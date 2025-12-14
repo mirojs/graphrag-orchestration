@@ -1,0 +1,24 @@
+{
+  "files": [
+    "BUILDERS LIMITED WARRANTY.pdf",
+    "HOLDING TANK SERVICING CONTRACT.pdf",
+    "PROPERTY MANAGEMENT AGREEMENT.pdf",
+    "contoso_lifts_invoice.pdf",
+    "purchase_contract.pdf"
+  ],
+  "extraction_time": 8.944451332092285,
+  "indexing_time": 139.03414130210876,
+  "query_time": 1.3140218257904053,
+  "total_time": 182.83646988868713,
+  "query": "Please summarize all the input files individually, please count number of words of each summarization as well as total amount of words of all the summarizations",
+  "response": "",
+  "response_metadata": {
+    "query": "Please summarize all the input files individually, please count number of words of each summarization as well as total amount of words of all the summarizations",
+    "mode": "local",
+    "answer": "The context does not contain enough information to summarize any input files or count the number of words in the summarizations. Please provide the input files or additional details for me to assist you.",
+    "sources": [],
+    "metadata": {
+      "entity_count": 0
+    }
+  }
+}

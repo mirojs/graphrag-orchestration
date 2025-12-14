@@ -1,0 +1,51 @@
+# Core dependencies
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.10.3
+pydantic-settings>=2.1.0
+
+# GraphRAG (pinned to stable version)
+graphrag==2.7.0
+
+# LlamaIndex core + integrations (0.12.x series - compatible with raptor)
+llama-index-core==0.12.52
+llama-index-llms-azure-openai==0.3.4
+llama-index-llms-openai==0.4.3
+llama-index-embeddings-azure-openai==0.3.3
+llama-index-vector-stores-azureaisearch==0.3.0
+llama-index-graph-stores-neo4j==0.4.1
+llama-index-packs-raptor==0.3.5
+scikit-learn>=1.4.0
+
+# Community Detection (GraphRAG Global Search)
+graspologic==3.4.1
+networkx==3.4.2
+
+llama-parse>=0.6.0  # Layout-aware PDF parsing
+
+# Vector stores (Azure AI Search)
+azure-search-documents==11.6.0
+
+# Graph stores
+neo4j>=5.15.0
+neo4j-graphrag==1.7.0  # Use 1.7.0 - no numpy constraint, works with graspologic
+rapidfuzz>=3.6.0  # Required by neo4j-graphrag
+
+# Azure SDKs
+azure-cosmos==4.9.0
+azure-storage-blob==12.24.0
+azure-identity==1.20.0
+azure-ai-documentintelligence==1.0.2
+openai>=1.14.0,<2.0.0  # Compatible with llama-index-llms-openai 0.4.x
+
+# Utilities
+python-dotenv>=1.0.0
+structlog>=24.1.0
+tenacity>=8.2.3
+json-repair>=0.9.0  # Neo4j pattern: LLM JSON output repair for production reliability
+
+# Async helpers
+anyio>=4.0.0
+
+# HTTP client for CU Standard ingestion
+httpx>=0.25.0

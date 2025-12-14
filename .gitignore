@@ -1,0 +1,153 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+.venv
+.venv-1/
+.venv-2/
+.venv-3/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+microsoft_test_env/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+coverage.xml
+*.cover
+*.log
+nosetests.xml
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# Build outputs
+dist/
+build/
+*.min.js
+*.min.css
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Test Results & Temporary Folders
+multi_input_results_*/
+complete_workflow_results_*/
+async_multi_input_results_*/
+step2_results_*/
+step2_simple_results_*/
+reference_results_*/
+schema_analysis_results_*/
+microsoft_knowledgesources_results_*/
+pro_mode_knowledgesources_test_results_*/
+pro_mode_reference_test_results_*/
+file_based_integration_*/
+comprehensive_results_*/
+multi_workflow_results_*/
+real_workflow_results_*/
+enhanced_workflow_results_*/
+complete_workflow_results/
+improved_test_results/
+live_test_results/
+perfected_test_results/
+real_api_test_results/
+real_schema_test_results/
+reference_test_results/
+simplified_workflow_results/
+direct_inconsistent_test/
+inconsistent_document_test/
+microsoft_sample/
+
+# Environment & Configuration
+.env
+.env.local
+.env.*.local
+*.local
+
+# Azure & Cloud
+# .azure/ is committed for easy machine transfer - contains only non-sensitive metadata
+# Secrets stored in Azure Key Vault and App Configuration (appcs-cps-y22yd4amoxqu)
+*.publishsettings
+
+# Logs
+logs/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup files
+*.backup
+*_backup/
+*.bak
+*.swp
+*.swo
+
+# TypeScript
+*.tsbuildinfo
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre
+.pyre/
+
+# pytype
+.pytype/
+
+# Cython
+cython_debug/
+
+# Cosmos backups (if these are test artifacts)
+cosmos_backups/
+
+# Keep these files
+!quick_backup.sh
+!backup_repo_to_azure.sh
+!restore_repo.sh

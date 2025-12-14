@@ -1,0 +1,692 @@
+"""
+Neo4j Store for V3 GraphRAG
+
+This module provides a unified Neo4j storage layer for all V3 data types:
+- Entities and Relationships (GraphRAG)
+- Communities (hierarchical, from graspologic)
+- RAPTOR nodes (hierarchical summaries)
+- Text chunks (with embeddings)
+- Documents (metadata)
+
+All operations include group_id for multi-tenancy.
+"""
+
+import logging
+import uuid
+import json
+from typing import Any, Dict, List, Optional, Tuple, cast
+from dataclasses import dataclass, field
+
+import neo4j
+from neo4j import GraphDatabase
+from neo4j import Query
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class Entity:
+    """Entity node data."""
+    id: str
+    name: str
+    type: str
+    description: str = ""
+    embedding: Optional[List[float]] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Relationship:
+    """Relationship edge data."""
+    source_id: str
+    target_id: str
+    type: str = "RELATED_TO"
+    description: str = ""
+    weight: float = 1.0
+    id: Optional[str] = None
+    
+    def __post_init__(self):
+        if self.id is None:
+            self.id = f"{self.source_id}->{self.target_id}"
+
+
+@dataclass
+class Community:
+    """Community node data."""
+    id: str
+    level: int
+    title: str = ""
+    summary: str = ""
+    full_content: str = ""
+    rank: float = 0.0
+    entity_ids: List[str] = field(default_factory=list)
+
+
+@dataclass
+class RaptorNode:
+    """RAPTOR tree node data."""
+    id: str
+    text: str
+    level: int
+    embedding: Optional[List[float]] = None
+    parent_id: Optional[str] = None
+    child_ids: List[str] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass 
+class TextChunk:
+    """Text chunk (text unit) data."""
+    id: str
+    text: str
+    chunk_index: int
+    document_id: str
+    embedding: Optional[List[float]] = None
+    tokens: int = 0
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class Document:
+    """Document metadata."""
+    id: str
+    title: str
+    source: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class Neo4jStoreV3:
+    """
+    Unified Neo4j store for V3 GraphRAG.
+    
+    This is the single source of truth for all query-time data.
+    All data types are stored in Neo4j with proper indexes.
+    """
+    
+    # Neo4j schema version for migrations
+    SCHEMA_VERSION = "3.0.0"
+    
+    def __init__(
+        self,
+        uri: str,
+        username: str,
+        password: str,
+        database: str = "neo4j",
+    ):
+        """Initialize Neo4j connection."""
+        self.uri = uri
+        self.username = username
+        self.password = password
+        self.database = database
+        self._driver = None
+        
+    @property
+    def driver(self) -> neo4j.Driver:
+        """Lazy initialization of Neo4j driver."""
+        if self._driver is None:
+            self._driver = GraphDatabase.driver(
+                self.uri,
+                auth=(self.username, self.password),
+            )
+            # Verify connectivity
+            self._driver.verify_connectivity()
+            logger.info(f"Connected to Neo4j at {self.uri}")
+        return self._driver
+    
+    def close(self):
+        """Close the Neo4j driver."""
+        if self._driver:
+            self._driver.close()
+            self._driver = None
+    
+    # ==================== Schema Management ====================
+    
+    def initialize_schema(self):
+        """
+        Create all required constraints, indexes, and vector indexes.
+        
+        Call this once during deployment or when schema changes.
+        """
+        logger.info("Initializing Neo4j schema for V3...")
+        
+        schema_queries = [
+            # Constraints (unique IDs)
+            "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
+            "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (c:Community) REQUIRE c.id IS UNIQUE",
+            "CREATE CONSTRAINT raptor_id IF NOT EXISTS FOR (r:RaptorNode) REQUIRE r.id IS UNIQUE",
+            "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (t:TextChunk) REQUIRE t.id IS UNIQUE",
+            "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
+            
+            # Regular indexes for filtering
+            "CREATE INDEX entity_group IF NOT EXISTS FOR (e:Entity) ON (e.group_id)",
+            "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
+            "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
+            "CREATE INDEX community_group IF NOT EXISTS FOR (c:Community) ON (c.group_id)",
+            "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)",
+            "CREATE INDEX raptor_group IF NOT EXISTS FOR (r:RaptorNode) ON (r.group_id)",
+            "CREATE INDEX raptor_level IF NOT EXISTS FOR (r:RaptorNode) ON (r.level)",
+            "CREATE INDEX chunk_group IF NOT EXISTS FOR (t:TextChunk) ON (t.group_id)",
+            "CREATE INDEX document_group IF NOT EXISTS FOR (d:Document) ON (d.group_id)",
+        ]
+        
+        # Vector indexes (separate because they need special syntax)
+        vector_indexes = [
+            """
+            CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
+            FOR (e:Entity) ON (e.embedding)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 1536,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
+            """
+            CREATE VECTOR INDEX raptor_embedding IF NOT EXISTS
+            FOR (r:RaptorNode) ON (r.embedding)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 1536,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
+            """
+            CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
+            FOR (t:TextChunk) ON (t.embedding)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 1536,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
+        ]
+        
+        with self.driver.session(database=self.database) as session:
+            for query in schema_queries:
+                try:
+                    session.run(Query(query))  # type: ignore[arg-type]
+                    logger.debug(f"Executed: {query[:50]}...")
+                except Exception as e:
+                    logger.warning(f"Schema query failed (may already exist): {e}")
+            
+            for query in vector_indexes:
+                try:
+                    session.run(Query(query))  # type: ignore[arg-type]
+                    logger.debug(f"Created vector index")
+                except Exception as e:
+                    logger.warning(f"Vector index creation failed (may already exist): {e}")
+        
+        logger.info("Neo4j schema initialization complete")
+    
+    # ==================== Entity Operations ====================
+    
+    def upsert_entity(self, group_id: str, entity: Entity) -> str:
+        """Insert or update an entity."""
+        query = """
+        MERGE (e:Entity {id: $id})
+        SET e.name = $name,
+            e.type = $type,
+            e.description = $description,
+            e.embedding = $embedding,
+            e.group_id = $group_id,
+            e.updated_at = datetime()
+        RETURN e.id AS id
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                id=entity.id,
+                name=entity.name,
+                type=entity.type,
+                description=entity.description,
+                embedding=entity.embedding,
+                group_id=group_id,
+            )
+            record = result.single()
+            return cast(str, record["id"]) if record else entity.id
+    
+    def upsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
+        """Batch insert/update entities."""
+        query = """
+        UNWIND $entities AS e
+        MERGE (entity:Entity {id: e.id})
+        SET entity.name = e.name,
+            entity.type = e.type,
+            entity.description = e.description,
+            entity.embedding = e.embedding,
+            entity.group_id = $group_id,
+            entity.updated_at = datetime()
+        RETURN count(entity) AS count
+        """
+        
+        entity_data = [
+            {
+                "id": e.id,
+                "name": e.name,
+                "type": e.type,
+                "description": e.description,
+                "embedding": e.embedding,
+            }
+            for e in entities
+        ]
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, entities=entity_data, group_id=group_id)
+            record = result.single()
+            return cast(int, record["count"]) if record else 0
+    
+    def get_entity(self, group_id: str, entity_id: str) -> Optional[Entity]:
+        """Get an entity by ID."""
+        query = """
+        MATCH (e:Entity {id: $id, group_id: $group_id})
+        RETURN e
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, id=entity_id, group_id=group_id)
+            record = result.single()
+            if record:
+                e = record["e"]
+                return Entity(
+                    id=e["id"],
+                    name=e["name"],
+                    type=e["type"],
+                    description=e.get("description", ""),
+                    embedding=e.get("embedding"),
+                )
+            return None
+    
+    def search_entities_by_embedding(
+        self,
+        group_id: str,
+        embedding: List[float],
+        top_k: int = 10,
+    ) -> List[Tuple[Entity, float]]:
+        """Vector similarity search for entities."""
+        query = """
+        CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
+        YIELD node, score
+        WHERE node.group_id = $group_id
+        RETURN node, score
+        ORDER BY score DESC
+        """
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                embedding=embedding,
+                top_k=top_k,
+                group_id=group_id,
+            )
+            for record in result:
+                e = record["node"]
+                entity = Entity(
+                    id=e["id"],
+                    name=e["name"],
+                    type=e["type"],
+                    description=e.get("description", ""),
+                    embedding=e.get("embedding"),
+                )
+                results.append((entity, record["score"]))
+        
+        return results
+    
+    # ==================== Relationship Operations ====================
+    
+    def upsert_relationship(self, group_id: str, relationship: Relationship) -> str:
+        """Insert or update a relationship."""
+        query = """
+        MATCH (source:Entity {id: $source_id, group_id: $group_id})
+        MATCH (target:Entity {id: $target_id, group_id: $group_id})
+        MERGE (source)-[r:RELATED_TO]->(target)
+        SET r.id = $id,
+            r.description = $description,
+            r.weight = $weight,
+            r.group_id = $group_id,
+            r.updated_at = datetime()
+        RETURN r.id AS id
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                source_id=relationship.source_id,
+                target_id=relationship.target_id,
+                id=relationship.id,
+                description=relationship.description,
+                weight=relationship.weight,
+                group_id=group_id,
+            )
+            record = result.single()
+            return cast(str, record["id"]) if record else (relationship.id or "")
+    
+    def upsert_relationships_batch(self, group_id: str, relationships: List[Relationship]) -> int:
+        """Batch insert/update relationships."""
+        query = """
+        UNWIND $relationships AS rel
+        MATCH (source:Entity {id: rel.source_id, group_id: $group_id})
+        MATCH (target:Entity {id: rel.target_id, group_id: $group_id})
+        MERGE (source)-[r:RELATED_TO]->(target)
+        SET r.id = rel.id,
+            r.description = rel.description,
+            r.weight = rel.weight,
+            r.group_id = $group_id,
+            r.updated_at = datetime()
+        RETURN count(r) AS count
+        """
+        
+        rel_data = [
+            {
+                "source_id": r.source_id,
+                "target_id": r.target_id,
+                "id": r.id,
+                "description": r.description,
+                "weight": r.weight,
+            }
+            for r in relationships
+        ]
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, relationships=rel_data, group_id=group_id)
+            record = result.single()
+            return cast(int, record["count"]) if record else 0
+    
+    # ==================== Community Operations ====================
+    
+    def upsert_community(self, group_id: str, community: Community) -> str:
+        """Insert or update a community."""
+        query = """
+        MERGE (c:Community {id: $id})
+        SET c.level = $level,
+            c.title = $title,
+            c.summary = $summary,
+            c.full_content = $full_content,
+            c.rank = $rank,
+            c.group_id = $group_id,
+            c.updated_at = datetime()
+        RETURN c.id AS id
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                id=community.id,
+                level=community.level,
+                title=community.title,
+                summary=community.summary,
+                full_content=community.full_content,
+                rank=community.rank,
+                group_id=group_id,
+            )
+            record = result.single()
+            
+            # Link entities to community
+            if community.entity_ids:
+                link_query = """
+                MATCH (c:Community {id: $community_id})
+                UNWIND $entity_ids AS entity_id
+                MATCH (e:Entity {id: entity_id, group_id: $group_id})
+                MERGE (e)-[:BELONGS_TO]->(c)
+                """
+                session.run(
+                    link_query,
+                    community_id=community.id,
+                    entity_ids=community.entity_ids,
+                    group_id=group_id,
+                )
+            
+            return cast(str, record["id"]) if record else community.id
+    
+    def get_communities_by_level(self, group_id: str, level: int) -> List[Community]:
+        """Get all communities at a specific level."""
+        query = """
+        MATCH (c:Community {group_id: $group_id, level: $level})
+        OPTIONAL MATCH (e:Entity)-[:BELONGS_TO]->(c)
+        RETURN c, collect(DISTINCT e.id) AS entity_ids
+        ORDER BY c.rank DESC
+        """
+        
+        communities = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id, level=level)
+            for record in result:
+                c = record["c"]
+                communities.append(Community(
+                    id=c["id"],
+                    level=c["level"],
+                    title=c.get("title", ""),
+                    summary=c.get("summary", ""),
+                    full_content=c.get("full_content", ""),
+                    rank=c.get("rank", 0.0),
+                    entity_ids=record["entity_ids"],
+                ))
+        
+        return communities
+    
+    # ==================== RAPTOR Node Operations ====================
+    
+    def upsert_raptor_node(self, group_id: str, node: RaptorNode) -> str:
+        """Insert or update a RAPTOR node."""
+        query = """
+        MERGE (r:RaptorNode {id: $id})
+        SET r.text = $text,
+            r.level = $level,
+            r.embedding = $embedding,
+            r.group_id = $group_id,
+            r.metadata = $metadata,
+            r.updated_at = datetime()
+        RETURN r.id AS id
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                id=node.id,
+                text=node.text,
+                level=node.level,
+                embedding=node.embedding,
+                group_id=group_id,
+                metadata=node.metadata,
+            )
+            record = result.single()
+            
+            # Link to parent if exists
+            if node.parent_id:
+                link_query = """
+                MATCH (child:RaptorNode {id: $child_id})
+                MATCH (parent:RaptorNode {id: $parent_id})
+                MERGE (child)-[:SUMMARIZES]->(parent)
+                """
+                session.run(
+                    link_query,
+                    child_id=node.id,
+                    parent_id=node.parent_id,
+                )
+            
+            return cast(str, record["id"]) if record else node.id
+    
+    def upsert_raptor_nodes_batch(self, group_id: str, nodes: List[RaptorNode]) -> int:
+        """Batch insert/update RAPTOR nodes."""
+        query = """
+        UNWIND $nodes AS n
+        MERGE (r:RaptorNode {id: n.id})
+        SET r.text = n.text,
+            r.level = n.level,
+            r.embedding = n.embedding,
+            r.group_id = $group_id,
+            r.updated_at = datetime()
+        RETURN count(r) AS count
+        """
+        
+        node_data = [
+            {
+                "id": n.id,
+                "text": n.text,
+                "level": n.level,
+                "embedding": n.embedding,
+            }
+            for n in nodes
+        ]
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, nodes=node_data, group_id=group_id)
+            record = result.single()
+            return cast(int, record["count"]) if record else 0
+    
+    def search_raptor_by_embedding(
+        self,
+        group_id: str,
+        embedding: List[float],
+        level: Optional[int] = None,
+        top_k: int = 10,
+    ) -> List[Tuple[RaptorNode, float]]:
+        """Vector similarity search for RAPTOR nodes."""
+        if level is not None:
+            query = """
+            CALL db.index.vector.queryNodes('raptor_embedding', $top_k, $embedding)
+            YIELD node, score
+            WHERE node.group_id = $group_id AND node.level = $level
+            RETURN node, score
+            ORDER BY score DESC
+            """
+            params = {"embedding": embedding, "top_k": top_k, "group_id": group_id, "level": level}
+        else:
+            query = """
+            CALL db.index.vector.queryNodes('raptor_embedding', $top_k, $embedding)
+            YIELD node, score
+            WHERE node.group_id = $group_id
+            RETURN node, score
+            ORDER BY score DESC
+            """
+            params = {"embedding": embedding, "top_k": top_k, "group_id": group_id}
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, **params)
+            for record in result:
+                n = record["node"]
+                node = RaptorNode(
+                    id=n["id"],
+                    text=n["text"],
+                    level=n["level"],
+                    embedding=n.get("embedding"),
+                )
+                results.append((node, record["score"]))
+        
+        return results
+    
+    # ==================== Text Chunk Operations ====================
+    
+    def upsert_text_chunks_batch(self, group_id: str, chunks: List[TextChunk]) -> int:
+        """Batch insert/update text chunks."""
+        query = """
+        UNWIND $chunks AS c
+        MERGE (t:TextChunk {id: c.id})
+        SET t.text = c.text,
+            t.chunk_index = c.chunk_index,
+            t.embedding = c.embedding,
+            t.tokens = c.tokens,
+            t.group_id = $group_id,
+            t.updated_at = datetime()
+        WITH t, c
+        MATCH (d:Document {id: c.document_id, group_id: $group_id})
+        MERGE (t)-[:PART_OF]->(d)
+        RETURN count(t) AS count
+        """
+        
+        chunk_data = [
+            {
+                "id": c.id,
+                "text": c.text,
+                "chunk_index": c.chunk_index,
+                "document_id": c.document_id,
+                "embedding": c.embedding,
+                "tokens": c.tokens,
+            }
+            for c in chunks
+        ]
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, chunks=chunk_data, group_id=group_id)
+            record = result.single()
+            return cast(int, record["count"]) if record else 0
+    
+    # ==================== Document Operations ====================
+    
+    def upsert_document(self, group_id: str, document: Document) -> str:
+        """Insert or update a document."""
+        query = """
+        MERGE (d:Document {id: $id})
+        SET d.title = $title,
+            d.source = $source,
+            d.group_id = $group_id,
+            d.metadata = $metadata,
+            d.updated_at = datetime()
+        RETURN d.id AS id
+        """
+        
+        # Serialize metadata to JSON string as Neo4j doesn't support nested maps
+        metadata_json = json.dumps(document.metadata) if document.metadata else "{}"
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                id=document.id,
+                title=document.title,
+                source=document.source,
+                group_id=group_id,
+                metadata=metadata_json,
+            )
+            record = result.single()
+            return cast(str, record["id"]) if record else document.id
+    
+    # ==================== Cleanup Operations ====================
+    
+    def delete_group_data(self, group_id: str) -> Dict[str, int]:
+        """Delete all data for a group (for cleanup/reindexing)."""
+        queries = [
+            ("entities", "MATCH (e:Entity {group_id: $group_id}) DETACH DELETE e RETURN count(*) AS count"),
+            ("communities", "MATCH (c:Community {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
+            ("raptor_nodes", "MATCH (r:RaptorNode {group_id: $group_id}) DETACH DELETE r RETURN count(*) AS count"),
+            ("text_chunks", "MATCH (t:TextChunk {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
+            ("documents", "MATCH (d:Document {group_id: $group_id}) DETACH DELETE d RETURN count(*) AS count"),
+        ]
+        
+        deleted: Dict[str, int] = {}
+        with self.driver.session(database=self.database) as session:
+            for name, query in queries:
+                result = session.run(Query(query), group_id=group_id)  # type: ignore[arg-type]
+                record = result.single()
+                deleted[name] = cast(int, record["count"]) if record else 0
+        
+        logger.info(f"Deleted data for group {group_id}: {deleted}")
+        return deleted
+    
+    def get_group_stats(self, group_id: str) -> Dict[str, int]:
+        """Get statistics for a group."""
+        query = """
+        MATCH (e:Entity {group_id: $group_id})
+        WITH count(e) AS entities
+        MATCH (c:Community {group_id: $group_id})
+        WITH entities, count(c) AS communities
+        MATCH (r:RaptorNode {group_id: $group_id})
+        WITH entities, communities, count(r) AS raptor_nodes
+        MATCH (t:TextChunk {group_id: $group_id})
+        WITH entities, communities, raptor_nodes, count(t) AS text_chunks
+        MATCH (d:Document {group_id: $group_id})
+        WITH entities, communities, raptor_nodes, text_chunks, count(d) AS documents
+        OPTIONAL MATCH (:Entity {group_id: $group_id})-[rel]->(:Entity {group_id: $group_id})
+        RETURN entities, communities, raptor_nodes, text_chunks, documents, count(rel) AS relationships
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id)
+            record = result.single()
+            if record:
+                return {
+                    "entities": record["entities"],
+                    "relationships": record["relationships"],
+                    "communities": record["communities"],
+                    "raptor_nodes": record["raptor_nodes"],
+                    "text_chunks": record["text_chunks"],
+                    "documents": record["documents"],
+                }
+            return {"entities": 0, "relationships": 0, "communities": 0, "raptor_nodes": 0, "text_chunks": 0, "documents": 0}

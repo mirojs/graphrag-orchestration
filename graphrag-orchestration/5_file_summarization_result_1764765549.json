@@ -1,0 +1,21 @@
+{
+  "files": [
+    "contoso_lifts_invoice.pdf",
+    "purchase_contract.pdf"
+  ],
+  "extraction_time": 6.3870110511779785,
+  "indexing_time": 76.42979145050049,
+  "query_time": 0.7660541534423828,
+  "total_time": 98.56176376342773,
+  "query": "Please summarize all the input files individually, please count number of words of each summarization as well as total amount of words of all the summarizations",
+  "response": "",
+  "response_metadata": {
+    "query": "Please summarize all the input files individually, please count number of words of each summarization as well as total amount of words of all the summarizations",
+    "mode": "local",
+    "answer": "The context does not contain enough information to summarize the input files or count the number of words in the summarizations. Please provide the input files or additional details.",
+    "sources": [],
+    "metadata": {
+      "entity_count": 0
+    }
+  }
+}

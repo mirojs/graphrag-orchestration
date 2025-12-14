@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.tox/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Data
+data/
+*.db
+*.sqlite
+*.json
+!requirements.txt
+
+# Logs
+logs/
+*.log
+
+# Git
+.git/
+.gitignore
+
+# Azure
+.azure/
+azure.yaml
+
+# Misc
+.DS_Store
+*.tmp
+*.bak

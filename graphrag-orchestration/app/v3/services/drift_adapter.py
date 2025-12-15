@@ -22,6 +22,13 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Module-level caches that persist across API requests
+# These store loaded data to avoid re-querying Neo4j on every request
+_GRAPHRAG_MODEL_CACHE: Dict[str, Any] = {}  # Stores complete GraphRAG models
+_ENTITY_CACHE: Dict[str, pd.DataFrame] = {}  # Stores entity DataFrames
+_COMMUNITY_CACHE: Dict[str, pd.DataFrame] = {}  # Stores community DataFrames
+_RELATIONSHIP_CACHE: Dict[str, pd.DataFrame] = {}  # Stores relationship DataFrames
+
 
 class GraphRAGEmbeddingWrapper:
     """Wrapper to adapt LlamaIndex embeddings to GraphRAG interface."""
@@ -35,6 +42,11 @@ class GraphRAGEmbeddingWrapper:
     def get_text_embedding(self, text: str) -> List[float]:
         """Get text embedding - direct pass-through to LlamaIndex."""
         return self.embedder.get_text_embedding(text)
+    
+    async def aget_text_embedding(self, text: str) -> List[float]:
+        """Async get text embedding - required by MS GraphRAG."""
+        # LlamaIndex embedder may not have async method, use sync
+        return self.embedder.get_text_embedding(text)
 
     def embed(self, text: str, **kwargs) -> List[float]:
         """Embed text using LlamaIndex embedder."""
@@ -42,7 +54,8 @@ class GraphRAGEmbeddingWrapper:
     
     async def aembed(self, text: str, **kwargs) -> List[float]:
         """Async embed text using LlamaIndex embedder."""
-        return await self.embedder.aget_text_embedding(text)
+        # Use sync method as fallback if async not available
+        return self.embedder.get_text_embedding(text)
 
 
 class DRIFTAdapter:
@@ -77,22 +90,22 @@ class DRIFTAdapter:
         self.llm = llm
         # Wrap embedder to provide required methods, handle None case
         self.embedder = GraphRAGEmbeddingWrapper(embedder) if embedder else None
-        
-        # Cache for loaded data (per group_id)
-        self._entity_cache: Dict[str, pd.DataFrame] = {}
-        self._community_cache: Dict[str, pd.DataFrame] = {}
-        self._relationship_cache: Dict[str, pd.DataFrame] = {}
+        # Note: All caches are now module-level globals for cross-request persistence
         
     def clear_cache(self, group_id: Optional[str] = None):
         """Clear cached DataFrames for a group or all groups."""
         if group_id:
-            self._entity_cache.pop(group_id, None)
-            self._community_cache.pop(group_id, None)
-            self._relationship_cache.pop(group_id, None)
+            _ENTITY_CACHE.pop(group_id, None)
+            _COMMUNITY_CACHE.pop(group_id, None)
+            _RELATIONSHIP_CACHE.pop(group_id, None)
+            # Also clear model cache if exists
+            cache_key = f"{group_id}_models_v3"
+            _GRAPHRAG_MODEL_CACHE.pop(cache_key, None)
         else:
-            self._entity_cache.clear()
-            self._community_cache.clear()
-            self._relationship_cache.clear()
+            _ENTITY_CACHE.clear()
+            _COMMUNITY_CACHE.clear()
+            _RELATIONSHIP_CACHE.clear()
+            _GRAPHRAG_MODEL_CACHE.clear()
             
     def load_entities(self, group_id: str, use_cache: bool = True) -> pd.DataFrame:
         """
@@ -106,9 +119,9 @@ class DRIFTAdapter:
         - text_unit_ids: List[str] (source chunk references)
         - description_embedding: List[float] (optional)
         """
-        if use_cache and group_id in self._entity_cache:
-            logger.debug(f"Using cached entities for group {group_id}")
-            return self._entity_cache[group_id]
+        if use_cache and group_id in _ENTITY_CACHE:
+            logger.debug(f"✅ Using cached entities for group {group_id}")
+            return _ENTITY_CACHE[group_id]
             
         logger.info(f"Loading entities from Neo4j for group {group_id}")
         
@@ -140,7 +153,8 @@ class DRIFTAdapter:
         df = pd.DataFrame(data)
         
         if use_cache:
-            self._entity_cache[group_id] = df
+            _ENTITY_CACHE[group_id] = df
+            logger.debug(f"✅ Cached {len(df)} entities for group {group_id}")
             
         logger.info(f"Loaded {len(df)} entities for group {group_id}")
         return df
@@ -158,9 +172,9 @@ class DRIFTAdapter:
         - rank: float (importance rank)
         - entity_ids: List[str] (member entity IDs)
         """
-        if use_cache and group_id in self._community_cache:
-            logger.debug(f"Using cached communities for group {group_id}")
-            return self._community_cache[group_id]
+        if use_cache and group_id in _COMMUNITY_CACHE:
+            logger.debug(f"✅ Using cached communities for group {group_id}")
+            return _COMMUNITY_CACHE[group_id]
             
         logger.info(f"Loading communities from Neo4j for group {group_id}")
         
@@ -195,7 +209,8 @@ class DRIFTAdapter:
         df = pd.DataFrame(data)
         
         if use_cache:
-            self._community_cache[group_id] = df
+            _COMMUNITY_CACHE[group_id] = df
+            logger.debug(f"✅ Cached {len(df)} communities for group {group_id}")
             
         logger.info(f"Loaded {len(df)} communities for group {group_id}")
         return df
@@ -212,9 +227,9 @@ class DRIFTAdapter:
         - description: str (relationship description)
         - text_unit_ids: List[str] (source chunk references)
         """
-        if use_cache and group_id in self._relationship_cache:
-            logger.debug(f"Using cached relationships for group {group_id}")
-            return self._relationship_cache[group_id]
+        if use_cache and group_id in _RELATIONSHIP_CACHE:
+            logger.debug(f"✅ Using cached relationships for group {group_id}")
+            return _RELATIONSHIP_CACHE[group_id]
             
         logger.info(f"Loading relationships from Neo4j for group {group_id}")
         
@@ -245,7 +260,8 @@ class DRIFTAdapter:
         df = pd.DataFrame(data)
         
         if use_cache:
-            self._relationship_cache[group_id] = df
+            _RELATIONSHIP_CACHE[group_id] = df
+            logger.debug(f"✅ Cached {len(df)} relationships for group {group_id}")
             
         logger.info(f"Loaded {len(df)} relationships for group {group_id}")
         return df
@@ -366,10 +382,13 @@ class DRIFTAdapter:
             - sources: List[str] (source references)
             - reasoning_path: List[dict] (step-by-step reasoning)
         """
-        logger.info(f"Starting DRIFT search for group {group_id}: {query[:50]}...")
+        import time
+        overall_start = time.time()
+        logger.info(f"[DRIFT STAGE 1/5] Starting DRIFT search for group {group_id}: {query[:50]}...")
         
         try:
             # Import MS GraphRAG DRIFT components
+            stage_start = time.time()
             try:
                 from graphrag.query.structured_search.drift_search.drift_context import DRIFTSearchContextBuilder
                 from graphrag.query.structured_search.drift_search.search import DRIFTSearch
@@ -377,7 +396,8 @@ class DRIFTAdapter:
                 from graphrag.config.models.language_model_config import LanguageModelConfig
                 from graphrag.config.enums import AuthType, ModelType
                 
-                logger.info("MS GraphRAG DRIFT modules imported successfully")
+                elapsed = time.time() - stage_start
+                logger.info(f"[DRIFT STAGE 1/5] MS GraphRAG DRIFT modules imported ({elapsed:.2f}s)")
             except ImportError as e:
                 logger.error(f"Failed to import MS GraphRAG DRIFT: {e}")
                 # Fallback to basic search if DRIFT not available
@@ -386,11 +406,26 @@ class DRIFTAdapter:
                 return await self._fallback_search(group_id, query, entities_df, relationships_df)
             
             # Load data from Neo4j and convert to MS GraphRAG models
-            entities = self.load_entities_as_graphrag_models(group_id)
-            relationships = self.load_relationships_as_graphrag_models(group_id)
-            # Use RAPTOR nodes + text chunks for richer context
-            text_units = self.load_text_units_with_raptor_as_graphrag_models(group_id)
-            communities = await self.load_communities_as_graphrag_models(group_id)
+            # Use aggressive caching - only load once per group_id
+            stage_start = time.time()
+            cache_key = f"{group_id}_models_v3"
+            
+            import asyncio
+            if cache_key in _GRAPHRAG_MODEL_CACHE:
+                logger.info(f"[DRIFT STAGE 2/5] ✅ Using cached GraphRAG models (0.00s)")
+                entities, relationships, text_units, communities = _GRAPHRAG_MODEL_CACHE[cache_key]
+            else:
+                logger.info(f"[DRIFT STAGE 2/5] Loading data from Neo4j (parallel, will cache)...")
+                # Run all data loading in parallel using asyncio
+                entities, relationships, text_units, communities = await asyncio.gather(
+                    asyncio.to_thread(self.load_entities_as_graphrag_models, group_id),
+                    asyncio.to_thread(self.load_relationships_as_graphrag_models, group_id),
+                    asyncio.to_thread(self.load_text_units_with_raptor_as_graphrag_models, group_id),
+                    self.load_communities_as_graphrag_models(group_id)
+                )
+                # Cache for subsequent queries (GLOBAL CACHE - persists across requests!)
+                _GRAPHRAG_MODEL_CACHE[cache_key] = (entities, relationships, text_units, communities)
+                logger.info(f"[DRIFT STAGE 2/5] ✅ Cached GraphRAG models for future queries")
             
             if not entities:
                 logger.warning(f"No entities found for group {group_id}")
@@ -402,10 +437,13 @@ class DRIFTAdapter:
                     "reasoning_path": [],
                 }
             
-            logger.info(f"Loaded {len(entities)} entities, {len(relationships)} relationships, "
-                       f"{len(text_units)} text units, {len(communities)} communities")
+            elapsed = time.time() - stage_start
+            logger.info(f"[DRIFT STAGE 2/5] Loaded {len(entities)} entities, {len(relationships)} relationships, "
+                       f"{len(text_units)} text units, {len(communities)} communities ({elapsed:.2f}s)")
             
             # Create Neo4j-backed vector store for entity embeddings
+            stage_start = time.time()
+            logger.info(f"[DRIFT STAGE 3/5] Building DRIFT context and vector stores...")
             entity_embeddings_store = Neo4jDRIFTVectorStore(
                 driver=self.driver,
                 group_id=group_id,
@@ -419,11 +457,11 @@ class DRIFTAdapter:
                 llm_config = LanguageModelConfig(
                     type=ModelType.Chat,
                     model_provider="azure",
-                    model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                    model=(settings.AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME or settings.AZURE_OPENAI_DEPLOYMENT_NAME),
                     api_key=settings.AZURE_OPENAI_API_KEY,
                     api_base=settings.AZURE_OPENAI_ENDPOINT,
                     api_version=settings.AZURE_OPENAI_API_VERSION,
-                    deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                    deployment_name=(settings.AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME or settings.AZURE_OPENAI_DEPLOYMENT_NAME),
                     auth_type=AuthType.APIKey,
                 )
             else:
@@ -461,12 +499,23 @@ class DRIFTAdapter:
             # Initialize local search (required before searching)
             drift_search.init_local_search()
             
+            elapsed = time.time() - stage_start
+            logger.info(f"[DRIFT STAGE 3/5] Context builder initialized ({elapsed:.2f}s)")
+            
             # Execute search - DRIFT uses 'search' method
+            stage_start = time.time()
+            logger.info(f"[DRIFT STAGE 4/5] Executing DRIFT iterative search (max {max_iterations} iterations)...")
             result = await drift_search.search(
                 query=query,
             )
             
-            return {
+            elapsed = time.time() - stage_start
+            logger.info(f"[DRIFT STAGE 4/5] DRIFT search completed ({elapsed:.2f}s)")
+            
+            stage_start = time.time()
+            logger.info(f"[DRIFT STAGE 5/5] Extracting and formatting results...")
+            
+            response = {
                 "answer": result.response if hasattr(result, 'response') else str(result),
                 "confidence": getattr(result, "score", 0.85),
                 "iterations": getattr(result, "iterations", max_iterations),
@@ -474,6 +523,13 @@ class DRIFTAdapter:
                 "reasoning_path": self._extract_reasoning_path(result),
                 "context_data": getattr(result, "context_data", {}),
             }
+            
+            elapsed = time.time() - stage_start
+            total_elapsed = time.time() - overall_start
+            logger.info(f"[DRIFT STAGE 5/5] Results formatted ({elapsed:.2f}s)")
+            logger.info(f"[DRIFT COMPLETE] Total time: {total_elapsed:.2f}s")
+            
+            return response
             
         except Exception as e:
             logger.error(f"DRIFT search failed for group {group_id}: {e}", exc_info=True)

@@ -458,8 +458,10 @@ async def query_drift(request: Request, payload: V3DriftRequest):
     Uses MS GraphRAG DRIFT algorithm with Neo4j data.
     This is the V3 flagship feature for multi-step reasoning.
     """
+    import time
     group_id = get_group_id(request)
-    logger.info("v3_drift_search", group_id=group_id, query=payload.query[:50])
+    start_time = time.time()
+    logger.info("v3_drift_search_start", group_id=group_id, query=payload.query[:50])
     
     try:
         adapter = get_drift_adapter()
@@ -470,6 +472,9 @@ async def query_drift(request: Request, payload: V3DriftRequest):
             max_iterations=payload.max_iterations,
             convergence_threshold=payload.convergence_threshold,
         )
+        
+        elapsed = time.time() - start_time
+        logger.info("v3_drift_search_complete", group_id=group_id, elapsed_seconds=f"{elapsed:.2f}")
         
         return V3DriftResponse(
             answer=result["answer"],

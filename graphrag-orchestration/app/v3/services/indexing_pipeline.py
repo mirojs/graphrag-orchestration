@@ -1146,9 +1146,38 @@ Summary:"""
                 if len(cluster) < 1:
                     continue
                 
-                # Combine texts in cluster
-                child_ids = [item[0] for item in cluster]
-                combined_text = "\n\n".join(item[1] for item in cluster)
+                # Extract data from cluster (may include silhouette scores from Phase 1)
+                if len(cluster[0]) == 4:  # Has silhouette scores
+                    child_ids = [item[0] for item in cluster]
+                    combined_text = "\n\n".join(item[1] for item in cluster)
+                    cluster_embeddings = [item[2] for item in cluster if item[2] is not None]
+                    silhouette_scores = [item[3] for item in cluster]
+                else:  # Fallback without scores
+                    child_ids = [item[0] for item in cluster]
+                    combined_text = "\n\n".join(item[1] for item in cluster)
+                    cluster_embeddings = [item[2] for item in cluster if item[2] is not None]
+                    silhouette_scores = [0.0] * len(cluster)
+                
+                # Calculate cluster coherence (Phase 1 metric)
+                import numpy as np
+                from scipy.spatial.distance import pdist
+                cluster_coherence = 0.0
+                if cluster_embeddings and len(cluster_embeddings) > 1:
+                    embeddings_array = np.array(cluster_embeddings)
+                    cluster_coherence = 1 - np.mean(pdist(embeddings_array, metric='cosine'))
+                elif len(cluster_embeddings) == 1:
+                    cluster_coherence = 1.0
+                
+                # Determine confidence level based on coherence (Phase 1)
+                if cluster_coherence >= 0.85:
+                    confidence_level = "high"
+                    confidence_score = 0.95
+                elif cluster_coherence >= 0.75:
+                    confidence_level = "medium"
+                    confidence_score = 0.80
+                else:
+                    confidence_level = "low"
+                    confidence_score = 0.60
                 
                 # Generate summary
                 summary = await self._generate_raptor_summary(combined_text, level)
@@ -1156,12 +1185,22 @@ Summary:"""
                 # Generate embedding for summary
                 embedding = await self._embed_text(summary)
                 
+                # Create RAPTOR node with Phase 1 quality metrics
                 node = RaptorNode(
                     id=f"raptor_L{level}_{cluster_idx}_{uuid.uuid4().hex[:8]}",
                     text=summary,
                     level=level,
                     embedding=embedding,
                     child_ids=child_ids,
+                    metadata={
+                        "cluster_coherence": float(cluster_coherence),
+                        "confidence_level": confidence_level,
+                        "confidence_score": float(confidence_score),
+                        "silhouette_score": float(np.mean(silhouette_scores)) if silhouette_scores else 0.0,
+                        "cluster_silhouette_avg": float(np.mean(silhouette_scores)) if silhouette_scores else 0.0,
+                        "child_count": len(cluster),
+                        "creation_model": "gpt-4o",
+                    }
                 )
                 raptor_nodes.append(node)
                 next_level_texts.append((node.id, summary, embedding))
@@ -1176,20 +1215,62 @@ Summary:"""
         texts: List[Tuple[str, str, Optional[List[float]]]],
     ) -> List[List[Tuple[str, str, Optional[List[float]]]]]:
         """
-        Cluster texts for RAPTOR summarization.
+        Cluster texts for RAPTOR summarization with quality metrics.
         
-        Uses embedding similarity to group related texts.
+        Uses k-means clustering on embeddings and calculates silhouette scores
+        for cluster quality validation (Phase 1).
         """
+        from sklearn.cluster import KMeans
+        from sklearn.metrics import silhouette_score, silhouette_samples
+        import numpy as np
+        
         cluster_size = self.config.raptor_cluster_size
         
         if len(texts) <= cluster_size:
             return [texts]
         
-        # Simple chunking for now - in production use k-means on embeddings
-        clusters = []
-        for i in range(0, len(texts), cluster_size):
-            cluster = texts[i:i + cluster_size]
-            clusters.append(cluster)
+        # Extract embeddings for clustering
+        embeddings = [emb for _, _, emb in texts if emb is not None]
+        
+        if not embeddings or len(embeddings) < 2:
+            # Fallback to simple chunking
+            clusters = []
+            for i in range(0, len(texts), cluster_size):
+                cluster = texts[i:i + cluster_size]
+                clusters.append(cluster)
+            return clusters
+        
+        # K-means clustering
+        embeddings_array = np.array(embeddings)
+        n_clusters = max(2, min(len(texts) // cluster_size, 10))
+        
+        try:
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            cluster_labels = kmeans.fit_predict(embeddings_array)
+            
+            # Calculate silhouette score for cluster quality (Phase 1)
+            silhouette_avg = silhouette_score(embeddings_array, cluster_labels)
+            silhouette_per_sample = silhouette_samples(embeddings_array, cluster_labels)
+            
+            logger.info(f"Cluster silhouette score: {silhouette_avg:.3f} (n_clusters={n_clusters})")
+            
+            # Group texts by cluster and store silhouette scores
+            from collections import defaultdict
+            clusters_dict = defaultdict(list)
+            for i, (text_id, text, emb) in enumerate(texts[:len(cluster_labels)]):
+                cluster_id = int(cluster_labels[i])
+                # Attach silhouette score to text metadata
+                clusters_dict[cluster_id].append((text_id, text, emb, float(silhouette_per_sample[i])))
+            
+            # Convert to list of clusters
+            clusters = [cluster for cluster in clusters_dict.values()]
+            
+        except Exception as e:
+            logger.warning(f"K-means clustering failed: {e}, falling back to simple chunking")
+            clusters = []
+            for i in range(0, len(texts), cluster_size):
+                cluster = texts[i:i + cluster_size]
+                clusters.append(cluster)
         
         return clusters
     

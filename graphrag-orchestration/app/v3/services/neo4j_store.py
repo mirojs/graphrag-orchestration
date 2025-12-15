@@ -504,7 +504,7 @@ class Neo4jStoreV3:
             return cast(str, record["id"]) if record else node.id
     
     def upsert_raptor_nodes_batch(self, group_id: str, nodes: List[RaptorNode]) -> int:
-        """Batch insert/update RAPTOR nodes."""
+        """Batch insert/update RAPTOR nodes with Phase 1 quality metrics."""
         query = """
         UNWIND $nodes AS n
         MERGE (r:RaptorNode {id: n.id})
@@ -512,6 +512,13 @@ class Neo4jStoreV3:
             r.level = n.level,
             r.embedding = n.embedding,
             r.group_id = $group_id,
+            r.cluster_coherence = n.cluster_coherence,
+            r.confidence_level = n.confidence_level,
+            r.confidence_score = n.confidence_score,
+            r.silhouette_score = n.silhouette_score,
+            r.cluster_silhouette_avg = n.cluster_silhouette_avg,
+            r.child_count = n.child_count,
+            r.creation_model = n.creation_model,
             r.updated_at = datetime()
         RETURN count(r) AS count
         """
@@ -522,6 +529,13 @@ class Neo4jStoreV3:
                 "text": n.text,
                 "level": n.level,
                 "embedding": n.embedding,
+                "cluster_coherence": n.metadata.get("cluster_coherence", 0.0),
+                "confidence_level": n.metadata.get("confidence_level", "unknown"),
+                "confidence_score": n.metadata.get("confidence_score", 0.0),
+                "silhouette_score": n.metadata.get("silhouette_score", 0.0),
+                "cluster_silhouette_avg": n.metadata.get("cluster_silhouette_avg", 0.0),
+                "child_count": n.metadata.get("child_count", 0),
+                "creation_model": n.metadata.get("creation_model", ""),
             }
             for n in nodes
         ]

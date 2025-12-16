@@ -9,6 +9,11 @@ param environmentName string
 @description('Primary location for all resources')
 param location string
 
+// CRITICAL: Ensure we never accidentally deploy hello-world images
+// This must point to the actual GraphRAG application image
+@description('MUST use drift-mini-optimized or later - NEVER use placeholder/hello-world images')
+var requiredImageTag = 'drift-mini-optimized'
+
 @description('Id of the user or app to assign application roles')
 param principalId string = ''
 
@@ -66,26 +71,33 @@ module graphragApp './core/host/container-app.bicep' = {
   params: {
     name: 'graphrag-orchestration'
     location: location
-    tags: tags
+    tags: union(tags, {
+      'azd-service-name': 'graphrag'
+    })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
     containerName: 'graphrag-orchestration'
-    containerImage: 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest' // Placeholder
+    // CRITICAL REQUIREMENT: Must use drift-mini-optimized or later
+    // NEVER allow placeholder hello-world images to sneak back in
+    containerImage: '${containerRegistry.name}.azurecr.io/graphrag-orchestration:${requiredImageTag}'
     targetPort: 8000
     env: concat([
       {
         name: 'AZURE_OPENAI_ENDPOINT'
-        value: ''  // Set via azd env
+        value: 'https://graphrag-openai-8476.openai.azure.com/'
       }
-    ], azureOpenAiApiKey != '' ? [
       {
-        name: 'AZURE_OPENAI_API_KEY'
-        secretRef: 'azure-openai-api-key'
+        name: 'AZURE_TENANT_ID'
+        value: subscription().tenantId
       }
-    ] : [], [
+    ], [
       {
         name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
         value: 'gpt-4o'
+      }
+      {
+        name: 'AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME'
+        value: 'gpt-5-2'  // Optional: Use GPT-5.2 for DRIFT queries (400K context, reasoning)
       }
       {
         name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
@@ -107,12 +119,6 @@ module graphragApp './core/host/container-app.bicep' = {
         name: 'AZURE_SEARCH_ENDPOINT'
         value: azureSearchEndpoint
       }
-    ], azureSearchApiKey != '' ? [
-      {
-        name: 'AZURE_SEARCH_API_KEY'
-        secretRef: 'azure-search-api-key'
-      }
-    ] : [], [
       {
         name: 'AZURE_SEARCH_INDEX_NAME'
         value: 'graphrag-raptor'
@@ -123,7 +129,7 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'NEO4J_URI'
-        value: ''  // Set via azd env
+        value: 'neo4j+s://a86dcf63.databases.neo4j.io'
       }
       {
         name: 'NEO4J_USERNAME'
@@ -142,22 +148,12 @@ module graphragApp './core/host/container-app.bicep' = {
         value: 'true'
       }
     ])
-    secrets: concat(azureOpenAiApiKey != '' ? [
-      {
-        name: 'azure-openai-api-key'
-        value: azureOpenAiApiKey
-      }
-    ] : [], azureSearchApiKey != '' ? [
-      {
-        name: 'azure-search-api-key'
-        value: azureSearchApiKey
-      }
-    ] : [], [
+    secrets: [
       {
         name: 'neo4j-password'
         value: neo4jPassword
       }
-    ])
+    ]
   }
 }
 
@@ -170,6 +166,7 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     storageAccountName: 'neo4jstorage21224'
     containerRegistryName: containerRegistry.name
     containerAppPrincipalId: graphragApp.outputs.identityPrincipalId
+    azureOpenAiName: 'graphrag-openai-8476'
   }
   dependsOn: [
     graphragApp

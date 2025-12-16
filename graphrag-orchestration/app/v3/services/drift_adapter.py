@@ -451,31 +451,10 @@ class DRIFTAdapter:
                 embedding_dimension=3072,  # text-embedding-3-large
             )
             
-            # Create MS GraphRAG compatible LLM for DRIFT
-            # Use managed identity if no API key is configured
-            if settings.AZURE_OPENAI_API_KEY:
-                llm_config = LanguageModelConfig(
-                    type=ModelType.Chat,
-                    model_provider="azure",
-                    model=(settings.AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME or settings.AZURE_OPENAI_DEPLOYMENT_NAME),
-                    api_key=settings.AZURE_OPENAI_API_KEY,
-                    api_base=settings.AZURE_OPENAI_ENDPOINT,
-                    api_version=settings.AZURE_OPENAI_API_VERSION,
-                    deployment_name=(settings.AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME or settings.AZURE_OPENAI_DEPLOYMENT_NAME),
-                    auth_type=AuthType.APIKey,
-                )
-            else:
-                # For managed identity, we need to use the LLM directly without config
-                # MS GraphRAG's LitellmChatModel requires API key, so skip DRIFT for now
-                logger.warning("DRIFT search requires API key authentication, falling back to basic search")
-                entities_df = self.load_entities(group_id, use_cache=use_cache)
-                relationships_df = self.load_relationships(group_id, use_cache=use_cache)
-                return await self._fallback_search(group_id, query, entities_df, relationships_df)
-            
-            drift_llm = LitellmChatModel(
-                name="drift_llm",
-                config=llm_config,
-            )
+            # Use LlamaIndex LLM directly - it already supports managed identity
+            # MS GraphRAG's DRIFT can accept any LLM that implements the BaseLLM interface
+            # Our LlamaIndex Azure OpenAI LLM works perfectly with managed identity
+            drift_llm = self.llm
             
             # Build DRIFT context builder with MS GraphRAG models
             # Required params: model, text_embedder, entities, entity_text_embeddings
@@ -544,38 +523,64 @@ class DRIFTAdapter:
     ) -> Dict[str, Any]:
         """
         Fallback search when DRIFT is not available.
-        Uses basic vector search + graph expansion.
+        Uses vector search (if embeddings exist) + text-based search + graph expansion.
         """
-        logger.warning("Using fallback search (DRIFT not available)")
+        logger.warning("Using fallback search (DRIFT not available with managed identity)")
         
-        if not self.embedder:
-            raise RuntimeError("Embedder not initialized. Please configure Azure OpenAI settings (AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_EMBEDDING_DEPLOYMENT)")
-        
-        # Embed the query
-        query_embedding = self.embedder.embed(query)
-        
-        # Vector search in Neo4j
-        vector_query = """
-        CALL db.index.vector.queryNodes('entity', $top_k, $embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
-        RETURN node.id AS id, node.name AS name, node.description AS description, score
-        ORDER BY score DESC
-        """
-        
-        records, _, _ = self.driver.execute_query(
-            vector_query,
-            embedding=query_embedding,
-            top_k=10,
-            group_id=group_id,
-        )
-        
-        # Build context from results
+        # Try vector search first (if embedder available and embeddings exist)
         context_parts = []
         sources = []
-        for record in records:
-            context_parts.append(f"- {record['name']}: {record['description']}")
-            sources.append(record['id'])
+        
+        if self.embedder:
+            try:
+                # Embed the query
+                query_embedding = self.embedder.embed(query)
+                
+                # Vector search in Neo4j
+                vector_query = """
+                CALL db.index.vector.queryNodes('entity', $top_k, $embedding)
+                YIELD node, score
+                WHERE node.group_id = $group_id
+                RETURN node.id AS id, node.name AS name, node.description AS description, score
+                ORDER BY score DESC
+                """
+                
+                records, _, _ = self.driver.execute_query(
+                    vector_query,
+                    embedding=query_embedding,
+                    top_k=10,
+                    group_id=group_id,
+                )
+                
+                for record in records:
+                    context_parts.append(f"- {record['name']}: {record['description']}")
+                    sources.append(record['id'])
+                
+                logger.info(f"Vector search found {len(sources)} entities")
+            except Exception as e:
+                logger.warning(f"Vector search failed (embeddings may not exist): {e}")
+        
+        # Fallback to text-based search if vector search found nothing
+        if not sources:
+            logger.info("Vector search returned no results, using text-based entity search")
+            text_query = """
+            MATCH (e:Entity {group_id: $group_id})
+            WHERE e.name IS NOT NULL AND e.description IS NOT NULL
+            RETURN e.id AS id, e.name AS name, e.description AS description
+            ORDER BY size(e.description) DESC
+            LIMIT 20
+            """
+            
+            records, _, _ = self.driver.execute_query(
+                text_query,
+                group_id=group_id,
+            )
+            
+            for record in records:
+                context_parts.append(f"- {record['name']}: {record['description']}")
+                sources.append(record['id'])
+            
+            logger.info(f"Text-based search found {len(sources)} entities")
         
         context = "\n".join(context_parts)
         

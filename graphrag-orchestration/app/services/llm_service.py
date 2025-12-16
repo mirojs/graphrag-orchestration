@@ -61,14 +61,17 @@ class LLMService:
                     def token_provider() -> str:
                         return env_token
                 else:
+                    logger.info("Initializing DefaultAzureCredential for managed identity")
                     credential = DefaultAzureCredential()
                     token_provider = get_bearer_token_provider(
                         credential,
                         "https://cognitiveservices.azure.com/.default"
                     )
+                    logger.info("Token provider created successfully")
                 
                 # Initialize LLM with token provider
                 try:
+                    logger.info(f"Creating AzureOpenAI LLM with endpoint: {settings.AZURE_OPENAI_ENDPOINT}")
                     self._llm = AzureOpenAI(
                         model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
                         deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
@@ -84,23 +87,26 @@ class LLMService:
                 
                 # Initialize Embedding Model with token provider
                 try:
+                    logger.info("Initializing embedding model with managed identity...")
                     # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
                     embed_kwargs = {
                         "model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         "deployment_name": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
+                        "api_key": "",  # Empty string required by SDK v0.3.3 even with token provider
                         "use_azure_ad": True,
                         "azure_ad_token_provider": token_provider,
                     }
                     # text-embedding-3-* models support dimensions parameter, ada-002 does not
                     if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
                         embed_kwargs["dimensions"] = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
+                        logger.info(f"Using dimensions: {settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS}")
                     
                     self._embed_model = AzureOpenAIEmbedding(**embed_kwargs)
                     logger.info("Embedding model initialized successfully with managed identity")
                 except Exception as e:
-                    logger.error(f"Failed to initialize embedding model: {e}")
+                    logger.error(f"Failed to initialize embedding model: {e}", exc_info=True)
                     raise
             else:
                 logger.info("Using API key authentication for OpenAI")

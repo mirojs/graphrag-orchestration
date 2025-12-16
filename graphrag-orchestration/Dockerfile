@@ -1,31 +1,41 @@
+# Stage 1: Builder - Install all dependencies
+FROM python:3.11-slim as builder
+
+WORKDIR /tmp
+
+# Install system dependencies needed for compilation
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install to user site packages
+COPY requirements.txt .
+# Upgrade pip to latest before installs to avoid resolver bugs on older pip
+RUN pip install --upgrade pip \
+    && pip install --user --no-cache-dir -r requirements.txt
+
+# Stage 2: Runtime - Minimal final image
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements and install Python dependencies
-COPY requirements.txt .
-# Upgrade pip to latest before installs to avoid resolver bugs on older pip
-RUN pip install --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-# Cache bust: 2025-12-13-14:15 - DI integration with blob download fix
-COPY . .
+# Copy only the installed packages from builder (not build tools)
+COPY --from=builder /root/.local /root/.local
 
 # Create data directories
 RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache
 
-# Expose port (mapped to 8001 externally via docker-compose)
-EXPOSE 8000
+# Copy application code
+# Cache bust: 2025-12-16-optimization - Multi-stage build for smaller image
+COPY . .
 
-# Set Python to unbuffered mode for immediate logging
-ENV PYTHONUNBUFFERED=1
+# Set PATH to use pip-installed packages from /root/.local
+ENV PATH=/root/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app
+
+# Expose port
+EXPOSE 8000
 
 # Run FastAPI with uvicorn
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

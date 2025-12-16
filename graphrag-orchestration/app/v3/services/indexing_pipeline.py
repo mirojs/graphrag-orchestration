@@ -686,17 +686,32 @@ class IndexingPipelineV3:
             logger.info(f"Extracted {len(extracted_nodes)} nodes with metadata")
             
             # Collect entities and relations from node metadata
+            # Track which entities came from which chunks for MENTIONS relationships
             all_entity_nodes = []
             all_relations = []
+            entity_to_chunks = {}  # Maps entity_name -> [chunk_ids]
             
             for i, node in enumerate(extracted_nodes):
                 if i == 0:
                     logger.info(f"First node metadata keys: {list(node.metadata.keys())}")
                 
+                chunk_id = node.node_id if hasattr(node, 'node_id') else node.id_
+                
                 # LlamaIndex stores extracted data in either 'nodes'/'kg_nodes' and 'relations'/'kg_relations'
                 if "nodes" in node.metadata:
+                    # Track which entities came from this chunk
+                    for entity_node in node.metadata["nodes"]:
+                        entity_name = entity_node.name if hasattr(entity_node, 'name') else str(entity_node.id)
+                        if entity_name not in entity_to_chunks:
+                            entity_to_chunks[entity_name] = []
+                        entity_to_chunks[entity_name].append(chunk_id)
                     all_entity_nodes.extend(node.metadata["nodes"])
                 elif "kg_nodes" in node.metadata:
+                    for entity_node in node.metadata["kg_nodes"]:
+                        entity_name = entity_node.name if hasattr(entity_node, 'name') else str(entity_node.id)
+                        if entity_name not in entity_to_chunks:
+                            entity_to_chunks[entity_name] = []
+                        entity_to_chunks[entity_name].append(chunk_id)
                     all_entity_nodes.extend(node.metadata["kg_nodes"])
                 
                 if "relations" in node.metadata:
@@ -798,9 +813,18 @@ class IndexingPipelineV3:
                      description=str(node.properties) if hasattr(node, 'properties') else "",
                  )
                  name_to_id_map[entity_key] = new_id
+                 
+                 # Store chunk IDs for this entity (for MENTIONS relationships)
+                 chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
+                 if chunk_ids_for_entity:
+                     all_entities[entity_key].text_unit_ids = chunk_ids_for_entity
              else:
-                 # If already exists, ensure we map this node to the existing entity ID
+                 # If already exists, merge chunk IDs
                  name_to_id_map[entity_key] = all_entities[entity_key].id
+                 chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
+                 if chunk_ids_for_entity:
+                     existing_ids = getattr(all_entities[entity_key], 'text_unit_ids', [])
+                     all_entities[entity_key].text_unit_ids = list(set(existing_ids + chunk_ids_for_entity))
 
         for relation_id, relation in graph_relations.items():
             # relation is a Relation object

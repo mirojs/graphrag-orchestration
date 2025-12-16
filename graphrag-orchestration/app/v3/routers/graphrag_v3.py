@@ -242,7 +242,7 @@ async def index_documents(
         
         # Run indexing as a background task for large document sets
         # For small sets, run synchronously for immediate feedback
-        if len(docs_for_pipeline) <= 3:
+        if len(docs_for_pipeline) <= 10:  # Increased threshold for testing
             # Synchronous indexing for small batches
             stats = await pipeline.index_documents(
                 group_id=group_id,

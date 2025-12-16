@@ -33,6 +33,7 @@ class Entity:
     description: str = ""
     embedding: Optional[List[float]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
+    text_unit_ids: List[str] = field(default_factory=list)  # For DRIFT MENTIONS relationships
 
 
 @dataclass
@@ -243,7 +244,7 @@ class Neo4jStoreV3:
             return cast(str, record["id"]) if record else entity.id
     
     def upsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
-        """Batch insert/update entities."""
+        """Batch insert/update entities and create MENTIONS relationships to chunks."""
         query = """
         UNWIND $entities AS e
         MERGE (entity:Entity {id: e.id})
@@ -253,7 +254,14 @@ class Neo4jStoreV3:
             entity.embedding = e.embedding,
             entity.group_id = $group_id,
             entity.updated_at = datetime()
-        RETURN count(entity) AS count
+        
+        // Create MENTIONS relationships to chunks for DRIFT
+        WITH entity, e
+        UNWIND e.text_unit_ids AS chunk_id
+        MATCH (chunk:TextChunk {id: chunk_id, group_id: $group_id})
+        MERGE (chunk)-[:MENTIONS]->(entity)
+        
+        RETURN count(DISTINCT entity) AS count
         """
         
         entity_data = [
@@ -263,6 +271,7 @@ class Neo4jStoreV3:
                 "type": e.type,
                 "description": e.description,
                 "embedding": e.embedding,
+                "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
             }
             for e in entities
         ]
@@ -270,7 +279,13 @@ class Neo4jStoreV3:
         with self.driver.session(database=self.database) as session:
             result = session.run(query, entities=entity_data, group_id=group_id)
             record = result.single()
-            return cast(int, record["count"]) if record else 0
+            count = cast(int, record["count"]) if record else 0
+            
+            # Log MENTIONS creation
+            mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
+            logger.info(f"Created {count} entities with {mentions_count} MENTIONS relationships")
+            
+            return count
     
     def get_entity(self, group_id: str, entity_id: str) -> Optional[Entity]:
         """Get an entity by ID."""

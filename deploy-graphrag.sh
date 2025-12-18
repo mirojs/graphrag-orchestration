@@ -14,15 +14,18 @@ get_env_value_or_default() {
     local default="$2"
     local required="${3:-false}"
 
-    local value
-    # Try azd first if available
-    if command -v azd &>/dev/null; then
-        value=$(azd env get-value "$key" 2>/dev/null || echo "")
-    fi
+    local value=""
     
-    # Fallback to environment variable
-    if [ -z "$value" ]; then
+    # Try environment variable first
+    if [ -n "${!key:-}" ]; then
         value="${!key}"
+    # Try azd if env var is empty and azd is available
+    elif command -v azd &>/dev/null; then
+        # azd outputs errors to stdout, so check for ERROR prefix
+        local azd_output=$(azd env get-value "$key" 2>&1)
+        if ! echo "$azd_output" | grep -q "^ERROR:"; then
+            value="$azd_output"
+        fi
     fi
     
     # Fallback to default
@@ -30,9 +33,10 @@ get_env_value_or_default() {
         value="$default"
     fi
 
+    # Check if required and still empty
     if [ -z "$value" ] && [ "$required" = "true" ]; then
-        echo "❌ Required environment key '$key' not found." >&2
-        echo "   Set it via: export $key=<value> or azd env set $key <value>" >&2
+        >&2 echo "❌ Required environment key '$key' not found."
+        >&2 echo "   Set it via: export $key=<value> or azd env set $key <value>"
         exit 1
     fi
 
@@ -40,14 +44,14 @@ get_env_value_or_default() {
 }
 
 # Configuration
-AZURE_SUBSCRIPTION_ID=$(get_env_value_or_default "AZURE_SUBSCRIPTION_ID" "" false)
-AZURE_RESOURCE_GROUP=$(get_env_value_or_default "AZURE_RESOURCE_GROUP" "rg-graphrag-feature" false)
-AZURE_LOCATION=$(get_env_value_or_default "AZURE_LOCATION" "swedencentral" false)
-CONTAINER_REGISTRY_NAME=$(get_env_value_or_default "CONTAINER_REGISTRY_NAME" "graphragacr12153" true)
-CONTAINER_APP_NAME=$(get_env_value_or_default "CONTAINER_APP_NAME" "graphrag-orchestration" false)
-CONTAINER_APP_ENVIRONMENT=$(get_env_value_or_default "CONTAINER_APP_ENVIRONMENT" "graphrag-env" false)
-AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "latest" false)
-CONTAINER_APP_USER_IDENTITY_ID=$(get_env_value_or_default "CONTAINER_APP_USER_IDENTITY_ID" "" false)
+AZURE_SUBSCRIPTION_ID=$(get_env_value_or_default "AZURE_SUBSCRIPTION_ID" "")
+AZURE_RESOURCE_GROUP=$(get_env_value_or_default "AZURE_RESOURCE_GROUP" "rg-graphrag-feature")
+AZURE_LOCATION=$(get_env_value_or_default "AZURE_LOCATION" "swedencentral")
+CONTAINER_REGISTRY_NAME=$(get_env_value_or_default "CONTAINER_REGISTRY_NAME" "" true)
+CONTAINER_APP_NAME=$(get_env_value_or_default "CONTAINER_APP_NAME" "graphrag-orchestration")
+CONTAINER_APP_ENVIRONMENT=$(get_env_value_or_default "CONTAINER_APP_ENVIRONMENT" "graphrag-env")
+AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "latest")
+CONTAINER_APP_USER_IDENTITY_ID=$(get_env_value_or_default "CONTAINER_APP_USER_IDENTITY_ID" "")
 
 # Neo4j Configuration
 NEO4J_CONTAINER_NAME="neo4j-graphrag"
@@ -150,6 +154,19 @@ fi
 echo "✅ Container App found: $CONTAINER_APP_NAME"
 echo ""
 
+# Auto-detect managed identity if not provided
+if [ -z "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
+    echo "🔍 Auto-detecting managed identity..."
+    CONTAINER_APP_USER_IDENTITY_ID=$(az containerapp show \
+        --name "$CONTAINER_APP_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>/dev/null || echo "")
+    
+    if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
+        echo "✅ Found managed identity: ${CONTAINER_APP_USER_IDENTITY_ID##*/}"
+    fi
+fi
+
 # Set registry authentication (using managed identity if available)
 if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
     echo "⏳ Configuring ACR authentication with managed identity..."
@@ -161,7 +178,8 @@ if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
         --only-show-errors
     echo "✅ Registry authentication configured (managed identity)"
 else
-    echo "⚠️  No managed identity ID provided. Ensure ACR admin credentials are enabled."
+    echo "⚠️  No managed identity found. Using ACR admin credentials (less secure)."
+    echo "   Consider enabling managed identity for better security."
 fi
 
 # Update container app with new image

@@ -1,0 +1,333 @@
+{
+  "fieldSchema": {
+    "name": "InvoiceContractVerification",
+    "description": "Analyze invoice to confirm total consistency with signed contract. Uses structured Documents arrays for multi-document comparisons. Generate complete inconsistency objects with all fields in a single pass for consistency and efficiency.",
+    "fields": {
+      "PaymentTermsInconsistencies": {
+        "type": "array",
+        "method": "generate",
+        "description": "Analyze payment terms across all invoice-contract pairs and generate a complete array of ALL inconsistencies found. For each inconsistency, provide comprehensive evidence including document fields, exact values, source filenames (WITHOUT UUID prefix), page numbers, and severity assessment. If multiple document pairs are involved, create a Documents array with one item per pair. Generate the entire array in one pass to ensure consistency.",
+        "items": {
+          "type": "object",
+          "description": "Single payment terms inconsistency with complete structured evidence",
+          "properties": {
+            "Evidence": {
+              "type": "string",
+              "description": "Clear evidence or reasoning explaining why this is an inconsistency between invoice and contract payment terms."
+            },
+            "InconsistencyType": {
+              "type": "string",
+              "description": "Specific type of payment terms inconsistency (e.g., 'Payment Due Date Mismatch', 'Payment Amount Discrepancy', 'Payment Method Conflict', 'Net Terms Mismatch')."
+            },
+            "Severity": {
+              "type": "string",
+              "description": "Severity level of this inconsistency: 'Critical', 'High', 'Medium', or 'Low'."
+            },
+            "Documents": {
+              "type": "array",
+              "description": "Array of document comparison pairs involved in this inconsistency. Each item represents one invoice-contract pair comparison. If comparing Invoice1 vs Contract1 AND Invoice2 vs Contract2, create TWO items in this array.",
+              "items": {
+                "type": "object",
+                "description": "A single document comparison pair showing the inconsistent payment term values from two documents",
+                "properties": {
+                  "DocumentAField": {
+                    "type": "string",
+                    "description": "Invoice field name that contains the inconsistent payment term (DocumentA = Invoice)."
+                  },
+                  "DocumentAValue": {
+                    "type": "string",
+                    "description": "Exact value or text found in the invoice for this payment term (e.g., '$29,900', 'Due on contract signing', '30 days net'). DocumentA = Invoice."
+                  },
+                  "DocumentASourceDocument": {
+                    "type": "string",
+                    "description": "Original filename of the invoice document where this value was found, WITHOUT any UUID prefix. If filename in storage is '7543c5b8-903b-466c-95dc-1a920040d10c_invoice_2024.pdf', return ONLY 'invoice_2024.pdf'. Strip UUID prefix before underscore. DocumentA = Invoice."
+                  },
+                  "DocumentAPageNumber": {
+                    "type": "number",
+                    "description": "Page number in the invoice document where this inconsistency was found (1-based index). DocumentA = Invoice."
+                  },
+                  "DocumentBField": {
+                    "type": "string",
+                    "description": "Contract field name that contains the inconsistent payment term (DocumentB = Contract)."
+                  },
+                  "DocumentBValue": {
+                    "type": "string",
+                    "description": "Exact value or text found in the contract for this payment term (e.g., 'staged payment structure', '60 days net'). DocumentB = Contract."
+                  },
+                  "DocumentBSourceDocument": {
+                    "type": "string",
+                    "description": "Original filename of the contract document where this value was found, WITHOUT any UUID prefix. If filename in storage is 'b4a7651c-6474-46cc-a6c5-5478dc3a1192_contract.pdf', return ONLY 'contract.pdf'. Strip UUID prefix before underscore. DocumentB = Contract."
+                  },
+                  "DocumentBPageNumber": {
+                    "type": "number",
+                    "description": "Page number in the contract document where this inconsistency was found (1-based index). DocumentB = Contract."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "ItemInconsistencies": {
+        "type": "array",
+        "method": "generate",
+        "description": "Analyze goods or services across all documents and generate a complete array of ALL item inconsistencies found (including detailed specifications for every line item mismatch). For each inconsistency, provide comprehensive evidence. Generate the entire array in one pass to ensure consistency.",
+        "items": {
+          "type": "object",
+          "description": "Single item/goods/services inconsistency with complete structured evidence",
+          "properties": {
+            "Evidence": {
+              "type": "string",
+              "description": "Clear evidence explaining why this item inconsistency exists between invoice and contract."
+            },
+            "InconsistencyType": {
+              "type": "string",
+              "description": "Specific type of item inconsistency (e.g., 'Item Description Mismatch', 'Quantity Discrepancy', 'Unit Price Mismatch', 'Product Code Conflict', 'Line Item Missing')."
+            },
+            "Severity": {
+              "type": "string",
+              "description": "Severity level of this inconsistency: 'Critical', 'High', 'Medium', or 'Low'."
+            },
+            "Documents": {
+              "type": "array",
+              "description": "Array of document comparison pairs involved in this inconsistency. Each item represents one invoice-contract pair comparison.",
+              "items": {
+                "type": "object",
+                "description": "A single document comparison pair showing the inconsistent item values from two documents",
+                "properties": {
+                  "DocumentAField": {
+                    "type": "string",
+                    "description": "Invoice field name that contains the inconsistent item information (DocumentA = Invoice)."
+                  },
+                  "DocumentAValue": {
+                    "type": "string",
+                    "description": "Exact value or text found in the invoice for this item (e.g., 'Widget Model X-200', '100 units', '$5,000'). DocumentA = Invoice."
+                  },
+                  "DocumentASourceDocument": {
+                    "type": "string",
+                    "description": "Original invoice filename WITHOUT UUID prefix. Strip UUID prefix before underscore. DocumentA = Invoice."
+                  },
+                  "DocumentAPageNumber": {
+                    "type": "number",
+                    "description": "Page number in the invoice document (1-based). DocumentA = Invoice."
+                  },
+                  "DocumentBField": {
+                    "type": "string",
+                    "description": "Contract field name that contains the inconsistent item information (DocumentB = Contract)."
+                  },
+                  "DocumentBValue": {
+                    "type": "string",
+                    "description": "Exact value or text found in the contract for this item (e.g., 'Widget Model X-100', '50 units', '$3,000'). DocumentB = Contract."
+                  },
+                  "DocumentBSourceDocument": {
+                    "type": "string",
+                    "description": "Original contract filename WITHOUT UUID prefix. Strip UUID prefix before underscore. DocumentB = Contract."
+                  },
+                  "DocumentBPageNumber": {
+                    "type": "number",
+                    "description": "Page number in the contract document (1-based). DocumentB = Contract."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "BillingLogisticsInconsistencies": {
+        "type": "array",
+        "method": "generate",
+        "description": "Analyze billing addresses, delivery addresses, remit-to addresses, and other logistics details across all documents and generate a complete array of ALL inconsistencies found. Generate the entire array in one pass to ensure consistency.",
+        "items": {
+          "type": "object",
+          "description": "Single billing/logistics inconsistency with complete structured evidence",
+          "properties": {
+            "Evidence": {
+              "type": "string",
+              "description": "Clear evidence explaining why this billing/logistics inconsistency exists."
+            },
+            "InconsistencyType": {
+              "type": "string",
+              "description": "Specific type of billing/logistics inconsistency (e.g., 'Billing Address Mismatch', 'Delivery Address Discrepancy', 'Ship-To Conflict', 'Remit-To Mismatch')."
+            },
+            "Severity": {
+              "type": "string",
+              "description": "Severity level of this inconsistency: 'Critical', 'High', 'Medium', or 'Low'."
+            },
+            "Documents": {
+              "type": "array",
+              "description": "Array of document comparison pairs involved in this inconsistency.",
+              "items": {
+                "type": "object",
+                "description": "A single document comparison pair showing the inconsistent billing/logistics values",
+                "properties": {
+                  "DocumentAField": {
+                    "type": "string",
+                    "description": "Invoice field name (DocumentA = Invoice)."
+                  },
+                  "DocumentAValue": {
+                    "type": "string",
+                    "description": "Exact value found in invoice (e.g., '123 Main St, NY', 'Warehouse A'). DocumentA = Invoice."
+                  },
+                  "DocumentASourceDocument": {
+                    "type": "string",
+                    "description": "Original invoice filename WITHOUT UUID prefix. DocumentA = Invoice."
+                  },
+                  "DocumentAPageNumber": {
+                    "type": "number",
+                    "description": "Page number in invoice (1-based). DocumentA = Invoice."
+                  },
+                  "DocumentBField": {
+                    "type": "string",
+                    "description": "Contract field name (DocumentB = Contract)."
+                  },
+                  "DocumentBValue": {
+                    "type": "string",
+                    "description": "Exact value found in contract (e.g., '456 Oak Ave, CA', 'Warehouse B'). DocumentB = Contract."
+                  },
+                  "DocumentBSourceDocument": {
+                    "type": "string",
+                    "description": "Original contract filename WITHOUT UUID prefix. DocumentB = Contract."
+                  },
+                  "DocumentBPageNumber": {
+                    "type": "number",
+                    "description": "Page number in contract (1-based). DocumentB = Contract."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "PaymentScheduleInconsistencies": {
+        "type": "array",
+        "method": "generate",
+        "description": "Analyze payment schedules, milestones, and payment timelines across all documents and generate a complete array of ALL inconsistencies found. Generate the entire array in one pass to ensure consistency.",
+        "items": {
+          "type": "object",
+          "description": "Single payment schedule inconsistency with complete structured evidence",
+          "properties": {
+            "Evidence": {
+              "type": "string",
+              "description": "Clear evidence explaining why this payment schedule inconsistency exists."
+            },
+            "InconsistencyType": {
+              "type": "string",
+              "description": "Specific type of payment schedule inconsistency (e.g., 'Milestone Date Mismatch', 'Payment Amount Discrepancy', 'Payment Sequence Conflict', 'Installment Count Mismatch')."
+            },
+            "Severity": {
+              "type": "string",
+              "description": "Severity level of this inconsistency: 'Critical', 'High', 'Medium', or 'Low'."
+            },
+            "Documents": {
+              "type": "array",
+              "description": "Array of document comparison pairs involved in this inconsistency.",
+              "items": {
+                "type": "object",
+                "description": "A single document comparison pair showing the inconsistent payment schedule values",
+                "properties": {
+                  "DocumentAField": {
+                    "type": "string",
+                    "description": "Invoice field name (DocumentA = Invoice)."
+                  },
+                  "DocumentAValue": {
+                    "type": "string",
+                    "description": "Exact value found in invoice (e.g., 'Payment due upon receipt', 'Milestone 1: $10,000'). DocumentA = Invoice."
+                  },
+                  "DocumentASourceDocument": {
+                    "type": "string",
+                    "description": "Original invoice filename WITHOUT UUID prefix. DocumentA = Invoice."
+                  },
+                  "DocumentAPageNumber": {
+                    "type": "number",
+                    "description": "Page number in invoice (1-based). DocumentA = Invoice."
+                  },
+                  "DocumentBField": {
+                    "type": "string",
+                    "description": "Contract field name (DocumentB = Contract)."
+                  },
+                  "DocumentBValue": {
+                    "type": "string",
+                    "description": "Exact value found in contract (e.g., '30 days net', 'Milestone 1: $15,000'). DocumentB = Contract."
+                  },
+                  "DocumentBSourceDocument": {
+                    "type": "string",
+                    "description": "Original contract filename WITHOUT UUID prefix. DocumentB = Contract."
+                  },
+                  "DocumentBPageNumber": {
+                    "type": "number",
+                    "description": "Page number in contract (1-based). DocumentB = Contract."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "TaxOrDiscountInconsistencies": {
+        "type": "array",
+        "method": "generate",
+        "description": "Analyze taxes, discounts, rebates, and other financial adjustments across all documents and generate a complete array of ALL inconsistencies found. Generate the entire array in one pass to ensure consistency.",
+        "items": {
+          "type": "object",
+          "description": "Single tax/discount inconsistency with complete structured evidence",
+          "properties": {
+            "Evidence": {
+              "type": "string",
+              "description": "Clear evidence explaining why this tax/discount inconsistency exists."
+            },
+            "InconsistencyType": {
+              "type": "string",
+              "description": "Specific type of tax/discount inconsistency (e.g., 'Tax Rate Mismatch', 'Discount Percentage Discrepancy', 'Rebate Amount Conflict', 'Tax Exemption Status Mismatch')."
+            },
+            "Severity": {
+              "type": "string",
+              "description": "Severity level of this inconsistency: 'Critical', 'High', 'Medium', or 'Low'."
+            },
+            "Documents": {
+              "type": "array",
+              "description": "Array of document comparison pairs involved in this inconsistency.",
+              "items": {
+                "type": "object",
+                "description": "A single document comparison pair showing the inconsistent tax/discount values",
+                "properties": {
+                  "DocumentAField": {
+                    "type": "string",
+                    "description": "Invoice field name (DocumentA = Invoice)."
+                  },
+                  "DocumentAValue": {
+                    "type": "string",
+                    "description": "Exact value found in invoice (e.g., '8% sales tax', '10% discount', '$500 rebate'). DocumentA = Invoice."
+                  },
+                  "DocumentASourceDocument": {
+                    "type": "string",
+                    "description": "Original invoice filename WITHOUT UUID prefix. DocumentA = Invoice."
+                  },
+                  "DocumentAPageNumber": {
+                    "type": "number",
+                    "description": "Page number in invoice (1-based). DocumentA = Invoice."
+                  },
+                  "DocumentBField": {
+                    "type": "string",
+                    "description": "Contract field name (DocumentB = Contract)."
+                  },
+                  "DocumentBValue": {
+                    "type": "string",
+                    "description": "Exact value found in contract (e.g., '5% sales tax', '15% discount', '$1,000 rebate'). DocumentB = Contract."
+                  },
+                  "DocumentBSourceDocument": {
+                    "type": "string",
+                    "description": "Original contract filename WITHOUT UUID prefix. DocumentB = Contract."
+                  },
+                  "DocumentBPageNumber": {
+                    "type": "number",
+                    "description": "Page number in contract (1-based). DocumentB = Contract."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

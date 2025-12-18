@@ -6,7 +6,7 @@ from app.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from app.middleware.group_isolation import GroupIsolationMiddleware
 from app.routers import health, graphrag, orchestration
-from app.v3.routers import graphrag_v3  # V3 endpoints (separate from V1/V2)
+from app.v3.routers import graphrag_v3, admin  # V3 endpoints (separate from V1/V2)
 
 # NOTE: GraphService and LLMService are core services used by V3
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
@@ -111,3 +111,6 @@ app.include_router(orchestration.router, prefix="/orchestrate", tags=["orchestra
 # V3 Router - Completely separate from V1/V2
 # Uses Neo4j ONLY at query time, MS GraphRAG DRIFT for reasoning
 app.include_router(graphrag_v3.router, prefix="/graphrag", tags=["graphrag-v3"])
+
+# Admin endpoints for maintenance
+app.include_router(admin.router, prefix="/admin", tags=["admin"])

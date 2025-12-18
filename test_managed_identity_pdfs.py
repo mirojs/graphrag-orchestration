@@ -17,7 +17,7 @@ from typing import Dict, Any, List
 
 # Configuration
 BASE_URL = "https://graphrag-orchestration.purplefield-1719ccc0.swedencentral.azurecontainerapps.io"
-TEST_GROUP_ID = f"pdf-mi-test-{int(time.time())}"
+TEST_GROUP_ID = "test-3072-fresh"  # Fresh group for clean 3072-dim testing
 
 # Storage Account Configuration
 STORAGE_ACCOUNT = "neo4jstorage21224"

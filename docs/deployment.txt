@@ -1,0 +1,63 @@
+Pro (customer-facing) deploy — console logs OFF (default):
+cd ./code/content-processing-solution-accelerator/infra/scripts && conda deactivate && ./docker-build.sh
+cd ./code/content-processing-solution-accelerator/infra/scripts && APP_CONSOLE_LOG_ENABLED=true ./docker-build.sh
+
+Dev deploy — temporarily enable console logs (local script):
+cd ./code/content-processing-solution-accelerator/infra/scripts
+APP_CONSOLE_LOG_ENABLED=true ./docker-build.sh
+
+Optional: if you run authentication setup afterwards and want logs ON for dev, pass the flag too:
+APP_CONSOLE_LOG_ENABLED=true ./configure-authentication.sh <envName>
+
+---
+
+Custom Domain Configuration (one-time setup):
+cd ./code/content-processing-solution-accelerator/infra/scripts
+./configure-custom-domain.sh <your-domain.com>
+
+Example:
+./configure-custom-domain.sh map.hulkdesign.com
+
+This script will:
+1. Add the custom domain to the Container App
+2. Create and bind a managed certificate
+3. Update app registration redirect URIs (both SPA and Web)
+4. Verify the configuration
+
+Prerequisites:
+- DNS CNAME record must point to the Container App environment domain
+- Authentication must be configured first (run configure-authentication.sh)
+
+---
+
+GitHub Actions CI/CD deployments:
+- Production repos: console logs are OFF by default (no action needed).
+- Dev repos: enable logs by setting a repository variable:
+  1. Go to: Settings → Secrets and variables → Actions → Variables
+  2. Click "New repository variable"
+  3. Name: APP_CONSOLE_LOG_ENABLED
+  4. Value: true
+  The next GitHub Actions deployment will inject APP_CONSOLE_LOG_ENABLED=true into the container app.
+
+---
+
+Enable/disable console logs immediately (without redeploying):
+# Enable logs:
+az containerapp update \
+  --name <YOUR_WEB_APP_NAME> \
+  --resource-group <YOUR_RESOURCE_GROUP> \
+  --set-env-vars APP_CONSOLE_LOG_ENABLED=true
+
+# Disable logs:
+az containerapp update \
+  --name <YOUR_WEB_APP_NAME> \
+  --resource-group <YOUR_RESOURCE_GROUP> \
+  --set-env-vars APP_CONSOLE_LOG_ENABLED=false
+
+After running the command, do a hard browser refresh (Ctrl+Shift+R / Cmd+Shift+R) to clear cached JS.
+
+---
+
+Notes:
+- If APP_CONSOLE_LOG_ENABLED is not provided, it defaults to false (logs OFF).
+- Set APP_CONSOLE_LOG_ENABLED=false to explicitly turn logs OFF again on the next deploy.

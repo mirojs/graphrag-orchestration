@@ -171,12 +171,20 @@ class Neo4jStoreV3:
         ]
         
         # Vector indexes (separate because they need special syntax)
+        # NOTE: Commented out drop logic to avoid timeouts during schema initialization
+        # If dimensions need changing, manually drop indexes via Neo4j Browser
+        # vector_indexes_to_drop = [
+        #     "DROP INDEX entity_embedding IF EXISTS",
+        #     "DROP INDEX raptor_embedding IF EXISTS",
+        #     "DROP INDEX chunk_embedding IF EXISTS",
+        # ]
+        
         vector_indexes = [
             """
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
             FOR (e:Entity) ON (e.embedding)
             OPTIONS {indexConfig: {
-                `vector.dimensions`: 1536,
+                `vector.dimensions`: 3072,
                 `vector.similarity_function`: 'cosine'
             }}
             """,
@@ -184,7 +192,7 @@ class Neo4jStoreV3:
             CREATE VECTOR INDEX raptor_embedding IF NOT EXISTS
             FOR (r:RaptorNode) ON (r.embedding)
             OPTIONS {indexConfig: {
-                `vector.dimensions`: 1536,
+                `vector.dimensions`: 3072,
                 `vector.similarity_function`: 'cosine'
             }}
             """,
@@ -192,7 +200,7 @@ class Neo4jStoreV3:
             CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
             FOR (t:TextChunk) ON (t.embedding)
             OPTIONS {indexConfig: {
-                `vector.dimensions`: 1536,
+                `vector.dimensions`: 3072,
                 `vector.similarity_function`: 'cosine'
             }}
             """,
@@ -206,12 +214,19 @@ class Neo4jStoreV3:
                 except Exception as e:
                     logger.warning(f"Schema query failed (may already exist): {e}")
             
+            # NOTE: Vector index drops commented out to avoid timeouts
+            # If dimensions need changing, manually drop via Neo4j Browser:
+            # DROP INDEX entity_embedding IF EXISTS
+            # DROP INDEX raptor_embedding IF EXISTS  
+            # DROP INDEX chunk_embedding IF EXISTS
+            
+            # Create vector indexes with correct dimensions
             for query in vector_indexes:
                 try:
                     session.run(Query(query))  # type: ignore[arg-type]
-                    logger.debug(f"Created vector index")
+                    logger.info(f"Created vector index with 3072 dimensions")
                 except Exception as e:
-                    logger.warning(f"Vector index creation failed (may already exist): {e}")
+                    logger.warning(f"Vector index creation failed: {e}")
         
         logger.info("Neo4j schema initialization complete")
     

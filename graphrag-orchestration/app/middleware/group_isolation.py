@@ -7,8 +7,8 @@ logger = structlog.get_logger()
 
 class GroupIsolationMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
-        # Skip isolation check for health/metrics/docs endpoints
-        skip_paths = ["/health", "/health/detailed", "/metrics", "/docs", "/redoc"]
+        # Skip isolation check for health/metrics/docs/admin endpoints
+        skip_paths = ["/health", "/health/detailed", "/metrics", "/docs", "/redoc", "/admin"]
         skip_prefixes = ["/api/v1/openapi.json", "/api/v1/graphrag/health"]
         
         if any(request.url.path.startswith(p) for p in skip_paths + skip_prefixes):

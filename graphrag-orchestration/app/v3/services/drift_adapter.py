@@ -448,13 +448,26 @@ class DRIFTAdapter:
                 driver=self.driver,
                 group_id=group_id,
                 index_name="entity",
-                embedding_dimension=3072,  # text-embedding-3-large
+                embedding_dimension=3072,  # text-embedding-3-large (matches indexing config)
             )
             
-            # Use LlamaIndex LLM directly - it already supports managed identity
-            # MS GraphRAG's DRIFT can accept any LLM that implements the BaseLLM interface
-            # Our LlamaIndex Azure OpenAI LLM works perfectly with managed identity
-            drift_llm = self.llm
+            # Use fallback search - DRIFT with MS GraphRAG LitellmChatModel has auth issues
+            # Our fallback uses vector search + graph expansion with LlamaIndex (works with managed identity)
+            logger.info("[DRIFT STAGE 3/5] Using optimized fallback search with vector + graph")
+            entities_df = self.load_entities(group_id, use_cache=use_cache)
+            relationships_df = self.load_relationships(group_id, use_cache=use_cache)
+            
+            if len(entities_df) == 0:
+                logger.warning(f"No entities found for group {group_id}")
+                return {
+                    "answer": "No data has been indexed for this group yet.",
+                    "confidence": 0.0,
+                    "iterations": 0,
+                    "sources": [],
+                    "reasoning_path": [],
+                }
+            
+            return await self._fallback_search(group_id, query, entities_df, relationships_df)
             
             # Build DRIFT context builder with MS GraphRAG models
             # Required params: model, text_embedder, entities, entity_text_embeddings
@@ -554,7 +567,12 @@ class DRIFTAdapter:
                 
                 for record in records:
                     context_parts.append(f"- {record['name']}: {record['description']}")
-                    sources.append(record['id'])
+                    sources.append({
+                        "id": record['id'],
+                        "name": record['name'],
+                        "type": "entity",
+                        "score": float(record['score'])
+                    })
                 
                 logger.info(f"Vector search found {len(sources)} entities")
             except Exception as e:
@@ -578,7 +596,11 @@ class DRIFTAdapter:
             
             for record in records:
                 context_parts.append(f"- {record['name']}: {record['description']}")
-                sources.append(record['id'])
+                sources.append({
+                    "id": record['id'],
+                    "name": record['name'],
+                    "type": "entity"
+                })
             
             logger.info(f"Text-based search found {len(sources)} entities")
         

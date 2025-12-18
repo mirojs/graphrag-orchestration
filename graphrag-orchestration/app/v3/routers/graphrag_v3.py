@@ -159,8 +159,8 @@ def get_indexing_pipeline():
         llm_service = LLMService()
         
         config = IndexingConfig(
-            embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-small",
-            embedding_dimensions=1536,  # Neo4j limit: 2048
+            embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-large",
+            embedding_dimensions=3072,  # Neo4j 5.x supports up to 4096
             llm_model=settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o",
         )
         
@@ -315,11 +315,38 @@ async def query_local(request: Request, payload: V3QueryRequest):
         query_embedding = adapter.embedder.embed_query(payload.query)
         
         store = get_neo4j_store()
-        results = store.search_entities_by_embedding(
-            group_id=group_id,
-            embedding=query_embedding,
-            top_k=payload.top_k,
-        )
+        
+        # Verify entity_embedding index exists and has correct dimensions
+        try:
+            results = store.search_entities_by_embedding(
+                group_id=group_id,
+                embedding=query_embedding,
+                top_k=payload.top_k,
+            )
+        except Exception as e:
+            logger.error(f"Entity vector search failed: {e}")
+            # Check if entities exist at all
+            with store.driver.session(database=store.database) as session:
+                count_result = session.run(
+                    "MATCH (e:Entity {group_id: $group_id}) RETURN count(e) as count",
+                    group_id=group_id
+                )
+                record = count_result.single()
+                count = record["count"] if record else 0
+                
+                if count == 0:
+                    return V3QueryResponse(
+                        answer="No data has been indexed for this group yet. Please index documents first.",
+                        confidence=0.0,
+                        sources=[],
+                        entities_used=[],
+                        search_type="local",
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Vector search failed. Index may be missing or have wrong dimensions. Error: {str(e)}"
+                    )
         
         if not results:
             return V3QueryResponse(
@@ -507,17 +534,65 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
     
     try:
         store = get_neo4j_store()
-        adapter = get_drift_adapter()
         
-        # Get query embedding
-        query_embedding = adapter.embedder.embed_query(payload.query)
+        # Get embedder - ensure we use 1536 dims to match indexed data
+        # RAPTOR nodes were indexed with text-embedding-3-small (1536 dims)
+        from app.services.llm_service import LLMService
+        from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+        
+        # Create embedder with explicit 1536 dimensions
+        credential = DefaultAzureCredential()
+        token_provider = get_bearer_token_provider(
+            credential, "https://cognitiveservices.azure.com/.default"
+        )
+        
+        # Use text-embedding-3-large with 3072 dims (matches indexing)
+        embedder_3072 = AzureOpenAIEmbedding(
+            model="text-embedding-3-large",
+            deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
+            api_key="",
+            use_azure_ad=True,
+            azure_ad_token_provider=token_provider,
+            dimensions=3072,  # Must match indexed dimensions
+        )
+        
+        # Get query embedding using 3072-dim embedder
+        query_embedding = embedder_3072.get_text_embedding(payload.query)
         
         # Search RAPTOR nodes by vector similarity
-        results = store.search_raptor_by_embedding(
-            group_id=group_id,
-            embedding=query_embedding,
-            top_k=payload.top_k,
-        )
+        try:
+            results = store.search_raptor_by_embedding(
+                group_id=group_id,
+                embedding=query_embedding,
+                top_k=payload.top_k,
+            )
+        except Exception as e:
+            logger.error(f"RAPTOR vector search failed: {e}")
+            # Check if RAPTOR nodes exist
+            with store.driver.session(database=store.database) as session:
+                count_result = session.run(
+                    "MATCH (r:RaptorNode {group_id: $group_id}) RETURN count(r) as count",
+                    group_id=group_id
+                )
+                record = count_result.single()
+                count = record["count"] if record else 0
+                
+                if count == 0:
+                    return V3QueryResponse(
+                        answer="No RAPTOR nodes found. Ensure documents were indexed with run_raptor=true.",
+                        confidence=0.0,
+                        sources=[],
+                        entities_used=[],
+                        search_type="raptor",
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"RAPTOR vector search failed. Index may have wrong dimensions. Error: {str(e)}"
+                    )
         
         if not results:
             return V3QueryResponse(
@@ -555,7 +630,9 @@ Provide a detailed answer with specific values, amounts, dates, and references f
 
 Answer:"""
         
-        response = adapter.llm.complete(prompt)
+        # Get LLM for generating answer
+        llm_service = LLMService()
+        response = llm_service.llm.complete(prompt)
         
         return V3QueryResponse(
             answer=response.text,

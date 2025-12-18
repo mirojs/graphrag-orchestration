@@ -251,32 +251,51 @@ class DocumentIntelligenceService:
                         # Use DefaultAzureCredential for blob access (Managed Identity)
                         # This requires the Container App to have 'Storage Blob Data Reader' role
                         credential = DefaultAzureCredential()
-                        async with BlobClient.from_blob_url(url, credential=credential) as blob_client:
+                        
+                        # Extract blob URL without query params (SAS tokens not needed with MI)
+                        clean_url = url.split('?')[0]
+                        logger.info(f"Using clean blob URL (no SAS): {clean_url}")
+                        
+                        async with BlobClient.from_blob_url(clean_url, credential=credential) as blob_client:
                             content = await blob_client.download_blob()
                             document_bytes = await content.readall()
                             
-                            logger.info(f"Successfully downloaded blob content ({len(document_bytes)} bytes)")
+                            logger.info(f"✅ Successfully downloaded blob content ({len(document_bytes)} bytes)")
                     except Exception as e:
-                        logger.warning(f"Failed to download blob content: {str(e)}. Will try URL source.")
-                        document_bytes = None
+                        logger.error(f"❌ Failed to download blob content: {str(e)}")
+                        logger.error(f"   This likely means the Container App doesn't have 'Storage Blob Data Reader' role")
+                        logger.error(f"   or the blob doesn't exist. Cannot proceed without blob content.")
+                        # Re-raise the exception instead of silently falling back
+                        raise RuntimeError(f"Failed to download blob {url}: {str(e)}")
 
                 # Start analysis with automatic polling
                 # For bytes, pass directly as second parameter; for URL, use AnalyzeDocumentRequest
                 if document_bytes:
                     # Pass bytes directly to the SDK (v1/v2 pattern)
+                    logger.info(f"⏳ Starting Document Intelligence analysis ({len(document_bytes)} bytes)...")
                     poller = await client.begin_analyze_document(
                         "prebuilt-layout",
                         document_bytes,
                     )
                 else:
-                    # Fallback to URL source (for public URLs)
+                    # Fallback to URL source (for public URLs or URLs with SAS tokens)
+                    logger.info(f"⏳ Starting Document Intelligence analysis (URL source)...")
                     poller = await client.begin_analyze_document(
                         "prebuilt-layout",
                         analyze_request=AnalyzeDocumentRequest(url_source=url),
                     )
 
-                # Wait for completion (SDK handles polling automatically)
-                result: AnalyzeResult = await poller.result()
+                # Wait for completion with timeout (SDK handles polling automatically)
+                # Azure DI typically takes 2-10 seconds per document
+                try:
+                    result: AnalyzeResult = await asyncio.wait_for(
+                        poller.result(), 
+                        timeout=60  # 60 seconds max per document
+                    )
+                    logger.info(f"✅ Document Intelligence analysis completed for {url[:80]}")
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ Document Intelligence analysis timed out after 60s for {url[:80]}")
+                    raise TimeoutError(f"Document Intelligence analysis timed out for {url}")
 
                 if not result.pages:
                     logger.warning(f"No pages extracted from {url}")

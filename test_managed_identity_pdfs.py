@@ -91,7 +91,9 @@ def index_documents(blob_urls: List[str]) -> Dict[str, Any]:
     start_time = time.time()
     
     try:
-        log(f"⏳ Sending request...")
+        log(f"⏳ [Step 1/5] Sending request to backend...")
+        log(f"   This will process {len(blob_urls)} PDFs in parallel")
+        log(f"   Expected time: ~2-3 minutes for 5 PDFs\n")
         
         response = requests.post(
             f"{BASE_URL}/graphrag/v3/index",
@@ -109,10 +111,13 @@ def index_documents(blob_urls: List[str]) -> Dict[str, Any]:
         )
         
         elapsed = time.time() - start_time
-        log(f"📥 Response received (HTTP {response.status_code}) after {elapsed:.1f}s\n")
+        log(f"\n📥 [Step 2/5] Response received (HTTP {response.status_code}) after {elapsed:.1f}s")
+        log(f"   Processing time: {elapsed/60:.1f} minutes\n")
         
+        log(f"⏳ [Step 3/5] Parsing response...")
         try:
             result = response.json()
+            log(f"✅ Response parsed successfully\n")
         except Exception as e:
             log(f"❌ Failed to parse JSON response")
             log(f"   Error: {e}")
@@ -121,13 +126,17 @@ def index_documents(blob_urls: List[str]) -> Dict[str, Any]:
             return {}
         
         if response.status_code == 200:
-            log(f"✅ Indexing completed successfully in {elapsed:.1f}s\n")
-            log(f"Results:")
-            log(f"  📄 Documents processed: {result.get('documents_processed', 0)}")
-            log(f"  🏷️  Entities created: {result.get('entities_created', 0)}")
-            log(f"  🔗 Relationships created: {result.get('relationships_created', 0)}")
-            log(f"  🌐 Communities detected: {result.get('communities_created', 0)}")
-            log(f"  🌳 RAPTOR nodes: {result.get('raptor_nodes_created', 0)}")
+            log(f"✅ [Step 4/5] Indexing completed successfully!\n")
+            log(f"⏱️  Performance Metrics:")
+            log(f"  • Total time: {elapsed:.1f}s ({elapsed/60:.1f} minutes)")
+            log(f"  • Average per PDF: {elapsed/len(blob_urls):.1f}s")
+            log(f"  • Throughput: {len(blob_urls)/(elapsed/60):.1f} PDFs/minute\n")
+            log(f"📊 Extraction Results:")
+            log(f"  • Documents processed: {result.get('documents_processed', 0)}")
+            log(f"  • Entities created: {result.get('entities_created', 0)}")
+            log(f"  • Relationships created: {result.get('relationships_created', 0)}")
+            log(f"  • Communities detected: {result.get('communities_created', 0)}")
+            log(f"  • RAPTOR nodes: {result.get('raptor_nodes_created', 0)}\n")
             return result
         else:
             log(f"❌ Indexing failed with HTTP {response.status_code}")
@@ -137,31 +146,35 @@ def index_documents(blob_urls: List[str]) -> Dict[str, Any]:
             
     except requests.Timeout:
         elapsed = time.time() - start_time
-        log(f"❌ Request timed out after {elapsed:.1f}s")
+        log(f"\n❌ Request timed out after {elapsed:.1f}s ({elapsed/60:.1f} minutes)")
         log(f"   This suggests the backend is stuck processing the documents")
-        log(f"   Check Container App logs for details")
+        log(f"   Check Container App logs: az containerapp logs show -n graphrag-orchestration -g rg-graphrag-feature --follow")
         return {}
     except Exception as e:
         elapsed = time.time() - start_time
-        log(f"❌ Request failed after {elapsed:.1f}s")
+        log(f"\n❌ Request failed after {elapsed:.1f}s")
         log(f"   Error: {e}")
+        log(f"   Error type: {type(e).__name__}")
         return {}
 
 
 def test_queries(group_id: str):
     """Test query against indexed documents"""
     log(f"\n{'=' * 80}")
-    log("🔍 TESTING QUERIES")
+    log("🔍 [Step 5/5] TESTING QUERIES")
     log(f"{'=' * 80}\n")
+    log(f"Running {len(TEST_QUERIES)} test queries against indexed data...\n")
     
     for i, query in enumerate(TEST_QUERIES, 1):
-        log(f"\n{'─' * 80}")
+        log(f"{'─' * 80}")
         log(f"Query {i}/{len(TEST_QUERIES)}: {query}")
         log(f"{'─' * 80}")
+        log(f"⏳ Sending query to: /graphrag/v3/query/local\n")
         
+        query_start = time.time()
         try:
             response = requests.post(
-                f"{BASE_URL}/graphrag/v3/query",
+                f"{BASE_URL}/graphrag/v3/query/local",
                 headers={
                     'Content-Type': 'application/json',
                     'X-Group-ID': group_id
@@ -170,9 +183,11 @@ def test_queries(group_id: str):
                 timeout=60
             )
             
+            query_time = time.time() - query_start
+            
             if response.status_code == 200:
                 result = response.json()
-                log(f"✅ Query successful\n")
+                log(f"✅ Query successful (took {query_time:.1f}s)\n")
                 log(f"Answer:\n{result.get('answer', 'No answer')}\n")
                 
                 sources = result.get('sources', [])
@@ -180,12 +195,16 @@ def test_queries(group_id: str):
                     log(f"Sources ({len(sources)}):")
                     for source in sources[:3]:
                         log(f"  • {source}")
+                log(f"")
             else:
-                log(f"❌ Query failed: HTTP {response.status_code}")
-                log(f"   {response.text[:200]}")
+                log(f"❌ Query failed: HTTP {response.status_code} (took {query_time:.1f}s)")
+                log(f"   Response: {response.text[:200]}")
+                log(f"")
                 
         except Exception as e:
-            log(f"❌ Query error: {e}")
+            query_time = time.time() - query_start
+            log(f"❌ Query error after {query_time:.1f}s: {e}")
+            log(f"   Error type: {type(e).__name__}\n")
 
 
 def main():
@@ -193,8 +212,17 @@ def main():
     log("=" * 80)
     log("GraphRAG v3 - PDF Test with Managed Identity")
     log("=" * 80)
+    log(f"\nTest started at: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+    
+    overall_start = time.time()
     
     # Step 1: Get blob URLs
+    log(f"📋 Test Plan:")
+    log(f"  1. Generate blob URLs (no SAS tokens)")
+    log(f"  2. Index 5 PDFs with Document Intelligence")
+    log(f"  3. Run 2 test queries")
+    log(f"  4. Report results\n")
+    
     blob_urls = get_blob_urls()
     
     if not blob_urls:
@@ -211,9 +239,19 @@ def main():
     # Step 3: Test queries
     test_queries(TEST_GROUP_ID)
     
+    overall_time = time.time() - overall_start
+    
     log(f"\n{'=' * 80}")
     log("✅ TEST COMPLETE")
-    log(f"{'=' * 80}\n")
+    log(f"{'=' * 80}")
+    log(f"\nTest Summary:")
+    log(f"  • Total execution time: {overall_time:.1f}s ({overall_time/60:.1f} minutes)")
+    log(f"  • Test finished at: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    log(f"  • Group ID: {TEST_GROUP_ID}")
+    log(f"\nNext steps:")
+    log(f"  • View data in Neo4j Browser: http://neo4j-graphrag.swedencentral.azurecontainer.io:7474")
+    log(f"  • Query via API: {BASE_URL}/docs")
+    log(f"  • Check logs: az containerapp logs show -n graphrag-orchestration -g rg-graphrag-feature\n")
 
 
 if __name__ == "__main__":

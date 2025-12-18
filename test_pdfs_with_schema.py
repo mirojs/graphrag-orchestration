@@ -3,19 +3,31 @@
 GraphRAG v3 - PDF Test with Schema-Based Extraction
 Tests 5 PDFs with timing for each process step
 """
+import os
 import requests
 import json
 import sys
 import time
 import base64
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
 # Configuration
 BASE_URL = "https://graphrag-orchestration.purplefield-1719ccc0.swedencentral.azurecontainerapps.io"
 TEST_GROUP_ID = f"pdf-schema-test-{int(time.time())}"
-PDF_DIR = Path("/afh/projects/vs-code-development-project-3-6f0bbb9a-4fab-4d99-9cdb-2fe63103e939/data/input_docs")
-SCHEMA_PATH = Path("/afh/projects/vs-code-development-project-3-6f0bbb9a-4fab-4d99-9cdb-2fe63103e939/data/CLEAN_SCHEMA_INVOICE_CONTRACT_VERIFICATION_OPTIMIZED.json")
+
+# Prefer repo-local copies of the five production PDFs; fall back to the older shared path if present.
+_default_pdf_dir = Path(__file__).parent / "graphrag-orchestration" / "data" / "input_docs"
+_legacy_pdf_dir = Path("/afh/projects/vs-code-development-project-3-6f0bbb9a-4fab-4d99-9cdb-2fe63103e939/data/input_docs")
+PDF_DIR = Path(os.getenv("PDF_DIR", _default_pdf_dir if _default_pdf_dir.exists() else _legacy_pdf_dir))
+
+# Schema file path can be overridden; if missing we continue but log a warning.
+_default_schema_path = Path(__file__).parent / "graphrag-orchestration" / "data" / "CLEAN_SCHEMA_INVOICE_CONTRACT_VERIFICATION_OPTIMIZED.json"
+_legacy_schema_path = Path("/afh/projects/vs-code-development-project-3-6f0bbb9a-4fab-4d99-9cdb-2fe63103e939/data/CLEAN_SCHEMA_INVOICE_CONTRACT_VERIFICATION_OPTIMIZED.json")
+SCHEMA_PATH = Path(os.getenv("SCHEMA_PATH", _default_schema_path if _default_schema_path.exists() else _legacy_schema_path))
+SCHEMA_URL = os.getenv("SCHEMA_URL")
+RESOLVED_SCHEMA_PATH: Path | None = None
 
 # PDF files to test
 PDF_FILES = [
@@ -101,19 +113,45 @@ def load_pdf_files() -> Tuple[List[Dict[str, str]], float]:
     return files_data, timer.elapsed
 
 
+def download_schema_from_url(url: str) -> Path | None:
+    """Download schema from URL to a temp path; return path on success"""
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        target_name = Path(url.split("?")[0]).name or "schema.json"
+        target_path = Path(tempfile.gettempdir()) / target_name
+        target_path.write_bytes(response.content)
+        print(f"  ✅ Downloaded schema from URL to {target_path}")
+        return target_path
+    except Exception as exc:  # pragma: no cover - depends on infra
+        print(f"  ❌ Failed to download schema from {url}: {exc}")
+        return None
+
+
 def load_schema() -> Tuple[Dict[str, Any], float]:
-    """Load the extraction schema"""
+    """Load the extraction schema if available"""
+    global RESOLVED_SCHEMA_PATH
+
     with Timer("Schema Loading") as timer:
-        if not SCHEMA_PATH.exists():
-            print(f"  ❌ Schema not found: {SCHEMA_PATH}")
-            return None, 0
-        
-        with open(SCHEMA_PATH, 'r') as f:
+        schema_path = SCHEMA_PATH
+
+        if SCHEMA_URL:
+            downloaded = download_schema_from_url(SCHEMA_URL)
+            if downloaded:
+                schema_path = downloaded
+
+        if not schema_path.exists():
+            print(f"  ⚠️ Schema not found: {schema_path}")
+            RESOLVED_SCHEMA_PATH = None
+            return None, timer.elapsed
+
+        with open(schema_path, 'r') as f:
             schema = json.load(f)
-        
-        print(f"  ✅ Loaded: {SCHEMA_PATH.name}")
+
+        RESOLVED_SCHEMA_PATH = schema_path
+        print(f"  ✅ Loaded: {schema_path.name}")
         print(f"  📋 Schema fields: {len(schema.get('properties', {}))}")
-    
+
     return schema, timer.elapsed
 
 
@@ -124,7 +162,9 @@ def test_indexing_with_schema(files_data: List[Dict], schema: Dict) -> Tuple[Dic
     print(f"Group ID: {TEST_GROUP_ID}")
     print(f"Total PDFs: {len(files_data)}")
     print(f"Batch Size: 2 PDFs per request (to avoid gateway timeout)")
-    print(f"Schema loaded: {SCHEMA_PATH.name}")
+    schema_path = RESOLVED_SCHEMA_PATH or SCHEMA_PATH
+    schema_status = schema_path.name if schema else f"{schema_path.name} (missing)"
+    print(f"Schema loaded: {schema_status}")
     print("NOTE: /v3/index uses LlamaIndex entity extraction, not JSON schema")
     print("      For schema-based extraction, use /index-from-schema endpoint\n")
     
@@ -370,6 +410,8 @@ def main():
     schema, schema_time = load_schema()
     timings["2. Schema Loading"] = schema_time
     results["Schema Loading"] = schema is not None
+    if schema is None:
+        print("\n⚠️ Schema file is missing; continuing without schema context.")
     
     # Step 3: Index with Schema
     indexing_result, indexing_time = test_indexing_with_schema(files_data, schema)

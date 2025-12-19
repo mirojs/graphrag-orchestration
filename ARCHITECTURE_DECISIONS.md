@@ -1,5 +1,8 @@
 # Architecture Decisions and Implementation Plan
 
+## Related Planning Documents
+- **[GraphRAG Query Schema Enhancement Plan](GRAPHRAG_QUERY_SCHEMA_PLAN.md)** - Comprehensive plan for schema-aware query retrieval (2025-12-19)
+
 ## Problem Description
 - **Context:** Build a GraphRAG + LlamaIndex application with strong multi-tenant isolation, dual schema storage, and Azure-aligned deployment. Reduce friction by selecting a dependable infrastructure baseline from four reference repos.
 - **Goals:**

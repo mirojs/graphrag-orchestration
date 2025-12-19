@@ -826,8 +826,20 @@ class IndexingPipelineV3:
              if entity_key not in all_entities:
                  new_id = f"entity_{uuid.uuid4().hex[:8]}"
                  chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
-                 # Use the first chunk text where this entity appeared as description
+                 
+                 # Get description from chunk text where entity appears
                  description = entity_to_text.get(entity_name, "")
+                 
+                 # If no description from entity_to_text, use chunk text from first chunk_id
+                 if not description and chunk_ids_for_entity:
+                     first_chunk_id = chunk_ids_for_entity[0]
+                     # Find the chunk text from chunks list
+                     for chunk in chunks:
+                         if chunk.id == first_chunk_id:
+                             description = chunk.text[:500]  # First 500 chars of chunk
+                             break
+                 
+                 # Fallback to node properties if still no description
                  if not description and hasattr(node, 'properties'):
                      description = str(node.properties)
                  

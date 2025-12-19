@@ -356,25 +356,29 @@ class Neo4jStoreV3:
         k_constant = 60  # RRF constant
         candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
         
+        # CRITICAL FIX: Vector indices don't pre-filter by group_id
+        # Must retrieve MUCH more to ensure enough results after filtering
+        retrieval_k = 500  # Large enough to get results from specific group
+        
         query = """
-        // Step 1: Vector search
-        CALL db.index.vector.queryNodes('entity_embedding', $candidate_k, $embedding)
+        // Step 1: Vector search with post-filtering
+        CALL db.index.vector.queryNodes('entity_embedding', $retrieval_k, $embedding)
         YIELD node AS vNode, score AS vScore
         WHERE vNode.group_id = $group_id
-        WITH collect({node: vNode, score: vScore, rank: range(1, $candidate_k + 1)[0..size(collect(vNode))]}) AS vectorResults
+        WITH collect({node: vNode, score: vScore, rank: 1}) AS vectorResults
         
-        // Step 2: Full-text search
-        CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text)
+        // Step 2: Full-text search with post-filtering  
+        CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text, {limit: $retrieval_k})
         YIELD node AS fNode, score AS fScore
         WHERE fNode.group_id = $group_id
-        WITH vectorResults, collect({node: fNode, score: fScore, rank: range(1, $candidate_k + 1)[0..size(collect(fNode))]}) AS textResults
-        LIMIT $candidate_k
+        WITH vectorResults, collect({node: fNode, score: fScore, rank: 1}) AS textResults
         
-        // Step 3: RRF Fusion
+        // Step 3: RRF Fusion on filtered results
         WITH vectorResults + textResults AS allResults
-        UNWIND allResults AS result
-        WITH result.node AS node, 
-             sum(1.0 / ($k_constant + result.rank)) AS combinedScore
+        UNWIND range(0, size(allResults)-1) AS idx
+        WITH allResults[idx] AS result, idx
+        WITH result.node AS node,
+             sum(1.0 / ($k_constant + idx + 1)) AS combinedScore
         
         RETURN node, combinedScore
         ORDER BY combinedScore DESC
@@ -388,7 +392,7 @@ class Neo4jStoreV3:
                     query,
                     embedding=embedding,
                     query_text=query_text,
-                    candidate_k=candidate_k,
+                    retrieval_k=retrieval_k,
                     k_constant=k_constant,
                     top_k=top_k,
                     group_id=group_id,

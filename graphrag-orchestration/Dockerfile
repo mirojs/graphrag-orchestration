@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements and install to user site packages
 COPY requirements.txt .
 # Upgrade pip to latest before installs to avoid resolver bugs on older pip
-RUN pip install --upgrade pip \
-    && pip install --user --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore \
+    && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt
 
 # Stage 2: Runtime - Minimal final image
 FROM python:3.11-slim

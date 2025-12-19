@@ -240,53 +240,32 @@ async def index_documents(
                     "metadata": doc.get("metadata", {}),
                 })
         
-        # Run indexing as a background task for large document sets
-        # For small sets, run synchronously for immediate feedback
-        if len(docs_for_pipeline) <= 10:  # Increased threshold for testing
-            # Synchronous indexing for small batches
-            stats = await pipeline.index_documents(
-                group_id=group_id,
-                documents=docs_for_pipeline,
-                reindex=False,
-                ingestion=payload.ingestion,
-            )
-            
-            return V3IndexResponse(
-                status="completed",
-                group_id=group_id,
-                documents_processed=stats["documents"],
-                entities_created=stats["entities"],
-                relationships_created=stats["relationships"],
-                communities_created=stats["communities"],
-                raptor_nodes_created=stats["raptor_nodes"],
-                message="Indexing completed successfully. All data stored in Neo4j.",
-            )
-        else:
-            # Background task for larger batches
-            async def run_indexing():
-                try:
-                    stats = await pipeline.index_documents(
-                        group_id=group_id,
-                        documents=docs_for_pipeline,
-                        reindex=False,
-                        ingestion=payload.ingestion,
-                    )
-                    logger.info("v3_index_complete", group_id=group_id, stats=stats)
-                except Exception as e:
-                    logger.error("v3_index_background_failed", group_id=group_id, error=str(e))
-            
-            background_tasks.add_task(run_indexing)
-            
-            return V3IndexResponse(
-                status="accepted",
-                group_id=group_id,
-                documents_processed=len(docs_for_pipeline),
-                entities_created=0,  # Will be updated by background task
-                relationships_created=0,
-                communities_created=0,
-                raptor_nodes_created=0,
-                message="Indexing started in background. Use /v3/stats/{group_id} to check progress.",
-            )
+        # Always use background tasks to avoid gateway timeouts
+        # Entity extraction + RAPTOR + community detection can take >4 minutes for even small batches
+        async def run_indexing():
+            try:
+                stats = await pipeline.index_documents(
+                    group_id=group_id,
+                    documents=docs_for_pipeline,
+                    reindex=False,
+                    ingestion=payload.ingestion,
+                )
+                logger.info("v3_index_complete", group_id=group_id, stats=stats)
+            except Exception as e:
+                logger.error("v3_index_background_failed", group_id=group_id, error=str(e))
+        
+        background_tasks.add_task(run_indexing)
+        
+        return V3IndexResponse(
+            status="accepted",
+            group_id=group_id,
+            documents_processed=len(docs_for_pipeline),
+            entities_created=0,  # Will be updated by background task
+            relationships_created=0,
+            communities_created=0,
+            raptor_nodes_created=0,
+            message="Indexing started in background. Check logs or query to verify completion.",
+        )
         
     except Exception as e:
         logger.error("v3_index_failed", group_id=group_id, error=str(e))
@@ -562,37 +541,32 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
         # Get query embedding using 3072-dim embedder
         query_embedding = embedder_3072.get_text_embedding(payload.query)
         
-        # Search RAPTOR nodes by vector similarity
-        try:
-            results = store.search_raptor_by_embedding(
-                group_id=group_id,
-                embedding=query_embedding,
-                top_k=payload.top_k,
+        # First, check if RAPTOR nodes exist
+        with store.driver.session(database=store.database) as session:
+            count_result = session.run(
+                "MATCH (r:RaptorNode {group_id: $group_id}) RETURN count(r) as count",
+                group_id=group_id
             )
-        except Exception as e:
-            logger.error(f"RAPTOR vector search failed: {e}")
-            # Check if RAPTOR nodes exist
-            with store.driver.session(database=store.database) as session:
-                count_result = session.run(
-                    "MATCH (r:RaptorNode {group_id: $group_id}) RETURN count(r) as count",
-                    group_id=group_id
-                )
-                record = count_result.single()
-                count = record["count"] if record else 0
-                
-                if count == 0:
-                    return V3QueryResponse(
-                        answer="No RAPTOR nodes found. Ensure documents were indexed with run_raptor=true.",
-                        confidence=0.0,
-                        sources=[],
-                        entities_used=[],
-                        search_type="raptor",
-                    )
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"RAPTOR vector search failed. Index may have wrong dimensions. Error: {str(e)}"
-                    )
+            record = count_result.single()
+            raptor_node_count = record["count"] if record else 0
+            logger.info(f"RAPTOR nodes found in Neo4j: {raptor_node_count}")
+        
+        if raptor_node_count == 0:
+            return V3QueryResponse(
+                answer="No RAPTOR nodes found. Ensure documents were indexed with run_raptor=true.",
+                confidence=0.0,
+                sources=[],
+                entities_used=[],
+                search_type="raptor",
+            )
+        
+        # Search RAPTOR nodes by vector similarity
+        results = store.search_raptor_by_embedding(
+            group_id=group_id,
+            embedding=query_embedding,
+            top_k=payload.top_k,
+        )
+        logger.info(f"RAPTOR vector search returned {len(results)} results")
         
         if not results:
             return V3QueryResponse(
@@ -608,12 +582,22 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
         sources = []
         
         for node, score in results:
-            context_parts.append(f"## Content (Level {node.level}):\n{node.text}\n")
+            # Handle both RaptorNode objects and Neo4j node dicts
+            if isinstance(node, dict):
+                text = node.get("text", "")
+                level = node.get("level", 0)
+                node_id = node.get("id", "")
+            else:
+                text = node.text if hasattr(node, 'text') else str(node)
+                level = node.level if hasattr(node, 'level') else 0
+                node_id = node.id if hasattr(node, 'id') else ""
+            
+            context_parts.append(f"## Content (Level {level}):\n{text}\n")
             sources.append({
-                "id": node.id,
-                "level": node.level,
-                "score": score,
-                "text_preview": node.text[:200] + "..." if len(node.text) > 200 else node.text,
+                "id": node_id,
+                "level": level,
+                "score": float(score) if score else 0.0,
+                "text_preview": text[:200] + "..." if len(text) > 200 else text,
             })
         
         context = "\n\n".join(context_parts)

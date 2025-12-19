@@ -218,11 +218,34 @@ class DocumentIntelligenceService:
 
         return "\n\n".join(lines)
 
+    def _select_model(self, url: str, default_model: str = "prebuilt-layout", explicit: Optional[str] = None) -> str:
+        """Select Document Intelligence model based on hints.
+
+        Priority:
+        1) explicit override (e.g., 'prebuilt-invoice')
+        2) filename/url heuristics
+        3) default model
+        """
+        if explicit:
+            return explicit
+
+        lower = url.lower()
+        # Simple heuristics: prefer invoice/receipt when filename hints exist
+        if any(k in lower for k in ["invoice", "inv_"]):
+            return "prebuilt-invoice"
+        if any(k in lower for k in ["receipt", "rcpt_"]):
+            return "prebuilt-receipt"
+        # Fallback
+        return default_model
+
     async def _analyze_single_document(
         self,
         client: DocumentIntelligenceClient,
         url: str,
         group_id: str,
+        *,
+        default_model: str = "prebuilt-layout",
+        explicit_model: Optional[str] = None,
     ) -> Tuple[str, List[Document], Optional[str]]:
         """
         Analyze a single document and return extracted Documents.
@@ -268,20 +291,23 @@ class DocumentIntelligenceService:
                         # Re-raise the exception instead of silently falling back
                         raise RuntimeError(f"Failed to download blob {url}: {str(e)}")
 
+                # Decide model
+                selected_model = self._select_model(url, default_model=default_model, explicit=explicit_model)
+
                 # Start analysis with automatic polling
                 # For bytes, pass directly as second parameter; for URL, use AnalyzeDocumentRequest
                 if document_bytes:
                     # Pass bytes directly to the SDK (v1/v2 pattern)
                     logger.info(f"⏳ Starting Document Intelligence analysis ({len(document_bytes)} bytes)...")
                     poller = await client.begin_analyze_document(
-                        "prebuilt-layout",
+                        selected_model,
                         document_bytes,
                     )
                 else:
                     # Fallback to URL source (for public URLs or URLs with SAS tokens)
-                    logger.info(f"⏳ Starting Document Intelligence analysis (URL source)...")
+                    logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
                     poller = await client.begin_analyze_document(
-                        "prebuilt-layout",
+                        selected_model,
                         analyze_request=AnalyzeDocumentRequest(url_source=url),
                     )
 
@@ -413,6 +439,8 @@ class DocumentIntelligenceService:
         group_id: str, 
         input_items: List[Union[str, Dict[str, Any]]],
         fail_fast: bool = False,
+        *,
+        model_strategy: str = "auto",  # 'auto' | 'layout' | 'invoice' | 'receipt'
     ) -> List[Document]:
         """
         Extract structured Documents from files using Azure Document Intelligence.
@@ -441,13 +469,26 @@ class DocumentIntelligenceService:
         # Separate URLs from raw text
         urls: List[str] = []
         passthrough_texts: List[str] = []
+        # Optional per-item override: map URL->explicit model
+        per_item_model: Dict[str, str] = {}
 
         for item in input_items:
             if isinstance(item, dict):
                 if "text" in item:
                     passthrough_texts.append(item["text"])
                 elif "url" in item:
-                    urls.append(item["url"])
+                    url = item["url"]
+                    urls.append(url)
+                    # Allow per-item explicit override via 'di_model' or 'doc_type'
+                    model = item.get("di_model") or None
+                    doc_type = (item.get("doc_type") or "").lower()
+                    if not model and doc_type:
+                        if doc_type in ("invoice", "ap-invoice"):
+                            model = "prebuilt-invoice"
+                        elif doc_type in ("receipt", "sales-receipt"):
+                            model = "prebuilt-receipt"
+                    if model:
+                        per_item_model[url] = model
                 else:
                     raise ValueError("Dict must have 'text' or 'url'")
             elif isinstance(item, str):
@@ -477,10 +518,27 @@ class DocumentIntelligenceService:
             
             async with await self._create_client() as client:
                 # Create tasks for parallel processing
-                tasks = [
-                    self._analyze_single_document(client, url, group_id)
-                    for url in urls
-                ]
+                # Resolve default model from strategy
+                if model_strategy == "layout":
+                    default_model = "prebuilt-layout"
+                elif model_strategy == "invoice":
+                    default_model = "prebuilt-invoice"
+                elif model_strategy == "receipt":
+                    default_model = "prebuilt-receipt"
+                else:
+                    default_model = "prebuilt-layout"  # auto with layout fallback
+
+                tasks = []
+                for url in urls:
+                    tasks.append(
+                        self._analyze_single_document(
+                            client,
+                            url,
+                            group_id,
+                            default_model=default_model,
+                            explicit_model=per_item_model.get(url),
+                        )
+                    )
                 
                 # Run all analyses in parallel (semaphore controls concurrency)
                 results = await asyncio.gather(*tasks, return_exceptions=True)

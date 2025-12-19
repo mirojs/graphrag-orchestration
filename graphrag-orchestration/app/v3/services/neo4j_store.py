@@ -359,6 +359,60 @@ class Neo4jStoreV3:
         
         return results
     
+    def search_entities_by_numeric_content(
+        self,
+        group_id: str,
+        top_k: int = 10,
+    ) -> List[Tuple[Entity, float]]:
+        """
+        Search for entities with numeric content (amounts, values, etc).
+        
+        Prioritizes entities that mention financial amounts, quantities, or dates.
+        Useful for locating invoice amounts, contract values, etc.
+        """
+        query = """
+        MATCH (e:Entity {group_id: $group_id})
+        WHERE e.description CONTAINS '$' 
+           OR e.description CONTAINS 'amount' 
+           OR e.description CONTAINS 'invoice' 
+           OR e.description CONTAINS 'cost'
+           OR e.description CONTAINS 'price'
+           OR e.name CONTAINS '$'
+        RETURN e, 
+               CASE 
+                   WHEN e.description CONTAINS 'invoice' THEN 5
+                   WHEN e.description CONTAINS '$' THEN 4
+                   WHEN e.description CONTAINS 'amount' THEN 3
+                   WHEN e.description CONTAINS 'cost' THEN 2
+                   WHEN e.description CONTAINS 'price' THEN 1
+                   ELSE 0
+               END AS relevance_score
+        ORDER BY relevance_score DESC
+        LIMIT $top_k
+        """
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                group_id=group_id,
+                top_k=top_k,
+            )
+            for record in result:
+                e = record["e"]
+                entity = Entity(
+                    id=e["id"],
+                    name=e["name"],
+                    type=e["type"],
+                    description=e.get("description", ""),
+                    embedding=e.get("embedding"),
+                )
+                # Normalize relevance score to 0-1 range for consistency
+                score = float(record["relevance_score"]) / 5.0
+                results.append((entity, score))
+        
+        return results
+    
     # ==================== Relationship Operations ====================
     
     def upsert_relationship(self, group_id: str, relationship: Relationship) -> str:
@@ -582,40 +636,60 @@ class Neo4jStoreV3:
         level: Optional[int] = None,
         top_k: int = 10,
     ) -> List[Tuple[RaptorNode, float]]:
-        """Vector similarity search for RAPTOR nodes."""
-        if level is not None:
-            query = """
-            CALL db.index.vector.queryNodes('raptor_embedding', $top_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id AND node.level = $level
-            RETURN node, score
-            ORDER BY score DESC
-            """
-            params = {"embedding": embedding, "top_k": top_k, "group_id": group_id, "level": level}
-        else:
-            query = """
-            CALL db.index.vector.queryNodes('raptor_embedding', $top_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id
-            RETURN node, score
-            ORDER BY score DESC
-            """
-            params = {"embedding": embedding, "top_k": top_k, "group_id": group_id}
+        """Vector similarity search for RAPTOR nodes.
         
-        results = []
+        Use cosine similarity instead of vector index to avoid filtering issues.
+        The vector index with WHERE clauses returns 0 results because the 
+        index returns top-k globally, then filters by group_id, which may 
+        eliminate all results if top-k matches don't include this group.
+        """
+        import math
+        
+        # Fetch all RAPTOR nodes for this group with their embeddings
         with self.driver.session(database=self.database) as session:
+            if level is not None:
+                query = """
+                MATCH (r:RaptorNode {group_id: $group_id, level: $level})
+                WHERE r.embedding IS NOT NULL
+                RETURN r.id as id, r.text as text, r.level as level, r.embedding as embedding
+                """
+                params = {"group_id": group_id, "level": level}
+            else:
+                query = """
+                MATCH (r:RaptorNode {group_id: $group_id})
+                WHERE r.embedding IS NOT NULL
+                RETURN r.id as id, r.text as text, r.level as level, r.embedding as embedding
+                """
+                params = {"group_id": group_id}
+            
             result = session.run(query, **params)
+            
+            # Calculate cosine similarity for each node
+            results = []
             for record in result:
-                n = record["node"]
+                node_embedding = record["embedding"]
+                
+                # Calculate cosine similarity
+                dot_product = sum(a * b for a, b in zip(embedding, node_embedding))
+                norm_embedding = math.sqrt(sum(a * a for a in embedding))
+                norm_node = math.sqrt(sum(a * a for a in node_embedding))
+                
+                if norm_embedding > 0 and norm_node > 0:
+                    similarity = dot_product / (norm_embedding * norm_node)
+                else:
+                    similarity = 0.0
+                
                 node = RaptorNode(
-                    id=n["id"],
-                    text=n["text"],
-                    level=n["level"],
-                    embedding=n.get("embedding"),
+                    id=record["id"],
+                    text=record["text"],
+                    level=record["level"],
+                    embedding=node_embedding,
                 )
-                results.append((node, record["score"]))
-        
-        return results
+                results.append((node, similarity))
+            
+            # Sort by similarity descending and return top_k
+            results.sort(key=lambda x: x[1], reverse=True)
+            return results[:top_k]
     
     # ==================== Text Chunk Operations ====================
     

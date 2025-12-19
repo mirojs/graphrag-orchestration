@@ -424,7 +424,8 @@ class IndexingPipelineV3:
                     extracted_docs = await di_service.extract_documents(
                         group_id=group_id,
                         input_items=needs_extraction,
-                        fail_fast=False
+                        fail_fast=False,
+                        model_strategy="auto",
                     )
                     
                     # Convert LlamaIndex Documents back to dict format for pipeline
@@ -690,6 +691,8 @@ class IndexingPipelineV3:
             all_entity_nodes = []
             all_relations = []
             entity_to_chunks = {}  # Maps entity_name -> [chunk_ids]
+            # Map chunk_id -> raw text for better entity descriptions
+            chunk_text_map = {}
             
             for i, node in enumerate(extracted_nodes):
                 if i == 0:
@@ -697,6 +700,18 @@ class IndexingPipelineV3:
                 
                 chunk_id = node.node_id if hasattr(node, 'node_id') else node.id_
                 
+                # Capture chunk text for later use in entity descriptions
+                chunk_text = ""
+                if hasattr(node, "get_content"):
+                    try:
+                        chunk_text = node.get_content()
+                    except Exception:
+                        chunk_text = getattr(node, "text", "") or getattr(node, "content", "")
+                else:
+                    chunk_text = getattr(node, "text", "") or getattr(node, "content", "")
+                if chunk_text:
+                    chunk_text_map[chunk_id] = chunk_text
+
                 # LlamaIndex stores extracted data in either 'nodes'/'kg_nodes' and 'relations'/'kg_relations'
                 if "nodes" in node.metadata:
                     # Track which entities came from this chunk
@@ -806,16 +821,26 @@ class IndexingPipelineV3:
              # Create entity if not exists
              if entity_key not in all_entities:
                  new_id = f"entity_{uuid.uuid4().hex[:8]}"
+                 chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
+                 # Pick the first chunk text as a concise description (helps search)
+                 description = ""
+                 if chunk_ids_for_entity:
+                     first_chunk = chunk_ids_for_entity[0]
+                     raw_text = chunk_text_map.get(first_chunk, "")
+                     if raw_text:
+                         description = raw_text[:500]
+                 if not description and hasattr(node, 'properties'):
+                     description = str(node.properties)
+                 
                  all_entities[entity_key] = Entity(
                      id=new_id,
                      name=entity_name,
                      type=node.label if hasattr(node, 'label') else "CONCEPT",
-                     description=str(node.properties) if hasattr(node, 'properties') else "",
+                     description=description,
                  )
                  name_to_id_map[entity_key] = new_id
                  
                  # Store chunk IDs for this entity (for MENTIONS relationships)
-                 chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
                  if chunk_ids_for_entity:
                      all_entities[entity_key].text_unit_ids = chunk_ids_for_entity
              else:

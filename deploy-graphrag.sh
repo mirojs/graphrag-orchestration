@@ -100,15 +100,9 @@ if [ -z "$ACR_SERVER" ]; then
 fi
 
 echo "✅ ACR Endpoint: $ACR_SERVER"
-
-# Login to ACR
-echo "🔐 Logging into Azure Container Registry..."
-az acr login \
-    --name "$CONTAINER_REGISTRY_NAME" \
-    --resource-group "$AZURE_RESOURCE_GROUP"
 echo ""
 
-# Build and push Docker image
+# Build and push Docker image using ACR build (no login required)
 echo "=================================================="
 echo "🐳 Building and Pushing Docker Image"
 echo "=================================================="
@@ -120,16 +114,14 @@ echo "Image URI: $IMAGE_URI"
 echo "Build Context: $APP_DIR"
 echo ""
 
-echo "⏳ Building image (this may take 2-3 minutes)..."
-docker build "$APP_DIR" \
-    --no-cache \
-    -t "$IMAGE_URI" \
+echo "⏳ Building and pushing image in ACR (this may take 2-3 minutes)..."
+az acr build \
+    --registry "$CONTAINER_REGISTRY_NAME" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --image "$IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-    --build-arg VERSION="$AZURE_ENV_IMAGETAG"
-
-echo ""
-echo "⏳ Pushing image to ACR..."
-docker push "$IMAGE_URI"
+    --build-arg VERSION="$AZURE_ENV_IMAGETAG" \
+    "$APP_DIR"
 
 echo "✅ Image built and pushed: $IMAGE_URI"
 echo ""
@@ -157,13 +149,26 @@ echo ""
 # Auto-detect managed identity if not provided
 if [ -z "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
     echo "🔍 Auto-detecting managed identity..."
-    CONTAINER_APP_USER_IDENTITY_ID=$(az containerapp show \
+    
+    # Check for system-assigned identity first
+    SYSTEM_IDENTITY=$(az containerapp show \
         --name "$CONTAINER_APP_NAME" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
-        --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>/dev/null || echo "")
+        --query "identity.type" -o tsv 2>/dev/null || echo "")
     
-    if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
-        echo "✅ Found managed identity: ${CONTAINER_APP_USER_IDENTITY_ID##*/}"
+    if [ "$SYSTEM_IDENTITY" == "SystemAssigned" ] || [ "$SYSTEM_IDENTITY" == "SystemAssigned, UserAssigned" ]; then
+        echo "✅ Found system-assigned managed identity"
+        CONTAINER_APP_USER_IDENTITY_ID="system"
+    else
+        # Check for user-assigned identity
+        CONTAINER_APP_USER_IDENTITY_ID=$(az containerapp show \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>/dev/null || echo "")
+        
+        if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
+            echo "✅ Found user-assigned managed identity: ${CONTAINER_APP_USER_IDENTITY_ID##*/}"
+        fi
     fi
 fi
 

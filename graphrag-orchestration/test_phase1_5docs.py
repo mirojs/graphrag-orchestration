@@ -135,9 +135,11 @@ def verify_quality_metrics():
             child_count = record["child_count"]
             
             print(f"\nLevel {level}:")
-            print(f"  Cluster Coherence: {coherence:.3f if coherence else 0.0}")
+            coherence_str = f"{coherence:.3f}" if coherence else "0.000"
+            print(f"  Cluster Coherence: {coherence_str}")
             print(f"  Confidence Level: {confidence}")
-            print(f"  Confidence Score: {conf_score:.2f if conf_score else 0.0}")
+            conf_score_str = f"{conf_score:.2f}" if conf_score else "0.00"
+            print(f"  Confidence Score: {conf_score_str}")
             print(f"  Child Count: {child_count}")
             print(f"  Model: {record['model']}")
             

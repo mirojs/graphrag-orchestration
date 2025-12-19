@@ -172,19 +172,29 @@ if [ -z "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
     fi
 fi
 
-# Set registry authentication (using managed identity if available)
-if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
-    echo "⏳ Configuring ACR authentication with managed identity..."
-    az containerapp registry set \
-        --name "$CONTAINER_APP_NAME" \
-        --resource-group "$AZURE_RESOURCE_GROUP" \
-        --server "$ACR_SERVER" \
-        --identity "$CONTAINER_APP_USER_IDENTITY_ID" \
-        --only-show-errors
-    echo "✅ Registry authentication configured (managed identity)"
+# Check if registry is already configured (skip if it is - saves 30-60 seconds)
+EXISTING_REGISTRY=$(az containerapp show \
+    --name "$CONTAINER_APP_NAME" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --query "properties.configuration.registries[?server=='$ACR_SERVER'].server" -o tsv 2>/dev/null || echo "")
+
+if [ -n "$EXISTING_REGISTRY" ]; then
+    echo "✅ ACR authentication already configured, skipping..."
 else
-    echo "⚠️  No managed identity found. Using ACR admin credentials (less secure)."
-    echo "   Consider enabling managed identity for better security."
+    # Set registry authentication (using managed identity if available)
+    if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
+        echo "⏳ Configuring ACR authentication with managed identity..."
+        az containerapp registry set \
+            --name "$CONTAINER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --server "$ACR_SERVER" \
+            --identity "$CONTAINER_APP_USER_IDENTITY_ID" \
+            --only-show-errors
+        echo "✅ Registry authentication configured (managed identity)"
+    else
+        echo "⚠️  No managed identity found. Using ACR admin credentials (less secure)."
+        echo "   Consider enabling managed identity for better security."
+    fi
 fi
 
 # Update container app with new image

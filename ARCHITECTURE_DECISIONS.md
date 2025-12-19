@@ -199,6 +199,69 @@
 
 ---
 
+### 2025-12-19 - Document Intelligence Metadata Utilization Enhancement
+
+**Problem:**
+Azure Document Intelligence's prebuilt-layout model extracts rich structured data (tables with headers/rows, section hierarchy, bounding boxes), but this metadata was being discarded before entity extraction. The LLM saw only flat markdown text without table structure or section context, reducing extraction accuracy.
+
+**Root Cause:**
+1. `document_intelligence_service.py` extracted and stored comprehensive metadata in Document objects:
+   - `tables`: Structured with headers and rows `[{headers: [...], rows: [{col: val}]}]`
+   - `section_path`: Hierarchical section context `["Invoice", "Line Items"]`
+   - `page_number`: Document organization
+   - `bounding_regions`: Spatial coordinates (stored but unused)
+
+2. `indexing_pipeline.py` dropped this metadata during chunking:
+   - `_chunk_document()`: Created TextChunk objects without preserving DI metadata
+   - `_extract_entities_and_relationships()`: Passed only `chunk_index` and `document_id` to LLM
+   - Result: LLM couldn't understand that "$25,000" was the value in "Amount" column
+
+**Solution:**
+Enhanced the metadata flow through the indexing pipeline:
+
+1. **Preserve in Chunks** (`_chunk_document`):
+   ```python
+   chunk_metadata = {
+       "page_number": doc_metadata.get("page_number"),
+       "section_path": doc_metadata.get("section_path", []),
+       "tables": doc_metadata.get("tables", []),
+       "source": doc_metadata.get("source"),
+   }
+   chunk = TextChunk(..., metadata=chunk_metadata)
+   ```
+
+2. **Pass to LLM** (`_extract_entities_and_relationships`):
+   ```python
+   node = TextNode(
+       text=chunk.text,
+       metadata={
+           "tables": chunk.metadata["tables"],        # Table structure
+           "section_path": chunk.metadata["section_path"],  # Hierarchy
+           "page_number": chunk.metadata["page_number"],
+       }
+   )
+   ```
+
+**Benefits:**
+- ✅ **Table-aware extraction**: LLM knows "$25,000" is in "Amount" column for "Maintenance" row
+- ✅ **Section context**: Entities reference which section/subsection they're under
+- ✅ **Better accuracy**: Structured context improves entity relationship understanding
+- ✅ **Full DI utilization**: No longer wasting API costs on metadata we discard
+
+**Impact on Invoice Search:**
+- Before: LLM sees "Maintenance $25,000" as nearby text
+- After: LLM understands "$25,000 is the Amount value for Maintenance service in table"
+- Result: More accurate entity extraction and relationship mapping
+
+**Files Changed:**
+- `app/v3/services/indexing_pipeline.py` - Preserve and pass DI metadata through pipeline
+
+**Deployment:**
+- Commit: `d41e684` - "Pass Document Intelligence metadata to entity extraction"
+- Ready for deployment with previous group isolation fixes
+
+---
+
 ## Upgrade & Versioning Strategy
 - **Version Pinning:**
   - Pin GraphRAG and LlamaIndex versions in dependencies; track GraphRAG `CHANGELOG.md`/`breaking-changes.md` and LlamaIndex monorepo changelogs.

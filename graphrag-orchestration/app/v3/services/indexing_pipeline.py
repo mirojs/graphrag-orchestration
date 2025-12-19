@@ -691,8 +691,8 @@ class IndexingPipelineV3:
             all_entity_nodes = []
             all_relations = []
             entity_to_chunks = {}  # Maps entity_name -> [chunk_ids]
-            # Map chunk_id -> raw text for better entity descriptions
-            chunk_text_map = {}
+            # Map entity_name -> sample chunk text for better descriptions
+            entity_to_text = {}  # Maps entity_name -> first chunk text where it appears
             
             for i, node in enumerate(extracted_nodes):
                 if i == 0:
@@ -700,7 +700,7 @@ class IndexingPipelineV3:
                 
                 chunk_id = node.node_id if hasattr(node, 'node_id') else node.id_
                 
-                # Capture chunk text for later use in entity descriptions
+                # Capture chunk text for entity descriptions
                 chunk_text = ""
                 if hasattr(node, "get_content"):
                     try:
@@ -709,8 +709,6 @@ class IndexingPipelineV3:
                         chunk_text = getattr(node, "text", "") or getattr(node, "content", "")
                 else:
                     chunk_text = getattr(node, "text", "") or getattr(node, "content", "")
-                if chunk_text:
-                    chunk_text_map[chunk_id] = chunk_text
 
                 # LlamaIndex stores extracted data in either 'nodes'/'kg_nodes' and 'relations'/'kg_relations'
                 if "nodes" in node.metadata:
@@ -719,6 +717,9 @@ class IndexingPipelineV3:
                         entity_name = entity_node.name if hasattr(entity_node, 'name') else str(entity_node.id)
                         if entity_name not in entity_to_chunks:
                             entity_to_chunks[entity_name] = []
+                            # Store the first chunk text where this entity appears
+                            if chunk_text:
+                                entity_to_text[entity_name] = chunk_text[:500]
                         entity_to_chunks[entity_name].append(chunk_id)
                     all_entity_nodes.extend(node.metadata["nodes"])
                 elif "kg_nodes" in node.metadata:
@@ -726,6 +727,9 @@ class IndexingPipelineV3:
                         entity_name = entity_node.name if hasattr(entity_node, 'name') else str(entity_node.id)
                         if entity_name not in entity_to_chunks:
                             entity_to_chunks[entity_name] = []
+                            # Store the first chunk text where this entity appears
+                            if chunk_text:
+                                entity_to_text[entity_name] = chunk_text[:500]
                         entity_to_chunks[entity_name].append(chunk_id)
                     all_entity_nodes.extend(node.metadata["kg_nodes"])
                 
@@ -822,13 +826,8 @@ class IndexingPipelineV3:
              if entity_key not in all_entities:
                  new_id = f"entity_{uuid.uuid4().hex[:8]}"
                  chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
-                 # Pick the first chunk text as a concise description (helps search)
-                 description = ""
-                 if chunk_ids_for_entity:
-                     first_chunk = chunk_ids_for_entity[0]
-                     raw_text = chunk_text_map.get(first_chunk, "")
-                     if raw_text:
-                         description = raw_text[:500]
+                 # Use the first chunk text where this entity appeared as description
+                 description = entity_to_text.get(entity_name, "")
                  if not description and hasattr(node, 'properties'):
                      description = str(node.properties)
                  

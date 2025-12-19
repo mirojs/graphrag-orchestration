@@ -112,5 +112,9 @@ app.include_router(orchestration.router, prefix="/orchestrate", tags=["orchestra
 # Uses Neo4j ONLY at query time, MS GraphRAG DRIFT for reasoning
 app.include_router(graphrag_v3.router, prefix="/graphrag", tags=["graphrag-v3"])
 
+# V3 Document Management - Individual document lifecycle operations
+from app.v3.api import document_management
+app.include_router(document_management.router, tags=["document-management"])
+
 # Admin endpoints for maintenance
 app.include_router(admin.router, prefix="/admin", tags=["admin"])

@@ -47,12 +47,12 @@ resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
   name: 'rg-graphrag-feature'
 }
 
-// Container Apps Environment
+// Container Apps Environment - Create with consistent name
 module containerAppsEnvironment './core/host/container-apps-environment.bicep' = {
   name: 'container-apps-environment'
   scope: rg
   params: {
-    name: '${abbrs.appManagedEnvironments}${resourceToken}'
+    name: 'graphrag-env'  // Use fixed name instead of random token
     location: location
     tags: tags
   }

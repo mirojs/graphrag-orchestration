@@ -290,15 +290,18 @@ async def query_local(request: Request, payload: V3QueryRequest):
     try:
         adapter = get_drift_adapter()
         
-        # Use vector search + graph expansion
+        # Use hybrid search (vector + full-text with RRF fusion)
         query_embedding = adapter.embedder.embed_query(payload.query)
         
         store = get_neo4j_store()
         
-        # Verify entity_embedding index exists and has correct dimensions
+        # Hybrid search: combines vector similarity with keyword matching
+        # This solves the "missing facts" problem where specific values
+        # (like "$25,000" or "Invoice #123") have weak embeddings
         try:
-            results = store.search_entities_by_embedding(
+            results = store.search_entities_hybrid(
                 group_id=group_id,
+                query_text=payload.query,
                 embedding=query_embedding,
                 top_k=payload.top_k,
             )

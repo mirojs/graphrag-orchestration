@@ -163,6 +163,9 @@ class Neo4jStoreV3:
             "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
             "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
             "CREATE INDEX community_group IF NOT EXISTS FOR (c:Community) ON (c.group_id)",
+            
+            # Full-text index for hybrid search (keyword matching)
+            "CREATE FULLTEXT INDEX entity_fulltext IF NOT EXISTS FOR (e:Entity) ON EACH [e.name, e.description]",
             "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)",
             "CREATE INDEX raptor_group IF NOT EXISTS FOR (r:RaptorNode) ON (r.group_id)",
             "CREATE INDEX raptor_level IF NOT EXISTS FOR (r:RaptorNode) ON (r.level)",
@@ -322,6 +325,91 @@ class Neo4jStoreV3:
                     embedding=e.get("embedding"),
                 )
             return None
+    
+    def search_entities_hybrid(
+        self,
+        group_id: str,
+        query_text: str,
+        embedding: List[float],
+        top_k: int = 10,
+    ) -> List[Tuple[Entity, float]]:
+        """
+        Hybrid search combining vector similarity and keyword matching with RRF.
+        
+        Uses Reciprocal Rank Fusion to merge:
+        1. Vector search (semantic similarity)
+        2. Full-text search (exact keyword matching)
+        
+        This solves the \"missing facts\" problem where specific values
+        (like \"$25,000\" or \"Invoice #123\") have weak semantic embeddings
+        but should rank high due to exact text match.
+        
+        Args:
+            group_id: Tenant identifier
+            query_text: Original query string for keyword matching
+            embedding: Query embedding for vector search
+            top_k: Number of final results to return
+            
+        Returns:
+            List of (Entity, combined_score) tuples sorted by fused rank
+        """
+        k_constant = 60  # RRF constant
+        candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
+        
+        query = """
+        // Step 1: Vector search
+        CALL db.index.vector.queryNodes('entity_embedding', $candidate_k, $embedding)
+        YIELD node AS vNode, score AS vScore
+        WHERE vNode.group_id = $group_id
+        WITH collect({node: vNode, score: vScore, rank: range(1, $candidate_k + 1)[0..size(collect(vNode))]}) AS vectorResults
+        
+        // Step 2: Full-text search
+        CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text)
+        YIELD node AS fNode, score AS fScore
+        WHERE fNode.group_id = $group_id
+        WITH vectorResults, collect({node: fNode, score: fScore, rank: range(1, $candidate_k + 1)[0..size(collect(fNode))]}) AS textResults
+        LIMIT $candidate_k
+        
+        // Step 3: RRF Fusion
+        WITH vectorResults + textResults AS allResults
+        UNWIND allResults AS result
+        WITH result.node AS node, 
+             sum(1.0 / ($k_constant + result.rank)) AS combinedScore
+        
+        RETURN node, combinedScore
+        ORDER BY combinedScore DESC
+        LIMIT $top_k
+        """
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            try:
+                result = session.run(
+                    query,
+                    embedding=embedding,
+                    query_text=query_text,
+                    candidate_k=candidate_k,
+                    k_constant=k_constant,
+                    top_k=top_k,
+                    group_id=group_id,
+                )
+                for record in result:
+                    e = record["node"]
+                    entity = Entity(
+                        id=e["id"],
+                        name=e["name"],
+                        type=e["type"],
+                        description=e.get("description", ""),
+                        embedding=e.get("embedding"),
+                    )
+                    results.append((entity, record["combinedScore"]))
+            except Exception as ex:
+                logger.error(f"Hybrid search failed: {ex}")
+                # Fallback to vector-only search
+                logger.info("Falling back to vector-only search")
+                return self.search_entities_by_embedding(group_id, embedding, top_k)
+        
+        return results
     
     def search_entities_by_embedding(
         self,

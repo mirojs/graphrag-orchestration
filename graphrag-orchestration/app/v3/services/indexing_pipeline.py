@@ -570,10 +570,14 @@ class IndexingPipelineV3:
         - Semantic sentence boundary detection
         - Intelligent overlap handling
         - Better paragraph preservation
+        - Preserves Document Intelligence metadata (tables, section_path) for entity extraction
         """
         content = document.get("content", "")
         if not content:
             return []
+        
+        # Get document metadata from DI extraction
+        doc_metadata = document.get("metadata", {})
         
         # Create LlamaIndex document
         llama_doc = LlamaDocument(
@@ -597,6 +601,16 @@ class IndexingPipelineV3:
                 # Generate embedding for chunk
                 embedding = await self._embed_text(chunk_text)
                 
+                # Preserve DI metadata for entity extraction context
+                chunk_metadata = {
+                    "page_number": doc_metadata.get("page_number"),
+                    "section_path": doc_metadata.get("section_path", []),
+                    "tables": doc_metadata.get("tables", []),
+                    "source": doc_metadata.get("source"),
+                }
+                # Remove None values
+                chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
+                
                 chunk = TextChunk(
                     id=f"{doc_id}_chunk_{chunk_index}",
                     text=chunk_text,
@@ -604,6 +618,7 @@ class IndexingPipelineV3:
                     document_id=doc_id,
                     embedding=embedding,
                     tokens=len(chunk_text.split()),  # Approximate
+                    metadata=chunk_metadata,
                 )
                 chunks.append(chunk)
         
@@ -624,16 +639,28 @@ class IndexingPipelineV3:
         - Structured output parsing with retries
         - Battle-tested production-grade extraction
         """
-        # Convert chunks to LlamaIndex nodes
+        # Convert chunks to LlamaIndex nodes with DI metadata for context
         llama_nodes = []
         for chunk in chunks:
+            # Include Document Intelligence metadata for table-aware and section-aware extraction
+            chunk_metadata = {
+                "chunk_index": chunk.chunk_index,
+                "document_id": chunk.document_id,
+            }
+            
+            # Add DI metadata if available (from prebuilt-layout model)
+            if chunk.metadata:
+                if "tables" in chunk.metadata and chunk.metadata["tables"]:
+                    chunk_metadata["tables"] = chunk.metadata["tables"]
+                if "section_path" in chunk.metadata and chunk.metadata["section_path"]:
+                    chunk_metadata["section_path"] = chunk.metadata["section_path"]
+                if "page_number" in chunk.metadata:
+                    chunk_metadata["page_number"] = chunk.metadata["page_number"]
+            
             node = TextNode(
                 id_=chunk.id,
                 text=chunk.text,
-                metadata={
-                    "chunk_index": chunk.chunk_index,
-                    "document_id": chunk.document_id,
-                },
+                metadata=chunk_metadata,
             )
             llama_nodes.append(node)
         

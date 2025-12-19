@@ -262,6 +262,123 @@ Enhanced the metadata flow through the indexing pipeline:
 
 ---
 
+### 2025-12-19 - Document Lifecycle Management with Orphan Cleanup
+
+**Problem:**
+In GraphRAG systems, simply deleting a document node leaves "zombie" or "orphaned" entities in the knowledge graph. These entities no longer have source documents but continue to appear in query results, causing:
+1. Outdated or incorrect answers from deleted content
+2. Graph pollution with entities that can't be traced to sources
+3. No clean way to update documents (must manually track and clean entities)
+
+**Root Cause:**
+Standard deletion approaches don't account for the entity graph structure:
+- Deleting `Document` node leaves `TextChunk` nodes orphaned
+- Deleting chunks leaves `Entity` nodes orphaned if they were only mentioned in that document
+- Shared entities (mentioned in multiple documents) should be preserved
+- No automatic cleanup mechanism existed in the codebase
+
+**Solution: Source-Linked Data Model with Cascading Deletion**
+
+Implemented a comprehensive document lifecycle management system with intelligent orphan detection:
+
+**1. Data Architecture** (already present in neo4j_store.py):
+```cypher
+(:Document) <-[:PART_OF]- (:TextChunk) -[:MENTIONS]-> (:Entity)
+```
+Every entity traces back to source chunks, enabling provenance tracking.
+
+**2. DocumentManager Class** (`app/v3/services/document_manager.py`):
+
+**Core Operations:**
+- `delete_document()`: Cascading deletion with orphan cleanup
+  - Deletes document and all its chunks
+  - Identifies entities mentioned ONLY in deleted chunks
+  - Removes orphaned entities and their relationships
+  - Cleans up empty communities that lost all entities
+  
+- `get_document_impact()`: Preview deletion effects
+  - Shows chunk count, total entities, and orphaned entities
+  - Enables confirmation before destructive operations
+  
+- `replace_document()`: Atomic document update
+  - Deletes old version with orphan cleanup
+  - Adds new version in single transaction
+  - Safer than separate delete + add operations
+
+- `list_documents()`: Document inventory with statistics
+  - Lists all documents with chunk/entity counts
+  - Sorted by update timestamp
+
+**3. Smart Orphan Detection Logic:**
+```cypher
+// Count mentions of entity in document being deleted
+WITH e, count(orphan_chunk) AS mentions_in_doc
+
+// Count total mentions across ALL chunks in group
+OPTIONAL MATCH (all_chunks:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+WITH e, mentions_in_doc, count(all_chunks) AS total_mentions
+
+// Entity is orphaned if ALL mentions are in deleted document
+WHERE total_mentions = mentions_in_doc
+```
+
+**Example Behavior:**
+- Doc A: mentions "Einstein", "Tesla"
+- Doc B: mentions "Einstein", "Newton"
+- Delete Doc A with orphan_cleanup=True:
+  - ✅ "Einstein" preserved (still in Doc B)
+  - ❌ "Tesla" deleted (orphaned)
+  - ✅ "Newton" unaffected (in Doc B)
+
+**4. REST API** (`app/v3/api/document_management.py`):
+
+**Endpoints:**
+```bash
+# Delete document with optional orphan cleanup
+DELETE /graphrag/v3/documents/{doc_id}
+Header: X-Group-ID: <group>
+Query: ?orphan_cleanup=true (default: true)
+
+# Preview deletion impact
+GET /graphrag/v3/documents/{doc_id}/impact
+Header: X-Group-ID: <group>
+
+# List all documents in group
+GET /graphrag/v3/documents
+Header: X-Group-ID: <group>
+```
+
+**Benefits:**
+- ✅ **No zombie entities**: Deleted documents fully removed from knowledge graph
+- ✅ **Preserves shared knowledge**: Entities in multiple docs are kept
+- ✅ **Safe updates**: Preview impact before deletion
+- ✅ **Atomic operations**: Document replacement happens in single transaction
+- ✅ **Production-ready**: Multi-tenant with group_id isolation
+- ✅ **Community cleanup**: Removes empty communities after entity deletion
+
+**Impact on System Integrity:**
+- Before: Deleting documents left orphaned entities causing hallucinations
+- After: Clean removal with intelligent entity lifecycle management
+- Result: Knowledge graph stays accurate and traceable to sources
+
+**Performance Considerations:**
+- Single Cypher query for deletion (no round-trips)
+- Batch operations prevent memory issues
+- Indexed lookups on `group_id` and `document_id`
+- Recommended: Use preview endpoint for large documents (10K+ chunks)
+
+**Files Changed:**
+- `app/v3/services/document_manager.py` - Core document lifecycle logic
+- `app/v3/api/document_management.py` - REST API endpoints
+- `app/main.py` - Router registration
+
+**Deployment:**
+- Commit: `9dba9a7` - "Add document lifecycle management with orphan cleanup"
+- API available at: `/graphrag/v3/documents/*`
+- Swagger docs: `/docs#/document-management`
+
+---
+
 ## Upgrade & Versioning Strategy
 - **Version Pinning:**
   - Pin GraphRAG and LlamaIndex versions in dependencies; track GraphRAG `CHANGELOG.md`/`breaking-changes.md` and LlamaIndex monorepo changelogs.

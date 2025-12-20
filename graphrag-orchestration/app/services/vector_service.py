@@ -239,7 +239,7 @@ class AzureAISearchProvider(VectorStoreProvider):
     ranker provides the most value.
     """
     
-    def __init__(self, endpoint: str, api_key: str, semantic_config_name: str = "raptor-semantic"):
+    def __init__(self, endpoint: str, api_key: Optional[str] = None, semantic_config_name: str = "raptor-semantic"):
         self.endpoint = endpoint
         self.api_key = api_key
         self.semantic_config_name = semantic_config_name
@@ -251,10 +251,17 @@ class AzureAISearchProvider(VectorStoreProvider):
         try:
             from azure.search.documents import SearchClient
             from azure.core.credentials import AzureKeyCredential
+            from azure.identity import DefaultAzureCredential
             
-            # Note: We'll create index-specific clients on demand
-            self._credential = AzureKeyCredential(self.api_key)
-            logger.info(f"Azure AI Search configured for {self.endpoint} with semantic ranking enabled")
+            # Use managed identity if no API key provided
+            if self.api_key:
+                self._credential = AzureKeyCredential(self.api_key)
+                logger.info(f"Azure AI Search configured with API key for {self.endpoint}")
+            else:
+                self._credential = DefaultAzureCredential()
+                logger.info(f"Azure AI Search configured with managed identity for {self.endpoint}")
+                
+            logger.info("Azure AI Search semantic ranking enabled")
         except ImportError:
             logger.error("Azure Search SDK not installed. Run: pip install azure-search-documents")
         except Exception as e:
@@ -274,7 +281,8 @@ class AzureAISearchProvider(VectorStoreProvider):
         vector_store = AzureAISearchVectorStore(
             search_or_index_client=None,  # Will be created internally
             endpoint=self.endpoint,
-            key=self.api_key,
+            key=self.api_key if self.api_key else None,
+            azure_credential=self._credential if not self.api_key else None,
             index_name=azure_index_name,
             filterable_metadata_field_keys=[
                 "group_id", 
@@ -477,14 +485,17 @@ class VectorStoreService:
     def _initialize(self) -> None:
         """Initialize the appropriate vector store provider."""
         if settings.VECTOR_STORE_TYPE == "azure_search":
-            if settings.AZURE_SEARCH_ENDPOINT and settings.AZURE_SEARCH_API_KEY:
+            if settings.AZURE_SEARCH_ENDPOINT:
                 self._provider = AzureAISearchProvider(
                     endpoint=settings.AZURE_SEARCH_ENDPOINT,
-                    api_key=settings.AZURE_SEARCH_API_KEY,
+                    api_key=settings.AZURE_SEARCH_API_KEY,  # Can be None for managed identity
                 )
-                logger.info("Using Azure AI Search vector store")
+                if settings.AZURE_SEARCH_API_KEY:
+                    logger.info("Using Azure AI Search vector store with API key")
+                else:
+                    logger.info("Using Azure AI Search vector store with managed identity")
             else:
-                logger.error("Azure Search credentials not configured")
+                logger.error("Azure Search endpoint not configured")
         else:  # Default to LanceDB
             self._provider = LanceDBProvider(base_path=settings.LANCEDB_PATH)
             logger.info("Using LanceDB vector store")

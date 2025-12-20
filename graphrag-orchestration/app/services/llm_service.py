@@ -94,7 +94,6 @@ class LLMService:
                         "deployment_name": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
-                        "api_key": "",  # Empty string required by SDK v0.3.3 even with token provider
                         "use_azure_ad": True,
                         "azure_ad_token_provider": token_provider,
                     }

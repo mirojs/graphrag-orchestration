@@ -451,33 +451,52 @@ class DRIFTAdapter:
                 embedding_dimension=3072,  # text-embedding-3-large
             )
             
-            # Create MS GraphRAG's LiteLLM model configured for Azure OpenAI with managed identity
-            # MS GraphRAG has its own LLM implementation that works with Azure OpenAI
-            from azure.identity import DefaultAzureCredential
+            # Create a wrapper for LlamaIndex LLM to make it compatible with MS GraphRAG DRIFT
+            # MS GraphRAG expects ChatModel protocol: achat(prompt, history) -> ModelResponse
+            class DRIFTModelResponse:
+                """ModelResponse implementation for MS GraphRAG DRIFT protocol."""
+                def __init__(self, text: str, raw_response=None):
+                    self._output = text
+                    self._raw = raw_response
+                
+                @property
+                def output(self) -> str:
+                    """The output text from the model."""
+                    return self._output
+                
+                @property
+                def parsed_response(self):
+                    """Parsed response (optional)."""
+                    return None
+                
+                @property
+                def history(self) -> list:
+                    """Conversation history."""
+                    return []
             
-            # Get Azure OpenAI credentials for managed identity
-            credential = DefaultAzureCredential()
-            token = credential.get_token("https://cognitiveservices.azure.com/.default")
+            class DRIFTLLMWrapper:
+                """Wrapper to adapt LlamaIndex LLM for MS GraphRAG DRIFT ChatModel protocol."""
+                def __init__(self, llama_llm):
+                    self.llm = llama_llm
+                    # Create config object that DRIFT expects
+                    self.config = type('Config', (), {
+                        'model': getattr(llama_llm, 'model', 'gpt-4o'),
+                        'temperature': getattr(llama_llm, 'temperature', 0.0),
+                        'max_tokens': getattr(llama_llm, 'max_tokens', 4000),
+                        'top_p': getattr(llama_llm, 'top_p', 1.0),
+                    })()
+                
+                async def achat(self, prompt: str, history: list | None = None, **kwargs):
+                    """MS GraphRAG ChatModel protocol: achat(prompt, history) -> ModelResponse."""
+                    response = await self.llm.acomplete(prompt)
+                    return DRIFTModelResponse(text=response.text, raw_response=response)
+                
+                def chat(self, prompt: str, history: list | None = None, **kwargs):
+                    """Sync version of chat."""
+                    response = self.llm.complete(prompt)
+                    return DRIFTModelResponse(text=response.text, raw_response=response)
             
-            # Create LanguageModelConfig for MS GraphRAG
-            llm_config = LanguageModelConfig(
-                type="azure_openai_chat",  # Required 'type' field
-                model_type="azure_openai_chat",  # Use string value
-                model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # gpt-4o
-                api_base=settings.AZURE_OPENAI_ENDPOINT,
-                api_version=settings.AZURE_OPENAI_API_VERSION,
-                deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                auth_type="azure_managed_identity",  # Correct auth type for managed identity
-                temperature=0.0,
-                max_tokens=4000,
-            )
-            
-            # Create LiteLLM chat model with Azure OpenAI
-            drift_llm = LitellmChatModel(
-                name="azure-openai-drift",  # Required name parameter
-                config=llm_config,
-                api_key=token.token,  # Pass the token from managed identity
-            )
+            drift_llm = DRIFTLLMWrapper(self.llm)
             
             # Build DRIFT context builder with MS GraphRAG models
             # Required params: model, text_embedder, entities, entity_text_embeddings
@@ -517,13 +536,21 @@ class DRIFTAdapter:
             stage_start = time.time()
             logger.info(f"[DRIFT STAGE 5/5] Extracting and formatting results...")
             
+            # Extract answer from SearchResult (has 'response' field, not 'answer')
+            answer = result.response if isinstance(result.response, str) else str(result.response)
+            
             response = {
-                "answer": result.response if hasattr(result, 'response') else str(result),
-                "confidence": getattr(result, "score", 0.85),
-                "iterations": getattr(result, "iterations", max_iterations),
+                "answer": answer,
+                "confidence": 0.85,  # DRIFT doesn't provide score
+                "iterations": max_iterations,
                 "sources": self._extract_sources(result),
                 "reasoning_path": self._extract_reasoning_path(result),
-                "context_data": getattr(result, "context_data", {}),
+                "context_data": result.context_data if hasattr(result, 'context_data') else {},
+                "llm_calls": result.llm_calls if hasattr(result, 'llm_calls') else 0,
+                "tokens": {
+                    "prompt": result.prompt_tokens if hasattr(result, 'prompt_tokens') else 0,
+                    "output": result.output_tokens if hasattr(result, 'output_tokens') else 0,
+                },
             }
             
             elapsed = time.time() - stage_start

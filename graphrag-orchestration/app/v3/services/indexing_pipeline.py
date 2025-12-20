@@ -977,11 +977,33 @@ class IndexingPipelineV3:
                 )
                 all_relationships.append(rel)
         
-        # Generate embeddings for entities
+        # Generate embeddings for entities (batch for efficiency)
         entities_list = list(all_entities.values())
-        for entity in entities_list:
-            desc_text = f"{entity.name}: {entity.description}" if entity.description else entity.name
-            entity.embedding = await self._embed_text(desc_text)
+        if entities_list:
+            # Prepare texts for batch embedding
+            entity_texts = [
+                f"{entity.name}: {entity.description}" if entity.description else entity.name
+                for entity in entities_list
+            ]
+            
+            # Batch embed all entities
+            try:
+                if hasattr(self.embedder, 'get_text_embedding_batch'):
+                    embeddings = self.embedder.get_text_embedding_batch(entity_texts)
+                else:
+                    # Fallback to individual embedding if batch not available
+                    embeddings = [await self._embed_text(text) for text in entity_texts]
+                
+                # Assign embeddings to entities
+                for entity, embedding in zip(entities_list, embeddings):
+                    entity.embedding = embedding
+                    
+                logger.info(f"Generated {len(embeddings)} entity embeddings (dim={len(embeddings[0])})")
+            except Exception as e:
+                logger.error(f"Failed to generate entity embeddings: {e}")
+                # Fallback: generate zero vectors
+                for entity in entities_list:
+                    entity.embedding = [0.0] * self.config.embedding_dimensions
         
         logger.info(f"LlamaIndex extraction: {len(entities_list)} entities, {len(all_relationships)} relationships")
         return entities_list, all_relationships

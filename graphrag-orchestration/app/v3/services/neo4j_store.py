@@ -363,29 +363,35 @@ class Neo4jStoreV3:
         k_constant = 60  # RRF constant
         candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
         
-        # CRITICAL FIX: Vector indices don't pre-filter by group_id
-        # Must retrieve MUCH more to ensure enough results after filtering
-        retrieval_k = 500  # Large enough to get results from specific group
-        
+        # NEW APPROACH: Get entities from target group FIRST, then do vector/text search on those
+        # This avoids the problem of global search returning entities from other groups
         query = """
-        // Step 1: Vector search with post-filtering
-        CALL db.index.vector.queryNodes('entity_embedding', $retrieval_k, $embedding)
-        YIELD node AS vNode, score AS vScore
-        WHERE vNode.group_id = $group_id
-        WITH collect({node: vNode, score: vScore, rank: 1}) AS vectorResults
+        // Step 1: Get all entities in this group (with embeddings for vector search)
+        MATCH (e:Entity {group_id: $group_id})
+        WHERE e.embedding IS NOT NULL
+        WITH collect(e) AS groupEntities
         
-        // Step 2: Full-text search with post-filtering  
+        // Step 2: Vector similarity scoring
+        UNWIND groupEntities AS entity
+        WITH entity,
+             gds.similarity.cosine(entity.embedding, $embedding) AS vectorScore
+        ORDER BY vectorScore DESC
+        LIMIT $retrieval_k
+        WITH collect({node: entity, score: vectorScore, rank: toInteger(vectorScore * 1000)}) AS vectorResults
+        
+        // Step 3: Full-text scoring on same group
         CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text, {limit: $retrieval_k})
         YIELD node AS fNode, score AS fScore
         WHERE fNode.group_id = $group_id
-        WITH vectorResults, collect({node: fNode, score: fScore, rank: 1}) AS textResults
+        WITH vectorResults, collect({node: fNode, score: fScore, rank: toInteger(fScore * 1000)}) AS textResults
         
-        // Step 3: RRF Fusion on filtered results
+        // Step 4: RRF Fusion
         WITH vectorResults + textResults AS allResults
         UNWIND range(0, size(allResults)-1) AS idx
         WITH allResults[idx] AS result, idx
         WITH result.node AS node,
              sum(1.0 / ($k_constant + idx + 1)) AS combinedScore
+        GROUP BY node
         
         RETURN node, combinedScore
         ORDER BY combinedScore DESC
@@ -399,7 +405,7 @@ class Neo4jStoreV3:
                     query,
                     embedding=embedding,
                     query_text=query_text,
-                    retrieval_k=retrieval_k,
+                    retrieval_k=candidate_k,
                     k_constant=k_constant,
                     top_k=top_k,
                     group_id=group_id,

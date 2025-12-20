@@ -986,24 +986,29 @@ class IndexingPipelineV3:
                 for entity in entities_list
             ]
             
-            # Batch embed all entities
+            # Batch embed all entities (async for efficiency)
             try:
-                if hasattr(self.embedder, 'get_text_embedding_batch'):
+                if hasattr(self.embedder, 'aget_text_embedding_batch'):
+                    # Use async batch method (preferred)
+                    embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
+                elif hasattr(self.embedder, 'get_text_embedding_batch'):
+                    # Fallback to sync batch method
                     embeddings = self.embedder.get_text_embedding_batch(entity_texts)
                 else:
-                    # Fallback to individual embedding if batch not available
+                    # Fallback to individual embedding
                     embeddings = [await self._embed_text(text) for text in entity_texts]
                 
                 # Assign embeddings to entities
                 for entity, embedding in zip(entities_list, embeddings):
                     entity.embedding = embedding
                     
-                logger.info(f"Generated {len(embeddings)} entity embeddings (dim={len(embeddings[0])})")
+                logger.info(f"✅ Generated {len(embeddings)} entity embeddings (dim={len(embeddings[0])})")
             except Exception as e:
-                logger.error(f"Failed to generate entity embeddings: {e}")
+                logger.error(f"❌ Failed to generate entity embeddings: {e}", exc_info=True)
                 # Fallback: generate zero vectors
                 for entity in entities_list:
                     entity.embedding = [0.0] * self.config.embedding_dimensions
+                logger.warning(f"⚠️  Using zero vectors for {len(entities_list)} entities due to embedding failure")
         
         logger.info(f"LlamaIndex extraction: {len(entities_list)} entities, {len(all_relationships)} relationships")
         return entities_list, all_relationships

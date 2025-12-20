@@ -9,7 +9,7 @@ import os
 
 # Configuration
 API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
-GROUP_ID = "phase1-5docs-1766235543"  # From the latest test run
+GROUP_ID = "phase1-5docs-1766238684"  # From the latest test run
 
 # Test queries based on the documents
 TEST_QUERIES = [

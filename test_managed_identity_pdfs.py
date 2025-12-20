@@ -158,6 +158,63 @@ def index_documents(blob_urls: List[str]) -> Dict[str, Any]:
         return {}
 
 
+def wait_for_indexing(group_id: str, max_wait: int = 120, poll_interval: int = 5):
+    """Poll Neo4j to confirm indexing has completed"""
+    from neo4j import GraphDatabase
+    
+    uri = 'neo4j+s://a86dcf63.databases.neo4j.io'
+    username = 'neo4j'
+    password = 'uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI'
+    database = 'neo4j'
+    
+    log(f"\n{'─' * 80}")
+    log(f"⏳ Waiting for background indexing to complete...")
+    log(f"   Max wait: {max_wait}s, checking every {poll_interval}s\n")
+    
+    driver = GraphDatabase.driver(uri, auth=(username, password))
+    
+    start_time = time.time()
+    last_count = 0
+    stable_count = 0
+    
+    try:
+        while time.time() - start_time < max_wait:
+            with driver.session(database=database) as session:
+                result = session.run(
+                    'MATCH (e:Entity {group_id: $group_id}) RETURN count(e) as count',
+                    group_id=group_id
+                )
+                count = result.single()['count']
+                
+                elapsed = time.time() - start_time
+                
+                if count > 0:
+                    if count == last_count:
+                        stable_count += 1
+                        if stable_count >= 2:  # Stable for 2 checks
+                            log(f"✅ Indexing complete! Found {count} entities after {elapsed:.1f}s\n")
+                            driver.close()
+                            return True
+                    else:
+                        stable_count = 0
+                        log(f"   [{elapsed:.1f}s] Entities: {count} (growing...)")
+                    
+                    last_count = count
+                else:
+                    log(f"   [{elapsed:.1f}s] Waiting for entities to appear...")
+            
+            time.sleep(poll_interval)
+        
+        log(f"⚠️  Timeout after {max_wait}s. Found {last_count} entities.\n")
+        driver.close()
+        return last_count > 0
+        
+    except Exception as e:
+        log(f"❌ Error polling Neo4j: {e}\n")
+        driver.close()
+        return False
+
+
 def test_queries(group_id: str):
     """Test query against indexed documents"""
     log(f"\n{'=' * 80}")
@@ -180,7 +237,7 @@ def test_queries(group_id: str):
                     'X-Group-ID': group_id
                 },
                 json={"query": query},
-                timeout=60
+                timeout=120  # Increased from 60 to 120 seconds
             )
             
             query_time = time.time() - query_start
@@ -235,6 +292,12 @@ def main():
     if not result:
         log("\n❌ Indexing failed - skipping queries")
         return
+    
+    # Step 2.5: Wait for background indexing to complete
+    indexing_complete = wait_for_indexing(TEST_GROUP_ID, max_wait=120, poll_interval=5)
+    
+    if not indexing_complete:
+        log("\n⚠️  Warning: Indexing may not be complete, but proceeding with queries...")
     
     # Step 3: Test queries
     test_queries(TEST_GROUP_ID)

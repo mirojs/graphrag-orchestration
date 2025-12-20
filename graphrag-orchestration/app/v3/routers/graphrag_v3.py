@@ -140,10 +140,35 @@ def get_drift_adapter():
         store = get_neo4j_store()
         llm_service = LLMService()
         
+        # Get embedder from LLMService; fallback to managed identity if None
+        embedder = llm_service.embed_model
+        if embedder is None:
+            # Fallback: create embedder with managed identity directly
+            from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            
+            credential = DefaultAzureCredential()
+            token_provider = get_bearer_token_provider(
+                credential, "https://cognitiveservices.azure.com/.default"
+            )
+            # text-embedding-3-large deployment with 3072 dims
+            embed_kwargs = {
+                "model": "text-embedding-3-large",
+                "deployment_name": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+                "api_version": settings.AZURE_OPENAI_API_VERSION,
+                "api_key": "",  # Empty string required even with use_azure_ad
+                "use_azure_ad": True,
+                "azure_ad_token_provider": token_provider,
+                "dimensions": 3072,
+            }
+            embedder = AzureOpenAIEmbedding(**embed_kwargs)
+            logger.info("Embedder initialized via fallback (managed identity)")
+        
         _drift_adapter = DRIFTAdapter(
             neo4j_driver=store.driver,
             llm=llm_service.llm,
-            embedder=llm_service.embed_model,
+            embedder=embedder,
         )
     return _drift_adapter
 
@@ -291,6 +316,7 @@ async def query_local(request: Request, payload: V3QueryRequest):
         adapter = get_drift_adapter()
         
         # Use hybrid search (vector + full-text with RRF fusion)
+        # get_drift_adapter() guarantees embedder is non-None
         query_embedding = adapter.embedder.embed_query(payload.query)
         
         store = get_neo4j_store()

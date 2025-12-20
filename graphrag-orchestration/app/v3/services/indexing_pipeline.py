@@ -380,7 +380,9 @@ class IndexingPipelineV3:
         Returns:
             Indexing statistics
         """
-        logger.info(f"Starting indexing for group {group_id} with {len(documents)} documents (ingestion={ingestion})")
+        import time
+        start_time = time.time()
+        logger.info(f"⏱️ [0.0s] Starting indexing for group {group_id} with {len(documents)} documents (ingestion={ingestion})")
         
         stats = {
             "group_id": group_id,
@@ -395,10 +397,11 @@ class IndexingPipelineV3:
         try:
             # Step 0: Clean up if reindexing
             if reindex:
-                logger.info(f"Reindexing: Deleting existing data for group {group_id}")
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Reindexing: Deleting existing data for group {group_id}")
                 self.neo4j_store.delete_group_data(group_id)
             
             # Step 0.5: Extract text from PDFs/images if needed
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 0.5: Starting document extraction (ingestion={ingestion})")
             if ingestion == "document-intelligence":
                 logger.info(f"📄 Using Document Intelligence to extract text from {len(documents)} documents")
                 di_service = DocumentIntelligenceService()
@@ -420,7 +423,7 @@ class IndexingPipelineV3:
                             needs_extraction.append(content)
                 
                 if needs_extraction:
-                    logger.info(f"🔍 Extracting text from {len(needs_extraction)} PDF documents using Document Intelligence...")
+                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] 🔍 Extracting text from {len(needs_extraction)} PDF documents using Document Intelligence...")
                     extracted_docs = await di_service.extract_documents(
                         group_id=group_id,
                         input_items=needs_extraction,
@@ -429,7 +432,7 @@ class IndexingPipelineV3:
                     )
                     
                     # Convert LlamaIndex Documents back to dict format for pipeline
-                    logger.info(f"✅ Document Intelligence extracted {len(extracted_docs)} document pages")
+                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] ✅ Document Intelligence extracted {len(extracted_docs)} document pages")
                     documents = []
                     for llama_doc in extracted_docs:
                         documents.append({
@@ -465,9 +468,10 @@ class IndexingPipelineV3:
             # Store chunks in batch
             self.neo4j_store.upsert_text_chunks_batch(group_id, all_chunks)
             stats["chunks"] = len(all_chunks)
-            logger.info(f"Created {len(all_chunks)} chunks")
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 1 complete: Created {len(all_chunks)} chunks")
             
             # Step 2: Extract entities and relationships
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 2: Starting entity & relationship extraction")
             entities, relationships = await self._extract_entities_and_relationships(
                 group_id, all_chunks
             )
@@ -475,14 +479,15 @@ class IndexingPipelineV3:
             # Store entities
             self.neo4j_store.upsert_entities_batch(group_id, entities)
             stats["entities"] = len(entities)
-            logger.info(f"Extracted {len(entities)} entities")
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Stored {len(entities)} entities")
             
             # Store relationships  
             self.neo4j_store.upsert_relationships_batch(group_id, relationships)
             stats["relationships"] = len(relationships)
-            logger.info(f"Extracted {len(relationships)} relationships")
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 2 complete: Extracted {len(relationships)} relationships")
             
             # Step 3: Build communities using hierarchical Leiden
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3: Starting community detection")
             communities = await self._build_communities(group_id, entities, relationships)
             
             # Generate community summaries
@@ -495,15 +500,17 @@ class IndexingPipelineV3:
             for community in communities:
                 self.neo4j_store.upsert_community(group_id, community)
             stats["communities"] = len(communities)
-            logger.info(f"Built {len(communities)} communities")
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3 complete: Built {len(communities)} communities")
             
             # Step 4: Build RAPTOR hierarchical summaries
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4: Starting RAPTOR hierarchy")
             raptor_nodes = await self._build_raptor_hierarchy(group_id, all_chunks)
             self.neo4j_store.upsert_raptor_nodes_batch(group_id, raptor_nodes)
             stats["raptor_nodes"] = len(raptor_nodes)
-            logger.info(f"Built {len(raptor_nodes)} RAPTOR nodes")
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4 complete: Built {len(raptor_nodes)} RAPTOR nodes")
             
             # Step 5: Index RAPTOR nodes in Azure AI Search (if enabled)
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 5: Indexing RAPTOR nodes in Azure AI Search")
             if self.vector_store_provider:
                 try:
                     logger.info(f"Pushing {len(raptor_nodes)} RAPTOR nodes to Azure AI Search")
@@ -534,6 +541,8 @@ class IndexingPipelineV3:
             
             # Log final extraction statistics
             self._log_extraction_stats()
+            
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] ✅ All steps complete, total time: {time.time()-start_time:.1f}s")
             
             # Add extraction quality metrics to stats
             stats["extraction_quality"] = {

@@ -14,12 +14,12 @@ from pathlib import Path
 from typing import Dict, Any, List, Tuple
 
 # Configuration
-BASE_URL = "https://graphrag-orchestration.purplefield-1719ccc0.swedencentral.azurecontainerapps.io"
+BASE_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 TEST_GROUP_ID = f"pdf-test-{int(time.time())}"
 
-# Use repo-local PDFs downloaded from storage
-PDF_DIR = Path(__file__).parent / "graphrag-orchestration" / "data" / "input_docs"
-PDF_URLS_ENV = os.getenv("PDF_URLS", "").strip()
+# Storage Account Configuration for managed identity
+STORAGE_ACCOUNT = "neo4jstorage21224"
+CONTAINER = "test-docs"
 
 # PDF files to test
 PDF_FILES = [
@@ -41,59 +41,35 @@ def log(msg: str):
     print(msg, flush=True)
 
 
-def load_pdfs() -> List[Dict[str, str]]:
-    """Load PDF files: prefer SAS URLs if provided, else base64"""
+def load_pdfs() -> List[str]:
+    """Generate raw blob URLs for managed identity access"""
     log(f"\n{'=' * 80}")
-    log("📄 LOADING PDF FILES")
+    log("🔗 GENERATING BLOB URLs (Managed Identity)")
     log(f"{'=' * 80}\n")
     
-    files_data = []
-    if PDF_URLS_ENV:
-        urls = [u for u in PDF_URLS_ENV.split(',') if u.strip()]
-        log(f"  🌐 Using cloud URLs (SAS) for {len(urls)} PDFs")
-        for i, url in enumerate(urls, 1):
-            name = Path(url.split('?')[0]).name
-            files_data.append({
-                "filename": name,
-                "url": url,
-                "content_type": "application/pdf"
-            })
-            log(f"  ✅ [{i}/{len(urls)}] URL ready: {name}")
-        log(f"\n  📊 Total: {len(files_data)} URL documents\n")
-    else:
-        for i, pdf_file in enumerate(PDF_FILES, 1):
-            pdf_path = PDF_DIR / pdf_file
-            
-            if not pdf_path.exists():
-                log(f"  ⚠️  [{i}/{len(PDF_FILES)}] File not found: {pdf_file}")
-                continue
-            
-            log(f"  📖 [{i}/{len(PDF_FILES)}] Reading {pdf_file}...")
-            with open(pdf_path, 'rb') as f:
-                content = base64.b64encode(f.read()).decode('utf-8')
-                files_data.append({
-                    "filename": pdf_file,
-                    "content": content,
-                    "content_type": "application/pdf"
-                })
-            
-            size_mb = len(content) / 1024 / 1024
-            log(f"  ✅ [{i}/{len(PDF_FILES)}] Loaded: {pdf_file} ({size_mb:.2f} MB encoded)")
-        
-        total_size = sum(len(f.get('content','')) for f in files_data) / 1024 / 1024
-        log(f"\n  📊 Total: {len(files_data)} files, {total_size:.2f} MB\n")
+    log(f"  Storage Account: {STORAGE_ACCOUNT}")
+    log(f"  Container: {CONTAINER}")
+    log(f"  Authentication: Managed Identity (no SAS)\n")
     
-    return files_data
+    urls = []
+    for i, filename in enumerate(PDF_FILES, 1):
+        url = f"https://{STORAGE_ACCOUNT}.blob.core.windows.net/{CONTAINER}/{filename}"
+        urls.append(url)
+        log(f"  ✅ [{i}/{len(PDF_FILES)}] {filename}")
+        log(f"     {url}\n")
+    
+    log(f"  📊 Total: {len(urls)} blob URLs (no SAS tokens)\n")
+    return urls
 
 
-def index_documents(files_data: List[Dict]) -> Dict[str, Any]:
+def index_documents(blob_urls: List[str]) -> Dict[str, Any]:
     """Index documents with batch processing and detailed progress"""
     log(f"\n{'=' * 80}")
-    log("🔄 INDEXING DOCUMENTS (GraphRAG v3 Entity Extraction)")
+    log("🔄 INDEXING DOCUMENTS (GraphRAG v3 with Managed Identity)")
     log(f"{'=' * 80}\n")
     
     log(f"Group ID: {TEST_GROUP_ID}")
-    log(f"Total PDFs: {len(files_data)}")
+    log(f"Total PDFs: {len(blob_urls)}")
     log(f"Batch Size: 2 PDFs per request (avoid timeout)")
     log(f"Endpoint: {BASE_URL}/graphrag/v3/index\n")
     
@@ -106,37 +82,23 @@ def index_documents(files_data: List[Dict]) -> Dict[str, Any]:
     }
     
     batch_size = 2
-    num_batches = (len(files_data) + batch_size - 1) // batch_size
+    num_batches = (len(blob_urls) + batch_size - 1) // batch_size
     
     for batch_num in range(num_batches):
         start_idx = batch_num * batch_size
-        end_idx = min(start_idx + batch_size, len(files_data))
-        batch = files_data[start_idx:end_idx]
+        end_idx = min(start_idx + batch_size, len(blob_urls))
+        batch = blob_urls[start_idx:end_idx]
         
         log(f"\n{'─' * 80}")
         log(f"📦 BATCH {batch_num + 1}/{num_batches}")
         log(f"{'─' * 80}")
-        for pdf in batch:
-            log(f"   • {pdf['filename']}")
+        for url in batch:
+            log(f"   • {url.split('/')[-1]}")
         
         batch_start = time.time()
         
         try:
-            documents = []
-            for pdf in batch:
-                if "url" in pdf:
-                    # URL ingestion: pass URL string directly
-                    documents.append(pdf["url"])
-                else:
-                    # Base64 ingestion: pass as text
-                    documents.append(pdf["content"])
-            
-            byte_total_mb = sum(len(d) for d in documents if not d.startswith('http')) / 1024 / 1024
-            url_total = sum(1 for d in documents if d.startswith('http'))
-            if url_total:
-                log(f"\n⏳ Step 1: Submitting {len(documents)} PDF URLs (SAS)")
-            else:
-                log(f"\n⏳ Step 1: Uploading {len(documents)} PDFs ({byte_total_mb:.2f} MB)")
+            log(f"\n⏳ Step 1: Submitting {len(batch)} PDF URLs (managed identity)")
             
             response = requests.post(
                 f"{BASE_URL}/graphrag/v3/index",
@@ -145,8 +107,8 @@ def index_documents(files_data: List[Dict]) -> Dict[str, Any]:
                     'X-Group-ID': TEST_GROUP_ID
                 },
                 json={
-                    "documents": documents,
-                    "ingestion": "document-intelligence",  # Use DI with managed identity
+                    "documents": batch,
+                    "ingestion": "document-intelligence",
                     "run_raptor": True,
                     "run_community_detection": True
                 },
@@ -249,14 +211,14 @@ def main():
     
     start_time = time.time()
     
-    # Step 1: Load PDFs
-    files_data = load_pdfs()
-    if not files_data:
-        log("\n❌ No PDF files loaded. Exiting.")
+    # Step 1: Generate blob URLs
+    blob_urls = load_pdfs()
+    if not blob_urls:
+        log("\n❌ No PDF URLs generated. Exiting.")
         sys.exit(1)
     
     # Step 2: Index documents
-    stats = index_documents(files_data)
+    stats = index_documents(blob_urls)
     if stats['documents_processed'] == 0:
         log("\n❌ Indexing failed. Skipping queries.")
         sys.exit(1)

@@ -14,14 +14,9 @@ param location string
 @description('MUST use drift-mini-optimized or later - NEVER use placeholder/hello-world images')
 var requiredImageTag = 'drift-mini-optimized'
 
-@description('Id of the user or app to assign application roles')
-param principalId string = ''
-
-@description('Azure OpenAI API Key (leave empty to use Managed Identity)')
-param azureOpenAiApiKey string = ''
-
+@secure()
 @description('Neo4j Password')
-param neo4jPassword string = 'uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI'
+param neo4jPassword string
 
 @description('Azure Document Intelligence Endpoint')
 param azureDocumentIntelligenceEndpoint string = 'https://doc-intel-graphrag.cognitiveservices.azure.com/'
@@ -29,18 +24,11 @@ param azureDocumentIntelligenceEndpoint string = 'https://doc-intel-graphrag.cog
 @description('Azure AI Search Endpoint')
 param azureSearchEndpoint string = 'https://graphrag-search.search.windows.net'
 
-@description('Azure AI Search API Key (for RAPTOR indexing)')
-@secure()
-param azureSearchApiKey string = ''
-
 // Tags for all resources
 var tags = {
-  'azd-env-name': environmentName
-  'app': 'graphrag-orchestration'
+  azd_env_name: environmentName
+  app: 'graphrag-orchestration'
 }
-
-var abbrs = loadJsonContent('./abbreviations.json')
-var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 
 // Reference existing Resource Group in Sweden Central
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
@@ -91,6 +79,10 @@ module graphragApp './core/host/container-app.bicep' = {
         value: subscription().tenantId
       }
     ], [
+      {
+        name: 'PORT'
+        value: '8000'
+      }
       {
         name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
         value: 'gpt-4o'
@@ -168,9 +160,6 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     containerAppPrincipalId: graphragApp.outputs.identityPrincipalId
     azureOpenAiName: 'graphrag-openai-8476'
   }
-  dependsOn: [
-    graphragApp
-  ]
 }
 
 // Outputs

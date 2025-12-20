@@ -159,6 +159,7 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     containerRegistryName: containerRegistry.name
     containerAppPrincipalId: graphragApp.outputs.identityPrincipalId
     azureOpenAiName: 'graphrag-openai-8476'
+    azureSearchName: 'graphrag-search'
   }
 }
 

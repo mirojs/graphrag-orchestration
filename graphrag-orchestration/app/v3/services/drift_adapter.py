@@ -451,10 +451,28 @@ class DRIFTAdapter:
                 embedding_dimension=3072,  # text-embedding-3-large
             )
             
-            # Use LlamaIndex LLM directly - it already supports managed identity
-            # MS GraphRAG's DRIFT can accept any LLM that implements the BaseLLM interface
-            # Our LlamaIndex Azure OpenAI LLM works perfectly with managed identity
-            drift_llm = self.llm
+            # Wrap LLM to add config attribute required by MS GraphRAG DRIFT
+            # MS GraphRAG expects model.config.model to exist
+            class LLMWrapper:
+                """Wrapper to make LlamaIndex LLM compatible with MS GraphRAG DRIFT."""
+                def __init__(self, llm):
+                    self._llm = llm
+                    # Add config attribute that DRIFT expects
+                    self.config = type('Config', (), {
+                        'model': getattr(llm, 'model', 'gpt-4o'),
+                        'temperature': getattr(llm, 'temperature', 0.0),
+                        'max_tokens': getattr(llm, 'max_tokens', 4000),
+                    })()
+                
+                def __getattr__(self, name):
+                    """Forward all other attribute access to wrapped LLM."""
+                    return getattr(self._llm, name)
+                
+                async def agenerate(self, *args, **kwargs):
+                    """Forward async generate calls to wrapped LLM."""
+                    return await self._llm.agenerate(*args, **kwargs)
+            
+            drift_llm = LLMWrapper(self.llm)
             
             # Build DRIFT context builder with MS GraphRAG models
             # Required params: model, text_embedder, entities, entity_text_embeddings

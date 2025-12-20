@@ -474,6 +474,7 @@ class DRIFTAdapter:
             
             # Create LiteLLM chat model with Azure OpenAI
             drift_llm = LitellmChatModel(
+                name="azure-openai-drift",  # Required name parameter
                 config=llm_config,
                 api_key=token.token,  # Pass the token from managed identity
             )

@@ -989,7 +989,7 @@ class IndexingPipelineV3:
             ]
             
             try:
-                logger.info(f"⚡ Generating embeddings for {len(entities_list)} entities")
+                logger.warning(f"⚡ EMBEDDING START: Generating embeddings for {len(entities_list)} entities")
                 
                 if hasattr(self.embedder, 'aget_text_embedding_batch'):
                     embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
@@ -1002,7 +1002,7 @@ class IndexingPipelineV3:
                 for entity, embedding in zip(entities_list, embeddings):
                     entity.embedding = embedding
                 
-                logger.info(f"✅ Generated {len(embeddings)} entity embeddings (dim={len(embeddings[0])})")
+                logger.warning(f"✅ EMBEDDING SUCCESS: Generated {len(embeddings)} entity embeddings (dim={len(embeddings[0])})")
                 
             except Exception as e:
                 logger.error(f"❌ Failed to generate entity embeddings: {e}", exc_info=True)

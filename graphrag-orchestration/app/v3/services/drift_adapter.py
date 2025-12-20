@@ -451,28 +451,31 @@ class DRIFTAdapter:
                 embedding_dimension=3072,  # text-embedding-3-large
             )
             
-            # Wrap LLM to add config attribute required by MS GraphRAG DRIFT
-            # MS GraphRAG expects model.config.model to exist
-            class LLMWrapper:
-                """Wrapper to make LlamaIndex LLM compatible with MS GraphRAG DRIFT."""
-                def __init__(self, llm):
-                    self._llm = llm
-                    # Add config attribute that DRIFT expects
-                    self.config = type('Config', (), {
-                        'model': getattr(llm, 'model', 'gpt-4o'),
-                        'temperature': getattr(llm, 'temperature', 0.0),
-                        'max_tokens': getattr(llm, 'max_tokens', 4000),
-                    })()
-                
-                def __getattr__(self, name):
-                    """Forward all other attribute access to wrapped LLM."""
-                    return getattr(self._llm, name)
-                
-                async def agenerate(self, *args, **kwargs):
-                    """Forward async generate calls to wrapped LLM."""
-                    return await self._llm.agenerate(*args, **kwargs)
+            # Create MS GraphRAG's LiteLLM model configured for Azure OpenAI with managed identity
+            # MS GraphRAG has its own LLM implementation that works with Azure OpenAI
+            from azure.identity import DefaultAzureCredential
             
-            drift_llm = LLMWrapper(self.llm)
+            # Get Azure OpenAI credentials for managed identity
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://cognitiveservices.azure.com/.default")
+            
+            # Create LanguageModelConfig for MS GraphRAG
+            llm_config = LanguageModelConfig(
+                model_type=ModelType.AZURE_OPENAI_CHAT,
+                model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # gpt-4o
+                api_base=settings.AZURE_OPENAI_ENDPOINT,
+                api_version=settings.AZURE_OPENAI_API_VERSION,
+                deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                auth_type=AuthType.AZURE_IDENTITY,  # Use managed identity
+                temperature=0.0,
+                max_tokens=4000,
+            )
+            
+            # Create LiteLLM chat model with Azure OpenAI
+            drift_llm = LitellmChatModel(
+                config=llm_config,
+                api_key=token.token,  # Pass the token from managed identity
+            )
             
             # Build DRIFT context builder with MS GraphRAG models
             # Required params: model, text_embedder, entities, entity_text_embeddings

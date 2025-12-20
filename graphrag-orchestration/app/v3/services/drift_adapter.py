@@ -461,12 +461,12 @@ class DRIFTAdapter:
             
             # Create LanguageModelConfig for MS GraphRAG
             llm_config = LanguageModelConfig(
-                model_type=ModelType.AZURE_OPENAI_CHAT,
+                model_type="azure_openai_chat",  # Use string value instead of enum
                 model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # gpt-4o
                 api_base=settings.AZURE_OPENAI_ENDPOINT,
                 api_version=settings.AZURE_OPENAI_API_VERSION,
                 deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                auth_type=AuthType.AZURE_IDENTITY,  # Use managed identity
+                auth_type="azure_identity",  # Use string value instead of enum
                 temperature=0.0,
                 max_tokens=4000,
             )

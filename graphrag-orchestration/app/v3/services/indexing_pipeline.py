@@ -977,47 +977,35 @@ class IndexingPipelineV3:
                 )
                 all_relationships.append(rel)
         
-        logger.info(f"🏁 Finished entity extraction loop. Total entities in dict: {len(all_entities)}, relationships: {len(all_relationships)}")
+        logger.info(f"🏁 Finished entity extraction loop. Total entities: {len(all_entities)}, relationships: {len(all_relationships)}")
         
-        # Generate embeddings for entities (batch for efficiency)
+        # Generate embeddings for entities (single batch with 100K TPM capacity)
         entities_list = list(all_entities.values())
-        logger.info(f"🔍 Starting entity embedding generation for {len(entities_list)} entities")
         
         if entities_list:
-            # Prepare texts for batch embedding
             entity_texts = [
                 f"{entity.name}: {entity.description}" if entity.description else entity.name
                 for entity in entities_list
             ]
-            logger.info(f"📝 Prepared {len(entity_texts)} texts for batch embedding")
             
-            # Batch embed all entities (async for efficiency)
             try:
-                logger.info(f"🔧 Checking embedder methods: has_aget={hasattr(self.embedder, 'aget_text_embedding_batch')}, has_get={hasattr(self.embedder, 'get_text_embedding_batch')}")
+                logger.info(f"⚡ Generating embeddings for {len(entities_list)} entities")
                 
                 if hasattr(self.embedder, 'aget_text_embedding_batch'):
-                    # Use async batch method (preferred)
-                    logger.info("⚡ Using aget_text_embedding_batch (async)")
                     embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
                 elif hasattr(self.embedder, 'get_text_embedding_batch'):
-                    # Fallback to sync batch method
-                    logger.info("⚡ Using get_text_embedding_batch (sync)")
                     embeddings = self.embedder.get_text_embedding_batch(entity_texts)
                 else:
-                    # Fallback to individual embedding
-                    logger.info("⚡ Using individual _embed_text fallback")
                     embeddings = [await self._embed_text(text) for text in entity_texts]
-                
-                logger.info(f"📊 Received {len(embeddings)} embeddings")
                 
                 # Assign embeddings to entities
                 for entity, embedding in zip(entities_list, embeddings):
                     entity.embedding = embedding
-                    
+                
                 logger.info(f"✅ Generated {len(embeddings)} entity embeddings (dim={len(embeddings[0])})")
+                
             except Exception as e:
                 logger.error(f"❌ Failed to generate entity embeddings: {e}", exc_info=True)
-                # Fallback: generate zero vectors
                 for entity in entities_list:
                     entity.embedding = [0.0] * self.config.embedding_dimensions
                 logger.warning(f"⚠️  Using zero vectors for {len(entities_list)} entities due to embedding failure")

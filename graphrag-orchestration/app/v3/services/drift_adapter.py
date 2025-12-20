@@ -496,13 +496,39 @@ class DRIFTAdapter:
                 
                 async def achat(self, prompt: str, history: list | None = None, **kwargs):
                     """MS GraphRAG ChatModel protocol: achat(prompt, history) -> ModelResponse."""
+                    # Check if JSON output is requested
+                    json_mode = kwargs.get('json', False)
+                    
+                    # If JSON mode, append instruction to prompt
+                    if json_mode and 'json' not in prompt.lower():
+                        prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
+                    
                     response = await self.llm.acomplete(prompt)
-                    return DRIFTModelResponse(text=response.text, raw_response=response)
+                    text = response.text.strip()
+                    
+                    # If JSON mode and response is empty or invalid, return empty JSON object
+                    if json_mode and (not text or text == ''):
+                        text = '{}'
+                    
+                    return DRIFTModelResponse(text=text, raw_response=response)
                 
                 def chat(self, prompt: str, history: list | None = None, **kwargs):
                     """Sync version of chat."""
+                    # Check if JSON output is requested
+                    json_mode = kwargs.get('json', False)
+                    
+                    # If JSON mode, append instruction to prompt
+                    if json_mode and 'json' not in prompt.lower():
+                        prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
+                    
                     response = self.llm.complete(prompt)
-                    return DRIFTModelResponse(text=response.text, raw_response=response)
+                    text = response.text.strip()
+                    
+                    # If JSON mode and response is empty or invalid, return empty JSON object
+                    if json_mode and (not text or text == ''):
+                        text = '{}'
+                    
+                    return DRIFTModelResponse(text=text, raw_response=response)
             
             drift_llm = DRIFTLLMWrapper(self.llm)
             

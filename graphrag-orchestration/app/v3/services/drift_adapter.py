@@ -504,10 +504,14 @@ class DRIFTAdapter:
                         prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
                     
                     response = await self.llm.acomplete(prompt)
-                    text = response.text.strip()
+                    text = response.text.strip() if response and hasattr(response, 'text') else ''
+                    
+                    # Log for debugging
+                    logger.info(f"[DRIFT LLM] json_mode={json_mode}, response_len={len(text)}, text_preview={text[:100] if text else 'EMPTY'}")
                     
                     # If JSON mode and response is empty or invalid, return empty JSON object
                     if json_mode and (not text or text == ''):
+                        logger.warning("[DRIFT LLM] Empty response in JSON mode, returning empty JSON object")
                         text = '{}'
                     
                     return DRIFTModelResponse(text=text, raw_response=response)

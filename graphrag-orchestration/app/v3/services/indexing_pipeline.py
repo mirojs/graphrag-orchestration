@@ -476,6 +476,10 @@ class IndexingPipelineV3:
                 group_id, all_chunks
             )
             
+            # Diagnostic: Check if entities have embeddings before storage
+            entities_with_embeddings = sum(1 for e in entities if e.embedding and e.embedding != [0.0] * self.config.embedding_dimensions)
+            logger.warning(f"📊 BEFORE STORAGE: {entities_with_embeddings}/{len(entities)} entities have non-zero embeddings")
+            
             # Store entities
             self.neo4j_store.upsert_entities_batch(group_id, entities)
             stats["entities"] = len(entities)

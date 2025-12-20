@@ -263,6 +263,13 @@ class Neo4jStoreV3:
     
     def upsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
         """Batch insert/update entities and create MENTIONS relationships to chunks."""
+        
+        # Diagnostic: Check embeddings before storing
+        with_embeddings = sum(1 for e in entities if e.embedding and len(e.embedding) > 0)
+        logger.warning(f"🔍 UPSERT CHECK: Storing {len(entities)} entities, {with_embeddings} have embeddings")
+        if entities and entities[0].embedding:
+            logger.warning(f"   First entity embedding dim: {len(entities[0].embedding)}")
+        
         query = """
         UNWIND $entities AS e
         MERGE (entity:Entity {id: e.id})

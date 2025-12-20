@@ -385,13 +385,12 @@ class Neo4jStoreV3:
         WHERE fNode.group_id = $group_id
         WITH vectorResults, collect({node: fNode, score: fScore, rank: toInteger(fScore * 1000)}) AS textResults
         
-        // Step 4: RRF Fusion
+        // Step 4: RRF Fusion (aggregation is implicit in Cypher, no GROUP BY needed)
         WITH vectorResults + textResults AS allResults
         UNWIND range(0, size(allResults)-1) AS idx
         WITH allResults[idx] AS result, idx
         WITH result.node AS node,
              sum(1.0 / ($k_constant + idx + 1)) AS combinedScore
-        GROUP BY node
         
         RETURN node, combinedScore
         ORDER BY combinedScore DESC

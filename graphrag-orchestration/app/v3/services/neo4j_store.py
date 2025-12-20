@@ -366,26 +366,21 @@ class Neo4jStoreV3:
         # NEW APPROACH: Get entities from target group FIRST, then do vector/text search on those
         # This avoids the problem of global search returning entities from other groups
         query = """
-        // Step 1: Get all entities in this group (with embeddings for vector search)
+        // Step 1 & 2: Get entities from group and compute vector similarity
         MATCH (e:Entity {group_id: $group_id})
         WHERE e.embedding IS NOT NULL
-        WITH collect(e) AS groupEntities
-        
-        // Step 2: Vector similarity scoring
-        UNWIND groupEntities AS entity
-        WITH entity,
-             gds.similarity.cosine(entity.embedding, $embedding) AS vectorScore
+        WITH e, gds.similarity.cosine(e.embedding, $embedding) AS vectorScore
         ORDER BY vectorScore DESC
         LIMIT $retrieval_k
-        WITH collect({node: entity, score: vectorScore, rank: toInteger(vectorScore * 1000)}) AS vectorResults
+        WITH collect({node: e, score: vectorScore}) AS vectorResults
         
-        // Step 3: Full-text scoring on same group
-        CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text, {limit: $retrieval_k})
+        // Step 3: Full-text scoring on same group (OPTIONAL to handle no results)
+        OPTIONAL CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text, {limit: $retrieval_k})
         YIELD node AS fNode, score AS fScore
         WHERE fNode.group_id = $group_id
-        WITH vectorResults, collect({node: fNode, score: fScore, rank: toInteger(fScore * 1000)}) AS textResults
+        WITH vectorResults, collect({node: fNode, score: fScore}) AS textResults
         
-        // Step 4: RRF Fusion (aggregation is implicit in Cypher, no GROUP BY needed)
+        // Step 4: RRF Fusion - combine results from both searches
         WITH vectorResults + textResults AS allResults
         UNWIND range(0, size(allResults)-1) AS idx
         WITH allResults[idx] AS result, idx

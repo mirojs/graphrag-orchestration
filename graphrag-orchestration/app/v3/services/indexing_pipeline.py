@@ -977,6 +977,8 @@ class IndexingPipelineV3:
                 )
                 all_relationships.append(rel)
         
+        logger.info(f"🏁 Finished entity extraction loop. Total entities in dict: {len(all_entities)}, relationships: {len(all_relationships)}")
+        
         # Generate embeddings for entities (batch for efficiency)
         entities_list = list(all_entities.values())
         logger.info(f"🔍 Starting entity embedding generation for {len(entities_list)} entities")

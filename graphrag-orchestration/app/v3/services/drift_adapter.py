@@ -453,15 +453,23 @@ class DRIFTAdapter:
             
             # Create a wrapper for LlamaIndex LLM to make it compatible with MS GraphRAG DRIFT
             # MS GraphRAG expects ChatModel protocol: achat(prompt, history) -> ModelResponse
+            class DRIFTModelOutput:
+                """Model output with content attribute for MS GraphRAG compatibility."""
+                def __init__(self, text: str):
+                    self.content = text
+                
+                def __str__(self):
+                    return self.content
+            
             class DRIFTModelResponse:
                 """ModelResponse implementation for MS GraphRAG DRIFT protocol."""
                 def __init__(self, text: str, raw_response=None):
-                    self._output = text
+                    self._output = DRIFTModelOutput(text)
                     self._raw = raw_response
                 
                 @property
-                def output(self) -> str:
-                    """The output text from the model."""
+                def output(self):
+                    """The output object with content attribute."""
                     return self._output
                 
                 @property

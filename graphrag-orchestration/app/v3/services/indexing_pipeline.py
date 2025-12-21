@@ -432,15 +432,32 @@ class IndexingPipelineV3:
                     )
                     
                     # Convert LlamaIndex Documents back to dict format for pipeline
+                    # Group pages by source URL to avoid duplicate Document nodes
                     logger.info(f"⏱️ [{time.time()-start_time:.1f}s] ✅ Document Intelligence extracted {len(extracted_docs)} document pages")
-                    documents = []
+                    
+                    from collections import defaultdict
+                    pages_by_source = defaultdict(list)
                     for llama_doc in extracted_docs:
+                        source_url = llama_doc.metadata.get("url", "")
+                        pages_by_source[source_url].append(llama_doc)
+                    
+                    documents = []
+                    for source_url, pages in pages_by_source.items():
+                        # Combine all pages into a single document
+                        combined_text = "\n\n".join(page.text for page in pages)
+                        # Use metadata from first page, add page_count
+                        combined_metadata = pages[0].metadata.copy()
+                        combined_metadata["page_count"] = len(pages)
+                        combined_metadata["page_numbers"] = [p.metadata.get("page_number", 0) for p in pages]
+                        
                         documents.append({
-                            "content": llama_doc.text,
-                            "title": llama_doc.metadata.get("url", "Untitled").split("/")[-1],
-                            "source": llama_doc.metadata.get("url", ""),
-                            "metadata": llama_doc.metadata,
+                            "content": combined_text,
+                            "title": source_url.split("/")[-1] if source_url else "Untitled",
+                            "source": source_url,
+                            "metadata": combined_metadata,
                         })
+                    
+                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] 📄 Grouped {len(extracted_docs)} pages into {len(documents)} documents")
                 else:
                     logger.info(f"ℹ️ All documents already have content, skipping Document Intelligence extraction")
             
@@ -712,20 +729,19 @@ class IndexingPipelineV3:
                 possible_relations=None,  # Use DEFAULT_RELATIONS: Literal["HAS", "LOCATED_IN", "PART_OF", ...]
                 strict=False,  # Let LLM use semantic understanding, don't over-constrain patterns
                 num_workers=1,
-                max_triplets_per_chunk=20,
+                max_triplets_per_chunk=80,  # Increased from 20 to allow more entities per chunk
             )
-            logger.info(f"Initialized SchemaLLMPathExtractor with strict=False for {len(llama_nodes)} nodes")
+            logger.info(f"Initialized SchemaLLMPathExtractor with strict=False, max_triplets_per_chunk=80 for {len(llama_nodes)} nodes")
         except Exception as e:
             logger.error(f"Failed to initialize SchemaLLMPathExtractor: {e}")
             raise
 
-# Extract entities and relationships using LlamaIndex
+        # Extract entities and relationships using LlamaIndex
         try:
             self.extraction_stats["total_extractions"] += 1
             
             extracted_nodes = await extractor.acall(llama_nodes)
             logger.info(f"Extracted {len(extracted_nodes)} nodes with metadata")
-            
             # Collect entities and relations from node metadata
             # Track which entities came from which chunks for MENTIONS relationships
             all_entity_nodes = []

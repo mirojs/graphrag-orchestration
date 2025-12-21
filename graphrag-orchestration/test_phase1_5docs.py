@@ -23,6 +23,48 @@ PDF_FILES = [
     "purchase_contract.pdf"
 ]
 
+def cleanup_neo4j():
+    """Delete all existing groups from Neo4j before starting."""
+    print("=" * 80)
+    print("CLEANUP: DELETING ALL EXISTING GROUPS FROM NEO4J")
+    print("=" * 80)
+    
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
+    
+    with driver.session() as session:
+        # Find all unique group_ids
+        result = session.run("""
+            MATCH (n)
+            WHERE n.group_id IS NOT NULL
+            RETURN DISTINCT n.group_id AS group_id
+            ORDER BY group_id
+        """)
+        
+        groups = [record['group_id'] for record in result]
+        
+        if not groups:
+            print("✅ No existing groups found - Neo4j is clean")
+            driver.close()
+            return
+        
+        print(f"Found {len(groups)} groups to delete")
+        
+        # Delete all groups
+        for group_id in groups:
+            result = session.run("""
+                MATCH (n {group_id: $group_id})
+                DETACH DELETE n
+                RETURN count(n) AS deleted
+            """, group_id=group_id)
+            
+            record = result.single()
+            deleted = record['deleted'] if record else 0
+            if deleted > 0:
+                print(f"  ✅ Deleted {deleted} nodes from group: {group_id[:40]}...")
+    
+    print(f"✅ Cleanup complete - deleted {len(groups)} groups\n")
+    driver.close()
+
 def test_indexing():
     """Index 5 documents using managed identity for blob storage and Document Intelligence."""
     print("=" * 80)
@@ -85,17 +127,73 @@ def verify_quality_metrics():
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
     
     with driver.session() as session:
-        # First check if entities exist
+        # Get comprehensive statistics
         result = session.run("""
             MATCH (e:Entity {group_id: $group_id})
-            RETURN count(e) as entity_count
+            WITH count(e) AS entities
+            MATCH (c:Community {group_id: $group_id})
+            WITH entities, count(c) AS communities
+            MATCH (r:RaptorNode {group_id: $group_id})
+            WITH entities, communities, count(r) AS raptor_nodes
+            MATCH (t:TextChunk {group_id: $group_id})
+            WITH entities, communities, raptor_nodes, count(t) AS text_chunks
+            MATCH (d:Document {group_id: $group_id})
+            WITH entities, communities, raptor_nodes, text_chunks, count(d) AS documents
+            OPTIONAL MATCH (:Entity {group_id: $group_id})-[rel]->(:Entity {group_id: $group_id})
+            RETURN entities, communities, raptor_nodes, text_chunks, documents, count(rel) AS relationships
         """, group_id=GROUP_ID)
-        entity_count = result.single()["entity_count"]
         
-        print(f"\n📊 Data Summary:")
-        print(f"   Entities: {entity_count}")
+        record = result.single()
+        if not record:
+            print("   ❌ No data found - indexing may not have completed yet")
+            driver.close()
+            return False
         
-        if entity_count == 0:
+        entities = record["entities"]
+        relationships = record["relationships"]
+        communities = record["communities"]
+        documents = record["documents"]
+        raptor_nodes = record["raptor_nodes"]
+        text_chunks = record["text_chunks"]
+        
+        print(f"\n📊 Indexing Statistics:")
+        print(f"   Documents: {documents}")
+        print(f"   Text Chunks: {text_chunks}")
+        print(f"   Entities: {entities}")
+        print(f"   Relationships: {relationships}")
+        print(f"   Communities: {communities}")
+        print(f"   RAPTOR Nodes: {raptor_nodes}")
+        
+        # Check for duplicate Document nodes
+        result = session.run("""
+            MATCH (d:Document {group_id: $group_id})
+            RETURN d.title AS title, count(*) AS count
+            ORDER BY count DESC, title
+        """, group_id=GROUP_ID)
+        
+        doc_counts = list(result)
+        duplicates = [r for r in doc_counts if r["count"] > 1]
+        
+        if duplicates:
+            print(f"\n⚠️  Duplicate Document nodes detected:")
+            for r in duplicates:
+                print(f"     {r['title']}: {r['count']} nodes")
+        else:
+            print(f"\n✅ No duplicate Document nodes (1 node per PDF)")
+        
+        # Compare with baseline
+        print(f"\n📈 Comparison with Baseline (352 entities, 440 relationships):")
+        if entities >= 300:
+            print(f"   ✅ Entities: {entities} (target: 300+)")
+        else:
+            print(f"   ⚠️  Entities: {entities} (target: 300+, {((entities/352)-1)*100:+.1f}%)")
+        
+        if relationships >= 350:
+            print(f"   ✅ Relationships: {relationships} (target: 350+)")
+        else:
+            print(f"   ⚠️  Relationships: {relationships} (target: 350+, {((relationships/440)-1)*100:+.1f}%)")
+        
+        if entities == 0:
             print("   ❌ No entities found - indexing may not have completed yet")
             driver.close()
             return False
@@ -170,23 +268,41 @@ if __name__ == "__main__":
     print(f"API: {API_URL}")
     print(f"Group ID: {GROUP_ID}\n")
     
+    # Cleanup Neo4j first
+    cleanup_neo4j()
+    
     # Index documents
     if not test_indexing():
         print("\n❌ TEST FAILED: Indexing error")
         exit(1)
     
     # Wait for background processing to complete
-    # Full pipeline takes ~7 minutes for 5 PDFs:
-    # - Document Intelligence extraction
-    # - Chunking
-    # - Entity/relationship extraction (LLM)
-    # - Community detection
-    # - RAPTOR hierarchy (LLM)
-    # - Vector indexing
-    print("\n⏳ Waiting 450 seconds (~7.5 minutes) for background indexing to complete...")
-    for i in range(90):
+    # Full pipeline typically takes 1-3 minutes for 5 PDFs with the fixes:
+    # - Document Intelligence extraction (~30s)
+    # - Chunking and entity extraction (~60s)
+    # - Community detection and RAPTOR (~60s)
+    print("\n⏳ Waiting 120 seconds (2 minutes) for background indexing to complete...")
+    for i in range(24):
         time.sleep(5)
-        print(f"   {(i+1)*5}s elapsed...")
+        if (i + 1) % 6 == 0:
+            print(f"   {(i+1)*5}s elapsed...")
+    
+    # Quick stats check via API
+    print("\n" + "=" * 80)
+    print("CHECKING INDEXING PROGRESS VIA API")
+    print("=" * 80)
+    response = requests.get(
+        f"{API_URL}/graphrag/v3/stats/{GROUP_ID}",
+        headers={"X-Group-ID": GROUP_ID}
+    )
+    if response.status_code == 200:
+        stats = response.json()
+        print(f"   Documents: {stats.get('documents', 0)}")
+        print(f"   Entities: {stats.get('entities', 0)}")
+        print(f"   Relationships: {stats.get('relationships', 0)}")
+        if stats.get('entities', 0) == 0:
+            print("\n⏳ Still processing, waiting another 60 seconds...")
+            time.sleep(60)
     
     # Verify metrics
     if not verify_quality_metrics():

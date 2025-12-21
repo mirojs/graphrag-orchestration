@@ -547,6 +547,54 @@ class DRIFTAdapter:
                     print(f"[DRIFT_DEBUG] Returning response type={type(result)}, str_value='{str(result)[:200]}'", flush=True)
                     return result
                 
+                async def achat_stream(self, prompt: str, history: list | None = None, **kwargs):
+                    """MS GraphRAG ChatModel protocol: achat_stream(prompt, history) -> async iterator of str chunks."""
+                    import sys
+                    
+                    # Check if JSON output is requested
+                    json_mode = kwargs.get('json', False)
+                    
+                    print(f"[DRIFT_DEBUG] achat_stream called, json_mode={json_mode}, prompt_len={len(prompt)}", flush=True)
+                    
+                    # If JSON mode, append instruction to prompt
+                    if json_mode and 'json' not in prompt.lower():
+                        prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
+                    
+                    try:
+                        # Use streaming if available, otherwise fallback to non-streaming
+                        if hasattr(self.llm, 'astream_complete'):
+                            print(f"[DRIFT_DEBUG] Using astream_complete...", flush=True)
+                            accumulated_text = ""
+                            async for chunk in await self.llm.astream_complete(prompt):
+                                if chunk and hasattr(chunk, 'text'):
+                                    accumulated_text += chunk.text
+                                    yield chunk.text
+                                elif chunk:
+                                    accumulated_text += str(chunk)
+                                    yield str(chunk)
+                            
+                            # Apply markdown stripping to full accumulated text if json_mode
+                            if json_mode and accumulated_text:
+                                cleaned_text = accumulated_text.strip()
+                                if cleaned_text.startswith("```json"):
+                                    cleaned_text = cleaned_text[7:]
+                                elif cleaned_text.startswith("```"):
+                                    cleaned_text = cleaned_text[3:]
+                                if cleaned_text.endswith("```"):
+                                    cleaned_text = cleaned_text[:-3]
+                                # If we stripped anything, we need to yield the corrected version
+                                if cleaned_text != accumulated_text:
+                                    print(f"[DRIFT_DEBUG] Markdown stripped in stream", flush=True)
+                        else:
+                            # Fallback to non-streaming achat and yield as single chunk
+                            print(f"[DRIFT_DEBUG] Fallback to non-streaming achat...", flush=True)
+                            response = await self.achat(prompt, history, **kwargs)
+                            yield str(response)
+                    except Exception as e:
+                        print(f"[DRIFT_DEBUG] achat_stream failed: {type(e).__name__}: {e}", flush=True)
+                        logger.error(f"[DRIFT_DEBUG] achat_stream failed: {e}")
+                        raise
+                
                 def chat(self, prompt: str, history: list | None = None, **kwargs):
                     """Sync version of chat."""
                     # Check if JSON output is requested

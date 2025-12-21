@@ -12,7 +12,7 @@ param location string
 // CRITICAL: Ensure we never accidentally deploy hello-world images
 // This must point to the actual GraphRAG application image
 @description('MUST use drift-mini-optimized or later - NEVER use placeholder/hello-world images')
-var requiredImageTag = 'drift-mini-optimized'
+var requiredImageTag = 'drift-achat-stream-fix'
 
 @secure()
 @description('Neo4j Password')

@@ -461,9 +461,19 @@ class DRIFTAdapter:
                 def __str__(self):
                     return self.content
             
-            class DRIFTModelResponse:
-                """ModelResponse implementation for MS GraphRAG DRIFT protocol."""
+            class DRIFTModelResponse(str):
+                """ModelResponse implementation for MS GraphRAG DRIFT protocol.
+                
+                Inherits from str so json.loads() can use it directly, while providing
+                ModelResponse protocol properties.
+                """
+                def __new__(cls, text: str, raw_response=None):
+                    # Create string instance first (required for str subclass)
+                    instance = str.__new__(cls, text)
+                    return instance
+                
                 def __init__(self, text: str, raw_response=None):
+                    # Store additional attributes (str.__init__ doesn't take params)
                     self._output = DRIFTModelOutput(text)
                     self._raw = raw_response
                 
@@ -496,25 +506,46 @@ class DRIFTAdapter:
                 
                 async def achat(self, prompt: str, history: list | None = None, **kwargs):
                     """MS GraphRAG ChatModel protocol: achat(prompt, history) -> ModelResponse."""
+                    import sys
+                    
                     # Check if JSON output is requested
                     json_mode = kwargs.get('json', False)
+                    
+                    # Debug: Print to stdout with flush
+                    print(f"[DRIFT_DEBUG] achat called, json_mode={json_mode}, prompt_len={len(prompt)}", flush=True)
+                    sys.stdout.flush()
+                    logger.error(f"[DRIFT_DEBUG] achat called, json_mode={json_mode}")
                     
                     # If JSON mode, append instruction to prompt
                     if json_mode and 'json' not in prompt.lower():
                         prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
                     
-                    response = await self.llm.acomplete(prompt)
-                    text = response.text.strip() if response and hasattr(response, 'text') else ''
+                    try:
+                        print(f"[DRIFT_DEBUG] Calling LLM...", flush=True)
+                        response = await self.llm.acomplete(prompt)
+                        text = response.text.strip() if response and hasattr(response, 'text') else ''
+                        print(f"[DRIFT_DEBUG] LLM response: len={len(text)}, text='{text[:500] if text else 'EMPTY'}'", flush=True)
+                        logger.error(f"[DRIFT_DEBUG] LLM returned: len={len(text)}, text={text[:200]}")
+                        
+                        # Strip markdown code fences if present (LLM often wraps JSON in ```json...```)
+                        if json_mode and text:
+                            cleaned_text = text.strip()
+                            if cleaned_text.startswith("```json"):
+                                cleaned_text = cleaned_text[7:]  # Remove ```json
+                            elif cleaned_text.startswith("```"):
+                                cleaned_text = cleaned_text[3:]  # Remove ```
+                            if cleaned_text.endswith("```"):
+                                cleaned_text = cleaned_text[:-3]  # Remove trailing ```
+                            text = cleaned_text.strip()
+                            print(f"[DRIFT_DEBUG] After stripping fences: len={len(text)}, starts_with={text[:80]}", flush=True)
+                    except Exception as e:
+                        print(f"[DRIFT_DEBUG] LLM call failed: {type(e).__name__}: {e}", flush=True)
+                        logger.error(f"[DRIFT_DEBUG] LLM call failed: {e}")
+                        raise
                     
-                    # Log for debugging
-                    logger.info(f"[DRIFT LLM] json_mode={json_mode}, response_len={len(text)}, text_preview={text[:100] if text else 'EMPTY'}")
-                    
-                    # If JSON mode and response is empty or invalid, return empty JSON object
-                    if json_mode and (not text or text == ''):
-                        logger.warning("[DRIFT LLM] Empty response in JSON mode, returning empty JSON object")
-                        text = '{}'
-                    
-                    return DRIFTModelResponse(text=text, raw_response=response)
+                    result = DRIFTModelResponse(text=text, raw_response=response)
+                    print(f"[DRIFT_DEBUG] Returning response type={type(result)}, str_value='{str(result)[:200]}'", flush=True)
+                    return result
                 
                 def chat(self, prompt: str, history: list | None = None, **kwargs):
                     """Sync version of chat."""
@@ -527,10 +558,6 @@ class DRIFTAdapter:
                     
                     response = self.llm.complete(prompt)
                     text = response.text.strip()
-                    
-                    # If JSON mode and response is empty or invalid, return empty JSON object
-                    if json_mode and (not text or text == ''):
-                        text = '{}'
                     
                     return DRIFTModelResponse(text=text, raw_response=response)
             

@@ -91,6 +91,7 @@
   - **Storage Strategy:**
     - **Neo4j:** Implement Native Vector Type (`VECTOR<FLOAT32>(1536)`) for sub-50ms retrieval without network hops.
     - **Azure AI Search:** "Silent Sink" - push vectors during indexing for disaster recovery/scaling only; inactive for queries.
+    - **Dimension Choice:** 1536 (text-embedding-3-small) chosen over 3072 (large) for 50% RAM reduction in Neo4j with only ~4% accuracy loss; graph structure provides precision.
   - **Acceptance:** Neo4j native vector index active; Azure index populated but cold; triplet density validated at <15.
 
 - **Phase 3: Orchestration & Triple-Engine Search**
@@ -104,7 +105,7 @@
       - **Entity/Relationship Extraction:** **GPT-4.1** (1M Token Window - optimized for massive document ingestion)
       - **RAPTOR Hierarchical Clustering:** **GPT-4.1** (handles thematic clustering across large corpora without reasoning overhead)
       - **Community Detection:** No LLM (graspologic Leiden algorithm)
-      - **Embedding Model:** **text-embedding-3-large** (3072 dims - maximum accuracy for financial/legal domain)
+      - **Embedding Model:** **text-embedding-3-small** (1536 dims - optimal for Neo4j RAM efficiency and retrieval speed)
     - **Query-Time Operations (The Unified Query):**
       - **Router (Intent Classification):** **GPT-5.2 Thinking Standard** (native "System 2" reasoning for near-perfect query routing)
       - **Answer Synthesis:** **GPT-5.2 Pro High Reasoning** (agentic verification with self-correction to prevent hallucinations)
@@ -114,12 +115,12 @@
     - **Migration Path:** 
       - Deploy GPT-4.1 for indexing when available (3-5x faster bulk extraction)
       - Deploy GPT-5.2 family for query-time when available (95%+ routing accuracy vs 85% with GPT-4o)
-      - Keep text-embedding-3-large (3072 dims) for highest accuracy
+      - Migrate to text-embedding-3-small (1536 dims) for Neo4j optimization (6.5x cost reduction, 2x RAM efficiency, minimal accuracy impact)
     - **Rationale:** 
       - **GPT-4.1 for Indexing:** 1M context window enables understanding document relationships at scale; "Reader" model optimized for ingestion, not reasoning
       - **GPT-5.2 Thinking for Routing:** Internal "System 2" loop achieves near-perfect intent classification (Vector vs Graph vs RAPTOR)
       - **GPT-5.2 Pro for Synthesis:** Agentic self-correction cross-references graph logic with text, preventing hallucinations in financial/insurance advice
-      - **text-embedding-3-large:** Maximum dimensionality (3072) provides superior accuracy for complex financial/legal document retrieval; cost justified by domain requirements
+      - **text-embedding-3-small:** Optimal for Neo4j native vectors - 1536 dims provide sufficient semantic capture for 400-600 token chunks while reducing RAM requirements by 50% and retrieval latency by ~30%; graph structure (triplets) + RAPTOR hierarchy provide precision, not raw embedding dimensionality; ~4% accuracy gap from Large model is negligible given architecture; 6.5x cost reduction ($0.02 vs $0.13 per 1M tokens)
   - **Query Logic:** "Hybrid+Boost" Cypher 25 query (Vector + Lexical + Quality Boost + RAPTOR Boost) in a single trip.
   - **Acceptance:** Single-trip retrieval latency <200ms; correct routing between engines; tenant isolation verified via unit tests.
 

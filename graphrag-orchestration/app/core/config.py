@@ -11,12 +11,16 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_BEARER_TOKEN: Optional[str] = None  # For local dev
-    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-4o"
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-4o"  # Primary model for queries
     # Optional override only for DRIFT to allow faster model like gpt-4o-mini
     AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = None
+    # Indexing operations (entity/relationship extraction, RAPTOR clustering)
+    AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = None  # Recommended: gpt-4.1 (1M context window)
+    # Query routing (intent classification: Vector vs Graph vs RAPTOR)
+    AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = None  # Recommended: gpt-5.2-thinking-standard
     AZURE_OPENAI_MODEL_VERSION: str = "2024-11-20"  # gpt-4o (2024-11-20)
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-large"
-    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 3072  # High precision for RAPTOR
+    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 3072  # High precision for RAPTOR (migrate to 1536 with text-embedding-3-small)
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Data Zone Standard max supported version
     
     # Vector Store for RAPTOR nodes

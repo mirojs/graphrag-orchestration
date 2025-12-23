@@ -52,16 +52,38 @@
   - ✅ Phase 1 Indexing (Dual-Write) complete.
   - ✅ **Phase 2 Complete:** Native Vector Types (`VECTOR<FLOAT32>`), triplet density (12-15), Hybrid+Boost Cypher query.
   - ✅ **Phase 3 Complete:** Triple-Engine routing with `TripleEngineRetriever`, unified `/v3/query` endpoint.
+  - ✅ **Phase 4 Complete:** RAPTOR-First Architecture (Local+RAPTOR, Global+RAPTOR, DRIFT+RAPTOR).
   
   **Benefits Achieved:**
   - **Latency:** -150ms (Single-trip Neo4j retrieval)
   - **Accuracy:** +10% estimated (Reduced graph noise + Quality boosting)
   - **Simplicity:** Single source of truth for query logic
+  - **Reasoning:** Multi-hop traversal via RAPTOR "teleporters" (DRIFT strategy)
   
   **Trade-offs:**
   - **Complexity:** Significantly Reduced. Single source of truth for queries.
   - **Scale:** Neo4j Aura has RAM limits; Azure provides the safety net if we exceed them.
   - **Search Quality:** Relying on "Graph Logic" boosting instead of Azure's Semantic Ranker (validated as sufficient for financial domain).
+
+- **Retrieval Strategy:** RAPTOR-First Architecture (Updated 2025-12-23)
+  - **Decision:** Implement "RAPTOR-First" logic where hierarchical summaries guide all search modes.
+  - **Status:** ✅ **IMPLEMENTED** (2025-12-23)
+  
+  **Strategies:**
+  1. **Local + RAPTOR (Contextual Zoom):**
+     - Logic: Entity Search → Parent RAPTOR Summary.
+     - Benefit: Provides "Thematic Context" to specific facts (e.g., "Contract Value" + "Risk Section Summary").
+  2. **Global + RAPTOR (Thematic Pruning):**
+     - Logic: RAPTOR Roots → Filter Communities → Synthesis.
+     - Benefit: Prunes 90% of irrelevant graph traversals by filtering communities based on high-level themes.
+  3. **DRIFT + RAPTOR (Multi-Hop Highway):**
+     - Logic: RAPTOR Summary ↔ Child Entities ↔ Next Summary.
+     - Benefit: Uses RAPTOR nodes as "teleporters" to jump between disconnected graph sections without getting lost in entity noise.
+  
+  **Implementation Details:**
+  - **Data Layer:** `SUMMARIZES` relationships link RAPTOR nodes to TextChunks.
+  - **Routing:** 4-way router (Vector, Graph, RAPTOR, DRIFT) using `o4-mini`.
+  - **Execution:** Unified Neo4j traversals in `TripleEngineRetriever`.
 
 - **LLM Strategy:** The "Lean Engine" (Azure OpenAI 2025)
   - **Decision:** Adopt specialized reasoning models for distinct pipeline stages.

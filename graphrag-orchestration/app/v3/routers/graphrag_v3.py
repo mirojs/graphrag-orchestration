@@ -115,6 +115,7 @@ class V3StatsResponse(BaseModel):
 _neo4j_store = None
 _drift_adapter = None
 _indexing_pipeline = None
+_triple_engine_retriever = None
 
 
 def get_neo4j_store():
@@ -196,6 +197,23 @@ def get_indexing_pipeline():
             config=config,
         )
     return _indexing_pipeline
+
+
+def get_triple_engine_retriever():
+    """Get or create Triple-Engine Retriever instance."""
+    global _triple_engine_retriever
+    if _triple_engine_retriever is None:
+        from app.v3.services.triple_engine_retriever import TripleEngineRetriever
+        from app.services.llm_service import LLMService
+        
+        store = get_neo4j_store()
+        llm_service = LLMService()
+        
+        _triple_engine_retriever = TripleEngineRetriever(
+            store=store,
+            llm_service=llm_service,
+        )
+    return _triple_engine_retriever
 
 
 # ==================== Helper Functions ====================
@@ -297,6 +315,46 @@ async def index_documents(
         raise HTTPException(status_code=500, detail=f"Indexing failed: {str(e)}")
 
 
+@router.post("/query", response_model=V3QueryResponse)
+async def query_unified(request: Request, payload: V3QueryRequest):
+    """
+    Unified query endpoint with automatic route selection (Triple-Engine).
+    
+    Uses GPT-5.2 Thinking to route queries to the optimal engine:
+    - Vector: Specific facts (dates, amounts, clause references)
+    - Graph: Relational reasoning (dependencies, connections)
+    - RAPTOR: Thematic summaries (portfolio risk, trends)
+    
+    This is the RECOMMENDED endpoint for general queries.
+    Use specific endpoints (/query/local, /query/global, /query/raptor) 
+    only when you need explicit control over routing.
+    """
+    group_id = get_group_id(request)
+    logger.info("v3_unified_query", group_id=group_id, query=payload.query[:50])
+    
+    try:
+        retriever = get_triple_engine_retriever()
+        
+        # Execute triple-engine retrieval with automatic routing
+        result = await retriever.retrieve(
+            query=payload.query,
+            group_id=group_id,
+            top_k=payload.top_k,
+        )
+        
+        return V3QueryResponse(
+            answer=result.answer,
+            confidence=result.confidence,
+            sources=result.sources if payload.include_sources else [],
+            entities_used=[s.get("name", "") for s in result.sources if "name" in s],
+            search_type=result.route,
+        )
+        
+    except Exception as e:
+        logger.error("v3_unified_query_failed", group_id=group_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
 @router.post("/query/local", response_model=V3QueryResponse)
 async def query_local(request: Request, payload: V3QueryRequest):
     """
@@ -308,6 +366,9 @@ async def query_local(request: Request, payload: V3QueryRequest):
     - Specific fact lookups
     
     Uses Neo4j vector search + graph expansion.
+    
+    NOTE: Consider using /v3/query (unified endpoint) instead,
+    which automatically routes to the optimal search method.
     """
     group_id = get_group_id(request)
     logger.info("v3_local_search", group_id=group_id, query=payload.query[:50])

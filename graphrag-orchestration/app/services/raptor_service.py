@@ -67,6 +67,8 @@ class RaptorService:
         self.summary_length = getattr(settings, 'RAPTOR_SUMMARY_LENGTH', 512)
         self.min_cluster_size = 2
         self.max_clusters_per_level = 10
+        # Use GPT-4.1 for RAPTOR clustering (1M context window, optimized for thematic summarization)
+        self.indexing_llm = None  # Lazy-loaded
         
     async def process_documents(
         self,
@@ -104,8 +106,12 @@ class RaptorService:
         """
         logger.info(f"Starting RAPTOR processing with Pack for {len(documents)} documents")
         
-        if self.llm_service.llm is None or self.llm_service.embed_model is None:
-            raise RuntimeError("LLM and embed_model must be initialized for RAPTOR processing")
+        # Use GPT-4.1 for RAPTOR hierarchical clustering (architecture: RAPTOR uses GPT-4.1)
+        if self.indexing_llm is None:
+            self.indexing_llm = self.llm_service.get_indexing_llm()
+        
+        if self.indexing_llm is None or self.llm_service.embed_model is None:
+            raise RuntimeError("Indexing LLM and embed_model must be initialized for RAPTOR processing")
         
         if RaptorPack is None:
             raise ImportError("RaptorPack is not available")
@@ -113,7 +119,7 @@ class RaptorService:
         try:
             raptor = RaptorPack(
                 documents=documents,
-                llm=self.llm_service.llm,
+                llm=self.indexing_llm,  # Use GPT-4.1 for thematic clustering
                 embed_model=self.llm_service.embed_model,
                 vector_store=None,
                 mode="tree_summarization",
@@ -359,8 +365,12 @@ class RaptorService:
         Returns:
             TextNode containing the summary, or None if failed
         """
-        if self.llm_service.llm is None or self.llm_service.embed_model is None:
-            raise RuntimeError("LLM and embed_model must be initialized for summarization")
+        # Use GPT-4.1 for hierarchical summarization (1M context window)
+        if self.indexing_llm is None:
+            self.indexing_llm = self.llm_service.get_indexing_llm()
+        
+        if self.indexing_llm is None or self.llm_service.embed_model is None:
+            raise RuntimeError("Indexing LLM and embed_model must be initialized for summarization")
         
         # Combine text from all nodes in cluster
         combined_text = "\n\n---\n\n".join([
@@ -392,7 +402,8 @@ Summary:"""
                 ChatMessage(role="user", content=prompt)
             ]
             
-            response = self.llm_service.llm.chat(messages)
+            # Use GPT-4.1 (1M context window) for thematic clustering
+            response = self.indexing_llm.chat(messages)
             summary_text = str(response).strip()
             
             # Clean up response

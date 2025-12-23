@@ -85,6 +85,14 @@
 
 - **Phase 2: High-Quality Local Indexing (Refined - "The Lean Engine")**
   - **Goal:** Transform Neo4j into a high-performance Vector + Logic engine while maintaining Azure as a "Cold" safety net.
+  - **Chunk Size Strategy:**
+    - **Target:** 400-600 tokens per chunk (optimized for financial/legal documents).
+    - **Why:** 
+      - **Small enough** to isolate specific clauses/facts (e.g., "guarantor liability clause" or "payment term").
+      - **Large enough** to preserve local context (surrounding sentences provide meaning).
+      - **Optimal for embeddings:** text-embedding-3-small (1536 dims) captures semantic meaning effectively in this range without requiring 3072-dim Large model.
+      - **Triplet efficiency:** Enables 12-15 focused triplets per chunk without "hairball" dilution.
+      - **RAPTOR compatibility:** Bite-sized units cluster cleanly into hierarchical summaries.
   - **Triplet Density Optimization:**
     - **Max Triplets:** 12–15 per chunk (reduced from 30-60).
     - **Why:** Focus graph on structural logic (Contract → Party → Obligation); let RAPTOR handle themes and Vector RAG handle page-level facts. Reduces "hairball" noise.
@@ -92,7 +100,7 @@
     - **Neo4j:** Implement Native Vector Type (`VECTOR<FLOAT32>(1536)`) for sub-50ms retrieval without network hops.
     - **Azure AI Search:** "Silent Sink" - push vectors during indexing for disaster recovery/scaling only; inactive for queries.
     - **Dimension Choice:** 1536 (text-embedding-3-small) chosen over 3072 (large) for 50% RAM reduction in Neo4j with only ~4% accuracy loss; graph structure provides precision.
-  - **Acceptance:** Neo4j native vector index active; Azure index populated but cold; triplet density validated at <15.
+  - **Acceptance:** Neo4j native vector index active; Azure index populated but cold; triplet density validated at <15; chunk sizes within 400-600 token range.
 
 - **Phase 3: Orchestration & Triple-Engine Search**
   - **Goal:** Consolidate retrieval into a single database trip (Neo4j) with Triple-Engine routing.

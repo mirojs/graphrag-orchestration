@@ -182,6 +182,8 @@ Respond with ONLY the route name (vector, graph, or raptor) on the first line, f
         - Community rank boost
         """
         # Get query embedding
+        if self.llm_service.embed_model is None:
+            raise RuntimeError("Embedding model not initialized")
         query_embedding = self.llm_service.embed_model.get_text_embedding(query)
         
         # Execute Hybrid+Boost search
@@ -228,6 +230,8 @@ Provide a precise answer with specific values, amounts, or dates if available.
 
 Answer:"""
         
+        if self.llm_service.llm is None:
+            raise RuntimeError("LLM not initialized")
         response = self.llm_service.llm.complete(prompt)
         
         return RetrievalResult(
@@ -291,6 +295,8 @@ Focus on explaining connections, dependencies, and how different entities relate
 
 Answer:"""
         
+        if self.llm_service.llm is None:
+            raise RuntimeError("LLM not initialized")
         response = self.llm_service.llm.complete(prompt)
         
         return RetrievalResult(
@@ -315,6 +321,8 @@ Answer:"""
         themes and cross-document insights.
         """
         # Get query embedding
+        if self.llm_service.embed_model is None:
+            raise RuntimeError("Embedding model not initialized")
         query_embedding = self.llm_service.embed_model.get_text_embedding(query)
         
         # Search RAPTOR nodes by vector similarity
@@ -360,6 +368,8 @@ Provide a comprehensive answer highlighting main themes, patterns, and cross-doc
 
 Answer:"""
         
+        if self.llm_service.llm is None:
+            raise RuntimeError("LLM not initialized")
         response = self.llm_service.llm.complete(prompt)
         
         return RetrievalResult(

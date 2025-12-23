@@ -960,7 +960,7 @@ Output ONLY the JSON object, no explanations or markdown:"""
         - entity_vector: Vector index on __Entity__ nodes
         - entity_fulltext: Fulltext index on __Entity__ name property
         """
-        results = {
+        results: Dict[str, Any] = {
             "chunk_vector": False,
             "chunk_fulltext": False,
             "entity_vector": False,

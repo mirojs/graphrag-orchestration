@@ -22,7 +22,7 @@ from app.services.llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 
-QueryRoute = Literal["vector", "graph", "raptor"]
+QueryRoute = Literal["vector", "graph", "raptor", "drift"]
 
 
 @dataclass
@@ -71,7 +71,7 @@ class TripleEngineRetriever:
         Returns:
             Tuple of (route, reasoning)
         """
-        routing_prompt = f"""You are a query router for a knowledge graph system. Classify the query into one of three routes:
+        routing_prompt = f"""You are a query router for a knowledge graph system. Classify the query into one of four routes:
 
 1. **vector**: For specific fact lookups
    - Examples: "What is the contract amount?", "When is the deadline?", "Who is the vendor?"
@@ -85,9 +85,13 @@ class TripleEngineRetriever:
    - Examples: "What are the main themes?", "Summarize all documents", "What are the risk factors?"
    - Characteristics: High-level overview, cross-document themes, portfolio analysis
 
+4. **drift**: For complex multi-hop reasoning
+   - Examples: "How did the incident in Part A lead to the change in Part B?", "What is the relationship between the CEO's vision and the Q3 budget?"
+   - Characteristics: Connecting distant concepts, "how" or "why" questions across topics
+
 Query: {query}
 
-Respond with ONLY the route name (vector, graph, or raptor) on the first line, followed by a brief explanation."""
+Respond with ONLY the route name (vector, graph, raptor, or drift) on the first line, followed by a brief explanation."""
 
         messages = [
             ChatMessage(role=MessageRole.SYSTEM, content="You are a precise query classifier."),
@@ -106,7 +110,7 @@ Respond with ONLY the route name (vector, graph, or raptor) on the first line, f
             reasoning = lines[1].strip() if len(lines) > 1 else "No reasoning provided"
             
             # Validate route
-            if route_str in ["vector", "graph", "raptor"]:
+            if route_str in ["vector", "graph", "raptor", "drift"]:
                 route = route_str  # type: ignore
                 logger.info(f"Query routed to: {route} | Reasoning: {reasoning[:100]}")
                 return route, reasoning
@@ -154,6 +158,8 @@ Respond with ONLY the route name (vector, graph, or raptor) on the first line, f
             return await self._retrieve_graph(query, group_id, top_k, reasoning)
         elif route == "raptor":
             return await self._retrieve_raptor(query, group_id, top_k, reasoning)
+        elif route == "drift":
+            return await self._retrieve_drift(query, group_id, top_k, reasoning)
         else:
             # Should never happen due to validation, but satisfy type checker
             logger.error(f"Unknown route: {route}")
@@ -207,6 +213,15 @@ Respond with ONLY the route name (vector, graph, or raptor) on the first line, f
         context_parts = []
         sources = []
         
+        # RAPTOR Context (Elevator Strategy: Local + RAPTOR)
+        # Fetch parent RAPTOR node for the top entity to provide thematic context
+        if results:
+            top_entity = results[0][0]
+            raptor_context = self.store.get_entity_raptor_context(group_id, top_entity.id)
+            if raptor_context:
+                context_parts.append(f"## Context (RAPTOR Summary):\n{raptor_context.text}\n")
+                logger.info(f"Added RAPTOR context for entity {top_entity.name}")
+        
         for entity, score in results:
             context_parts.append(f"- {entity.name} ({entity.type}): {entity.description}")
             sources.append({
@@ -252,11 +267,31 @@ Answer:"""
         """
         Graph Route: Relational reasoning using community summaries.
         
-        Uses Neo4j's community detection (Leiden algorithm) to find
-        thematically related entities and their connections.
+        Uses RAPTOR to prune the graph (Elevator Strategy: Global + RAPTOR), 
+        then retrieves relevant community summaries.
         """
-        # Get top-level community summaries (level 0 = broadest)
-        communities = self.store.get_communities_by_level(group_id=group_id, level=0)
+        # Step 1: RAPTOR Pruning (Elevator Strategy)
+        # Search RAPTOR nodes first to find relevant themes
+        if self.llm_service.embed_model is None:
+             raise RuntimeError("Embedding model not initialized")
+        query_embedding = self.llm_service.embed_model.get_text_embedding(query)
+        
+        raptor_nodes = self.store.search_raptor_by_embedding(
+            group_id=group_id,
+            embedding=query_embedding,
+            top_k=3, # Top 3 themes
+        )
+        
+        communities = []
+        if raptor_nodes:
+            raptor_ids = [node.id for node, _ in raptor_nodes]
+            communities = self.store.get_communities_by_raptor_context(group_id, raptor_ids)
+            logger.info(f"RAPTOR Pruning: Found {len(communities)} communities via {len(raptor_nodes)} RAPTOR nodes")
+            
+        # Fallback if RAPTOR didn't find anything (or no RAPTOR index)
+        if not communities:
+            logger.info("RAPTOR Pruning: No results, falling back to full community scan")
+            communities = self.store.get_communities_by_level(group_id=group_id, level=0)
         
         if not communities:
             return RetrievalResult(
@@ -376,6 +411,81 @@ Answer:"""
             answer=response.text,
             confidence=results[0][1] if results else 0.0,
             route="raptor",
+            sources=sources,
+            reasoning=reasoning,
+        )
+
+    async def _retrieve_drift(
+        self,
+        query: str,
+        group_id: str,
+        top_k: int,
+        reasoning: str,
+    ) -> RetrievalResult:
+        """
+        DRIFT Route: Multi-hop traversal using RAPTOR nodes as 'teleporters'.
+        
+        Uses RAPTOR summaries to jump between disconnected parts of the graph
+        when standard entity traversal fails or is too slow.
+        """
+        # Step 1: Start with high-level RAPTOR summaries (The "Highway")
+        if self.llm_service.embed_model is None:
+             raise RuntimeError("Embedding model not initialized")
+        query_embedding = self.llm_service.embed_model.get_text_embedding(query)
+        
+        # Find entry points (RAPTOR nodes)
+        raptor_nodes = self.store.search_raptor_by_embedding(
+            group_id=group_id,
+            embedding=query_embedding,
+            top_k=3,
+        )
+        
+        if not raptor_nodes:
+             # Fallback to vector search if no RAPTOR nodes found
+             return await self._retrieve_vector(query, group_id, top_k, reasoning)
+
+        context_parts = []
+        sources = []
+        
+        # Step 2: Drill down from RAPTOR to Entities (The "Off-Ramp")
+        for node, score in raptor_nodes:
+            context_parts.append(f"## Theme: {node.text[:200]}...")
+            
+            # Find entities mentioned in this RAPTOR cluster
+            # This is the "DRIFT" part - moving from Summary -> Entity
+            entities = self.store.get_entities_by_raptor_context(group_id, node.id, limit=5)
+            
+            for entity in entities:
+                context_parts.append(f"- Related Fact: {entity.name} ({entity.type}): {entity.description}")
+                sources.append({
+                    "id": entity.id,
+                    "name": entity.name,
+                    "type": "drift_entity",
+                    "via_raptor": node.id
+                })
+                
+        context = "\n".join(context_parts)
+        
+        # Generate answer
+        prompt = f"""Answer the following complex question by synthesizing high-level themes and specific facts.
+
+Context:
+{context}
+
+Question: {query}
+
+Explain the connections between the themes and the specific facts.
+
+Answer:"""
+
+        if self.llm_service.llm is None:
+            raise RuntimeError("LLM not initialized")
+        response = self.llm_service.llm.complete(prompt)
+        
+        return RetrievalResult(
+            answer=response.text,
+            confidence=raptor_nodes[0][1] if raptor_nodes else 0.0,
+            route="drift", # Note: We need to add 'drift' to QueryRoute type definition
             sources=sources,
             reasoning=reasoning,
         )

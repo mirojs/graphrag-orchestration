@@ -663,6 +663,92 @@ class Neo4jStoreV3:
         
         return communities
     
+    def get_entities_by_raptor_context(self, group_id: str, raptor_node_id: str, limit: int = 10) -> List[Entity]:
+        """
+        Get entities mentioned in the chunks summarized by a RAPTOR node.
+        Used for DRIFT traversal (Summary -> Entity).
+        """
+        query = """
+        MATCH (r:RaptorNode {id: $raptor_id})
+        // Traverse down to chunks
+        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk)
+        // Find entities in these chunks
+        MATCH (c)-[:MENTIONS]->(e:Entity)
+        RETURN DISTINCT e
+        LIMIT $limit
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, raptor_id=raptor_node_id, limit=limit)
+            entities = []
+            for record in result:
+                e = record["e"]
+                entities.append(Entity(
+                    id=e["id"],
+                    name=e["name"],
+                    type=e["type"],
+                    description=e.get("description", ""),
+                    metadata=dict(e.get("metadata", {})),
+                ))
+            return entities
+
+    def get_communities_by_raptor_context(self, group_id: str, raptor_node_ids: List[str]) -> List[Community]:
+        """
+        Get communities relevant to specific RAPTOR nodes.
+        Used for 'Global + RAPTOR' pruning.
+        """
+        query = """
+        MATCH (r:RaptorNode)
+        WHERE r.id IN $raptor_ids
+        // Traverse down to chunks
+        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk)
+        // Find entities in these chunks
+        MATCH (c)-[:MENTIONS]->(e:Entity)
+        // Find communities these entities belong to
+        MATCH (e)-[:IN_COMMUNITY]->(comm:Community)
+        WHERE comm.group_id = $group_id AND comm.level = 0
+        RETURN DISTINCT comm
+        LIMIT 20
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id, raptor_ids=raptor_node_ids)
+            communities = []
+            for record in result:
+                c = record["comm"]
+                communities.append(Community(
+                    id=c["id"],
+                    level=c["level"],
+                    title=c.get("title", ""),
+                    summary=c.get("summary", ""),
+                    rank=c.get("rank", 0.0),
+                    entity_ids=c.get("entity_ids", []),
+                ))
+            return communities
+
+    def get_entity_raptor_context(self, group_id: str, entity_id: str) -> Optional[RaptorNode]:
+        """
+        Get the parent RAPTOR node for an entity to provide thematic context.
+        Traverses: Entity <- MENTIONS - TextChunk - SUMMARIZES -> RaptorNode
+        """
+        query = """
+        MATCH (e:Entity {id: $entity_id})<-[:MENTIONS]-(c:TextChunk)-[:SUMMARIZES]->(r:RaptorNode)
+        WHERE r.group_id = $group_id
+        RETURN r
+        ORDER BY r.level ASC
+        LIMIT 1
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id, entity_id=entity_id)
+            record = result.single()
+            if record:
+                node_data = record["r"]
+                return RaptorNode(
+                    id=node_data["id"],
+                    text=node_data["text"],
+                    level=node_data["level"],
+                    metadata=dict(node_data.get("metadata", {})),
+                )
+        return None
+
     # ==================== RAPTOR Node Operations ====================
     
     def upsert_raptor_node(self, group_id: str, node: RaptorNode) -> str:
@@ -673,9 +759,18 @@ class Neo4jStoreV3:
             r.level = $level,
             r.group_id = $group_id,
             r.metadata = $metadata,
+            r.child_ids = $child_ids,
             r.updated_at = datetime()
         WITH r
         CALL db.create.setVectorProperty(r, 'embedding', $embedding)
+        
+        WITH r
+        UNWIND $child_ids AS child_id
+        OPTIONAL MATCH (tc:TextChunk {id: child_id})
+        FOREACH (_ IN CASE WHEN tc IS NOT NULL THEN [1] ELSE [] END | MERGE (tc)-[:SUMMARIZES]->(r))
+        OPTIONAL MATCH (rn:RaptorNode {id: child_id})
+        FOREACH (_ IN CASE WHEN rn IS NOT NULL THEN [1] ELSE [] END | MERGE (rn)-[:SUMMARIZES]->(r))
+        
         RETURN r.id AS id
         """
         
@@ -688,10 +783,12 @@ class Neo4jStoreV3:
                 embedding=node.embedding,
                 group_id=group_id,
                 metadata=node.metadata,
+                child_ids=node.child_ids,
             )
             record = result.single()
             
-            # Link to parent if exists
+            # Link to parent if exists (legacy support)
+            if node.parent_id:
             if node.parent_id:
                 link_query = """
                 MATCH (child:RaptorNode {id: $child_id})

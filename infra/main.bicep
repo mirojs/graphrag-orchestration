@@ -161,6 +161,16 @@ module graphragApp './core/host/container-app.bicep' = {
   }
 }
 
+// Deploy Azure OpenAI Models (Lean Engine Architecture)
+module openAiModels './core/ai/openai-models.bicep' = {
+  name: 'openai-models'
+  scope: rg
+  params: {
+    openAiResourceName: 'graphrag-openai-8476'
+    location: location
+  }
+}
+
 // Role Assignments for Container App Managed Identity
 module roleAssignments './core/security/role-assignments.bicep' = {
   name: 'role-assignments'
@@ -173,6 +183,7 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     azureOpenAiName: 'graphrag-openai-8476'
     azureSearchName: 'graphrag-search'
   }
+  dependsOn: [openAiModels] // Ensure models exist before assigning permissions
 }
 
 // Outputs

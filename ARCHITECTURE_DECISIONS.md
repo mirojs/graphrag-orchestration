@@ -104,7 +104,7 @@
       - **Entity/Relationship Extraction:** **GPT-4.1** (1M Token Window - optimized for massive document ingestion)
       - **RAPTOR Hierarchical Clustering:** **GPT-4.1** (handles thematic clustering across large corpora without reasoning overhead)
       - **Community Detection:** No LLM (graspologic Leiden algorithm)
-      - **Embedding Model:** **text-embedding-3-small** (1536 dims with Matryoshka - cost-effective for Neo4j native vectors)
+      - **Embedding Model:** **text-embedding-3-large** (3072 dims - maximum accuracy for financial/legal domain)
     - **Query-Time Operations (The Unified Query):**
       - **Router (Intent Classification):** **GPT-5.2 Thinking Standard** (native "System 2" reasoning for near-perfect query routing)
       - **Answer Synthesis:** **GPT-5.2 Pro High Reasoning** (agentic verification with self-correction to prevent hallucinations)
@@ -114,12 +114,12 @@
     - **Migration Path:** 
       - Deploy GPT-4.1 for indexing when available (3-5x faster bulk extraction)
       - Deploy GPT-5.2 family for query-time when available (95%+ routing accuracy vs 85% with GPT-4o)
-      - Consider downgrading to text-embedding-3-small (1536 dims) for cost optimization
+      - Keep text-embedding-3-large (3072 dims) for highest accuracy
     - **Rationale:** 
       - **GPT-4.1 for Indexing:** 1M context window enables understanding document relationships at scale; "Reader" model optimized for ingestion, not reasoning
       - **GPT-5.2 Thinking for Routing:** Internal "System 2" loop achieves near-perfect intent classification (Vector vs Graph vs RAPTOR)
       - **GPT-5.2 Pro for Synthesis:** Agentic self-correction cross-references graph logic with text, preventing hallucinations in financial/insurance advice
-      - **text-embedding-3-small:** Matryoshka dimensions provide 85% of Large model accuracy at 60% cost; optimal for Neo4j's native vector storage
+      - **text-embedding-3-large:** Maximum dimensionality (3072) provides superior accuracy for complex financial/legal document retrieval; cost justified by domain requirements
   - **Query Logic:** "Hybrid+Boost" Cypher 25 query (Vector + Lexical + Quality Boost + RAPTOR Boost) in a single trip.
   - **Acceptance:** Single-trip retrieval latency <200ms; correct routing between engines; tenant isolation verified via unit tests.
 

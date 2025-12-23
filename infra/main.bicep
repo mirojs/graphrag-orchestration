@@ -85,19 +85,31 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
-        value: 'gpt-4o'
+        value: 'o3-pro'
       }
       {
-        name: 'AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME'
-        value: 'gpt-5-2'  // Optional: Use GPT-5.2 for DRIFT queries (400K context, reasoning)
+        name: 'AZURE_OPENAI_ROUTING_DEPLOYMENT'
+        value: 'o4-mini'
+      }
+      {
+        name: 'AZURE_OPENAI_INDEXING_DEPLOYMENT'
+        value: 'gpt-4.1'
       }
       {
         name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
-        value: 'text-embedding-3-large'
+        value: 'text-embedding-3-small'
       }
       {
         name: 'AZURE_OPENAI_EMBEDDING_DIMENSIONS'
-        value: '3072'
+        value: '1536'
+      }
+      {
+        name: 'AZURE_OPENAI_REASONING_EFFORT'
+        value: 'high'
+      }
+      {
+        name: 'AZURE_OPENAI_ROUTING_REASONING_EFFORT'
+        value: 'medium'
       }
       {
         name: 'AZURE_OPENAI_API_VERSION'

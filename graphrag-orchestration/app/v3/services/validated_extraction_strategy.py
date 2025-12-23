@@ -72,20 +72,68 @@ class ValidatedEntityExtractor:
             "total_rejected": 0,
         }
         
-        all_validated_nodes = []
-        
-        # Single pass extraction (already validated by LLM naturally)
-        logger.info(f"Extracting entities from {len(nodes)} chunks with max_triplets={self.max_triplets_per_pass}")
+        # Extract entities from chunks
+        logger.info(f"🔍 VALIDATION: Extracting entities from {len(nodes)} chunks with max_triplets={self.max_triplets_per_pass}")
         
         extracted_nodes = await self.extractor.acall(nodes)
         stats["total_passes"] = 1
         stats["total_extracted"] = len(extracted_nodes)
+        logger.info(f"🔍 VALIDATION: Extracted {len(extracted_nodes)} nodes before validation")
+        logger.info(f"🔍 VALIDATION: Extracted {len(extracted_nodes)} nodes before validation")
         
-        # Optional: Add validation pass if needed
-        # For now, trust LLM's natural validation at conservative limits
-        stats["total_validated"] = len(extracted_nodes)
+        # Validate extracted entities using LLM
+        validated_nodes = []
+        for node in extracted_nodes:
+            # Get entities from node metadata
+            kg_nodes = node.metadata.get("kg_nodes", [])
+            if not kg_nodes:
+                # No entities to validate, keep node as-is
+                validated_nodes.append(node)
+                continue
+            
+            # Extract entity info for validation
+            entities = []
+            for kg_node in kg_nodes:
+                entity_name = getattr(kg_node, "name", None) or kg_node.get("name")
+                entities.append({"name": entity_name})
+            
+            # Validate entities against source text
+            chunk_text = node.text if hasattr(node, 'text') else str(node)
+            validated_entities = await self.validate_entities(entities, chunk_text)
+            
+            # Filter entities by confidence threshold
+            high_confidence_names = {
+                entity["name"] for entity, confidence in validated_entities 
+                if confidence >= self.validation_threshold
+            }
+            
+            # Filter kg_nodes to keep only high-confidence entities
+            filtered_kg_nodes = [
+                kg_node for kg_node in kg_nodes
+                if (getattr(kg_node, "name", None) or kg_node.get("name")) in high_confidence_names
+            ]
+            
+            rejected_count = len(kg_nodes) - len(filtered_kg_nodes)
+            stats["total_rejected"] += rejected_count
+            stats["total_validated"] += len(filtered_kg_nodes)
+            
+            if rejected_count > 0:
+                rejected_names = [
+                    getattr(kg_node, "name", None) or kg_node.get("name")
+                    for kg_node in kg_nodes
+                    if (getattr(kg_node, "name", None) or kg_node.get("name")) not in high_confidence_names
+                ]               
+                logger.info(f"🔍 VALIDATION: Rejected {rejected_count} low-confidence entities: {rejected_names[:5]}")
+            else:
+                logger.info(f"🔍 VALIDATION: All entities passed validation threshold {self.validation_threshold}")
+            
+            # Update node with filtered entities
+            node.metadata["kg_nodes"] = filtered_kg_nodes
+            validated_nodes.append(node)
         
-        return extracted_nodes, stats
+        filter_rate = (stats['total_rejected'] / stats['total_extracted'] * 100) if stats['total_extracted'] > 0 else 0
+        logger.info(f"🔍 VALIDATION SUMMARY: {stats['total_validated']} validated, {stats['total_rejected']} rejected ({filter_rate:.1f}% filtered)")
+        return validated_nodes, stats
     
     async def validate_entities(self, entities: List[Dict], chunk_text: str) -> List[Tuple[Dict, float]]:
         """
@@ -103,11 +151,14 @@ class ValidatedEntityExtractor:
         if not entities:
             return []
         
+        # Truncate chunk text if too long (keep first 1000 chars for context)
+        if len(chunk_text) > 1000:
+            chunk_text = chunk_text[:1000] + "..."
+        
         # Create validation prompt
         entity_list = "\n".join([f"- {e['name']}" for e in entities])
         
-        validation_prompt = f"""
-Given this text:
+        validation_prompt = f"""Given this text:
 {chunk_text}
 
 These entities were extracted:
@@ -120,16 +171,39 @@ Score 0-10 where:
 - 4-6: Somewhat implied
 - 0-3: Weak connection or hallucinated
 
-Return JSON array: [{{"name": "entity", "score": 0-10, "reasoning": "why"}}]
+Return ONLY a JSON array with no markdown formatting: [{{"name": "entity", "score": 8}}]
 """
         
         try:
             response = await self.llm.acomplete(validation_prompt)
-            # Parse validation scores
-            # (Implementation would parse JSON and filter by threshold)
+            response_text = str(response).strip()
             
-            # For now, return all with high confidence (trust LLM at conservative limits)
-            return [(e, 1.0) for e in entities]
+            # Remove markdown code fences if present
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+            
+            # Parse JSON response
+            import json
+            try:
+                scores = json.loads(response_text)
+                
+                # Map scores to entities
+                score_map = {item["name"]: item["score"] / 10.0 for item in scores}
+                
+                validated = []
+                for entity in entities:
+                    confidence = score_map.get(entity["name"], 0.5)  # Default to 0.5 if not found
+                    validated.append((entity, confidence))
+                
+                return validated
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse validation JSON: {e}. Response: {response_text[:200]}")
+                # On parse error, trust original extraction
+                return [(e, 1.0) for e in entities]
             
         except Exception as e:
             logger.error(f"Validation failed: {e}")
@@ -137,35 +211,37 @@ Return JSON array: [{{"name": "entity", "score": 0-10, "reasoning": "why"}}]
             return [(e, 1.0) for e in entities]
 
 
-# Recommended configuration based on analysis
+# Recommended configuration based on "Lean Engine" Architecture (2025-12-23)
+# Reduced triplet density to focus graph on structural logic (12-15 max)
+# See: ARCHITECTURE_DECISIONS.md § Phase 2: High-Quality Local Indexing
 EXTRACTION_CONFIGS = {
     "conservative": {
-        # Neo4j-style: High precision, lower recall
-        "max_triplets_per_chunk": 25,
+        # Lean Engine: Minimal triplets for simple documents
+        "max_triplets_per_chunk": 10,
         "use_validation": False,
-        "description": "Fast, high quality, may miss some entities"
+        "description": "Lean graph for simple docs (invoices, forms)"
     },
     
     "balanced": {
-        # Our current approach: Good balance
-        "max_triplets_per_chunk": 60,
+        # Lean Engine Default: Focus on structural relationships
+        "max_triplets_per_chunk": 12,
         "use_validation": False,
-        "description": "Good balance of quality and coverage"
+        "description": "Optimal density for contract/business docs (NEW DEFAULT)"
     },
     
-    "aggressive": {
-        # High recall with validation safety net
-        "max_triplets_per_chunk": 80,
-        "use_validation": False,  # Trust LLM at this level
-        "description": "Maximum extraction, acceptable quality"
+    "dense": {
+        # Upper limit for complex documents
+        "max_triplets_per_chunk": 15,
+        "use_validation": False,
+        "description": "Maximum density for legal/technical docs"
     },
     
-    "validated_aggressive": {
-        # Microsoft-style: Multiple passes with validation
-        "max_triplets_per_chunk": 30,
+    "validated_balanced": {
+        # Validation pass with lean density
+        "max_triplets_per_chunk": 12,
         "use_validation": True,
-        "max_passes": 3,
-        "description": "Highest quality, slower, more expensive"
+        "max_passes": 2,
+        "description": "Quality-validated balanced extraction"
     },
 }
 
@@ -173,6 +249,9 @@ EXTRACTION_CONFIGS = {
 def get_recommended_config(document_complexity: str = "medium") -> Dict[str, Any]:
     """
     Get recommended extraction configuration based on document type.
+    
+    Updated for "Lean Engine" architecture (12-15 triplet max).
+    Focus graph on structural logic; let RAPTOR handle themes and Vector RAG handle facts.
     
     Args:
         document_complexity: "simple" | "medium" | "complex"
@@ -185,25 +264,34 @@ def get_recommended_config(document_complexity: str = "medium") -> Dict[str, Any
         return EXTRACTION_CONFIGS["conservative"]
     
     elif document_complexity == "medium":
-        # Business docs (contracts, reports): Balanced approach
+        # Business docs (contracts, reports): Balanced approach (NEW DEFAULT)
         return EXTRACTION_CONFIGS["balanced"]
     
     elif document_complexity == "complex":
-        # Complex docs (legal, technical): Aggressive extraction
-        return EXTRACTION_CONFIGS["aggressive"]
+        # Complex docs (legal, technical): Dense extraction (but still capped at 15)
+        return EXTRACTION_CONFIGS["dense"]
     
     else:
         return EXTRACTION_CONFIGS["balanced"]
 
 
-# Example usage
+# Example usage for "Lean Engine" Architecture
 """
-For your use case (5 PDFs with contracts/invoices):
+For contract/invoice processing (updated 2025-12-23):
 
-Option 1: Current approach (Good)
-  max_triplets_per_chunk = 80
+Option 1: Lean Balanced (RECOMMENDED)
+  max_triplets_per_chunk = 12
   No validation pass
-  Result: 664 entities, fast processing
+  Focus: Structural relationships (Contract → Party → Obligation)
+  Result: Clean graph, RAPTOR handles themes, Vector RAG handles facts
+  
+Option 2: Lean Conservative (Simple Docs)
+  max_triplets_per_chunk = 10
+  For simple invoices/forms
+  
+Option 3: Dense (Complex Docs Only)
+  max_triplets_per_chunk = 15
+  For legal/technical documents with many entities
   → Use this if quality is acceptable
 
 Option 2: Neo4j conservative + validation (Highest quality)

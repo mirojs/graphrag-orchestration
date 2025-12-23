@@ -58,6 +58,7 @@ from llama_index.core.graph_stores import SimplePropertyGraphStore
 from llama_index.core import PropertyGraphIndex
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.indices.property_graph import SchemaLLMPathExtractor, SimpleLLMPathExtractor
+from app.v3.services.validated_extraction_strategy import ValidatedEntityExtractor
 
 from app.core.config import settings
 from app.services.vector_service import AzureAISearchProvider
@@ -722,26 +723,30 @@ class IndexingPipelineV3:
         # - Matches how Microsoft GraphRAG, Neo4j GraphRAG, and Cognee work
         #
         # Result: LLM does semantic reasoning (its strength) + Pydantic ensures clean data (compensates for LLM weakness)
+        #
+        # WITH MICROSOFT VALIDATION: Adds post-extraction validation pass to score entity confidence
+        # and filter out hallucinations using LLM-based quality scoring (0-10 scale)
         try:
-            extractor = SchemaLLMPathExtractor(
+            # Use Microsoft-style validated extraction
+            validated_extractor = ValidatedEntityExtractor(
                 llm=self.llm,
-                possible_entities=None,  # Use DEFAULT_ENTITIES: Literal["PERSON", "ORGANIZATION", "LOCATION", ...]
-                possible_relations=None,  # Use DEFAULT_RELATIONS: Literal["HAS", "LOCATED_IN", "PART_OF", ...]
-                strict=False,  # Let LLM use semantic understanding, don't over-constrain patterns
-                num_workers=1,
-                max_triplets_per_chunk=80,  # Increased from 20 to allow more entities per chunk
+                max_triplets_per_pass=60,  # Extract up to 60 triplets
+                validation_threshold=0.7,  # Keep entities with 7+ confidence (Microsoft default, quality-first)
+                max_passes=1,  # Single extraction pass (validation happens after)
             )
-            logger.info(f"Initialized SchemaLLMPathExtractor with strict=False, max_triplets_per_chunk=80 for {len(llama_nodes)} nodes")
+            logger.info(f"Initialized ValidatedEntityExtractor with max_triplets=60, validation_threshold=0.7 for {len(llama_nodes)} nodes")
         except Exception as e:
-            logger.error(f"Failed to initialize SchemaLLMPathExtractor: {e}")
+            logger.error(f"Failed to initialize ValidatedEntityExtractor: {e}")
             raise
 
-        # Extract entities and relationships using LlamaIndex
+        # Extract entities and relationships using validated extraction
         try:
             self.extraction_stats["total_extractions"] += 1
             
-            extracted_nodes = await extractor.acall(llama_nodes)
-            logger.info(f"Extracted {len(extracted_nodes)} nodes with metadata")
+            # Extract with validation
+            extracted_nodes, validation_stats = await validated_extractor.extract_with_validation(llama_nodes)
+            logger.info(f"Extracted {len(extracted_nodes)} nodes (validation stats: {validation_stats})")
+            
             # Collect entities and relations from node metadata
             # Track which entities came from which chunks for MENTIONS relationships
             all_entity_nodes = []

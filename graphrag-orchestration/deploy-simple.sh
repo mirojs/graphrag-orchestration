@@ -52,81 +52,36 @@ echo "✅ ACR: $ACR_SERVER"
 # Build and push image
 echo ""
 echo "=================================================="
+# Use custom IMAGE_TAG if provided, otherwise default to 'latest'
+IMAGE_TAG="${IMAGE_TAG:-latest}"
+IMAGE_NAME="$ACR_SERVER/graphrag-orchestration:$IMAGE_TAG"
+
 echo "Building and Pushing Docker Image"
 echo "=================================================="
+echo "Image tag: $IMAGE_TAG"
 echo "⏳ Logging in..."
 echo "$ACR_PASSWORD" | docker login "$ACR_SERVER" --username "$ACR_NAME" --password-stdin
 
 echo "⏳ Building..."
-docker build -t "$ACR_SERVER/graphrag-orchestration:latest" .
+docker build -t "$IMAGE_NAME" .
 
 echo "⏳ Pushing..."
-docker push "$ACR_SERVER/graphrag-orchestration:latest"
+docker push "$IMAGE_NAME"
 
-echo "✅ Image: $ACR_SERVER/graphrag-orchestration:latest"
+echo "✅ Image: $IMAGE_NAME"
 
 # Save image ID for cleanup after successful deployment
-IMAGE_ID=$(docker images "$ACR_SERVER/graphrag-orchestration:latest" --format "{{.ID}}")
+IMAGE_ID=$(docker images "$IMAGE_NAME" --format "{{.ID}}")
 echo "  Image ID: $IMAGE_ID (will cleanup after deployment)"
 
-# Check if Neo4j container exists and is running
+# Use Neo4j Aura (cloud-hosted, always available)
 echo ""
 echo "=================================================="
-echo "Checking Neo4j Container"
+echo "Using Neo4j Aura Cloud"
 echo "=================================================="
-
-NEO4J_STATE=$(az container show --name neo4j-graphrag --resource-group "$RESOURCE_GROUP" --query instanceView.state -o tsv 2>/dev/null || echo "NotFound")
-
-if [ "$NEO4J_STATE" = "Running" ]; then
-  echo "✅ Neo4j already running"
-  NEO4J_FQDN=$(az container show --name neo4j-graphrag --resource-group "$RESOURCE_GROUP" --query ipAddress.fqdn -o tsv)
-elif [ "$NEO4J_STATE" = "NotFound" ] || [ "$NEO4J_STATE" = "Failed" ] || [ "$NEO4J_STATE" = "Terminated" ]; then
-  echo "⏳ Deploying new Neo4j container..."
-  
-  # Delete failed container if exists
-  if [ "$NEO4J_STATE" != "NotFound" ]; then
-    az container delete --name neo4j-graphrag --resource-group "$RESOURCE_GROUP" --yes 2>/dev/null || true
-  fi
-  
-  # Get storage key
-  STORAGE_KEY=$(az storage account keys list --account-name "$STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" --query "[0].value" -o tsv)
-  
-  # Ensure file share exists
-  az storage share create --name neo4j-data --account-name "$STORAGE_ACCOUNT" --account-key "$STORAGE_KEY" 2>/dev/null || echo "  (File share already exists)"
-  
-  # Deploy Neo4j
-  az container create \
-    --resource-group "$RESOURCE_GROUP" \
-    --name neo4j-graphrag \
-    --image neo4j:5.15.0 \
-    --os-type Linux \
-    --cpu 2 \
-    --memory 4 \
-    --ports 7474 7687 \
-    --ip-address Public \
-    --dns-name-label "neo4j-graphrag-${RANDOM}" \
-    --environment-variables \
-      NEO4J_AUTH="neo4j/$NEO4J_PASSWORD" \
-      NEO4J_PLUGINS='["apoc","graph-data-science"]' \
-    --azure-file-volume-account-name "$STORAGE_ACCOUNT" \
-    --azure-file-volume-account-key "$STORAGE_KEY" \
-    --azure-file-volume-share-name neo4j-data \
-    --azure-file-volume-mount-path /data \
-    --no-wait
-  
-  echo "  ⏳ Waiting for Neo4j to start (30s)..."
-  sleep 30
-  
-  NEO4J_FQDN=$(az container show --name neo4j-graphrag --resource-group "$RESOURCE_GROUP" --query ipAddress.fqdn -o tsv)
-else
-  echo "  Neo4j state: $NEO4J_STATE"
-  echo "  ⏳ Waiting for current operation to complete..."
-  sleep 20
-  NEO4J_FQDN=$(az container show --name neo4j-graphrag --resource-group "$RESOURCE_GROUP" --query ipAddress.fqdn -o tsv)
-fi
-
-NEO4J_URI="bolt://${NEO4J_FQDN}:7687"
-echo "✅ Neo4j: $NEO4J_URI"
+NEO4J_URI="neo4j+s://a86dcf63.databases.neo4j.io"
+NEO4J_PASSWORD="uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+echo "✅ Neo4j Aura: $NEO4J_URI"
 
 # Get existing Azure resources
 echo ""
@@ -167,24 +122,22 @@ if [ "$APP_EXISTS" = "yes" ]; then
   az containerapp update \
     --name graphrag-orchestration \
     --resource-group "$RESOURCE_GROUP" \
-    --image "$ACR_SERVER/graphrag-orchestration:latest" \
+    --image "$IMAGE_NAME" \
     --set-env-vars \
       "NEO4J_URI=$NEO4J_URI" \
       "NEO4J_USERNAME=neo4j" \
       "NEO4J_PASSWORD=$NEO4J_PASSWORD" \
       "AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT" \
+      "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://doc-intel-graphrag.cognitiveservices.azure.com/" \
       "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" \
     --output table
-    # Note: Azure Content Understanding endpoint commented out - using Azure Document Intelligence instead
-    # "AZURE_CONTENT_UNDERSTANDING_ENDPOINT=https://cu-graphrag-service.cognitiveservices.azure.com/" \
-    # "AZURE_CONTENT_UNDERSTANDING_API_KEY=..."
 else
   echo "⏳ Creating new app..."
   az containerapp create \
     --name graphrag-orchestration \
     --resource-group "$RESOURCE_GROUP" \
     --environment graphrag-env \
-    --image "$ACR_SERVER/graphrag-orchestration:latest" \
+    --image "$IMAGE_NAME" \
     --registry-server "$ACR_SERVER" \
     --registry-username "$ACR_NAME" \
     --registry-password "$ACR_PASSWORD" \
@@ -198,6 +151,7 @@ else
       "AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT" \
       "AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o" \
       "AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large" \
+      "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://doc-intel-graphrag.cognitiveservices.azure.com/" \
       "NEO4J_URI=$NEO4J_URI" \
       "NEO4J_USERNAME=neo4j" \
       "NEO4J_PASSWORD=$NEO4J_PASSWORD" \
@@ -207,13 +161,53 @@ else
       "COSMOS_DATABASE_NAME=content-processor" \
       "ENABLE_GROUP_ISOLATION=true" \
     --output table
-    # Note: Azure Content Understanding endpoint commented out - using Azure Document Intelligence instead
-    # "AZURE_CONTENT_UNDERSTANDING_ENDPOINT=https://cu-graphrag-service.cognitiveservices.azure.com/" \
-    # "AZURE_CONTENT_UNDERSTANDING_API_KEY=..."
 fi
 
 GRAPHRAG_URL=$(az containerapp show --name graphrag-orchestration --resource-group "$RESOURCE_GROUP" --query properties.configuration.ingress.fqdn -o tsv)
 GRAPHRAG_URL="https://$GRAPHRAG_URL"
+
+# Configure managed identity and permissions
+echo ""
+echo "=================================================="
+echo "Configuring Managed Identity & Permissions"
+echo "=================================================="
+echo "⏳ Assigning system managed identity..."
+PRINCIPAL_ID=$(az containerapp identity assign \
+  --name graphrag-orchestration \
+  --resource-group "$RESOURCE_GROUP" \
+  --system-assigned \
+  --query principalId -o tsv)
+
+if [ -n "$PRINCIPAL_ID" ]; then
+  echo "✅ Managed identity: $PRINCIPAL_ID"
+  
+  echo "⏳ Granting Storage Blob Data Reader..."
+  az role assignment create \
+    --assignee "$PRINCIPAL_ID" \
+    --role "Storage Blob Data Reader" \
+    --scope "/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.Storage/storageAccounts/$STORAGE_ACCOUNT" \
+    --output none 2>/dev/null || echo "  (Already assigned)"
+  
+  echo "⏳ Granting Cognitive Services User (Document Intelligence)..."
+  az role assignment create \
+    --assignee "$PRINCIPAL_ID" \
+    --role "Cognitive Services User" \
+    --scope "/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/doc-intel-graphrag" \
+    --output none 2>/dev/null || echo "  (Already assigned)"
+  
+  echo "⏳ Granting Cognitive Services OpenAI User..."
+  az role assignment create \
+    --assignee "$PRINCIPAL_ID" \
+    --role "Cognitive Services OpenAI User" \
+    --scope "/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.CognitiveServices/accounts/graphrag-openai-8476" \
+    --output none 2>/dev/null || echo "  (Already assigned)"
+  
+  echo "✅ All permissions configured"
+  echo "⏳ Waiting 60s for RBAC propagation (Azure can be slow)..."
+  sleep 60
+else
+  echo "❌ Failed to get principal ID"
+fi
 
 # Summary
 echo ""

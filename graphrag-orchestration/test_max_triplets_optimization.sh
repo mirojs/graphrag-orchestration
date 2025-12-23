@@ -13,14 +13,14 @@ RESULTS_FILE="/tmp/max_triplets_results_${TIMESTAMP}.txt"
 echo "=================================================================" | tee $RESULTS_FILE
 echo "MAX_TRIPLETS_PER_CHUNK OPTIMIZATION TEST" | tee -a $RESULTS_FILE
 echo "Started: $(date)" | tee -a $RESULTS_FILE
-echo "Testing values: 20, 40, 80" | tee -a $RESULTS_FILE
+echo "Testing values: 20, 40, 60" | tee -a $RESULTS_FILE
 echo "=================================================================" | tee -a $RESULTS_FILE
 echo "" | tee -a $RESULTS_FILE
 
 GROUP_IDS=()
 
 # Test each value
-for TRIPLETS in 20 40 80; do
+for TRIPLETS in 20 40 60; do
     echo "" | tee -a $RESULTS_FILE
     echo "=================================================================" | tee -a $RESULTS_FILE
     echo "Testing max_triplets_per_chunk = $TRIPLETS" | tee -a $RESULTS_FILE
@@ -28,13 +28,13 @@ for TRIPLETS in 20 40 80; do
     
     # Update code
     echo "📝 Updating code..." | tee -a $RESULTS_FILE
-    sed -i "s/max_triplets_per_chunk=[0-9]\+/max_triplets_per_chunk=$TRIPLETS/" app/v3/services/indexing_pipeline.py
+    sed -i "s/max_triplets_per_chunk=[0-9]\+/max_triplets_per_chunk=$TRIPLETS/" graphrag-orchestration/app/v3/services/indexing_pipeline.py
     echo "✅ Updated to $TRIPLETS" | tee -a $RESULTS_FILE
     
     # Deploy
     echo "" | tee -a $RESULTS_FILE
     echo "🚀 Deploying..." | tee -a $RESULTS_FILE
-    bash deploy.sh 2>&1 | grep -E "(✅|View Swagger|Check application|Run test)" | tee -a $RESULTS_FILE
+    bash graphrag-orchestration/deploy.sh 2>&1 | grep -E "(✅|View Swagger|Check application|Run test)" | tee -a $RESULTS_FILE
     echo "✅ Deployed" | tee -a $RESULTS_FILE
     
     # Wait for deployment
@@ -56,13 +56,15 @@ response = requests.post(
     headers={'x-group-id': '$GROUP_ID'},
     json={
         'documents': [
-            {'url': 'https://afhazstorage.blob.core.windows.net/source-docs/BUILDERS%20LIMITED%20WARRANTY.pdf'},
-            {'url': 'https://afhazstorage.blob.core.windows.net/source-docs/AZURE%20Data%20Integration%20-%20Whitepaper.pdf'},
-            {'url': 'https://afhazstorage.blob.core.windows.net/source-docs/Azure%20Machine%20Learning.pdf'},
-            {'url': 'https://afhazstorage.blob.core.windows.net/source-docs/Best%20Practices%20for%20Azure%20Integration%20Services.pdf'},
-            {'url': 'https://afhazstorage.blob.core.windows.net/source-docs/Using%20Azure%20Data%20Factory%20Self-Hosted%20Integration%20Runtime.pdf'}
+            'https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf',
+            'https://neo4jstorage21224.blob.core.windows.net/test-docs/HOLDING TANK SERVICING CONTRACT.pdf',
+            'https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY MANAGEMENT AGREEMENT.pdf',
+            'https://neo4jstorage21224.blob.core.windows.net/test-docs/contoso_lifts_invoice.pdf',
+            'https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf'
         ],
-        'ingestion': 'document-intelligence'
+        'ingestion': 'document-intelligence',
+        'run_raptor': True,
+        'run_community_detection': True
     }
 )
 
@@ -97,13 +99,13 @@ echo "=================================================================" | tee -
 echo "" | tee -a $RESULTS_FILE
 
 # Collect results
-python3 << 'EOFPYTHON'
+python3 - "${GROUP_IDS[@]}" << 'EOFPYTHON' | tee -a $RESULTS_FILE
 import sys
 from neo4j import GraphDatabase
 
 uri = "neo4j+s://a86dcf63.databases.neo4j.io"
 username = "neo4j"
-password = "KXa8R-XdLe34_VUxtQr9v8VpzvNTsQxqMw4glTe78Ww"
+password = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
 
 driver = GraphDatabase.driver(uri, auth=(username, password))
 
@@ -153,7 +155,7 @@ for group_id, triplets in group_data:
             json.dump(samples, f, indent=2)
 
 driver.close()
-EOFPYTHON ${GROUP_IDS[@]} | tee -a $RESULTS_FILE
+EOFPYTHON
 
 echo "" | tee -a $RESULTS_FILE
 echo "=================================================================" | tee -a $RESULTS_FILE

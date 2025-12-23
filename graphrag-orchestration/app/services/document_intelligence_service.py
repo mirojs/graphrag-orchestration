@@ -327,6 +327,14 @@ class DocumentIntelligenceService:
                     logger.warning(f"No pages extracted from {url}")
                     return (url, [], None)
 
+                # Log Document Intelligence confidence scores
+                if result.paragraphs:
+                    confidences = [p.confidence for p in result.paragraphs if hasattr(p, 'confidence') and p.confidence is not None]
+                    if confidences:
+                        avg_confidence = sum(confidences) / len(confidences)
+                        min_confidence = min(confidences)
+                        logger.info(f"📊 DI Confidence: avg={avg_confidence:.3f}, min={min_confidence:.3f}, samples={len(confidences)}")
+
                 documents: List[Document] = []
                 
                 # Create one document per page (better for large docs)
@@ -512,12 +520,11 @@ class DocumentIntelligenceService:
                 )
             )
 
-        # Process URLs via Document Intelligence API in parallel
+        # Process URLs via Document Intelligence Batch API
         if urls:
-            logger.info(f"📦 Batch processing {len(urls)} documents (max concurrency: {self.max_concurrency})")
+            logger.info(f"📦 Batch processing {len(urls)} documents with 60s timeout")
             
             async with await self._create_client() as client:
-                # Create tasks for parallel processing
                 # Resolve default model from strategy
                 if model_strategy == "layout":
                     default_model = "prebuilt-layout"
@@ -528,6 +535,7 @@ class DocumentIntelligenceService:
                 else:
                     default_model = "prebuilt-layout"  # auto with layout fallback
 
+                # Create parallel tasks for all documents
                 tasks = []
                 for url in urls:
                     tasks.append(
@@ -540,8 +548,17 @@ class DocumentIntelligenceService:
                         )
                     )
                 
-                # Run all analyses in parallel (semaphore controls concurrency)
-                results = await asyncio.gather(*tasks, return_exceptions=True)
+                # Run all in parallel with batch timeout
+                try:
+                    results = await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=60  # 60s for entire batch
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("❌ Batch timeout after 60s")
+                    if fail_fast:
+                        raise RuntimeError("Batch processing timeout")
+                    return documents
                 
                 # Process results
                 errors: List[str] = []

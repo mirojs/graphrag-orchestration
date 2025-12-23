@@ -182,6 +182,11 @@ class Neo4jStoreV3:
         #     "DROP INDEX chunk_embedding IF EXISTS",
         # ]
         
+        # Native Vector Type indexes (Neo4j 5.13+)
+        # Note: If upgrading from list-based embeddings, you must:
+        #   1. DROP old indexes
+        #   2. Convert properties: SET e.embedding = null then use db.create.setVectorProperty
+        #   3. CREATE new indexes with updated config
         vector_indexes = [
             """
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
@@ -236,15 +241,16 @@ class Neo4jStoreV3:
     # ==================== Entity Operations ====================
     
     def upsert_entity(self, group_id: str, entity: Entity) -> str:
-        """Insert or update an entity."""
+        """Insert or update an entity using native vector storage."""
         query = """
         MERGE (e:Entity {id: $id})
         SET e.name = $name,
             e.type = $type,
             e.description = $description,
-            e.embedding = $embedding,
             e.group_id = $group_id,
             e.updated_at = datetime()
+        WITH e
+        CALL db.create.setVectorProperty(e, 'embedding', $embedding)
         RETURN e.id AS id
         """
         
@@ -262,7 +268,7 @@ class Neo4jStoreV3:
             return cast(str, record["id"]) if record else entity.id
     
     def upsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
-        """Batch insert/update entities and create MENTIONS relationships to chunks."""
+        """Batch insert/update entities with native vector support."""
         
         # Diagnostic: Check embeddings before storing
         with_embeddings = sum(1 for e in entities if e.embedding and len(e.embedding) > 0)
@@ -276,9 +282,17 @@ class Neo4jStoreV3:
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
-            entity.embedding = e.embedding,
             entity.group_id = $group_id,
             entity.updated_at = datetime()
+        
+        WITH entity, e
+        CALL {
+            WITH entity, e
+            WITH entity, e
+            WHERE e.embedding IS NOT NULL AND size(e.embedding) > 0
+            CALL db.create.setVectorProperty(entity, 'embedding', e.embedding)
+            RETURN count(*) as _ignored
+        }
         
         // Create MENTIONS relationships to chunks for DRIFT
         WITH entity, e
@@ -341,15 +355,13 @@ class Neo4jStoreV3:
         top_k: int = 10,
     ) -> List[Tuple[Entity, float]]:
         """
-        Hybrid search combining vector similarity and keyword matching with RRF.
+        Hybrid search combining vector similarity and keyword matching with RRF and Quality Boost.
         
-        Uses Reciprocal Rank Fusion to merge:
-        1. Vector search (semantic similarity)
+        Implements "Hybrid+Boost" strategy:
+        1. Vector search (semantic similarity) using native vector index/functions
         2. Full-text search (exact keyword matching)
-        
-        This solves the \"missing facts\" problem where specific values
-        (like \"$25,000\" or \"Invoice #123\") have weak semantic embeddings
-        but should rank high due to exact text match.
+        3. RRF Fusion
+        4. Quality/RAPTOR Boost (boosting entities in high-ranking communities)
         
         Args:
             group_id: Tenant identifier
@@ -363,10 +375,8 @@ class Neo4jStoreV3:
         k_constant = 60  # RRF constant
         candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
         
-        # NEW APPROACH: Get entities from target group FIRST, then do vector/text search on those
-        # This avoids the problem of global search returning entities from other groups
         query = """
-        // Step 1 & 2: Get entities from group and compute vector similarity
+        // Step 1: Vector Search (Native - using gds.similarity.cosine for Neo4j 5.x compatibility)
         MATCH (e:Entity {group_id: $group_id})
         WHERE e.embedding IS NOT NULL
         WITH e, gds.similarity.cosine(e.embedding, $embedding) AS vectorScore
@@ -374,21 +384,30 @@ class Neo4jStoreV3:
         LIMIT $retrieval_k
         WITH collect({node: e, score: vectorScore}) AS vectorResults
         
-        // Step 3: Full-text scoring on same group (OPTIONAL to handle no results)
+        // Step 2: Full-text Search
         OPTIONAL CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text, {limit: $retrieval_k})
         YIELD node AS fNode, score AS fScore
         WHERE fNode.group_id = $group_id
         WITH vectorResults, collect({node: fNode, score: fScore}) AS textResults
         
-        // Step 4: RRF Fusion - combine results from both searches
+        // Step 3: RRF Fusion
         WITH vectorResults + textResults AS allResults
         UNWIND range(0, size(allResults)-1) AS idx
         WITH allResults[idx] AS result, idx
         WITH result.node AS node,
-             sum(1.0 / ($k_constant + idx + 1)) AS combinedScore
+             sum(1.0 / ($k_constant + idx + 1)) AS rrfScore
         
-        RETURN node, combinedScore
-        ORDER BY combinedScore DESC
+        // Step 4: Quality/RAPTOR Boost
+        // Boost entities that belong to high-ranking communities (RAPTOR/Leiden)
+        OPTIONAL MATCH (node)-[:BELONGS_TO]->(c:Community)
+        WITH node, rrfScore, coalesce(max(c.rank), 0.0) AS communityRank
+        
+        // Apply boost: 5% boost per rank unit to avoid over-weighting community membership
+        // This ensures factual accuracy from vector search remains primary signal
+        WITH node, rrfScore * (1.0 + (communityRank * 0.05)) AS finalScore
+        
+        RETURN node, finalScore
+        ORDER BY finalScore DESC
         LIMIT $top_k
         """
         
@@ -413,7 +432,7 @@ class Neo4jStoreV3:
                         description=e.get("description", ""),
                         embedding=e.get("embedding"),
                     )
-                    results.append((entity, record["combinedScore"]))
+                    results.append((entity, record["finalScore"]))
             except Exception as ex:
                 logger.error(f"Hybrid search failed: {ex}")
                 # Fallback to vector-only search
@@ -428,7 +447,7 @@ class Neo4jStoreV3:
         embedding: List[float],
         top_k: int = 10,
     ) -> List[Tuple[Entity, float]]:
-        """Vector similarity search for entities."""
+        """Vector similarity search for entities using native vector index."""
         query = """
         CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
         YIELD node, score
@@ -647,15 +666,16 @@ class Neo4jStoreV3:
     # ==================== RAPTOR Node Operations ====================
     
     def upsert_raptor_node(self, group_id: str, node: RaptorNode) -> str:
-        """Insert or update a RAPTOR node."""
+        """Insert or update a RAPTOR node using native vector storage."""
         query = """
         MERGE (r:RaptorNode {id: $id})
         SET r.text = $text,
             r.level = $level,
-            r.embedding = $embedding,
             r.group_id = $group_id,
             r.metadata = $metadata,
             r.updated_at = datetime()
+        WITH r
+        CALL db.create.setVectorProperty(r, 'embedding', $embedding)
         RETURN r.id AS id
         """
         
@@ -687,13 +707,12 @@ class Neo4jStoreV3:
             return cast(str, record["id"]) if record else node.id
     
     def upsert_raptor_nodes_batch(self, group_id: str, nodes: List[RaptorNode]) -> int:
-        """Batch insert/update RAPTOR nodes with Phase 1 quality metrics."""
+        """Batch insert/update RAPTOR nodes with native vector support."""
         query = """
         UNWIND $nodes AS n
         MERGE (r:RaptorNode {id: n.id})
         SET r.text = n.text,
             r.level = n.level,
-            r.embedding = n.embedding,
             r.group_id = $group_id,
             r.cluster_coherence = n.cluster_coherence,
             r.confidence_level = n.confidence_level,
@@ -703,6 +722,16 @@ class Neo4jStoreV3:
             r.child_count = n.child_count,
             r.creation_model = n.creation_model,
             r.updated_at = datetime()
+        
+        WITH r, n
+        CALL {
+            WITH r, n
+            WITH r, n
+            WHERE n.embedding IS NOT NULL AND size(n.embedding) > 0
+            CALL db.create.setVectorProperty(r, 'embedding', n.embedding)
+            RETURN count(*) as _ignored
+        }
+        
         RETURN count(r) AS count
         """
         
@@ -735,74 +764,67 @@ class Neo4jStoreV3:
         level: Optional[int] = None,
         top_k: int = 10,
     ) -> List[Tuple[RaptorNode, float]]:
-        """Vector similarity search for RAPTOR nodes.
+        """Vector similarity search for RAPTOR nodes using native vector functions."""
         
-        Use cosine similarity instead of vector index to avoid filtering issues.
-        The vector index with WHERE clauses returns 0 results because the 
-        index returns top-k globally, then filters by group_id, which may 
-        eliminate all results if top-k matches don't include this group.
-        """
-        import math
+        # Use gds.similarity.cosine for efficient calculation (Neo4j 5.x compatible)
+        if level is not None:
+            query = """
+            MATCH (r:RaptorNode {group_id: $group_id, level: $level})
+            WHERE r.embedding IS NOT NULL
+            WITH r, gds.similarity.cosine(r.embedding, $embedding) AS score
+            ORDER BY score DESC
+            LIMIT $top_k
+            RETURN r, score
+            """
+            params = {"group_id": group_id, "level": level, "embedding": embedding, "top_k": top_k}
+        else:
+            query = """
+            MATCH (r:RaptorNode {group_id: $group_id})
+            WHERE r.embedding IS NOT NULL
+            WITH r, gds.similarity.cosine(r.embedding, $embedding) AS score
+            ORDER BY score DESC
+            LIMIT $top_k
+            RETURN r, score
+            """
+            params = {"group_id": group_id, "embedding": embedding, "top_k": top_k}
         
-        # Fetch all RAPTOR nodes for this group with their embeddings
+        results = []
         with self.driver.session(database=self.database) as session:
-            if level is not None:
-                query = """
-                MATCH (r:RaptorNode {group_id: $group_id, level: $level})
-                WHERE r.embedding IS NOT NULL
-                RETURN r.id as id, r.text as text, r.level as level, r.embedding as embedding
-                """
-                params = {"group_id": group_id, "level": level}
-            else:
-                query = """
-                MATCH (r:RaptorNode {group_id: $group_id})
-                WHERE r.embedding IS NOT NULL
-                RETURN r.id as id, r.text as text, r.level as level, r.embedding as embedding
-                """
-                params = {"group_id": group_id}
-            
             result = session.run(query, **params)
-            
-            # Calculate cosine similarity for each node
-            results = []
             for record in result:
-                node_embedding = record["embedding"]
-                
-                # Calculate cosine similarity
-                dot_product = sum(a * b for a, b in zip(embedding, node_embedding))
-                norm_embedding = math.sqrt(sum(a * a for a in embedding))
-                norm_node = math.sqrt(sum(a * a for a in node_embedding))
-                
-                if norm_embedding > 0 and norm_node > 0:
-                    similarity = dot_product / (norm_embedding * norm_node)
-                else:
-                    similarity = 0.0
-                
+                r = record["r"]
                 node = RaptorNode(
-                    id=record["id"],
-                    text=record["text"],
-                    level=record["level"],
-                    embedding=node_embedding,
+                    id=r["id"],
+                    text=r["text"],
+                    level=r["level"],
+                    embedding=r.get("embedding"),
                 )
-                results.append((node, similarity))
-            
-            # Sort by similarity descending and return top_k
-            results.sort(key=lambda x: x[1], reverse=True)
-            return results[:top_k]
+                results.append((node, record["score"]))
+        
+        return results
     
     # ==================== Text Chunk Operations ====================
     
     def upsert_text_chunks_batch(self, group_id: str, chunks: List[TextChunk]) -> int:
-        """Batch insert/update text chunks."""
+        """Batch insert/update text chunks with native vector support."""
         query = """
         UNWIND $chunks AS c
         MERGE (t:TextChunk {id: c.id})
         SET t.text = c.text,
             t.chunk_index = c.chunk_index,
-            t.embedding = c.embedding,
             t.tokens = c.tokens,
             t.group_id = $group_id,
             t.updated_at = datetime()
+        
+        WITH t, c
+        CALL {
+            WITH t, c
+            WITH t, c
+            WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+            CALL db.create.setVectorProperty(t, 'embedding', c.embedding)
+            RETURN count(*) as _ignored
+        }
+        
         WITH t, c
         MATCH (d:Document {id: c.document_id, group_id: $group_id})
         MERGE (t)-[:PART_OF]->(d)

@@ -1,4 +1,4 @@
-GraphRAG Service: https://graphrag-orchestration.ashypebble-48100d7f.swedencentral.azurecontainerapps.io
-Neo4j URI: bolt://neo4j-graphrag-23987.swedencentral.azurecontainer.io:7687
-Neo4j Password: GraphRAG-Neo4j-2025
-Neo4j Browser: http://neo4j-graphrag-23987.swedencentral.azurecontainer.io:7474
+GraphRAG Service: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+Neo4j URI: neo4j+s://a86dcf63.databases.neo4j.io
+Neo4j Password: uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI
+Neo4j Browser: http://:7474

@@ -789,7 +789,6 @@ class Neo4jStoreV3:
             
             # Link to parent if exists (legacy support)
             if node.parent_id:
-            if node.parent_id:
                 link_query = """
                 MATCH (child:RaptorNode {id: $child_id})
                 MATCH (parent:RaptorNode {id: $parent_id})

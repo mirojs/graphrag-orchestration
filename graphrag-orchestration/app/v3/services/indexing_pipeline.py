@@ -246,20 +246,23 @@ class IndexingPipelineV3:
         llm: Any,
         embedder: Any,
         config: Optional[IndexingConfig] = None,
+        llm_service: Optional[Any] = None,
     ):
         """
         Initialize the indexing pipeline.
         
         Args:
             neo4j_store: Neo4j storage instance (your custom schema)
-            llm: LLM for summaries and extraction (Azure OpenAI)
+            llm: LLM for summaries and general operations (Azure OpenAI)
             embedder: Embeddings model (Azure OpenAI)
             config: Pipeline configuration
+            llm_service: LLMService instance for specialized model selection (optional)
         """
         self.neo4j_store = neo4j_store
         self.llm = llm
         self.embedder = embedder
         self.config = config or IndexingConfig()
+        self.llm_service = llm_service
         
         # Track JSON repair statistics for monitoring
         self.extraction_stats = {
@@ -727,9 +730,12 @@ class IndexingPipelineV3:
         # WITH MICROSOFT VALIDATION: Adds post-extraction validation pass to score entity confidence
         # and filter out hallucinations using LLM-based quality scoring (0-10 scale)
         try:
+            # Use specialized indexing LLM if available (GPT-4.1 with 1M context window)
+            indexing_llm = self.llm_service.get_indexing_llm() if self.llm_service else self.llm
+            
             # Use Microsoft-style validated extraction
             validated_extractor = ValidatedEntityExtractor(
-                llm=self.llm,
+                llm=indexing_llm,
                 max_triplets_per_pass=60,  # Extract up to 60 triplets
                 validation_threshold=0.7,  # Keep entities with 7+ confidence (Microsoft default, quality-first)
                 max_passes=1,  # Single extraction pass (validation happens after)

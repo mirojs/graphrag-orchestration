@@ -19,6 +19,26 @@ This guide explains how to deploy the recommended GPT model strategy for optimal
 - Azure OpenAI resource with appropriate quotas
 - Access to GPT-4.1 and GPT-5.2 family models (availability varies by region)
 
+### Step 0: Request Quota Increases
+
+**🔗 Quota Increase Form:** https://aka.ms/oai/quotaincrease
+
+Before deploying models, request appropriate TPM (tokens per minute) quotas:
+
+| Model | Recommended TPM | Justification |
+|-------|----------------|---------------|
+| GPT-4.1 (Indexing) | 50K-100K | Bulk document processing - 10K+ docs, high throughput needed |
+| GPT-5.2 Thinking (Routing) | 10K-20K | Per-query classification - 1K queries/day, peak hour buffer |
+| GPT-5.2 Pro (Synthesis) | 20K-50K | Context-heavy answer generation with concurrent users |
+
+**What to include in request:**
+- **Resource:** Your Azure OpenAI resource name
+- **Region:** e.g., East US, West Europe
+- **Current Quota:** Usually 10K TPM for new deployments
+- **Use Case:** "GraphRAG knowledge graph construction for financial/legal documents - bulk indexing (GPT-4.1) and real-time query operations (GPT-5.2)"
+
+**Typical approval time:** 1-3 business days
+
 ### Step 1: Deploy Azure OpenAI Models
 
 #### 1.1 Create GPT-4.1 Deployment (Indexing)

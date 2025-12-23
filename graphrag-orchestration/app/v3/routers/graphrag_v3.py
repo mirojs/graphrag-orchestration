@@ -195,6 +195,7 @@ def get_indexing_pipeline():
             llm=llm_service.llm,
             embedder=llm_service.embed_model,
             config=config,
+            llm_service=llm_service,  # Pass service for specialized model selection
         )
     return _indexing_pipeline
 

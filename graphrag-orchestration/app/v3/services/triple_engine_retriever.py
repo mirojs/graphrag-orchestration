@@ -95,7 +95,9 @@ Respond with ONLY the route name (vector, graph, or raptor) on the first line, f
         ]
         
         try:
-            response = self.llm_service.llm.chat(messages)
+            # Use specialized routing LLM if available (GPT-5.2 Thinking for System 2 reasoning)
+            routing_llm = self.llm_service.get_routing_llm()
+            response = routing_llm.chat(messages)
             response_text = response.message.content.strip()
             
             # Parse response: first line is route, rest is reasoning

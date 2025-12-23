@@ -39,25 +39,24 @@
   - **Why:** Consistent with current app patterns; separates user-facing metadata from AI-processing raw schema.
   - **Trade-offs:** Must maintain dual-write consistency and cleanup.
 
-- **Vector Store + Graph Store:** Dual-System Architecture (Neo4j + Azure AI Search)
-  - **Decision:** **Neo4j** for graph storage and relationship extraction; **Azure AI Search** for RAPTOR text summaries with semantic ranking
-  - **Status:** ✅ **Implemented** (2025-12-14)
+- **Vector Store + Graph Store:** Neo4j-Centric Hybrid Architecture (Updated 2025-12-23)
+  - **Decision:** **Neo4j** as the primary "Hot" engine for Graph + Vector + Logic; **Azure AI Search** as a "Cold" backup sink for scaling.
+  - **Status:** 🔄 **Optimization Planned** (2025-12-23)
   
   **Rationale:**
-  - **Neo4j (Graph):** Handles entity/relationship extraction via PropertyGraphIndex + SchemaAwareExtractor. Best for "How is X related to Y?" queries and multi-hop graph traversal.
-  - **Azure AI Search (Semantic):** Stores RAPTOR hierarchical summaries with semantic ranker enabled. Best for "What are the details about X?" queries with deep learning-based relevance ranking.
-  - **Complementary Strengths:** Neo4j provides structural retrieval; Azure AI Search provides semantic precision. Together they enable hybrid search (Phase 2).
+  - **Neo4j (Primary):** Handles Vector Search (Native Type), Graph Traversal, and Logic-based Reranking in a single low-latency trip.
+  - **Azure AI Search (Secondary):** Acts as a scalable "Silent Sink" for disaster recovery or future expansion beyond Neo4j memory limits.
+  - **Pivot Reason:** Dual-system query latency (~150ms overhead) and synchronization complexity were deemed unnecessary given Neo4j 2025's native vector capabilities.
   
-  **Current State (Phase 1 Complete):**
-  - ✅ RAPTOR nodes indexed to both Neo4j (entities/relationships) and Azure AI Search (text/metadata)
-  - ✅ Quality metrics added: silhouette scores, cluster coherence, confidence levels (high/medium/low)
-  - ✅ Metadata expanded from 5 to 13 fields for better indexing quality
-  - ⏳ Query-time Azure AI Search integration pending (Phase 2)
+  **Current State (Transitioning):**
+  - ✅ Phase 1 Indexing (Dual-Write) complete.
+  - ⏳ **Phase 2 Update:** Switching query path to Neo4j-only; disabling Azure query-time integration.
+  - ⏳ **Optimization:** Reducing triplet density (15 max) and implementing "Hybrid+Boost" Cypher query.
   
   **Trade-offs:**
-  - **Complexity:** Maintaining two indexing pipelines requires consistency. Mitigated by shared RAPTOR nodes with quality metadata.
-  - **Cost:** Higher than single-system approach. Justified by accuracy gains (+30-40% expected with Phase 2).
-  - **Sync:** Both systems index same nodes but don't cross-query yet. Phase 2 will merge results at query time.
+  - **Complexity:** Significantly Reduced. Single source of truth for queries.
+  - **Scale:** Neo4j Aura has RAM limits; Azure provides the safety net if we exceed them.
+  - **Search Quality:** Relying on "Graph Logic" boosting instead of Azure's Semantic Ranker (validated as sufficient for financial domain).
 
 - **Graph Knowledge:** GraphRAG
   - **Decision:** Use GraphRAG for entity/relationship extraction, community detection, and query engines (global/local/DRIFT).
@@ -79,22 +78,27 @@
   - Storage: Implement `CosmosHelper` (mandatory `partition_key`) and `StorageBlobHelper` for SAS URLs and group-aware paths.
   - Acceptance: CRUD on schemas in Cosmos + Blob with dual-write; CORS configured; tenancy isolation verified.
 
-- **Phase 2: GraphRAG Service + Indexing Quality (Phase 1 Complete ✅)**
-  - **Indexing:** Integrate GraphRAG with RAPTOR hierarchical summarization; run entity/relationship extraction via Neo4j PropertyGraphIndex; persist to Neo4j + Azure AI Search with quality metrics.
-  - **Quality Metrics (Phase 1 - Deployed 2025-12-14):**
-    - ✅ Silhouette score calculation for cluster quality validation
-    - ✅ Cluster coherence metrics (intra-cluster similarity)
-    - ✅ Confidence scoring (high/medium/low) based on coherence
-    - ✅ Expanded metadata: 13 fields indexed (group_id, raptor_level, confidence_level, confidence_score, cluster_coherence, silhouette_score, creation_model, child_count, etc.)
-    - ✅ Quality metrics filterable in Azure AI Search
-  - **Query API:** Expose global/local/DRIFT/hybrid endpoints; secure with Azure AD; include grounding references.
-  - **Next (Phase 2):** Enable Azure AI Search semantic ranking at query time; merge with Neo4j results for +20-25% accuracy gain.
-  - **Acceptance:** Queries return coherent, grounded responses; quality metrics visible in results; performance within SLO; logs show token accounting.
+- **Phase 2: High-Quality Local Indexing (Refined - "The Lean Engine")**
+  - **Goal:** Transform Neo4j into a high-performance Vector + Logic engine while maintaining Azure as a "Cold" safety net.
+  - **Triplet Density Optimization:**
+    - **Max Triplets:** 12–15 per chunk (reduced from 30-60).
+    - **Why:** Focus graph on structural logic (Contract → Party → Obligation); let RAPTOR handle themes and Vector RAG handle page-level facts. Reduces "hairball" noise.
+  - **Storage Strategy:**
+    - **Neo4j:** Implement Native Vector Type (`VECTOR<FLOAT32>(1536)`) for sub-50ms retrieval without network hops.
+    - **Azure AI Search:** "Silent Sink" - push vectors during indexing for disaster recovery/scaling only; inactive for queries.
+  - **Acceptance:** Neo4j native vector index active; Azure index populated but cold; triplet density validated at <15.
 
-- **Phase 3: Orchestration via LlamaIndex**
-  - Router/Workflow: Compose router to choose GraphRAG vs vector vs schema extraction paths.
-  - Schema Extraction: Implement LlamaIndex extractors producing Pro Mode-like JSON; dual-write to Cosmos + Blob.
-  - Acceptance: Composite queries run across modalities and synthesize correct final responses.
+- **Phase 3: Orchestration & Triple-Engine Search**
+  - **Goal:** Consolidate retrieval into a single database trip (Neo4j) with Triple-Engine routing.
+  - **Triple-Engine Routes:**
+    - **Vector Route:** For specific facts (dates, clauses).
+    - **Graph Route:** For relational reasoning (dependencies).
+    - **RAPTOR Route:** For thematic summaries (portfolio risk).
+  - **Model Selection:**
+    - **Router:** GPT-5.2 Thinking (Standard) for intent classification.
+    - **Synthesizer:** GPT-5.2 Pro (High Reasoning) for contradiction resolution.
+  - **Query Logic:** "Hybrid+Boost" Cypher 25 query (Vector + Lexical + Quality Boost + RAPTOR Boost) in a single trip.
+  - **Acceptance:** Single-trip retrieval latency <200ms; correct routing between engines; tenant isolation verified via unit tests.
 
 - **Phase 4: Frontend**
   - Chat UI: Streaming chat with tool call telemetry; charts for analytics.
@@ -379,6 +383,34 @@ Header: X-Group-ID: <group>
 - Commit: `9dba9a7` - "Add document lifecycle management with orphan cleanup"
 - API available at: `/graphrag/v3/documents/*`
 - Swagger docs: `/docs#/document-management`
+
+---
+
+### 2025-12-23: Architecture Optimization - "The Lean Engine" - PLANNED ⏳
+
+**Decision:** Consolidate retrieval into a Neo4j-centric "Triple-Engine" model to reduce complexity and latency.
+
+**Problem:**
+- Dual-service retrieval (Azure + Neo4j) introduced ~150ms latency and synchronization complexity.
+- High triplet density (30-60) created "hairball" graphs, diluting reasoning precision.
+- "Lost in the Middle" issues persisted for complex financial queries despite RAPTOR.
+
+**Solution Strategy:**
+1.  **Neo4j-Centric Retrieval:** Move vector search and re-ranking logic entirely into Neo4j using Native Vector Types (`VECTOR<FLOAT32>`) and Cypher 25.
+2.  **Azure as "Cold Sink":** Keep Azure AI Search for indexing (disaster recovery/scaling) but disable it for queries.
+3.  **Triplet Density Cap:** Reduce `max_triplets_per_chunk` to 12-15. Focus graph on structural logic; let RAPTOR handle themes and Vector RAG handle facts.
+4.  **Triple-Engine Routing:** Use GPT-5.2 Thinking to route queries to Vector (facts), Graph (relations), or RAPTOR (summaries).
+5.  **Hybrid+Boost Query:** Implement single-trip Cypher query with RRF (Vector + Lexical) and metadata boosting (Confidence + RAPTOR Level).
+
+**Expected Impact:**
+- **Latency:** -150ms (Eliminated network hop).
+- **Accuracy:** +10% (Reduced graph noise + Quality-weighted ranking).
+- **Simplicity:** Single source of truth for query logic.
+
+**Next Steps:**
+- Update `neo4j_store.py` to use native vector types and new Cypher query.
+- Implement `TripleEngineRetriever` in LlamaIndex.
+- Add unit tests for tenant isolation and boosting logic.
 
 ---
 

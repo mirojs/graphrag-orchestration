@@ -733,14 +733,14 @@ class IndexingPipelineV3:
             # Use specialized indexing LLM if available (GPT-4.1 with 1M context window)
             indexing_llm = self.llm_service.get_indexing_llm() if self.llm_service else self.llm
             
-            # Use Microsoft-style validated extraction
+            # Use Lean Engine extraction strategy: 12-15 triplet density (ARCHITECTURE_DECISIONS.md § Phase 2)
             validated_extractor = ValidatedEntityExtractor(
                 llm=indexing_llm,
-                max_triplets_per_pass=60,  # Extract up to 60 triplets
+                max_triplets_per_pass=12,  # Balanced triplet density for contract/business docs
                 validation_threshold=0.7,  # Keep entities with 7+ confidence (Microsoft default, quality-first)
                 max_passes=1,  # Single extraction pass (validation happens after)
             )
-            logger.info(f"Initialized ValidatedEntityExtractor with max_triplets=60, validation_threshold=0.7 for {len(llama_nodes)} nodes")
+            logger.info(f"Initialized ValidatedEntityExtractor with max_triplets=12, validation_threshold=0.7 for {len(llama_nodes)} nodes")
         except Exception as e:
             logger.error(f"Failed to initialize ValidatedEntityExtractor: {e}")
             raise

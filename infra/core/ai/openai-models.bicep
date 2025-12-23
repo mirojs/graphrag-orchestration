@@ -63,12 +63,12 @@ resource o3proDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   dependsOn: [o4miniDeployment]
 }
 
-// text-embedding-3-small - Embeddings (Standard, 1536 dims for cost optimization)
+// text-embedding-3-small - Embeddings (GlobalStandard for Sweden Central compatibility)
 resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
   parent: openAiAccount
   name: 'text-embedding-3-small'
   sku: {
-    name: 'Standard'
+    name: 'GlobalStandard'
     capacity: 100
   }
   properties: {

@@ -99,9 +99,27 @@
     - **Vector Route:** For specific facts (dates, clauses).
     - **Graph Route:** For relational reasoning (dependencies).
     - **RAPTOR Route:** For thematic summaries (portfolio risk).
-  - **Model Selection:**
-    - **Router:** GPT-5.2 Thinking (Standard) for intent classification.
-    - **Synthesizer:** GPT-5.2 Pro (High Reasoning) for contradiction resolution.
+  - **Model Selection Strategy:**
+    - **Indexing Operations (The Knowledge Spine):**
+      - **Entity/Relationship Extraction:** **GPT-4.1** (1M Token Window - optimized for massive document ingestion)
+      - **RAPTOR Hierarchical Clustering:** **GPT-4.1** (handles thematic clustering across large corpora without reasoning overhead)
+      - **Community Detection:** No LLM (graspologic Leiden algorithm)
+      - **Embedding Model:** **text-embedding-3-small** (1536 dims with Matryoshka - cost-effective for Neo4j native vectors)
+    - **Query-Time Operations (The Unified Query):**
+      - **Router (Intent Classification):** **GPT-5.2 Thinking Standard** (native "System 2" reasoning for near-perfect query routing)
+      - **Answer Synthesis:** **GPT-5.2 Pro High Reasoning** (agentic verification with self-correction to prevent hallucinations)
+    - **Current Implementation:** 
+      - GPT-4o for all operations (baseline)
+      - text-embedding-3-large (3072 dims) for embeddings
+    - **Migration Path:** 
+      - Deploy GPT-4.1 for indexing when available (3-5x faster bulk extraction)
+      - Deploy GPT-5.2 family for query-time when available (95%+ routing accuracy vs 85% with GPT-4o)
+      - Consider downgrading to text-embedding-3-small (1536 dims) for cost optimization
+    - **Rationale:** 
+      - **GPT-4.1 for Indexing:** 1M context window enables understanding document relationships at scale; "Reader" model optimized for ingestion, not reasoning
+      - **GPT-5.2 Thinking for Routing:** Internal "System 2" loop achieves near-perfect intent classification (Vector vs Graph vs RAPTOR)
+      - **GPT-5.2 Pro for Synthesis:** Agentic self-correction cross-references graph logic with text, preventing hallucinations in financial/insurance advice
+      - **text-embedding-3-small:** Matryoshka dimensions provide 85% of Large model accuracy at 60% cost; optimal for Neo4j's native vector storage
   - **Query Logic:** "Hybrid+Boost" Cypher 25 query (Vector + Lexical + Quality Boost + RAPTOR Boost) in a single trip.
   - **Acceptance:** Single-trip retrieval latency <200ms; correct routing between engines; tenant isolation verified via unit tests.
 
@@ -414,9 +432,15 @@ Header: X-Group-ID: <group>
 
 1. **Native Vector Storage** (`neo4j_store.py`):
    - `db.create.setVectorProperty()` for `VECTOR<FLOAT32>` storage
-   - Updated all upsert methods (entities, RAPTOR nodes, text chunks)
-   - Compatible with Neo4j 5.x using `gds.similarity.cosine()`
-
+   - Updated all upsert mwith LLM-based intent classification
+   - Three specialized retrieval methods for each route
+   - Answer synthesis with configurable LLM (GPT-4o baseline, GPT-5.2 Pro recommended)
+   
+4. **Model Configuration** (Environment-based):
+   - `AZURE_OPENAI_DEPLOYMENT_NAME`: Primary LLM (default: gpt-4o, recommended: gpt-5.2-pro for queries)
+   - `AZURE_OPENAI_INDEXING_DEPLOYMENT`: Indexing LLM (default: gpt-4o, recommended: gpt-5.2-instant)
+   - `AZURE_OPENAI_ROUTING_DEPLOYMENT`: Router LLM (default: uses primary, recommended: gpt-5.2-thinking-standard)
+   - Fallback chain: Routing → Primary → gpt-4o
 2. **Hybrid+Boost Search** (`neo4j_store.py::search_entities_hybrid`):
    - Step 1: Vector search (semantic similarity)
    - Step 2: Full-text search (lexical matching)
@@ -424,9 +448,9 @@ Header: X-Group-ID: <group>
    - Step 4: Community rank boost (conservative 5% to preserve vector accuracy)
 
 3. **TripleEngineRetriever** (`app/v3/services/triple_engine_retriever.py`):
-   - Intelligent routing using GPT-5.2 Thinking (Standard)
+   - Intelligent routing using GPT-4o (currently) with upgrade path to GPT-5.2 Thinking when available
    - Three specialized retrieval methods for each route
-   - Answer synthesis using GPT-5.2 Pro (High Reasoning)
+   - Answer synthesis using GPT-4o (currently) with upgrade path to GPT-5.2 Pro for enhanced reasoning
 
 4. **Unified Query Endpoint** (`/v3/query`):
    - New primary endpoint with automatic route selection

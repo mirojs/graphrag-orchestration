@@ -955,7 +955,7 @@ Output ONLY the JSON object, no explanations or markdown:"""
         Create V2-compatible vector and fulltext indexes in Neo4j.
         
         Creates:
-        - chunk_vector: Vector index on __Node__/Chunk nodes (3072 dimensions for text-embedding-3-large)
+        - chunk_vector: Vector index on __Node__/Chunk nodes (configured dimensions)
         - chunk_fulltext: Fulltext index on __Node__/Chunk text property
         - entity_vector: Vector index on __Entity__ nodes
         - entity_fulltext: Fulltext index on __Entity__ name property
@@ -967,22 +967,24 @@ Output ONLY the JSON object, no explanations or markdown:"""
             "entity_fulltext": False,
         }
         
+        dims = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
+        
         with self.driver.session() as session:
             # Create chunk_vector index on __Node__ nodes
             try:
-                session.run("""
+                session.run(f"""
                     CREATE VECTOR INDEX chunk_vector IF NOT EXISTS
                     FOR (n:__Node__)
                     ON n.embedding
-                    OPTIONS {
-                        indexConfig: {
-                            `vector.dimensions`: 3072,
+                    OPTIONS {{
+                        indexConfig: {{
+                            `vector.dimensions`: {dims},
                             `vector.similarity_function`: 'cosine'
-                        }
-                    }
+                        }}
+                    }}
                 """)
                 results["chunk_vector"] = True
-                logger.info("Created chunk_vector index on __Node__")
+                logger.info(f"Created chunk_vector index on __Node__ with {dims} dimensions")
             except Exception as e:
                 logger.error(f"Failed to create chunk_vector index: {e}")
                 results["chunk_vector"] = str(e)
@@ -1002,19 +1004,19 @@ Output ONLY the JSON object, no explanations or markdown:"""
             
             # Create entity_vector index on __Entity__ nodes
             try:
-                session.run("""
+                session.run(f"""
                     CREATE VECTOR INDEX entity_vector IF NOT EXISTS
                     FOR (e:__Entity__)
                     ON e.embedding
-                    OPTIONS {
-                        indexConfig: {
-                            `vector.dimensions`: 3072,
+                    OPTIONS {{
+                        indexConfig: {{
+                            `vector.dimensions`: {dims},
                             `vector.similarity_function`: 'cosine'
-                        }
-                    }
+                        }}
+                    }}
                 """)
                 results["entity_vector"] = True
-                logger.info("Created entity_vector index on __Entity__")
+                logger.info(f"Created entity_vector index on __Entity__ with {dims} dimensions")
             except Exception as e:
                 logger.error(f"Failed to create entity_vector index: {e}")
                 results["entity_vector"] = str(e)

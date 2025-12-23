@@ -63,26 +63,6 @@ resource o3proDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   dependsOn: [o4miniDeployment]
 }
 
-// text-embedding-3-small - Embeddings (GlobalStandard for Sweden Central compatibility)
-resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
-  parent: openAiAccount
-  name: 'text-embedding-3-small'
-  sku: {
-    name: 'GlobalStandard'
-    capacity: 100
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'text-embedding-3-small'
-      version: '1'
-    }
-    raiPolicyName: 'Microsoft.DefaultV2'
-  }
-  dependsOn: [o3proDeployment]
-}
-
 output gpt41DeploymentName string = gpt41Deployment.name
 output o4miniDeploymentName string = o4miniDeployment.name
 output o3proDeploymentName string = o3proDeployment.name
-output embeddingDeploymentName string = embeddingDeployment.name

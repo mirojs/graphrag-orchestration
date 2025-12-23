@@ -187,9 +187,9 @@ def fix_invalid_json(raw_json: str) -> str:
 class IndexingConfig:
     """Configuration for the V3 indexing pipeline."""
     
-    # Chunking settings
-    chunk_size: int = 1024
-    chunk_overlap: int = 128
+    # Chunking settings (Lean Engine: 400-600 tokens per chunk, ARCHITECTURE_DECISIONS.md § Phase 2)
+    chunk_size: int = 512  # Target: 400-600 tokens for financial/legal documents
+    chunk_overlap: int = 64  # ~12.5% overlap maintains context continuity
     
     # Entity extraction settings
     entity_types: List[str] = field(default_factory=lambda: [

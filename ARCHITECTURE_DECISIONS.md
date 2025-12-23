@@ -131,20 +131,16 @@
       - **Community Detection:** No LLM (graspologic Leiden algorithm)
       - **Embedding Model:** **text-embedding-3-small** (1536 dims - optimal for Neo4j RAM efficiency and retrieval speed)
     - **Query-Time Operations (The Unified Query):**
-      - **Router (Intent Classification):** **GPT-5.2** (advanced reasoning for query routing)
-      - **Answer Synthesis:** **GPT-5.2** (agentic verification with self-correction to prevent hallucinations)
+      - **Router (Intent Classification):** **o4-mini** (Data Zone Standard; `reasoning_effort="medium"`; 60% cheaper/3x faster than o1-mini)
+      - **Answer Synthesis:** **o3-pro** (Global Standard; `reasoning_effort="high"`; deep reasoning for self-correction)
     - **Current Implementation:** 
-      - GPT-4o for all operations (baseline)
-      - text-embedding-3-large (3072 dims) for embeddings
-    - **Migration Path:** 
-      - Deploy GPT-4.1 for indexing when available (3-5x faster bulk extraction)
-      - Deploy GPT-5.2 family for query-time when available (95%+ routing accuracy vs 85% with GPT-4o)
-      - Migrate to text-embedding-3-small (1536 dims) for Neo4j optimization (6.5x cost reduction, 2x RAM efficiency, minimal accuracy impact)
+      - **Lean Engine Deployed:** o4-mini (Routing), o3-pro (Synthesis), GPT-4.1 (Indexing)
+      - **Embeddings:** text-embedding-3-small (1536 dims)
     - **Rationale:** 
-      - **GPT-4.1 for Indexing:** 1M context window enables understanding document relationships at scale; "Reader" model optimized for ingestion, not reasoning
-      - **GPT-5.2 for Routing:** Advanced reasoning achieves high-accuracy intent classification (Vector vs Graph vs RAPTOR)
-      - **GPT-5.2 for Synthesis:** Agentic self-correction cross-references graph logic with text, preventing hallucinations in financial/insurance advice
-      - **text-embedding-3-small:** Optimal for Neo4j native vectors - 1536 dims provide sufficient semantic capture for 400-600 token chunks while reducing RAM requirements by 50% and retrieval latency by ~30%; graph structure (triplets) + RAPTOR hierarchy provide precision, not raw embedding dimensionality; ~4% accuracy gap from Large model is negligible given architecture; 6.5x cost reduction ($0.02 vs $0.13 per 1M tokens)
+      - **GPT-4.1 for Indexing:** 1M context window enables understanding document relationships at scale.
+      - **o4-mini for Routing:** High-speed, low-cost reasoning model trained on GQL 2025 standards.
+      - **o3-pro for Synthesis:** "Thinking" model capable of resolving complex contradictions and preventing hallucinations.
+      - **text-embedding-3-small:** 1536 dims provide sufficient semantic capture while reducing RAM requirements by 50% vs Large model.
   - **Query Logic:** "Hybrid+Boost" Cypher 25 query (Vector + Lexical + Quality Boost + RAPTOR Boost) in a single trip.
   - **Acceptance:** Single-trip retrieval latency <200ms; correct routing between engines; tenant isolation verified via unit tests.
 
@@ -447,7 +443,7 @@ Header: X-Group-ID: <group>
 1.  **Neo4j-Centric Retrieval:** Moved vector search and re-ranking logic entirely into Neo4j using Native Vector Types (`VECTOR<FLOAT32>`) and Cypher 25.
 2.  **Azure as "Cold Sink":** Azure AI Search continues indexing for disaster recovery/scaling but is inactive for queries.
 3.  **Triplet Density Cap:** Reduced `max_triplets_per_chunk` to 12-15 (balanced: 12, dense: 15). Focus graph on structural logic; let RAPTOR handle themes and Vector RAG handle facts.
-4.  **Triple-Engine Routing:** Implemented `TripleEngineRetriever` using GPT-5.2 for intent classification:
+4.  **Triple-Engine Routing:** Implemented `TripleEngineRetriever` using **o4-mini** for intent classification:
      - **Vector Route:** Specific facts (dates, amounts, clause references)
      - **Graph Route:** Relational reasoning (dependencies, connections)
      - **RAPTOR Route:** Thematic summaries (portfolio risk, trends)
@@ -457,25 +453,24 @@ Header: X-Group-ID: <group>
 
 1. **Native Vector Storage** (`neo4j_store.py`):
    - `db.create.setVectorProperty()` for `VECTOR<FLOAT32>` storage
-   - Updated all upsert mwith LLM-based intent classification
-   - Three specialized retrieval methods for each route
-   - Answer synthesis with configurable LLM (GPT-5.2 deployed)
-   
-4. **Model Configuration** (Environment-based):
-   - `AZURE_OPENAI_DEPLOYMENT_NAME`: Primary LLM (deployed: gpt-5-2)
-   - `AZURE_OPENAI_INDEXING_DEPLOYMENT`: Indexing LLM (recommended: gpt-4.1 when available)
-   - `AZURE_OPENAI_ROUTING_DEPLOYMENT`: Router LLM (deployed: gpt-5-2)
+   - Updated all upsert methods to support native vectors
+
+2. **Model Configuration** (Environment-based):
+   - `AZURE_OPENAI_DEPLOYMENT_NAME`: Primary LLM (deployed: **o3-pro**)
+   - `AZURE_OPENAI_INDEXING_DEPLOYMENT`: Indexing LLM (recommended: **gpt-4.1**)
+   - `AZURE_OPENAI_ROUTING_DEPLOYMENT`: Router LLM (deployed: **o4-mini**)
    - Fallback chain: Routing → Primary → gpt-4o
-2. **Hybrid+Boost Search** (`neo4j_store.py::search_entities_hybrid`):
+
+3. **Hybrid+Boost Search** (`neo4j_store.py::search_entities_hybrid`):
    - Step 1: Vector search (semantic similarity)
    - Step 2: Full-text search (lexical matching)
    - Step 3: RRF Fusion
    - Step 4: Community rank boost (conservative 5% to preserve vector accuracy)
 
-3. **TripleEngineRetriever** (`app/v3/services/triple_engine_retriever.py`):
-   - Intelligent routing using GPT-5.2
+4. **TripleEngineRetriever** (`app/v3/services/triple_engine_retriever.py`):
+   - Intelligent routing using **o4-mini**
    - Three specialized retrieval methods for each route
-   - Answer synthesis using GPT-5.2 with agentic verification
+   - Answer synthesis using **o3-pro** with agentic verification
 
 4. **Unified Query Endpoint** (`/v3/query`):
    - New primary endpoint with automatic route selection

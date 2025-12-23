@@ -98,8 +98,10 @@
     - **GPT-4.1:** Data Zone Standard (EU Compliance + Zone Capacity).
     - **o4-mini:** Data Zone Standard (EU Compliance + Low Latency).
     - **o3-pro:** Global Standard (Access to high-end reasoning).
-    - **text-embedding-3-small:** Standard (Local data residency).
-  - **Trade-offs:** Requires asynchronous handling for "Thinking" time; `o3-pro` availability may vary by region.
+  - **Deployment Configuration (Switzerland North):**
+    - **text-embedding-3-small:** Standard (Geographic separation for embeddings).
+  - **Architecture:** Dual-region setup with Sweden Central for LLMs and Switzerland North for embeddings.
+  - **Trade-offs:** Requires asynchronous handling for "Thinking" time; `o3-pro` availability may vary by region; dual-endpoint configuration for embeddings.
 
 - **Graph Knowledge:** GraphRAG
   - **Decision:** Use GraphRAG for entity/relationship extraction, community detection, and query engines (global/local/DRIFT).

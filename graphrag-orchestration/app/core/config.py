@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = "o4-mini"  # Will use o4-mini when deployed
     AZURE_OPENAI_ROUTING_REASONING_EFFORT: str = "medium"  # Reasoning effort for routing
     AZURE_OPENAI_MODEL_VERSION: str = "2024-11-20"  # gpt-4o (2024-11-20)
+    
+    # Embeddings (Switzerland North - Separate resource)
+    AZURE_OPENAI_EMBEDDING_ENDPOINT: Optional[str] = None  # Switzerland North endpoint
+    AZURE_OPENAI_EMBEDDING_API_KEY: Optional[str] = None  # Separate key for embedding resource
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
     AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 1536  # text-embedding-3-small dimensions
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Data Zone Standard max supported version

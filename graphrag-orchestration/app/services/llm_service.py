@@ -99,15 +99,30 @@ class LLMService:
                 # Initialize Embedding Model with token provider
                 try:
                     logger.info("Initializing embedding model with managed identity...")
+                    
+                    # Use separate endpoint for embeddings if configured (Switzerland North)
+                    embedding_endpoint = settings.AZURE_OPENAI_EMBEDDING_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
+                    embedding_token_provider = token_provider
+                    
+                    # If using separate embedding endpoint, create new token provider
+                    if settings.AZURE_OPENAI_EMBEDDING_ENDPOINT and settings.AZURE_OPENAI_EMBEDDING_ENDPOINT != settings.AZURE_OPENAI_ENDPOINT:
+                        logger.info(f"Using separate embedding endpoint: {settings.AZURE_OPENAI_EMBEDDING_ENDPOINT}")
+                        if not settings.AZURE_OPENAI_EMBEDDING_API_KEY:
+                            embedding_credential = DefaultAzureCredential()
+                            embedding_token_provider = get_bearer_token_provider(
+                                embedding_credential,
+                                "https://cognitiveservices.azure.com/.default"
+                            )
+                    
                     # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
                     embed_kwargs = {
                         "model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         "deployment_name": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-                        "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+                        "azure_endpoint": embedding_endpoint,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
                         "api_key": "",  # Empty string required even with use_azure_ad
                         "use_azure_ad": True,
-                        "azure_ad_token_provider": token_provider,
+                        "azure_ad_token_provider": embedding_token_provider,
                     }
                     # text-embedding-3-* models support dimensions parameter, ada-002 does not
                     if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
@@ -115,7 +130,7 @@ class LLMService:
                         logger.info(f"Using dimensions: {settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS}")
                     
                     self._embed_model = AzureOpenAIEmbedding(**embed_kwargs)
-                    logger.info("Embedding model initialized successfully with managed identity")
+                    logger.info(f"Embedding model initialized successfully at {embedding_endpoint}")
                 except Exception as e:
                     logger.error(f"Failed to initialize embedding model: {e}", exc_info=True)
                     raise

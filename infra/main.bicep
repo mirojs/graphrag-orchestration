@@ -75,6 +75,10 @@ module graphragApp './core/host/container-app.bicep' = {
         value: 'https://graphrag-openai-8476.openai.azure.com/'
       }
       {
+        name: 'AZURE_OPENAI_EMBEDDING_ENDPOINT'
+        value: 'https://graphrag-openai-switzerland.openai.azure.com/'
+      }
+      {
         name: 'AZURE_TENANT_ID'
         value: subscription().tenantId
       }

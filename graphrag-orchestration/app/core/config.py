@@ -11,16 +11,18 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_BEARER_TOKEN: Optional[str] = None  # For local dev
-    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-5-2"  # Primary model for synthesis (GPT-5.2)
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = "o3-pro"  # Primary model for synthesis (o3-pro)
+    AZURE_OPENAI_REASONING_EFFORT: str = "high"  # Reasoning effort for synthesis
     # Optional override only for DRIFT to allow faster model like gpt-4o-mini
     AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = None
     # Indexing operations (entity/relationship extraction, RAPTOR clustering)
-    AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = None  # Will use gpt-4.1 when deployed
+    AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = "gpt-4.1"  # Will use gpt-4.1 when deployed
     # Query routing (intent classification: Vector vs Graph vs RAPTOR)
-    AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = None  # Will use gpt-5.2-thinking-standard when deployed
+    AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = "o4-mini"  # Will use o4-mini when deployed
+    AZURE_OPENAI_ROUTING_REASONING_EFFORT: str = "medium"  # Reasoning effort for routing
     AZURE_OPENAI_MODEL_VERSION: str = "2024-11-20"  # gpt-4o (2024-11-20)
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-ada-002"
-    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 1024  # Ada dimensions
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
+    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 1536  # text-embedding-3-small dimensions
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Data Zone Standard max supported version
     
     # Vector Store for RAPTOR nodes

@@ -152,16 +152,16 @@ def get_drift_adapter():
             token_provider = get_bearer_token_provider(
                 credential, "https://cognitiveservices.azure.com/.default"
             )
-            # text-embedding-3-large deployment with 3072 dims
+            # text-embedding-3-small deployment with 1536 dims
             embed_kwargs = {
-                "model": "text-embedding-3-large",
+                "model": "text-embedding-3-small",
                 "deployment_name": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                 "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                 "api_version": settings.AZURE_OPENAI_API_VERSION,
                 "api_key": "",  # Empty string required even with use_azure_ad
                 "use_azure_ad": True,
                 "azure_ad_token_provider": token_provider,
-                "dimensions": 3072,
+                "dimensions": 1536,
             }
             embedder = AzureOpenAIEmbedding(**embed_kwargs)
             logger.info("Embedder initialized via fallback (managed identity)")
@@ -185,8 +185,8 @@ def get_indexing_pipeline():
         llm_service = LLMService()
         
         config = IndexingConfig(
-            embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-large",
-            embedding_dimensions=3072,  # Neo4j 5.x supports up to 4096
+            embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-small",
+            embedding_dimensions=1536,  # Neo4j 5.x supports up to 4096
             llm_model=settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o",
         )
         
@@ -617,20 +617,20 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
             credential, "https://cognitiveservices.azure.com/.default"
         )
         
-        # Use text-embedding-3-large with 3072 dims (matches indexing)
-        embedder_3072 = AzureOpenAIEmbedding(
-            model="text-embedding-3-large",
+        # Use text-embedding-3-small with 1536 dims (matches indexing)
+        embedder_1536 = AzureOpenAIEmbedding(
+            model="text-embedding-3-small",
             deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_version=settings.AZURE_OPENAI_API_VERSION,
             api_key="",
             use_azure_ad=True,
             azure_ad_token_provider=token_provider,
-            dimensions=3072,  # Must match indexed dimensions
+            dimensions=1536,  # Must match indexed dimensions
         )
         
-        # Get query embedding using 3072-dim embedder
-        query_embedding = embedder_3072.get_text_embedding(payload.query)
+        # Get query embedding using 1536-dim embedder
+        query_embedding = embedder_1536.get_text_embedding(payload.query)
         
         # First, check if RAPTOR nodes exist
         with store.driver.session(database=store.database) as session:

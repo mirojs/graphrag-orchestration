@@ -209,8 +209,8 @@ class IndexingConfig:
     raptor_cluster_size: int = 10  # Texts to cluster per level
     
     # Embedding settings
-    embedding_model: str = "text-embedding-3-large"  # 3072 dims, Neo4j 5.x supports up to 4096
-    embedding_dimensions: int = 3072
+    embedding_model: str = "text-embedding-3-small"  # 1536 dims, Neo4j 5.x supports up to 4096
+    embedding_dimensions: int = 1536
     
     # LLM settings
     llm_model: str = "gpt-4o"

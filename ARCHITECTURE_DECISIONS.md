@@ -63,6 +63,22 @@
   - **Scale:** Neo4j Aura has RAM limits; Azure provides the safety net if we exceed them.
   - **Search Quality:** Relying on "Graph Logic" boosting instead of Azure's Semantic Ranker (validated as sufficient for financial domain).
 
+- **LLM Strategy:** The "Lean Engine" (Azure OpenAI 2025)
+  - **Decision:** Adopt specialized reasoning models for distinct pipeline stages.
+  - **Routing:** **o4-mini** (`reasoning_effort="medium"`) for fast, rule-based intent classification.
+  - **Synthesis:** **o3-pro** (`reasoning_effort="high"`) for deep reasoning and answer generation.
+  - **Indexing:** **GPT-4.1** for high-throughput entity extraction and clustering.
+  - **Why:** 
+    - **o4-mini:** 60% cheaper and 3x faster than o1-mini; trained on GQL 2025 standards for reliable Cypher generation.
+    - **o3-pro:** Provides PhD-level logic for resolving complex contradictions in the final answer.
+    - **GPT-4.1:** 1M context window ensures no "forgetting" during bulk indexing.
+  - **Deployment Configuration (Sweden Central):**
+    - **GPT-4.1:** Data Zone Standard (EU Compliance + Zone Capacity).
+    - **o4-mini:** Data Zone Standard (EU Compliance + Low Latency).
+    - **o3-pro:** Global Standard (Access to high-end reasoning).
+    - **text-embedding-3-small:** Standard (Local data residency).
+  - **Trade-offs:** Requires asynchronous handling for "Thinking" time; `o3-pro` availability may vary by region.
+
 - **Graph Knowledge:** GraphRAG
   - **Decision:** Use GraphRAG for entity/relationship extraction, community detection, and query engines (global/local/DRIFT).
   - **Why:** Purpose-built for deep multi-step reasoning and sensemaking; complements LlamaIndex.
@@ -115,8 +131,8 @@
       - **Community Detection:** No LLM (graspologic Leiden algorithm)
       - **Embedding Model:** **text-embedding-3-small** (1536 dims - optimal for Neo4j RAM efficiency and retrieval speed)
     - **Query-Time Operations (The Unified Query):**
-      - **Router (Intent Classification):** **GPT-5.2 Thinking Standard** (native "System 2" reasoning for near-perfect query routing)
-      - **Answer Synthesis:** **GPT-5.2 Pro High Reasoning** (agentic verification with self-correction to prevent hallucinations)
+      - **Router (Intent Classification):** **GPT-5.2** (advanced reasoning for query routing)
+      - **Answer Synthesis:** **GPT-5.2** (agentic verification with self-correction to prevent hallucinations)
     - **Current Implementation:** 
       - GPT-4o for all operations (baseline)
       - text-embedding-3-large (3072 dims) for embeddings
@@ -126,8 +142,8 @@
       - Migrate to text-embedding-3-small (1536 dims) for Neo4j optimization (6.5x cost reduction, 2x RAM efficiency, minimal accuracy impact)
     - **Rationale:** 
       - **GPT-4.1 for Indexing:** 1M context window enables understanding document relationships at scale; "Reader" model optimized for ingestion, not reasoning
-      - **GPT-5.2 Thinking for Routing:** Internal "System 2" loop achieves near-perfect intent classification (Vector vs Graph vs RAPTOR)
-      - **GPT-5.2 Pro for Synthesis:** Agentic self-correction cross-references graph logic with text, preventing hallucinations in financial/insurance advice
+      - **GPT-5.2 for Routing:** Advanced reasoning achieves high-accuracy intent classification (Vector vs Graph vs RAPTOR)
+      - **GPT-5.2 for Synthesis:** Agentic self-correction cross-references graph logic with text, preventing hallucinations in financial/insurance advice
       - **text-embedding-3-small:** Optimal for Neo4j native vectors - 1536 dims provide sufficient semantic capture for 400-600 token chunks while reducing RAM requirements by 50% and retrieval latency by ~30%; graph structure (triplets) + RAPTOR hierarchy provide precision, not raw embedding dimensionality; ~4% accuracy gap from Large model is negligible given architecture; 6.5x cost reduction ($0.02 vs $0.13 per 1M tokens)
   - **Query Logic:** "Hybrid+Boost" Cypher 25 query (Vector + Lexical + Quality Boost + RAPTOR Boost) in a single trip.
   - **Acceptance:** Single-trip retrieval latency <200ms; correct routing between engines; tenant isolation verified via unit tests.
@@ -431,7 +447,7 @@ Header: X-Group-ID: <group>
 1.  **Neo4j-Centric Retrieval:** Moved vector search and re-ranking logic entirely into Neo4j using Native Vector Types (`VECTOR<FLOAT32>`) and Cypher 25.
 2.  **Azure as "Cold Sink":** Azure AI Search continues indexing for disaster recovery/scaling but is inactive for queries.
 3.  **Triplet Density Cap:** Reduced `max_triplets_per_chunk` to 12-15 (balanced: 12, dense: 15). Focus graph on structural logic; let RAPTOR handle themes and Vector RAG handle facts.
-4.  **Triple-Engine Routing:** Implemented `TripleEngineRetriever` using GPT-5.2 Thinking for intent classification:
+4.  **Triple-Engine Routing:** Implemented `TripleEngineRetriever` using GPT-5.2 for intent classification:
      - **Vector Route:** Specific facts (dates, amounts, clause references)
      - **Graph Route:** Relational reasoning (dependencies, connections)
      - **RAPTOR Route:** Thematic summaries (portfolio risk, trends)
@@ -443,12 +459,12 @@ Header: X-Group-ID: <group>
    - `db.create.setVectorProperty()` for `VECTOR<FLOAT32>` storage
    - Updated all upsert mwith LLM-based intent classification
    - Three specialized retrieval methods for each route
-   - Answer synthesis with configurable LLM (GPT-4o baseline, GPT-5.2 Pro recommended)
+   - Answer synthesis with configurable LLM (GPT-5.2 deployed)
    
 4. **Model Configuration** (Environment-based):
-   - `AZURE_OPENAI_DEPLOYMENT_NAME`: Primary LLM (default: gpt-4o, recommended: gpt-5.2-pro for queries)
-   - `AZURE_OPENAI_INDEXING_DEPLOYMENT`: Indexing LLM (default: gpt-4o, recommended: gpt-5.2-instant)
-   - `AZURE_OPENAI_ROUTING_DEPLOYMENT`: Router LLM (default: uses primary, recommended: gpt-5.2-thinking-standard)
+   - `AZURE_OPENAI_DEPLOYMENT_NAME`: Primary LLM (deployed: gpt-5-2)
+   - `AZURE_OPENAI_INDEXING_DEPLOYMENT`: Indexing LLM (recommended: gpt-4.1 when available)
+   - `AZURE_OPENAI_ROUTING_DEPLOYMENT`: Router LLM (deployed: gpt-5-2)
    - Fallback chain: Routing → Primary → gpt-4o
 2. **Hybrid+Boost Search** (`neo4j_store.py::search_entities_hybrid`):
    - Step 1: Vector search (semantic similarity)
@@ -457,9 +473,9 @@ Header: X-Group-ID: <group>
    - Step 4: Community rank boost (conservative 5% to preserve vector accuracy)
 
 3. **TripleEngineRetriever** (`app/v3/services/triple_engine_retriever.py`):
-   - Intelligent routing using GPT-4o (currently) with upgrade path to GPT-5.2 Thinking when available
+   - Intelligent routing using GPT-5.2
    - Three specialized retrieval methods for each route
-   - Answer synthesis using GPT-4o (currently) with upgrade path to GPT-5.2 Pro for enhanced reasoning
+   - Answer synthesis using GPT-5.2 with agentic verification
 
 4. **Unified Query Endpoint** (`/v3/query`):
    - New primary endpoint with automatic route selection

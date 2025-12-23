@@ -41,11 +41,11 @@ class DimensionAwareAzureEmbeddings(AzureOpenAIEmbeddings):
     """
     Azure OpenAI embeddings wrapper that passes dimensions parameter.
     
-    text-embedding-3-large supports configurable dimensions (256-3072).
+    text-embedding-3-small supports configurable dimensions (256-1536).
     This wrapper ensures the dimensions parameter is always passed to the API.
     """
     
-    def __init__(self, dimensions: int = 3072, **kwargs):
+    def __init__(self, dimensions: int = 1536, **kwargs):
         self._dimensions = dimensions
         super().__init__(**kwargs)
     

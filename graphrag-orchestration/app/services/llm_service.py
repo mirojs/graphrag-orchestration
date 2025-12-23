@@ -72,14 +72,25 @@ class LLMService:
                 # Initialize LLM with token provider
                 try:
                     logger.info(f"Creating AzureOpenAI LLM with endpoint: {settings.AZURE_OPENAI_ENDPOINT}")
-                    self._llm = AzureOpenAI(
-                        model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                        deployment_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                        azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-                        api_version=settings.AZURE_OPENAI_API_VERSION,
-                        use_azure_ad=True,
-                        azure_ad_token_provider=token_provider,
-                    )
+                    
+                    # Configure reasoning effort if applicable (o1/o3/o4 models)
+                    llm_kwargs = {
+                        "model": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                        "deployment_name": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                        "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+                        "api_version": settings.AZURE_OPENAI_API_VERSION,
+                        "use_azure_ad": True,
+                        "azure_ad_token_provider": token_provider,
+                    }
+                    
+                    # Add reasoning_effort for o-series models
+                    if settings.AZURE_OPENAI_DEPLOYMENT_NAME.startswith(("o1", "o3", "o4")):
+                        llm_kwargs["additional_kwargs"] = {
+                            "reasoning_effort": settings.AZURE_OPENAI_REASONING_EFFORT
+                        }
+                        logger.info(f"Using reasoning_effort={settings.AZURE_OPENAI_REASONING_EFFORT} for {settings.AZURE_OPENAI_DEPLOYMENT_NAME}")
+
+                    self._llm = AzureOpenAI(**llm_kwargs)
                     logger.info("LLM initialized successfully with managed identity")
                 except Exception as e:
                     logger.error(f"Failed to initialize LLM: {e}")
@@ -216,6 +227,57 @@ class LLMService:
                 azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
                 api_version=settings.AZURE_OPENAI_API_VERSION,
             )
+
+    def get_routing_llm(self) -> Any:
+        """Get the specialized routing LLM (o4-mini)."""
+        deployment = settings.AZURE_OPENAI_ROUTING_DEPLOYMENT or "o4-mini"
+        effort = settings.AZURE_OPENAI_ROUTING_REASONING_EFFORT or "medium"
+        return self._create_llm_client(deployment, reasoning_effort=effort)
+
+    def get_indexing_llm(self) -> Any:
+        """Get the specialized indexing LLM (GPT-4.1)."""
+        deployment = settings.AZURE_OPENAI_INDEXING_DEPLOYMENT or "gpt-4.1"
+        return self._create_llm_client(deployment)
+
+    def _create_llm_client(self, deployment_name: str, reasoning_effort: Optional[str] = None) -> Any:
+        """Helper to create LLM instance with correct auth and settings."""
+        from llama_index.llms.azure_openai import AzureOpenAI
+        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+        
+        # Auth logic (simplified from _initialize)
+        if not settings.AZURE_OPENAI_API_KEY:
+            env_token = os.getenv("AZURE_OPENAI_BEARER_TOKEN")
+            if env_token:
+                def token_provider() -> str:
+                    return env_token
+            else:
+                credential = DefaultAzureCredential()
+                token_provider = get_bearer_token_provider(
+                    credential, "https://cognitiveservices.azure.com/.default"
+                )
+            
+            llm_kwargs = {
+                "model": deployment_name,
+                "deployment_name": deployment_name,
+                "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+                "api_version": settings.AZURE_OPENAI_API_VERSION,
+                "use_azure_ad": True,
+                "azure_ad_token_provider": token_provider,
+            }
+        else:
+            llm_kwargs = {
+                "model": deployment_name,
+                "deployment_name": deployment_name,
+                "api_key": settings.AZURE_OPENAI_API_KEY,
+                "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+                "api_version": settings.AZURE_OPENAI_API_VERSION,
+            }
+            
+        # Add reasoning_effort if specified and model supports it
+        if reasoning_effort and deployment_name.startswith(("o1", "o3", "o4")):
+            llm_kwargs["additional_kwargs"] = {"reasoning_effort": reasoning_effort}
+            
+        return AzureOpenAI(**llm_kwargs)
 
     def generate(self, prompt: str, **kwargs) -> str:
         """Generate a response from the LLM."""

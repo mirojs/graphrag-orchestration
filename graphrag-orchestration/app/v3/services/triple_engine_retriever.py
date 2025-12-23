@@ -7,8 +7,8 @@ Implements the "Lean Engine" architecture with intelligent query routing:
 - RAPTOR Route: Thematic summaries (portfolio risk, trends)
 
 Model Selection:
-- Current: Uses GPT-4o for both routing and synthesis (excellent reasoning, production-ready)
-- Planned: Upgrade to GPT-5.2 Thinking (routing) and GPT-5.2 Pro (synthesis) when available
+- Current: Uses GPT-5.2 for both routing and synthesis (deployed)
+- Planned: Use GPT-4.1 for indexing when available (1M context window)
 """
 
 import logging
@@ -40,9 +40,9 @@ class TripleEngineRetriever:
     Single-trip Neo4j retriever with intelligent query routing.
     
     Architecture:
-    1. Router (GPT-4o): Classifies query intent [Upgrade to GPT-5.2 Thinking when available]
+    1. Router (GPT-5.2): Classifies query intent with advanced reasoning
     2. Retrieval (Neo4j): Single-trip Hybrid+Boost query
-    3. Synthesizer (GPT-4o): Contradiction resolution and answer generation [Upgrade to GPT-5.2 Pro when available]
+    3. Synthesizer (GPT-5.2): Contradiction resolution and answer generation with agentic verification
     
     Routes:
     - Vector: "What is the contract value?" → Entity search (Hybrid+Boost)
@@ -95,7 +95,7 @@ Respond with ONLY the route name (vector, graph, or raptor) on the first line, f
         ]
         
         try:
-            # Use specialized routing LLM if available (GPT-5.2 Thinking for System 2 reasoning)
+            # Use specialized routing LLM if available (GPT-5.2 for advanced reasoning)
             routing_llm = self.llm_service.get_routing_llm()
             response = routing_llm.chat(messages)
             response_text = response.message.content.strip()

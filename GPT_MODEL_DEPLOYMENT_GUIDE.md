@@ -5,19 +5,19 @@ This guide explains how to deploy the recommended GPT model strategy for optimal
 
 ## Model Strategy Summary
 
-| Stage | Operation | Model | Rationale |
-|-------|-----------|-------|-----------|
-| **Indexing** | Entity/Relationship Extraction | **GPT-4.1** | 1M context window for bulk document ingestion; 3-5x faster than GPT-4o |
-| **Indexing** | RAPTOR Clustering | **GPT-4.1** | Handles thematic clustering across large corpora without reasoning overhead |
-| **Indexing** | Embeddings | **text-embedding-3-small** (1536 dims) | Optimal for Neo4j RAM efficiency; ~4% accuracy gap vs Large negligible |
-| **Query** | Intent Routing | **GPT-5.2 Thinking Standard** | Native System 2 reasoning for 95%+ routing accuracy |
-| **Query** | Answer Synthesis | **GPT-5.2 Pro High Reasoning** | Agentic self-correction to prevent hallucinations |
+| Stage | Operation | Model | Deployment Type | Configuration | Rationale |
+|-------|-----------|-------|-----------------|---------------|-----------|
+| **Indexing** | Entity/Relationship Extraction | **GPT-4.1** | Data Zone Standard | Standard | 1M context window; EU compliance + Zone capacity |
+| **Indexing** | RAPTOR Clustering | **GPT-4.1** | Data Zone Standard | Standard | Handles thematic clustering across large corpora |
+| **Indexing** | Embeddings | **text-embedding-3-small** | Standard | 1536 dims | Local residency (Sweden Central); optimal for Neo4j |
+| **Query** | Intent Routing | **o4-mini** | Data Zone Standard | `reasoning_effort="medium"` | EU compliance; 60% cheaper/3x faster than o1-mini |
+| **Query** | Answer Synthesis | **o3-pro** | Global Standard | `reasoning_effort="high"` | Access to high-end reasoning model |
 
 ## Deployment Steps
 
 ### Prerequisites
-- Azure OpenAI resource with appropriate quotas
-- Access to GPT-4.1 and GPT-5.2 family models (availability varies by region)
+- Azure OpenAI resource in **Sweden Central**
+- Access to GPT-4.1, o4-mini, and o3-pro models
 
 ### Step 0: Request Quota Increases
 
@@ -28,14 +28,14 @@ Before deploying models, request appropriate TPM (tokens per minute) quotas:
 | Model | Recommended TPM | Justification |
 |-------|----------------|---------------|
 | GPT-4.1 (Indexing) | 50K-100K | Bulk document processing - 10K+ docs, high throughput needed |
-| GPT-5.2 Thinking (Routing) | 10K-20K | Per-query classification - 1K queries/day, peak hour buffer |
-| GPT-5.2 Pro (Synthesis) | 20K-50K | Context-heavy answer generation with concurrent users |
+| o4-mini (Routing) | 20K-50K | High-volume query classification; low latency requirement |
+| o3-pro (Synthesis) | 30K-60K | Deep reasoning for final answer generation; high compute intensity |
 
 **What to include in request:**
 - **Resource:** Your Azure OpenAI resource name
 - **Region:** e.g., East US, West Europe
 - **Current Quota:** Usually 10K TPM for new deployments
-- **Use Case:** "GraphRAG knowledge graph construction for financial/legal documents - bulk indexing (GPT-4.1) and real-time query operations (GPT-5.2)"
+- **Use Case:** "GraphRAG knowledge graph construction - bulk indexing (GPT-4.1) and reasoning-heavy query pipeline (o4-mini for routing, o3-pro for synthesis)"
 
 **Typical approval time:** 1-3 business days
 
@@ -47,6 +47,7 @@ Before deploying models, request appropriate TPM (tokens per minute) quotas:
 # 1. Navigate to Azure OpenAI Studio > Deployments
 # 2. Create new deployment:
 #    - Model: gpt-4.1
+#    - Deployment type: Data Zone Standard (EU)
 #    - Deployment name: gpt-4.1-indexing
 #    - TPM: 50K+ recommended for bulk indexing
 ```
@@ -61,37 +62,52 @@ az cognitiveservices account deployment create \
   --model-version "2025-01-15" \
   --model-format OpenAI \
   --sku-capacity 50 \
-  --sku-name "Standard"
+  --sku-name "DataZoneStandard"
 ```
 
-#### 1.2 Create GPT-5.2 Thinking Deployment (Routing)
+#### 1.2 Create o4-mini Deployment (Routing)
 ```bash
+# Via Azure Portal:
+# - Model: o4-mini
+# - Deployment type: Data Zone Standard (EU)
+# - Deployment name: graphrag-router
+
 az cognitiveservices account deployment create \
   --name <your-openai-resource> \
   --resource-group <your-rg> \
-  --deployment-name gpt-5.2-thinking-standard \
-  --model-name gpt-5.2-thinking-standard \
-  --model-version "2025-01-15" \
+  --deployment-name graphrag-router \
+  --model-name o4-mini \
+  --model-version "2025-10-01" \
   --model-format OpenAI \
-  --sku-capacity 10 \
-  --sku-name "Standard"
+  --sku-capacity 50 \
+  --sku-name "DataZoneStandard"
 ```
 
-#### 1.3 Create GPT-5.2 Pro Deployment (Synthesis)
+#### 1.3 Create o3-pro Deployment (Synthesis)
 ```bash
+# Via Azure Portal:
+# - Model: o3-pro
+# - Deployment type: Global Standard
+# - Deployment name: graphrag-synthesizer
+
 az cognitiveservices account deployment create \
   --name <your-openai-resource> \
   --resource-group <your-rg> \
-  --deployment-name gpt-5.2-pro-high-reasoning \
-  --model-name gpt-5.2-pro-high-reasoning \
-  --model-version "2025-01-15" \
+  --deployment-name graphrag-synthesizer \
+  --model-name o3-pro \
+  --model-version "2025-12-01" \
   --model-format OpenAI \
-  --sku-capacity 20 \
-  --sku-name "Standard"
+  --sku-capacity 50 \
+  --sku-name "GlobalStandard"
 ```
 
 #### 1.4 Deploy text-embedding-3-small (Cost Optimization)
 ```bash
+# Via Azure Portal:
+# - Model: text-embedding-3-small
+# - Deployment type: Standard (Region: Sweden Central)
+# - Deployment name: text-embedding-3-small
+
 az cognitiveservices account deployment create \
   --name <your-openai-resource> \
   --resource-group <your-rg> \
@@ -108,12 +124,20 @@ az cognitiveservices account deployment create \
 Update your `.env` file or Azure Container App environment variables:
 
 ```bash
-# Primary model (for synthesis and fallback)
-AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5.2-pro-high-reasoning
+# Primary model (for synthesis)
+AZURE_OPENAI_DEPLOYMENT_NAME=graphrag-synthesizer
+AZURE_OPENAI_REASONING_EFFORT=high
+
+# Routing model
+AZURE_OPENAI_ROUTING_DEPLOYMENT=graphrag-router
+AZURE_OPENAI_ROUTING_REASONING_EFFORT=low
+
+AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-2
 
 # Specialized deployments
 AZURE_OPENAI_INDEXING_DEPLOYMENT=gpt-4.1-indexing
-AZURE_OPENAI_ROUTING_DEPLOYMENT=gpt-5.2-thinking-standard
+AZURE_OPENAI_ROUTING_DEPLOYMENT=graphrag-router
+AZURE_OPENAI_ROUTING_REASONING_EFFORT=medium
 
 # Embedding model (after migration from Large)
 AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
@@ -132,9 +156,11 @@ az containerapp update \
   --name $APP_NAME \
   --resource-group $RESOURCE_GROUP \
   --set-env-vars \
-    AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5.2-pro-high-reasoning \
+    AZURE_OPENAI_DEPLOYMENT_NAME=graphrag-synthesizer \
+    AZURE_OPENAI_REASONING_EFFORT=high \
     AZURE_OPENAI_INDEXING_DEPLOYMENT=gpt-4.1-indexing \
-    AZURE_OPENAI_ROUTING_DEPLOYMENT=gpt-5.2-thinking-standard \
+    AZURE_OPENAI_ROUTING_DEPLOYMENT=graphrag-router \
+    AZURE_OPENAI_ROUTING_REASONING_EFFORT=medium \
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small \
     AZURE_OPENAI_EMBEDDING_DIMENSIONS=1536
 ```
@@ -150,7 +176,7 @@ curl -X GET "https://<your-app>.azurecontainerapps.io/health" \
 
 # Expected output should show:
 # {
-#   "llm_model": "gpt-5.2-pro-high-reasoning",
+#   "llm_model": "gpt-5-2",
 #   "embedding_model": "text-embedding-3-small"
 # }
 ```
@@ -190,11 +216,10 @@ curl -X POST "https://<your-app>.azurecontainerapps.io/v3/query" \
 - Monitor indexing speed improvement (expect 3-5x faster)
 - If not set, system continues using primary deployment
 
-### Phase 2: Deploy GPT-5.2 Family for Queries (When Available)
-- Deploy gpt-5.2-thinking and gpt-5.2-pro in Azure OpenAI
-- Update `AZURE_OPENAI_ROUTING_DEPLOYMENT=<gpt-5.2-thinking-deployment-name>`
-- Update `AZURE_OPENAI_DEPLOYMENT_NAME=<gpt-5.2-pro-deployment-name>`
-- Monitor routing accuracy (expect 95%+ vs 85% with GPT-4o)
+### Phase 2: Deploy GPT-5.2 for Query Operations (✅ DEPLOYED)
+- GPT-5.2 already deployed as `gpt-5-2`
+- Handles both routing (intent classification) and synthesis (answer generation)
+- Monitor query accuracy and response quality
 
 ### Phase 3: Migrate to text-embedding-3-small (Recommended)
 - Deploy text-embedding-3-small in Azure OpenAI
@@ -214,8 +239,8 @@ curl -X POST "https://<your-app>.azurecontainerapps.io/v3/query" \
 
 ### Optimized Strategy (GPT-4.1 + GPT-5.2 + text-embedding-3-small)
 - Indexing: $2.50 per 1M input tokens (GPT-4.1 - 50% cheaper + faster)
-- Routing: $3.00 per 1M input tokens (GPT-5.2 Thinking)
-- Synthesis: $5.00 per 1M input tokens (GPT-5.2 Pro - same as GPT-4o but better quality)
+- Routing: $3.00 per 1M input tokens (GPT-5.2)
+- Synthesis: $5.00 per 1M input tokens (GPT-5.2 - same as GPT-4o but better quality)
 - Embeddings: $0.02 per 1M tokens (6.5x cheaper)
 - **Estimated monthly cost (10K docs, 1K queries):** ~$550
 

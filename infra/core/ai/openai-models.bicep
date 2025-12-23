@@ -19,7 +19,7 @@ resource gpt41Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
     model: {
       format: 'OpenAI'
       name: 'gpt-4.1'
-      version: '2025-01-15'
+      version: '2025-04-14'
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }
@@ -37,11 +37,11 @@ resource o4miniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024
     model: {
       format: 'OpenAI'
       name: 'o4-mini'
-      version: '2025-10-01'
+      version: '2025-04-16'
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }
-  dependsOn: [gpt41Deployment] // Sequential deployment to avoid quota conflicts
+  dependsOn: [gpt41Deployment]
 }
 
 // o3-pro - Answer Synthesis (Global Standard for high-end reasoning)
@@ -56,7 +56,7 @@ resource o3proDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
     model: {
       format: 'OpenAI'
       name: 'o3-pro'
-      version: '2025-12-01'
+      version: '2025-06-10'
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }
@@ -75,7 +75,7 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
     model: {
       format: 'OpenAI'
       name: 'text-embedding-3-small'
-      version: '2024-09-15'
+      version: '1'
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }

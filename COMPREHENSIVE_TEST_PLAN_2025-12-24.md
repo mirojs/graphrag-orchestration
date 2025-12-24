@@ -68,43 +68,43 @@ test-comprehensive-{timestamp}
 #### Test Questions (10)
 
 1. **Q1.1:** "What is the invoice amount in the Contoso Lifts invoice?"
-   - **Expected:** Specific dollar amount from invoice
+   - **Expected:** Amount due/total is **29,900.00** (shown as SUBTOTAL/TOTAL/AMOUNT DUE)
    - **Validates:** Entity extraction, numeric content search
 
 2. **Q1.2:** "Who is the property manager in the property management agreement?"
-   - **Expected:** Specific party name
+   - **Expected:** **Walt Flood Realty** (Agent)
    - **Validates:** Entity type detection (PERSON/ORGANIZATION)
 
 3. **Q1.3:** "What is the warranty period for the builders limited warranty?"
-   - **Expected:** Time period (e.g., "12 months", "1 year")
+   - **Expected:** **1 year** for core structural components/systems + roof, and **60 days** for items like doors/windows/switches/fixtures/caulking
    - **Validates:** Temporal entity extraction
 
 4. **Q1.4:** "What services are covered under the holding tank servicing contract?"
-   - **Expected:** List of services
+   - **Expected:** Holding tank servicing by the pumper + reporting to the County (including service dates, gallons pumped, and tank/component condition)
    - **Validates:** Multi-entity retrieval, list extraction
 
 5. **Q1.5:** "What is the purchase price in the purchase contract?"
-   - **Expected:** Specific amount with currency
+   - **Expected:** Total contract price is **$29,900.00**
    - **Validates:** Financial entity extraction
 
 6. **Q1.6:** "Who are the parties involved in the property management agreement?"
-   - **Expected:** Landlord and property manager names
+   - **Expected:** **Contoso Ltd.** (Owner) and **Walt Flood Realty** (Agent)
    - **Validates:** Multi-entity relationship
 
-7. **Q1.7:** "What is the payment schedule in the servicing contract?"
-   - **Expected:** Payment frequency and amounts
-   - **Validates:** Structured data extraction
+7. **Q1.7:** "What is the pumper’s registration number in the holding tank servicing contract?"
+   - **Expected:** **REG-54321**
+   - **Validates:** Precise fact extraction from short documents
 
 8. **Q1.8:** "What exclusions are mentioned in the warranty?"
-   - **Expected:** List of exclusions
+   - **Expected:** Examples include **consequential/incidental damages**, many **consumer products/appliances**, defects covered by **manufacturer warranties**, and defects caused by **improper maintenance/negligence**
    - **Validates:** Negative constraint extraction
 
 9. **Q1.9:** "What is the service fee mentioned in the property management agreement?"
-   - **Expected:** Percentage or dollar amount
+   - **Expected:** **25%** commission for short-term rentals (<180 days) and **10%** for long-term leases (>180 days); plus additional monthly fees (e.g., $75 advertising, $50 admin)
    - **Validates:** Fee extraction from contracts
 
 10. **Q1.10:** "What is the effective date of the purchase contract?"
-    - **Expected:** Specific date
+   - **Expected:** Effective **upon mutual signature and initial payment**; signature page shows **Signed this 04/30/2025**
     - **Validates:** Date entity extraction
 
 **Success Criteria:**
@@ -452,7 +452,7 @@ test-comprehensive-{timestamp}
    - **Validates:** Keyword matching
 
 3. **Q7.3:** "What does the warranty say about water damage?"
-   - **Expected:** Specific warranty clause
+   - **Expected:** The warranty durations: **1 year** for core components/systems + roof, and **60 days** for specified items (doors/windows/switches/fixtures/caulking)
    - **Validates:** Topic-based retrieval
 
 4. **Q7.4:** "Retrieve the payment terms section."
@@ -468,7 +468,7 @@ test-comprehensive-{timestamp}
    - **Validates:** Semantic similarity
 
 7. **Q7.7:** "What does the invoice say about labor costs?"
-   - **Expected:** Labor cost details from invoice
+   - **Expected:** Invoice shows **AMOUNT DUE / TOTAL = 29,900.00**, **DUE DATE = 12/17/2015**, and **TERMS = Due on contract**
    - **Validates:** Document-specific retrieval
 
 8. **Q7.8:** "Retrieve all date references in the documents."

@@ -191,18 +191,12 @@ def get_indexing_pipeline():
             raise RuntimeError("Embedding model not initialized - check Azure OpenAI embedding configuration and credentials")
         
         # Use indexing deployment (gpt-4.1) for RAPTOR and entity extraction
-        # Convert deployment name to model name for metadata (gpt-4-1 → gpt-4.1, replace last hyphen only)
         deployment_name = settings.AZURE_OPENAI_INDEXING_DEPLOYMENT or settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o"
-        if "-" in deployment_name:
-            parts = deployment_name.rsplit("-", 1)
-            model_name = f"{parts[0]}.{parts[1]}"
-        else:
-            model_name = deployment_name
         
         config = IndexingConfig(
             embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-small",
             embedding_dimensions=1536,  # Neo4j 5.x supports up to 4096
-            llm_model=model_name,
+            llm_model=deployment_name,  # Store deployment name as-is (e.g., "gpt-4.1")
         )
         
         _indexing_pipeline = IndexingPipelineV3(

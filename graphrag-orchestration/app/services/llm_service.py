@@ -116,7 +116,7 @@ class LLMService:
                     
                     # Configure reasoning effort if applicable (o1/o3/o4 models)
                     llm_kwargs = {
-                        "model": settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # For Azure, model = deployment name
+                        "engine": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
                         "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
                         "use_azure_ad": True,
@@ -160,7 +160,7 @@ class LLMService:
                     
                     # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
                     embed_kwargs = {
-                        "model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                        "engine": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         "azure_endpoint": embedding_endpoint,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
                         "api_key": "",  # Empty string required even with use_azure_ad
@@ -182,7 +182,7 @@ class LLMService:
                 logger.info("Using API key authentication for OpenAI")
                 # Initialize LLM with API key
                 self._llm = AzureOpenAI(
-                    model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                    engine=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
                     api_key=settings.AZURE_OPENAI_API_KEY,
                     azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
                     api_version=settings.AZURE_OPENAI_API_VERSION,
@@ -191,7 +191,7 @@ class LLMService:
                 # Initialize Embedding Model with API key
                 # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
                 embed_kwargs = {
-                    "model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                    "engine": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                     "api_key": settings.AZURE_OPENAI_API_KEY,
                     "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                     "api_version": settings.AZURE_OPENAI_API_VERSION,
@@ -256,7 +256,7 @@ class LLMService:
                 )
             
             llm_kwargs = {
-                "model": deployment_name,  # For Azure, model = deployment name
+                "engine": deployment_name,
                 "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                 "api_version": settings.AZURE_OPENAI_API_VERSION,
                 "use_azure_ad": True,
@@ -264,7 +264,7 @@ class LLMService:
             }
         else:
             llm_kwargs = {
-                "model": deployment_name,  # For Azure, model = deployment name
+                "engine": deployment_name,
                 "api_key": settings.AZURE_OPENAI_API_KEY,
                 "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                 "api_version": settings.AZURE_OPENAI_API_VERSION,

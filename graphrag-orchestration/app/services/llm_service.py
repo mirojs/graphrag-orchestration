@@ -116,8 +116,7 @@ class LLMService:
                     
                     # Configure reasoning effort if applicable (o1/o3/o4 models)
                     llm_kwargs = {
-                        "model": model_name,  # Model name for validation (gpt-5.2)
-                        "deployment_name": settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # Actual deployment (gpt-5-2)
+                        "engine": settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # Azure deployment name
                         "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
                         "use_azure_ad": True,

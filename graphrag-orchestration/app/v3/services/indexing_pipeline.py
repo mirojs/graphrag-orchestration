@@ -1343,6 +1343,9 @@ Summary:"""
                 embedding = await self._embed_text(summary)
                 
                 # Create RAPTOR node with Phase 1 quality metrics
+                # Get deployment name from LLM instance (e.g., "gpt-4.1")
+                deployment_name = getattr(self.llm, "deployment_name", self.config.llm_model)
+                
                 node = RaptorNode(
                     id=f"raptor_L{level}_{cluster_idx}_{uuid.uuid4().hex[:8]}",
                     text=summary,
@@ -1356,7 +1359,7 @@ Summary:"""
                         "silhouette_score": float(np.mean(silhouette_scores)) if silhouette_scores else 0.0,
                         "cluster_silhouette_avg": float(np.mean(silhouette_scores)) if silhouette_scores else 0.0,
                         "child_count": len(cluster),
-                        "creation_model": self.config.llm_model,  # Deployment name (e.g., "gpt-4.1")
+                        "creation_model": deployment_name,
                     }
                 )
                 raptor_nodes.append(node)

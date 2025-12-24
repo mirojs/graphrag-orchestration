@@ -12,7 +12,7 @@
 
 ---
 
-## A) Vector / Exact-Retrieval Questions (8)
+## A) Vector / Exact-Retrieval Questions (10)
 Use for `mode=vector` (or queries intended to route to `vector`).
 
 1. **Q-V1:** What is the invoice **TOTAL** amount?
@@ -46,6 +46,14 @@ Use for `mode=vector` (or queries intended to route to `vector`).
 8. **Q-V8:** What is the warranty’s builder address city/state/zip?
    - **Expected:** `Pocatello, ID 83201`
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3)
+
+9. **Q-V9:** Who is the invoice **SALESPERSON**?
+   - **Expected:** `Jim Contoso`
+   - **Source:** contoso_lifts_invoice.pdf (chunk 0)
+
+10. **Q-V10:** What is the invoice **P.O. NUMBER**?
+   - **Expected:** `30060204`
+   - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 ---
 
@@ -94,7 +102,7 @@ Use for `mode=local` (or queries intended to route to GraphRAG local).
 
 ---
 
-## C) Global / Cross-Section or “Policy” Questions (5)
+## C) Global / Cross-Section or “Policy” Questions (10)
 Use for `mode=global` (or queries intended to route to GraphRAG global/community summaries).
 
 1. **Q-G1:** Across the agreements, list the **termination/cancellation** rules you can find.
@@ -132,9 +140,44 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
      - Purchase contract: legal fees recoverable by contractor upon customer default.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/5/6); purchase_contract.pdf (chunk 0)
 
+6. **Q-G6:** List all **named parties/organizations** across the documents and which document(s) they appear in.
+    - **Expected:**
+       - `Fabrikam Inc.`: builder (warranty), pumper (holding tank), customer (purchase contract)
+       - `Contoso Ltd.`: owner (property management), holding tank owner (holding tank)
+       - `Contoso Lifts LLC`: contractor (purchase contract)
+       - `Walt Flood Realty`: agent (property management)
+    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0)
+
+7. **Q-G7:** Summarize all explicit **notice / delivery** mechanisms (written notice, certified mail, phone, filings) mentioned.
+    - **Expected:**
+       - PMA: `60 days written notice` to terminate
+       - Warranty: defect notice must be `in writing` and sent by `certified mail return receipt requested`; emergencies by phone
+       - Holding tank: file contract changes with municipality/County within `10 business days`
+    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); BUILDERS LIMITED WARRANTY.pdf (chunk 2/3); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1)
+
+8. **Q-G8:** Summarize all explicit **insurance / indemnity / hold harmless** clauses.
+    - **Expected:**
+       - PMA: requires liability insurance with minimum limits `$300,000` BI and `$25,000` PD; hold harmless/indemnify agent (except gross negligence/willful misconduct)
+    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+
+9. **Q-G9:** Identify all explicit **non-refundable / forfeiture** terms across the documents.
+    - **Expected:**
+       - PMA: `non-refundable start-up fee` of `$250.00`
+       - Purchase contract: after 3 business days, `deposit is forfeited`
+    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); purchase_contract.pdf (chunk 0/1)
+
+10. **Q-G10:** Summarize each document’s main purpose in one sentence.
+    - **Expected:**
+       - Warranty: limited warranty + arbitration process and exclusions
+       - Holding tank: servicing/reporting obligations between owner and pumper
+       - PMA: agent manages/rents property, fees, responsibilities, and termination
+       - Invoice: amount due for lift purchase
+       - Purchase contract: scope of work + payments + delivery + cancellation
+    - **Source:** All docs (see chunks referenced throughout)
+
 ---
 
-## D) Drift / Multi-Hop Reasoning Questions (5)
+## D) Drift / Multi-Hop Reasoning Questions (10)
 Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 1. **Q-D1:** If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?
@@ -157,9 +200,29 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
    - **Expected:** Coverage begins on date of final settlement or first occupancy (whichever first); claims must be made in writing within the 1-year or 60-day period.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0)
 
+6. **Q-D6:** Do the purchase contract total price and the invoice total match? If so, what is that amount?
+   - **Expected:** Yes — both state a total of `29,900.00` / `$29,900.00`.
+   - **Source:** purchase_contract.pdf (chunk 0); contoso_lifts_invoice.pdf (chunk 0)
+
+7. **Q-D7:** Which document has the latest explicit date, and what is it?
+   - **Expected:** `Signed this 04/30/2025` in the purchase contract Exhibit A.
+   - **Source:** purchase_contract.pdf (chunk 1)
+
+8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
+   - **Expected:** `Fabrikam Inc.` appears in more documents (warranty, holding tank, purchase contract) than `Contoso Ltd.` (property management, holding tank).
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+
+9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
+   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20k/$7k/$2.9k).
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)
+
+10. **Q-D10:** List the three different “risk allocation” statements across the set (risk of loss, liability limitations, non-transferability).
+   - **Expected:** Purchase contract shifts risk after delivery; PMA limits agent liability except gross negligence/willful misconduct; warranty is not transferable (terminates if first purchaser sells/moves out).
+   - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
+
 ---
 
-## E) RAPTOR / High-Level Theme Questions (2)
+## E) RAPTOR / High-Level Theme Questions (10)
 Use for `mode=raptor` (or queries intended to route to hierarchical summaries).
 
 1. **Q-R1:** Summarize the major themes across the 5 documents.
@@ -169,3 +232,70 @@ Use for `mode=raptor` (or queries intended to route to hierarchical summaries).
 2. **Q-R2:** Summarize risk allocation across the set (risk of loss, liability/hold harmless, non-transferability).
    - **Expected:** Purchase contract risk shifts after delivery; PMA has hold harmless/indemnity for agent (except gross negligence/willful misconduct); warranty is not transferable and has exclusions; arbitration clauses define dispute handling.
    - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunks 1–6)
+
+3. **Q-R3:** Summarize the payment structures (invoice vs contract vs ongoing management fees).
+   - **Expected:** Invoice total/amount due 29,900; purchase contract $29,900 in 3 installments; PMA commissions (25%/10%) plus monthly/percentage/hourly add-ons.
+   - **Source:** contoso_lifts_invoice.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+
+4. **Q-R4:** Summarize all “timeline” concepts (effective dates, term starts, cancellation windows, notice periods).
+   - **Expected:** PMA term begins 2010-06-15 with 60-day termination notice; purchase contract effective on signature+payment and signed 04/30/2025 with 3-business-day cancel window; holding tank contract date 2024-06-15; invoice due date 12/17/2015.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/3); purchase_contract.pdf (chunk 0/1); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); contoso_lifts_invoice.pdf (chunk 0)
+
+5. **Q-R5:** Summarize the warranty’s coverage durations and claim process at a high level.
+   - **Expected:** 1-year and 60-day coverage buckets; written notice (certified mail) before the period ends; emergencies by phone; builder repairs within 60 days if covered.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0/2/3)
+
+6. **Q-R6:** Summarize the holding tank contract’s core obligations and reporting contents.
+   - **Expected:** Owner provides access; pumper services tank and submits County reports including service dates, gallons pumped, and tank/component condition.
+   - **Source:** HOLDING TANK SERVICING CONTRACT.pdf (chunk 0)
+
+7. **Q-R7:** Summarize the PMA responsibilities split between Agent and Owner.
+   - **Expected:** Agent advertises, collects rents into trust account, provides monthly statements, contracts for services/maintenance; Owner furnishes/maintains unit, provides tax IDs/license, provides insurance.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/1)
+
+8. **Q-R8:** Summarize the purchase contract’s scope of work and delivery expectations.
+   - **Expected:** Furnish/install a vertical platform lift with listed components; delivery expected 8–10 weeks after drawing approval; delays may include factory and permits.
+   - **Source:** purchase_contract.pdf (chunk 0)
+
+9. **Q-R9:** Summarize dispute resolution mechanisms mentioned and where they apply.
+   - **Expected:** Warranty disputes go to binding arbitration (with small claims carveout); purchase contract mentions legal fees recoverable if customer defaults.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/5/6); purchase_contract.pdf (chunk 0)
+
+10. **Q-R10:** Summarize all explicit fees and rates in the PMA.
+   - **Expected:** 25% short-term commission; 10% long-term; $75/month advertising; $50/month admin; 10% repairs; $35/hour scheduling; 4.712% Hawaii excise tax on fees; $250 non-refundable start-up fee.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+
+---
+
+## F) Negative Tests (10)
+These should return **“not found / not specified in the provided documents”** (or equivalent) for group `phase1-5docs-1766595043`.
+
+1. **Q-N1:** What is the **late fee** percentage for overdue payments on the invoice?
+   - **Expected:** Not specified.
+
+2. **Q-N2:** What **interest rate / APR** applies to unpaid balances?
+   - **Expected:** Not specified.
+
+3. **Q-N3:** What is the invoice **discount** amount or discount percentage?
+   - **Expected:** Not specified.
+
+4. **Q-N4:** What is the invoice **number**?
+   - **Expected:** Not specified.
+
+5. **Q-N5:** What are the invoice **labor costs** (line-item labor charge)?
+   - **Expected:** Not specified.
+
+6. **Q-N6:** Which documents are governed by the laws of **California**?
+   - **Expected:** None (California not referenced).
+
+7. **Q-N7:** What is the property management Agent’s **license number**?
+   - **Expected:** Not specified.
+
+8. **Q-N8:** What is the purchase contract’s required **wire transfer / ACH instructions**?
+   - **Expected:** Not specified.
+
+9. **Q-N9:** What is the exact clause about **water damage** coverage in the warranty?
+   - **Expected:** Not specified as “water damage” (warranty mentions “water escape,” but not “water damage” wording).
+
+10. **Q-N10:** What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+   - **Expected:** Not specified / blank.

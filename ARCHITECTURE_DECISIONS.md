@@ -65,39 +65,32 @@
   - **Scale:** Neo4j Aura has RAM limits; Azure provides the safety net if we exceed them.
   - **Search Quality:** Relying on "Graph Logic" boosting instead of Azure's Semantic Ranker (validated as sufficient for financial domain).
 
-- **Retrieval Strategy:** RAPTOR-First Architecture (Updated 2025-12-23)
-  - **Decision:** Implement "RAPTOR-First" logic where hierarchical summaries guide all search modes.
-  - **Status:** ✅ **IMPLEMENTED** (2025-12-23)
+- **Retrieval Strategy:** 5-Way Routing Architecture (Updated 2025-12-24)
+  - **Decision:** Implement a 5-way routing strategy to optimize for the "Low Latency" (<2min) SLA.
+  - **Status:** ✅ **IMPLEMENTED** (2025-12-24)
   
-  **Strategies:**
-  1. **Local + RAPTOR (Contextual Zoom):**
-     - Logic: Entity Search → Parent RAPTOR Summary.
-     - Benefit: Provides "Thematic Context" to specific facts (e.g., "Contract Value" + "Risk Section Summary").
-  2. **Global + RAPTOR (Thematic Pruning):**
-     - Logic: RAPTOR Roots → Filter Communities → Synthesis.
-     - Benefit: Prunes 90% of irrelevant graph traversals by filtering communities based on high-level themes.
-  3. **DRIFT + RAPTOR (Multi-Hop Highway):**
-     - Logic: RAPTOR Summary ↔ Child Entities ↔ Next Summary.
-     - Benefit: Uses RAPTOR nodes as "teleporters" to jump between disconnected graph sections without getting lost in entity noise.
+  **Routes:**
+  1. **Vector (TextChunk):** Exact text search for quotes/clauses. (Fastest)
+  2. **Local (Entity):** Entity-centric search for specific people/companies. (Fast)
+  3. **Graph (Community):** Broad thematic search via community summaries. (Medium)
+  4. **RAPTOR (Tree):** Hierarchical summary search for structured deep-dives. (Medium)
+  5. **DRIFT (Multi-Hop):** Complex reasoning connecting distant concepts. (Slow)
   
-  **Implementation Details:**
-  - **Data Layer:** `SUMMARIZES` relationships link RAPTOR nodes to TextChunks.
-  - **Routing:** 4-way router (Vector, Graph, RAPTOR, DRIFT) using `o4-mini`.
-  - **Execution:** Unified Neo4j traversals in `TripleEngineRetriever`.
+  **Rationale:**
+  - Separating **Vector** (Text) from **Local** (Entity) provides a dedicated "Fast Lane" for simple lookups.
+  - Separating **DRIFT** from **RAPTOR** prevents over-spending compute on simple summary questions.
 
 - **LLM Strategy:** The "Low Latency Engine" (Azure OpenAI 2025) - Updated 2025-12-24
-  - **Decision:** Pivot from high-reasoning models to low-latency models for <2 minute response time requirement.
-  - **Routing:** **o4-mini** (`reasoning_effort="medium"`) for fast, rule-based intent classification.
-  - **Synthesis/Query:** **GPT-5.2** (Standard deployment) for fast query-time reasoning and answer generation.
-  - **Indexing:** **GPT-4.1** for high-throughput entity extraction and clustering.
+  - **Decision:** Use production-ready models optimized for <2 minute response time requirement.
+  - **Routing:** **gpt-4o** for fast, reliable intent classification.
+  - **Synthesis/Query:** **gpt-4o** (Standard deployment) for balanced speed and quality.
+  - **Indexing:** **gpt-4o** for entity extraction and clustering (proven reliability).
   - **Embeddings:** **text-embedding-3-small** (1536 dims) for optimal RAM efficiency and retrieval speed.
   - **Why:** 
-    - **o4-mini:** 60% cheaper and 3x faster than o1-mini; trained on GQL 2025 standards for reliable Cypher generation.
-    - **GPT-5.2 (formerly o3-pro):** Prioritizes speed over reasoning depth; meets <2 minute SLA requirement.
-    - **GPT-4.1:** 1M context window ensures no "forgetting" during bulk indexing.
+    - **gpt-4o:** Proven production model; 128k context window; fast response times; reliable for both routing and synthesis.
     - **text-embedding-3-small (1536 dims):** 50% RAM reduction vs 3072-dim model; graph structure compensates for precision loss.
   - **Deployment Configuration (Sweden Central):**
-    - **GPT-4.1:** Data Zone Standard (EU Compliance + Zone Capacity).
+    - **gpt-4o:** Standard deployment for consistent performance.
     - **o4-mini:** Data Zone Standard (EU Compliance + Low Latency).
     - **GPT-5.2:** Standard (Low latency for query-time operations).
   - **Deployment Configuration (Switzerland North):**

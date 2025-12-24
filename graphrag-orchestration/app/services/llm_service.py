@@ -49,7 +49,13 @@ class LLMService:
             from llama_index.llms.azure_openai import AzureOpenAI
             from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
             from llama_index.core import Settings as LlamaSettings
+            from llama_index.llms.openai import utils as openai_utils
             from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            
+            # Monkey-patch llama_index to support gpt-5.2 (our deployment name is gpt-5-2)
+            if "gpt-5.2" not in openai_utils.modelname_to_contextsize:
+                openai_utils.modelname_to_contextsize["gpt-5.2"] = 128000
+                logger.info("Patched llama_index to support gpt-5.2 (128k context)")
             
             # Use Azure AD authentication if no API key is provided
             if not settings.AZURE_OPENAI_API_KEY:

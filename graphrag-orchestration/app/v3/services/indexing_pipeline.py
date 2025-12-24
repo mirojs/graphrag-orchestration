@@ -1459,7 +1459,10 @@ Summary (be concise but capture key information):"""
     async def _embed_text(self, text: str) -> List[float]:
         """Generate embedding for text using the embedder."""
         try:
-            if hasattr(self.embedder, 'get_text_embedding'):
+            # Try async methods first (LlamaIndex AzureOpenAIEmbedding has aget_text_embedding)
+            if hasattr(self.embedder, 'aget_text_embedding'):
+                return await self.embedder.aget_text_embedding(text)
+            elif hasattr(self.embedder, 'get_text_embedding'):
                 return self.embedder.get_text_embedding(text)
             elif hasattr(self.embedder, 'aembed'):
                 return await self.embedder.aembed(text)
@@ -1469,13 +1472,11 @@ Summary (be concise but capture key information):"""
                 result = self.embedder(text)
                 if asyncio.iscoroutine(result):
                     result = await result
-                # Cast to List[float] for type safety
                 return list(result) if hasattr(result, '__iter__') else [0.0] * self.config.embedding_dimensions
             else:
                 raise ValueError("Embedder does not have embed method")
         except Exception as e:
             logger.warning(f"Embedding failed: {e}")
-            # Return zero vector as fallback
             return [0.0] * self.config.embedding_dimensions
     
     async def _llm_complete(self, prompt: str) -> str:

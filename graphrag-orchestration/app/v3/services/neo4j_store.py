@@ -897,6 +897,44 @@ class Neo4jStoreV3:
     
     # ==================== Text Chunk Operations ====================
     
+    def search_text_chunks(
+        self,
+        group_id: str,
+        query_text: str,
+        embedding: List[float],
+        top_k: int = 10,
+    ) -> List[Tuple[TextChunk, float]]:
+        """
+        Vector search for TextChunk nodes.
+        Used for pure Vector RAG (finding exact quotes).
+        """
+        # Use gds.similarity.cosine for efficient calculation
+        query = """
+        MATCH (t:TextChunk {group_id: $group_id})
+        WHERE t.embedding IS NOT NULL
+        WITH t, gds.similarity.cosine(t.embedding, $embedding) AS score
+        ORDER BY score DESC
+        LIMIT $top_k
+        RETURN t, score
+        """
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id, embedding=embedding, top_k=top_k)
+            for record in result:
+                t = record["t"]
+                chunk = TextChunk(
+                    id=t["id"],
+                    text=t["text"],
+                    chunk_index=t["chunk_index"],
+                    document_id=t.get("document_id", ""),
+                    tokens=t.get("tokens", 0),
+                    embedding=t.get("embedding"),
+                )
+                results.append((chunk, record["score"]))
+        
+        return results
+
     def upsert_text_chunks_batch(self, group_id: str, chunks: List[TextChunk]) -> int:
         """Batch insert/update text chunks with native vector support."""
         query = """

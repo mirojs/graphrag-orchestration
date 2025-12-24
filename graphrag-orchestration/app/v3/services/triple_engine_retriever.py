@@ -1,10 +1,23 @@
 """
 Triple-Engine Retriever for Neo4j-Centric GraphRAG
 
-Implements the "Lean Engine" architecture with intelligent query routing:
-- Vector Route: Specific facts (dates, amounts, clause references)
-- Graph Route: Relational reasoning (dependencies, connections)
-- RAPTOR Route: Thematic summaries (portfolio risk, trends)
+Implements the "Lean Engine" architecture with intelligent query routing.
+We use a 5-Way Routing Strategy to optimize for the "Low Latency" (<2min) SLA:
+
+1. Vector Route: Exact text search (quotes, specific clauses)
+   - Cost: Lowest | Latency: Fastest
+2. Local Route: Entity-centric search (specific people, companies)
+   - Cost: Low | Latency: Fast
+3. Graph Route: Relational reasoning (dependencies, connections)
+   - Cost: Medium | Latency: Medium
+4. RAPTOR Route: Thematic summaries (portfolio risk, trends)
+   - Cost: Low/Medium | Latency: Fast (fetches pre-computed summaries)
+5. DRIFT Route: Complex multi-hop reasoning (connecting distant concepts)
+   - Cost: High | Latency: Slow (requires "teleporting" between graph clusters)
+
+Why 5-Way?
+Separating "Vector" (Text) from "Local" (Entity) allows the fastest possible path for simple lookups.
+Separating DRIFT from RAPTOR prevents over-spending compute on simple summary questions.
 
 Model Selection:
 - Current: Uses GPT-5.2 for both routing and synthesis (deployed)
@@ -22,7 +35,7 @@ from app.services.llm_service import LLMService
 logger = logging.getLogger(__name__)
 
 
-QueryRoute = Literal["vector", "graph", "raptor", "drift"]
+QueryRoute = Literal["vector", "local", "graph", "raptor", "drift"]
 
 
 @dataclass
@@ -45,9 +58,11 @@ class TripleEngineRetriever:
     3. Synthesizer (GPT-5.2): Contradiction resolution and answer generation with agentic verification
     
     Routes:
-    - Vector: "What is the contract value?" → Entity search (Hybrid+Boost)
+    - Vector: "Quote the liability clause" → Text Chunk search (Fastest)
+    - Local: "Who is Company X?" → Entity search (Hybrid+Boost)
     - Graph: "Who is connected to X?" → Community/relationship traversal
     - RAPTOR: "What are the main themes?" → Hierarchical summaries
+    - DRIFT: "How does X affect Y?" → Multi-hop reasoning via RAPTOR teleporters
     """
     
     def __init__(self, store: Neo4jStoreV3, llm_service: LLMService):
@@ -71,27 +86,31 @@ class TripleEngineRetriever:
         Returns:
             Tuple of (route, reasoning)
         """
-        routing_prompt = f"""You are a query router for a knowledge graph system. Classify the query into one of four routes:
+        routing_prompt = f"""You are a query router for a knowledge graph system. Classify the query into one of five routes:
 
-1. **vector**: For specific fact lookups
-   - Examples: "What is the contract amount?", "When is the deadline?", "Who is the vendor?"
-   - Characteristics: Looking for specific values, dates, names, or amounts
+1. **vector**: For exact text lookups and quotes
+   - Examples: "What does the contract say about liability?", "Quote the indemnity clause", "Find the exact wording"
+   - Characteristics: Looking for raw text, specific clauses, or exact matches.
 
-2. **graph**: For relational reasoning
+2. **local**: For entity-specific details
+   - Examples: "Who is John Doe?", "What is the address of Company X?", "What is the value of the deal?"
+   - Characteristics: Looking for facts about a specific person, organization, or object.
+
+3. **graph**: For relational reasoning
    - Examples: "Who is connected to Company X?", "What are the dependencies?", "Show related entities"
-   - Characteristics: Exploring connections, relationships, or networks
+   - Characteristics: Exploring connections, relationships, or networks.
 
-3. **raptor**: For thematic summaries
+4. **raptor**: For thematic summaries
    - Examples: "What are the main themes?", "Summarize all documents", "What are the risk factors?"
-   - Characteristics: High-level overview, cross-document themes, portfolio analysis
+   - Characteristics: High-level overview, cross-document themes, portfolio analysis.
 
-4. **drift**: For complex multi-hop reasoning
+5. **drift**: For complex multi-hop reasoning
    - Examples: "How did the incident in Part A lead to the change in Part B?", "What is the relationship between the CEO's vision and the Q3 budget?"
-   - Characteristics: Connecting distant concepts, "how" or "why" questions across topics
+   - Characteristics: Connecting distant concepts, "how" or "why" questions across topics.
 
 Query: {query}
 
-Respond with ONLY the route name (vector, graph, raptor, or drift) on the first line, followed by a brief explanation."""
+Respond with ONLY the route name (vector, local, graph, raptor, or drift) on the first line, followed by a brief explanation."""
 
         messages = [
             ChatMessage(role=MessageRole.SYSTEM, content="You are a precise query classifier."),
@@ -110,7 +129,7 @@ Respond with ONLY the route name (vector, graph, raptor, or drift) on the first 
             reasoning = lines[1].strip() if len(lines) > 1 else "No reasoning provided"
             
             # Validate route
-            if route_str in ["vector", "graph", "raptor", "drift"]:
+            if route_str in ["vector", "local", "graph", "raptor", "drift"]:
                 route = route_str  # type: ignore
                 logger.info(f"Query routed to: {route} | Reasoning: {reasoning[:100]}")
                 return route, reasoning
@@ -154,6 +173,8 @@ Respond with ONLY the route name (vector, graph, raptor, or drift) on the first 
         # Step 2: Execute retrieval based on route
         if route == "vector":
             return await self._retrieve_vector(query, group_id, top_k, reasoning)
+        elif route == "local":
+            return await self._retrieve_local(query, group_id, top_k, reasoning)
         elif route == "graph":
             return await self._retrieve_graph(query, group_id, top_k, reasoning)
         elif route == "raptor":
@@ -179,9 +200,82 @@ Respond with ONLY the route name (vector, graph, raptor, or drift) on the first 
         reasoning: str,
     ) -> RetrievalResult:
         """
-        Vector Route: Specific fact lookups using Hybrid+Boost search.
+        Vector Route: Exact text search using TextChunk embeddings.
         
-        Uses Neo4j's native vector search with:
+        Uses Neo4j's native vector search on TEXT CHUNKS.
+        Best for: Exact quotes, specific clauses, finding raw text.
+        """
+        # Get query embedding
+        if self.llm_service.embed_model is None:
+            raise RuntimeError("Embedding model not initialized")
+        query_embedding = self.llm_service.embed_model.get_text_embedding(query)
+        
+        # Execute Vector Search on TextChunks
+        results = self.store.search_text_chunks(
+            group_id=group_id,
+            query_text=query,
+            embedding=query_embedding,
+            top_k=top_k,
+        )
+        
+        if not results:
+            return RetrievalResult(
+                answer="No relevant text found for this query.",
+                confidence=0.0,
+                route="vector",
+                sources=[],
+                reasoning=reasoning,
+            )
+        
+        # Build context from text chunks
+        context_parts = []
+        sources = []
+        
+        for chunk, score in results:
+            context_parts.append(f"--- Source (Score: {score:.2f}) ---\n{chunk.text}\n")
+            sources.append({
+                "id": chunk.id,
+                "type": "text_chunk",
+                "score": float(score),
+                "document_id": chunk.document_id
+            })
+        
+        context = "\n".join(context_parts)
+        
+        # Generate answer using LLM
+        prompt = f"""Based on the following text excerpts, answer the question.
+If the user asked for a quote, provide the exact text.
+
+Excerpts:
+{context}
+
+Question: {query}
+
+Answer:"""
+        
+        if self.llm_service.llm is None:
+            raise RuntimeError("LLM not initialized")
+        response = self.llm_service.llm.complete(prompt)
+        
+        return RetrievalResult(
+            answer=response.text,
+            confidence=results[0][1] if results else 0.0,
+            route="vector",
+            sources=sources,
+            reasoning=reasoning,
+        )
+
+    async def _retrieve_local(
+        self,
+        query: str,
+        group_id: str,
+        top_k: int,
+        reasoning: str,
+    ) -> RetrievalResult:
+        """
+        Local Route: Entity-specific fact lookups using Hybrid+Boost search.
+        
+        Uses Neo4j's native vector search on ENTITIES with:
         - Vector similarity (gds.similarity.cosine)
         - Full-text search (lexical matching)
         - RRF fusion
@@ -204,7 +298,7 @@ Respond with ONLY the route name (vector, graph, raptor, or drift) on the first 
             return RetrievalResult(
                 answer="No relevant information found for this query.",
                 confidence=0.0,
-                route="vector",
+                route="local",
                 sources=[],
                 reasoning=reasoning,
             )
@@ -252,7 +346,7 @@ Answer:"""
         return RetrievalResult(
             answer=response.text,
             confidence=results[0][1] if results else 0.0,
-            route="vector",
+            route="local",
             sources=sources,
             reasoning=reasoning,
         )

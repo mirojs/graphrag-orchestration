@@ -4,7 +4,7 @@
 import requests
 import time
 
-API_URL = "https://graphrag-orchestration.purplefield-1719ccc0.swedencentral.azurecontainerapps.io"
+API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "phase1-v3-validation"  # Use the working test group
 
 # Simple test documents (like working test)

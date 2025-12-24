@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     AZURE_OPENAI_EMBEDDING_API_KEY: Optional[str] = None  # Separate key for embedding resource
     AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
     AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 1536  # text-embedding-3-small dimensions
-    AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Data Zone Standard max supported version
+    AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Latest stable version
     
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)

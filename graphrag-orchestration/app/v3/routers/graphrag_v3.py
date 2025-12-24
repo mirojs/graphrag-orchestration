@@ -184,10 +184,24 @@ def get_indexing_pipeline():
         store = get_neo4j_store()
         llm_service = LLMService()
         
+        # Validate LLM service initialization
+        if llm_service.llm is None:
+            raise RuntimeError("LLM not initialized - check Azure OpenAI configuration and credentials")
+        if llm_service.embed_model is None:
+            raise RuntimeError("Embedding model not initialized - check Azure OpenAI embedding configuration and credentials")
+        
+        # Convert deployment name to model name for metadata (gpt-5-2 → gpt-5.2, replace last hyphen only)
+        deployment_name = settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o"
+        if "-" in deployment_name:
+            parts = deployment_name.rsplit("-", 1)
+            model_name = f"{parts[0]}.{parts[1]}"
+        else:
+            model_name = deployment_name
+        
         config = IndexingConfig(
             embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-small",
             embedding_dimensions=1536,  # Neo4j 5.x supports up to 4096
-            llm_model=settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o",
+            llm_model=model_name,
         )
         
         _indexing_pipeline = IndexingPipelineV3(

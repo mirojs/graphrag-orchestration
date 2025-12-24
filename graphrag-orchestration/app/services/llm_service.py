@@ -49,13 +49,39 @@ class LLMService:
             from llama_index.llms.azure_openai import AzureOpenAI
             from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
             from llama_index.core import Settings as LlamaSettings
-            from llama_index.llms.openai import utils as openai_utils
             from azure.identity import DefaultAzureCredential, get_bearer_token_provider
             
             # Monkey-patch llama_index to support gpt-5.2 (our deployment name is gpt-5-2)
-            if "gpt-5.2" not in openai_utils.modelname_to_contextsize:
-                openai_utils.modelname_to_contextsize["gpt-5.2"] = 128000
-                logger.info("Patched llama_index to support gpt-5.2 (128k context)")
+            # Need to patch multiple validation lists for both LLM and embedding operations
+            try:
+                # Patch context size mapping
+                from llama_index.llms.openai import utils as openai_utils
+                if hasattr(openai_utils, 'modelname_to_contextsize'):
+                    openai_utils.modelname_to_contextsize["gpt-5.2"] = 128000
+                    logger.info("✅ Patched modelname_to_contextsize for gpt-5.2")
+                
+                # Patch ALL_AVAILABLE_MODELS if it exists (can be dict or tuple)
+                if hasattr(openai_utils, 'ALL_AVAILABLE_MODELS'):
+                    if "gpt-5.2" not in openai_utils.ALL_AVAILABLE_MODELS:
+                        if isinstance(openai_utils.ALL_AVAILABLE_MODELS, dict):
+                            openai_utils.ALL_AVAILABLE_MODELS["gpt-5.2"] = True
+                        else:
+                            openai_utils.ALL_AVAILABLE_MODELS = openai_utils.ALL_AVAILABLE_MODELS + ("gpt-5.2",)
+                        logger.info("✅ Patched ALL_AVAILABLE_MODELS for gpt-5.2")
+                
+                # Patch CHAT_MODELS if it exists (can be dict or tuple)
+                if hasattr(openai_utils, 'CHAT_MODELS'):
+                    if "gpt-5.2" not in openai_utils.CHAT_MODELS:
+                        if isinstance(openai_utils.CHAT_MODELS, dict):
+                            openai_utils.CHAT_MODELS["gpt-5.2"] = True
+                        else:
+                            openai_utils.CHAT_MODELS = openai_utils.CHAT_MODELS + ("gpt-5.2",)
+                        logger.info("✅ Patched CHAT_MODELS for gpt-5.2")
+                        
+            except (ImportError, AttributeError) as e:
+                logger.warning(f"⚠️ Could not patch gpt-5.2 support: {e}. Using gpt-4o as fallback.")
+                # Fallback: use gpt-4o deployment instead
+                settings.AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-4o"
             
             # Use Azure AD authentication if no API key is provided
             if not settings.AZURE_OPENAI_API_KEY:
@@ -79,10 +105,19 @@ class LLMService:
                 try:
                     logger.info(f"Creating AzureOpenAI LLM with endpoint: {settings.AZURE_OPENAI_ENDPOINT}")
                     
+                    # Map deployment name to model name for validation
+                    # Deployment "gpt-5-2" maps to model "gpt-5.2" for validation (replace last hyphen only)
+                    deployment_name = settings.AZURE_OPENAI_DEPLOYMENT_NAME
+                    if "-" in deployment_name:
+                        parts = deployment_name.rsplit("-", 1)
+                        model_name = f"{parts[0]}.{parts[1]}"
+                    else:
+                        model_name = deployment_name
+                    
                     # Configure reasoning effort if applicable (o1/o3/o4 models)
                     llm_kwargs = {
-                        "model": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-                        "deployment_name": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                        "model": model_name,  # Model name for validation (gpt-5.2)
+                        "deployment_name": settings.AZURE_OPENAI_DEPLOYMENT_NAME,  # Actual deployment (gpt-5-2)
                         "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
                         "use_azure_ad": True,
@@ -105,10 +140,14 @@ class LLMService:
                 # Initialize Embedding Model with token provider
                 try:
                     logger.info("Initializing embedding model with managed identity...")
+                    logger.info(f"Embedding deployment: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
+                    logger.info(f"Embedding dimensions: {settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS}")
                     
                     # Use separate endpoint for embeddings if configured (Switzerland North)
                     embedding_endpoint = settings.AZURE_OPENAI_EMBEDDING_ENDPOINT or settings.AZURE_OPENAI_ENDPOINT
                     embedding_token_provider = token_provider
+                    
+                    logger.info(f"Embedding endpoint: {embedding_endpoint}")
                     
                     # If using separate embedding endpoint, create new token provider
                     if settings.AZURE_OPENAI_EMBEDDING_ENDPOINT and settings.AZURE_OPENAI_EMBEDDING_ENDPOINT != settings.AZURE_OPENAI_ENDPOINT:
@@ -130,15 +169,16 @@ class LLMService:
                         "use_azure_ad": True,
                         "azure_ad_token_provider": embedding_token_provider,
                     }
-                    # text-embedding-3-* models support dimensions parameter, ada-002 does not
-                    if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
-                        embed_kwargs["dimensions"] = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
-                        logger.info(f"Using dimensions: {settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS}")
+                    # Note: text-embedding-3-small defaults to 1536 dimensions
+                    # Omitting dimensions parameter to avoid API validation issues with managed identity
+                    logger.info(f"Embedding model will use default dimensions (1536 for text-embedding-3-small)")
                     
+                    logger.info("Creating AzureOpenAIEmbedding instance...")
                     self._embed_model = AzureOpenAIEmbedding(**embed_kwargs)
-                    logger.info(f"Embedding model initialized successfully at {embedding_endpoint}")
+                    logger.info(f"✅ Embedding model initialized successfully: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
                 except Exception as e:
-                    logger.error(f"Failed to initialize embedding model: {e}", exc_info=True)
+                    logger.error(f"❌ Failed to initialize embedding model: {e}", exc_info=True)
+                    logger.error(f"Embedding config: deployment={settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}, endpoint={embedding_endpoint}")
                     raise
             else:
                 logger.info("Using API key authentication for OpenAI")
@@ -176,8 +216,10 @@ class LLMService:
             )
         except ImportError as e:
             logger.error(f"LlamaIndex Azure OpenAI packages not installed: {e}")
+            raise
         except Exception as e:
-            logger.error(f"Failed to initialize Azure OpenAI: {e}")
+            logger.error(f"Failed to initialize Azure OpenAI: {e}", exc_info=True)
+            raise
 
     @property
     def llm(self) -> Optional[Any]:

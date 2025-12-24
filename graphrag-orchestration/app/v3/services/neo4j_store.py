@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from dataclasses import dataclass, field
 
 import neo4j
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, AsyncGraphDatabase
 from neo4j import Query
 
 logger = logging.getLogger(__name__)
@@ -120,6 +120,7 @@ class Neo4jStoreV3:
         self.password = password
         self.database = database
         self._driver = None
+        self._async_driver = None
         
     @property
     def driver(self) -> neo4j.Driver:
@@ -134,11 +135,28 @@ class Neo4jStoreV3:
             logger.info(f"Connected to Neo4j at {self.uri}")
         return self._driver
     
+    @property
+    def async_driver(self) -> neo4j.AsyncDriver:
+        """Lazy initialization of async Neo4j driver."""
+        if self._async_driver is None:
+            self._async_driver = AsyncGraphDatabase.driver(
+                self.uri,
+                auth=(self.username, self.password),
+            )
+            logger.info(f"Connected to Neo4j (async) at {self.uri}")
+        return self._async_driver
+    
     def close(self):
         """Close the Neo4j driver."""
         if self._driver:
             self._driver.close()
             self._driver = None
+    
+    async def aclose(self):
+        """Close the async Neo4j driver."""
+        if self._async_driver:
+            await self._async_driver.close()
+            self._async_driver = None
     
     # ==================== Schema Management ====================
     
@@ -321,6 +339,61 @@ class Neo4jStoreV3:
             # Log MENTIONS creation
             mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
             logger.info(f"Created {count} entities with {mentions_count} MENTIONS relationships")
+            
+            return count
+    
+    async def aupsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
+        """Async batch insert/update entities with native vector support."""
+        
+        # Diagnostic: Check embeddings before storing
+        with_embeddings = sum(1 for e in entities if e.embedding and len(e.embedding) > 0)
+        logger.warning(f"🔍 ASYNC UPSERT CHECK: Storing {len(entities)} entities, {with_embeddings} have embeddings")
+        if entities and entities[0].embedding:
+            logger.warning(f"   First entity embedding dim: {len(entities[0].embedding)}")
+        
+        query = """
+        UNWIND $entities AS e
+        MERGE (entity:Entity {id: e.id})
+        SET entity.name = e.name,
+            entity.type = e.type,
+            entity.description = e.description,
+            entity.group_id = $group_id,
+            entity.updated_at = datetime()
+        
+        WITH entity, e
+        FOREACH (_ IN CASE WHEN e.embedding IS NOT NULL AND size(e.embedding) > 0 THEN [1] ELSE [] END |
+            SET entity.embedding = e.embedding
+        )
+        
+        // Create MENTIONS relationships to chunks for DRIFT
+        WITH entity, e
+        UNWIND e.text_unit_ids AS chunk_id
+        MATCH (chunk:TextChunk {id: chunk_id, group_id: $group_id})
+        MERGE (chunk)-[:MENTIONS]->(entity)
+        
+        RETURN count(DISTINCT entity) AS count
+        """
+        
+        entity_data = [
+            {
+                "id": e.id,
+                "name": e.name,
+                "type": e.type,
+                "description": e.description,
+                "embedding": e.embedding,
+                "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
+            }
+            for e in entities
+        ]
+        
+        async with self.async_driver.session(database=self.database) as session:
+            result = await session.run(query, entities=entity_data, group_id=group_id)
+            record = await result.single()
+            count = cast(int, record["count"]) if record else 0
+            
+            # Log MENTIONS creation
+            mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
+            logger.info(f"Created {count} entities with {mentions_count} MENTIONS relationships (async)")
             
             return count
     

@@ -63,6 +63,46 @@ resource o3proDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   dependsOn: [o4miniDeployment]
 }
 
+// GPT-5.2 - Primary synthesis model (Low latency, 128k context)
+resource gpt52Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+  parent: openAiAccount
+  name: 'gpt-5-2'
+  sku: {
+    name: 'GlobalStandard'
+    capacity: 100
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'gpt-5.2'
+      version: '2025-12-10'
+    }
+    raiPolicyName: 'Microsoft.DefaultV2'
+  }
+  dependsOn: [o3proDeployment]
+}
+
+// text-embedding-3-small - Embeddings (Sweden Central backup)
+resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+  parent: openAiAccount
+  name: 'text-embedding-3-small'
+  sku: {
+    name: 'Standard'
+    capacity: 100
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'text-embedding-3-small'
+      version: '1'
+    }
+    raiPolicyName: 'Microsoft.DefaultV2'
+  }
+  dependsOn: [gpt52Deployment]
+}
+
 output gpt41DeploymentName string = gpt41Deployment.name
 output o4miniDeploymentName string = o4miniDeployment.name
 output o3proDeploymentName string = o3proDeployment.name
+output gpt52DeploymentName string = gpt52Deployment.name
+output embeddingDeploymentName string = embeddingDeployment.name

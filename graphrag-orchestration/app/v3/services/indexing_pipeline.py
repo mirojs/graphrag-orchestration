@@ -501,8 +501,8 @@ class IndexingPipelineV3:
             entities_with_embeddings = sum(1 for e in entities if e.embedding and e.embedding != [0.0] * self.config.embedding_dimensions)
             logger.warning(f"📊 BEFORE STORAGE: {entities_with_embeddings}/{len(entities)} entities have non-zero embeddings")
             
-            # Store entities
-            self.neo4j_store.upsert_entities_batch(group_id, entities)
+            # Store entities (async to avoid blocking event loop)
+            await self.neo4j_store.aupsert_entities_batch(group_id, entities)
             stats["entities"] = len(entities)
             logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Stored {len(entities)} entities")
             
@@ -1022,12 +1022,8 @@ class IndexingPipelineV3:
             try:
                 logger.warning(f"⚡ EMBEDDING START: Generating embeddings for {len(entities_list)} entities")
                 
-                if hasattr(self.embedder, 'aget_text_embedding_batch'):
-                    embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
-                elif hasattr(self.embedder, 'get_text_embedding_batch'):
-                    embeddings = self.embedder.get_text_embedding_batch(entity_texts)
-                else:
-                    embeddings = [await self._embed_text(text) for text in entity_texts]
+                # AzureOpenAIEmbedding has aget_text_embedding_batch for efficient batch processing
+                embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
                 
                 # Assign embeddings to entities
                 for entity, embedding in zip(entities_list, embeddings):
@@ -1353,7 +1349,7 @@ Summary:"""
                         "silhouette_score": float(np.mean(silhouette_scores)) if silhouette_scores else 0.0,
                         "cluster_silhouette_avg": float(np.mean(silhouette_scores)) if silhouette_scores else 0.0,
                         "child_count": len(cluster),
-                        "creation_model": "gpt-4o",
+                        "creation_model": self.config.llm_model,
                     }
                 )
                 raptor_nodes.append(node)
@@ -1457,51 +1453,11 @@ Summary (be concise but capture key information):"""
             return text[:200]  # Fallback to truncation
     
     async def _embed_text(self, text: str) -> List[float]:
-        """Generate embedding for text using the embedder."""
-        try:
-            # Try async methods first (LlamaIndex AzureOpenAIEmbedding has aget_text_embedding)
-            if hasattr(self.embedder, 'aget_text_embedding'):
-                return await self.embedder.aget_text_embedding(text)
-            elif hasattr(self.embedder, 'get_text_embedding'):
-                return self.embedder.get_text_embedding(text)
-            elif hasattr(self.embedder, 'aembed'):
-                return await self.embedder.aembed(text)
-            elif hasattr(self.embedder, 'embed'):
-                return self.embedder.embed(text)
-            elif callable(self.embedder):
-                result = self.embedder(text)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                return list(result) if hasattr(result, '__iter__') else [0.0] * self.config.embedding_dimensions
-            else:
-                raise ValueError("Embedder does not have embed method")
-        except Exception as e:
-            logger.warning(f"Embedding failed: {e}")
-            return [0.0] * self.config.embedding_dimensions
+        """Generate embedding for text using AzureOpenAIEmbedding."""
+        return await self.embedder.aget_text_embedding(text)
     
     async def _llm_complete(self, prompt: str) -> str:
-        """Generate completion using the LLM."""
-        try:
-            if hasattr(self.llm, 'achat'):
-                # GraphRAG-style model
-                messages = [ChatMessage(role=MessageRole.USER, content=prompt)]
-                response = await self.llm.achat(messages)
-                return response.message.content if hasattr(response, 'message') else str(response)
-            elif hasattr(self.llm, 'acomplete'):
-                # LlamaIndex-style model
-                response = await self.llm.acomplete(prompt)
-                return response.text if hasattr(response, 'text') else str(response)
-            elif hasattr(self.llm, 'complete'):
-                response = self.llm.complete(prompt)
-                return response.text if hasattr(response, 'text') else str(response)
-            elif callable(self.llm):
-                result = self.llm(prompt)
-                if asyncio.iscoroutine(result):
-                    result = await result
-                return str(result)
-            else:
-                raise ValueError("LLM does not have a completion method")
-        except Exception as e:
-            logger.error(f"LLM completion failed: {e}", exc_info=True)
-            return ""
-            raise
+        """Generate completion using AzureOpenAI."""
+        messages = [ChatMessage(role=MessageRole.USER, content=prompt)]
+        response = await self.llm.achat(messages)
+        return response.message.content

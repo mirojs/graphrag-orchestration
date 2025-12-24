@@ -149,8 +149,8 @@ else
     --memory 2.0Gi \
     --env-vars \
       "AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT" \
-      "AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o" \
-      "AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large" \
+      "AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-2" \
+      "AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small" \
       "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://doc-intel-graphrag.cognitiveservices.azure.com/" \
       "NEO4J_URI=$NEO4J_URI" \
       "NEO4J_USERNAME=neo4j" \

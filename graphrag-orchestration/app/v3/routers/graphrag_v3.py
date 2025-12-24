@@ -190,8 +190,9 @@ def get_indexing_pipeline():
         if llm_service.embed_model is None:
             raise RuntimeError("Embedding model not initialized - check Azure OpenAI embedding configuration and credentials")
         
-        # Convert deployment name to model name for metadata (gpt-5-2 → gpt-5.2, replace last hyphen only)
-        deployment_name = settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o"
+        # Use indexing deployment (gpt-4.1) for RAPTOR and entity extraction
+        # Convert deployment name to model name for metadata (gpt-4-1 → gpt-4.1, replace last hyphen only)
+        deployment_name = settings.AZURE_OPENAI_INDEXING_DEPLOYMENT or settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o"
         if "-" in deployment_name:
             parts = deployment_name.rsplit("-", 1)
             model_name = f"{parts[0]}.{parts[1]}"
@@ -206,7 +207,7 @@ def get_indexing_pipeline():
         
         _indexing_pipeline = IndexingPipelineV3(
             neo4j_store=store,
-            llm=llm_service.llm,
+            llm=llm_service.get_indexing_llm(),  # Use gpt-4.1 for indexing operations
             embedder=llm_service.embed_model,
             config=config,
             llm_service=llm_service,  # Pass service for specialized model selection

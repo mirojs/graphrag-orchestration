@@ -1,0 +1,57 @@
+
+Testing GraphRAG Phase 1 with 5 documents
+API: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+Group ID: phase1-5docs-1766585303
+
+================================================================================
+CLEANUP: DELETING ALL EXISTING GROUPS FROM NEO4J
+================================================================================
+Found 2 groups to delete
+  ✅ Deleted 271 nodes from group: phase1-5docs-1766583004...
+  ✅ Deleted 253 nodes from group: test-2docs-1766583994...
+✅ Cleanup complete - deleted 2 groups
+
+================================================================================
+PHASE 1: INDEXING 5 DOCUMENTS WITH MANAGED IDENTITY
+================================================================================
+   BUILDERS LIMITED WARRANTY.pdf
+   HOLDING TANK SERVICING CONTRACT.pdf
+   PROPERTY MANAGEMENT AGREEMENT.pdf
+   contoso_lifts_invoice.pdf
+   purchase_contract.pdf
+
+   Total: 5 PDFs
+   Authentication: Managed Identity
+
+================================================================================
+PHASE 2: SUBMITTING TO GRAPHRAG V3 API
+================================================================================
+✅ Indexing request accepted in 0.0s
+   Status: accepted
+   Documents processed: 5
+   Entities created: 0
+   Relationships created: 0
+   RAPTOR nodes created: 0
+   Message: Indexing started in background. Check logs or query to verify completion.
+
+⏳ Waiting 120 seconds (2 minutes) for background indexing to complete...
+   30s elapsed...
+   60s elapsed...
+   90s elapsed...
+   120s elapsed...
+
+================================================================================
+CHECKING INDEXING PROGRESS VIA API
+================================================================================
+   Documents: 0
+   Entities: 0
+   Relationships: 0
+
+⏳ Still processing, waiting another 60 seconds...
+
+================================================================================
+PHASE 3: VERIFY DATA AND QUALITY METRICS IN NEO4J
+================================================================================
+   ❌ No data found - indexing may not have completed yet
+
+⚠️  Warning: Some data may still be processing

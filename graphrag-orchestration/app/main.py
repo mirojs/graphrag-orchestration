@@ -52,6 +52,12 @@ async def lifespan(app: FastAPI):
         if llm_service.llm:
             logger.info("llm_service_initialized", 
                        model=llm_service.config.get("AZURE_OPENAI_DEPLOYMENT_NAME"))
+            if llm_service.embed_model:
+                logger.info(
+                    "embedder_initialized",
+                    deployment=llm_service.config.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
+                    endpoint=llm_service.config.get("AZURE_OPENAI_ENDPOINT"),
+                )
         else:
             logger.warning("llm_not_configured",
                           message="Azure OpenAI not configured - LLM features disabled")

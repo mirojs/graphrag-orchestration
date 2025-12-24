@@ -208,21 +208,13 @@ class GraphRAGQueryEngine(CustomQueryEngine):
         This is the fallback method when hybrid search is unavailable.
         Searches entity embeddings stored in Neo4j.
         """
-        # Generate embedding for the query
-        from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
-        from app.core.config import settings
-        
-        # Use the correct setting names
-        embed_model = AzureOpenAIEmbedding(
-            model="text-embedding-3-large",  # Model name
-            deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-            api_key=settings.AZURE_OPENAI_API_KEY,
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-            dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,
-        )
-        
-        query_embedding = embed_model.get_text_embedding(query_str)
+        # Generate embedding for the query using the central LLMService embedder
+        from app.services.llm_service import LLMService
+        llm_service = LLMService()
+        if llm_service.embed_model is None:
+            raise RuntimeError("Embedding model not initialized")
+
+        query_embedding = llm_service.embed_model.get_text_embedding(query_str)
         
         # Search Neo4j vector index
         result = self.graph_store.structured_query(

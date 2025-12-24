@@ -158,21 +158,19 @@ class LLMService:
                                 "https://cognitiveservices.azure.com/.default"
                             )
                     
-                    # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
-                    embed_kwargs = {
-                        "engine": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-                        "azure_endpoint": embedding_endpoint,
-                        "api_version": settings.AZURE_OPENAI_API_VERSION,
-                        "api_key": "",  # Empty string required even with use_azure_ad
-                        "use_azure_ad": True,
-                        "azure_ad_token_provider": embedding_token_provider,
-                    }
-                    # Note: text-embedding-3-small defaults to 1536 dimensions
-                    # Omitting dimensions parameter to avoid API validation issues with managed identity
-                    logger.info(f"Embedding model will use default dimensions (1536 for text-embedding-3-small)")
-                    
-                    logger.info("Creating AzureOpenAIEmbedding instance...")
-                    self._embed_model = AzureOpenAIEmbedding(**embed_kwargs)
+                    # LlamaIndex's AzureOpenAIEmbedding + AAD can incorrectly behave as if the token is an api-key.
+                    # Use the official OpenAI Azure client with `azure_ad_token_provider` instead.
+                    from app.services.azure_ad_openai_embedding import AzureADOpenAIEmbedding
+
+                    logger.info("Creating AzureADOpenAIEmbedding instance...")
+                    self._embed_model = AzureADOpenAIEmbedding(
+                        deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                        azure_endpoint=embedding_endpoint,
+                        api_version=settings.AZURE_OPENAI_API_VERSION,
+                        azure_ad_token_provider=embedding_token_provider,
+                        # Keep dimensions unset by default; text-embedding-3-small defaults to 1536.
+                        dimensions=None,
+                    )
                     logger.info(f"✅ Embedding model initialized successfully: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
                 except Exception as e:
                     logger.error(f"❌ Failed to initialize embedding model: {e}", exc_info=True)

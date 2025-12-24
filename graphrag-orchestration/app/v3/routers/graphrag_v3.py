@@ -141,30 +141,7 @@ def get_drift_adapter():
         store = get_neo4j_store()
         llm_service = LLMService()
         
-        # Get embedder from LLMService; fallback to managed identity if None
         embedder = llm_service.embed_model
-        if embedder is None:
-            # Fallback: create embedder with managed identity directly
-            from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
-            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-            
-            credential = DefaultAzureCredential()
-            token_provider = get_bearer_token_provider(
-                credential, "https://cognitiveservices.azure.com/.default"
-            )
-            # text-embedding-3-small deployment with 1536 dims
-            embed_kwargs = {
-                "model": "text-embedding-3-small",
-                "deployment_name": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-                "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
-                "api_version": settings.AZURE_OPENAI_API_VERSION,
-                "api_key": "",  # Empty string required even with use_azure_ad
-                "use_azure_ad": True,
-                "azure_ad_token_provider": token_provider,
-                "dimensions": 1536,
-            }
-            embedder = AzureOpenAIEmbedding(**embed_kwargs)
-            logger.info("Embedder initialized via fallback (managed identity)")
         
         _drift_adapter = DRIFTAdapter(
             neo4j_driver=store.driver,
@@ -614,32 +591,13 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
     try:
         store = get_neo4j_store()
         
-        # Get embedder - ensure we use 1536 dims to match indexed data
-        # RAPTOR nodes were indexed with text-embedding-3-small (1536 dims)
+        # Get embedder from LLMService (must match indexing dimensions; text-embedding-3-small defaults to 1536)
         from app.services.llm_service import LLMService
-        from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
-        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-        
-        # Create embedder with explicit 1536 dimensions
-        credential = DefaultAzureCredential()
-        token_provider = get_bearer_token_provider(
-            credential, "https://cognitiveservices.azure.com/.default"
-        )
-        
-        # Use text-embedding-3-small with 1536 dims (matches indexing)
-        embedder_1536 = AzureOpenAIEmbedding(
-            model="text-embedding-3-small",
-            deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_version=settings.AZURE_OPENAI_API_VERSION,
-            api_key="",
-            use_azure_ad=True,
-            azure_ad_token_provider=token_provider,
-            dimensions=1536,  # Must match indexed dimensions
-        )
-        
-        # Get query embedding using 1536-dim embedder
-        query_embedding = embedder_1536.get_text_embedding(payload.query)
+        llm_service = LLMService()
+        if llm_service.embed_model is None:
+            raise HTTPException(status_code=500, detail="Embedding model not initialized")
+
+        query_embedding = llm_service.embed_model.get_text_embedding(payload.query)
         
         # First, check if RAPTOR nodes exist
         with store.driver.session(database=store.database) as session:

@@ -336,9 +336,14 @@ class LLMService:
                 "api_version": settings.AZURE_OPENAI_API_VERSION,
             }
             
+        # Add deployment_name to additional_kwargs for metadata tracking
+        additional_kwargs = {"deployment_name": deployment_name}
+        
         # Add reasoning_effort if specified and model supports it
         if reasoning_effort and deployment_name.startswith(("o1", "o3", "o4")):
-            llm_kwargs["additional_kwargs"] = {"reasoning_effort": reasoning_effort}
+            additional_kwargs["reasoning_effort"] = reasoning_effort
+            
+        llm_kwargs["additional_kwargs"] = additional_kwargs
             
         return AzureOpenAI(**llm_kwargs)
 

@@ -192,7 +192,7 @@ class Neo4jStoreV3:
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
             FOR (e:Entity) ON (e.embedding)
             OPTIONS {indexConfig: {
-                `vector.dimensions`: 3072,
+                `vector.dimensions`: 1536,
                 `vector.similarity_function`: 'cosine'
             }}
             """,
@@ -250,7 +250,9 @@ class Neo4jStoreV3:
             e.group_id = $group_id,
             e.updated_at = datetime()
         WITH e
-        CALL db.create.setVectorProperty(e, 'embedding', $embedding)
+        FOREACH (_ IN CASE WHEN $embedding IS NOT NULL THEN [1] ELSE [] END |
+            SET e.embedding = $embedding
+        )
         RETURN e.id AS id
         """
         
@@ -286,13 +288,9 @@ class Neo4jStoreV3:
             entity.updated_at = datetime()
         
         WITH entity, e
-        CALL {
-            WITH entity, e
-            WITH entity, e
-            WHERE e.embedding IS NOT NULL AND size(e.embedding) > 0
-            CALL db.create.setVectorProperty(entity, 'embedding', e.embedding)
-            RETURN count(*) as _ignored
-        }
+        FOREACH (_ IN CASE WHEN e.embedding IS NOT NULL AND size(e.embedding) > 0 THEN [1] ELSE [] END |
+            SET entity.embedding = e.embedding
+        )
         
         // Create MENTIONS relationships to chunks for DRIFT
         WITH entity, e
@@ -762,7 +760,9 @@ class Neo4jStoreV3:
             r.child_ids = $child_ids,
             r.updated_at = datetime()
         WITH r
-        CALL db.create.setVectorProperty(r, 'embedding', $embedding)
+        FOREACH (_ IN CASE WHEN $embedding IS NOT NULL THEN [1] ELSE [] END |
+            SET r.embedding = $embedding
+        )
         
         WITH r
         UNWIND $child_ids AS child_id
@@ -820,13 +820,9 @@ class Neo4jStoreV3:
             r.updated_at = datetime()
         
         WITH r, n
-        CALL {
-            WITH r, n
-            WITH r, n
-            WHERE n.embedding IS NOT NULL AND size(n.embedding) > 0
-            CALL db.create.setVectorProperty(r, 'embedding', n.embedding)
-            RETURN count(*) as _ignored
-        }
+        FOREACH (_ IN CASE WHEN n.embedding IS NOT NULL AND size(n.embedding) > 0 THEN [1] ELSE [] END |
+            SET r.embedding = n.embedding
+        )
         
         RETURN count(r) AS count
         """
@@ -913,13 +909,9 @@ class Neo4jStoreV3:
             t.updated_at = datetime()
         
         WITH t, c
-        CALL {
-            WITH t, c
-            WITH t, c
-            WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
-            CALL db.create.setVectorProperty(t, 'embedding', c.embedding)
-            RETURN count(*) as _ignored
-        }
+        FOREACH (_ IN CASE WHEN c.embedding IS NOT NULL AND size(c.embedding) > 0 THEN [1] ELSE [] END |
+            SET t.embedding = c.embedding
+        )
         
         WITH t, c
         MATCH (d:Document {id: c.document_id, group_id: $group_id})

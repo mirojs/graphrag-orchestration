@@ -69,7 +69,7 @@ def create_indexes() -> None:
         },
         {
             "name": "entity_embedding",
-            "query": "CREATE VECTOR INDEX entity_embedding IF NOT EXISTS FOR (n:Entity) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 3072, `vector.similarity_function`: 'cosine'}}",
+            "query": "CREATE VECTOR INDEX entity_embedding IF NOT EXISTS FOR (n:Entity) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}",
             "description": "Vector index for entity embeddings",
         },
         {

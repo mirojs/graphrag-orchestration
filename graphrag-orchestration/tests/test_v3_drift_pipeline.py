@@ -67,7 +67,7 @@ class MockEmbeddingModel:
     Required methods: embed, aembed, embed_batch, aembed_batch
     """
     
-    def __init__(self, dimension: int = 3072):
+    def __init__(self, dimension: int = 1536):
         self.dimension = dimension
     
     def embed(self, text: str, **kwargs) -> List[float]:

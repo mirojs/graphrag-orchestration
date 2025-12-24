@@ -448,7 +448,7 @@ class DRIFTAdapter:
                 driver=self.driver,
                 group_id=group_id,
                 index_name="entity",
-                embedding_dimension=3072,  # text-embedding-3-large
+                embedding_dimension=1536,  # text-embedding-3-small
             )
             
             # Create a wrapper for LlamaIndex LLM to make it compatible with MS GraphRAG DRIFT
@@ -990,7 +990,7 @@ class Neo4jDRIFTVectorStore:
             driver: Neo4j driver instance
             group_id: Tenant identifier for filtering
             index_name: Name of the Neo4j vector index
-            embedding_dimension: Dimension of embeddings (default: 3072)
+            embedding_dimension: Dimension of embeddings (default: 1536)
         """
         self.driver = driver
         self.group_id = group_id

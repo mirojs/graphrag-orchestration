@@ -34,8 +34,8 @@ class Neo4jGenAIEmbedder:
         self,
         driver: Driver,
         provider: str = "azure-openai",
-        model: str = "text-embedding-3-large",
-        dimensions: int = 3072,
+        model: str = "text-embedding-3-small",
+        dimensions: int = 1536,
         database: str = "neo4j",
     ):
         """

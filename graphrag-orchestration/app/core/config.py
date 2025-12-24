@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_BEARER_TOKEN: Optional[str] = None  # For local dev
-    AZURE_OPENAI_DEPLOYMENT_NAME: str = "o3-pro"  # Primary model for synthesis (o3-pro)
-    AZURE_OPENAI_REASONING_EFFORT: str = "high"  # Reasoning effort for synthesis
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-5-2"  # Primary model for synthesis (GPT-5.2)
+    AZURE_OPENAI_REASONING_EFFORT: str = "medium"  # Reasoning effort for synthesis
     # Optional override only for DRIFT to allow faster model like gpt-4o-mini
-    AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = None
+    AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = "gpt-5-2"
     # Indexing operations (entity/relationship extraction, RAPTOR clustering)
     AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = "gpt-4.1"  # Will use gpt-4.1 when deployed
     # Query routing (intent classification: Vector vs Graph vs RAPTOR)

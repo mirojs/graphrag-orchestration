@@ -146,7 +146,7 @@ class Neo4jGraphRAGService:
     
     @property
     def embedder(self) -> "DimensionAwareAzureEmbeddings":
-        """Lazy initialization of Azure OpenAI embeddings (text-embedding-3-large with 3072 dimensions)."""
+        """Lazy initialization of Azure OpenAI embeddings (text-embedding-3-small with 1536 dimensions)."""
         if self._embedder is None:
             # Wrap AzureOpenAIEmbeddings to always pass dimensions parameter
             self._embedder = DimensionAwareAzureEmbeddings(

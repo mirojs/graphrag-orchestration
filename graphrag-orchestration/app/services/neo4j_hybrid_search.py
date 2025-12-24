@@ -123,14 +123,14 @@ class Neo4jHybridSearchService:
             
             if not existing:
                 # Create vector index on entity embeddings
-                # Note: dimensions should match your embedding model (3072 for text-embedding-3-large)
+                # Note: dimensions should match your embedding model (1536 for text-embedding-3-small)
                 create_vec_query = f"""
                 CREATE VECTOR INDEX {self.vector_index_name} IF NOT EXISTS
                 FOR (e:`__Entity__`)
                 ON e.embedding
                 OPTIONS {{
                     indexConfig: {{
-                        `vector.dimensions`: 3072,
+                        `vector.dimensions`: 1536,
                         `vector.similarity_function`: 'cosine'
                     }}
                 }}

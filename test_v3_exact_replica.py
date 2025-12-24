@@ -4,7 +4,7 @@
 import requests
 import time
 
-API_URL = "https://graphrag-orchestration.purplefield-1719ccc0.swedencentral.azurecontainerapps.io"
+API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "invoice-contract-verification"
 
 # Exact same documents as working test

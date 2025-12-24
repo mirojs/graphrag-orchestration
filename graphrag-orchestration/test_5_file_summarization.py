@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app.services.document_intelligence_service import DocumentIntelligenceService
 
 # API configuration
-API_BASE_URL = "https://graphrag-orchestration.ashypebble-48100d7f.swedencentral.azurecontainerapps.io/graphrag"
+API_BASE_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/graphrag"
 
 
 # Test files from data/input_docs (in repository root)

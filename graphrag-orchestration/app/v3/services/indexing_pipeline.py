@@ -515,8 +515,11 @@ class IndexingPipelineV3:
             logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3: Starting community detection")
             communities = await self._build_communities(group_id, entities, relationships)
             
-            # Generate community summaries
-            for community in communities:
+            # Generate community summaries (with rate limit throttling)
+            for i, community in enumerate(communities):
+                # Add delay to respect rate limits (1 second between calls)
+                if i > 0:
+                    await asyncio.sleep(1.0)
                 summary = await self._generate_community_summary(community, entities)
                 community.summary = summary
                 community.full_content = summary  # DRIFT needs full_content
@@ -1293,6 +1296,10 @@ Summary:"""
             
             next_level_texts = []
             for cluster_idx, cluster in enumerate(clusters):
+                # Add delay to respect rate limits (1 second between calls)
+                if cluster_idx > 0:
+                    await asyncio.sleep(1.0)
+                    
                 if len(cluster) < 1:
                     continue
                 

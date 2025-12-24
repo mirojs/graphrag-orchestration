@@ -231,66 +231,6 @@ class LLMService:
         """Get the Embedding model instance."""
         return self._embed_model
     
-    def get_indexing_llm(self) -> Any:
-        """
-        Get LLM for indexing operations (entity extraction, RAPTOR clustering).
-        
-        Uses AZURE_OPENAI_INDEXING_DEPLOYMENT if set, otherwise uses primary LLM.
-        Recommended: gpt-4.1 (1M context window for bulk document reading)
-        """
-        if not settings.AZURE_OPENAI_INDEXING_DEPLOYMENT:
-            return self._llm
-        
-        return self._create_llm_instance(settings.AZURE_OPENAI_INDEXING_DEPLOYMENT)
-    
-    def get_routing_llm(self) -> Any:
-        """
-        Get LLM for query routing (intent classification: Vector vs Graph vs RAPTOR).
-        
-        Uses AZURE_OPENAI_ROUTING_DEPLOYMENT if set, otherwise uses primary LLM.
-        Recommended: gpt-5.2-thinking-standard (System 2 reasoning for 95%+ accuracy)
-        """
-        if not settings.AZURE_OPENAI_ROUTING_DEPLOYMENT:
-            return self._llm
-        
-        return self._create_llm_instance(settings.AZURE_OPENAI_ROUTING_DEPLOYMENT)
-    
-    def _create_llm_instance(self, deployment_name: str) -> Any:
-        """Create an LLM instance for a specific deployment."""
-        from llama_index.llms.azure_openai import AzureOpenAI
-        from azure.identity import DefaultAzureCredential, get_bearer_token_provider
-        
-        if not settings.AZURE_OPENAI_API_KEY:
-            # Use managed identity
-            env_token = os.getenv("AZURE_OPENAI_BEARER_TOKEN")
-            if env_token:
-                def token_provider() -> str:
-                    return env_token
-            else:
-                credential = DefaultAzureCredential()
-                token_provider = get_bearer_token_provider(
-                    credential,
-                    "https://cognitiveservices.azure.com/.default"
-                )
-            
-            return AzureOpenAI(
-                model=deployment_name,
-                deployment_name=deployment_name,
-                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-                api_version=settings.AZURE_OPENAI_API_VERSION,
-                use_azure_ad=True,
-                azure_ad_token_provider=token_provider,
-            )
-        else:
-            # Use API key
-            return AzureOpenAI(
-                model=deployment_name,
-                deployment_name=deployment_name,
-                api_key=settings.AZURE_OPENAI_API_KEY,
-                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-                api_version=settings.AZURE_OPENAI_API_VERSION,
-            )
-
     def get_routing_llm(self) -> Any:
         """Get the specialized routing LLM (o4-mini)."""
         deployment = settings.AZURE_OPENAI_ROUTING_DEPLOYMENT or "o4-mini"

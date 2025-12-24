@@ -1,13 +1,22 @@
 #!/usr/bin/env python3
-"""Test Phase 1 quality metrics with 5 real documents."""
+"""Test Phase 1 quality metrics with 5 real documents.
 
+Supports:
+- Index + wait + Neo4j verification (Phase 1)
+- Endpoint-focused engine correctness QA using the grounded question bank
+"""
+
+import os
+import re
 import requests
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from neo4j import GraphDatabase
 
 # Configuration
 API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
-GROUP_ID = f"phase1-5docs-{int(time.time())}"  # Unique group ID
+GROUP_ID = os.getenv("GROUP_ID", f"phase1-5docs-{int(time.time())}")  # Unique group ID
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
 NEO4J_USER = "neo4j"
 NEO4J_PASSWORD = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
@@ -22,6 +31,501 @@ PDF_FILES = [
     "contoso_lifts_invoice.pdf",
     "purchase_contract.pdf"
 ]
+
+# Optional safety + automation toggles
+CLEANUP_ALL_GROUPS = os.getenv("CLEANUP_ALL_GROUPS", "false").lower() == "true"
+WAIT_TIMEOUT_SECONDS = int(os.getenv("WAIT_TIMEOUT_SECONDS", "900"))
+WAIT_POLL_SECONDS = int(os.getenv("WAIT_POLL_SECONDS", "10"))
+RUN_LOCAL_QA = os.getenv("RUN_LOCAL_QA", "false").lower() == "true"
+SKIP_INDEXING = os.getenv("SKIP_INDEXING", "false").lower() == "true"
+SKIP_NEO4J_VERIFY = os.getenv("SKIP_NEO4J_VERIFY", "false").lower() == "true"
+LOCAL_QUERY_TIMEOUT_SECONDS = int(os.getenv("LOCAL_QUERY_TIMEOUT_SECONDS", "240"))
+LOCAL_QUERY_RETRIES = int(os.getenv("LOCAL_QUERY_RETRIES", "2"))
+SLEEP_BETWEEN_QUERIES_SECONDS = float(os.getenv("SLEEP_BETWEEN_QUERIES_SECONDS", "2"))
+QA_ENGINES = [e.strip().lower() for e in os.getenv("QA_ENGINES", "").split(",") if e.strip()]
+QA_FAIL_FAST = os.getenv("QA_FAIL_FAST", "false").lower() == "true"
+
+# Question bank driven endpoint QA
+RUN_QUESTION_BANK = os.getenv("RUN_QUESTION_BANK", "false").lower() == "true"
+QUESTION_BANK_PATH = os.getenv("QUESTION_BANK_PATH", "../QUESTION_BANK_5PDFS_2025-12-24.md")
+QA_INCLUDE_NEGATIVES = os.getenv("QA_INCLUDE_NEGATIVES", "true").lower() == "true"
+
+
+def _sleep_with_notice(seconds: float, reason: str) -> None:
+    if seconds <= 0:
+        return
+    print(f"  ⏳ {reason} (sleep {seconds:.0f}s)")
+    time.sleep(seconds)
+
+
+def _post_with_rate_limit_retry(url: str, *, json_body: dict, timeout_seconds: int) -> requests.Response:
+    """POST with retries and 429 handling.
+
+    - Retries network errors.
+    - On HTTP 429, honors Retry-After if present.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(LOCAL_QUERY_RETRIES + 1):
+        try:
+            resp = requests.post(
+                url,
+                json=json_body,
+                headers={"X-Group-ID": GROUP_ID},
+                timeout=timeout_seconds,
+            )
+
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after and retry_after.strip().isdigit():
+                    wait_s = float(retry_after.strip())
+                else:
+                    wait_s = float(10 * (attempt + 1))
+                _sleep_with_notice(wait_s, "Rate limited (429)")
+                continue
+
+            return resp
+
+        except requests.exceptions.RequestException as e:
+            last_exc = e
+            if attempt >= LOCAL_QUERY_RETRIES:
+                raise
+            backoff = float(5 * (attempt + 1))
+            _sleep_with_notice(backoff, f"Request error: {e}")
+
+    # Should be unreachable, but keep mypy/humans happy
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("POST failed without response")
+
+
+def _extract_answer_and_search_type(resp: requests.Response) -> tuple[str, str]:
+    try:
+        data = resp.json()
+    except Exception:
+        return (resp.text or ""), ""
+    return (data.get("answer") or ""), (data.get("search_type") or "")
+
+
+@dataclass(frozen=True)
+class BankQuestion:
+    qid: str
+    query: str
+    expected_text: str
+    source_text: str
+
+
+def _normalize_text(s: str) -> str:
+    return re.sub(r"[^a-z0-9@]+", "", (s or "").lower())
+
+
+def _term_in_answer(term: str, answer: str) -> bool:
+    t = _normalize_text(term)
+    if not t:
+        return True
+    a = _normalize_text(answer)
+    return t in a
+
+
+def _extract_required_terms(expected_text: str) -> list[str]:
+    """Extract match terms from the question bank expected text.
+
+    Preference order:
+    - backtick terms (most precise)
+    - dates ($mm/dd/yyyy$, $yyyy-mm-dd$)
+    - money/number tokens
+    """
+    text = expected_text or ""
+
+    terms: list[str] = []
+
+    # Backticks are the strongest anchors in the markdown question bank.
+    for bt in re.findall(r"`([^`]+)`", text):
+        for part in bt.split(";"):
+            p = part.strip()
+            if p:
+                terms.append(p)
+
+    # Dates
+    terms.extend(re.findall(r"\b\d{2}/\d{2}/\d{4}\b", text))
+    terms.extend(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text))
+
+    # Codes like REG-54321
+    terms.extend(re.findall(r"\b[A-Z]{2,}-\d{3,}\b", text))
+
+    # Currency / numeric anchors
+    for num in re.findall(r"\$?\d[\d,]*(?:\.\d+)?", text):
+        n = num.strip()
+        if not n:
+            continue
+        # Drop lone years that may appear in explanatory sentences
+        if re.fullmatch(r"\d{4}", n):
+            continue
+        terms.append(n)
+
+    # Deduplicate, preserve order
+    seen = set()
+    out: list[str] = []
+    for t in terms:
+        key = _normalize_text(t)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(t)
+    return out
+
+
+def _load_question_bank(path: str) -> dict[str, list[BankQuestion]]:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Question bank not found: {p.resolve()}")
+
+    text = p.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    section = None
+    sections: dict[str, list[BankQuestion]] = {
+        "vector": [],
+        "local": [],
+        "global": [],
+        "drift": [],
+        "raptor": [],
+        "negative": [],
+    }
+
+    # Map markdown section headers to keys
+    def _section_key(header_line: str) -> str | None:
+        hl = header_line.lower()
+        if hl.startswith("## a)") and "vector" in hl:
+            return "vector"
+        if hl.startswith("## b)") and "local" in hl:
+            return "local"
+        if hl.startswith("## c)") and "global" in hl:
+            return "global"
+        if hl.startswith("## d)") and "drift" in hl:
+            return "drift"
+        if hl.startswith("## e)") and "raptor" in hl:
+            return "raptor"
+        if hl.startswith("## f)") and "negative" in hl:
+            return "negative"
+        return None
+
+    # Question IDs in the bank are like: Q-V1, Q-L10, Q-G3, Q-D7, Q-R2, Q-N10
+    q_re = re.compile(r"^\s*\d+\.\s*\*\*(Q-[A-Z]-?\d+):\*\*\s*(.+?)\s*$")
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        if line.startswith("## "):
+            sk = _section_key(line)
+            if sk:
+                section = sk
+            i += 1
+            continue
+
+        m = q_re.match(line)
+        if not m or section is None:
+            i += 1
+            continue
+
+        qid = m.group(1).strip()
+        query = m.group(2).strip()
+        expected_lines: list[str] = []
+        source_text = ""
+
+        j = i + 1
+        while j < len(lines):
+            s = lines[j].strip()
+
+            # Stop at next question or section
+            if s.startswith("## ") or q_re.match(lines[j]):
+                break
+
+            if s.startswith("- **Expected:**"):
+                remainder = s.split("**Expected:**", 1)[1].strip()
+                if remainder:
+                    expected_lines.append(remainder)
+                j += 1
+                while j < len(lines):
+                    ss = lines[j].strip()
+                    if ss.startswith("- **Source:**") or ss.startswith("## ") or q_re.match(lines[j]):
+                        break
+                    if ss.startswith("-"):
+                        expected_lines.append(ss.lstrip("-").strip())
+                    elif ss:
+                        expected_lines.append(ss)
+                    j += 1
+                continue
+
+            if s.startswith("- **Source:**"):
+                source_text = s.split("**Source:**", 1)[1].strip()
+                j += 1
+                continue
+
+            j += 1
+
+        sections[section].append(
+            BankQuestion(
+                qid=qid,
+                query=query,
+                expected_text="\n".join(expected_lines).strip(),
+                source_text=source_text,
+            )
+        )
+
+        i = j
+
+    return sections
+
+
+def _is_negative_ok(answer: str) -> bool:
+    a = (answer or "").lower()
+    markers = [
+        "not specified",
+        "not provided",
+        "not mentioned",
+        "not found",
+        "cannot determine",
+        "no relevant",
+        "not stated",
+        "none",
+    ]
+    return any(m in a for m in markers)
+
+
+def run_question_bank_engine(engine: str, bank: dict[str, list[BankQuestion]]) -> bool:
+    engine = engine.strip().lower()
+    if engine not in {"vector", "local", "global", "drift", "raptor"}:
+        raise ValueError(f"Unsupported engine: {engine}")
+
+    positives = bank.get(engine, [])
+    negatives = bank.get("negative", []) if QA_INCLUDE_NEGATIVES else []
+
+    if len(positives) != 10:
+        raise RuntimeError(f"Question bank for {engine} must have 10 questions; found {len(positives)}")
+    if QA_INCLUDE_NEGATIVES and len(negatives) != 10:
+        raise RuntimeError(f"Question bank negatives must have 10 questions; found {len(negatives)}")
+
+    print("\n" + "=" * 80)
+    print(f"QUESTION BANK QA: {engine.upper()} (10 + negatives={QA_INCLUDE_NEGATIVES})")
+    print("=" * 80)
+
+    if engine == "vector":
+        endpoint = f"{API_URL}/graphrag/v3/query"
+        make_payload = lambda q: {"query": q, "top_k": 10, "include_sources": True, "force_route": "vector"}
+        expected_search_type = "vector"
+    elif engine == "local":
+        endpoint = f"{API_URL}/graphrag/v3/query/local"
+        make_payload = lambda q: {"query": q, "top_k": 10, "include_sources": True}
+        expected_search_type = "local"
+    elif engine == "global":
+        endpoint = f"{API_URL}/graphrag/v3/query/global"
+        make_payload = lambda q: {"query": q, "top_k": 10, "include_sources": True}
+        expected_search_type = "global"
+    elif engine == "raptor":
+        endpoint = f"{API_URL}/graphrag/v3/query/raptor"
+        make_payload = lambda q: {"query": q, "top_k": 10, "include_sources": True}
+        expected_search_type = "raptor"
+    else:  # drift
+        endpoint = f"{API_URL}/graphrag/v3/query/drift"
+        make_payload = lambda q: {
+            "query": q,
+            "max_iterations": 5,
+            "convergence_threshold": 0.8,
+            "include_reasoning_path": False,
+        }
+        expected_search_type = "drift"
+
+    failures = 0
+
+    def _run_one(q: BankQuestion, *, is_negative: bool) -> bool:
+        nonlocal failures
+        print(f"\n{q.qid}: {q.query}")
+        try:
+            resp = _post_with_rate_limit_retry(
+                endpoint,
+                json_body=make_payload(q.query),
+                timeout_seconds=LOCAL_QUERY_TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.RequestException as e:
+            print(f"  ❌ Request failed after retries: {e}")
+            failures += 1
+            return False
+
+        if resp.status_code != 200:
+            print(f"  ❌ HTTP {resp.status_code}")
+            print((resp.text or "")[:1000])
+            failures += 1
+            return False
+
+        answer, search_type = _extract_answer_and_search_type(resp)
+        if not answer.strip():
+            print("  ❌ Empty answer")
+            failures += 1
+            return False
+
+        if search_type and search_type.lower() != expected_search_type:
+            print(f"  ⚠️  Unexpected search_type='{search_type}' (expected '{expected_search_type}')")
+
+        if is_negative:
+            if _is_negative_ok(answer):
+                print("  ✅ Negative: Pass")
+                return True
+            print("  ❌ Negative: expected 'not specified/not found' style response")
+            failures += 1
+            return False
+
+        required = _extract_required_terms(q.expected_text)
+        if not required:
+            # Fallback: require non-trivial answer.
+            if len(answer.strip()) < 40:
+                print("  ❌ Answer too short to validate")
+                failures += 1
+                return False
+            print("  ✅ Pass (no explicit required terms found)")
+            return True
+
+        missing = [t for t in required if not _term_in_answer(t, answer)]
+        if missing:
+            print("  ❌ Missing expected terms:", missing[:8])
+            failures += 1
+            return False
+
+        print("  ✅ Pass")
+        return True
+
+    # Positive questions (10)
+    for q in positives:
+        ok = _run_one(q, is_negative=False)
+        if QA_FAIL_FAST and not ok:
+            return False
+        _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+
+    # Negative questions (10) per engine
+    if negatives:
+        for q in negatives:
+            ok = _run_one(q, is_negative=True)
+            if QA_FAIL_FAST and not ok:
+                return False
+            _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+
+    if failures:
+        print(f"\n⚠️  QUESTION BANK QA ({engine}): {failures} failures")
+        return False
+    print(f"\n✅ QUESTION BANK QA ({engine}): all passed")
+    return True
+
+
+def run_engine_qa_smoke(engine: str) -> bool:
+    """Engine-correctness QA: directly hit per-engine endpoint (no routing).
+
+    This is intentionally small and stable:
+    - Confirms endpoint returns HTTP 200
+    - Confirms answer is non-empty
+    - Optionally checks a few expected terms
+    """
+    engine = engine.strip().lower()
+    if engine not in {"local", "global", "raptor", "drift"}:
+        raise ValueError(f"Unsupported engine: {engine}")
+
+    print("\n" + "=" * 80)
+    print(f"ENGINE QA: {engine.upper()} ENDPOINT")
+    print("=" * 80)
+
+    # Keep these concise to reduce token spend and rate-limit risk.
+    if engine == "local":
+        endpoint = f"{API_URL}/graphrag/v3/query/local"
+        questions: list[tuple[str, list[str]]] = [
+            ("Who is the Agent in the property management agreement?", ["Walt Flood Realty"]),
+            ("Who is the Owner in the property management agreement?", ["Contoso Ltd"]),
+            ("In the purchase contract Exhibit A, what is the job location?", ["811 Ocean Drive", "Tampa"]),
+        ]
+        make_payload = lambda q: {"query": q, "top_k": 10, "include_sources": True}
+    elif engine == "global":
+        endpoint = f"{API_URL}/graphrag/v3/query/global"
+        questions = [
+            (
+                "Summarize the documents and mention the main agreements involved.",
+                ["agreement", "contract", "invoice"],
+            ),
+        ]
+        make_payload = lambda q: {"query": q, "top_k": 10, "include_sources": True}
+    elif engine == "raptor":
+        endpoint = f"{API_URL}/graphrag/v3/query/raptor"
+        questions = [
+            ("What is the total amount due on the Contoso lifts invoice?", ["29,900", "29900"]),
+            ("In the purchase contract Exhibit A, what is the contact email?", ["@fabrikam.com", "enolasco"]),
+        ]
+        make_payload = lambda q: {"query": q, "top_k": 6, "include_sources": True}
+    else:  # drift
+        endpoint = f"{API_URL}/graphrag/v3/query/drift"
+        questions = [
+            (
+                "Connect the property management agreement parties and the managed property address.",
+                ["Contoso", "Honolulu"],
+            ),
+        ]
+        make_payload = lambda q: {
+            "query": q,
+            "max_iterations": 3,
+            "convergence_threshold": 0.8,
+            "include_reasoning_path": False,
+        }
+
+    failures = 0
+    for i, (q, expected_terms) in enumerate(questions, 1):
+        print(f"\nQ{i}: {q}")
+        try:
+            resp = _post_with_rate_limit_retry(
+                endpoint,
+                json_body=make_payload(q),
+                timeout_seconds=LOCAL_QUERY_TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.RequestException as e:
+            print(f"  ❌ Query request failed after retries: {e}")
+            failures += 1
+            if QA_FAIL_FAST:
+                return False
+            _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+            continue
+
+        if resp.status_code != 200:
+            print(f"  ❌ Query failed: {resp.status_code}")
+            print((resp.text or "")[:1000])
+            failures += 1
+            if QA_FAIL_FAST:
+                return False
+            _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+            continue
+
+        answer, search_type = _extract_answer_and_search_type(resp)
+        if not answer.strip():
+            print("  ❌ Empty answer")
+            failures += 1
+            if QA_FAIL_FAST:
+                return False
+            _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+            continue
+
+        if search_type and search_type.lower() != engine:
+            print(f"  ⚠️  Unexpected search_type='{search_type}' (expected '{engine}')")
+
+        answer_l = answer.lower()
+        missing = [t for t in expected_terms if t.lower() not in answer_l]
+        if missing:
+            print("  ⚠️  Missing expected terms:", missing)
+            failures += 1
+            if QA_FAIL_FAST:
+                return False
+        else:
+            print("  ✅ Pass")
+
+        _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+
+    if failures:
+        print(f"\n⚠️  ENGINE QA ({engine}): {failures} failures")
+        return False
+    print(f"\n✅ ENGINE QA ({engine}): all passed")
+    return True
 
 def cleanup_neo4j():
     """Delete all existing groups from Neo4j before starting."""
@@ -64,6 +568,114 @@ def cleanup_neo4j():
     
     print(f"✅ Cleanup complete - deleted {len(groups)} groups\n")
     driver.close()
+
+
+def wait_for_indexing_completion() -> bool:
+    """Poll the V3 stats endpoint until indexing is complete (or timeout)."""
+    print("\n" + "=" * 80)
+    print("WAIT: POLLING /graphrag/v3/stats UNTIL INDEXING COMPLETES")
+    print("=" * 80)
+
+    deadline = time.time() + WAIT_TIMEOUT_SECONDS
+    last = None
+
+    while time.time() < deadline:
+        try:
+            response = requests.get(
+                f"{API_URL}/graphrag/v3/stats/{GROUP_ID}",
+                headers={"X-Group-ID": GROUP_ID},
+                timeout=30,
+            )
+
+            if response.status_code != 200:
+                print(f"  ⏳ Stats not ready yet ({response.status_code})")
+                time.sleep(WAIT_POLL_SECONDS)
+                continue
+
+            stats = response.json()
+            last = stats
+            docs = stats.get("documents", 0)
+            chunks = stats.get("text_chunks", 0)
+            entities = stats.get("entities", 0)
+            communities = stats.get("communities", 0)
+            raptor_nodes = stats.get("raptor_nodes", 0)
+
+            print(
+                f"  📊 docs={docs} chunks={chunks} entities={entities} communities={communities} raptor={raptor_nodes}"
+            )
+
+            # Minimal completion condition
+            if docs >= len(PDF_FILES) and chunks > 0 and entities > 0:
+                print("✅ Indexing appears complete")
+                return True
+
+        except Exception as e:
+            print(f"  ⏳ Stats poll error: {e}")
+
+        time.sleep(WAIT_POLL_SECONDS)
+
+    print("❌ Timed out waiting for indexing completion")
+    if last:
+        print(f"Last stats: {last}")
+    return False
+
+
+def run_local_qa_smoke() -> bool:
+    """Run 10 content-grounded local questions and check key strings."""
+    print("\n" + "=" * 80)
+    print("PHASE 4: LOCAL QA SMOKE (10 QUESTIONS)")
+    print("=" * 80)
+
+    questions = [
+        ("Who is the Agent in the property management agreement?", ["Walt Flood Realty"]),
+        ("Who is the Owner in the property management agreement?", ["Contoso Ltd"]),
+        ("What is the managed property address in the property management agreement?", ["456 Palm Tree Avenue", "Honolulu", "96815"]),
+        ("What is the initial term start date in the property management agreement?", ["2010", "06", "15"]),
+        ("What written notice period is required for termination of the property management agreement?", ["60", "sixty", "days"]),
+        ("What is the Agent fee/commission for short-term rentals (reservations of less than 180 days)?", ["25", "twenty", "percent"]),
+        ("What is the Agent fee/commission for long-term leases (leases of more than 180 days)?", ["10", "ten", "percent"]),
+        ("What is the pro-ration advertising charge and the minimum admin/accounting charge?", ["75", "50"]),
+        ("In the purchase contract Exhibit A, what is the job location?", ["811 Ocean Drive", "Tampa", "33602"]),
+        ("In the purchase contract Exhibit A, what is the contact name and email?", ["Elizabeth", "Nolasco", "enolasco@fabrikam.com"]),
+    ]
+
+    failures = 0
+    for i, (q, expected_terms) in enumerate(questions, 1):
+        print(f"\nQ{i}: {q}")
+        try:
+            resp = _post_with_rate_limit_retry(
+                f"{API_URL}/graphrag/v3/query/local",
+                json_body={"query": q, "top_k": 10, "include_sources": True},
+                timeout_seconds=LOCAL_QUERY_TIMEOUT_SECONDS,
+            )
+        except requests.exceptions.RequestException as e:
+            print(f"  ❌ Query request failed after retries: {e}")
+            failures += 1
+            _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+            continue
+
+        if resp.status_code != 200:
+            print(f"  ❌ Query failed: {resp.status_code}")
+            print((resp.text or "")[:1000])
+            failures += 1
+            continue
+
+        answer = (resp.json().get("answer") or "")
+        answer_l = answer.lower()
+        missing = [t for t in expected_terms if t.lower() not in answer_l]
+        if missing:
+            print("  ⚠️  Missing expected terms:", missing)
+            failures += 1
+        else:
+            print("  ✅ Pass")
+
+        _sleep_with_notice(SLEEP_BETWEEN_QUERIES_SECONDS, "Pacing")
+
+    if failures:
+        print(f"\n⚠️  LOCAL QA: {failures} failures")
+        return False
+    print("\n✅ LOCAL QA: all passed")
+    return True
 
 def test_indexing():
     """Index 5 documents using managed identity for blob storage and Document Intelligence."""
@@ -217,7 +829,7 @@ def verify_quality_metrics():
         if not nodes:
             print("\n   ℹ️  No RAPTOR nodes found with level > 0 (may still be processing)")
             driver.close()
-            return entity_count > 0  # Pass if we have entities
+            return entities > 0  # Pass if we have entities
         
         print(f"\n✅ Found {len(nodes)} RAPTOR nodes at level > 0")
         
@@ -268,44 +880,46 @@ if __name__ == "__main__":
     print(f"API: {API_URL}")
     print(f"Group ID: {GROUP_ID}\n")
     
-    # Cleanup Neo4j first
-    cleanup_neo4j()
+    # Cleanup is destructive; disabled by default.
+    if CLEANUP_ALL_GROUPS:
+        cleanup_neo4j()
+    else:
+        print("=" * 80)
+        print("CLEANUP: SKIPPED (set CLEANUP_ALL_GROUPS=true to enable)")
+        print("=" * 80)
     
     # Index documents
-    if not test_indexing():
-        print("\n❌ TEST FAILED: Indexing error")
+    if not SKIP_INDEXING:
+        if not test_indexing():
+            print("\n❌ TEST FAILED: Indexing error")
+            exit(1)
+    else:
+        print("\nℹ️  SKIP_INDEXING=true (will not call /index)")
+    
+    if not wait_for_indexing_completion():
+        print("\n❌ TEST FAILED: Timed out waiting for indexing completion")
         exit(1)
     
-    # Wait for background processing to complete
-    # Full pipeline typically takes 1-3 minutes for 5 PDFs with the fixes:
-    # - Document Intelligence extraction (~30s)
-    # - Chunking and entity extraction (~60s)
-    # - Community detection and RAPTOR (~60s)
-    print("\n⏳ Waiting 120 seconds (2 minutes) for background indexing to complete...")
-    for i in range(24):
-        time.sleep(5)
-        if (i + 1) % 6 == 0:
-            print(f"   {(i+1)*5}s elapsed...")
-    
-    # Quick stats check via API
-    print("\n" + "=" * 80)
-    print("CHECKING INDEXING PROGRESS VIA API")
-    print("=" * 80)
-    response = requests.get(
-        f"{API_URL}/graphrag/v3/stats/{GROUP_ID}",
-        headers={"X-Group-ID": GROUP_ID}
-    )
-    if response.status_code == 200:
-        stats = response.json()
-        print(f"   Documents: {stats.get('documents', 0)}")
-        print(f"   Entities: {stats.get('entities', 0)}")
-        print(f"   Relationships: {stats.get('relationships', 0)}")
-        if stats.get('entities', 0) == 0:
-            print("\n⏳ Still processing, waiting another 60 seconds...")
-            time.sleep(60)
-    
-    # Verify metrics
-    if not verify_quality_metrics():
-        print("\n⚠️  Warning: Some data may still be processing")
+    # Verify metrics (optional for endpoint-only engine correctness testing)
+    if SKIP_NEO4J_VERIFY:
+        print("\nℹ️  SKIP_NEO4J_VERIFY=true (will not query Neo4j directly)")
     else:
-        print("\n✅ Data verified in Neo4j!")
+        if not verify_quality_metrics():
+            print("\n⚠️  Warning: Some data may still be processing")
+        else:
+            print("\n✅ Data verified in Neo4j!")
+
+    if RUN_LOCAL_QA:
+        run_local_qa_smoke()
+
+    # Question bank QA (10 per route + negatives per route)
+    if RUN_QUESTION_BANK:
+        bank = _load_question_bank(QUESTION_BANK_PATH)
+        engines = QA_ENGINES or ["vector", "local", "global", "drift", "raptor"]
+        for engine in engines:
+            run_question_bank_engine(engine, bank)
+    else:
+        # Engine correctness QA (small per-endpoint smoke).
+        if QA_ENGINES:
+            for engine in QA_ENGINES:
+                run_engine_qa_smoke(engine)

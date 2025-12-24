@@ -57,6 +57,14 @@ class V3QueryRequest(BaseModel):
     query: str = Field(..., description="Natural language query")
     top_k: int = Field(default=10, description="Number of results to return")
     include_sources: bool = Field(default=True, description="Include source references")
+    force_route: Optional[Literal["vector", "local", "graph", "raptor", "drift"]] = Field(
+        default=None,
+        description="Optional route override for testing/debugging (bypasses routing LLM)",
+    )
+    synthesize: bool = Field(
+        default=True,
+        description="If false, return retrieval results without LLM synthesis (faster; for debugging/testing).",
+    )
 
 
 class V3DriftRequest(BaseModel):
@@ -327,6 +335,7 @@ async def query_unified(request: Request, payload: V3QueryRequest):
             query=payload.query,
             group_id=group_id,
             top_k=payload.top_k,
+            force_route=payload.force_route,
         )
         
         return V3QueryResponse(
@@ -361,11 +370,15 @@ async def query_local(request: Request, payload: V3QueryRequest):
     logger.info("v3_local_search", group_id=group_id, query=payload.query[:50])
     
     try:
+        import time
+        t0 = time.monotonic()
         adapter = get_drift_adapter()
         
         # Use hybrid search (vector + full-text with RRF fusion)
         # get_drift_adapter() guarantees embedder is non-None
+        t_embed0 = time.monotonic()
         query_embedding = adapter.embedder.embed_query(payload.query)
+        t_embed1 = time.monotonic()
         
         store = get_neo4j_store()
         
@@ -373,12 +386,14 @@ async def query_local(request: Request, payload: V3QueryRequest):
         # This solves the "missing facts" problem where specific values
         # (like "$25,000" or "Invoice #123") have weak embeddings
         try:
+            t_db0 = time.monotonic()
             results = store.search_entities_hybrid(
                 group_id=group_id,
                 query_text=payload.query,
                 embedding=query_embedding,
                 top_k=payload.top_k,
             )
+            t_db1 = time.monotonic()
         except Exception as e:
             logger.error(f"Entity vector search failed: {e}")
             # Check if entities exist at all
@@ -429,9 +444,30 @@ async def query_local(request: Request, payload: V3QueryRequest):
             })
         
         context = "\n".join(context_parts)
+
+        # Optional fast path: retrieval-only (no LLM call)
+        if not payload.synthesize:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            logger.info(
+                "v3_local_search_timing",
+                group_id=group_id,
+                total_ms=elapsed_ms,
+                embed_ms=int((t_embed1 - t_embed0) * 1000),
+                neo4j_ms=int((t_db1 - t_db0) * 1000),
+                llm_ms=0,
+                top_k=payload.top_k,
+            )
+            return V3QueryResponse(
+                answer=context,
+                confidence=results[0][1] if results else 0.0,
+                sources=sources if payload.include_sources else [],
+                entities_used=entities_used,
+                search_type="local",
+            )
         
         # Generate answer
         prompt = f"""Based on the following information, answer the question.
+    Only use the provided information. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Information:
 {context}
@@ -440,7 +476,20 @@ Question: {payload.query}
 
 Answer:"""
         
+        t_llm0 = time.monotonic()
         response = adapter.llm.complete(prompt)
+        t_llm1 = time.monotonic()
+
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "v3_local_search_timing",
+            group_id=group_id,
+            total_ms=elapsed_ms,
+            embed_ms=int((t_embed1 - t_embed0) * 1000),
+            neo4j_ms=int((t_db1 - t_db0) * 1000),
+            llm_ms=int((t_llm1 - t_llm0) * 1000),
+            top_k=payload.top_k,
+        )
         
         return V3QueryResponse(
             answer=response.text,
@@ -471,6 +520,8 @@ async def query_global(request: Request, payload: V3QueryRequest):
     logger.info("v3_global_search", group_id=group_id, query=payload.query[:50])
     
     try:
+        import time
+        t0 = time.monotonic()
         store = get_neo4j_store()
         adapter = get_drift_adapter()
         
@@ -500,9 +551,26 @@ async def query_global(request: Request, payload: V3QueryRequest):
             })
         
         context = "\n\n".join(context_parts)
+
+        if not payload.synthesize:
+            logger.info(
+                "v3_global_search_timing",
+                group_id=group_id,
+                total_ms=int((time.monotonic() - t0) * 1000),
+                llm_ms=0,
+                top_k=payload.top_k,
+            )
+            return V3QueryResponse(
+                answer=context,
+                confidence=0.85,
+                sources=sources if payload.include_sources else [],
+                entities_used=[],
+                search_type="global",
+            )
         
         # Generate answer using map-reduce style
         prompt = f"""Based on the following community summaries, answer the question.
+    Only use the provided summaries. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Community Summaries:
 {context}
@@ -513,7 +581,17 @@ Provide a comprehensive answer that synthesizes information across all relevant 
 
 Answer:"""
         
+        t_llm0 = time.monotonic()
         response = adapter.llm.complete(prompt)
+        t_llm1 = time.monotonic()
+
+        logger.info(
+            "v3_global_search_timing",
+            group_id=group_id,
+            total_ms=int((time.monotonic() - t0) * 1000),
+            llm_ms=int((t_llm1 - t_llm0) * 1000),
+            top_k=payload.top_k,
+        )
         
         return V3QueryResponse(
             answer=response.text,
@@ -589,6 +667,8 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
     logger.info("v3_raptor_search", group_id=group_id, query=payload.query[:50])
     
     try:
+        import time
+        t0 = time.monotonic()
         store = get_neo4j_store()
         
         # Get embedder from LLMService (must match indexing dimensions; text-embedding-3-small defaults to 1536)
@@ -597,7 +677,9 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
         if llm_service.embed_model is None:
             raise HTTPException(status_code=500, detail="Embedding model not initialized")
 
+        t_embed0 = time.monotonic()
         query_embedding = llm_service.embed_model.get_text_embedding(payload.query)
+        t_embed1 = time.monotonic()
         
         # First, check if RAPTOR nodes exist
         with store.driver.session(database=store.database) as session:
@@ -619,11 +701,13 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
             )
         
         # Search RAPTOR nodes by vector similarity
+        t_db0 = time.monotonic()
         results = store.search_raptor_by_embedding(
             group_id=group_id,
             embedding=query_embedding,
             top_k=payload.top_k,
         )
+        t_db1 = time.monotonic()
         logger.info(f"RAPTOR vector search returned {len(results)} results")
         
         if not results:
@@ -659,9 +743,28 @@ async def query_raptor(request: Request, payload: V3QueryRequest):
             })
         
         context = "\n\n".join(context_parts)
+
+        if not payload.synthesize:
+            logger.info(
+                "v3_raptor_search_timing",
+                group_id=group_id,
+                total_ms=int((time.monotonic() - t0) * 1000),
+                embed_ms=int((t_embed1 - t_embed0) * 1000),
+                neo4j_ms=int((t_db1 - t_db0) * 1000),
+                llm_ms=0,
+                top_k=payload.top_k,
+            )
+            return V3QueryResponse(
+                answer=context,
+                confidence=results[0][1] if results else 0.0,
+                sources=sources if payload.include_sources else [],
+                entities_used=[],
+                search_type="raptor",
+            )
         
         # Generate answer with full document context
         prompt = f"""Based on the following detailed document content, answer the question comprehensively.
+    Only use the provided content. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Document Content:
 {context}
@@ -674,7 +777,19 @@ Answer:"""
         
         # Get LLM for generating answer
         llm_service = LLMService()
+        t_llm0 = time.monotonic()
         response = llm_service.llm.complete(prompt)
+        t_llm1 = time.monotonic()
+
+        logger.info(
+            "v3_raptor_search_timing",
+            group_id=group_id,
+            total_ms=int((time.monotonic() - t0) * 1000),
+            embed_ms=int((t_embed1 - t_embed0) * 1000),
+            neo4j_ms=int((t_db1 - t_db0) * 1000),
+            llm_ms=int((t_llm1 - t_llm0) * 1000),
+            top_k=payload.top_k,
+        )
         
         return V3QueryResponse(
             answer=response.text,

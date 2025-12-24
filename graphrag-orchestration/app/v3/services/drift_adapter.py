@@ -496,6 +496,11 @@ class DRIFTAdapter:
                 """Wrapper to adapt LlamaIndex LLM for MS GraphRAG DRIFT ChatModel protocol."""
                 def __init__(self, llama_llm):
                     self.llm = llama_llm
+                    self._prefix = (
+                        "You are answering questions using ONLY the provided context. "
+                        "If the answer is not present in the provided context, respond with: "
+                        "\"Not specified in the provided documents.\".\n\n"
+                    )
                     # Create config object that DRIFT expects
                     self.config = type('Config', (), {
                         'model': getattr(llama_llm, 'model', 'gpt-4o'),
@@ -507,6 +512,8 @@ class DRIFTAdapter:
                 async def achat(self, prompt: str, history: list | None = None, **kwargs):
                     """MS GraphRAG ChatModel protocol: achat(prompt, history) -> ModelResponse."""
                     import sys
+
+                    prompt = f"{self._prefix}{prompt}"
                     
                     # Check if JSON output is requested
                     json_mode = kwargs.get('json', False)
@@ -550,6 +557,8 @@ class DRIFTAdapter:
                 async def achat_stream(self, prompt: str, history: list | None = None, **kwargs):
                     """MS GraphRAG ChatModel protocol: achat_stream(prompt, history) -> async iterator of str chunks."""
                     import sys
+
+                    prompt = f"{self._prefix}{prompt}"
                     
                     # Check if JSON output is requested
                     json_mode = kwargs.get('json', False)
@@ -597,6 +606,7 @@ class DRIFTAdapter:
                 
                 def chat(self, prompt: str, history: list | None = None, **kwargs):
                     """Sync version of chat."""
+                    prompt = f"{self._prefix}{prompt}"
                     # Check if JSON output is requested
                     json_mode = kwargs.get('json', False)
                     
@@ -758,6 +768,7 @@ class DRIFTAdapter:
         
         # Generate answer with LLM
         prompt = f"""Based on the following context, answer the question.
+    Only use the provided context. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Context:
 {context}

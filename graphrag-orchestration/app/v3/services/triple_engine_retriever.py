@@ -244,7 +244,8 @@ Respond with ONLY the route name (vector, local, graph, raptor, or drift) on the
         
         # Generate answer using LLM
         prompt = f"""Based on the following text excerpts, answer the question.
-If the user asked for a quote, provide the exact text.
+    If the user asked for a quote, provide the exact text.
+    Only use the provided excerpts. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Excerpts:
 {context}
@@ -329,6 +330,7 @@ Answer:"""
         
         # Generate answer using LLM (currently GPT-4o)
         prompt = f"""Based on the following information, answer the question with specific details.
+    Only use the provided information. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Information:
 {context}
@@ -414,6 +416,7 @@ Answer:"""
         
         # Generate answer focusing on relationships
         prompt = f"""Based on the following community summaries, answer the question about relationships and connections.
+    Only use the provided summaries. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Community Summaries:
 {context}
@@ -487,6 +490,7 @@ Answer:"""
         
         # Generate answer focusing on themes
         prompt = f"""Based on the following hierarchical summaries, answer the question about themes and patterns.
+    Only use the provided summaries. If the answer is not present, respond with: "Not specified in the provided documents.".
 
 Document Content:
 {context}

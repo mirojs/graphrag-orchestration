@@ -733,6 +733,106 @@ class Neo4jStoreV3:
                 ))
         
         return communities
+
+    def get_community_levels(self, group_id: str) -> List[int]:
+        """Return sorted distinct community levels for a group."""
+        query = """
+        MATCH (c:Community {group_id: $group_id})
+        RETURN DISTINCT c.level AS level
+        ORDER BY level ASC
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id)
+            levels: list[int] = []
+            for record in result:
+                lvl = record.get("level")
+                if isinstance(lvl, int):
+                    levels.append(lvl)
+            return levels
+
+    def ensure_community_hierarchy(self, group_id: str) -> None:
+        """Create parent-child edges between communities across adjacent levels.
+
+        Dynamic Global Search needs a traversable community tree.
+        Our indexing stores communities per level and entity membership; this method
+        derives a hierarchy by assigning each child community to the parent community
+        at the previous level with the highest entity overlap fraction.
+
+        Relationship created:
+            (child:Community)-[:PARENT_COMMUNITY]->(parent:Community)
+        """
+        levels = self.get_community_levels(group_id)
+        if len(levels) < 2:
+            return
+
+        with self.driver.session(database=self.database) as session:
+            # Clear existing edges for deterministic rebuild.
+            session.run(
+                """
+                MATCH (c:Community {group_id: $group_id})-[r:PARENT_COMMUNITY]->(:Community)
+                DELETE r
+                """,
+                group_id=group_id,
+            )
+
+            for parent_level, child_level in zip(levels, levels[1:]):
+                # For each child community, pick the parent community that overlaps most.
+                # Use overlap/child_size to avoid bias toward giant parents.
+                session.run(
+                    """
+                    MATCH (child:Community {group_id: $group_id, level: $child_level})
+                    OPTIONAL MATCH (ce:Entity {group_id: $group_id})-[:BELONGS_TO]->(child)
+                    WITH child, collect(DISTINCT ce.id) AS child_eids
+                    WHERE size(child_eids) > 0
+                    MATCH (parent:Community {group_id: $group_id, level: $parent_level})
+                    OPTIONAL MATCH (pe:Entity {group_id: $group_id})-[:BELONGS_TO]->(parent)
+                    WITH child, child_eids, parent, collect(DISTINCT pe.id) AS parent_eids
+                    WITH child, parent,
+                         size([x IN child_eids WHERE x IN parent_eids]) AS overlap,
+                         size(child_eids) AS child_size
+                    WHERE overlap > 0
+                    WITH child, parent, (overlap * 1.0 / child_size) AS frac
+                    ORDER BY child.id, frac DESC
+                    WITH child, collect({p: parent, f: frac})[0] AS best
+                    WITH child, best.p AS parent
+                    WHERE parent IS NOT NULL
+                    MERGE (child)-[:PARENT_COMMUNITY]->(parent)
+                    """,
+                    group_id=group_id,
+                    parent_level=parent_level,
+                    child_level=child_level,
+                )
+
+    def get_child_communities(self, group_id: str, parent_id: str, child_level: int) -> List[Community]:
+        """Fetch child communities linked to a parent community."""
+        query = """
+        MATCH (child:Community {group_id: $group_id, level: $child_level})-[:PARENT_COMMUNITY]->(parent:Community {id: $parent_id})
+        OPTIONAL MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(child)
+        RETURN child AS c, collect(DISTINCT e.id) AS entity_ids
+        ORDER BY child.rank DESC
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                group_id=group_id,
+                parent_id=parent_id,
+                child_level=child_level,
+            )
+            out: list[Community] = []
+            for record in result:
+                c = record["c"]
+                out.append(
+                    Community(
+                        id=c["id"],
+                        level=c["level"],
+                        title=c.get("title", ""),
+                        summary=c.get("summary", ""),
+                        full_content=c.get("full_content", ""),
+                        rank=c.get("rank", 0.0),
+                        entity_ids=record.get("entity_ids") or [],
+                    )
+                )
+            return out
     
     def get_entities_by_raptor_context(self, group_id: str, raptor_node_id: str, limit: int = 10) -> List[Entity]:
         """
@@ -775,9 +875,10 @@ class Neo4jStoreV3:
         // Find entities in these chunks
         MATCH (c)-[:MENTIONS]->(e:Entity)
         // Find communities these entities belong to
-        MATCH (e)-[:IN_COMMUNITY]->(comm:Community)
+        MATCH (e)-[:BELONGS_TO]->(comm:Community)
         WHERE comm.group_id = $group_id AND comm.level = 0
-        RETURN DISTINCT comm
+        OPTIONAL MATCH (e2:Entity {group_id: $group_id})-[:BELONGS_TO]->(comm)
+        RETURN comm, collect(DISTINCT e2.id) AS entity_ids
         LIMIT 20
         """
         with self.driver.session(database=self.database) as session:
@@ -791,7 +892,7 @@ class Neo4jStoreV3:
                     title=c.get("title", ""),
                     summary=c.get("summary", ""),
                     rank=c.get("rank", 0.0),
-                    entity_ids=c.get("entity_ids", []),
+                    entity_ids=record.get("entity_ids") or [],
                 ))
             return communities
 
@@ -981,14 +1082,17 @@ class Neo4jStoreV3:
         Vector search for TextChunk nodes.
         Used for pure Vector RAG (finding exact quotes).
         """
-        # Use gds.similarity.cosine for efficient calculation
+        # Use gds.similarity.cosine for efficient calculation.
+        # Also pull the related Document (via PART_OF) so callers can attribute
+        # concrete terms (jurisdiction/amounts) per document.
         query = """
         MATCH (t:TextChunk {group_id: $group_id})
         WHERE t.embedding IS NOT NULL
         WITH t, gds.similarity.cosine(t.embedding, $embedding) AS score
         ORDER BY score DESC
         LIMIT $top_k
-        RETURN t, score
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+        RETURN t, d, score
         """
         
         results = []
@@ -996,13 +1100,18 @@ class Neo4jStoreV3:
             result = session.run(query, group_id=group_id, embedding=embedding, top_k=top_k)
             for record in result:
                 t = record["t"]
+                d = record.get("d")
                 chunk = TextChunk(
                     id=t["id"],
                     text=t["text"],
                     chunk_index=t["chunk_index"],
-                    document_id=t.get("document_id", ""),
+                    document_id=(d.get("id") if d else ""),
                     tokens=t.get("tokens", 0),
                     embedding=t.get("embedding"),
+                    metadata={
+                        "document_title": (d.get("title") if d else ""),
+                        "document_source": (d.get("source") if d else ""),
+                    },
                 )
                 results.append((chunk, record["score"]))
         

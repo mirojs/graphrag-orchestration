@@ -155,6 +155,34 @@ module graphragApp './core/host/container-app.bicep' = {
         name: 'ENABLE_GROUP_ISOLATION'
         value: 'true'
       }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_SELECTION'
+        value: 'true'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_MAX_DEPTH'
+        value: '2'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET'
+        value: '30'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL'
+        value: '12'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD'
+        value: '25'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE'
+        value: '8'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY'
+        value: 'true'
+      }
     ])
     secrets: [
       {

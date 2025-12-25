@@ -43,6 +43,7 @@ import asyncio
 import logging
 import uuid
 import json
+import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Set, Union
 from dataclasses import dataclass, field
@@ -515,12 +516,13 @@ class IndexingPipelineV3:
             logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3: Starting community detection")
             communities = await self._build_communities(group_id, entities, relationships)
             
-            # Generate community summaries (with rate limit throttling)
+            # Generate community reports (with rate limit throttling)
+            chunk_by_id = {c.id: c for c in all_chunks}
             for i, community in enumerate(communities):
                 # Add delay to respect rate limits (1 second between calls)
                 if i > 0:
                     await asyncio.sleep(1.0)
-                summary = await self._generate_community_summary(community, entities)
+                summary = await self._generate_community_summary(community, entities, chunk_by_id, all_chunks)
                 community.summary = summary
                 community.full_content = summary  # DRIFT needs full_content
             
@@ -529,6 +531,12 @@ class IndexingPipelineV3:
                 self.neo4j_store.upsert_community(group_id, community)
             stats["communities"] = len(communities)
             logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3 complete: Built {len(communities)} communities")
+
+            # Derive parent-child community edges for dynamic community selection
+            try:
+                self.neo4j_store.ensure_community_hierarchy(group_id)
+            except Exception as e:
+                logger.warning(f"Failed to build community hierarchy edges: {e}")
             
             # Step 4: Build RAPTOR hierarchical summaries
             logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4: Starting RAPTOR hierarchy")
@@ -1221,37 +1229,185 @@ class IndexingPipelineV3:
         self,
         community: Community,
         all_entities: List[Entity],
+        chunk_by_id: Dict[str, TextChunk],
+        all_chunks: List[TextChunk],
     ) -> str:
+        """Generate a grounded community report for Microsoft GraphRAG Global Search.
+
+        Unlike an entity-only abstract summary, this report is grounded in supporting
+        text chunks (via entity.text_unit_ids) so it can retain concrete terms (dates,
+        amounts, notice periods) without hallucination.
         """
-        Generate a summary for a community using LLM.
-        """
-        # Get entities in this community
         entity_dict = {e.id: e for e in all_entities}
         member_entities = [entity_dict[eid] for eid in community.entity_ids if eid in entity_dict]
-        
         if not member_entities:
             return ""
-        
-        # Build entity descriptions
-        entity_descriptions = []
-        for e in member_entities[:20]:  # Limit to 20 entities
-            desc = f"- {e.name} ({e.type}): {e.description}" if e.description else f"- {e.name} ({e.type})"
-            entity_descriptions.append(desc)
-        
-        prompt = f"""Summarize this community of related entities in 2-3 sentences.
-Focus on what unifies these entities and their significance.
 
-Entities:
-{chr(10).join(entity_descriptions)}
+        def _normalize_for_grounding(s: str) -> str:
+            s = (s or "").lower()
+            s = s.replace("\u00a0", " ")
+            s = re.sub(r"\s+", " ", s).strip()
+            return s
 
-Summary:"""
+        def _extract_value_like_spans(text: str) -> list[str]:
+            t = text or ""
+            spans: list[str] = []
+            spans.extend(re.findall(r"https?://\S+", t, flags=re.IGNORECASE))
+            spans.extend(re.findall(r"\b\d{4,}\b", t))
+            spans.extend(re.findall(r"\b[A-Za-z]{1,6}[-_]\d{2,}\b", t))
+            seen = set()
+            out: list[str] = []
+            for s in spans:
+                key = re.sub(r"[^a-z0-9]", "", s.lower())
+                if key and key not in seen:
+                    seen.add(key)
+                    out.append(s)
+            return out
+
+        def _value_spans_grounded(answer: str, context: str) -> bool:
+            ctx = _normalize_for_grounding(context)
+            if not ctx:
+                return False
+            ctx_key = re.sub(r"[^a-z0-9]", "", ctx)
+            for span in _extract_value_like_spans(answer):
+                span_key = re.sub(r"[^a-z0-9]", "", span.lower())
+                if span_key and span_key not in ctx_key:
+                    return False
+            return True
+
+        # Collect supporting chunks from entity mentions.
+        # Important: preserve *relevance ordering* by prioritizing chunks mentioned
+        # by many member entities. This helps retain concrete terms (amounts/dates)
+        # that would otherwise get dropped if we take the first N arbitrary ids.
+        chunk_counts: dict[str, int] = {}
+        for e in member_entities:
+            ids = getattr(e, "text_unit_ids", None) or []
+            for cid in ids:
+                if not cid:
+                    continue
+                chunk_counts[cid] = chunk_counts.get(cid, 0) + 1
+            # Avoid unbounded growth on very large communities.
+            if len(chunk_counts) >= 200:
+                break
+
+        chunk_ids: list[str] = sorted(
+            chunk_counts.keys(),
+            key=lambda cid: (-chunk_counts.get(cid, 0), cid),
+        )
+
+        # Fallback: add chunk candidates by embedding similarity to the community theme.
+        # This catches important contract clauses that weren't linked to entities.
+        try:
+            if len(chunk_ids) < 12 and getattr(self, "embedder", None) is not None:
+                names = [e.name for e in member_entities[:10] if (e.name or "").strip()]
+                query_text = (f"{community.title}\n" + "\n".join(names)).strip()
+                if query_text:
+                    q_emb = self.embedder.get_text_embedding(query_text)
+                    scored: list[tuple[float, str]] = []
+                    for ch in all_chunks:
+                        if not ch.embedding or len(ch.embedding) != len(q_emb):
+                            continue
+                        # cosine similarity
+                        dot = 0.0
+                        na = 0.0
+                        nb = 0.0
+                        for a, b in zip(q_emb, ch.embedding):
+                            dot += a * b
+                            na += a * a
+                            nb += b * b
+                        denom = (na ** 0.5) * (nb ** 0.5)
+                        sim = (dot / denom) if denom else 0.0
+                        if ch.id:
+                            scored.append((sim, ch.id))
+                    scored.sort(key=lambda t: t[0], reverse=True)
+                    for _, cid in scored[:20]:
+                        if cid not in chunk_ids:
+                            chunk_ids.append(cid)
+                        if len(chunk_ids) >= 50:
+                            break
+        except Exception as e:
+            logger.debug(f"Embedding-based chunk selection failed: {e}")
+
+        excerpts: list[str] = []
+        for cid in chunk_ids[:20]:
+            c = chunk_by_id.get(cid)
+            if not c:
+                continue
+            text = (c.text or "").strip()
+            if not text:
+                continue
+            if len(text) > 2000:
+                text = text[:2000] + "..."
+            meta = c.metadata or {}
+            src = meta.get("source") or meta.get("file_name") or c.document_id
+            page = meta.get("page_number")
+            header = f"[Chunk {c.id} | doc={src}{' | page='+str(page) if page else ''}]"
+            excerpts.append(f"{header}\n{text}")
+
+        # Build entity hint list (kept short)
+        entity_hints: list[str] = []
+        for e in member_entities[:15]:
+            entity_hints.append(f"- {e.name} ({e.type})")
+
+        excerpts_text = "\n\n---\n\n".join(excerpts) if excerpts else "(No supporting excerpts found.)"
+
+        prompt = f"""You are generating a COMMUNITY REPORT for Microsoft GraphRAG Global Search.
+
+You MUST follow these rules:
+- Use ONLY the provided text excerpts. Do not invent or guess.
+- If a specific value (numbers, URLs, legal jurisdictions, notice periods, dollar amounts) is not explicitly present, write: Not specified in excerpts.
+- Prefer quoting exact phrases from the excerpts when stating concrete terms.
+
+Community title: {community.title}
+
+Entity hints (may help orient you, but do NOT add facts from hints):
+{chr(10).join(entity_hints)}
+
+Supporting excerpts:
+{excerpts_text}
+
+Write a structured report with these sections:
+1) Overview (1-2 sentences)
+2) Key parties / organizations (bullets)
+3) Key obligations / terms (bullets; include notice/termination if present)
+4) Key financial terms (bullets; amounts/fees if present)
+5) Key dates / deadlines (bullets)
+6) Governing law / jurisdiction (bullets)
+7) Verbatim clause snippets (bullets; quote exact phrases; prefix each bullet with the chunk header like [Chunk ...])
+
+Report:"""
 
         try:
-            summary = await self._llm_complete(prompt)
-            return summary.strip()[:self.config.raptor_summary_max_tokens]
+            report = (await self._llm_complete(prompt) or "").strip()
+            # Enforce grounding for concrete values. If the model invents values,
+            # retry once with an explicit correction request.
+            if report and excerpts_text and not _value_spans_grounded(report, excerpts_text):
+                offending = _extract_value_like_spans(report)
+                fix_prompt = f"""You wrote a community report but included concrete values not present in the excerpts.
+
+Offending value-like spans (must NOT appear unless explicitly in excerpts):
+{json.dumps(offending, ensure_ascii=False)}
+
+Rewrite the report using ONLY the excerpts. If a value is not present, write: Not specified in excerpts.
+
+Supporting excerpts:
+{excerpts_text}
+
+Corrected report:"""
+                report2 = (await self._llm_complete(fix_prompt) or "").strip()
+                if report2 and _value_spans_grounded(report2, excerpts_text):
+                    report = report2
+
+            if report and excerpts_text and not _value_spans_grounded(report, excerpts_text):
+                names = ", ".join(e.name for e in member_entities[:8])
+                return f"Community entities: {names}"
+
+            return report[: max(self.config.raptor_summary_max_tokens, 1200)]
         except Exception as e:
-            logger.warning(f"Community summary generation failed: {e}")
-            return f"Community containing: {', '.join(e.name for e in member_entities[:5])}"
+            logger.warning(f"Community report generation failed: {e}")
+            # Fallback: entity-only, but avoid hallucination by keeping it purely enumerative
+            names = ", ".join(e.name for e in member_entities[:8])
+            return f"Community entities: {names}"
     
     async def _build_raptor_hierarchy(
         self,

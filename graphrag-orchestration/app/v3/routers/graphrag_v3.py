@@ -19,6 +19,11 @@ Endpoints:
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Union, Literal
+import asyncio
+import json
+import math
+import os
+import re
 import structlog
 import traceback
 import uuid
@@ -28,6 +33,371 @@ from app.core.config import settings
 logger = structlog.get_logger()
 
 router = APIRouter(prefix="/v3", tags=["GraphRAG V3"])
+
+
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    denom = math.sqrt(na) * math.sqrt(nb)
+    return (dot / denom) if denom else 0.0
+
+
+def _normalize_for_grounding(s: str) -> str:
+    s = (s or "").lower()
+    s = s.replace("\u00a0", " ")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _extract_value_like_spans(answer: str) -> List[str]:
+    """Extract spans that look like concrete values.
+
+    We only validate these against context to reduce hallucinations:
+    - URLs
+    - long digit sequences (IDs, amounts, routing/account numbers)
+    - alnum identifiers like REG-54321 / RB-21106
+    """
+    a = answer or ""
+    spans: list[str] = []
+    spans.extend(re.findall(r"https?://\S+", a, flags=re.IGNORECASE))
+    spans.extend(re.findall(r"\b\d{4,}\b", a))
+    spans.extend(re.findall(r"\b[A-Za-z]{1,6}[-_]\d{2,}\b", a))
+    # Deduplicate while preserving order
+    seen = set()
+    out: list[str] = []
+    for s in spans:
+        key = re.sub(r"[^a-z0-9]", "", s.lower())
+        if key and key not in seen:
+            seen.add(key)
+            out.append(s)
+    return out
+
+
+def _value_spans_grounded(answer: str, context: str) -> bool:
+    ctx = _normalize_for_grounding(context)
+    if not ctx:
+        return False
+    for span in _extract_value_like_spans(answer):
+        span_key = re.sub(r"[^a-z0-9]", "", span.lower())
+        if not span_key:
+            continue
+        ctx_key = re.sub(r"[^a-z0-9]", "", ctx)
+        if span_key not in ctx_key:
+            return False
+    return True
+
+
+def _strengthen_global_prompt(context: str, query: str) -> str:
+    return f"""You are answering strictly from the provided community summaries.
+
+Rules (must follow):
+- Only use facts explicitly present in the summaries.
+- Never invent or guess numbers, IDs, URLs, names, locations, dates, or clauses.
+- If a specific value is not explicitly present, respond with exactly: Not specified in the provided documents.
+
+Community Summaries:
+{context}
+
+Question: {query}
+
+Answer:"""
+
+
+def _global_map_prompt(community_report: str, query: str) -> str:
+    return f"""You are given ONE community report from a GraphRAG system.
+
+Task:
+- Extract ONLY the information from this report that directly helps answer the user question.
+
+Rules (must follow):
+- Use ONLY the provided report content.
+- Do not invent or guess numbers, IDs, URLs, names, locations, dates, or clauses.
+- If the report does not contain relevant information for the question, respond with exactly: Not specified in the provided documents.
+- Do NOT mention system state or workflow (no: indexing, community reports, summaries available, "please index", etc.).
+- If the question asks for concrete terms (amounts, notice periods, jurisdictions), prefer quoting exact phrases from the report's chunk snippets.
+
+Community Report:
+{community_report}
+
+Question: {query}
+
+Relevant answer (or Not specified in the provided documents.):"""
+
+
+def _global_reduce_prompt(map_answers: str, query: str) -> str:
+    return f"""You are given evidence extracted from indexed documents.
+
+Task:
+- Produce a single final answer to the user question using ONLY the evidence.
+
+Rules (must follow):
+- Use ONLY the provided evidence.
+- Do not invent or guess numbers, IDs, URLs, names, locations, dates, or clauses.
+- If the evidence does not contain the information needed, respond with exactly: Not specified in the provided documents.
+- Do NOT mention system state or workflow (no: indexing, community reports, "no community summaries", "please index", etc.).
+- When listing values like jurisdictions, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
+
+Evidence:
+{map_answers}
+
+Question: {query}
+
+Final answer:"""
+
+
+def _is_empty_or_unhelpful_global_answer(text: str) -> bool:
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    if t in {
+        "not specified in the provided documents.",
+        "not specified in the provided documents",
+        "not specified",
+        "n/a",
+        "none",
+        "no",
+    }:
+        return True
+    # Common "no info" phrasings
+    if "not specified in the provided documents" in t:
+        return True
+    if "no relevant" in t and "information" in t:
+        return True
+    # Avoid leaking internal indexing guidance into answers.
+    if "please index" in t and "document" in t:
+        return True
+    if "no community" in t and "available" in t:
+        return True
+    return False
+
+
+def _get_env_bool(name: str, default: bool = False) -> bool:
+    val = os.getenv(name)
+    if val is None:
+        return default
+    return val.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
+def _get_env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _community_text_for_embedding(c: Any) -> str:
+    text = f"{getattr(c, 'title', '')}\n{getattr(c, 'summary', '')}".strip()
+    if len(text) > 8000:
+        text = text[:8000]
+    return text
+
+
+def _rank_communities_for_query(adapter: Any, query: str, communities: list[Any]) -> list[Any]:
+    """Rank communities by embedding similarity to query when possible."""
+    try:
+        if getattr(adapter, "embedder", None) is None:
+            return sorted(communities, key=lambda c: getattr(c, "rank", 0.0), reverse=True)
+        q_emb = adapter.embedder.get_text_embedding(query)
+        scored: list[tuple[float, Any]] = []
+        for c in communities:
+            c_emb = adapter.embedder.get_text_embedding(_community_text_for_embedding(c))
+            scored.append((_cosine_similarity(q_emb, c_emb), c))
+        scored.sort(key=lambda t: t[0], reverse=True)
+        return [c for _, c in scored]
+    except Exception:
+        return sorted(communities, key=lambda c: getattr(c, "rank", 0.0), reverse=True)
+
+
+def _safe_json_loads(text: str) -> Any:
+    """Parse JSON returned by LLM, tolerating fenced code blocks."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    # Strip ```json ... ``` fences if present
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", t)
+        t = re.sub(r"\s*```\s*$", "", t)
+        t = t.strip()
+    return json.loads(t)
+
+
+def _llm_rate_communities(
+    adapter: Any,
+    query: str,
+    communities: list[Any],
+    batch_size: int,
+) -> dict[str, int]:
+    """Rate community relevance using an LLM (0-100).
+
+    This is the core of Microsoft-style dynamic selection: top-down rating followed by pruning.
+    Returns a mapping of community_id -> score.
+    """
+    llm = getattr(adapter, "llm", None)
+    if llm is None:
+        return {getattr(c, "id", ""): 0 for c in communities if getattr(c, "id", "")}
+
+    scores: dict[str, int] = {}
+    # Chunk to keep prompts bounded.
+    for i in range(0, len(communities), max(1, batch_size)):
+        batch = communities[i : i + max(1, batch_size)]
+        items: list[dict[str, str]] = []
+        for c in batch:
+            cid = getattr(c, "id", "")
+            if not cid:
+                continue
+            items.append(
+                {
+                    "id": cid,
+                    "title": (getattr(c, "title", "") or "")[:200],
+                    "summary": (getattr(c, "summary", "") or "")[:2000],
+                }
+            )
+
+        if not items:
+            continue
+
+        prompt = (
+            "You are a relevance rater for Microsoft GraphRAG Global Search dynamic community selection.\n"
+            "Given a user question and a list of community reports (summaries), assign each report a relevance score from 0 to 100.\n\n"
+            "Scoring rubric:\n"
+            "- 0: completely irrelevant to answering the question\n"
+            "- 30: tangential / might provide minor context\n"
+            "- 60: relevant and likely contains supporting facts\n"
+            "- 90-100: directly answers or is critical evidence\n\n"
+            "Important rules:\n"
+            "- Use ONLY the provided title+summary; do not assume missing details.\n"
+            "- Return ONLY valid JSON (no markdown) as an object mapping community id to integer score.\n\n"
+            f"Question: {query}\n\n"
+            f"Communities: {json.dumps(items, ensure_ascii=False)}\n\n"
+            "JSON:" 
+        )
+
+        try:
+            resp = llm.complete(prompt)
+            data = _safe_json_loads(getattr(resp, "text", "") or "")
+            if isinstance(data, dict):
+                for k, v in data.items():
+                    if not isinstance(k, str):
+                        continue
+                    try:
+                        iv = int(v)
+                    except Exception:
+                        continue
+                    if iv < 0:
+                        iv = 0
+                    if iv > 100:
+                        iv = 100
+                    scores[k] = iv
+        except Exception:
+            # If rating fails, default to 0 and let pruning/ranking fallback handle it.
+            continue
+
+    # Fill any missing ids with 0 to keep downstream deterministic.
+    for c in communities:
+        cid = getattr(c, "id", "")
+        if cid and cid not in scores:
+            scores[cid] = 0
+    return scores
+
+
+def _dynamic_select_communities_microsoft(
+    store: Any,
+    adapter: Any,
+    group_id: str,
+    query: str,
+    final_top_k: int,
+    max_depth: int,
+    candidate_budget: int,
+    keep_per_level: int,
+    score_threshold: int,
+    rating_batch_size: int,
+) -> tuple[list[Any], dict[str, int]]:
+    """Microsoft-style dynamic community selection (top-down LLM rating + hierarchical pruning).
+
+    Returns:
+        (selected_communities, scores_by_id)
+    """
+    levels = store.get_community_levels(group_id)
+    if not levels:
+        return ([], {})
+
+    # Start at top level (smallest).
+    current_level_idx = 0
+    current_level = levels[current_level_idx]
+    candidates = store.get_communities_by_level(group_id=group_id, level=current_level)
+
+    scores_by_id: dict[str, int] = {}
+    selected: list[Any] = []
+
+    depth_used = 0
+    while True:
+        # Bound candidates to keep prompt cost/latency controlled.
+        if candidate_budget > 0 and len(candidates) > candidate_budget:
+            # Prefilter by embeddings (if available), else by stored rank.
+            candidates = _rank_communities_for_query(adapter, query, candidates)[:candidate_budget]
+
+        level_scores = _llm_rate_communities(
+            adapter=adapter,
+            query=query,
+            communities=candidates,
+            batch_size=rating_batch_size,
+        )
+        scores_by_id.update(level_scores)
+
+        def _score(c: Any) -> int:
+            return level_scores.get(getattr(c, "id", ""), 0)
+
+        ranked = sorted(candidates, key=_score, reverse=True)
+        kept = [c for c in ranked if _score(c) >= score_threshold]
+        if keep_per_level > 0:
+            kept = kept[:keep_per_level]
+        if final_top_k > 0:
+            kept = kept[: max(final_top_k, 1)]
+
+        selected = kept
+
+        # Drill down
+        if current_level_idx + 1 >= len(levels):
+            break
+        if depth_used >= max_depth:
+            break
+        if not kept:
+            break
+
+        next_level_idx = current_level_idx + 1
+        next_level = levels[next_level_idx]
+        children: list[Any] = []
+        for parent in kept:
+            try:
+                children.extend(
+                    store.get_child_communities(
+                        group_id=group_id,
+                        parent_id=parent.id,
+                        child_level=next_level,
+                    )
+                )
+            except Exception:
+                continue
+
+        if not children:
+            break
+
+        candidates = children
+        current_level_idx = next_level_idx
+        current_level = next_level
+        depth_used += 1
+
+    # Return only up to final_top_k communities for context.
+    if final_top_k > 0 and len(selected) > final_top_k:
+        selected = selected[:final_top_k]
+    return (selected, scores_by_id)
 
 
 # ==================== Request/Response Models ====================
@@ -278,9 +648,10 @@ async def index_documents(
                     "metadata": doc.get("metadata", {}),
                 })
         
-        # Always use background tasks to avoid gateway timeouts
-        # Entity extraction + RAPTOR + community detection can take >4 minutes for even small batches
-        async def run_indexing():
+        # Run indexing asynchronously after returning to avoid gateway timeouts.
+        # In some deployments, relying on BackgroundTasks for long async workloads can be unreliable;
+        # scheduling via asyncio.create_task ensures the coroutine is actually started.
+        async def _run_indexing_async():
             try:
                 stats = await pipeline.index_documents(
                     group_id=group_id,
@@ -291,8 +662,12 @@ async def index_documents(
                 logger.info("v3_index_complete", group_id=group_id, stats=stats)
             except Exception as e:
                 logger.error("v3_index_background_failed", group_id=group_id, error=str(e))
-        
-        background_tasks.add_task(run_indexing)
+
+        try:
+            asyncio.create_task(_run_indexing_async())
+        except RuntimeError:
+            # Extremely defensive fallback (e.g., if called without a running loop).
+            background_tasks.add_task(_run_indexing_async)
         
         return V3IndexResponse(
             status="accepted",
@@ -514,7 +889,7 @@ async def query_global(request: Request, payload: V3QueryRequest):
     - "Summarize all documents"
     - Cross-document questions
     
-    Uses community summaries from Neo4j.
+    Uses community reports from Neo4j (Microsoft-style map-reduce synthesis).
     """
     group_id = get_group_id(request)
     logger.info("v3_global_search", group_id=group_id, query=payload.query[:50])
@@ -524,23 +899,61 @@ async def query_global(request: Request, payload: V3QueryRequest):
         t0 = time.monotonic()
         store = get_neo4j_store()
         adapter = get_drift_adapter()
-        
-        # Get top-level community summaries
-        communities = store.get_communities_by_level(group_id=group_id, level=0)
+
+        use_dynamic = _get_env_bool("V3_GLOBAL_DYNAMIC_SELECTION", default=False)
+        dynamic_max_depth = _get_env_int("V3_GLOBAL_DYNAMIC_MAX_DEPTH", default=2)
+        dynamic_candidate_budget = _get_env_int("V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET", default=30)
+        dynamic_keep_per_level = _get_env_int("V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL", default=max(5, min(12, payload.top_k)))
+        dynamic_score_threshold = _get_env_int("V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD", default=25)
+        dynamic_rating_batch_size = _get_env_int("V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE", default=8)
+        build_hierarchy_on_query = _get_env_bool("V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY", default=True)
+
+        scores_by_id: dict[str, int] = {}
+
+        # Get community summaries
+        if use_dynamic:
+            if build_hierarchy_on_query:
+                try:
+                    store.ensure_community_hierarchy(group_id)
+                except Exception as e:
+                    logger.warning("v3_global_dynamic_build_hierarchy_failed", group_id=group_id, error=str(e))
+
+            communities, scores_by_id = _dynamic_select_communities_microsoft(
+                store=store,
+                adapter=adapter,
+                group_id=group_id,
+                query=payload.query,
+                final_top_k=payload.top_k,
+                max_depth=max(0, dynamic_max_depth),
+                candidate_budget=max(0, dynamic_candidate_budget),
+                keep_per_level=max(0, dynamic_keep_per_level),
+                score_threshold=max(0, min(100, dynamic_score_threshold)),
+                rating_batch_size=max(1, dynamic_rating_batch_size),
+            )
+        else:
+            communities = store.get_communities_by_level(group_id=group_id, level=0)
         
         if not communities:
             return V3QueryResponse(
-                answer="No community summaries available. Please index documents first.",
-                confidence=0.0,
+                answer="Not specified in the provided documents.",
+                confidence=0.85,
                 sources=[],
                 entities_used=[],
                 search_type="global",
             )
-        
-        # Build context from community summaries
-        context_parts = []
-        sources = []
-        
+
+        # Rank communities by relevance (embedding similarity) when possible.
+        # For dynamic selection we keep LLM rating as the selector; this final ranking
+        # is a stable ordering step.
+        try:
+            communities = _rank_communities_for_query(adapter, payload.query, communities)
+        except Exception as e:
+            logger.warning("v3_global_search_ranking_failed", group_id=group_id, error=str(e))
+
+        # Build context from top-ranked community summaries
+        context_parts: list[str] = []
+        sources: list[dict[str, Any]] = []
+
         for community in communities[:payload.top_k]:
             context_parts.append(f"## {community.title}\n{community.summary}")
             sources.append({
@@ -548,8 +961,9 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 "title": community.title,
                 "level": community.level,
                 "entity_count": len(community.entity_ids),
+                "score": scores_by_id.get(community.id, None) if use_dynamic else None,
             })
-        
+
         context = "\n\n".join(context_parts)
 
         if not payload.synthesize:
@@ -567,22 +981,140 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 entities_used=[],
                 search_type="global",
             )
-        
-        # Generate answer using map-reduce style
-        prompt = f"""Based on the following community summaries, answer the question.
-    Only use the provided summaries. If the answer is not present, respond with: "Not specified in the provided documents.".
 
-Community Summaries:
-{context}
-
-Question: {payload.query}
-
-Provide a comprehensive answer that synthesizes information across all relevant communities.
-
-Answer:"""
-        
+        # Microsoft-style Map-Reduce over community reports.
+        # We also add a small amount of direct TextChunk evidence for this query,
+        # because some concrete terms (amounts, notice periods, jurisdictions)
+        # are present in chunks but may not be reflected in any single community report.
         t_llm0 = time.monotonic()
-        response = adapter.llm.complete(prompt)
+
+        map_answers: list[dict[str, Any]] = []
+        for community in communities[:payload.top_k]:
+            report = (community.summary or "").strip()
+            if not report:
+                continue
+            map_prompt = _global_map_prompt(report, payload.query)
+            map_resp = adapter.llm.complete(map_prompt)
+            map_text = (map_resp.text or "").strip()
+            if _is_empty_or_unhelpful_global_answer(map_text):
+                continue
+            # Guard value-like spans for map output against the community report itself
+            if map_text and not _value_spans_grounded(map_text, report):
+                continue
+            map_answers.append(
+                {
+                    "community_id": community.id,
+                    "community_title": community.title,
+                    "text": map_text,
+                }
+            )
+
+        # Query-targeted chunk evidence (vector retrieval)
+        chunk_evidence_parts: list[str] = []
+        try:
+            embedder = getattr(adapter, "embedder", None)
+            if embedder is None:
+                raise RuntimeError("No embedder available")
+
+            # Base retrieval
+            base_queries: list[str] = [payload.query]
+
+            # Lightweight query expansion to improve retrieval of concrete terms.
+            ql = (payload.query or "").lower()
+            if any(k in ql for k in ["pay", "fee", "fees", "amount", "amount due", "invoice", "charges", "tax"]):
+                base_queries.append(payload.query + "\nFocus: invoice total, amount due, deposits, non-refundable fees")
+            if any(k in ql for k in ["jurisdiction", "governing law", "venue", "state of", "laws of"]):
+                base_queries.append(payload.query + "\nFocus: governing law, jurisdiction, venue, state")
+            if any(k in ql for k in ["notice", "delivery", "certified mail", "return receipt", "business days"]):
+                base_queries.append(payload.query + "\nFocus: notice, certified mail, return receipt, deadlines")
+
+            seen_chunk_ids: set[str] = set()
+            merged_chunks: list[tuple[Any, float]] = []
+            per_query_top_k = max(4, min(10, payload.top_k))
+
+            for q in base_queries[:3]:
+                try:
+                    query_embedding = embedder.embed_query(q)
+                except Exception:
+                    query_embedding = embedder.get_text_embedding(q)
+
+                chunk_results = store.search_text_chunks(
+                    group_id=group_id,
+                    query_text=q,
+                    embedding=query_embedding,
+                    top_k=per_query_top_k,
+                )
+                for ch, sc in chunk_results:
+                    cid = getattr(ch, "id", "")
+                    if cid and cid not in seen_chunk_ids:
+                        seen_chunk_ids.add(cid)
+                        merged_chunks.append((ch, sc))
+
+            # Keep the best-scoring chunks overall.
+            merged_chunks.sort(key=lambda t: float(t[1]), reverse=True)
+            for chunk, score in merged_chunks[: max(6, min(12, payload.top_k * 2))]:
+                text = (getattr(chunk, "text", "") or "").strip()
+                if not text:
+                    continue
+                if len(text) > 1600:
+                    text = text[:1600] + "..."
+
+                meta = getattr(chunk, "metadata", {}) or {}
+                doc_title = (meta.get("document_title") or "").strip()
+                doc_source = (meta.get("document_source") or "").strip()
+                doc_id = (getattr(chunk, "document_id", "") or "").strip()
+                doc_label_bits = []
+                if doc_title:
+                    doc_label_bits.append(doc_title)
+                if doc_id:
+                    doc_label_bits.append(f"doc_id={doc_id}")
+                if doc_source:
+                    doc_label_bits.append(f"source={doc_source}")
+                doc_label = (" | ".join(doc_label_bits)) if doc_label_bits else "(unknown document)"
+
+                chunk_evidence_parts.append(
+                    f"[TextChunk {chunk.id} | {doc_label} | chunk_index={chunk.chunk_index} | score={score:.3f}]\n{text}"
+                )
+                sources.append(
+                    {
+                        "id": chunk.id,
+                        "type": "text_chunk",
+                        "chunk_index": chunk.chunk_index,
+                        "document_id": doc_id,
+                        "document_title": doc_title,
+                        "score": float(score),
+                    }
+                )
+        except Exception as e:
+            logger.warning("v3_global_search_chunk_evidence_failed", group_id=group_id, error=str(e))
+
+        reduce_context_parts: list[str] = []
+        for a in map_answers:
+            reduce_context_parts.append(f"## {a['community_title']}\n{a['text']}")
+        if chunk_evidence_parts:
+            reduce_context_parts.append("## Retrieved Text Chunks\n" + "\n\n".join(chunk_evidence_parts))
+
+        if not reduce_context_parts:
+            t_llm1 = time.monotonic()
+            logger.info(
+                "v3_global_search_timing",
+                group_id=group_id,
+                total_ms=int((time.monotonic() - t0) * 1000),
+                llm_ms=int((t_llm1 - t_llm0) * 1000),
+                top_k=payload.top_k,
+            )
+            return V3QueryResponse(
+                answer="Not specified in the provided documents.",
+                confidence=0.85,
+                sources=sources if payload.include_sources else [],
+                entities_used=[],
+                search_type="global",
+            )
+
+        reduce_context = "\n\n".join(reduce_context_parts)
+        reduce_prompt = _global_reduce_prompt(reduce_context, payload.query)
+
+        response = adapter.llm.complete(reduce_prompt)
         t_llm1 = time.monotonic()
 
         logger.info(
@@ -593,8 +1125,15 @@ Answer:"""
             top_k=payload.top_k,
         )
         
+        answer_text = (response.text or "").strip()
+        if _is_empty_or_unhelpful_global_answer(answer_text):
+            answer_text = "Not specified in the provided documents."
+        # Ground value-like spans against the reduce context (extracted map answers)
+        if answer_text and not _value_spans_grounded(answer_text, reduce_context):
+            answer_text = "Not specified in the provided documents."
+
         return V3QueryResponse(
-            answer=response.text,
+            answer=answer_text,
             confidence=0.85,  # Global search has moderate confidence
             sources=sources if payload.include_sources else [],
             entities_used=[],
@@ -828,8 +1367,17 @@ async def get_stats(group_id: str):
         )
         
     except Exception as e:
-        logger.error("v3_get_stats_failed", group_id=group_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+        # Stats should never block progress; treat transient DB issues as "not ready".
+        logger.warning("v3_get_stats_failed", group_id=group_id, error=str(e))
+        return V3StatsResponse(
+            group_id=group_id,
+            entities=0,
+            relationships=0,
+            communities=0,
+            raptor_nodes=0,
+            text_chunks=0,
+            documents=0,
+        )
 
 
 @router.post("/schema/init")

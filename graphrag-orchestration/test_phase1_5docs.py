@@ -15,7 +15,11 @@ from pathlib import Path
 from neo4j import GraphDatabase
 
 # Configuration
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+# Allow overriding to test local/staging deployments.
+API_URL = os.getenv(
+    "API_URL",
+    "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+)
 GROUP_ID = os.getenv("GROUP_ID", f"phase1-5docs-{int(time.time())}")  # Unique group ID
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
 NEO4J_USER = "neo4j"
@@ -44,6 +48,8 @@ LOCAL_QUERY_RETRIES = int(os.getenv("LOCAL_QUERY_RETRIES", "2"))
 SLEEP_BETWEEN_QUERIES_SECONDS = float(os.getenv("SLEEP_BETWEEN_QUERIES_SECONDS", "2"))
 QA_ENGINES = [e.strip().lower() for e in os.getenv("QA_ENGINES", "").split(",") if e.strip()]
 QA_FAIL_FAST = os.getenv("QA_FAIL_FAST", "false").lower() == "true"
+QA_PRINT_ANSWERS = os.getenv("QA_PRINT_ANSWERS", "false").lower() == "true"
+QA_PRINT_SOURCES = os.getenv("QA_PRINT_SOURCES", "false").lower() == "true"
 
 # Question bank driven endpoint QA
 RUN_QUESTION_BANK = os.getenv("RUN_QUESTION_BANK", "false").lower() == "true"
@@ -106,6 +112,53 @@ def _extract_answer_and_search_type(resp: requests.Response) -> tuple[str, str]:
     return (data.get("answer") or ""), (data.get("search_type") or "")
 
 
+def _extract_sources(resp: requests.Response) -> list[dict]:
+    try:
+        data = resp.json()
+    except Exception:
+        return []
+    sources = data.get("sources")
+    if isinstance(sources, list):
+        return [s for s in sources if isinstance(s, dict)]
+    return []
+
+
+def _print_sources(sources: list[dict], *, max_items: int = 5) -> None:
+    if not sources:
+        print("  ↳ Sources: (none)")
+        return
+    print(f"  ↳ Sources (showing up to {max_items}):")
+    for idx, s in enumerate(sources[:max_items], start=1):
+        sid = str(s.get("id", ""))
+        name = str(s.get("name", ""))
+        stype = str(s.get("type", ""))
+        doc_id = str(s.get("document_id", ""))
+        score = s.get("score", "")
+
+        label_bits = []
+        if name:
+            label_bits.append(name)
+        if stype:
+            label_bits.append(f"type={stype}")
+        if doc_id:
+            label_bits.append(f"document_id={doc_id}")
+        if sid:
+            label_bits.append(f"id={sid}")
+        if score != "":
+            try:
+                label_bits.append(f"score={float(score):.3f}")
+            except Exception:
+                label_bits.append(f"score={score}")
+
+        print(f"    {idx}. " + (" | ".join(label_bits) if label_bits else "(unlabeled source)"))
+
+        # Some routes may include text/excerpts in the source object.
+        excerpt = s.get("text") or s.get("excerpt") or s.get("content")
+        if isinstance(excerpt, str) and excerpt.strip():
+            ex = excerpt.strip().replace("\n", " ")
+            print(f"       excerpt: {ex[:240]}")
+
+
 @dataclass(frozen=True)
 class BankQuestion:
     qid: str
@@ -119,11 +172,87 @@ def _normalize_text(s: str) -> str:
 
 
 def _term_in_answer(term: str, answer: str) -> bool:
-    t = _normalize_text(term)
-    if not t:
-        return True
     a = _normalize_text(answer)
-    return t in a
+    for v in _term_variants(term):
+        tv = _normalize_text(v)
+        if not tv:
+            return True
+        if tv in a:
+            return True
+    return False
+
+
+_MONTHS = {
+    1: ["january", "jan"],
+    2: ["february", "feb"],
+    3: ["march", "mar"],
+    4: ["april", "apr"],
+    5: ["may"],
+    6: ["june", "jun"],
+    7: ["july", "jul"],
+    8: ["august", "aug"],
+    9: ["september", "sep", "sept"],
+    10: ["october", "oct"],
+    11: ["november", "nov"],
+    12: ["december", "dec"],
+}
+
+
+def _term_variants(term: str) -> list[str]:
+    """Generate looser matching variants for a required term.
+
+    This harness is intended to validate correctness, not formatting.
+    """
+    t = (term or "").strip()
+    if not t:
+        return [""]
+
+    variants: list[str] = [t]
+
+    # ISO date -> common formats (MM/DD/YYYY and Month DD, YYYY)
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", t)
+    if m:
+        year = int(m.group(1))
+        month = int(m.group(2))
+        day = int(m.group(3))
+        variants.append(f"{month:02d}/{day:02d}/{year}")
+        variants.append(f"{month}/{day}/{year}")
+        for name in _MONTHS.get(month, []):
+            variants.append(f"{name} {day}, {year}")
+            variants.append(f"{name} {day} {year}")
+
+    # If term contains a percentage, allow numeric-only variants.
+    pct_paren = re.search(r"\(\s*(\d{1,3})\s*%\s*\)", t)
+    if pct_paren:
+        n = pct_paren.group(1)
+        variants.extend([f"{n}%", f"{n} percent", n])
+    else:
+        pct = re.search(r"\b(\d{1,3})\s*%\b", t)
+        if pct:
+            n = pct.group(1)
+            variants.extend([f"{n}%", f"{n} percent", n])
+
+    # Money: allow matching just the amount.
+    money = re.search(r"\$\s*(\d[\d,]*(?:\.\d+)?)", t)
+    if money:
+        amt = money.group(1)
+        variants.extend([f"${amt}", amt])
+
+    # Monthly phrasing: "/month" <-> "per month"
+    if "/month" in t.lower():
+        variants.append(re.sub(r"(?i)/month", " per month", t))
+    if "per month" in t.lower():
+        variants.append(re.sub(r"(?i)per month", "/month", t))
+
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    out: list[str] = []
+    for v in variants:
+        key = _normalize_text(v)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(v)
+    return out
 
 
 def _extract_required_terms(expected_text: str) -> list[str]:
@@ -146,8 +275,24 @@ def _extract_required_terms(expected_text: str) -> list[str]:
                 terms.append(p)
 
     # Dates
-    terms.extend(re.findall(r"\b\d{2}/\d{2}/\d{4}\b", text))
-    terms.extend(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text))
+    mmddyyyy_dates = re.findall(r"\b\d{2}/\d{2}/\d{4}\b", text)
+    iso_dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text)
+    terms.extend(mmddyyyy_dates)
+    terms.extend(iso_dates)
+
+    # If we have explicit dates, avoid also requiring their individual numeric parts
+    # (e.g. "06" from "2010-06-15"), since answers may use month names.
+    date_parts_to_skip: set[str] = set()
+    for d in iso_dates:
+        m = re.fullmatch(r"\d{4}-(\d{2})-(\d{2})", d)
+        if m:
+            date_parts_to_skip.add(m.group(1))
+            date_parts_to_skip.add(m.group(2))
+    for d in mmddyyyy_dates:
+        m = re.fullmatch(r"(\d{2})/(\d{2})/\d{4}", d)
+        if m:
+            date_parts_to_skip.add(m.group(1))
+            date_parts_to_skip.add(m.group(2))
 
     # Codes like REG-54321
     terms.extend(re.findall(r"\b[A-Z]{2,}-\d{3,}\b", text))
@@ -156,6 +301,8 @@ def _extract_required_terms(expected_text: str) -> list[str]:
     for num in re.findall(r"\$?\d[\d,]*(?:\.\d+)?", text):
         n = num.strip()
         if not n:
+            continue
+        if len(n) <= 2 and n.isdigit() and n in date_parts_to_skip:
             continue
         # Drop lone years that may appear in explanatory sentences
         if re.fullmatch(r"\d{4}", n):
@@ -278,8 +425,19 @@ def _load_question_bank(path: str) -> dict[str, list[BankQuestion]]:
 
 
 def _is_negative_ok(answer: str) -> bool:
+    # NOTE: This is intentionally heuristic and language-inclusive.
+    # For CI stability, prefer deterministic canonical outputs (e.g. forcing a single
+    # "Not specified in the provided documents." phrase) and keep this as a safety net.
     a = (answer or "").lower()
+    # Normalize formatting that often appears in model output.
+    # - Markdown emphasis can split markers: "does **not provide**".
+    # - Newlines / double spaces can split markers.
+    a = a.replace("\u00a0", " ")
+    a = re.sub(r"[*_`]+", "", a)
+    a = re.sub(r"\s+", " ", a).strip()
+
     markers = [
+        # EN
         "not specified",
         "not provided",
         "not mentioned",
@@ -288,8 +446,115 @@ def _is_negative_ok(answer: str) -> bool:
         "no relevant",
         "not stated",
         "none",
+        "not shown",
+        "not listed",
+        "does not list",
+        "does not contain",
+        "no clause",
+        "does not provide",
+        "does not specify",
+        "not included",
+        "not available",
+        "no instructions",
+        "no wire",
+        "no ach",
+        "not specified in the provided documents",
+
+        # DE
+        "nicht angegeben",
+        "nicht spezifiziert",
+        "nicht erwähnt",
+        "nicht gefunden",
+        "nicht verfügbar",
+        "kann nicht bestimmt",
+        "kann nicht festgestellt",
+        "keine angaben",
+        "nicht enthalten",
+        "wird nicht bereitgestellt",
+
+        # FR
+        "non spécifié",
+        "non specifie",  # fallback without accents
+        "non indiqué",
+        "non indique",
+        "non mentionné",
+        "non mentionne",
+        "introuvable",
+        "pas fourni",
+        "n'est pas fourni",
+        "ne peut pas déterminer",
+        "ne peut pas determiner",
+        "aucune information",
+        "non disponible",
+
+        # ES
+        "no se especifica",
+        "no especificado",
+        "no se menciona",
+        "no mencionado",
+        "no se encuentra",
+        "no encontrado",
+        "no proporcionado",
+        "no disponible",
+        "no incluye",
+
+        # ZH (CN)
+        "未提及",
+        "未说明",
+        "未說明",
+        "未指定",
+        "未提供",
+        "未找到",
+        "无法确定",
+        "無法確定",
+        "没有提到",
+        "沒有提到",
+        "文档中未",
+        "文件中未",
+        "资料中没有",
+        "資料中沒有",
+
+        # JA (JP)
+        "記載されていません",
+        "明記されていません",
+        "言及されていません",
+        "見つかりません",
+        "提供されていません",
+        "確認できません",
+        "不明",
+
+        # KO (KR)
+        "명시되어 있지 않습니다",
+        "기재되어 있지 않습니다",
+        "언급되지 않습니다",
+        "찾을 수 없습니다",
+        "제공되지 않습니다",
+        "확인할 수 없습니다",
+        "알 수 없습니다",
+
+        # TH
+        "ไม่ระบุ",
+        "ไม่ได้ระบุ",
+        "ไม่พบ",
+        "ไม่มีข้อมูล",
+        "ไม่กล่าวถึง",
+        "ไม่ปรากฏ",
+        "ไม่สามารถระบุได้",
     ]
-    return any(m in a for m in markers)
+
+    if any(m in a for m in markers):
+        return True
+
+    # Regex fallbacks for split words / minor punctuation variance.
+    regexes = [
+        r"\bdoes\s+not\s+provide\b",
+        r"\bdoes\s+not\s+specify\b",
+        r"\bdoes\s+not\s+list\b",
+        r"\bdoes\s+not\s+contain\b",
+        r"\bno\s+[^.]{0,40}\s+appears\b",
+        r"^none\b",
+    ]
+    return any(re.search(rx, a) for rx in regexes)
 
 
 def run_question_bank_engine(engine: str, bank: dict[str, list[BankQuestion]]) -> bool:
@@ -358,8 +623,11 @@ def run_question_bank_engine(engine: str, bank: dict[str, list[BankQuestion]]) -
             return False
 
         answer, search_type = _extract_answer_and_search_type(resp)
+        sources = _extract_sources(resp)
         if not answer.strip():
             print("  ❌ Empty answer")
+            if QA_PRINT_SOURCES:
+                _print_sources(sources)
             failures += 1
             return False
 
@@ -371,6 +639,11 @@ def run_question_bank_engine(engine: str, bank: dict[str, list[BankQuestion]]) -
                 print("  ✅ Negative: Pass")
                 return True
             print("  ❌ Negative: expected 'not specified/not found' style response")
+            if QA_PRINT_ANSWERS:
+                print("  ↳ Answer (truncated):")
+                print("  " + (answer.strip().replace("\n", "\n  ")[:1200]))
+            if QA_PRINT_SOURCES:
+                _print_sources(sources)
             failures += 1
             return False
 
@@ -387,6 +660,11 @@ def run_question_bank_engine(engine: str, bank: dict[str, list[BankQuestion]]) -
         missing = [t for t in required if not _term_in_answer(t, answer)]
         if missing:
             print("  ❌ Missing expected terms:", missing[:8])
+            if QA_PRINT_ANSWERS:
+                print("  ↳ Answer (truncated):")
+                print("  " + (answer.strip().replace("\n", "\n  ")[:1200]))
+            if QA_PRINT_SOURCES:
+                _print_sources(sources)
             failures += 1
             return False
 

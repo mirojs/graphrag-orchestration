@@ -389,52 +389,44 @@ Entities (one per line):
         Returns:
             Comprehensive summary synthesized from all community summaries.
         """
-        logger.info("Running global summary query across all communities...")
-        
-        # Get all community summaries
+        logger.info("Running global summary query (Map-Reduce) across all communities...")
+
         community_summaries = self.graph_store.get_community_summaries()
-        
         if not community_summaries:
             return "No community summaries available. Please run build_communities() first."
-        
-        # Combine all summaries
-        all_summaries = '\n\n'.join([
-            f"Community {cid}:\n{summary}" 
-            for cid, summary in community_summaries.items()
-        ])
-        
+
         # Default query for general summarization
         if query_str is None:
-            query_str = """Provide a comprehensive summary covering:
-1. Key organizations and their relationships
-2. Key people and their roles  
-3. Contracts and agreements
-4. Financial information
-5. Important dates and deadlines"""
-        
-        prompt = f"""Based on the following community summaries from a knowledge graph, provide a comprehensive response:
+            query_str = (
+                "Provide a comprehensive summary covering:\n"
+                "1. Key organizations and their relationships\n"
+                "2. Key people and their roles\n"
+                "3. Contracts and agreements\n"
+                "4. Financial information\n"
+                "5. Important dates and deadlines"
+            )
 
-{all_summaries}
+        # MAP: Answer per community in isolation
+        community_answers: List[str] = []
+        for cid, summary in community_summaries.items():
+            try:
+                ans = self._generate_answer_from_summary(summary, query_str)
+                if ans and not self._is_empty_answer(ans):
+                    community_answers.append(ans)
+            except Exception as e:
+                logger.warning(f"Map step failed for community {cid}: {e}")
 
-Question/Task: {query_str}
+        if not community_answers:
+            return "No relevant information found in any community."
 
-Please synthesize the information into a coherent, well-organized response."""
-        
+        # REDUCE: Aggregate intermediate answers
         try:
-            messages = [
-                ChatMessage(
-                    role="system",
-                    content="You are a helpful assistant that synthesizes information from multiple document summaries to provide comprehensive, well-structured answers."
-                ),
-                ChatMessage(role="user", content=prompt),
-            ]
-            response = self.llm.chat(messages)
-            cleaned_response = re.sub(r"^assistant:\s*", "", str(response)).strip()
-            logger.info(f"Global summary generated from {len(community_summaries)} communities")
-            return cleaned_response
+            final = self._aggregate_answers(community_answers, query_str)
+            logger.info(f"Global summary generated from {len(community_summaries)} communities (kept {len(community_answers)} map answers)")
+            return final
         except Exception as e:
-            logger.error(f"Failed to generate global summary: {e}")
-            return f"Error generating summary: {str(e)}"
+            logger.error(f"Failed to reduce global summary: {e}")
+            return community_answers[0] if community_answers else f"Error generating summary: {str(e)}"
 
     def comparison_query(self, query_str: str) -> str:
         """

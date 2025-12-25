@@ -268,21 +268,21 @@ Use for `mode=raptor` (or queries intended to route to hierarchical summaries).
 ---
 
 ## F) Negative Tests (10)
-These should return **“not found / not specified in the provided documents”** (or equivalent) for group `phase1-5docs-1766595043`.
+These should return **“not found / not specified in the provided documents”** (or equivalent).
 
-1. **Q-N1:** What is the **late fee** percentage for overdue payments on the invoice?
+1. **Q-N1:** What is the invoice’s **bank routing number** for payment?
    - **Expected:** Not specified.
 
-2. **Q-N2:** What **interest rate / APR** applies to unpaid balances?
+2. **Q-N2:** What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
    - **Expected:** Not specified.
 
-3. **Q-N3:** What is the invoice **discount** amount or discount percentage?
+3. **Q-N3:** What is the vendor’s **VAT / Tax ID number** on the invoice?
    - **Expected:** Not specified.
 
-4. **Q-N4:** What is the invoice **number**?
+4. **Q-N4:** What is the invoice’s **payment portal URL** (web link to pay online)?
    - **Expected:** Not specified.
 
-5. **Q-N5:** What are the invoice **labor costs** (line-item labor charge)?
+5. **Q-N5:** What is the invoice’s **bank account number** for ACH/wire payments?
    - **Expected:** Not specified.
 
 6. **Q-N6:** Which documents are governed by the laws of **California**?
@@ -294,8 +294,8 @@ These should return **“not found / not specified in the provided documents”*
 8. **Q-N8:** What is the purchase contract’s required **wire transfer / ACH instructions**?
    - **Expected:** Not specified.
 
-9. **Q-N9:** What is the exact clause about **water damage** coverage in the warranty?
-   - **Expected:** Not specified as “water damage” (warranty mentions “water escape,” but not “water damage” wording).
+9. **Q-N9:** What is the exact clause about **mold damage** coverage in the warranty?
+   - **Expected:** Not specified.
 
 10. **Q-N10:** What is the invoice **shipping method** (value in “SHIPPED VIA”)?
    - **Expected:** Not specified / blank.

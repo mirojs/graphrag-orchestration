@@ -1117,6 +1117,75 @@ class Neo4jStoreV3:
         
         return results
 
+    def search_text_chunks_by_terms(
+        self,
+        group_id: str,
+        terms: List[str],
+        top_k: int = 10,
+    ) -> List[Tuple[TextChunk, float]]:
+        """Lexical search for TextChunk nodes by substring terms.
+
+        This is a lightweight complement to vector search. It is intentionally simple:
+        - Matches if any term appears in the chunk text (case-insensitive)
+        - Scores by number of matched terms
+
+        Used to retrieve exact phrases like "AMOUNT DUE", "return receipt requested",
+        or insurance limits that embeddings may miss.
+        """
+        normalized_terms: list[str] = []
+        seen: set[str] = set()
+        for t in terms or []:
+            v = (t or "").strip().lower()
+            if not v:
+                continue
+            if len(v) > 80:
+                v = v[:80]
+            if v in seen:
+                continue
+            seen.add(v)
+            normalized_terms.append(v)
+
+        if not normalized_terms:
+            return []
+
+        query = """
+        MATCH (t:TextChunk {group_id: $group_id})
+        WITH t, [term IN $terms WHERE toLower(t.text) CONTAINS term] AS hits
+        WITH t, size(hits) AS score
+        WHERE score > 0
+        ORDER BY score DESC, t.chunk_index ASC
+        LIMIT $top_k
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+        RETURN t, d, score
+        """
+
+        results: list[tuple[TextChunk, float]] = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(
+                query,
+                group_id=group_id,
+                terms=normalized_terms,
+                top_k=top_k,
+            )
+            for record in result:
+                t = record["t"]
+                d = record.get("d")
+                score = float(record.get("score") or 0.0)
+                chunk = TextChunk(
+                    id=t["id"],
+                    text=t["text"],
+                    chunk_index=t["chunk_index"],
+                    document_id=(d.get("id") if d else ""),
+                    tokens=t.get("tokens", 0),
+                    embedding=t.get("embedding"),
+                    metadata={
+                        "document_title": (d.get("title") if d else ""),
+                        "document_source": (d.get("source") if d else ""),
+                    },
+                )
+                results.append((chunk, score))
+
+        return results
     def upsert_text_chunks_batch(self, group_id: str, chunks: List[TextChunk]) -> int:
         """Batch insert/update text chunks with native vector support."""
         query = """

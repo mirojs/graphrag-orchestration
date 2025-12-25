@@ -143,6 +143,7 @@ Rules (must follow):
 - If the evidence does not contain the information needed, respond with exactly: Not specified in the provided documents.
 - Do NOT mention system state or workflow (no: indexing, community reports, "no community summaries", "please index", etc.).
 - When listing values like jurisdictions, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
+- If some evidence sections say "Not specified" but other evidence contains relevant clauses, include the relevant clauses and ignore the "Not specified" sections.
 
 Evidence:
 {map_answers}
@@ -150,6 +151,75 @@ Evidence:
 Question: {query}
 
 Final answer:"""
+
+
+def _lexical_terms_for_global_query(query: str) -> list[str]:
+    """Heuristic terms to pull exact-phrase chunks for common Global QA intents."""
+    q = (query or "").lower()
+    terms: list[str] = []
+
+    if any(k in q for k in ["jurisdiction", "governing law", "venue", "laws of", "governed by"]):
+        terms.extend([
+            "governing law",
+            "governed by",
+            "laws of",
+            "jurisdiction",
+            "venue",
+            "state of",
+            "county",
+        ])
+
+    if any(k in q for k in ["notice", "delivery", "certified mail", "return receipt", "written notice"]):
+        terms.extend([
+            "certified mail",
+            "return receipt",
+            "return receipt requested",
+            "written notice",
+            "by mail",
+        ])
+
+    if any(k in q for k in ["pay", "fee", "fees", "charge", "charges", "tax", "invoice", "amount", "amount due", "balance due", "total"]):
+        terms.extend([
+            "amount due",
+            "balance due",
+            "total",
+            "subtotal",
+            "tax",
+            "invoice",
+        ])
+
+    if any(k in q for k in ["party", "parties", "organization", "organizations", "named parties", "named party"]):
+        terms.extend([
+            "hereinafter",
+            "llc",
+            "inc",
+            "ltd",
+            "corporation",
+            "agent:",
+            "owner",
+        ])
+
+    if any(k in q for k in ["insurance", "indemnity", "hold harmless", "liability", "coverage"]):
+        terms.extend([
+            "insurance",
+            "liability",
+            "coverage",
+            "indemnify",
+            "hold harmless",
+            "300,000",
+            "25,000",
+        ])
+
+    # De-dup while preserving order
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in terms:
+        v = (t or "").strip().lower()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        out.append(t)
+    return out
 
 
 def _is_empty_or_unhelpful_global_answer(text: str) -> bool:
@@ -1030,7 +1100,7 @@ async def query_global(request: Request, payload: V3QueryRequest):
 
             seen_chunk_ids: set[str] = set()
             merged_chunks: list[tuple[Any, float]] = []
-            per_query_top_k = max(4, min(10, payload.top_k))
+            per_query_top_k = max(6, min(12, payload.top_k * 2))
 
             for q in base_queries[:3]:
                 try:
@@ -1050,14 +1120,29 @@ async def query_global(request: Request, payload: V3QueryRequest):
                         seen_chunk_ids.add(cid)
                         merged_chunks.append((ch, sc))
 
+            # Intent-driven lexical retrieval to capture exact phrases that embeddings may miss.
+            lex_terms = _lexical_terms_for_global_query(payload.query)
+            if lex_terms:
+                lex_top_k = max(10, min(30, payload.top_k * 6))
+                for ch, hit_score in store.search_text_chunks_by_terms(
+                    group_id=group_id,
+                    terms=lex_terms,
+                    top_k=lex_top_k,
+                ):
+                    cid = getattr(ch, "id", "")
+                    if cid and cid not in seen_chunk_ids:
+                        seen_chunk_ids.add(cid)
+                        # Boost lexical hits above cosine similarities (0..1 range)
+                        merged_chunks.append((ch, 10.0 + float(hit_score)))
+
             # Keep the best-scoring chunks overall.
             merged_chunks.sort(key=lambda t: float(t[1]), reverse=True)
-            for chunk, score in merged_chunks[: max(6, min(12, payload.top_k * 2))]:
+            for chunk, score in merged_chunks[: max(10, min(24, payload.top_k * 6))]:
                 text = (getattr(chunk, "text", "") or "").strip()
                 if not text:
                     continue
-                if len(text) > 1600:
-                    text = text[:1600] + "..."
+                if len(text) > 1400:
+                    text = text[:1400] + "..."
 
                 meta = getattr(chunk, "metadata", {}) or {}
                 doc_title = (meta.get("document_title") or "").strip()

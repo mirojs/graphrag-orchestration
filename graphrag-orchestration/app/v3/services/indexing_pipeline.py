@@ -1275,6 +1275,97 @@ class IndexingPipelineV3:
                     return False
             return True
 
+        def _extract_concrete_fact_spans(excerpts: str, *, max_items: int = 14) -> list[str]:
+            """Extract concrete fact spans that should be preserved in community reports.
+
+            This is intentionally targeted (not every 4+ digit number), focusing on:
+            - money/amounts (e.g., $300,000, 29900.00)
+            - invoice labels (amount due/total/subtotal/balance due)
+            - deadlines (e.g., 10 business days, 60 days)
+            - delivery methods (certified mail/return receipt requested)
+            - jurisdiction phrases (state of X / governed by the laws of ...)
+            """
+            text = _normalize_for_grounding(excerpts)
+            if not text:
+                return []
+
+            spans: list[str] = []
+
+            # Delivery / notice
+            for pat in [
+                r"certified mail return receipt requested",
+                r"return receipt requested",
+                r"certified mail",
+                r"written notice",
+                r"in writing",
+            ]:
+                if re.search(pat, text, flags=re.IGNORECASE):
+                    spans.append(pat)
+
+            # Non-refundable / fees phrasing
+            for m in re.finditer(r"\bnon-refundable\b[^\n.]{0,80}", text, flags=re.IGNORECASE):
+                spans.append(m.group(0).strip())
+            if re.search(r"\bstart-?up fee\b", text, flags=re.IGNORECASE):
+                spans.append("start-up fee")
+
+            # Jurisdiction / governing law
+            for m in re.finditer(r"\b(?:laws of|governed by|governed and construed in accordance with)\b[^\n.]{0,120}", text, flags=re.IGNORECASE):
+                spans.append(m.group(0).strip())
+            for m in re.finditer(r"\bstate of\s+[a-z][a-z\s]{2,30}\b", text, flags=re.IGNORECASE):
+                spans.append(m.group(0).strip())
+
+            # Deadlines / time periods
+            for m in re.finditer(r"\b\d{1,3}\s+(?:business\s+)?days\b", text, flags=re.IGNORECASE):
+                spans.append(m.group(0).strip())
+            for m in re.finditer(r"\b(?:sixty|ten)\s*\(\s*\d{1,3}\s*\)\s*(?:business\s+)?days\b", text, flags=re.IGNORECASE):
+                spans.append(m.group(0).strip())
+
+            # Invoice financial labels with values (captures 29900.00 patterns)
+            for m in re.finditer(
+                r"\b(?:subtotal|total|amount due|balance due)\b\s*[:\-|]?\s*\$?\s*\d[\d,]*(?:\.\d{2})?\b",
+                text,
+                flags=re.IGNORECASE,
+            ):
+                spans.append(m.group(0).strip())
+
+            # Standalone money amounts (USD-like)
+            for m in re.finditer(r"\$\s*\d[\d,]*(?:\.\d{2})?\b", text, flags=re.IGNORECASE):
+                spans.append(m.group(0).strip())
+
+            # Decimal amounts with cents (common in invoices), but avoid years.
+            for m in re.finditer(r"\b\d{2,}(?:,\d{3})*(?:\.\d{2})\b", text):
+                spans.append(m.group(0).strip())
+
+            # De-dup while preserving order, prefer shorter spans (more likely to match verbatim).
+            seen: set[str] = set()
+            out: list[str] = []
+            for s in spans:
+                k = re.sub(r"[^a-z0-9]", "", (s or "").lower())
+                if not k or k in seen:
+                    continue
+                seen.add(k)
+                out.append(s)
+                if len(out) >= max_items:
+                    break
+            return out
+
+        def _concrete_facts_covered(report_text: str, fact_spans: list[str]) -> bool:
+            if not fact_spans:
+                return True
+            rkey = re.sub(r"[^a-z0-9]", "", _normalize_for_grounding(report_text))
+            if not rkey:
+                return False
+            for s in fact_spans:
+                skey = re.sub(r"[^a-z0-9]", "", (s or "").lower())
+                if not skey:
+                    continue
+                # Special-case regex markers we used above for exact phrases.
+                if s in {"certified mail return receipt requested", "return receipt requested", "certified mail", "written notice", "in writing"}:
+                    skey = re.sub(r"[^a-z0-9]", "", s)
+                if skey and skey not in rkey:
+                    return False
+            return True
+
         # Collect supporting chunks from entity mentions.
         # Important: preserve *relevance ordering* by prioritizing chunks mentioned
         # by many member entities. This helps retain concrete terms (amounts/dates)
@@ -1328,6 +1419,80 @@ class IndexingPipelineV3:
         except Exception as e:
             logger.debug(f"Embedding-based chunk selection failed: {e}")
 
+        # Prioritize excerpts that contain concrete terms (amounts, deadlines, jurisdictions, delivery methods)
+        # so they survive the top-N excerpt cap.
+        def _concrete_score_for_chunk(cid: str) -> int:
+            c = chunk_by_id.get(cid)
+            if not c or not (c.text or "").strip():
+                return 0
+            t = _normalize_for_grounding(c.text)
+            score = 0
+            if any(k in t for k in ["amount due", "balance due", "subtotal", "total"]):
+                score += 6
+            if any(k in t for k in ["certified mail", "return receipt"]):
+                score += 6
+            if any(k in t for k in ["governing law", "governed by", "laws of", "state of"]):
+                score += 4
+            if re.search(r"\b\d{1,3}\s+(?:business\s+)?days\b", t):
+                score += 4
+            if re.search(r"\$\s*\d[\d,]*(?:\.\d{2})?\b", t):
+                score += 5
+            if re.search(r"\b\d{2,}(?:,\d{3})*(?:\.\d{2})\b", t):
+                score += 3
+            return score
+
+        chunk_ids = sorted(
+            chunk_ids,
+            key=lambda cid: (
+                -_concrete_score_for_chunk(cid),
+                -chunk_counts.get(cid, 0),
+                cid,
+            ),
+        )
+
+        # Document-aware expansion: if this community already touches a document,
+        # add a few of the most concrete chunks from those same documents.
+        # This helps capture governing law blocks, invoice totals, insurance limits,
+        # and other concrete clauses that may not be linked via entity mentions.
+        doc_counts: dict[str, int] = {}
+        for cid in chunk_ids:
+            c = chunk_by_id.get(cid)
+            doc_id = getattr(c, "document_id", None) if c else None
+            if doc_id:
+                doc_counts[doc_id] = doc_counts.get(doc_id, 0) + 1
+
+        candidate_doc_ids = [
+            doc_id
+            for doc_id, _ in sorted(doc_counts.items(), key=lambda t: (-t[1], t[0]))[:2]
+        ]
+
+        if candidate_doc_ids:
+            extras: list[tuple[int, str]] = []
+            existing = set(chunk_ids)
+            for ch in all_chunks:
+                if not getattr(ch, "id", None) or getattr(ch, "document_id", None) not in candidate_doc_ids:
+                    continue
+                cid = ch.id
+                if cid in existing:
+                    continue
+                sc = _concrete_score_for_chunk(cid)
+                if sc > 0:
+                    extras.append((sc, cid))
+            extras.sort(key=lambda t: (-t[0], t[1]))
+            # Prefer these concrete chunks by pushing them earlier in the excerpt list.
+            for _, cid in extras[:10]:
+                chunk_ids.insert(0, cid)
+                existing.add(cid)
+
+            # De-dup while preserving order
+            seen_cids: set[str] = set()
+            deduped: list[str] = []
+            for cid in chunk_ids:
+                if cid and cid not in seen_cids:
+                    seen_cids.add(cid)
+                    deduped.append(cid)
+            chunk_ids = deduped
+
         excerpts: list[str] = []
         for cid in chunk_ids[:20]:
             c = chunk_by_id.get(cid)
@@ -1351,12 +1516,15 @@ class IndexingPipelineV3:
 
         excerpts_text = "\n\n---\n\n".join(excerpts) if excerpts else "(No supporting excerpts found.)"
 
+        required_fact_spans = _extract_concrete_fact_spans(excerpts_text)
+
         prompt = f"""You are generating a COMMUNITY REPORT for Microsoft GraphRAG Global Search.
 
 You MUST follow these rules:
 - Use ONLY the provided text excerpts. Do not invent or guess.
 - If a specific value (numbers, URLs, legal jurisdictions, notice periods, dollar amounts) is not explicitly present, write: Not specified in excerpts.
 - Prefer quoting exact phrases from the excerpts when stating concrete terms.
+    - IMPORTANT: If the excerpts contain concrete facts (amounts, deadlines, governing law, delivery methods), you MUST carry them into the report verbatim.
 
 Community title: {community.title}
 
@@ -1365,6 +1533,9 @@ Entity hints (may help orient you, but do NOT add facts from hints):
 
 Supporting excerpts:
 {excerpts_text}
+
+Concrete facts to preserve (verbatim or near-verbatim; do NOT add new facts):
+{json.dumps(required_fact_spans, ensure_ascii=False)}
 
 Write a structured report with these sections:
 1) Overview (1-2 sentences)
@@ -1397,6 +1568,27 @@ Corrected report:"""
                 report2 = (await self._llm_complete(fix_prompt) or "").strip()
                 if report2 and _value_spans_grounded(report2, excerpts_text):
                     report = report2
+
+            # Enforce coverage: if excerpts contain concrete facts, require the report to include them.
+            # This makes Global Search reliably report-driven (no query-time heuristics needed).
+            if report and excerpts_text and required_fact_spans and not _concrete_facts_covered(report, required_fact_spans):
+                fix_missing_prompt = f"""Your community report omitted concrete facts that ARE explicitly present in the excerpts.
+
+You MUST rewrite the report and include ALL of these concrete facts (verbatim or near-verbatim) somewhere in the appropriate sections:
+{json.dumps(required_fact_spans, ensure_ascii=False)}
+
+Rules:
+- Use ONLY the excerpts.
+- Do NOT add any new numbers, jurisdictions, deadlines, fees, IDs, or clauses beyond what appears in the excerpts.
+- Prefer quoting exact phrases.
+
+Supporting excerpts:
+{excerpts_text}
+
+Corrected report:"""
+                report3 = (await self._llm_complete(fix_missing_prompt) or "").strip()
+                if report3 and _value_spans_grounded(report3, excerpts_text) and _concrete_facts_covered(report3, required_fact_spans):
+                    report = report3
 
             if report and excerpts_text and not _value_spans_grounded(report, excerpts_text):
                 names = ", ".join(e.name for e in member_entities[:8])

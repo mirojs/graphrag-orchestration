@@ -119,7 +119,10 @@ Task:
 Rules (must follow):
 - Use ONLY the provided report content.
 - Do not invent or guess numbers, IDs, URLs, names, locations, dates, or clauses.
-- If the report does not contain relevant information for the question, respond with exactly: Not specified in the provided documents.
+- If the report contains NO relevant information for the question, respond with exactly: Not specified in the provided documents.
+- If the report contains SOME relevant information but not every requested detail, extract what you can and omit what is missing.
+- If the report contains SOME relevant information but not every requested detail, extract what you can and omit what is missing.
+- If the question asks to attribute items to specific documents but the report does not name the document(s), still extract the items and note that the document is not specified in this report.
 - Do NOT mention system state or workflow (no: indexing, community reports, summaries available, "please index", etc.).
 - If the question asks for concrete terms (amounts, notice periods, jurisdictions), prefer quoting exact phrases from the report's chunk snippets.
 
@@ -141,9 +144,15 @@ Rules (must follow):
 - Use ONLY the provided evidence.
 - Do not invent or guess numbers, IDs, URLs, names, locations, dates, or clauses.
 - If the evidence does not contain the information needed, respond with exactly: Not specified in the provided documents.
+- If the evidence does not contain the information needed, respond with exactly: Not specified in the provided documents.
+- If the question asks to attribute items to documents but the evidence does not include document names for those items, still answer with the items and note that the document is not specified in the evidence.
 - Do NOT mention system state or workflow (no: indexing, community reports, "no community summaries", "please index", etc.).
 - When listing values like jurisdictions, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
+- When listing values like jurisdictions, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
 - If some evidence sections say "Not specified" but other evidence contains relevant clauses, include the relevant clauses and ignore the "Not specified" sections.
+- For notice/deadline clauses: include the deadline in digits (e.g., include "10 business days" / "60 days") even if the evidence uses words.
+- For fee/invoice questions: if evidence contains lines like "AMOUNT DUE" / "TOTAL" / "BALANCE DUE", include them verbatim.
+- For insurance/indemnity questions: if evidence contains coverage limits (e.g., dollar amounts), include the exact amounts.
 
 Evidence:
 {map_answers}
@@ -151,75 +160,6 @@ Evidence:
 Question: {query}
 
 Final answer:"""
-
-
-def _lexical_terms_for_global_query(query: str) -> list[str]:
-    """Heuristic terms to pull exact-phrase chunks for common Global QA intents."""
-    q = (query or "").lower()
-    terms: list[str] = []
-
-    if any(k in q for k in ["jurisdiction", "governing law", "venue", "laws of", "governed by"]):
-        terms.extend([
-            "governing law",
-            "governed by",
-            "laws of",
-            "jurisdiction",
-            "venue",
-            "state of",
-            "county",
-        ])
-
-    if any(k in q for k in ["notice", "delivery", "certified mail", "return receipt", "written notice"]):
-        terms.extend([
-            "certified mail",
-            "return receipt",
-            "return receipt requested",
-            "written notice",
-            "by mail",
-        ])
-
-    if any(k in q for k in ["pay", "fee", "fees", "charge", "charges", "tax", "invoice", "amount", "amount due", "balance due", "total"]):
-        terms.extend([
-            "amount due",
-            "balance due",
-            "total",
-            "subtotal",
-            "tax",
-            "invoice",
-        ])
-
-    if any(k in q for k in ["party", "parties", "organization", "organizations", "named parties", "named party"]):
-        terms.extend([
-            "hereinafter",
-            "llc",
-            "inc",
-            "ltd",
-            "corporation",
-            "agent:",
-            "owner",
-        ])
-
-    if any(k in q for k in ["insurance", "indemnity", "hold harmless", "liability", "coverage"]):
-        terms.extend([
-            "insurance",
-            "liability",
-            "coverage",
-            "indemnify",
-            "hold harmless",
-            "300,000",
-            "25,000",
-        ])
-
-    # De-dup while preserving order
-    seen: set[str] = set()
-    out: list[str] = []
-    for t in terms:
-        v = (t or "").strip().lower()
-        if not v or v in seen:
-            continue
-        seen.add(v)
-        out.append(t)
-    return out
 
 
 def _is_empty_or_unhelpful_global_answer(text: str) -> bool:
@@ -235,11 +175,7 @@ def _is_empty_or_unhelpful_global_answer(text: str) -> bool:
         "no",
     }:
         return True
-    # Common "no info" phrasings
-    if "not specified in the provided documents" in t:
-        return True
-    if "no relevant" in t and "information" in t:
-        return True
+    # Allow partial answers that include a "not specified" disclaimer.
     # Avoid leaking internal indexing guidance into answers.
     if "please index" in t and "document" in t:
         return True
@@ -1053,9 +989,7 @@ async def query_global(request: Request, payload: V3QueryRequest):
             )
 
         # Microsoft-style Map-Reduce over community reports.
-        # We also add a small amount of direct TextChunk evidence for this query,
-        # because some concrete terms (amounts, notice periods, jurisdictions)
-        # are present in chunks but may not be reflected in any single community report.
+        # Microsoft-style Map-Reduce over community reports (report-driven; no query-time chunk evidence).
         t_llm0 = time.monotonic()
 
         map_answers: list[dict[str, Any]] = []
@@ -1070,7 +1004,26 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 continue
             # Guard value-like spans for map output against the community report itself
             if map_text and not _value_spans_grounded(map_text, report):
-                continue
+                fix_prompt = f"""Your extracted answer includes concrete values that are not present in the community report.
+
+Rewrite the answer using ONLY phrases and values explicitly present in the report.
+- Prefer quoting exact phrases.
+- If the report contains no relevant information, respond with exactly: Not specified in the provided documents.
+
+Community Report:
+{report}
+
+Question: {payload.query}
+
+Corrected relevant answer:"""
+                map_resp2 = adapter.llm.complete(fix_prompt)
+                map_text2 = (map_resp2.text or "").strip()
+                if _is_empty_or_unhelpful_global_answer(map_text2):
+                    continue
+                if map_text2 and _value_spans_grounded(map_text2, report):
+                    map_text = map_text2
+                else:
+                    continue
             map_answers.append(
                 {
                     "community_id": community.id,
@@ -1079,105 +1032,9 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 }
             )
 
-        # Query-targeted chunk evidence (vector retrieval)
-        chunk_evidence_parts: list[str] = []
-        try:
-            embedder = getattr(adapter, "embedder", None)
-            if embedder is None:
-                raise RuntimeError("No embedder available")
-
-            # Base retrieval
-            base_queries: list[str] = [payload.query]
-
-            # Lightweight query expansion to improve retrieval of concrete terms.
-            ql = (payload.query or "").lower()
-            if any(k in ql for k in ["pay", "fee", "fees", "amount", "amount due", "invoice", "charges", "tax"]):
-                base_queries.append(payload.query + "\nFocus: invoice total, amount due, deposits, non-refundable fees")
-            if any(k in ql for k in ["jurisdiction", "governing law", "venue", "state of", "laws of"]):
-                base_queries.append(payload.query + "\nFocus: governing law, jurisdiction, venue, state")
-            if any(k in ql for k in ["notice", "delivery", "certified mail", "return receipt", "business days"]):
-                base_queries.append(payload.query + "\nFocus: notice, certified mail, return receipt, deadlines")
-
-            seen_chunk_ids: set[str] = set()
-            merged_chunks: list[tuple[Any, float]] = []
-            per_query_top_k = max(6, min(12, payload.top_k * 2))
-
-            for q in base_queries[:3]:
-                try:
-                    query_embedding = embedder.embed_query(q)
-                except Exception:
-                    query_embedding = embedder.get_text_embedding(q)
-
-                chunk_results = store.search_text_chunks(
-                    group_id=group_id,
-                    query_text=q,
-                    embedding=query_embedding,
-                    top_k=per_query_top_k,
-                )
-                for ch, sc in chunk_results:
-                    cid = getattr(ch, "id", "")
-                    if cid and cid not in seen_chunk_ids:
-                        seen_chunk_ids.add(cid)
-                        merged_chunks.append((ch, sc))
-
-            # Intent-driven lexical retrieval to capture exact phrases that embeddings may miss.
-            lex_terms = _lexical_terms_for_global_query(payload.query)
-            if lex_terms:
-                lex_top_k = max(10, min(30, payload.top_k * 6))
-                for ch, hit_score in store.search_text_chunks_by_terms(
-                    group_id=group_id,
-                    terms=lex_terms,
-                    top_k=lex_top_k,
-                ):
-                    cid = getattr(ch, "id", "")
-                    if cid and cid not in seen_chunk_ids:
-                        seen_chunk_ids.add(cid)
-                        # Boost lexical hits above cosine similarities (0..1 range)
-                        merged_chunks.append((ch, 10.0 + float(hit_score)))
-
-            # Keep the best-scoring chunks overall.
-            merged_chunks.sort(key=lambda t: float(t[1]), reverse=True)
-            for chunk, score in merged_chunks[: max(10, min(24, payload.top_k * 6))]:
-                text = (getattr(chunk, "text", "") or "").strip()
-                if not text:
-                    continue
-                if len(text) > 1400:
-                    text = text[:1400] + "..."
-
-                meta = getattr(chunk, "metadata", {}) or {}
-                doc_title = (meta.get("document_title") or "").strip()
-                doc_source = (meta.get("document_source") or "").strip()
-                doc_id = (getattr(chunk, "document_id", "") or "").strip()
-                doc_label_bits = []
-                if doc_title:
-                    doc_label_bits.append(doc_title)
-                if doc_id:
-                    doc_label_bits.append(f"doc_id={doc_id}")
-                if doc_source:
-                    doc_label_bits.append(f"source={doc_source}")
-                doc_label = (" | ".join(doc_label_bits)) if doc_label_bits else "(unknown document)"
-
-                chunk_evidence_parts.append(
-                    f"[TextChunk {chunk.id} | {doc_label} | chunk_index={chunk.chunk_index} | score={score:.3f}]\n{text}"
-                )
-                sources.append(
-                    {
-                        "id": chunk.id,
-                        "type": "text_chunk",
-                        "chunk_index": chunk.chunk_index,
-                        "document_id": doc_id,
-                        "document_title": doc_title,
-                        "score": float(score),
-                    }
-                )
-        except Exception as e:
-            logger.warning("v3_global_search_chunk_evidence_failed", group_id=group_id, error=str(e))
-
         reduce_context_parts: list[str] = []
         for a in map_answers:
             reduce_context_parts.append(f"## {a['community_title']}\n{a['text']}")
-        if chunk_evidence_parts:
-            reduce_context_parts.append("## Retrieved Text Chunks\n" + "\n\n".join(chunk_evidence_parts))
 
         if not reduce_context_parts:
             t_llm1 = time.monotonic()
@@ -1215,7 +1072,24 @@ async def query_global(request: Request, payload: V3QueryRequest):
             answer_text = "Not specified in the provided documents."
         # Ground value-like spans against the reduce context (extracted map answers)
         if answer_text and not _value_spans_grounded(answer_text, reduce_context):
-            answer_text = "Not specified in the provided documents."
+            fix_reduce = f"""Your answer includes concrete values not present in the evidence.
+
+Rewrite the final answer using ONLY the evidence provided.
+- Prefer quoting exact phrases for concrete terms.
+- If the evidence does not contain the required information, respond with exactly: Not specified in the provided documents.
+
+Evidence:
+{reduce_context}
+
+Question: {payload.query}
+
+Corrected final answer:"""
+            resp2 = adapter.llm.complete(fix_reduce)
+            answer2 = (resp2.text or "").strip()
+            if answer2 and not _is_empty_or_unhelpful_global_answer(answer2) and _value_spans_grounded(answer2, reduce_context):
+                answer_text = answer2
+            else:
+                answer_text = "Not specified in the provided documents."
 
         return V3QueryResponse(
             answer=answer_text,

@@ -1245,7 +1245,40 @@ class IndexingPipelineV3:
                         )
                     )
 
-                return list(all_entities.values()), all_relationships
+                # Generate embeddings for entities on cache hit as well.
+                # Without this, cached runs store entities without embeddings (hurts downstream ranking).
+                entities_list = list(all_entities.values())
+                if entities_list and getattr(self, "embedder", None) is not None:
+                    entity_texts = [
+                        f"{entity.name}: {entity.description}" if entity.description else entity.name
+                        for entity in entities_list
+                    ]
+                    try:
+                        logger.warning(
+                            "⚡ EMBEDDING START: Generating embeddings for %s entities (cache_hit)",
+                            len(entities_list),
+                        )
+                        embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
+                        for entity, embedding in zip(entities_list, embeddings):
+                            entity.embedding = embedding
+                        logger.warning(
+                            "✅ EMBEDDING SUCCESS: Generated %s entity embeddings (cache_hit, dim=%s)",
+                            len(embeddings),
+                            len(embeddings[0]) if embeddings else 0,
+                        )
+                    except Exception as e:
+                        logger.error(f"❌ Failed to generate entity embeddings (cache_hit): {e}", exc_info=True)
+                        for entity in entities_list:
+                            entity.embedding = [0.0] * self.config.embedding_dimensions
+                        logger.warning(
+                            "⚠️  Using zero vectors for %s entities due to embedding failure (cache_hit)",
+                            len(entities_list),
+                        )
+                elif entities_list:
+                    for entity in entities_list:
+                        entity.embedding = [0.0] * self.config.embedding_dimensions
+
+                return entities_list, all_relationships
             
             for i, node in enumerate(extracted_nodes):
                 if i == 0:

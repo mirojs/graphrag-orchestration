@@ -1,15 +1,20 @@
 #!/bin/bash
 # Simplified GraphRAG Deployment - Reuses Existing Resources
 
-set -e
+set -euo pipefail
+
+echo "⚠️  NOTE: deploy-simple.sh is a legacy convenience script."
+echo "   - It builds locally (docker) and may modify Container App env vars."
+echo "   - For normal code deploys, prefer: ./deploy-graphrag.sh"
+echo ""
 
 RESOURCE_GROUP="rg-graphrag-feature"
 LOCATION="swedencentral"
 ACR_NAME="graphragacr12153"  # Reuse existing
 STORAGE_ACCOUNT="neo4jstorage21224"  # Reuse existing
 
-# Priority: 1) ENV var, 2) existing Neo4j container, 3) deployment-info.txt, 4) generate new
-if [ -n "$NEO4J_PASSWORD" ]; then
+# Priority: 1) ENV var, 2) existing Neo4j container, 3) deployment-info.txt
+if [ -n "${NEO4J_PASSWORD:-}" ]; then
   echo "✅ Using NEO4J_PASSWORD from environment variable"
 else
   # Try to get password from running Neo4j container
@@ -24,12 +29,14 @@ else
       echo "✅ Reusing password from deployment-info.txt"
       NEO4J_PASSWORD="$CACHED_PASSWORD"
     else
-      echo "⚙️  Generating new Neo4j password"
-      NEO4J_PASSWORD=$(openssl rand -base64 24)
+      echo "❌ NEO4J_PASSWORD not found in deployment-info.txt"
+      echo "   Set it via: export NEO4J_PASSWORD='<password>'"
+      exit 1
     fi
   else
-    echo "⚙️  Generating new Neo4j password"
-    NEO4J_PASSWORD=$(openssl rand -base64 24)
+    echo "❌ NEO4J_PASSWORD not set and no cached value found."
+    echo "   Set it via: export NEO4J_PASSWORD='<password>'"
+    exit 1
   fi
 fi
 
@@ -79,9 +86,8 @@ echo ""
 echo "=================================================="
 echo "Using Neo4j Aura Cloud"
 echo "=================================================="
-NEO4J_URI="neo4j+s://a86dcf63.databases.neo4j.io"
-NEO4J_PASSWORD="uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
-echo "✅ Neo4j Aura: $NEO4J_URI"
+NEO4J_URI="${NEO4J_URI:-neo4j+s://a86dcf63.databases.neo4j.io}"
+echo "✅ Neo4j: $NEO4J_URI"
 
 # Get existing Azure resources
 echo ""
@@ -126,7 +132,6 @@ if [ "$APP_EXISTS" = "yes" ]; then
     --set-env-vars \
       "NEO4J_URI=$NEO4J_URI" \
       "NEO4J_USERNAME=neo4j" \
-      "NEO4J_PASSWORD=$NEO4J_PASSWORD" \
       "AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT" \
       "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://doc-intel-graphrag.cognitiveservices.azure.com/" \
       "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" \
@@ -226,9 +231,8 @@ echo "  Health: $GRAPHRAG_URL/health"
 echo ""
 echo "Neo4j:"
 echo "  Bolt: $NEO4J_URI"
-echo "  Browser: http://${NEO4J_FQDN}:7474"
 echo "  Username: neo4j"
-echo "  Password: $NEO4J_PASSWORD"
+echo "  Password: (not shown)"
 echo ""
 echo "Test:"
 echo "  curl -H 'X-Group-ID: test' $GRAPHRAG_URL/health"
@@ -239,8 +243,6 @@ echo "=================================================="
 cat > deployment-info.txt << EOF
 GraphRAG Service: $GRAPHRAG_URL
 Neo4j URI: $NEO4J_URI
-Neo4j Password: $NEO4J_PASSWORD
-Neo4j Browser: http://${NEO4J_FQDN}:7474
 EOF
 
 echo "✅ Info saved to: deployment-info.txt"

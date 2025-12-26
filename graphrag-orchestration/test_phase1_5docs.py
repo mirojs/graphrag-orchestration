@@ -266,6 +266,36 @@ def _term_variants(term: str) -> list[str]:
         amt = money.group(1)
         variants.extend([f"${amt}", amt])
 
+    # Composite anchors that include a numeric token (e.g. "TOTAL/AMOUNT DUE 29900.00").
+    # The question bank often backticks a whole label+value phrase, but we still
+    # want to accept answers that correctly include the value with different labels.
+    if re.search(r"[A-Za-z]", t):
+        for num in re.findall(r"\b\d[\d,]*(?:\.\d+)?\b", t):
+            n = num.strip()
+            if not n:
+                continue
+            variants.append(n)
+            # Also allow the same number without thousands separators.
+            if "," in n:
+                variants.append(n.replace(",", ""))
+            # If the number is >= 1000, allow a comma-formatted variant.
+            # Preserve decimal precision; do not add decimals.
+            try:
+                from decimal import Decimal, InvalidOperation
+
+                raw = n.replace(",", "")
+                if raw and re.fullmatch(r"\d+(?:\.\d+)?", raw):
+                    d = Decimal(raw)
+                    if d >= 1000:
+                        if "." in raw:
+                            int_part, frac_part = raw.split(".", 1)
+                            int_fmt = f"{int(int_part):,}"
+                            variants.append(f"{int_fmt}.{frac_part}")
+                        else:
+                            variants.append(f"{int(d):,}")
+            except Exception:
+                pass
+
     # Monthly phrasing: "/month" <-> "per month"
     if "/month" in t.lower():
         variants.append(re.sub(r"(?i)/month", " per month", t))

@@ -124,7 +124,10 @@ Rules (must follow):
 - If the report contains SOME relevant information but not every requested detail, extract what you can and omit what is missing.
 - If the question asks to attribute items to specific documents but the report does not name the document(s), still extract the items and note that the document is not specified in this report.
 - Do NOT mention system state or workflow (no: indexing, community reports, summaries available, "please index", etc.).
-- If the question asks for concrete terms (amounts, notice periods, jurisdictions), prefer quoting exact phrases from the report's chunk snippets.
+- If the question asks for concrete terms (amounts, notice periods, jurisdictions, venues/locations), prefer quoting exact phrases from the report.
+- Whenever you include a concrete term (amount, date, deadline, jurisdiction, venue/location, clause wording), include a short verbatim quote from the report that contains that term.
+- When you include numeric amounts/IDs, keep the value exactly as written in the report.
+- If helpful for matching/clarity, you may also include a normalized numeric form by removing currency symbols and thousands separators (commas/spaces), but do NOT add precision (e.g., do not add “.00” unless it appears in the report).
 
 Community Report:
 {community_report}
@@ -147,11 +150,15 @@ Rules (must follow):
 - If the evidence does not contain the information needed, respond with exactly: Not specified in the provided documents.
 - If the question asks to attribute items to documents but the evidence does not include document names for those items, still answer with the items and note that the document is not specified in the evidence.
 - Do NOT mention system state or workflow (no: indexing, community reports, "no community summaries", "please index", etc.).
-- When listing values like jurisdictions, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
-- When listing values like jurisdictions, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
+- When listing values like jurisdictions, venues/locations, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
+- When listing values like jurisdictions, venues/locations, fees/amounts, or notice periods, quote the exact phrase from evidence and (when available) attribute it to the document shown in the header.
+- For every concrete term you state (amount/date/deadline/jurisdiction/venue), include at least one short verbatim quote from the evidence that contains it.
 - If some evidence sections say "Not specified" but other evidence contains relevant clauses, include the relevant clauses and ignore the "Not specified" sections.
 - For notice/deadline clauses: include the deadline in digits (e.g., include "10 business days" / "60 days") even if the evidence uses words.
-- For fee/invoice questions: if evidence contains lines like "AMOUNT DUE" / "TOTAL" / "BALANCE DUE", include them verbatim.
+- For fee/invoice questions:
+    - If evidence contains lines like "AMOUNT DUE" / "TOTAL" / "BALANCE DUE", include them verbatim.
+    - When providing an amount, keep it exactly as written in evidence.
+    - If helpful for matching/clarity, you may also include a normalized numeric form by removing currency symbols and thousands separators (commas/spaces), but do NOT add precision.
 - For insurance/indemnity questions: if evidence contains coverage limits (e.g., dollar amounts), include the exact amounts.
 
 Evidence:

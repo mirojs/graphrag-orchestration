@@ -2130,7 +2130,7 @@ class IndexingPipelineV3:
 
             # Invoice financial labels with values (captures 29900.00 patterns)
             for m in re.finditer(
-                r"\b(?:subtotal|total|amount due|balance due)\b\s*[:\-|]?\s*\$?\s*\d[\d,]*(?:\.\d{2})?\b",
+                r"\b(?:subtotal|total|amount\s+due|balance\s+due|total\s*/\s*amount\s+due|total\s+amount\s+due)\b\s*[:\-|]?\s*\$?\s*\d[\d,]*(?:\.\d{2})?\b",
                 text,
                 flags=re.IGNORECASE,
             ):

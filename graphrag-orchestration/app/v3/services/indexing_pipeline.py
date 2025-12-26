@@ -210,6 +210,11 @@ class IndexingConfig:
     raptor_levels: int = 3  # Number of RAPTOR summary levels
     raptor_summary_max_tokens: int = 500
     raptor_cluster_size: int = 10  # Texts to cluster per level
+
+    # Community report settings
+    # Community reports are used directly by Global Search; keep enough room for
+    # the required sections + concrete terms (jurisdictions, fees, insurance limits).
+    community_report_max_chars: int = 8000
     
     # Embedding settings
     embedding_model: str = "text-embedding-3-small"  # 1536 dims, Neo4j 5.x supports up to 4096
@@ -2405,7 +2410,13 @@ Corrected report:"""
                 names = ", ".join(e.name for e in member_entities[:8])
                 return f"Community entities: {names}"
 
-            return report[: max(self.config.raptor_summary_max_tokens, 1200)]
+            # Do NOT reuse RAPTOR token limits here: truncating community reports can
+            # cut off later sections (e.g., governing law / insurance / fees) even
+            # after we enforced that the model included them.
+            max_chars = int(getattr(self.config, "community_report_max_chars", 8000) or 8000)
+            if max_chars <= 0:
+                max_chars = 8000
+            return report[:max_chars]
         except Exception as e:
             logger.warning(f"Community report generation failed: {e}")
             # Fallback: entity-only, but avoid hallucination by keeping it purely enumerative

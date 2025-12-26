@@ -40,6 +40,7 @@ PDF_FILES = [
 CLEANUP_ALL_GROUPS = os.getenv("CLEANUP_ALL_GROUPS", "false").lower() == "true"
 WAIT_TIMEOUT_SECONDS = int(os.getenv("WAIT_TIMEOUT_SECONDS", "900"))
 WAIT_POLL_SECONDS = int(os.getenv("WAIT_POLL_SECONDS", "10"))
+WAIT_NO_PROGRESS_GRACE_SECONDS = int(os.getenv("WAIT_NO_PROGRESS_GRACE_SECONDS", "120"))
 RUN_LOCAL_QA = os.getenv("RUN_LOCAL_QA", "false").lower() == "true"
 SKIP_INDEXING = os.getenv("SKIP_INDEXING", "false").lower() == "true"
 SKIP_NEO4J_VERIFY = os.getenv("SKIP_NEO4J_VERIFY", "false").lower() == "true"
@@ -885,6 +886,8 @@ def wait_for_indexing_completion(*, require_communities: bool = False, require_r
 
     deadline = time.time() + WAIT_TIMEOUT_SECONDS
     last = None
+    first_progress_ts: float | None = None
+    started_ts = time.time()
 
     while time.time() < deadline:
         try:
@@ -906,6 +909,26 @@ def wait_for_indexing_completion(*, require_communities: bool = False, require_r
             entities = stats.get("entities", 0)
             communities = stats.get("communities", 0)
             raptor_nodes = stats.get("raptor_nodes", 0)
+
+            any_progress = any(v > 0 for v in (docs, chunks, entities, communities, raptor_nodes))
+            if any_progress and first_progress_ts is None:
+                first_progress_ts = time.time()
+
+            # If we see *no* progress at all for a while, it's usually a wrong API_URL/GROUP_ID
+            # or the index request never reached the service. Fail fast so users don't think
+            # indexing is "stuck forever".
+            if (
+                first_progress_ts is None
+                and (time.time() - started_ts) >= WAIT_NO_PROGRESS_GRACE_SECONDS
+            ):
+                print(
+                    "❌ No indexing progress detected (all stats remain 0).\n"
+                    "   This usually means the /index request never started, you are polling the wrong API_URL,\n"
+                    "   or you are using a GROUP_ID that doesn't exist on this deployment.\n"
+                    f"   Group: {GROUP_ID}\n"
+                    f"   API: {API_URL}"
+                )
+                return False
 
             print(
                 f"  📊 docs={docs} chunks={chunks} entities={entities} communities={communities} raptor={raptor_nodes}"

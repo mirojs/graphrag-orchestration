@@ -57,6 +57,33 @@ QUESTION_BANK_PATH = os.getenv("QUESTION_BANK_PATH", "../QUESTION_BANK_5PDFS_202
 QA_INCLUDE_NEGATIVES = os.getenv("QA_INCLUDE_NEGATIVES", "true").lower() == "true"
 
 
+def _resolve_input_path(path: str) -> Path:
+    """Resolve a user-provided path robustly.
+
+    The harness is often run from repo root, but the default QUESTION_BANK_PATH is
+    relative to this script's directory. Prefer existing paths in this order:
+    1) as provided (absolute or relative to CWD)
+    2) relative to this script directory
+    """
+    raw = (path or "").strip()
+    if not raw:
+        return Path(raw)
+
+    p = Path(raw)
+    if p.exists():
+        return p
+
+    script_dir = Path(__file__).resolve().parent
+    p2 = (script_dir / p).resolve()
+    if p2.exists():
+        return p2
+
+    # Helpful error message with candidates.
+    candidates = [p.resolve(), p2]
+    details = "\n".join(f"- {c}" for c in candidates)
+    raise FileNotFoundError(f"Path not found: {raw}\nTried:\n{details}")
+
+
 def _sleep_with_notice(seconds: float, reason: str) -> None:
     if seconds <= 0:
         return
@@ -321,9 +348,7 @@ def _extract_required_terms(expected_text: str) -> list[str]:
 
 
 def _load_question_bank(path: str) -> dict[str, list[BankQuestion]]:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Question bank not found: {p.resolve()}")
+    p = _resolve_input_path(path)
 
     text = p.read_text(encoding="utf-8")
     lines = text.splitlines()
@@ -848,8 +873,12 @@ def cleanup_neo4j():
     driver.close()
 
 
-def wait_for_indexing_completion() -> bool:
-    """Poll the V3 stats endpoint until indexing is complete (or timeout)."""
+def wait_for_indexing_completion(*, require_communities: bool = False, require_raptor: bool = False) -> bool:
+    """Poll the V3 stats endpoint until indexing is complete (or timeout).
+
+    By default, waits for documents/chunks/entities.
+    For global/drift/raptor testing, also wait for communities and/or RAPTOR nodes.
+    """
     print("\n" + "=" * 80)
     print("WAIT: POLLING /graphrag/v3/stats UNTIL INDEXING COMPLETES")
     print("=" * 80)
@@ -882,8 +911,14 @@ def wait_for_indexing_completion() -> bool:
                 f"  📊 docs={docs} chunks={chunks} entities={entities} communities={communities} raptor={raptor_nodes}"
             )
 
-            # Minimal completion condition
-            if docs >= len(PDF_FILES) and chunks > 0 and entities > 0:
+            # Minimal completion condition (optionally stronger for global/raptor).
+            if (
+                docs >= len(PDF_FILES)
+                and chunks > 0
+                and entities > 0
+                and (not require_communities or communities > 0)
+                and (not require_raptor or raptor_nodes > 0)
+            ):
                 print("✅ Indexing appears complete")
                 return True
 
@@ -1174,7 +1209,18 @@ if __name__ == "__main__":
     else:
         print("\nℹ️  SKIP_INDEXING=true (will not call /index)")
     
-    if not wait_for_indexing_completion():
+    # If running the question bank, make sure pipeline steps needed by the
+    # selected engines are complete before starting queries.
+    engines_for_wait: list[str] = []
+    if RUN_QUESTION_BANK:
+        engines_for_wait = QA_ENGINES or ["vector", "local", "global", "drift", "raptor"]
+    elif QA_ENGINES:
+        engines_for_wait = QA_ENGINES
+
+    require_communities = any(e in {"global", "drift"} for e in engines_for_wait)
+    require_raptor = any(e == "raptor" for e in engines_for_wait)
+
+    if not wait_for_indexing_completion(require_communities=require_communities, require_raptor=require_raptor):
         print("\n❌ TEST FAILED: Timed out waiting for indexing completion")
         exit(1)
     

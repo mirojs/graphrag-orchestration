@@ -2236,6 +2236,12 @@ class IndexingPipelineV3:
                 score += 6
             if any(k in t for k in ["governing law", "governed by", "laws of", "state of"]):
                 score += 4
+            if any(k in t for k in ["jurisdiction", "venue", "arbitration", "aaa", "american arbitration association"]):
+                score += 2
+            if any(k in t for k in ["insurance", "indemn", "hold harmless", "liability", "coverage", "policy", "bond"]):
+                score += 4
+            if any(k in t for k in ["fee", "fees", "commission", "charge", "charges", "admin", "accounting", "advertising", "pro-rat", "prorat"]):
+                score += 2
             if re.search(r"\b\d{1,3}\s+(?:business\s+)?days\b", t):
                 score += 4
             if re.search(r"\$\s*\d[\d,]*(?:\.\d{2})?\b", t):
@@ -2264,9 +2270,11 @@ class IndexingPipelineV3:
             if doc_id:
                 doc_counts[doc_id] = doc_counts.get(doc_id, 0) + 1
 
+        # Include more than 2 documents to avoid missing key clauses that
+        # live outside the entity-linked chunks (e.g., governing law, insurance limits).
         candidate_doc_ids = [
             doc_id
-            for doc_id, _ in sorted(doc_counts.items(), key=lambda t: (-t[1], t[0]))[:2]
+            for doc_id, _ in sorted(doc_counts.items(), key=lambda t: (-t[1], t[0]))[:5]
         ]
 
         if candidate_doc_ids:

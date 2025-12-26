@@ -47,7 +47,7 @@ import re
 import hashlib
 import random
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Tuple, Set, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Set, Union, cast
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -1852,7 +1852,16 @@ class IndexingPipelineV3:
         This is the same algorithm MS GraphRAG uses internally.
         """
         if len(entities) < self.config.min_community_size:
-            logger.info(f"Too few entities ({len(entities)}) for community detection")
+            logger.info(
+                "v3_community_detection_skipped %s",
+                {
+                    "group_id": group_id,
+                    "reason": "too_few_entities",
+                    "entity_count": len(entities),
+                    "relationship_count": len(relationships),
+                    "min_community_size": self.config.min_community_size,
+                },
+            )
             return []
         
         # Build adjacency matrix
@@ -1863,6 +1872,7 @@ class IndexingPipelineV3:
         # Create sparse adjacency matrix
         adj_matrix = np.zeros((n, n), dtype=np.float32)
         
+        edges_added = 0
         for rel in relationships:
             src_idx = entity_index.get(rel.source_id)
             tgt_idx = entity_index.get(rel.target_id)
@@ -1870,6 +1880,30 @@ class IndexingPipelineV3:
                 weight = rel.weight
                 adj_matrix[src_idx, tgt_idx] = weight
                 adj_matrix[tgt_idx, src_idx] = weight  # Make symmetric
+                edges_added += 1
+
+        # If there are no edges, hierarchical_leiden often degenerates into singleton clusters.
+        # For Global Search we still want a deterministic, queryable "community report".
+        if edges_added == 0:
+            community = Community(
+                id=f"community_L0_all_{uuid.uuid4().hex[:8]}",
+                level=0,
+                entity_ids=entity_ids,
+                title="Community Level 0 - all",
+                rank=1.0,
+            )
+            logger.warning(
+                "v3_community_detection_no_edges %s",
+                {
+                    "group_id": group_id,
+                    "entity_count": len(entities),
+                    "relationship_count": len(relationships),
+                    "edges_added": edges_added,
+                    "communities_created": 1,
+                    "note": "created_single_all_entities_community",
+                },
+            )
+            return [community]
         
         # Run hierarchical Leiden
         try:
@@ -1900,28 +1934,65 @@ class IndexingPipelineV3:
                 if isinstance(node_idx, int) and node_idx < len(entity_ids):
                     level_communities[level][comm_id].append(entity_ids[node_idx])
             
+            # Normalize levels so the minimum level becomes 0.
+            # Global Query defaults to level=0; without normalization, some graspologic
+            # outputs start at level=1 which makes global search appear "empty".
+            min_level = min(level_communities.keys()) if level_communities else 0
+
+            pruned_small = 0
             # Create Community objects
             for level, comm_dict in level_communities.items():
-                if level >= self.config.max_community_levels:
+                normalized_level = int(level) - int(min_level)
+                if normalized_level < 0:
                     continue
-                    
+                if normalized_level >= self.config.max_community_levels:
+                    continue
+
                 for comm_id, member_ids in comm_dict.items():
                     if len(member_ids) < self.config.min_community_size:
+                        pruned_small += 1
                         continue
-                    
+
                     community = Community(
-                        id=f"community_L{level}_{comm_id}_{uuid.uuid4().hex[:8]}",
-                        level=level,
+                        id=f"community_L{normalized_level}_{comm_id}_{uuid.uuid4().hex[:8]}",
+                        level=normalized_level,
                         entity_ids=member_ids,
-                        title=f"Community Level {level} - {comm_id}",
+                        title=f"Community Level {normalized_level} - {comm_id}",
                         rank=len(member_ids) / n,  # Rank by size
                     )
                     communities.append(community)
-            
+
+            logger.warning(
+                "v3_community_detection_summary %s",
+                {
+                    "group_id": group_id,
+                    "entity_count": len(entities),
+                    "relationship_count": len(relationships),
+                    "edges_added": edges_added,
+                    "levels_raw": sorted(level_communities.keys()),
+                    "min_level_raw": min_level,
+                    "levels_normalized": sorted({c.level for c in communities}),
+                    "communities_created": len(communities),
+                    "communities_pruned_small": pruned_small,
+                    "min_community_size": self.config.min_community_size,
+                    "max_community_levels": self.config.max_community_levels,
+                    "community_resolution": self.config.community_resolution,
+                },
+            )
+
             return communities
             
         except Exception as e:
-            logger.warning(f"Community detection failed: {e}")
+            logger.warning(
+                "v3_community_detection_failed %s",
+                {
+                    "group_id": group_id,
+                    "error": str(e),
+                    "entity_count": len(entities),
+                    "relationship_count": len(relationships),
+                    "edges_added": edges_added,
+                },
+            )
             return []
     
     async def _generate_community_summary(

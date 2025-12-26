@@ -96,8 +96,9 @@ echo "$HEALTH_BODY"
 
 echo ""
 echo "Detailed health check..."
-curl -s "$GRAPHRAG_URL/api/v1/graphrag/health" | python -m json.tool || {
-    echo "⚠️  Detailed health check failed"
+HEALTH_GROUP_ID="${HEALTH_GROUP_ID:-health-check}"
+curl -s "$GRAPHRAG_URL/graphrag/v3/health" -H "X-Group-ID: $HEALTH_GROUP_ID" | python -m json.tool || {
+    echo "⚠️  V3 health check failed"
 }
 
 # Test with managed identity
@@ -117,31 +118,66 @@ TOKEN=$(az account get-access-token \
 
 echo "✅ Token obtained"
 
-# Test basic indexing with managed identity
+# Smoke-test V3 indexing + global query.
+# NOTE: V3 endpoints live under /graphrag/v3/* (legacy /api/v1/graphrag/* is deprecated).
+TEST_GROUP_ID="test-group-deployed-$(date +%s)"
+
 echo ""
-echo "Testing index-from-prompt endpoint..."
+echo "Testing V3 indexing endpoint..."
 RESPONSE=$(curl -s -w "\n%{http_code}" \
-    -X POST "$GRAPHRAG_URL/api/v1/graphrag/index-from-prompt" \
+    -X POST "$GRAPHRAG_URL/graphrag/v3/index" \
     -H "Authorization: Bearer $TOKEN" \
-    -H "X-Group-ID: test-group-deployed" \
+    -H "X-Group-ID: $TEST_GROUP_ID" \
     -H "Content-Type: application/json" \
     -d '{
-        "schema_prompt": "Extract people and organizations",
-        "documents": ["Microsoft was founded by Bill Gates and Paul Allen."],
-        "ingestion": "cu-standard",
-        "run_community_detection": false
+        "documents": [
+            "Microsoft was founded by Bill Gates and Paul Allen.",
+            "Termination requires 60 days written notice."
+        ],
+        "run_raptor": false,
+        "run_community_detection": true,
+        "ingestion": "none"
     }')
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -n 1)
 RESPONSE_BODY=$(echo "$RESPONSE" | head -n -1)
 
 if [ "$HTTP_CODE" = "200" ]; then
-    echo "✅ Indexing endpoint works"
+    echo "✅ V3 indexing accepted"
     echo "$RESPONSE_BODY" | python -m json.tool
 else
-    echo "⚠️  Indexing returned $HTTP_CODE"
+    echo "⚠️  V3 indexing returned $HTTP_CODE"
     echo "$RESPONSE_BODY"
 fi
+
+echo ""
+echo "Polling V3 stats until communities are present (timeout ~60s)..."
+for i in {1..12}; do
+    STATS=$(curl -s "$GRAPHRAG_URL/graphrag/v3/stats/$TEST_GROUP_ID" -H "X-Group-ID: $TEST_GROUP_ID" || true)
+    COMMUNITIES=$(echo "$STATS" | python -c 'import sys,json
+try:
+  d=json.load(sys.stdin)
+  v=d.get("communities")
+  print(v if isinstance(v,int) else 0)
+except Exception:
+  print(0)')
+    echo "  Attempt $i: communities=$COMMUNITIES"
+    if [ "$COMMUNITIES" -gt 0 ]; then
+        echo "$STATS" | python -m json.tool
+        break
+    fi
+    sleep 5
+done
+
+echo ""
+echo "Testing V3 global query (synthesize=false)..."
+curl -s -X POST "$GRAPHRAG_URL/graphrag/v3/query/global" \
+    -H "X-Group-ID: $TEST_GROUP_ID" \
+    -H "Content-Type: application/json" \
+    -d '{"query":"What are the main themes?","top_k":5,"include_sources":true,"synthesize":false}' \
+    | python -m json.tool || {
+        echo "⚠️  V3 global query failed"
+    }
 
 # Check container logs
 echo ""

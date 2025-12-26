@@ -937,9 +937,40 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 rating_batch_size=max(1, dynamic_rating_batch_size),
             )
         else:
-            communities = store.get_communities_by_level(group_id=group_id, level=0)
+            requested_level = 0
+            communities = store.get_communities_by_level(group_id=group_id, level=requested_level)
+
+            # Some community builders produce levels starting at 1. If so, use the
+            # lowest available level (still community-based; not a different algorithm).
+            if not communities:
+                try:
+                    levels = store.get_community_levels(group_id)
+                except Exception:
+                    levels = []
+                if levels:
+                    level_used = min(levels)
+                    if level_used != requested_level:
+                        communities = store.get_communities_by_level(group_id=group_id, level=level_used)
+                        logger.info(
+                            "v3_global_search_level_fallback",
+                            group_id=group_id,
+                            requested_level=requested_level,
+                            level_used=level_used,
+                            levels_available=levels,
+                            communities_found=len(communities),
+                        )
         
         if not communities:
+            try:
+                levels = store.get_community_levels(group_id)
+            except Exception:
+                levels = []
+            logger.info(
+                "v3_global_search_no_communities",
+                group_id=group_id,
+                use_dynamic=use_dynamic,
+                levels_available=levels,
+            )
             return V3QueryResponse(
                 answer="Not specified in the provided documents.",
                 confidence=0.85,
@@ -947,6 +978,17 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 entities_used=[],
                 search_type="global",
             )
+
+        # Diagnostics: summary coverage
+        missing_summary = sum(1 for c in communities if not (c.summary or "").strip())
+        logger.info(
+            "v3_global_search_communities_loaded",
+            group_id=group_id,
+            use_dynamic=use_dynamic,
+            communities=len(communities),
+            missing_summaries=missing_summary,
+            top_k=payload.top_k,
+        )
 
         # Rank communities by relevance (embedding similarity) when possible.
         # For dynamic selection we keep LLM rating as the selector; this final ranking

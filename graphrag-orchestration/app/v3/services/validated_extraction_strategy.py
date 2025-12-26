@@ -18,6 +18,7 @@ This gives:
 from typing import List, Tuple, Dict, Any
 import logging
 from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
+from llama_index.core.indices.property_graph import SimpleLLMPathExtractor
 from llama_index.core.llms import LLM
 
 logger = logging.getLogger(__name__)
@@ -74,8 +75,29 @@ class ValidatedEntityExtractor:
         
         # Extract entities from chunks
         logger.info(f"🔍 VALIDATION: Extracting entities from {len(nodes)} chunks with max_triplets={self.max_triplets_per_pass}")
-        
-        extracted_nodes = await self.extractor.acall(nodes)
+
+        try:
+            extracted_nodes = await self.extractor.acall(nodes)
+        except Exception as e:
+            # Some LLM deployments (or LlamaIndex backends) can be incompatible with
+            # SchemaLLMPathExtractor's structured output / tool-call requirements.
+            # Fall back to SimpleLLMPathExtractor to avoid total extraction failure.
+            logger.error(
+                "SchemaLLMPathExtractor failed (%s: %s). Falling back to SimpleLLMPathExtractor.",
+                type(e).__name__,
+                str(e)[:500],
+                exc_info=True,
+            )
+
+            fallback = SimpleLLMPathExtractor(
+                llm=self.llm,
+                num_workers=1,
+                max_paths_per_chunk=self.max_triplets_per_pass,
+            )
+
+            extracted_nodes = await fallback.acall(nodes)
+            # Mark fallback usage in stats for observability.
+            stats["fallback_used"] = 1
         stats["total_passes"] = 1
         stats["total_extracted"] = len(extracted_nodes)
         logger.info(f"🔍 VALIDATION: Extracted {len(extracted_nodes)} nodes before validation")

@@ -44,6 +44,8 @@ import logging
 import uuid
 import json
 import re
+import hashlib
+import random
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Set, Union
 from dataclasses import dataclass, field
@@ -708,7 +710,63 @@ class IndexingPipelineV3:
                 metadata=chunk_metadata,
             )
             llama_nodes.append(node)
+
+        def _canonical_entity_key(name: str) -> str:
+            """Deterministic normalization for entity de-duplication.
+
+            This is intentionally non-LLM and general-purpose: normalize whitespace/punctuation
+            and strip common corporate suffixes when they appear as trailing tokens.
+            """
+            s = (name or "").strip().lower()
+            if not s:
+                return ""
+            s = s.replace("\u00a0", " ")
+            # Replace punctuation with spaces, keep alphanumerics/underscore and '&'
+            s = re.sub(r"[^a-z0-9_&\s]", " ", s)
+            s = re.sub(r"\s+", " ", s).strip()
+            if not s:
+                return ""
+
+            tokens = s.split()
+            # Convert '&' to 'and' for stable keying
+            tokens = ["and" if t == "&" else t for t in tokens]
+
+            # Strip common corporate suffixes (only trailing tokens)
+            suffixes = {
+                "inc",
+                "incorporated",
+                "corp",
+                "corporation",
+                "co",
+                "company",
+                "llc",
+                "ltd",
+                "limited",
+                "plc",
+                "gmbh",
+                "ag",
+                "sa",
+                "sarl",
+            }
+            while len(tokens) >= 2 and tokens and tokens[-1] in suffixes:
+                tokens.pop()
+            return " ".join(tokens)
+
+        # Determinism: optional extraction cache keyed by chunk text + stable metadata + model/params.
+        #
+        # Azure OpenAI can still show run-to-run variability even with temperature=0 due to
+        # backend nondeterminism. When enabled, we persist the per-chunk extracted payload
+        # (entity names/types + relation endpoints/labels) and reuse it on subsequent runs.
+        cache_enabled = bool(getattr(settings, "GRAPHRAG_ENABLE_EXTRACTION_CACHE", False))
         
+        # NOTE: Use a fresh in-memory graph store per run.
+        #
+        # `SimplePropertyGraphStore` accumulates nodes/relations in memory. If shared across
+        # concurrent background indexing tasks, it can leak state across runs and create
+        # nondeterministic digests/counts. Keeping it local makes the LLM-stage vs graph-stage
+        # determinism diagnostics comparable and prevents cross-run contamination.
+        temp_graph_store = SimplePropertyGraphStore()
+
         # Create PropertyGraphIndex with entity extraction
         # Use SchemaLLMPathExtractor with strict=True for reliable schema-based extraction
         logger.info(f"Extracting entities from {len(llama_nodes)} nodes using SchemaLLMPathExtractor")
@@ -743,6 +801,16 @@ class IndexingPipelineV3:
         try:
             # Use specialized indexing LLM if available (GPT-4.1 with 1M context window)
             indexing_llm = self.llm_service.get_indexing_llm() if self.llm_service else self.llm
+
+            def _best_effort_model_id(llm_obj: object) -> str:
+                for attr in ("model", "model_name", "deployment_name", "deployment"):
+                    v = getattr(llm_obj, attr, None)
+                    if v:
+                        return str(v)
+                return str(getattr(settings, "AZURE_OPENAI_INDEXING_DEPLOYMENT", None) or self.config.llm_model)
+
+            model_id = _best_effort_model_id(indexing_llm)
+            cache_version = str(getattr(settings, "GRAPHRAG_EXTRACTION_CACHE_VERSION", "v1"))
             
             # Use Lean Engine extraction strategy: 12-15 triplet density (ARCHITECTURE_DECISIONS.md § Phase 2)
             validated_extractor = ValidatedEntityExtractor(
@@ -759,18 +827,425 @@ class IndexingPipelineV3:
         # Extract entities and relationships using validated extraction
         try:
             self.extraction_stats["total_extractions"] += 1
-            
-            # Extract with validation
-            extracted_nodes, validation_stats = await validated_extractor.extract_with_validation(llama_nodes)
-            logger.info(f"Extracted {len(extracted_nodes)} nodes (validation stats: {validation_stats})")
+
+            # --------------------
+            # Extraction cache keying (stable across runs)
+            # --------------------
+            def _stable_chunk_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
+                """Remove run-specific identifiers so cache keys can be reused across group_ids/runs."""
+                raw = dict(meta or {})
+
+                # document_id contains a UUID generated per run; exclude it.
+                raw.pop("document_id", None)
+
+                # Document Intelligence metadata can be large and can vary run-to-run
+                # (e.g., table cell geometry/order). Do not key cache entries on it.
+                raw.pop("tables", None)
+                raw.pop("section_path", None)
+
+                # Keep only minimal stable identifiers.
+                cleaned: Dict[str, Any] = {}
+                if "chunk_index" in raw:
+                    cleaned["chunk_index"] = raw.get("chunk_index")
+                if "page_number" in raw:
+                    cleaned["page_number"] = raw.get("page_number")
+                return cleaned
+
+            def _cache_key_for_node(node: TextNode) -> str:
+                meta = _stable_chunk_metadata(getattr(node, "metadata", {}) or {})
+                text = ""
+                try:
+                    text = node.get_content()  # type: ignore[attr-defined]
+                except Exception:
+                    text = getattr(node, "text", "") or ""
+
+                params_obj = {
+                    "cache_version": cache_version,
+                    "model": model_id,
+                    "model_version": getattr(settings, "AZURE_OPENAI_MODEL_VERSION", ""),
+                    "max_triplets_per_pass": 12,
+                    "validation_threshold": 0.7,
+                    "max_passes": 1,
+                    "meta": meta,
+                    "text": text,
+                }
+                material = json.dumps(params_obj, sort_keys=True, ensure_ascii=False)
+                return hashlib.sha256(material.encode("utf-8", errors="ignore")).hexdigest()
+
+            cache_keys: List[str] = []
+            for n in llama_nodes:
+                k = _cache_key_for_node(n)
+                cache_keys.append(k)
+
+            # Digest/sample of cache keys to quickly diff key stability across runs.
+            _ck_h = hashlib.sha256()
+            for _k in sorted(cache_keys):
+                _ck_h.update(_k.encode("utf-8", errors="ignore"))
+                _ck_h.update(b"\n")
+            cache_keys_digest = _ck_h.hexdigest()[:12]
+            cache_keys_sample = [k[:12] for k in cache_keys[:5]]
+
+            cached_payloads: Dict[str, str] = {}
+            if cache_enabled:
+                try:
+                    cached_payloads = await self.neo4j_store.aget_extraction_cache_batch(cache_keys)
+                except Exception as e:
+                    logger.warning(f"Extraction cache lookup failed (continuing without cache): {e}")
+                    cached_payloads = {}
+
+            cache_hits = sum(1 for k in cache_keys if k in cached_payloads)
+            cache_misses = len(cache_keys) - cache_hits
+
+            extracted_nodes: List[TextNode] = []
+            validation_stats: Dict[str, Any] = {}
+
+            if cache_enabled and cache_misses == 0 and cache_keys:
+                # Full cache hit: reconstruct extracted_nodes from cached payloads.
+                for original_node, ck in zip(llama_nodes, cache_keys):
+                    payload_json = cached_payloads.get(ck)
+                    payload: Dict[str, Any] = {}
+                    if payload_json:
+                        try:
+                            payload = json.loads(payload_json)
+                        except Exception:
+                            payload = {}
+
+                    merged_meta = dict(getattr(original_node, "metadata", {}) or {})
+                    # Payload includes extracted keys like nodes/relations.
+                    if isinstance(payload, dict):
+                        merged_meta.update(payload)
+
+                    extracted_nodes.append(
+                        TextNode(
+                            id_=getattr(original_node, "id_", None) or nid,
+                            text=getattr(original_node, "text", ""),
+                            metadata=merged_meta,
+                        )
+                    )
+
+                validation_stats = {
+                    "cache_enabled": True,
+                    "cache_version": cache_version,
+                    "cache_hits": cache_hits,
+                    "cache_misses": cache_misses,
+                    "total_extracted": len(extracted_nodes),
+                }
+                logger.info(f"Extraction cache hit: reused {cache_hits}/{len(cache_keys)} chunks (skipped LLM)")
+            else:
+                # Cache miss (or disabled): run LLM extraction once for all chunks, then populate cache.
+                extracted_nodes, validation_stats = await validated_extractor.extract_with_validation(llama_nodes)
+                if isinstance(validation_stats, dict):
+                    validation_stats.setdefault("cache_version", cache_version)
+                logger.info(f"Extracted {len(extracted_nodes)} nodes (validation stats: {validation_stats})")
+
+                if cache_enabled and extracted_nodes:
+                    def _entity_payload(entity_node: object) -> Dict[str, Any]:
+                        name_val = getattr(entity_node, "name", None)
+                        props = getattr(entity_node, "properties", None)
+                        name = None
+                        if name_val:
+                            name = str(name_val)
+                        elif isinstance(props, dict) and props.get("name"):
+                            name = str(props.get("name"))
+                        else:
+                            for attr in ("id", "id_", "node_id"):
+                                v = getattr(entity_node, attr, None)
+                                if v:
+                                    name = str(v)
+                                    break
+                        label = getattr(entity_node, "label", None) or getattr(entity_node, "type", None) or "CONCEPT"
+                        return {"name": (name or "").strip(), "label": str(label)}
+
+                    def _relation_payload(rel: object) -> Dict[str, Any]:
+                        label = getattr(rel, "label", None) or getattr(rel, "type", None) or "RELATED_TO"
+                        src = getattr(rel, "source_id", None) or getattr(rel, "source", None) or getattr(rel, "subject", None) or ""
+                        tgt = getattr(rel, "target_id", None) or getattr(rel, "target", None) or getattr(rel, "object", None) or ""
+                        return {"source": str(src).strip(), "target": str(tgt).strip(), "label": str(label)}
+
+                    cache_items: List[Dict[str, Any]] = []
+                    params_hash = hashlib.sha256(
+                        json.dumps(
+                            {
+                                "cache_version": cache_version,
+                                "model": model_id,
+                                "model_version": getattr(settings, "AZURE_OPENAI_MODEL_VERSION", ""),
+                                "max_triplets_per_pass": 12,
+                                "validation_threshold": 0.7,
+                                "max_passes": 1,
+                            },
+                            sort_keys=True,
+                            ensure_ascii=False,
+                        ).encode("utf-8", errors="ignore")
+                    ).hexdigest()[:16]
+
+                    if len(extracted_nodes) != len(llama_nodes):
+                        logger.warning(
+                            "Extraction cache alignment warning: extracted_nodes=%s, llama_nodes=%s. Cache population will zip by order.",
+                            len(extracted_nodes),
+                            len(llama_nodes),
+                        )
+
+                    for original_node, node, ck in zip(llama_nodes, extracted_nodes, cache_keys):
+                        payload: Dict[str, Any] = {}
+                        for ek in ("nodes", "kg_nodes"):
+                            if ek in (getattr(node, "metadata", {}) or {}):
+                                ent_list = node.metadata.get(ek) or []  # type: ignore[attr-defined]
+                                payload[ek] = [p for p in (_entity_payload(e) for e in ent_list) if p.get("name")]
+                        for rk in ("relations", "kg_relations"):
+                            if rk in (getattr(node, "metadata", {}) or {}):
+                                rel_list = node.metadata.get(rk) or []  # type: ignore[attr-defined]
+                                payload[rk] = [p for p in (_relation_payload(r) for r in rel_list) if p.get("source") and p.get("target")]
+
+                        cache_items.append(
+                            {
+                                "key": ck,
+                                "payload": json.dumps(payload, ensure_ascii=False),
+                                "model": model_id,
+                                "params_hash": params_hash,
+                            }
+                        )
+
+                    if cache_items:
+                        try:
+                            await self.neo4j_store.aput_extraction_cache_batch(cache_items)
+                            logger.info(f"Extraction cache populated for {len(cache_items)}/{len(cache_keys)} chunks")
+
+                            # Verify persistence by reading back the written keys.
+                            try:
+                                written_keys = [ci.get("key") for ci in cache_items if ci.get("key")]
+                                verify = await self.neo4j_store.aget_extraction_cache_batch(cast(List[str], written_keys))
+                                if len(verify) != len(written_keys):
+                                    missing_samples = [k[:12] for k in written_keys if k not in verify][:10]
+                                    logger.warning(
+                                        "Extraction cache verify mismatch: read_back=%s written=%s missing_samples=%s",
+                                        len(verify),
+                                        len(written_keys),
+                                        missing_samples,
+                                    )
+                                else:
+                                    logger.info(
+                                        "Extraction cache verify OK: read_back=%s written=%s",
+                                        len(verify),
+                                        len(written_keys),
+                                    )
+                            except Exception as e:
+                                logger.warning(f"Extraction cache verify read-back failed (continuing): {e}")
+                        except Exception as e:
+                            logger.warning(f"Extraction cache write failed (continuing): {e}")
+
+                if isinstance(validation_stats, dict):
+                    validation_stats = {
+                        **validation_stats,
+                        "cache_enabled": cache_enabled,
+                        "cache_hits": cache_hits,
+                        "cache_misses": cache_misses,
+                        "cache_key_digest": cache_keys_digest,
+                        "cache_key_sample": cache_keys_sample,
+                    }
             
             # Collect entities and relations from node metadata
             # Track which entities came from which chunks for MENTIONS relationships
             all_entity_nodes = []
             all_relations = []
-            entity_to_chunks = {}  # Maps entity_name -> [chunk_ids]
-            # Map entity_name -> sample chunk text for better descriptions
-            entity_to_text = {}  # Maps entity_name -> first chunk text where it appears
+            entity_to_chunks = {}  # Maps canonical_entity_key -> [chunk_ids]
+            # Map canonical_entity_key -> sample chunk text for better descriptions
+            entity_to_text = {}  # Maps canonical_entity_key -> first chunk text where it appears
+
+            # Determinism diagnostics: summarize extractor output before graph-store upsert.
+            diag_mentions_total = 0
+            diag_chunks_with_entities = 0
+            diag_raw_names: Set[str] = set()
+            diag_canonical_keys: Set[str] = set()
+
+            def _stable_set_digest(items: Set[str]) -> str:
+                h = hashlib.sha256()
+                for s in sorted(items):
+                    h.update(s.encode("utf-8", errors="ignore"))
+                    h.update(b"\n")
+                return h.hexdigest()[:12]
+
+            def _hash12(value: str) -> str:
+                h = hashlib.sha256()
+                h.update((value or "").encode("utf-8", errors="ignore"))
+                return h.hexdigest()[:12]
+
+            def _bucket_summaries(items: Set[str], buckets: int = 8) -> Dict[str, Dict[str, Union[int, str]]]:
+                """Return small, privacy-preserving summaries that are easy to diff across runs.
+
+                We bucket by a deterministic hash of the canonical key, then compute a digest per bucket.
+                This makes it easier to localize which subset changed without logging raw keys.
+                """
+
+                bucketed: list[set[str]] = [set() for _ in range(buckets)]
+                for item in items:
+                    if not item:
+                        continue
+                    idx = int(hashlib.sha256(item.encode("utf-8", errors="ignore")).hexdigest()[:8], 16) % buckets
+                    bucketed[idx].add(item)
+                out: Dict[str, Dict[str, Union[int, str]]] = {}
+                for i, bset in enumerate(bucketed):
+                    out[str(i)] = {"n": len(bset), "d": _stable_set_digest(bset) if bset else ""}
+                return out
+
+
+            # Full cache hit: build final Entities/Relationships directly from cached payload.
+            # We avoid feeding dicts into LlamaIndex graph-store types.
+            if cache_enabled and cache_misses == 0 and cache_keys:
+                diag_mentions_total = 0
+                diag_chunks_with_entities = 0
+                diag_raw_names: Set[str] = set()
+                diag_canonical_keys: Set[str] = set()
+
+                entity_to_chunks: Dict[str, List[str]] = {}
+                entity_to_text: Dict[str, str] = {}
+                entity_info: Dict[str, Dict[str, str]] = {}
+                rel_records: List[Tuple[str, str, str]] = []
+
+                for original_node, ck in zip(llama_nodes, cache_keys):
+                    payload_json = cached_payloads.get(ck)
+                    payload: Dict[str, Any] = {}
+                    if payload_json:
+                        try:
+                            payload = json.loads(payload_json)
+                        except Exception:
+                            payload = {}
+
+                    chunk_id = getattr(original_node, "id_", None) or getattr(original_node, "node_id", None) or ""
+                    chunk_text = ""
+                    try:
+                        chunk_text = original_node.get_content()  # type: ignore[attr-defined]
+                    except Exception:
+                        chunk_text = getattr(original_node, "text", "") or ""
+
+                    # Entities
+                    chunk_has_entities = False
+                    for ek in ("nodes", "kg_nodes"):
+                        for ent in (payload.get(ek) or []):
+                            if not isinstance(ent, dict):
+                                continue
+                            ename = str(ent.get("name") or "").strip()
+                            elabel = str(ent.get("label") or "CONCEPT").strip() or "CONCEPT"
+                            ekey = _canonical_entity_key(ename)
+                            if not ekey:
+                                continue
+                            chunk_has_entities = True
+                            diag_mentions_total += 1
+                            diag_raw_names.add(ename[:200])
+                            diag_canonical_keys.add(ekey)
+
+                            info = entity_info.get(ekey)
+                            if info is None:
+                                entity_info[ekey] = {"name": ename, "type": elabel}
+
+                            if ekey not in entity_to_chunks:
+                                entity_to_chunks[ekey] = []
+                                if chunk_text:
+                                    entity_to_text[ekey] = chunk_text[:500]
+                            entity_to_chunks[ekey].append(str(chunk_id))
+
+                    if chunk_has_entities:
+                        diag_chunks_with_entities += 1
+
+                    # Relations
+                    for rk in ("relations", "kg_relations"):
+                        for rel in (payload.get(rk) or []):
+                            if not isinstance(rel, dict):
+                                continue
+                            src = str(rel.get("source") or "").strip()
+                            tgt = str(rel.get("target") or "").strip()
+                            rlabel = str(rel.get("label") or "RELATED_TO").strip() or "RELATED_TO"
+                            if not src or not tgt:
+                                continue
+                            sk = _canonical_entity_key(src)
+                            tk = _canonical_entity_key(tgt)
+                            if not sk or not tk:
+                                continue
+                            # Include relation endpoints in canonical set
+                            diag_raw_names.add(src[:200])
+                            diag_raw_names.add(tgt[:200])
+                            diag_canonical_keys.add(sk)
+                            diag_canonical_keys.add(tk)
+                            rel_records.append((sk, tk, rlabel))
+
+                logger.warning(
+                    "v3_extract_determinism_llm_metadata %s",
+                    {
+                        "group_id": group_id,
+                        "chunks": len(chunks),
+                        "llama_nodes": len(llama_nodes),
+                        "extracted_nodes": len(llama_nodes),
+                        "cache_key_digest": cache_keys_digest,
+                        "cache_key_sample": cache_keys_sample,
+                        "validation_stats": {
+                            "cache_enabled": True,
+                            "cache_hits": cache_hits,
+                            "cache_misses": cache_misses,
+                            "total_extracted": len(llama_nodes),
+                            "cache_key_digest": cache_keys_digest,
+                            "cache_key_sample": cache_keys_sample,
+                        },
+                        "chunks_with_entities": diag_chunks_with_entities,
+                        "entity_mentions_total": diag_mentions_total,
+                        "raw_entity_names_unique": len(diag_raw_names),
+                        "canonical_entity_keys_unique": len(diag_canonical_keys),
+                        "canonical_entity_keys_digest": _stable_set_digest(diag_canonical_keys),
+                        "canonical_entity_keys_buckets": _bucket_summaries(diag_canonical_keys),
+                        "canonical_entity_keys_sample_hashes": [_hash12(k) for k in sorted(diag_canonical_keys)[:20]],
+                        "relations_total": len(rel_records),
+                    },
+                )
+
+                # Build final Entities/Relationships for persistence.
+                all_entities: Dict[str, Entity] = {}
+                name_to_id_map: Dict[str, str] = {}
+                for ekey, info in entity_info.items():
+                    new_id = f"entity_{uuid.uuid4().hex[:8]}"
+                    desc = entity_to_text.get(ekey, "")
+                    ent = Entity(
+                        id=new_id,
+                        name=info.get("name") or ekey,
+                        type=info.get("type") or "CONCEPT",
+                        description=desc,
+                    )
+                    chunk_ids = entity_to_chunks.get(ekey) or []
+                    if chunk_ids:
+                        ent.text_unit_ids = chunk_ids
+                    all_entities[ekey] = ent
+                    name_to_id_map[ekey] = new_id
+
+                # Ensure relation endpoints exist as entities
+                for sk, tk, _ in rel_records:
+                    for k in (sk, tk):
+                        if k in name_to_id_map:
+                            continue
+                        new_id = f"entity_{uuid.uuid4().hex[:8]}"
+                        ent = Entity(
+                            id=new_id,
+                            name=k,
+                            type="CONCEPT",
+                            description=entity_to_text.get(k, ""),
+                        )
+                        chunk_ids = entity_to_chunks.get(k) or []
+                        if chunk_ids:
+                            ent.text_unit_ids = chunk_ids
+                        all_entities[k] = ent
+                        name_to_id_map[k] = new_id
+
+                all_relationships: List[Relationship] = []
+                for sk, tk, rlabel in rel_records:
+                    sid = name_to_id_map.get(sk)
+                    tid = name_to_id_map.get(tk)
+                    if not sid or not tid:
+                        continue
+                    all_relationships.append(
+                        Relationship(
+                            source_id=sid,
+                            target_id=tid,
+                            description=rlabel,
+                        )
+                    )
+
+                return list(all_entities.values()), all_relationships
             
             for i, node in enumerate(extracted_nodes):
                 if i == 0:
@@ -788,41 +1263,159 @@ class IndexingPipelineV3:
                 else:
                     chunk_text = getattr(node, "text", "") or getattr(node, "content", "")
 
+                def _extract_entity_name(entity_node: object) -> str:
+                    name_val = getattr(entity_node, "name", None)
+                    if name_val:
+                        return str(name_val)
+                    props = getattr(entity_node, "properties", None)
+                    if isinstance(props, dict) and props.get("name"):
+                        return str(props.get("name"))
+                    for attr in ("id", "id_", "node_id"):
+                        v = getattr(entity_node, attr, None)
+                        if v:
+                            return str(v)
+                    return ""
+
+                def _extract_relation_endpoint_names(rel: object) -> list[str]:
+                    """Best-effort extraction of endpoint identifiers from a LlamaIndex relation.
+
+                    Some extractors only return relations, and the graph-store may implicitly
+                    create/ensure endpoint nodes during relation upsert. Including these endpoint
+                    identifiers in LLM-stage diagnostics makes the LLM digest comparable to the
+                    graph-store digest.
+                    """
+
+                    candidates: list[str] = []
+                    for attr in (
+                        "source_id",
+                        "target_id",
+                        "source",
+                        "target",
+                        "subject",
+                        "object",
+                        "head",
+                        "tail",
+                        "from_id",
+                        "to_id",
+                    ):
+                        v = getattr(rel, attr, None)
+                        if v:
+                            candidates.append(str(v))
+
+                    props = getattr(rel, "properties", None)
+                    if isinstance(props, dict):
+                        for k in (
+                            "source",
+                            "target",
+                            "source_id",
+                            "target_id",
+                            "subject",
+                            "object",
+                            "from",
+                            "to",
+                        ):
+                            pv = props.get(k)
+                            if pv:
+                                candidates.append(str(pv))
+
+                    # De-dup while preserving order
+                    seen: set[str] = set()
+                    out: list[str] = []
+                    for c in candidates:
+                        c = (c or "").strip()
+                        if not c or c in seen:
+                            continue
+                        seen.add(c)
+                        out.append(c)
+                    return out
+
                 # LlamaIndex stores extracted data in either 'nodes'/'kg_nodes' and 'relations'/'kg_relations'
                 if "nodes" in node.metadata:
+                    if node.metadata.get("nodes"):
+                        diag_chunks_with_entities += 1
                     # Track which entities came from this chunk
                     for entity_node in node.metadata["nodes"]:
-                        entity_name = entity_node.name if hasattr(entity_node, 'name') else str(entity_node.id)
-                        if entity_name not in entity_to_chunks:
-                            entity_to_chunks[entity_name] = []
+                        entity_name = _extract_entity_name(entity_node)
+                        entity_key = _canonical_entity_key(entity_name)
+                        if not entity_key:
+                            continue
+                        diag_mentions_total += 1
+                        diag_raw_names.add(str(entity_name)[:200])
+                        diag_canonical_keys.add(entity_key)
+                        if entity_key not in entity_to_chunks:
+                            entity_to_chunks[entity_key] = []
                             # Store the first chunk text where this entity appears
                             if chunk_text:
-                                entity_to_text[entity_name] = chunk_text[:500]
-                        entity_to_chunks[entity_name].append(chunk_id)
+                                entity_to_text[entity_key] = chunk_text[:500]
+                        entity_to_chunks[entity_key].append(chunk_id)
                     all_entity_nodes.extend(node.metadata["nodes"])
                 elif "kg_nodes" in node.metadata:
+                    if node.metadata.get("kg_nodes"):
+                        diag_chunks_with_entities += 1
                     for entity_node in node.metadata["kg_nodes"]:
-                        entity_name = entity_node.name if hasattr(entity_node, 'name') else str(entity_node.id)
-                        if entity_name not in entity_to_chunks:
-                            entity_to_chunks[entity_name] = []
+                        entity_name = _extract_entity_name(entity_node)
+                        entity_key = _canonical_entity_key(entity_name)
+                        if not entity_key:
+                            continue
+                        diag_mentions_total += 1
+                        diag_raw_names.add(str(entity_name)[:200])
+                        diag_canonical_keys.add(entity_key)
+                        if entity_key not in entity_to_chunks:
+                            entity_to_chunks[entity_key] = []
                             # Store the first chunk text where this entity appears
                             if chunk_text:
-                                entity_to_text[entity_name] = chunk_text[:500]
-                        entity_to_chunks[entity_name].append(chunk_id)
+                                entity_to_text[entity_key] = chunk_text[:500]
+                        entity_to_chunks[entity_key].append(chunk_id)
                     all_entity_nodes.extend(node.metadata["kg_nodes"])
                 
                 if "relations" in node.metadata:
-                    all_relations.extend(node.metadata["relations"])
+                    rels = node.metadata["relations"]
+                    all_relations.extend(rels)
+                    # Include relation endpoints in LLM-stage entity-key diagnostics
+                    for rel in rels or []:
+                        for endpoint_name in _extract_relation_endpoint_names(rel):
+                            ek = _canonical_entity_key(endpoint_name)
+                            if ek:
+                                diag_raw_names.add(str(endpoint_name)[:200])
+                                diag_canonical_keys.add(ek)
                 elif "kg_relations" in node.metadata:
-                    all_relations.extend(node.metadata["kg_relations"])
+                    rels = node.metadata["kg_relations"]
+                    all_relations.extend(rels)
+                    for rel in rels or []:
+                        for endpoint_name in _extract_relation_endpoint_names(rel):
+                            ek = _canonical_entity_key(endpoint_name)
+                            if ek:
+                                diag_raw_names.add(str(endpoint_name)[:200])
+                                diag_canonical_keys.add(ek)
             
+            logger.warning(
+                "v3_extract_determinism_llm_metadata %s",
+                {
+                    "group_id": group_id,
+                    "chunks": len(chunks),
+                    "llama_nodes": len(llama_nodes),
+                    "extracted_nodes": len(extracted_nodes),
+                    "cache_key_digest": cache_keys_digest,
+                    "cache_key_sample": cache_keys_sample,
+                    "validation_stats": validation_stats,
+                    "chunks_with_entities": diag_chunks_with_entities,
+                    "entity_mentions_total": diag_mentions_total,
+                    "raw_entity_names_unique": len(diag_raw_names),
+                    "canonical_entity_keys_unique": len(diag_canonical_keys),
+                    "canonical_entity_keys_digest": _stable_set_digest(diag_canonical_keys),
+                    "canonical_entity_keys_buckets": _bucket_summaries(diag_canonical_keys),
+                    "canonical_entity_keys_sample_hashes": [_hash12(k) for k in sorted(diag_canonical_keys)[:20]],
+                    "relations_total": len(all_relations),
+                },
+            )
+
             logger.info(f"Found {len(all_entity_nodes)} entities and {len(all_relations)} relations")
             
             if all_entity_nodes:
-                self.temp_graph_store.upsert_nodes(all_entity_nodes)
+                temp_graph_store.upsert_nodes(all_entity_nodes)
             
             if all_relations:
-                self.temp_graph_store.upsert_relations(all_relations)
+                temp_graph_store.upsert_relations(all_relations)
                 
             logger.info("Upserted entities and relations into graph store")
             
@@ -865,12 +1458,42 @@ class IndexingPipelineV3:
         
         # Get extracted entities and relationships from graph store
         # Manual extraction from graph store since get_triplets() seems to be failing
-        graph = self.temp_graph_store.graph
+        graph = temp_graph_store.graph
         graph_nodes = graph.nodes
         graph_relations = graph.relations
         
         # Helper to find entity ID by name
         name_to_id_map = {}
+
+        # Determinism diagnostics: summarize what actually ended up in the graph store.
+        diag_graph_raw_names: Set[str] = set()
+        diag_graph_canonical: Set[str] = set()
+        diag_canonical_to_variants: Dict[str, Set[str]] = {}
+        desc_upgrades = 0
+
+        def _stable_set_digest(items: Set[str]) -> str:
+            h = hashlib.sha256()
+            for s in sorted(items):
+                h.update(s.encode("utf-8", errors="ignore"))
+                h.update(b"\n")
+            return h.hexdigest()[:12]
+
+        def _hash12(value: str) -> str:
+            h = hashlib.sha256()
+            h.update((value or "").encode("utf-8", errors="ignore"))
+            return h.hexdigest()[:12]
+
+        def _bucket_summaries(items: Set[str], buckets: int = 8) -> Dict[str, Dict[str, Union[int, str]]]:
+            bucketed: list[set[str]] = [set() for _ in range(buckets)]
+            for item in items:
+                if not item:
+                    continue
+                idx = int(hashlib.sha256(item.encode("utf-8", errors="ignore")).hexdigest()[:8], 16) % buckets
+                bucketed[idx].add(item)
+            out: Dict[str, Dict[str, Union[int, str]]] = {}
+            for i, bset in enumerate(bucketed):
+                out[str(i)] = {"n": len(bset), "d": _stable_set_digest(bset) if bset else ""}
+            return out
 
         for node_id, node in graph_nodes.items():
              # node is a LabelledNode or EntityNode
@@ -898,15 +1521,48 @@ class IndexingPipelineV3:
                  else:
                      continue
 
-             entity_key = entity_name.lower()
+             diag_graph_raw_names.add(str(entity_name)[:200])
+             entity_key = _canonical_entity_key(entity_name)
+             if not entity_key:
+                 continue
+
+             diag_graph_canonical.add(entity_key)
+             vset = diag_canonical_to_variants.get(entity_key)
+             if vset is None:
+                 vset = set()
+                 diag_canonical_to_variants[entity_key] = vset
+             vset.add(str(entity_name)[:200])
+
+             def _description_score(text: str) -> tuple[int, int]:
+                 t = (text or "").strip()
+                 if not t:
+                     return (0, 0)
+                 words = re.findall(r"[a-z0-9]+", t.lower())
+                 return (len(set(words)), len(t))
+
+             def _choose_better_description(existing: str, candidate: str) -> str:
+                 cand = (candidate or "").strip()
+                 if not cand:
+                     return (existing or "").strip()
+                 cur = (existing or "").strip()
+                 if not cur:
+                     return cand
+                 # Prefer non-dict-like descriptions over raw properties dumps
+                 cur_dicty = cur.startswith("{") and cur.endswith("}")
+                 cand_dicty = cand.startswith("{") and cand.endswith("}")
+                 if cur_dicty and not cand_dicty:
+                     return cand
+                 if cand_dicty and not cur_dicty:
+                     return cur
+                 return cand if _description_score(cand) > _description_score(cur) else cur
              
              # Create entity if not exists
              if entity_key not in all_entities:
                  new_id = f"entity_{uuid.uuid4().hex[:8]}"
-                 chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
+                 chunk_ids_for_entity = entity_to_chunks.get(entity_key, [])
                  
                  # Get description from chunk text where entity appears
-                 description = entity_to_text.get(entity_name, "")
+                 description = entity_to_text.get(entity_key, "")
                  
                  # If no description from entity_to_text, use chunk text from first chunk_id
                  if not description and chunk_ids_for_entity:
@@ -935,10 +1591,53 @@ class IndexingPipelineV3:
              else:
                  # If already exists, merge chunk IDs
                  name_to_id_map[entity_key] = all_entities[entity_key].id
-                 chunk_ids_for_entity = entity_to_chunks.get(entity_name, [])
+                 chunk_ids_for_entity = entity_to_chunks.get(entity_key, [])
                  if chunk_ids_for_entity:
                      existing_ids = getattr(all_entities[entity_key], 'text_unit_ids', [])
                      all_entities[entity_key].text_unit_ids = list(set(existing_ids + chunk_ids_for_entity))
+
+                 # Upgrade description when we see better evidence later.
+                 candidate_desc = entity_to_text.get(entity_key, "")
+                 if not candidate_desc and chunk_ids_for_entity:
+                     first_chunk_id = chunk_ids_for_entity[0]
+                     for chunk in chunks:
+                         if chunk.id == first_chunk_id:
+                             candidate_desc = chunk.text[:500]
+                             break
+                 if not candidate_desc and hasattr(node, 'properties'):
+                     candidate_desc = str(node.properties)
+
+                 before_desc = getattr(all_entities[entity_key], "description", "")
+                 after_desc = _choose_better_description(before_desc, candidate_desc)
+                 if after_desc != (before_desc or ""):
+                     desc_upgrades += 1
+                 all_entities[entity_key].description = after_desc
+
+        variant_clusters = [(k, len(v)) for k, v in diag_canonical_to_variants.items() if len(v) > 1]
+        variant_clusters.sort(key=lambda t: (-t[1], t[0]))
+        top_variant_clusters = []
+        for k, n in variant_clusters[:8]:
+            samples = sorted(diag_canonical_to_variants.get(k, set()))[:6]
+            top_variant_clusters.append({"key": k[:120], "variants": n, "samples": samples})
+
+        logger.warning(
+            "v3_extract_determinism_graph_store %s",
+            {
+                "group_id": group_id,
+                "graph_nodes": len(graph_nodes),
+                "graph_relations": len(graph_relations),
+                "graph_raw_names_unique": len(diag_graph_raw_names),
+                "graph_canonical_keys_unique": len(diag_graph_canonical),
+                "graph_canonical_digest": _stable_set_digest(diag_graph_canonical),
+                "graph_canonical_buckets": _bucket_summaries(diag_graph_canonical),
+                "graph_canonical_sample_hashes": [_hash12(k) for k in sorted(diag_graph_canonical)[:20]],
+                "canonical_keys_with_variants": len(variant_clusters),
+                "top_variant_clusters": top_variant_clusters,
+                "final_entities": len(all_entities),
+                "final_relationships": len(all_relationships),
+                "description_upgrades": desc_upgrades,
+            },
+        )
 
         for relation_id, relation in graph_relations.items():
             # relation is a Relation object
@@ -949,7 +1648,7 @@ class IndexingPipelineV3:
             target_name = relation.target_id
             
             # Fallback: if for some reason IDs are not names, try to look up the node
-            if source_name not in name_to_id_map:
+            if _canonical_entity_key(str(source_name)) not in name_to_id_map:
                  source_node = graph_nodes.get(source_name)
                  if source_node:
                      if hasattr(source_node, "name") and source_node.name:
@@ -957,7 +1656,7 @@ class IndexingPipelineV3:
                      elif hasattr(source_node, "properties") and "name" in source_node.properties:
                          source_name = source_node.properties["name"]
 
-            if target_name not in name_to_id_map:
+            if _canonical_entity_key(str(target_name)) not in name_to_id_map:
                  target_node = graph_nodes.get(target_name)
                  if target_node:
                      if hasattr(target_node, "name") and target_node.name:
@@ -965,8 +1664,8 @@ class IndexingPipelineV3:
                      elif hasattr(target_node, "properties") and "name" in target_node.properties:
                          target_name = target_node.properties["name"]
             
-            source_key = str(source_name).lower()
-            target_key = str(target_name).lower()
+            source_key = _canonical_entity_key(str(source_name))
+            target_key = _canonical_entity_key(str(target_name))
             
             source_entity_id = name_to_id_map.get(source_key)
             target_entity_id = name_to_id_map.get(target_key)
@@ -982,7 +1681,7 @@ class IndexingPipelineV3:
         # Fallback to get_triplets if manual extraction yielded nothing (unlikely given the stats)
         if not all_entities and not all_relationships:
             logger.warning("Manual extraction failed, trying get_triplets()")
-            graph_data = self.temp_graph_store.get_triplets()
+            graph_data = temp_graph_store.get_triplets()
             for triplet in graph_data:
                 # Triplet format: (subject, relation, object)
                 subject_name = triplet[0]
@@ -1817,5 +2516,42 @@ Summary (be concise but capture key information):"""
     async def _llm_complete(self, prompt: str) -> str:
         """Generate completion using AzureOpenAI."""
         messages = [ChatMessage(role=MessageRole.USER, content=prompt)]
-        response = await self.llm.achat(messages)
-        return response.message.content
+
+        # Be polite to Azure OpenAI token rate limits.
+        # LlamaIndex has its own retry, but it may retry too aggressively (e.g., 1s) relative
+        # to the server-provided guidance (often 10s+). This wrapper adds an outer backoff.
+        delay_s = 1.0
+        max_attempts = 6
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self.llm.achat(messages)
+                return response.message.content
+            except Exception as e:
+                error_text = str(e)
+                is_rate_limited = (
+                    "RateLimit" in e.__class__.__name__
+                    or "RateLimitReached" in error_text
+                    or "Error code: 429" in error_text
+                )
+
+                if (not is_rate_limited) or attempt >= max_attempts:
+                    raise
+
+                # Parse common Azure message: "Please retry after 10 seconds."
+                m = re.search(r"retry after\s+(\d+(?:\.\d+)?)\s+seconds", error_text, flags=re.IGNORECASE)
+                if m:
+                    delay_s = float(m.group(1))
+                else:
+                    delay_s = min(delay_s * 2.0, 30.0)
+
+                # Small jitter to avoid thundering herd in multi-replica scenarios.
+                delay_s = delay_s + (random.random() * 0.5)
+                logger.warning(
+                    "v3_llm_rate_limited",
+                    attempt=attempt,
+                    sleep_seconds=delay_s,
+                )
+                await asyncio.sleep(delay_s)
+
+        raise RuntimeError("Unreachable: _llm_complete retry loop exhausted")

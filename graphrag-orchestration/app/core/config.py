@@ -67,6 +67,10 @@ class Settings(BaseSettings):
     # GraphRAG Data Directories
     GRAPHRAG_DATA_DIR: str = "/app/data/graphrag"
     GRAPHRAG_CACHE_DIR: str = "/app/data/cache"
+
+    # Determinism: extraction caching (Neo4j-backed)
+    GRAPHRAG_ENABLE_EXTRACTION_CACHE: bool = Field(default=False)
+    GRAPHRAG_EXTRACTION_CACHE_VERSION: str = Field(default="v1")
     
     # Multi-tenancy
     ENABLE_GROUP_ISOLATION: bool = True

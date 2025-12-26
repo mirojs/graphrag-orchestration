@@ -29,7 +29,8 @@ Model: prebuilt-layout (2024-11-30 API version)
 import asyncio
 import logging
 import base64
-from typing import Any, Dict, List, Optional, Tuple, Union
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote
 
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
@@ -75,20 +76,31 @@ class DocumentIntelligenceService:
         logger.info(f"Document Intelligence Service Init - Using API key: {bool(self.api_key)}")
         logger.info(f"Document Intelligence Service Init - Max concurrency: {self.max_concurrency}")
 
-    async def _create_client(self) -> DocumentIntelligenceClient:
-        """Create async client with appropriate authentication."""
+    @asynccontextmanager
+    async def _create_client(self) -> AsyncIterator[DocumentIntelligenceClient]:
+        """Create an async Document Intelligence client and ensure resources are closed.
+
+        Azure async credentials and clients use aiohttp under the hood. If they aren't
+        closed, the process can emit warnings like "Unclosed client session/connector".
+        """
         if self.api_key:
             logger.info("Document Intelligence: Using API key authentication")
             credential = AzureKeyCredential(self.api_key)
+            async with DocumentIntelligenceClient(
+                endpoint=self.endpoint,
+                credential=credential,
+                api_version=self.api_version,
+            ) as client:
+                yield client
         else:
             logger.info("Document Intelligence: Using managed identity authentication")
-            credential = DefaultAzureCredential()
-
-        return DocumentIntelligenceClient(
-            endpoint=self.endpoint,
-            credential=credential,
-            api_version=self.api_version,
-        )
+            async with DefaultAzureCredential() as credential:
+                async with DocumentIntelligenceClient(
+                    endpoint=self.endpoint,
+                    credential=credential,
+                    api_version=self.api_version,
+                ) as client:
+                    yield client
 
     def _build_section_hierarchy(self, paragraphs: List[DocumentParagraph]) -> List[str]:
         """Extract section hierarchy from paragraph roles."""
@@ -272,18 +284,18 @@ class DocumentIntelligenceService:
                         logger.info(f"Attempting to download blob content from: {url}")
                         
                         # Use DefaultAzureCredential for blob access (Managed Identity)
-                        # This requires the Container App to have 'Storage Blob Data Reader' role
-                        credential = DefaultAzureCredential()
-                        
-                        # Extract blob URL without query params (SAS tokens not needed with MI)
-                        clean_url = url.split('?')[0]
-                        logger.info(f"Using clean blob URL (no SAS): {clean_url}")
-                        
-                        async with BlobClient.from_blob_url(clean_url, credential=credential) as blob_client:
-                            content = await blob_client.download_blob()
-                            document_bytes = await content.readall()
-                            
-                            logger.info(f"✅ Successfully downloaded blob content ({len(document_bytes)} bytes)")
+                        # This requires the Container App to have 'Storage Blob Data Reader' role.
+                        # Ensure credential is properly closed to avoid aiohttp unclosed-session warnings.
+                        async with DefaultAzureCredential() as credential:
+                            # Extract blob URL without query params (SAS tokens not needed with MI)
+                            clean_url = url.split('?')[0]
+                            logger.info(f"Using clean blob URL (no SAS): {clean_url}")
+
+                            async with BlobClient.from_blob_url(clean_url, credential=credential) as blob_client:
+                                content = await blob_client.download_blob()
+                                document_bytes = await content.readall()
+
+                                logger.info(f"✅ Successfully downloaded blob content ({len(document_bytes)} bytes)")
                     except Exception as e:
                         logger.error(f"❌ Failed to download blob content: {str(e)}")
                         logger.error(f"   This likely means the Container App doesn't have 'Storage Blob Data Reader' role")
@@ -524,7 +536,7 @@ class DocumentIntelligenceService:
         if urls:
             logger.info(f"📦 Batch processing {len(urls)} documents with 60s timeout")
             
-            async with await self._create_client() as client:
+            async with self._create_client() as client:
                 # Resolve default model from strategy
                 if model_strategy == "layout":
                     default_model = "prebuilt-layout"

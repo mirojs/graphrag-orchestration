@@ -14,6 +14,8 @@ All operations include group_id for multi-tenancy.
 import logging
 import uuid
 import json
+import asyncio
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple, cast
 from dataclasses import dataclass, field
 
@@ -121,6 +123,10 @@ class Neo4jStoreV3:
         self.database = database
         self._driver = None
         self._async_driver = None
+
+        # Determinism: chunk-level extraction cache schema init (best-effort).
+        self._extraction_cache_schema_ready: bool = False
+        self._extraction_cache_schema_lock: asyncio.Lock = asyncio.Lock()
         
     @property
     def driver(self) -> neo4j.Driver:
@@ -157,6 +163,33 @@ class Neo4jStoreV3:
         if self._async_driver:
             await self._async_driver.close()
             self._async_driver = None
+
+        self._extraction_cache_schema_ready = False
+
+    async def _aensure_extraction_cache_schema(self) -> None:
+        """Ensure ExtractionCache schema exists (best-effort).
+
+        Neo4j emits notifications (UnknownLabel/UnknownPropertyKey) when querying
+        labels/properties that haven't been created yet. Creating the constraint
+        once up-front suppresses those notifications and improves lookup speed.
+        """
+
+        if self._extraction_cache_schema_ready:
+            return
+
+        async with self._extraction_cache_schema_lock:
+            if self._extraction_cache_schema_ready:
+                return
+
+            try:
+                async with self.async_driver.session(database=self.database) as session:
+                    await session.run(
+                        "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE"
+                    )
+                self._extraction_cache_schema_ready = True
+            except Exception as e:
+                # Caching is optional; never fail the indexing request because of it.
+                logger.warning(f"Failed to ensure ExtractionCache schema (continuing): {e}")
     
     # ==================== Schema Management ====================
     
@@ -175,6 +208,9 @@ class Neo4jStoreV3:
             "CREATE CONSTRAINT raptor_id IF NOT EXISTS FOR (r:RaptorNode) REQUIRE r.id IS UNIQUE",
             "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (t:TextChunk) REQUIRE t.id IS UNIQUE",
             "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
+
+            # Determinism: chunk-level extraction cache
+            "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE",
             
             # Regular indexes for filtering
             "CREATE INDEX entity_group IF NOT EXISTS FOR (e:Entity) ON (e.group_id)",
@@ -255,6 +291,70 @@ class Neo4jStoreV3:
                     logger.warning(f"Vector index creation failed: {e}")
         
         logger.info("Neo4j schema initialization complete")
+
+    # ==================== Extraction Cache (Determinism) ====================
+
+    async def aget_extraction_cache_batch(self, keys: List[str]) -> Dict[str, str]:
+        """Fetch extraction-cache payloads by key.
+
+        Returns a dict of key -> payload_json for the keys that exist.
+        """
+        if not keys:
+            return {}
+
+        await self._aensure_extraction_cache_schema()
+
+        query = """
+        UNWIND $keys AS k
+        OPTIONAL MATCH (c:ExtractionCache {key: k})
+        RETURN k AS key, c['payload'] AS payload
+        """
+
+        async with self.async_driver.session(database=self.database) as session:
+            result = await session.run(query, keys=keys)
+            out: Dict[str, str] = {}
+            async for record in result:
+                key = cast(str, record.get("key"))
+                payload = record.get("payload")
+                if key and payload:
+                    out[key] = cast(str, payload)
+            return out
+
+    async def aput_extraction_cache_batch(
+        self,
+        items: List[Dict[str, Any]],
+    ) -> int:
+        """Upsert extraction-cache payloads.
+
+        Each item should include: key, payload, model (optional), params_hash (optional).
+        """
+        if not items:
+            return 0
+
+        await self._aensure_extraction_cache_schema()
+
+        query = """
+        UNWIND $items AS item
+        MERGE (c:ExtractionCache {key: item.key})
+        ON CREATE SET
+            c.payload = item.payload,
+            c.model = coalesce(item.model, ''),
+            c.params_hash = coalesce(item.params_hash, ''),
+            c.created_at = datetime(),
+            c.updated_at = datetime(),
+            c.hits = 0
+        ON MATCH SET
+            c.model = coalesce(item.model, c.model),
+            c.params_hash = coalesce(item.params_hash, c.params_hash),
+            c.updated_at = datetime()
+        SET c.hits = coalesce(c.hits, 0) + 1
+        RETURN count(c) AS count
+        """
+
+        async with self.async_driver.session(database=self.database) as session:
+            result = await session.run(query, items=items)
+            record = await result.single()
+            return cast(int, record["count"]) if record and record.get("count") is not None else 0
     
     # ==================== Entity Operations ====================
     
@@ -1279,15 +1379,15 @@ class Neo4jStoreV3:
     def get_group_stats(self, group_id: str) -> Dict[str, int]:
         """Get statistics for a group."""
         query = """
-        MATCH (e:Entity {group_id: $group_id})
+        OPTIONAL MATCH (e:Entity {group_id: $group_id})
         WITH count(e) AS entities
-        MATCH (c:Community {group_id: $group_id})
+        OPTIONAL MATCH (c:Community {group_id: $group_id})
         WITH entities, count(c) AS communities
-        MATCH (r:RaptorNode {group_id: $group_id})
+        OPTIONAL MATCH (r:RaptorNode {group_id: $group_id})
         WITH entities, communities, count(r) AS raptor_nodes
-        MATCH (t:TextChunk {group_id: $group_id})
+        OPTIONAL MATCH (t:TextChunk {group_id: $group_id})
         WITH entities, communities, raptor_nodes, count(t) AS text_chunks
-        MATCH (d:Document {group_id: $group_id})
+        OPTIONAL MATCH (d:Document {group_id: $group_id})
         WITH entities, communities, raptor_nodes, text_chunks, count(d) AS documents
         OPTIONAL MATCH (:Entity {group_id: $group_id})-[rel]->(:Entity {group_id: $group_id})
         RETURN entities, communities, raptor_nodes, text_chunks, documents, count(rel) AS relationships

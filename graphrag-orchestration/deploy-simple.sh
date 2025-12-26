@@ -130,6 +130,8 @@ if [ "$APP_EXISTS" = "yes" ]; then
       "AZURE_OPENAI_ENDPOINT=$OPENAI_ENDPOINT" \
       "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://doc-intel-graphrag.cognitiveservices.azure.com/" \
       "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" \
+      "GRAPHRAG_ENABLE_EXTRACTION_CACHE=true" \
+      "GRAPHRAG_EXTRACTION_CACHE_VERSION=${GRAPHRAG_EXTRACTION_CACHE_VERSION:-v3}" \
     --output table
 else
   echo "⏳ Creating new app..."
@@ -161,6 +163,8 @@ else
       "COSMOS_ENDPOINT=$COSMOS_ENDPOINT" \
       "COSMOS_DATABASE_NAME=content-processor" \
       "ENABLE_GROUP_ISOLATION=true" \
+      "GRAPHRAG_ENABLE_EXTRACTION_CACHE=true" \
+      "GRAPHRAG_EXTRACTION_CACHE_VERSION=${GRAPHRAG_EXTRACTION_CACHE_VERSION:-v3}" \
     --output table
 fi
 

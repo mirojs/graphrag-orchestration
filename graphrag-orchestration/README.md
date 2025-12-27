@@ -7,6 +7,12 @@ This service implements the **"Gold Standard" Hybrid Architecture** for advanced
 
 ## Architecture
 
+## Booster patterns
+
+This service uses small “boosters” (selection-stage recall boosts and post-reduce completeness boosters) to improve grounded recall and prevent map/reduce compression from dropping concrete anchors (e.g., deadlines, limits).
+
+See: docs/BOOSTERS.md
+
 ### Components
 1. **FastAPI Application**: Handles HTTP requests, auth, and orchestration.
 2. **Neo4j Database**: Stores the Knowledge Graph (Nodes, Relationships, Properties).

@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     
     # Community Detection (GraphRAG Global Search)
     GRAPHRAG_MAX_CLUSTER_SIZE: int = 10  # Max nodes per community cluster
+
+    # DRIFT debugging
+    # If true, DRIFT will fall back to a simpler retrieval path when the graph is
+    # missing prerequisites (e.g., communities/relationships). Keep false in prod.
+    V3_DRIFT_DEBUG_FALLBACK: bool = Field(default=False)
     
     class Config:
         env_file = ".env"

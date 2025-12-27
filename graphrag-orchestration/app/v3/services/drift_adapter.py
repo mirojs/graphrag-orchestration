@@ -22,6 +22,14 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+
+class DriftPrerequisitesError(RuntimeError):
+    """Raised when a DRIFT search cannot run due to missing prerequisite graph data."""
+
+    def __init__(self, message: str, *, missing: list[str] | None = None):
+        super().__init__(message)
+        self.missing = missing or []
+
 # Module-level caches that persist across API requests
 # These store loaded data to avoid re-querying Neo4j on every request
 _GRAPHRAG_MODEL_CACHE: Dict[str, Any] = {}  # Stores complete GraphRAG models
@@ -436,6 +444,35 @@ class DRIFTAdapter:
                     "sources": [],
                     "reasoning_path": [],
                 }
+
+            # DRIFT relies on community structure and at least some relationship signal.
+            # For debugging, we can fall back; by default we fail-fast with a clear 4xx.
+            missing: list[str] = []
+            if not relationships:
+                missing.append("relationships")
+            if not communities:
+                missing.append("communities")
+            if missing:
+                message = (
+                    "DRIFT prerequisites missing for this group. "
+                    f"Missing: {', '.join(missing)}. "
+                    "Reindex with community detection enabled (run_community_detection=true) "
+                    "and ensure relationship extraction succeeded."
+                )
+
+                if settings.V3_DRIFT_DEBUG_FALLBACK:
+                    logger.warning(
+                        "DRIFT prerequisites missing; debug fallback enabled",
+                        extra={
+                            "group_id": group_id,
+                            "missing": missing,
+                        },
+                    )
+                    entities_df = self.load_entities(group_id, use_cache=use_cache)
+                    relationships_df = self.load_relationships(group_id, use_cache=use_cache)
+                    return await self._fallback_search(group_id, query, entities_df, relationships_df)
+
+                raise DriftPrerequisitesError(message, missing=missing)
             
             elapsed = time.time() - stage_start
             logger.info(f"[DRIFT STAGE 2/5] Loaded {len(entities)} entities, {len(relationships)} relationships, "
@@ -508,23 +545,102 @@ class DRIFTAdapter:
                         'max_tokens': getattr(llama_llm, 'max_tokens', 4000),
                         'top_p': getattr(llama_llm, 'top_p', 1.0),
                     })()
+
+                @staticmethod
+                def _wants_json(prompt: str, kwargs: dict) -> bool:
+                    if kwargs.get("json", False):
+                        return True
+                    p = (prompt or "").lower()
+                    # MS GraphRAG drift primer expects JSON for query decomposition; it usually
+                    # includes explicit JSON instructions in the prompt, even if it doesn't pass
+                    # a structured flag in kwargs.
+                    return "json" in p
+
+                @staticmethod
+                def _strip_code_fences(text: str) -> str:
+                    t = (text or "").strip()
+                    if not t:
+                        return ""
+                    if t.startswith("```json"):
+                        t = t[7:]
+                    elif t.startswith("```"):
+                        t = t[3:]
+                    if t.endswith("```"):
+                        t = t[:-3]
+                    return t.strip()
+
+                @staticmethod
+                def _coerce_single_json(text: str) -> str:
+                    """Return a single valid JSON object/array string.
+
+                    Handles common LLM failure modes:
+                    - Markdown fences
+                    - Preface/suffix text around JSON (causing JSONDecodeError: Extra data)
+                    - Minor JSON syntax issues (attempt repair)
+                    """
+                    import json
+
+                    raw = DRIFTLLMWrapper._strip_code_fences(text)
+                    if not raw:
+                        return ""
+
+                    # Try extracting the first JSON value via raw_decode.
+                    decoder = json.JSONDecoder()
+                    start = None
+                    for i, ch in enumerate(raw):
+                        if ch in "{[":
+                            start = i
+                            break
+                    if start is not None:
+                        try:
+                            _, end = decoder.raw_decode(raw[start:])
+                            candidate = raw[start : start + end].strip()
+                            # Validate
+                            json.loads(candidate)
+                            return candidate
+                        except Exception:
+                            pass
+
+                    # Fallback: attempt JSON repair and then parse again.
+                    try:
+                        from json_repair import repair_json
+
+                        repaired = repair_json(raw).strip()
+                        if repaired and repaired not in ('""', ""):
+                            # Some repairs may still include leading/trailing text; repeat extraction.
+                            start = None
+                            for i, ch in enumerate(repaired):
+                                if ch in "{[":
+                                    start = i
+                                    break
+                            if start is not None:
+                                _, end = decoder.raw_decode(repaired[start:])
+                                candidate = repaired[start : start + end].strip()
+                                json.loads(candidate)
+                                return candidate
+                            json.loads(repaired)
+                            return repaired
+                    except Exception:
+                        pass
+
+                    # Last resort: return stripped text (will surface error upstream).
+                    return raw
                 
                 async def achat(self, prompt: str, history: list | None = None, **kwargs):
                     """MS GraphRAG ChatModel protocol: achat(prompt, history) -> ModelResponse."""
                     import sys
 
                     prompt = f"{self._prefix}{prompt}"
-                    
-                    # Check if JSON output is requested
-                    json_mode = kwargs.get('json', False)
+
+                    json_mode = self._wants_json(prompt, kwargs)
                     
                     # Debug: Print to stdout with flush
                     print(f"[DRIFT_DEBUG] achat called, json_mode={json_mode}, prompt_len={len(prompt)}", flush=True)
                     sys.stdout.flush()
                     logger.error(f"[DRIFT_DEBUG] achat called, json_mode={json_mode}")
                     
-                    # If JSON mode, append instruction to prompt
-                    if json_mode and 'json' not in prompt.lower():
+                    # If JSON mode, append instruction to prompt (even if prompt already mentions JSON)
+                    if json_mode:
                         prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
                     
                     try:
@@ -533,18 +649,14 @@ class DRIFTAdapter:
                         text = response.text.strip() if response and hasattr(response, 'text') else ''
                         print(f"[DRIFT_DEBUG] LLM response: len={len(text)}, text='{text[:500] if text else 'EMPTY'}'", flush=True)
                         logger.error(f"[DRIFT_DEBUG] LLM returned: len={len(text)}, text={text[:200]}")
-                        
-                        # Strip markdown code fences if present (LLM often wraps JSON in ```json...```)
+
+                        if text:
+                            text = self._strip_code_fences(text)
                         if json_mode and text:
-                            cleaned_text = text.strip()
-                            if cleaned_text.startswith("```json"):
-                                cleaned_text = cleaned_text[7:]  # Remove ```json
-                            elif cleaned_text.startswith("```"):
-                                cleaned_text = cleaned_text[3:]  # Remove ```
-                            if cleaned_text.endswith("```"):
-                                cleaned_text = cleaned_text[:-3]  # Remove trailing ```
-                            text = cleaned_text.strip()
-                            print(f"[DRIFT_DEBUG] After stripping fences: len={len(text)}, starts_with={text[:80]}", flush=True)
+                            coerced = self._coerce_single_json(text)
+                            if coerced != text:
+                                print(f"[DRIFT_DEBUG] Coerced JSON output: len={len(coerced)}", flush=True)
+                            text = coerced
                     except Exception as e:
                         print(f"[DRIFT_DEBUG] LLM call failed: {type(e).__name__}: {e}", flush=True)
                         logger.error(f"[DRIFT_DEBUG] LLM call failed: {e}")
@@ -607,15 +719,19 @@ class DRIFTAdapter:
                 def chat(self, prompt: str, history: list | None = None, **kwargs):
                     """Sync version of chat."""
                     prompt = f"{self._prefix}{prompt}"
-                    # Check if JSON output is requested
-                    json_mode = kwargs.get('json', False)
-                    
-                    # If JSON mode, append instruction to prompt
-                    if json_mode and 'json' not in prompt.lower():
+
+                    json_mode = self._wants_json(prompt, kwargs)
+
+                    if json_mode:
                         prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
                     
                     response = self.llm.complete(prompt)
-                    text = response.text.strip()
+
+                    text = response.text.strip() if response and hasattr(response, 'text') else ''
+                    if text:
+                        text = self._strip_code_fences(text)
+                    if json_mode and text:
+                        text = self._coerce_single_json(text)
                     
                     return DRIFTModelResponse(text=text, raw_response=response)
             

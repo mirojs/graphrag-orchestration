@@ -87,6 +87,25 @@ class Settings(BaseSettings):
     # missing prerequisites (e.g., communities/relationships). Keep false in prod.
     V3_DRIFT_DEBUG_FALLBACK: bool = Field(default=False)
     
+    # DRIFT detailed logging for debugging text unit retrieval, sources, and chunk content
+    # Enable to trace text unit loading, chunk content, and source extraction
+    # Note: Can be verbose; use only for specific groups with V3_DRIFT_DEBUG_GROUP_ID
+    V3_DRIFT_DEBUG_LOGGING: bool = Field(default=False)
+    
+    # Specific group ID to trace DRIFT processing (only logs for this group when V3_DRIFT_DEBUG_LOGGING=true)
+    # Example: "drift-ok-1766862426"
+    V3_DRIFT_DEBUG_GROUP_ID: Optional[str] = Field(default=None)
+
+    # When enabled (and debug group matches), scan loaded text units + extracted sources
+    # for key phrases/timeframe patterns to debug missing grounding.
+    V3_DRIFT_DEBUG_TERM_SCAN: bool = Field(default=False)
+
+    # DRIFT prompt guardrails
+    # GraphRAG may pass very large history/context messages (especially during reduce).
+    # These caps bound how much history we serialize into a single prompt.
+    V3_DRIFT_MAX_HISTORY_CHARS: int = Field(default=120_000)
+    V3_DRIFT_MAX_HISTORY_MESSAGE_CHARS: int = Field(default=40_000)
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

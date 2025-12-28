@@ -539,6 +539,7 @@ class V3DriftRequest(BaseModel):
     query: str = Field(..., description="Natural language query")
     max_iterations: int = Field(default=5, description="Maximum DRIFT iterations")
     convergence_threshold: float = Field(default=0.8, description="Stop when confidence reaches this")
+    include_sources: bool = Field(default=True, description="Include source references")
     include_reasoning_path: bool = Field(default=True, description="Include step-by-step reasoning")
 
 
@@ -711,6 +712,16 @@ async def index_documents(
     """
     group_id = get_group_id(request)
     logger.info("v3_index_start", group_id=group_id, num_documents=len(payload.documents))
+
+    # Important: DRIFT keeps aggressive in-process caches of GraphRAG models per group.
+    # If we don't clear these, post-index queries can continue to serve stale results
+    # until the container restarts.
+    try:
+        adapter = get_drift_adapter()
+        adapter.clear_cache(group_id)
+        logger.info("v3_index_cleared_drift_cache", group_id=group_id)
+    except Exception as e:
+        logger.warning("v3_index_clear_drift_cache_failed", group_id=group_id, error=str(e))
     
     try:
         pipeline = get_indexing_pipeline()
@@ -1829,6 +1840,7 @@ async def query_drift(request: Request, payload: V3DriftRequest):
                 query=payload.query,
                 max_iterations=payload.max_iterations,
                 convergence_threshold=payload.convergence_threshold,
+                include_sources=payload.include_sources,
             )
         except Exception as e:
             # If the DRIFT adapter cannot run due to missing prerequisite data,
@@ -1846,7 +1858,7 @@ async def query_drift(request: Request, payload: V3DriftRequest):
             answer=result["answer"],
             confidence=result["confidence"],
             iterations=result["iterations"],
-            sources=result["sources"] if payload.include_reasoning_path else [],
+            sources=result["sources"] if payload.include_sources else [],
             reasoning_path=result["reasoning_path"] if payload.include_reasoning_path else [],
             search_type="drift",
         )

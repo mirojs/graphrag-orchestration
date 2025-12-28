@@ -14,6 +14,7 @@ Usage:
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional
 import pandas as pd
 import neo4j
@@ -21,6 +22,22 @@ from neo4j import AsyncGraphDatabase
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b):
+        fx = float(x)
+        fy = float(y)
+        dot += fx * fy
+        na += fx * fx
+        nb += fy * fy
+    denom = (na ** 0.5) * (nb ** 0.5)
+    return (dot / denom) if denom else 0.0
 
 
 class DriftPrerequisitesError(RuntimeError):
@@ -114,6 +131,90 @@ class DRIFTAdapter:
             _COMMUNITY_CACHE.clear()
             _RELATIONSHIP_CACHE.clear()
             _GRAPHRAG_MODEL_CACHE.clear()
+
+    def _debug_term_scan(
+        self,
+        *,
+        where: str,
+        items: list[Any],
+        term_groups: dict[str, list[str]],
+        get_text: callable,
+        get_id: callable,
+        get_doc_ids: callable,
+        max_samples_per_term: int = 2,
+    ) -> None:
+        """Best-effort diagnostics to answer: does the tenant corpus contain evidence?
+
+        This is intentionally lightweight and log-only.
+        Term strings can be plain substrings or prefixed with "re:" for regex.
+        """
+
+        def _matches(text: str, term: str) -> bool:
+            if not text:
+                return False
+            if term.startswith("re:"):
+                try:
+                    return re.search(term[3:], text, flags=re.IGNORECASE) is not None
+                except re.error:
+                    return False
+            return term.lower() in text.lower()
+
+        print(f"[TERM_SCAN] where={where} items={len(items)} groups={list(term_groups.keys())}]", flush=True)
+
+        # Pre-lower texts once to keep scan cheap.
+        lowered: list[tuple[Any, str]] = []
+        for it in items:
+            try:
+                text = str(get_text(it) or "")
+            except Exception:
+                text = ""
+            lowered.append((it, text))
+
+        for group_name, terms in term_groups.items():
+            group_hits = 0
+            term_counts: dict[str, int] = {t: 0 for t in terms}
+            term_samples: dict[str, list[dict[str, Any]]] = {t: [] for t in terms}
+
+            for it, text in lowered:
+                if not text:
+                    continue
+
+                any_hit = False
+                for term in terms:
+                    if _matches(text, term):
+                        any_hit = True
+                        term_counts[term] += 1
+                        if len(term_samples[term]) < max_samples_per_term:
+                            try:
+                                iid = str(get_id(it) or "")
+                            except Exception:
+                                iid = ""
+                            try:
+                                doc_ids = get_doc_ids(it)
+                            except Exception:
+                                doc_ids = None
+                            term_samples[term].append(
+                                {
+                                    "id": iid or None,
+                                    "document_ids": doc_ids,
+                                }
+                            )
+                if any_hit:
+                    group_hits += 1
+
+            # Keep logs compact: only print terms that matched at least once.
+            matched_terms = [(t, c) for (t, c) in term_counts.items() if c > 0]
+            matched_terms.sort(key=lambda x: x[1], reverse=True)
+
+            print(
+                f"[TERM_SCAN] group={group_name} items_with_any_term={group_hits}/{len(items)} terms_matched={len(matched_terms)}/{len(terms)}]",
+                flush=True,
+            )
+            for term, count in matched_terms[:12]:
+                print(
+                    f"[TERM_SCAN] group={group_name} term={term} hits={count} samples={term_samples.get(term) or []}]",
+                    flush=True,
+                )
             
     def load_entities(self, group_id: str, use_cache: bool = True) -> pd.DataFrame:
         """
@@ -357,8 +458,9 @@ class DRIFTAdapter:
         query: str,
         max_iterations: int = 5,
         convergence_threshold: float = 0.8,
+        include_sources: bool = False,
         use_cache: bool = True,
-        **kwargs
+        **kwargs,
     ) -> Dict[str, Any]:
         """
         Execute DRIFT search using Neo4j data with MS GraphRAG models.
@@ -393,6 +495,20 @@ class DRIFTAdapter:
         import time
         overall_start = time.time()
         logger.info(f"[DRIFT STAGE 1/5] Starting DRIFT search for group {group_id}: {query[:50]}...")
+
+        is_debug_group = (
+            settings.V3_DRIFT_DEBUG_LOGGING
+            and (settings.V3_DRIFT_DEBUG_GROUP_ID is None or settings.V3_DRIFT_DEBUG_GROUP_ID == group_id)
+        )
+        
+        # DEBUG: Verify settings are being read correctly
+        if is_debug_group:
+            print(
+                f"[DEBUG_SETTINGS] V3_DRIFT_DEBUG_LOGGING={settings.V3_DRIFT_DEBUG_LOGGING} (type={type(settings.V3_DRIFT_DEBUG_LOGGING)})",
+                flush=True,
+            )
+            print(f"[DEBUG_SETTINGS] V3_DRIFT_DEBUG_GROUP_ID={settings.V3_DRIFT_DEBUG_GROUP_ID}", flush=True)
+            print(f"[DEBUG_SETTINGS] Current group_id={group_id}", flush=True)
         
         try:
             # Import MS GraphRAG DRIFT components
@@ -409,6 +525,11 @@ class DRIFTAdapter:
             except ImportError as e:
                 logger.error(f"Failed to import MS GraphRAG DRIFT: {e}")
                 # Fallback to basic search if DRIFT not available
+                if is_debug_group:
+                    print(
+                        "[DRIFT_DEBUG] EXECUTION_PATH=fallback_search reason=import_error]",
+                        flush=True,
+                    )
                 entities_df = self.load_entities(group_id, use_cache=use_cache)
                 relationships_df = self.load_relationships(group_id, use_cache=use_cache)
                 return await self._fallback_search(group_id, query, entities_df, relationships_df)
@@ -478,15 +599,95 @@ class DRIFTAdapter:
             logger.info(f"[DRIFT STAGE 2/5] Loaded {len(entities)} entities, {len(relationships)} relationships, "
                        f"{len(text_units)} text units, {len(communities)} communities ({elapsed:.2f}s)")
             
+            # Debug logging: Check for "10 business days" in text units
+            if is_debug_group and settings.V3_DRIFT_DEBUG_TERM_SCAN and text_units:
+                # Focused diagnostics for the question bank drift set (Q-D1..Q-D3)
+                # to distinguish: data absence vs retrieval/ranking/context selection.
+                term_groups = {
+                    "Q-D1_warranty_emergency": [
+                        "telephone",
+                        "emergency",
+                        "burst pipe",
+                        "promptly notify",
+                        "relieves",
+                        "builder",
+                    ],
+                    "Q-D2_pma_reservations": [
+                        "confirmed reservations",
+                        "honor all confirmed reservations",
+                        "owner shall honor",
+                        "terminated",
+                        "termination",
+                        "sold",
+                        "sale",
+                    ],
+                    "Q-D3_timeframes": [
+                        # Numeric + parenthetical styles commonly found in contracts
+                        "re:\\b\\d+\\s+business\\s+days\\b",
+                        "re:\\b\\d+\\s+days\\b",
+                        "re:\\bsixty\\s*\\(\\s*60\\s*\\)\\s*days\\b",
+                        "re:\\bten\\s*\\(\\s*10\\s*\\)\\s*business\\s*days\\b",
+                        "arbitration",
+                        "written notice",
+                    ],
+                }
+
+                self._debug_term_scan(
+                    where="text_units",
+                    items=text_units,
+                    term_groups=term_groups,
+                    get_text=lambda u: getattr(u, "text", ""),
+                    get_id=lambda u: getattr(u, "id", None),
+                    get_doc_ids=lambda u: getattr(u, "document_ids", None),
+                )
+            
             # Create Neo4j-backed vector store for entity embeddings
             stage_start = time.time()
             logger.info(f"[DRIFT STAGE 3/5] Building DRIFT context and vector stores...")
             entity_embeddings_store = Neo4jDRIFTVectorStore(
                 driver=self.driver,
                 group_id=group_id,
-                index_name="entity",
+                index_name="entity_embedding",
                 embedding_dimension=1536,  # text-embedding-3-small
             )
+
+            # Root-cause guardrail: if entity embeddings exist on the entity models,
+            # preload them into the vector store so query→entity mapping works even
+            # when the Neo4j vector index returns no in-tenant hits.
+            try:
+                from graphrag.vector_stores.base import VectorStoreDocument
+
+                embedded_entities: list[tuple[Any, list[float]]] = []
+                for e in entities:
+                    vec = getattr(e, "description_embedding", None)
+                    if isinstance(vec, list) and len(vec) > 0:
+                        embedded_entities.append((e, vec))
+
+                if is_debug_group:
+                    print(
+                        f"[DEBUG] Entity embeddings present: {len(embedded_entities)}/{len(entities)}]",
+                        flush=True,
+                    )
+                    if embedded_entities:
+                        print(
+                            f"[DEBUG] Entity embedding dims (sample): {len(embedded_entities[0][1])}]",
+                            flush=True,
+                        )
+
+                docs = [
+                    VectorStoreDocument(
+                        id=str(getattr(e, "id", "")),
+                        text=str(getattr(e, "title", "") or ""),
+                        vector=vec,
+                    )
+                    for (e, vec) in embedded_entities
+                    if getattr(e, "id", None)
+                ]
+                if docs:
+                    entity_embeddings_store.load_documents(docs, overwrite=True)
+            except Exception:
+                # Best-effort only; do not fail the query if GraphRAG changes interfaces.
+                pass
             
             # Create a wrapper for LlamaIndex LLM to make it compatible with MS GraphRAG DRIFT
             # MS GraphRAG expects ChatModel protocol: achat(prompt, history) -> ModelResponse
@@ -535,8 +736,16 @@ class DRIFTAdapter:
                     self.llm = llama_llm
                     self._prefix = (
                         "You are answering questions using ONLY the provided context. "
-                        "If the answer is not present in the provided context, respond with: "
-                        "\"Not specified in the provided documents.\".\n\n"
+                        "If you can find any relevant clause or evidence in the provided context, answer using it (quote key phrases when possible). "
+                        "Respond with \"Not specified in the provided documents.\" ONLY when there is no relevant clause/evidence in the provided context.\n\n"
+                    )
+                    # Guardrail: GraphRAG may pass very large history/context messages (especially
+                    # during reduce). Because our underlying LlamaIndex interface accepts a single
+                    # string prompt, serializing history naively can exceed model context limits.
+                    # These limits are intentionally conservative and can be tuned via env.
+                    self._max_history_chars = int(getattr(settings, "V3_DRIFT_MAX_HISTORY_CHARS", 120_000) or 120_000)
+                    self._max_history_message_chars = int(
+                        getattr(settings, "V3_DRIFT_MAX_HISTORY_MESSAGE_CHARS", 40_000) or 40_000
                     )
                     # Create config object that DRIFT expects
                     self.config = type('Config', (), {
@@ -625,27 +834,157 @@ class DRIFTAdapter:
 
                     # Last resort: return stripped text (will surface error upstream).
                     return raw
+
+                @staticmethod
+                def _render_history(history: list | None) -> str:
+                    """Render GraphRAG chat history into a single prompt string.
+
+                    GraphRAG's ChatModel protocol passes context and instructions via
+                    a list of messages (usually system messages). Our underlying
+                    LlamaIndex LLM interface accepts a single string prompt, so we
+                    must serialize the history.
+                    """
+
+                    if not history:
+                        return ""
+
+                    # NOTE: This method remains @staticmethod for compatibility with older
+                    # call sites, but we still want truncation. If called as instance method,
+                    # we can access self.* limits; otherwise we fall back to safe defaults.
+                    return DRIFTLLMWrapper._render_history_with_limits(history)
+
+                @staticmethod
+                def _truncate_text(text: str, *, max_chars: int, keep: str = "start") -> str:
+                    t = (text or "").strip()
+                    if max_chars <= 0:
+                        return ""
+                    if len(t) <= max_chars:
+                        return t
+                    ellipsis = "\n...[TRUNCATED]...\n"
+                    budget = max(0, max_chars - len(ellipsis))
+                    if budget <= 0:
+                        return t[:max_chars]
+                    if keep == "end":
+                        return ellipsis + t[-budget:]
+                    return t[:budget] + ellipsis
+
+                @staticmethod
+                def _render_history_with_limits(history: list | None, *, max_total_chars: int = 120_000, max_msg_chars: int = 40_000) -> str:
+                    if not history:
+                        return ""
+
+                    # Split roles so we can prioritize system instructions.
+                    system_msgs: list[tuple[str, str]] = []
+                    other_msgs: list[tuple[str, str]] = []
+                    for msg in history:
+                        if not isinstance(msg, dict):
+                            continue
+                        role_raw = str(msg.get("role") or "").strip().lower()
+                        role = (role_raw or "message").upper()
+                        content = str(msg.get("content") or "").strip()
+                        if not content:
+                            continue
+
+                        # Per-message truncation: keep the *start* for SYSTEM, keep the *end*
+                        # for non-system since recent details tend to be later.
+                        keep = "start" if role_raw == "system" else "end"
+                        content = DRIFTLLMWrapper._truncate_text(content, max_chars=max_msg_chars, keep=keep)
+                        if role_raw == "system":
+                            system_msgs.append((role, content))
+                        else:
+                            other_msgs.append((role, content))
+
+                    def render(pairs: list[tuple[str, str]]) -> str:
+                        return "\n\n".join([f"{r}:\n{c}" for (r, c) in pairs if c])
+
+                    # Start with system; then add the last few non-system messages.
+                    rendered_system = render(system_msgs)
+                    if not other_msgs:
+                        return DRIFTLLMWrapper._truncate_text(rendered_system, max_chars=max_total_chars, keep="start")
+
+                    # Keep at most last 8 non-system entries to avoid runaway growth.
+                    tail_other = other_msgs[-8:]
+                    rendered_other = render(tail_other)
+
+                    if rendered_system:
+                        combined = f"{rendered_system}\n\n{rendered_other}" if rendered_other else rendered_system
+                    else:
+                        combined = rendered_other
+
+                    # Enforce overall cap while preserving system preamble.
+                    if len(combined) <= max_total_chars:
+                        return combined
+
+                    # If system alone is too large, truncate it and drop other.
+                    if rendered_system and len(rendered_system) >= max_total_chars:
+                        return DRIFTLLMWrapper._truncate_text(rendered_system, max_chars=max_total_chars, keep="start")
+
+                    # Otherwise, keep full system and truncate non-system tail.
+                    remaining = max_total_chars - (len(rendered_system) + 2)  # +2 for separator newlines
+                    truncated_other = DRIFTLLMWrapper._truncate_text(rendered_other, max_chars=max(0, remaining), keep="end")
+                    return f"{rendered_system}\n\n{truncated_other}".strip()
+
+                def _build_prompt(self, prompt: str, history: list | None, kwargs: dict) -> tuple[str, bool]:
+                    history_text = self._render_history_with_limits(
+                        history,
+                        max_total_chars=self._max_history_chars,
+                        max_msg_chars=self._max_history_message_chars,
+                    )
+                    if (
+                        getattr(settings, "V3_DRIFT_DEBUG_LOGGING", False)
+                        and "[TRUNCATED]" in history_text
+                    ):
+                        print(
+                            f"[DRIFT_DEBUG] history truncated: max_total_chars={self._max_history_chars} max_msg_chars={self._max_history_message_chars}",
+                            flush=True,
+                        )
+                    if history_text:
+                        full_prompt = f"{self._prefix}{history_text}\n\nUSER:\n{prompt}"
+                    else:
+                        full_prompt = f"{self._prefix}{prompt}"
+
+                    json_mode = self._wants_json(full_prompt, kwargs)
+                    if json_mode:
+                        full_prompt = f"{full_prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
+                    return full_prompt, json_mode
+
+                @staticmethod
+                def _extract_llm_kwargs(kwargs: dict) -> dict:
+                    """Map GraphRAG model_parameters into LlamaIndex LLM kwargs (best-effort)."""
+                    model_parameters = kwargs.get("model_parameters")
+                    if not isinstance(model_parameters, dict):
+                        return {}
+                    allowed = {
+                        "max_tokens",
+                        "temperature",
+                        "top_p",
+                        "presence_penalty",
+                        "frequency_penalty",
+                        "seed",
+                        "stop",
+                        "timeout",
+                    }
+                    llm_kwargs: dict = {}
+                    for k, v in model_parameters.items():
+                        if k in allowed and v is not None:
+                            llm_kwargs[k] = v
+                    return llm_kwargs
                 
                 async def achat(self, prompt: str, history: list | None = None, **kwargs):
                     """MS GraphRAG ChatModel protocol: achat(prompt, history) -> ModelResponse."""
                     import sys
 
-                    prompt = f"{self._prefix}{prompt}"
-
-                    json_mode = self._wants_json(prompt, kwargs)
+                    prompt, json_mode = self._build_prompt(prompt, history, kwargs)
+                    llm_kwargs = self._extract_llm_kwargs(kwargs)
                     
                     # Debug: Print to stdout with flush
                     print(f"[DRIFT_DEBUG] achat called, json_mode={json_mode}, prompt_len={len(prompt)}", flush=True)
                     sys.stdout.flush()
                     logger.error(f"[DRIFT_DEBUG] achat called, json_mode={json_mode}")
                     
-                    # If JSON mode, append instruction to prompt (even if prompt already mentions JSON)
-                    if json_mode:
-                        prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
-                    
                     try:
                         print(f"[DRIFT_DEBUG] Calling LLM...", flush=True)
-                        response = await self.llm.acomplete(prompt)
+                        response = await self.llm.acomplete(prompt, **llm_kwargs)
                         text = response.text.strip() if response and hasattr(response, 'text') else ''
                         print(f"[DRIFT_DEBUG] LLM response: len={len(text)}, text='{text[:500] if text else 'EMPTY'}'", flush=True)
                         logger.error(f"[DRIFT_DEBUG] LLM returned: len={len(text)}, text={text[:200]}")
@@ -670,23 +1009,17 @@ class DRIFTAdapter:
                     """MS GraphRAG ChatModel protocol: achat_stream(prompt, history) -> async iterator of str chunks."""
                     import sys
 
-                    prompt = f"{self._prefix}{prompt}"
-                    
-                    # Check if JSON output is requested
-                    json_mode = kwargs.get('json', False)
-                    
+                    prompt, json_mode = self._build_prompt(prompt, history, kwargs)
+                    llm_kwargs = self._extract_llm_kwargs(kwargs)
+
                     print(f"[DRIFT_DEBUG] achat_stream called, json_mode={json_mode}, prompt_len={len(prompt)}", flush=True)
-                    
-                    # If JSON mode, append instruction to prompt
-                    if json_mode and 'json' not in prompt.lower():
-                        prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
                     
                     try:
                         # Use streaming if available, otherwise fallback to non-streaming
                         if hasattr(self.llm, 'astream_complete'):
                             print(f"[DRIFT_DEBUG] Using astream_complete...", flush=True)
                             accumulated_text = ""
-                            async for chunk in await self.llm.astream_complete(prompt):
+                            async for chunk in self.llm.astream_complete(prompt, **llm_kwargs):
                                 if chunk and hasattr(chunk, 'text'):
                                     accumulated_text += chunk.text
                                     yield chunk.text
@@ -709,8 +1042,13 @@ class DRIFTAdapter:
                         else:
                             # Fallback to non-streaming achat and yield as single chunk
                             print(f"[DRIFT_DEBUG] Fallback to non-streaming achat...", flush=True)
-                            response = await self.achat(prompt, history, **kwargs)
-                            yield str(response)
+                            response = await self.llm.acomplete(prompt, **llm_kwargs)
+                            text = response.text.strip() if response and hasattr(response, 'text') else ''
+                            if text:
+                                text = self._strip_code_fences(text)
+                            if json_mode and text:
+                                text = self._coerce_single_json(text)
+                            yield str(text)
                     except Exception as e:
                         print(f"[DRIFT_DEBUG] achat_stream failed: {type(e).__name__}: {e}", flush=True)
                         logger.error(f"[DRIFT_DEBUG] achat_stream failed: {e}")
@@ -718,14 +1056,9 @@ class DRIFTAdapter:
                 
                 def chat(self, prompt: str, history: list | None = None, **kwargs):
                     """Sync version of chat."""
-                    prompt = f"{self._prefix}{prompt}"
-
-                    json_mode = self._wants_json(prompt, kwargs)
-
-                    if json_mode:
-                        prompt = f"{prompt}\n\nIMPORTANT: Return ONLY valid JSON, no other text."
-                    
-                    response = self.llm.complete(prompt)
+                    prompt, json_mode = self._build_prompt(prompt, history, kwargs)
+                    llm_kwargs = self._extract_llm_kwargs(kwargs)
+                    response = self.llm.complete(prompt, **llm_kwargs)
 
                     text = response.text.strip() if response and hasattr(response, 'text') else ''
                     if text:
@@ -739,6 +1072,24 @@ class DRIFTAdapter:
             
             # Build DRIFT context builder with MS GraphRAG models
             # Required params: model, text_embedder, entities, entity_text_embeddings
+            # IMPORTANT: MS GraphRAG DRIFT uses config.n_depth and config.drift_k_followups to control
+            # how many sub-queries run (and how much concurrency). Without overriding config, the defaults
+            # can easily cause long-running requests.
+            from graphrag.config.models.drift_search_config import DRIFTSearchConfig
+
+            safe_depth = max(1, min(int(max_iterations or 1), 5))
+            drift_config = DRIFTSearchConfig(
+                n_depth=safe_depth,
+                drift_k_followups=5,
+                primer_folds=2,
+                concurrency=8,
+                # Keep prompts bounded; smaller contexts reduce latency/cost.
+                local_search_max_data_tokens=6000,
+                primer_llm_max_tokens=4000,
+                local_search_top_k_mapped_entities=10,
+                local_search_top_k_relationships=10,
+            )
+
             context_builder = DRIFTSearchContextBuilder(
                 model=drift_llm,  # Use MS GraphRAG wrapper
                 text_embedder=GraphRAGEmbeddingWrapper(self.embedder),  # EmbeddingModel protocol
@@ -747,24 +1098,64 @@ class DRIFTAdapter:
                 relationships=relationships,
                 reports=communities,  # CommunityReport objects
                 text_units=text_units,
+                config=drift_config,
             )
             
+            if is_debug_group:
+                print(f"[DEBUG] DRIFTSearchContextBuilder initialized with:]", flush=True)
+                print(f"[DEBUG]   - {len(entities)} entities]", flush=True)
+                print(f"[DEBUG]   - {len(relationships)} relationships]", flush=True)
+                print(f"[DEBUG]   - {len(text_units)} text units]", flush=True)
+                print(f"[DEBUG]   - {len(communities)} communities/reports]", flush=True)
+            
             # DRIFTSearch requires: model, context_builder
-            # Config is set via DRIFTSearchContextBuilder or environment
-            drift_search = DRIFTSearch(
+            # Config is set via DRIFTSearchContextBuilder or environment.
+            # NOTE: Upstream GraphRAG hard-codes return_candidate_context=False inside
+            # DRIFTSearch.init_local_search(), which results in empty SearchResult.context_data.
+            # For V3, we enable candidate context ONLY when include_sources=True.
+            from graphrag.query.structured_search.drift_search.search import DRIFTSearch
+
+            DRIFTSearchImpl = DRIFTSearch
+            if include_sources:
+                class DRIFTSearchWithCandidates(DRIFTSearch):
+                    def init_local_search(self):  # type: ignore[override]
+                        local_search = super().init_local_search()
+                        try:
+                            local_search.context_builder_params["return_candidate_context"] = True
+                        except Exception:
+                            # Best-effort: if GraphRAG changes internals, don't fail the request.
+                            pass
+                        return local_search
+
+                DRIFTSearchImpl = DRIFTSearchWithCandidates
+
+            if is_debug_group:
+                print(f"[DEBUG] Creating DRIFTSearch instance...]", flush=True)
+
+            drift_search = DRIFTSearchImpl(
                 model=drift_llm,
                 context_builder=context_builder,
             )
-            
-            # Initialize local search (required before searching)
-            drift_search.init_local_search()
+
+            if is_debug_group:
+                print(f"[DEBUG] DRIFTSearch instance created successfully]", flush=True)
+                print(f"[DEBUG] include_sources={include_sources}]", flush=True)
+                try:
+                    rc = drift_search.local_search.context_builder_params.get("return_candidate_context")
+                except Exception:
+                    rc = None
+                print(f"[DEBUG] return_candidate_context={rc} (search_class={type(drift_search).__name__})]", flush=True)
+                print(
+                    f"[DRIFT_DEBUG] EXECUTION_PATH=graphrag_drift search_class={type(drift_search).__name__}]",
+                    flush=True,
+                )
             
             elapsed = time.time() - stage_start
             logger.info(f"[DRIFT STAGE 3/5] Context builder initialized ({elapsed:.2f}s)")
             
             # Execute search - DRIFT uses 'search' method
             stage_start = time.time()
-            logger.info(f"[DRIFT STAGE 4/5] Executing DRIFT iterative search (max {max_iterations} iterations)...")
+            logger.info(f"[DRIFT STAGE 4/5] Executing DRIFT iterative search (max {safe_depth} iterations)...")
             result = await drift_search.search(
                 query=query,
             )
@@ -772,17 +1163,63 @@ class DRIFTAdapter:
             elapsed = time.time() - stage_start
             logger.info(f"[DRIFT STAGE 4/5] DRIFT search completed ({elapsed:.2f}s)")
             
+            if is_debug_group:
+                print(f"[DEBUG] DRIFT result attributes: {dir(result)}]", flush=True)
+                print(f"[DEBUG] result.response: {result.response if hasattr(result, 'response') else 'N/A'}]", flush=True)
+                print(f"[DEBUG] result.context_data: {result.context_data if hasattr(result, 'context_data') else 'N/A'}]", flush=True)
+            
             stage_start = time.time()
             logger.info(f"[DRIFT STAGE 5/5] Extracting and formatting results...")
             
             # Extract answer from SearchResult (has 'response' field, not 'answer')
             answer = result.response if isinstance(result.response, str) else str(result.response)
             
+            extracted_sources = self._extract_sources(result, group_id=group_id, is_debug=is_debug_group)
+            if is_debug_group:
+                print(f"[DEBUG] Extracted sources: {extracted_sources}]", flush=True)
+                print(f"[DEBUG] Number of sources: {len(extracted_sources)}]", flush=True)
+
+            if is_debug_group and settings.V3_DRIFT_DEBUG_TERM_SCAN and extracted_sources:
+                term_groups = {
+                    "Q-D1_warranty_emergency": [
+                        "telephone",
+                        "emergency",
+                        "burst pipe",
+                        "promptly notify",
+                        "relieves",
+                        "builder",
+                    ],
+                    "Q-D2_pma_reservations": [
+                        "confirmed reservations",
+                        "honor all confirmed reservations",
+                        "owner shall honor",
+                        "terminated",
+                        "termination",
+                        "sold",
+                        "sale",
+                    ],
+                    "Q-D3_timeframes": [
+                        "re:\\b\\d+\\s+business\\s+days\\b",
+                        "re:\\b\\d+\\s+days\\b",
+                        "arbitration",
+                        "written notice",
+                    ],
+                }
+
+                self._debug_term_scan(
+                    where="extracted_sources",
+                    items=extracted_sources,
+                    term_groups=term_groups,
+                    get_text=lambda s: s.get("text") if isinstance(s, dict) else "",
+                    get_id=lambda s: s.get("id") if isinstance(s, dict) else None,
+                    get_doc_ids=lambda s: None,
+                )
+            
             response = {
                 "answer": answer,
                 "confidence": 0.85,  # DRIFT doesn't provide score
-                "iterations": max_iterations,
-                "sources": self._extract_sources(result),
+                "iterations": safe_depth,
+                "sources": extracted_sources,
                 "reasoning_path": self._extract_reasoning_path(result),
                 "context_data": result.context_data if hasattr(result, 'context_data') else {},
                 "llm_calls": result.llm_calls if hasattr(result, 'llm_calls') else 0,
@@ -827,17 +1264,20 @@ class DRIFTAdapter:
                 
                 # Vector search in Neo4j
                 vector_query = """
-                CALL db.index.vector.queryNodes('entity', $top_k, $embedding)
+                CALL db.index.vector.queryNodes('entity_embedding', $fetch_k, $embedding)
                 YIELD node, score
+                WITH node, score
                 WHERE node.group_id = $group_id
                 RETURN node.id AS id, node.name AS name, node.description AS description, score
                 ORDER BY score DESC
+                LIMIT $top_k
                 """
                 
                 records, _, _ = self.driver.execute_query(
                     vector_query,
                     embedding=query_embedding,
                     top_k=10,
+                    fetch_k=250,
                     group_id=group_id,
                 )
                 
@@ -903,15 +1343,76 @@ Answer:"""
             "reasoning_path": [{"step": "fallback_vector_search", "note": "DRIFT not available"}],
         }
     
-    def _extract_sources(self, result: Any) -> List[str]:
-        """Extract source references from DRIFT result."""
-        sources = []
-        if hasattr(result, "context_data") and result.context_data:
-            if "sources" in result.context_data:
-                sources = result.context_data["sources"]
-            elif "entities" in result.context_data:
-                sources = [e.get("id") for e in result.context_data["entities"]]
-        return sources
+    def _extract_sources(self, result: Any, group_id: str = "", is_debug: bool = False) -> List[Dict[str, Any]]:
+        """Extract source references from a DRIFT SearchResult.
+
+        MS GraphRAG DRIFT returns nested context_data shaped like:
+            {"<sub_query>": {"sources": DataFrame, "entities": DataFrame, ...}, ...}
+
+        We normalize this to a V3-friendly list of dicts.
+        """
+        extracted: list[dict[str, Any]] = []
+
+        if is_debug:
+            print(f"[DEBUG] _extract_sources() called]", flush=True)
+            print(f"[DEBUG] result has context_data: {hasattr(result, 'context_data')}]", flush=True)
+
+        if not (hasattr(result, "context_data") and result.context_data):
+            if is_debug:
+                print(f"[DEBUG] No context_data available or it's empty]", flush=True)
+            return []
+
+        context_data = result.context_data
+        if not isinstance(context_data, dict):
+            if is_debug:
+                print(f"[DEBUG] context_data is not a dict: {type(context_data)}]", flush=True)
+            return []
+
+        if is_debug:
+            print(f"[DEBUG] top-level context_data keys: {list(context_data.keys())[:10]}]", flush=True)
+
+        seen: set[tuple[str, str]] = set()
+
+        for sub_query, sub_ctx in context_data.items():
+            if not isinstance(sub_ctx, dict):
+                continue
+
+            sources_df = sub_ctx.get("sources")
+            if sources_df is None:
+                continue
+
+            # sources_df is typically a pandas DataFrame with columns: id, text, ...
+            try:
+                rows = sources_df.to_dict("records") if hasattr(sources_df, "to_dict") else []
+            except Exception:
+                rows = []
+
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                sid = str(row.get("id") or "").strip()
+                text = str(row.get("text") or "").strip()
+                if not sid and not text:
+                    continue
+
+                key = (sid, text[:80])
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                extracted.append(
+                    {
+                        "id": sid or None,
+                        "type": "text_unit",
+                        "text": text[:5000] if text else None,
+                        "sub_query": str(sub_query)[:500],
+                    }
+                )
+
+        if is_debug:
+            print(f"[DEBUG] Extracted {len(extracted)} sources from nested context_data]", flush=True)
+
+        return extracted
     
     def _extract_reasoning_path(self, result: Any) -> List[Dict[str, Any]]:
         """Extract reasoning steps from DRIFT result."""
@@ -1019,9 +1520,21 @@ Answer:"""
         """
         from graphrag.data_model.text_unit import TextUnit as GraphRAGTextUnit
         
+        is_debug_group = (
+            settings.V3_DRIFT_DEBUG_LOGGING and 
+            (settings.V3_DRIFT_DEBUG_GROUP_ID is None or settings.V3_DRIFT_DEBUG_GROUP_ID == group_id)
+        )
+        
         # Load both data sources
         chunks_df = self.load_text_chunks(group_id)
         raptor_df = self.load_raptor_nodes(group_id)
+        
+        if is_debug_group:
+            print(f"[DEBUG] load_text_units_with_raptor_as_graphrag_models: group={group_id}]", flush=True)
+            print(f"[DEBUG]   Loaded {len(chunks_df)} text chunks from Neo4j]", flush=True)
+            print(f"[DEBUG]   Loaded {len(raptor_df)} RAPTOR nodes from Neo4j]", flush=True)
+            if len(chunks_df) > 0:
+                print(f"[DEBUG]   Sample chunk (first row): {chunks_df.iloc[0].to_dict() if len(chunks_df) > 0 else 'N/A'}]", flush=True)
         
         text_units = []
         
@@ -1047,6 +1560,12 @@ Answer:"""
                 n_tokens=None,
             )
             text_units.append(text_unit)
+        
+        if is_debug_group:
+            print(f"[DEBUG] Converted {len(chunks_df)} text chunks + {len(raptor_df)} RAPTOR nodes "
+                       f"= {len(text_units)} total text units for DRIFT search (group {group_id})")
+            if text_units:
+                print(f"[DEBUG] First text unit sample: id={text_units[0].id}, text_len={len(text_units[0].text or '')}]", flush=True)
         
         logger.info(f"Converted {len(chunks_df)} text chunks + {len(raptor_df)} RAPTOR nodes "
                    f"= {len(text_units)} total text units for DRIFT search (group {group_id})")
@@ -1107,7 +1626,7 @@ class Neo4jDRIFTVectorStore:
         self,
         driver: neo4j.Driver,
         group_id: str,
-        index_name: str = "entity",
+        index_name: str = "entity_embedding",
         embedding_dimension: int = 1536,
     ):
         """
@@ -1189,23 +1708,97 @@ class Neo4jDRIFTVectorStore:
         """
         from graphrag.vector_stores.base import VectorStoreSearchResult
         
-        query = """
-        CALL db.index.vector.queryNodes($index_name, $k, $embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
-        RETURN node.id AS id, node.name AS text, node.embedding AS vector, score
-        ORDER BY score DESC
-        """
-        
-        records, _, _ = self.driver.execute_query(
-            query,
-            index_name=self.index_name,
-            k=k,
-            embedding=query_embedding,
-            group_id=self.group_id,
+        # Important: Neo4j vector indexes are global; if multiple group_ids share the same index,
+        # a small top-k can easily return only other tenants' nodes. Oversample, then filter and trim.
+        # We also do a single adaptive retry with a larger fetch_k when tenant hits are 0.
+        def _run_query(fetch_k_val: int) -> list[Any]:
+            query = """
+            CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
+            YIELD node, score
+            WITH node, score
+            WHERE node.group_id = $group_id
+            RETURN node.id AS id, node.name AS text, node.embedding AS vector, score
+            ORDER BY score DESC
+            LIMIT $k
+            """
+
+            recs, _, _ = self.driver.execute_query(
+                query,
+                index_name=self.index_name,
+                fetch_k=fetch_k_val,
+                k=k,
+                embedding=query_embedding,
+                group_id=self.group_id,
+            )
+            return list(recs or [])
+
+        fetch_k = min(max(int(k) * 25, int(k)), 500)
+        records = _run_query(fetch_k)
+
+        is_debug_group = (
+            settings.V3_DRIFT_DEBUG_LOGGING
+            and (settings.V3_DRIFT_DEBUG_GROUP_ID is None or settings.V3_DRIFT_DEBUG_GROUP_ID == self.group_id)
         )
+        used_in_memory_fallback = False
+        neo4j_hit_count = len(records)
+
+        # Adaptive retry: if we got 0 in-tenant hits, check whether the index produced global hits.
+        # If it did, we likely missed tenant items due to cross-tenant competition in the top-K.
+        # Retry once with a larger fetch_k (bounded) before falling back to in-memory similarity.
+        if neo4j_hit_count == 0 and query_embedding:
+            diag_total_hits: int | None = None
+            diag_tenant_hits: int | None = None
+            try:
+                diag_query = """
+                CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
+                YIELD node, score
+                RETURN
+                    count(*) AS total_hits,
+                    sum(CASE WHEN node.group_id = $group_id THEN 1 ELSE 0 END) AS tenant_hits,
+                    collect(DISTINCT coalesce(node.group_id, '<missing>'))[0..5] AS sample_group_ids,
+                    head(collect(coalesce(node.id, '<missing>'))) AS sample_node_id
+                """
+                diag_records, _, _ = self.driver.execute_query(
+                    diag_query,
+                    index_name=self.index_name,
+                    fetch_k=fetch_k,
+                    embedding=query_embedding,
+                    group_id=self.group_id,
+                )
+                if diag_records:
+                    d = diag_records[0]
+                    diag_total_hits = int(d.get("total_hits") or 0)
+                    diag_tenant_hits = int(d.get("tenant_hits") or 0)
+                    if is_debug_group:
+                        print(
+                            "[DRIFT_DEBUG] vectorstore_diag(entity): "
+                            f"index={self.index_name} total_hits={d.get('total_hits')} tenant_hits={d.get('tenant_hits')} "
+                            f"sample_group_ids={d.get('sample_group_ids')} sample_node_id={d.get('sample_node_id')}]",
+                            flush=True,
+                        )
+            except Exception as e:
+                if is_debug_group:
+                    print(
+                        f"[DRIFT_DEBUG] vectorstore_diag(entity) failed: {type(e).__name__}: {e}]",
+                        flush=True,
+                    )
+
+            should_retry = (diag_total_hits is None) or (diag_total_hits > 0 and (diag_tenant_hits or 0) == 0)
+            if should_retry:
+                retry_fetch_k = min(max(fetch_k * 4, 2000), 5000)
+                if retry_fetch_k > fetch_k:
+                    if is_debug_group:
+                        print(
+                            f"[DRIFT_DEBUG] vectorstore_retry(entity): index={self.index_name} fetch_k={fetch_k} -> {retry_fetch_k}]",
+                            flush=True,
+                        )
+                    fetch_k = retry_fetch_k
+                    records = _run_query(fetch_k)
+                    neo4j_hit_count = len(records)
+
+        # (Diagnostics are emitted above as part of adaptive retry; no extra pass here.)
         
-        results = []
+        results: list[Any] = []
         for record in records:
             from graphrag.vector_stores.base import VectorStoreDocument
             doc = VectorStoreDocument(
@@ -1213,11 +1806,37 @@ class Neo4jDRIFTVectorStore:
                 text=record["text"] or "",
                 vector=record["vector"],
             )
-            results.append(VectorStoreSearchResult(
-                document=doc,
-                score=record["score"],
-            ))
-        
+            results.append(
+                VectorStoreSearchResult(
+                    document=doc,
+                    score=record["score"],
+                )
+            )
+
+        # If Neo4j vector search yields no in-tenant hits, fall back to in-memory
+        # similarity over any preloaded documents. Without this, selected_entities
+        # can be empty, which produces empty context_records and thus no sources.
+        if not results and self._documents and query_embedding:
+            used_in_memory_fallback = True
+            scored: list[tuple[float, Any]] = []
+            for doc in self._documents.values():
+                vec = getattr(doc, "vector", None)
+                if not vec or len(vec) != len(query_embedding):
+                    continue
+                score = _cosine_similarity(query_embedding, vec)
+                scored.append((score, doc))
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            for score, doc in scored[:k]:
+                results.append(VectorStoreSearchResult(document=doc, score=score))
+
+        if is_debug_group:
+            print(
+                f"[DRIFT_DEBUG] vectorstore(entity): neo4j_hits={neo4j_hit_count} result_count={len(results)} "
+                f"in_memory_fallback={used_in_memory_fallback} cached_docs={len(self._documents)} k={k} fetch_k={fetch_k}]",
+                flush=True,
+            )
+
         return results
     
     def similarity_search_by_text(

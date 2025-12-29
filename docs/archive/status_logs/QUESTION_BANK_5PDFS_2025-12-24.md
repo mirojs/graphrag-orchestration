@@ -3,6 +3,16 @@
 **Data Source:** Neo4j `TextChunk.text` extracted content (Document Intelligence pipeline output)  
 **Group ID:** `phase1-5docs-1766595043`
 
+## Routing Mapping (Hybrid 3-Route System)
+
+These question groups are designed to exercise the Hybrid 3-route router:
+
+- Section A (Q-V*): Expected to route to **Route 1 (Vector RAG)** under Profile A; forced to **Route 2** under Profile B.
+- Sections B/C (Q-L*, Q-G*): Expected to route to **Route 2 (Local/Global equivalent)**.
+- Section D (Q-D*): Expected to route to **Route 3 (DRIFT multi-hop)** under Profile A; forced to **Route 2** under Profile C.
+
+Note: Profile constraints always override base routing.
+
 ## Documents
 1. BUILDERS LIMITED WARRANTY.pdf
 2. HOLDING TANK SERVICING CONTRACT.pdf

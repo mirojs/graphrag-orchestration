@@ -28,7 +28,23 @@ import urllib.request
 from pathlib import Path
 
 
-QUESTION_BANK_PATH = Path(__file__).resolve().parents[1] / "QUESTION_BANK_5PDFS_2025-12-24.md"
+_ROOT = Path(__file__).resolve().parents[1]
+
+# Post-workspace-cleanup: the question bank may live in docs/archive.
+_CANDIDATES = [
+    _ROOT / "QUESTION_BANK_5PDFS_2025-12-24.md",
+    _ROOT / "docs" / "archive" / "status_logs" / "QUESTION_BANK_5PDFS_2025-12-24.md",
+]
+
+
+def _find_question_bank() -> Path:
+    for p in _CANDIDATES:
+        if p.exists():
+            return p
+    return _CANDIDATES[0]
+
+
+QUESTION_BANK_PATH = _find_question_bank()
 
 
 def _extract_drift_questions(md_text: str, *, max_items: int = 3) -> list[tuple[str, str]]:

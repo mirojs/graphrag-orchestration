@@ -1,3 +1,3 @@
-from . import health, graphrag, orchestration
+from . import health, graphrag, orchestration, hybrid
 
-__all__ = ["health", "graphrag", "orchestration"]
+__all__ = ["health", "graphrag", "orchestration", "hybrid"]

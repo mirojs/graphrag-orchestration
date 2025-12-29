@@ -5,7 +5,7 @@ import structlog
 from app.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from app.middleware.group_isolation import GroupIsolationMiddleware
-from app.routers import health, graphrag, orchestration
+from app.routers import health, graphrag, orchestration, hybrid
 from app.v3.routers import graphrag_v3, admin  # V3 endpoints (separate from V1/V2)
 
 # NOTE: GraphService and LLMService are core services used by V3
@@ -113,6 +113,9 @@ app.add_middleware(GroupIsolationMiddleware)
 app.include_router(health.router, tags=["health"])
 app.include_router(graphrag.router, prefix="/graphrag", tags=["graphrag"])
 app.include_router(orchestration.router, prefix="/orchestrate", tags=["orchestration"])
+
+# Hybrid Pipeline Router - LazyGraphRAG + HippoRAG 2
+app.include_router(hybrid.router, prefix="/hybrid", tags=["hybrid-pipeline"])
 
 # V3 Router - Completely separate from V1/V2
 # Uses Neo4j ONLY at query time, MS GraphRAG DRIFT for reasoning

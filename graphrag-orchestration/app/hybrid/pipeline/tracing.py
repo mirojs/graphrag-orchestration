@@ -70,11 +70,18 @@ class DeterministicTracer:
         try:
             # HippoRAG's retrieve function with seeds
             # Note: API may vary based on HippoRAG version
-            ranked_nodes = self.hipporag.retrieve(
-                query=query,
-                top_k=top_k,
-                # seeds=seed_entities  # Pass if supported
-            )
+            try:
+                ranked_nodes = self.hipporag.retrieve(
+                    query=query,
+                    top_k=top_k,
+                    seeds=seed_entities,
+                )
+            except TypeError:
+                ranked_nodes = self.hipporag.retrieve(
+                    query=query,
+                    top_k=top_k,
+                    seed_entities=seed_entities,
+                )
             
             logger.info("hipporag_trace_success", 
                        query=query,

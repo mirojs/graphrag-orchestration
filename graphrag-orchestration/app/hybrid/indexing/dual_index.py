@@ -117,13 +117,13 @@ class DualIndexService:
         """Extract all entities from Neo4j for this group."""
         if not self.driver:
             return []
-        
+
+        # Schema note: in many deployments entities are labeled :Entity.
+        # Keep this query narrow to avoid pulling in documents/chunks.
         query = """
-        MATCH (e)
+        MATCH (e:Entity)
         WHERE e.group_id = $group_id
-        AND NOT e:__Community__
-        AND NOT e:__Chunk__
-        RETURN 
+        RETURN
             elementId(e) as id,
             labels(e) as labels,
             e.name as name,
@@ -155,13 +155,9 @@ class DualIndexService:
             return []
         
         query = """
-        MATCH (s)-[r]->(o)
+        MATCH (s:Entity)-[r]->(o:Entity)
         WHERE s.group_id = $group_id
-        AND NOT s:__Community__
-        AND NOT s:__Chunk__
-        AND NOT o:__Community__
-        AND NOT o:__Chunk__
-        RETURN 
+        RETURN
             s.name as subject,
             type(r) as predicate,
             o.name as object,
@@ -187,15 +183,16 @@ class DualIndexService:
         """Extract text chunks/units for synthesis."""
         if not self.driver:
             return []
-        
+
+        # Schema note: chunks are typically :TextChunk and linked to :Document via (:TextChunk)-[:PART_OF]->(:Document).
         query = """
-        MATCH (c:__Chunk__)
+        MATCH (c:TextChunk)
         WHERE c.group_id = $group_id
-        RETURN 
+        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document)
+        RETURN
             elementId(c) as id,
             c.text as text,
-            c.source_document as source,
-            c.page_number as page,
+            coalesce(d.source, d.title) as source,
             c.chunk_index as chunk_index
         """
         
@@ -207,7 +204,6 @@ class DualIndexService:
                     "id": record["id"],
                     "text": record["text"],
                     "source": record["source"],
-                    "page": record["page"],
                     "chunk_index": record["chunk_index"]
                 })
         
@@ -223,9 +219,10 @@ class DualIndexService:
         if not self.driver:
             return {}
         
+        # Schema note: chunks often point to entities via (:TextChunk)-[:MENTIONS]->(:Entity)
         query = """
-        MATCH (e)-[:MENTIONED_IN|EXTRACTED_FROM]->(c:__Chunk__)
-        WHERE e.group_id = $group_id
+        MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+        WHERE c.group_id = $group_id
         RETURN e.name as entity, collect(c.text) as texts
         """
         
@@ -257,7 +254,7 @@ class DualIndexService:
         # Save entities
         entities_file = group_dir / "entities.json"
         with open(entities_file, 'w') as f:
-            json.dump(entities, f, indent=2)
+            json.dump(entities, f, indent=2, default=str)
         
         # Save triples in HippoRAG format
         triples_file = group_dir / "hipporag_triples.json"
@@ -266,12 +263,12 @@ class DualIndexService:
             for t in triples
         ]
         with open(triples_file, 'w') as f:
-            json.dump(hipporag_format, f, indent=2)
+            json.dump(hipporag_format, f, indent=2, default=str)
         
         # Save entity-text mapping
         entity_texts_file = group_dir / "entity_texts.json"
         with open(entity_texts_file, 'w') as f:
-            json.dump(entity_text_map, f, indent=2)
+            json.dump(entity_text_map, f, indent=2, default=str)
         
         logger.info("hipporag_index_saved",
                    entities_file=str(entities_file),
@@ -295,7 +292,7 @@ class DualIndexService:
         # Save text units
         text_units_file = group_dir / "lazygraphrag_units.json"
         with open(text_units_file, 'w') as f:
-            json.dump(text_units, f, indent=2)
+            json.dump(text_units, f, indent=2, default=str)
         
         # Save entity index for LazyGraphRAG focal entity lookup
         entity_index_file = group_dir / "entity_index.json"
@@ -308,7 +305,7 @@ class DualIndexService:
             for e in entities if e["name"]
         }
         with open(entity_index_file, 'w') as f:
-            json.dump(entity_index, f, indent=2)
+            json.dump(entity_index, f, indent=2, default=str)
         
         logger.info("lazygraphrag_index_saved",
                    text_units_file=str(text_units_file),

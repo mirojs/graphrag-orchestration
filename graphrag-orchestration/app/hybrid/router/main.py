@@ -1,15 +1,15 @@
 """
 Hybrid Pipeline Router
 
-Routes queries between 3 distinct routes:
+Routes queries between 4 distinct routes:
 1. Vector RAG - Fast lane for simple fact lookups
-2. Local/Global Equivalent - Entity-focused with LazyGraphRAG + HippoRAG 2
-3. DRIFT Equivalent - Multi-hop iterative reasoning for ambiguous queries
+2. Local Search Equivalent - Entity-focused with LazyGraphRAG iterative deepening
+3. Global Search Equivalent - Thematic queries with LazyGraphRAG + HippoRAG 2 PPR
+4. DRIFT Equivalent - Multi-hop iterative reasoning for ambiguous queries
 
 Profiles:
-- Profile A (General Enterprise): All 3 routes enabled
-- Profile B (High-Assurance Audit): Routes 2 + 3 only (no Vector RAG)
-- Profile C (Speed-Critical): Routes 1 + 2 only (no DRIFT)
+- General Enterprise: All 4 routes enabled (Route 1 is default for simple queries)
+- High Assurance: Routes 2, 3, 4 only (no Vector RAG shortcuts)
 """
 
 from enum import Enum
@@ -22,34 +22,34 @@ logger = structlog.get_logger(__name__)
 class QueryRoute(Enum):
     """Available routing destinations."""
     VECTOR_RAG = "vector_rag"               # Route 1: Fast lane for simple queries
-    LOCAL_GLOBAL = "local_global"           # Route 2: Entity-focused hybrid
-    DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 3: Iterative multi-hop reasoning
+    LOCAL_SEARCH = "local_search"           # Route 2: Entity-focused (LazyGraphRAG only)
+    GLOBAL_SEARCH = "global_search"         # Route 3: Thematic (LazyGraphRAG + HippoRAG)
+    DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 4: Iterative multi-hop reasoning
 
 
 class DeploymentProfile(Enum):
     """Deployment configuration profiles."""
-    GENERAL_ENTERPRISE = "general_enterprise"  # Profile A: All 3 routes
-    HIGH_ASSURANCE_AUDIT = "high_assurance"    # Profile B: Routes 2+3 only
-    SPEED_CRITICAL = "speed_critical"          # Profile C: Routes 1+2 only
+    GENERAL_ENTERPRISE = "general_enterprise"  # All 4 routes, Route 1 default
+    HIGH_ASSURANCE = "high_assurance"          # Routes 2, 3, 4 only (no Vector RAG)
 
 
 class HybridRouter:
     """
-    Routes queries based on complexity, clarity, and deployment profile.
+    Routes queries based on complexity, entity clarity, and deployment profile.
     
     Classification Logic:
-    - Simple fact + clear entity -> Route 1 (Vector RAG)
-    - Clear entity + needs graph -> Route 2 (Local/Global)
-    - Ambiguous + multi-hop -> Route 3 (DRIFT)
+    - Simple fact + clear entity -> Route 1 (Vector RAG) [General Enterprise only]
+    - Explicit entity + needs graph -> Route 2 (Local Search - LazyGraphRAG)
+    - Thematic / no explicit entity -> Route 3 (Global Search - LazyGraphRAG + HippoRAG)
+    - Ambiguous + multi-hop -> Route 4 (DRIFT)
     
-    Profile A (General Enterprise):
-        - All 3 routes enabled
+    General Enterprise Profile:
+        - All 4 routes enabled
+        - Route 1 handles ~80% of simple queries for speed
     
-    Profile B (High-Assurance Audit):
-        - Routes 2 + 3 only (no Vector RAG shortcuts)
-    
-    Profile C (Speed-Critical):
-        - Routes 1 + 2 only (no slow DRIFT)
+    High Assurance Profile:
+        - Routes 2, 3, 4 only (no Vector RAG shortcuts)
+        - Every query gets graph-based retrieval for auditability
     
     Model Selection:
         Uses HYBRID_ROUTER_MODEL (default: gpt-4o-mini) for classification.
@@ -60,25 +60,29 @@ class HybridRouter:
         self,
         profile: DeploymentProfile = DeploymentProfile.GENERAL_ENTERPRISE,
         llm_client: Optional[Any] = None,
-        vector_threshold: float = 0.3,
-        drift_threshold: float = 0.7
+        vector_threshold: float = 0.25,
+        global_threshold: float = 0.5,
+        drift_threshold: float = 0.75
     ):
         """
         Args:
             profile: Deployment profile (affects routing behavior).
             llm_client: Optional LLM for advanced classification.
             vector_threshold: Below this -> Route 1 (Vector RAG)
-            drift_threshold: Above this -> Route 3 (DRIFT Multi-Hop)
-            Between thresholds -> Route 2 (Local/Global)
+            global_threshold: Below this (but above vector) -> Route 2 (Local Search)
+            drift_threshold: Above this -> Route 4 (DRIFT Multi-Hop)
+            Between global and drift thresholds -> Route 3 (Global Search)
         """
         self.profile = profile
         self.llm = llm_client
         self.vector_threshold = vector_threshold
+        self.global_threshold = global_threshold
         self.drift_threshold = drift_threshold
         
         logger.info("router_initialized", 
                    profile=profile.value,
                    vector_threshold=vector_threshold,
+                   global_threshold=global_threshold,
                    drift_threshold=drift_threshold)
     
     async def route(self, query: str) -> QueryRoute:
@@ -91,17 +95,22 @@ class HybridRouter:
         # Assess query characteristics
         complexity = await self._assess_complexity(query)
         ambiguity = await self._assess_ambiguity(query)
+        has_explicit_entity = self._has_explicit_entity(query)
         
         # Combined score: complexity + ambiguity
         combined_score = (complexity * 0.6) + (ambiguity * 0.4)
         
-        # Determine base route from score
+        # Determine base route from score and entity clarity
         if combined_score < self.vector_threshold:
             base_route = QueryRoute.VECTOR_RAG
         elif combined_score >= self.drift_threshold:
             base_route = QueryRoute.DRIFT_MULTI_HOP
+        elif has_explicit_entity:
+            # Explicit entity -> Local Search (LazyGraphRAG only)
+            base_route = QueryRoute.LOCAL_SEARCH
         else:
-            base_route = QueryRoute.LOCAL_GLOBAL
+            # Thematic, no explicit entity -> Global Search (LazyGraphRAG + HippoRAG)
+            base_route = QueryRoute.GLOBAL_SEARCH
         
         # Apply profile constraints
         final_route = self._apply_profile_constraints(base_route)
@@ -112,22 +121,44 @@ class HybridRouter:
                    complexity=f"{complexity:.2f}",
                    ambiguity=f"{ambiguity:.2f}",
                    combined=f"{combined_score:.2f}",
+                   has_explicit_entity=has_explicit_entity,
                    profile=self.profile.value)
         
         return final_route
     
+    def _has_explicit_entity(self, query: str) -> bool:
+        """
+        Check if query contains explicit entity mentions.
+        
+        Explicit = proper nouns, quoted terms, specific identifiers.
+        """
+        words = query.split()
+        
+        # Check for proper nouns (capitalized words not at sentence start)
+        proper_nouns = sum(1 for w in words[1:] if len(w) > 1 and w[0].isupper())
+        if proper_nouns >= 1:
+            return True
+        
+        # Check for quoted terms
+        if '"' in query or "'" in query:
+            return True
+        
+        # Check for identifiers (alphanumeric patterns like TX-12345, ABC-001)
+        import re
+        identifier_pattern = r'\b[A-Z]{2,}-?\d+\b|\b\d+-[A-Z]+\b'
+        if re.search(identifier_pattern, query):
+            return True
+        
+        return False
+    
     def _apply_profile_constraints(self, base_route: QueryRoute) -> QueryRoute:
         """Apply deployment profile constraints to route selection."""
         
-        # Profile B: No Vector RAG allowed
-        if self.profile == DeploymentProfile.HIGH_ASSURANCE_AUDIT:
+        # High Assurance: No Vector RAG allowed
+        if self.profile == DeploymentProfile.HIGH_ASSURANCE:
             if base_route == QueryRoute.VECTOR_RAG:
-                return QueryRoute.LOCAL_GLOBAL
-        
-        # Profile C: No DRIFT allowed
-        if self.profile == DeploymentProfile.SPEED_CRITICAL:
-            if base_route == QueryRoute.DRIFT_MULTI_HOP:
-                return QueryRoute.LOCAL_GLOBAL
+                # Fall through to Local Search (simplest graph route)
+                return QueryRoute.LOCAL_SEARCH
         
         return base_route
     
@@ -275,27 +306,35 @@ class QueryClassifier:
     
     Categories:
     - FACTUAL: Simple fact lookup -> Route 1
-    - ENTITY_FOCUSED: Clear entity, needs graph -> Route 2
-    - MULTI_HOP: Ambiguous, needs decomposition -> Route 3
+    - ENTITY_FOCUSED: Explicit entity, needs graph -> Route 2
+    - THEMATIC: No explicit entity, thematic -> Route 3
+    - MULTI_HOP: Ambiguous, needs decomposition -> Route 4
     """
     
     def classify(self, query: str) -> QueryRoute:
         """Classify query into a route category."""
         query_lower = query.lower()
         
-        # Multi-hop / ambiguous patterns -> Route 3
+        # Multi-hop / ambiguous patterns -> Route 4
         if any(kw in query_lower for kw in [
             "analyze", "exposure", "risk", "how are we connected",
-            "through", "subsidiaries", "implications"
+            "through", "subsidiaries", "implications", "compare"
         ]):
             return QueryRoute.DRIFT_MULTI_HOP
+        
+        # Thematic patterns (no explicit entity) -> Route 3
+        if any(kw in query_lower for kw in [
+            "main risks", "key themes", "overall", "summarize",
+            "what are the trends", "general overview"
+        ]):
+            return QueryRoute.GLOBAL_SEARCH
         
         # Entity-focused patterns -> Route 2
         if any(kw in query_lower for kw in [
             "all contracts", "list all", "related to", "associated with",
             "what are the", "who are the"
         ]):
-            return QueryRoute.LOCAL_GLOBAL
+            return QueryRoute.LOCAL_SEARCH
         
         # Simple fact patterns -> Route 1
         if any(kw in query_lower for kw in [
@@ -304,5 +343,5 @@ class QueryClassifier:
         ]):
             return QueryRoute.VECTOR_RAG
         
-        # Default to Local/Global (middle ground)
-        return QueryRoute.LOCAL_GLOBAL
+        # Default to Local Search (entity-focused is most common)
+        return QueryRoute.LOCAL_SEARCH

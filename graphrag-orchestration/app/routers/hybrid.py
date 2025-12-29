@@ -38,16 +38,16 @@ _pipeline_cache: Dict[str, HybridPipeline] = {}
 
 class DeploymentProfileEnum(str, Enum):
     """Deployment profile selection."""
-    GENERAL_ENTERPRISE = "general_enterprise"     # All 3 routes
-    HIGH_ASSURANCE_AUDIT = "high_assurance_audit" # Routes 2+3 only
-    SPEED_CRITICAL = "speed_critical"             # Routes 1+2 only
+    GENERAL_ENTERPRISE = "general_enterprise"     # All 4 routes
+    HIGH_ASSURANCE = "high_assurance"             # Routes 2, 3, 4 only (no Vector RAG)
 
 
 class RouteEnum(str, Enum):
     """Available query routes."""
-    VECTOR_RAG = "vector_rag"           # Route 1
-    LOCAL_GLOBAL = "local_global"       # Route 2
-    DRIFT_MULTI_HOP = "drift_multi_hop" # Route 3
+    VECTOR_RAG = "vector_rag"           # Route 1: Fast lane
+    LOCAL_SEARCH = "local_search"       # Route 2: Entity-focused (LazyGraphRAG)
+    GLOBAL_SEARCH = "global_search"     # Route 3: Thematic (LazyGraphRAG + HippoRAG)
+    DRIFT_MULTI_HOP = "drift_multi_hop" # Route 4: Multi-hop iterative
 
 
 class HybridQueryRequest(BaseModel):
@@ -77,9 +77,9 @@ class HybridQueryResponse(BaseModel):
         default_factory=list,
         description="Source citations with text and metadata"
     )
-    evidence_path: List[Dict[str, Any]] = Field(
+    evidence_path: List[Any] = Field(
         default_factory=list,
-        description="Entity path showing evidence connections"
+        description="Evidence path (entity IDs/names or structured nodes)"
     )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
@@ -112,7 +112,7 @@ class PipelineConfigRequest(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str
-    components: Dict[str, str]
+    components: Dict[str, Any]
     profile: str
     group_id: str
 
@@ -125,8 +125,7 @@ def _get_deployment_profile(profile_enum: DeploymentProfileEnum) -> DeploymentPr
     """Convert API enum to internal DeploymentProfile."""
     profile_map = {
         DeploymentProfileEnum.GENERAL_ENTERPRISE: DeploymentProfile.GENERAL_ENTERPRISE,
-        DeploymentProfileEnum.HIGH_ASSURANCE_AUDIT: DeploymentProfile.HIGH_ASSURANCE_AUDIT,
-        DeploymentProfileEnum.SPEED_CRITICAL: DeploymentProfile.SPEED_CRITICAL,
+        DeploymentProfileEnum.HIGH_ASSURANCE: DeploymentProfile.HIGH_ASSURANCE,
     }
     return profile_map.get(profile_enum, DeploymentProfile.GENERAL_ENTERPRISE)
 
@@ -151,23 +150,56 @@ async def _get_or_create_pipeline(
         logger.info("creating_hybrid_pipeline",
                    group_id=group_id,
                    profile=profile.value)
-        
-        # TODO: Initialize actual clients from services
-        # For now, create pipeline with None clients (will use fallbacks)
-        # In production:
-        # - llm_client = LLMService().get_llm()
-        # - hipporag_instance = HippoRAGService(group_id).get_instance()
-        # - graph_store = GraphService().get_store(group_id)
-        # - vector_rag = VectorService().get_query_engine(group_id)
-        
+
+        # Real wiring (E2E-real): use in-process services.
+        # If a dependency is unavailable, we still construct the pipeline but
+        # downstream behavior may degrade (and E2E tests should catch it).
+        from app.services import GraphService, LLMService
+        from app.services.community_service import CommunityService
+        from app.hybrid.indexing.hipporag_service import get_hipporag_service
+        from app.hybrid.indexing.text_store import HippoRAGTextUnitStore
+
+        llm_service = LLMService()
+        llm_client = llm_service.llm
+
+        graph_store = None
+        try:
+            graph_service = GraphService()
+            graph_store = graph_service.get_store(group_id)
+        except Exception as e:
+            logger.warning("hybrid_graph_store_unavailable", group_id=group_id, error=str(e))
+
+        # Community summaries (optional but improves intent disambiguation)
+        graph_communities = None
+        try:
+            community_service = CommunityService()
+            summaries = community_service.get_community_summaries(group_id)
+            graph_communities = [
+                {"title": f"Community {cid}", "summary": summary}
+                for cid, summary in sorted((summaries or {}).items(), key=lambda x: x[0])
+            ]
+        except Exception as e:
+            logger.warning("hybrid_community_summaries_unavailable", group_id=group_id, error=str(e))
+
+        # HippoRAG (Route 2/3 tracer + citation text backing)
+        hipporag_service = get_hipporag_service(group_id, "./hipporag_index")
+        try:
+            await hipporag_service.initialize()
+        except Exception as e:
+            logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
+
+        hipporag_instance = hipporag_service.get_instance()
+        text_unit_store = HippoRAGTextUnitStore(hipporag_service)
+
         pipeline = HybridPipeline(
             profile=profile,
-            llm_client=None,  # TODO: Wire to LLMService
-            hipporag_instance=None,  # TODO: Wire to HippoRAG
-            graph_store=None,  # TODO: Wire to Neo4j
-            text_unit_store=None,  # TODO: Wire to text store
-            vector_rag_client=None,  # TODO: Wire to Vector RAG
-            relevance_budget=relevance_budget
+            llm_client=llm_client,
+            hipporag_instance=hipporag_instance,
+            graph_store=graph_store,
+            text_unit_store=text_unit_store,
+            vector_rag_client=None,
+            graph_communities=graph_communities,
+            relevance_budget=relevance_budget,
         )
         
         _pipeline_cache[cache_key] = pipeline
@@ -206,7 +238,8 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
         if body.force_route:
             route_map: Dict[RouteEnum, QueryRoute] = {
                 RouteEnum.VECTOR_RAG: QueryRoute.VECTOR_RAG,
-                RouteEnum.LOCAL_GLOBAL: QueryRoute.LOCAL_GLOBAL,
+                RouteEnum.LOCAL_SEARCH: QueryRoute.LOCAL_SEARCH,
+                RouteEnum.GLOBAL_SEARCH: QueryRoute.GLOBAL_SEARCH,
                 RouteEnum.DRIFT_MULTI_HOP: QueryRoute.DRIFT_MULTI_HOP,
             }
             forced_route = route_map[body.force_route]
@@ -246,10 +279,10 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
                query_preview=body.query[:50])
     
     try:
-        # Use High-Assurance profile for audit queries (Routes 2+3 only)
+        # Use High-Assurance profile for audit queries (Routes 2, 3, 4 only)
         pipeline = await _get_or_create_pipeline(
             group_id,
-            profile=DeploymentProfile.HIGH_ASSURANCE_AUDIT,
+            profile=DeploymentProfile.HIGH_ASSURANCE,
             relevance_budget=0.95  # Maximum thoroughness
         )
         
@@ -364,12 +397,14 @@ async def hybrid_health(request: Request):
     try:
         pipeline = await _get_or_create_pipeline(group_id)
         health_status = await pipeline.health_check()
+
+        allowed = {"ok", "not_configured", "fallback_mode", "no_llm"}
+        component_values = [
+            v for k, v in health_status.items() if isinstance(v, str) and k not in {"profile"}
+        ]
         
         return HealthResponse(
-            status="healthy" if all(
-                v in ["ok", "not_configured", "fallback_mode"]
-                for v in health_status.values()
-            ) else "degraded",
+            status="healthy" if component_values and all(v in allowed for v in component_values) else "degraded",
             components=health_status,
             profile=health_status.get("profile", "unknown"),
             group_id=group_id
@@ -427,9 +462,10 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
         
         # Determine which routes are enabled based on profile + overrides
         routes_enabled = {
-            "vector_rag": config.enable_vector_rag and profile != DeploymentProfile.HIGH_ASSURANCE_AUDIT,
-            "local_global": True,  # Always enabled
-            "drift_multi_hop": config.enable_drift and profile != DeploymentProfile.SPEED_CRITICAL
+            "vector_rag": config.enable_vector_rag and profile != DeploymentProfile.HIGH_ASSURANCE,
+            "local_search": True,  # Always enabled
+            "global_search": True,  # Always enabled
+            "drift_multi_hop": config.enable_drift
         }
         
         return {
@@ -682,13 +718,21 @@ async def get_index_status(request: Request, index_dir: str = "./hipporag_index"
                            "entity_index.json"]:
                 filepath = group_dir / filename
                 if filepath.exists():
-                    with open(filepath) as f:
-                        data = json.load(f)
-                    status["files"][filename] = {
-                        "exists": True,
-                        "count": len(data) if isinstance(data, list) else len(data.keys()),
-                        "size_bytes": filepath.stat().st_size
-                    }
+                    try:
+                        with open(filepath) as f:
+                            data = json.load(f)
+                        status["files"][filename] = {
+                            "exists": True,
+                            "count": len(data) if isinstance(data, list) else len(data.keys()),
+                            "size_bytes": filepath.stat().st_size
+                        }
+                    except Exception as e:
+                        status["files"][filename] = {
+                            "exists": True,
+                            "unreadable": True,
+                            "error": str(e),
+                            "size_bytes": filepath.stat().st_size,
+                        }
                 else:
                     status["files"][filename] = {"exists": False}
         

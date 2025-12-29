@@ -101,33 +101,32 @@ async def test_question_bank_has_expected_sections(question_bank):
 
 @pytest.mark.asyncio
 async def test_profile_b_disables_vector_route_for_vector_questions(question_bank):
-    """High-assurance audit must never route to Vector RAG."""
-    router = HybridRouter(profile=DeploymentProfile.HIGH_ASSURANCE_AUDIT, llm_client=None)
+    """High-assurance profile must never route to Vector RAG."""
+    router = HybridRouter(profile=DeploymentProfile.HIGH_ASSURANCE, llm_client=None)
 
     vector_qs = _pick_by_prefix(question_bank["A"], "Q-V")
     assert vector_qs, "No vector questions found"
 
     # Test all Q-V items: even if base routing would pick VECTOR_RAG,
-    # profile constraints must force LOCAL_GLOBAL.
+    # profile constraints must force LOCAL_SEARCH.
     for q in vector_qs:
         route = await router.route(q.text)
         assert route != QueryRoute.VECTOR_RAG, f"Profile B routed {q.qid} to Vector"
-        assert route == QueryRoute.LOCAL_GLOBAL, f"Profile B should fall through to Local/Global for {q.qid}"
+        assert route == QueryRoute.LOCAL_SEARCH, f"Profile B should fall through to Local Search for {q.qid}"
 
 
 @pytest.mark.asyncio
-async def test_profile_c_disables_drift_route_for_drift_questions(question_bank):
-    """Speed-critical must never route to DRIFT multi-hop."""
-    router = HybridRouter(profile=DeploymentProfile.SPEED_CRITICAL, llm_client=None)
+async def test_high_assurance_uses_graph_routes(question_bank):
+    """High-assurance profile should use graph-based routes."""
+    router = HybridRouter(profile=DeploymentProfile.HIGH_ASSURANCE, llm_client=None)
 
     drift_qs = _pick_by_prefix(question_bank["D"], "Q-D")
     assert drift_qs, "No drift questions found"
 
     for q in drift_qs:
         route = await router.route(q.text)
-        assert route != QueryRoute.DRIFT_MULTI_HOP, f"Profile C routed {q.qid} to DRIFT"
-        # Profile C only disables DRIFT. Depending on heuristics, a question may still
-        # legitimately route to VECTOR_RAG or LOCAL_GLOBAL.
+        # High-assurance can use any graph route (LOCAL_SEARCH, GLOBAL_SEARCH, DRIFT_MULTI_HOP)
+        assert route != QueryRoute.VECTOR_RAG, f"High Assurance routed {q.qid} to Vector RAG"
 
 
 @pytest.mark.asyncio

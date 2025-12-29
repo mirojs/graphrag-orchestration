@@ -1,12 +1,16 @@
 """
 Hybrid Pipeline API Router
 
-Exposes the LazyGraphRAG + HippoRAG 2 hybrid pipeline via REST endpoints.
+Exposes the 3-way routing system via REST endpoints:
+- Route 1: Vector RAG (fast lane for simple queries)
+- Route 2: Local/Global equivalent (entity-focused with HippoRAG 2)
+- Route 3: DRIFT equivalent (multi-hop iterative reasoning)
 
 Endpoints:
-- POST /hybrid/query - Execute a query through the hybrid pipeline
-- POST /hybrid/query/audit - Execute with full audit trail
-- POST /hybrid/query/fast - Execute via Vector RAG fast lane
+- POST /hybrid/query - Auto-route to appropriate handler
+- POST /hybrid/query/audit - Force Route 2/3 with audit trail
+- POST /hybrid/query/fast - Force Route 1 (Vector RAG)
+- POST /hybrid/query/drift - Force Route 3 (multi-hop)
 - GET /hybrid/health - Health check for hybrid components
 - POST /hybrid/configure - Configure pipeline settings
 """
@@ -18,7 +22,7 @@ from enum import Enum
 import structlog
 
 from app.hybrid.orchestrator import HybridPipeline
-from app.hybrid.router.main import DeploymentProfile
+from app.hybrid.router.main import DeploymentProfile, QueryRoute
 from app.hybrid.indexing import DualIndexService, get_hipporag_service
 
 router = APIRouter()
@@ -34,8 +38,16 @@ _pipeline_cache: Dict[str, HybridPipeline] = {}
 
 class DeploymentProfileEnum(str, Enum):
     """Deployment profile selection."""
-    GENERAL_ENTERPRISE = "general_enterprise"
-    HIGH_ASSURANCE_AUDIT = "high_assurance_audit"
+    GENERAL_ENTERPRISE = "general_enterprise"     # All 3 routes
+    HIGH_ASSURANCE_AUDIT = "high_assurance_audit" # Routes 2+3 only
+    SPEED_CRITICAL = "speed_critical"             # Routes 1+2 only
+
+
+class RouteEnum(str, Enum):
+    """Available query routes."""
+    VECTOR_RAG = "vector_rag"           # Route 1
+    LOCAL_GLOBAL = "local_global"       # Route 2
+    DRIFT_MULTI_HOP = "drift_multi_hop" # Route 3
 
 
 class HybridQueryRequest(BaseModel):
@@ -45,7 +57,7 @@ class HybridQueryRequest(BaseModel):
         default="detailed_report",
         description="Type of response to generate"
     )
-    force_route: Optional[Literal["vector_rag", "hybrid_pipeline"]] = Field(
+    force_route: Optional[RouteEnum] = Field(
         default=None,
         description="Force a specific route (overrides router decision)"
     )
@@ -60,7 +72,7 @@ class HybridQueryRequest(BaseModel):
 class HybridQueryResponse(BaseModel):
     """Response model for hybrid pipeline queries."""
     response: str = Field(..., description="The generated answer")
-    route_used: str = Field(..., description="Which route was taken")
+    route_used: str = Field(..., description="Which route was taken (route_1/route_2/route_3)")
     citations: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Source citations with text and metadata"
@@ -89,7 +101,11 @@ class PipelineConfigRequest(BaseModel):
     )
     enable_vector_rag: bool = Field(
         default=True,
-        description="Enable Vector RAG fast lane (Profile A only)"
+        description="Enable Route 1 (Vector RAG)"
+    )
+    enable_drift: bool = Field(
+        default=True,
+        description="Enable Route 3 (DRIFT multi-hop)"
     )
 
 
@@ -107,9 +123,12 @@ class HealthResponse(BaseModel):
 
 def _get_deployment_profile(profile_enum: DeploymentProfileEnum) -> DeploymentProfile:
     """Convert API enum to internal DeploymentProfile."""
-    if profile_enum == DeploymentProfileEnum.HIGH_ASSURANCE_AUDIT:
-        return DeploymentProfile.HIGH_ASSURANCE_AUDIT
-    return DeploymentProfile.GENERAL_ENTERPRISE
+    profile_map = {
+        DeploymentProfileEnum.GENERAL_ENTERPRISE: DeploymentProfile.GENERAL_ENTERPRISE,
+        DeploymentProfileEnum.HIGH_ASSURANCE_AUDIT: DeploymentProfile.HIGH_ASSURANCE_AUDIT,
+        DeploymentProfileEnum.SPEED_CRITICAL: DeploymentProfile.SPEED_CRITICAL,
+    }
+    return profile_map.get(profile_enum, DeploymentProfile.GENERAL_ENTERPRISE)
 
 
 async def _get_or_create_pipeline(
@@ -163,11 +182,12 @@ async def _get_or_create_pipeline(
 @router.post("/query", response_model=HybridQueryResponse)
 async def hybrid_query(request: Request, body: HybridQueryRequest):
     """
-    Execute a query through the hybrid LazyGraphRAG + HippoRAG 2 pipeline.
+    Execute a query through the 3-way routing hybrid pipeline.
     
     The router automatically decides between:
-    - Vector RAG (fast lane) for simple queries
-    - Hybrid Pipeline (deep dive) for complex queries
+    - Route 1: Vector RAG for simple fact lookups
+    - Route 2: Local/Global (LazyGraphRAG + HippoRAG 2) for entity-focused queries
+    - Route 3: DRIFT multi-hop for ambiguous/complex queries
     
     Use `force_route` to override the automatic decision.
     """
@@ -177,17 +197,23 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                group_id=group_id,
                query_preview=body.query[:50],
                response_type=body.response_type,
-               force_route=body.force_route)
+               force_route=body.force_route.value if body.force_route else None)
     
     try:
         pipeline = await _get_or_create_pipeline(group_id)
         
         # Handle forced routing
-        if body.force_route == "vector_rag":
-            result = await pipeline._execute_vector_rag(body.query)
-        elif body.force_route == "hybrid_pipeline":
-            result = await pipeline._execute_hybrid_pipeline(
-                body.query, body.response_type
+        if body.force_route:
+            route_map: Dict[RouteEnum, QueryRoute] = {
+                RouteEnum.VECTOR_RAG: QueryRoute.VECTOR_RAG,
+                RouteEnum.LOCAL_GLOBAL: QueryRoute.LOCAL_GLOBAL,
+                RouteEnum.DRIFT_MULTI_HOP: QueryRoute.DRIFT_MULTI_HOP,
+            }
+            forced_route = route_map[body.force_route]
+            result = await pipeline.force_route(
+                query=body.query,
+                route=forced_route,
+                response_type=body.response_type
             )
         else:
             result = await pipeline.query(body.query, body.response_type)
@@ -204,11 +230,11 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
 @router.post("/query/audit", response_model=HybridQueryResponse)
 async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
     """
-    Execute a query with full audit trail.
+    Execute a query with full audit trail (Routes 2 or 3 only).
     
     This is a convenience endpoint that:
     - Forces response_type to "audit_trail"
-    - Always uses the hybrid pipeline (no Vector RAG shortcut)
+    - Bypasses Vector RAG (Route 1) - always uses Routes 2 or 3
     - Returns maximum evidence detail for compliance
     
     Recommended for: forensic accounting, legal discovery, compliance audits.
@@ -220,7 +246,7 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
                query_preview=body.query[:50])
     
     try:
-        # Use High-Assurance profile for audit queries
+        # Use High-Assurance profile for audit queries (Routes 2+3 only)
         pipeline = await _get_or_create_pipeline(
             group_id,
             profile=DeploymentProfile.HIGH_ASSURANCE_AUDIT,
@@ -240,14 +266,14 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
 @router.post("/query/fast", response_model=HybridQueryResponse)
 async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
     """
-    Execute a query via Vector RAG fast lane only.
+    Execute a query via Route 1 (Vector RAG) only.
     
     This is a convenience endpoint that:
-    - Always uses Vector RAG (no hybrid pipeline)
-    - Optimized for sub-second latency
+    - Always uses Vector RAG (Route 1)
+    - Optimized for sub-second latency (<500ms)
     - Best for simple fact lookups
     
-    Note: Will fall back to hybrid if Vector RAG is unavailable.
+    Note: Will fall back to Route 2 if Vector RAG is unavailable.
     """
     group_id = request.state.group_id
     
@@ -261,11 +287,61 @@ async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
             relevance_budget=0.5  # Speed over thoroughness
         )
         
-        result = await pipeline._execute_vector_rag(body.query)
+        result = await pipeline.force_route(
+            query=body.query,
+            route=QueryRoute.VECTOR_RAG,
+            response_type=body.response_type
+        )
         return HybridQueryResponse(**result)
         
     except Exception as e:
         logger.error("fast_query_failed",
+                    group_id=group_id,
+                    error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/query/drift", response_model=HybridQueryResponse)
+async def hybrid_query_drift(request: Request, body: HybridQueryRequest):
+    """
+    Execute a query via Route 3 (DRIFT multi-hop reasoning).
+    
+    This is a convenience endpoint that:
+    - Always uses DRIFT-style iterative query decomposition
+    - Decomposes ambiguous queries into sub-questions
+    - Discovers entities through intermediate steps
+    - Consolidates evidence for comprehensive answers
+    
+    Best for:
+    - Ambiguous queries without clear entity references
+    - Complex multi-hop reasoning
+    - Questions requiring discovery of related concepts
+    
+    Example queries that benefit:
+    - "What regulatory implications exist?" (no specific entity)
+    - "How do ESG factors affect valuations?" (needs decomposition)
+    """
+    group_id = request.state.group_id
+    
+    logger.info("drift_query_received",
+               group_id=group_id,
+               query_preview=body.query[:50])
+    
+    try:
+        pipeline = await _get_or_create_pipeline(
+            group_id,
+            relevance_budget=0.9  # Thoroughness for complex queries
+        )
+        
+        result = await pipeline.force_route(
+            query=body.query,
+            route=QueryRoute.DRIFT_MULTI_HOP,
+            response_type=body.response_type
+        )
+        return HybridQueryResponse(**result)
+        
+    except Exception as e:
+        logger.error("drift_query_failed",
                     group_id=group_id,
                     error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
@@ -316,9 +392,10 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
     """
     Configure the hybrid pipeline for this group.
     
-    Allows switching between:
-    - Profile A (General Enterprise): Vector RAG + Hybrid
-    - Profile B (High-Assurance): Hybrid only
+    Allows switching between deployment profiles:
+    - Profile A (General Enterprise): All 3 routes
+    - Profile B (High-Assurance): Routes 2+3 only (no Vector RAG)
+    - Profile C (Speed-Critical): Routes 1+2 only (no DRIFT)
     
     Configuration persists for the duration of the session.
     """
@@ -327,7 +404,9 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
     logger.info("configuring_pipeline",
                group_id=group_id,
                profile=config.profile.value,
-               relevance_budget=config.relevance_budget)
+               relevance_budget=config.relevance_budget,
+               enable_vector_rag=config.enable_vector_rag,
+               enable_drift=config.enable_drift)
     
     try:
         profile = _get_deployment_profile(config.profile)
@@ -346,12 +425,19 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
             relevance_budget=config.relevance_budget
         )
         
+        # Determine which routes are enabled based on profile + overrides
+        routes_enabled = {
+            "vector_rag": config.enable_vector_rag and profile != DeploymentProfile.HIGH_ASSURANCE_AUDIT,
+            "local_global": True,  # Always enabled
+            "drift_multi_hop": config.enable_drift and profile != DeploymentProfile.SPEED_CRITICAL
+        }
+        
         return {
             "status": "configured",
             "group_id": group_id,
             "profile": config.profile.value,
             "relevance_budget": config.relevance_budget,
-            "vector_rag_enabled": config.enable_vector_rag and profile != DeploymentProfile.HIGH_ASSURANCE_AUDIT
+            "routes_enabled": routes_enabled
         }
         
     except Exception as e:
@@ -366,33 +452,79 @@ async def list_profiles():
     """
     List available deployment profiles with descriptions.
     
-    Helps users understand the tradeoffs between profiles.
+    Helps users understand the tradeoffs between the 3-way routing system.
     """
     return {
+        "routes": [
+            {
+                "id": "route_1",
+                "name": "Vector RAG",
+                "description": "Embedding-based retrieval for fast fact lookups",
+                "latency": "<500ms",
+                "best_for": ["Simple fact queries", "Known entity lookups", "FAQ-style questions"],
+                "mechanism": "Cosine similarity search on vector embeddings"
+            },
+            {
+                "id": "route_2",
+                "name": "Local/Global (LazyGraphRAG + HippoRAG 2)",
+                "description": "Entity-focused graph traversal with deterministic evidence paths",
+                "latency": "3-8 seconds",
+                "best_for": [
+                    "Queries with clear entity references",
+                    "Evidence tracing requirements",
+                    "Relationship mapping"
+                ],
+                "mechanism": "NER → PPR graph traversal → Iterative deepening"
+            },
+            {
+                "id": "route_3",
+                "name": "DRIFT Multi-Hop",
+                "description": "Iterative query decomposition for ambiguous multi-hop reasoning",
+                "latency": "8-15 seconds",
+                "best_for": [
+                    "Ambiguous queries without clear entities",
+                    "Complex multi-hop reasoning",
+                    "Discovery-oriented questions"
+                ],
+                "mechanism": "Query decomposition → Sub-question resolution → Consolidated synthesis"
+            }
+        ],
         "profiles": [
             {
                 "id": "general_enterprise",
                 "name": "General Enterprise (Profile A)",
-                "description": "Speed-optimized with Vector RAG fast lane",
+                "description": "All 3 routes enabled - automatic routing",
+                "available_routes": ["route_1", "route_2", "route_3"],
                 "best_for": [
+                    "General business intelligence",
                     "Customer support",
-                    "Internal wikis",
-                    "General Q&A"
+                    "Knowledge management"
                 ],
-                "latency": "Fast (sub-second for simple queries)",
-                "accuracy": "Standard (90%+ for fact lookups)"
+                "routing_behavior": "Auto-select optimal route based on query complexity and ambiguity"
             },
             {
                 "id": "high_assurance_audit",
                 "name": "High-Assurance Audit (Profile B)",
-                "description": "Precision-only with full hybrid pipeline",
+                "description": "Routes 2+3 only - no Vector RAG, always deterministic paths",
+                "available_routes": ["route_2", "route_3"],
                 "best_for": [
                     "Forensic accounting",
                     "Compliance auditing",
                     "Legal discovery"
                 ],
-                "latency": "Thorough (5-10 seconds)",
-                "accuracy": "High (deterministic evidence paths)"
+                "routing_behavior": "Always use graph-based routes with full evidence trails"
+            },
+            {
+                "id": "speed_critical",
+                "name": "Speed-Critical (Profile C)",
+                "description": "Routes 1+2 only - no DRIFT, optimized for latency",
+                "available_routes": ["route_1", "route_2"],
+                "best_for": [
+                    "Real-time dashboards",
+                    "Interactive Q&A",
+                    "High-volume queries"
+                ],
+                "routing_behavior": "Prioritize speed, skip expensive multi-hop reasoning"
             }
         ]
     }

@@ -43,7 +43,9 @@ class EvidenceSynthesizer:
         self,
         query: str,
         evidence_nodes: List[Tuple[str, float]],
-        response_type: str = "detailed_report"
+        response_type: str = "detailed_report",
+        sub_questions: Optional[List[str]] = None,
+        intermediate_context: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -52,6 +54,8 @@ class EvidenceSynthesizer:
             query: The original user query.
             evidence_nodes: List of (entity_name, score) from Stage 2.
             response_type: "detailed_report" | "summary" | "audit_trail"
+            sub_questions: Optional list of sub-questions (Route 3 DRIFT).
+            intermediate_context: Optional intermediate results from sub-questions.
             
         Returns:
             Dictionary containing:
@@ -65,27 +69,52 @@ class EvidenceSynthesizer:
         # Step 2: Build context with citations
         context, citation_map = self._build_cited_context(text_chunks)
         
-        # Step 3: Generate response with citation requirements
+        # Step 3: For Route 3, add sub-question context
+        if sub_questions and intermediate_context:
+            context = self._enrich_context_for_drift(
+                context, sub_questions, intermediate_context
+            )
+        
+        # Step 4: Generate response with citation requirements
         response = await self._generate_response(
             query=query,
             context=context,
-            response_type=response_type
+            response_type=response_type,
+            sub_questions=sub_questions
         )
         
-        # Step 4: Extract and validate citations
+        # Step 5: Extract and validate citations
         citations = self._extract_citations(response, citation_map)
         
         logger.info("synthesis_complete",
                    query=query,
                    num_citations=len(citations),
-                   response_length=len(response))
+                   response_length=len(response),
+                   is_drift_mode=sub_questions is not None)
         
         return {
             "response": response,
             "citations": citations,
             "evidence_path": [node for node, _ in evidence_nodes],
-            "text_chunks_used": len(text_chunks)
+            "text_chunks_used": len(text_chunks),
+            "sub_questions_addressed": sub_questions or []
         }
+    
+    def _enrich_context_for_drift(
+        self,
+        base_context: str,
+        sub_questions: List[str],
+        intermediate_context: List[Dict[str, Any]]
+    ) -> str:
+        """Add structured sub-question context for DRIFT-style synthesis."""
+        drift_section = "\n\n## Sub-Question Analysis:\n"
+        
+        for i, (sub_q, result) in enumerate(zip(sub_questions, intermediate_context), 1):
+            drift_section += f"\n### Q{i}: {sub_q}\n"
+            drift_section += f"- Entities identified: {', '.join(result.get('entities', []))}\n"
+            drift_section += f"- Evidence points: {result.get('evidence_count', 0)}\n"
+        
+        return base_context + drift_section
     
     async def _retrieve_text_chunks(
         self, 
@@ -144,7 +173,8 @@ class EvidenceSynthesizer:
         self,
         query: str,
         context: str,
-        response_type: str
+        response_type: str,
+        sub_questions: Optional[List[str]] = None
     ) -> str:
         """Generate the final response with citation requirements."""
         
@@ -153,13 +183,16 @@ class EvidenceSynthesizer:
             return "Error: LLM client not configured"
         
         # Different prompts for different response types
-        prompts = {
-            "detailed_report": self._get_detailed_report_prompt(query, context),
-            "summary": self._get_summary_prompt(query, context),
-            "audit_trail": self._get_audit_trail_prompt(query, context)
-        }
-        
-        prompt = prompts.get(response_type, prompts["detailed_report"])
+        if sub_questions:
+            # DRIFT mode: Use multi-question synthesis prompt
+            prompt = self._get_drift_synthesis_prompt(query, context, sub_questions)
+        else:
+            prompts = {
+                "detailed_report": self._get_detailed_report_prompt(query, context),
+                "summary": self._get_summary_prompt(query, context),
+                "audit_trail": self._get_audit_trail_prompt(query, context)
+            }
+            prompt = prompts.get(response_type, prompts["detailed_report"])
         
         try:
             response = await self.llm.acomplete(prompt)
@@ -167,6 +200,47 @@ class EvidenceSynthesizer:
         except Exception as e:
             logger.error("response_generation_failed", error=str(e))
             return f"Error generating response: {str(e)}"
+    
+    def _get_drift_synthesis_prompt(
+        self, 
+        query: str, 
+        context: str,
+        sub_questions: List[str]
+    ) -> str:
+        """Prompt for DRIFT-style multi-question synthesis."""
+        sub_q_list = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(sub_questions))
+        
+        return f"""You are analyzing a complex query that was decomposed into multiple sub-questions.
+
+Original Query: {query}
+
+Sub-questions explored:
+{sub_q_list}
+
+Evidence Context (with citation markers):
+{context}
+
+Instructions:
+1. Synthesize findings from ALL sub-questions into a coherent analysis
+2. Show how the answers connect to address the original query
+3. EVERY factual claim must include a citation [n] to the evidence
+4. Structure your response to follow the logical flow of the sub-questions
+5. Include a final synthesis section that ties everything together
+
+Format:
+## Analysis
+
+[Your comprehensive analysis addressing each sub-question]
+
+## Key Connections
+
+[How the findings relate to each other]
+
+## Conclusion
+
+[Final answer to the original query]
+
+Your response:"""
     
     def _get_detailed_report_prompt(self, query: str, context: str) -> str:
         return f"""You are an expert analyst generating a detailed report.

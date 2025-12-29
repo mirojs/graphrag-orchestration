@@ -20,7 +20,10 @@ from app.hybrid.router.main import DeploymentProfile, HybridRouter, QueryRoute
 
 
 QUESTION_BANK_CANDIDATES = [
-    # Original location (older scripts assumed this)
+    # New (active) hybrid router bank
+    Path(__file__).resolve().parents[2] / "QUESTION_BANK_HYBRID_ROUTER_2025-12-29.md",
+
+    # Older bank (kept as an archived fallback)
     Path(__file__).resolve().parents[2] / "QUESTION_BANK_5PDFS_2025-12-24.md",
     # Current archived location (post-cleanup)
     Path(__file__).resolve().parents[2]

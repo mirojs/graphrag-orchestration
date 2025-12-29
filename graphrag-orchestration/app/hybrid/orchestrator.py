@@ -7,6 +7,24 @@ Coordinates 3 distinct query routes:
 3. DRIFT Equivalent - Multi-hop iterative reasoning for ambiguous queries
 
 This is the main entry point for the Hybrid Architecture.
+
+Model Selection by Route:
+========================
+Route 1 (Vector RAG):
+  - Embeddings: text-embedding-3-large
+
+Route 2 (Local/Global):
+  - Entity Extraction (NER): HYBRID_NER_MODEL (gpt-4o)
+  - Graph Traversal (PPR): N/A - algorithmic (HippoRAG PageRank)
+  - Answer Synthesis: HYBRID_SYNTHESIS_MODEL (gpt-5.2)
+
+Route 3 (DRIFT Multi-Hop):
+  - Query Decomposition: HYBRID_DECOMPOSITION_MODEL (gpt-4.1)
+  - Sub-Question Synthesis: HYBRID_INTERMEDIATE_MODEL (gpt-4o)
+  - Final Consolidation: HYBRID_SYNTHESIS_MODEL (gpt-5.2)
+
+Router (all routes):
+  - Query Classification: HYBRID_ROUTER_MODEL (gpt-4o-mini)
 """
 
 from typing import Dict, Any, Optional, List

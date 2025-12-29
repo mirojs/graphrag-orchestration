@@ -277,3 +277,39 @@ async def run_query(query: str):
 | "How are we connected to Company X through subsidiaries?" | **Route 3** | Multi-hop, unclear path |
 | "Compare compliance status of our top 3 partners" | **Route 3** | Multi-entity, comparative analysis |
 
+---
+
+## 8. Deployment Profiles & Routing Configuration
+
+To address the need for both a "fast query solution" and a "high-assurance solution", we define distinct deployment profiles.
+
+### 8.1. Profile Implementation (3-Way vs 2-Way)
+
+The distinction between the 3-way (General Enterprise) and 2-way (High Assurance) systems is implemented as a simple **On/Off Toggle for Route 1 (Vector RAG)**.
+
+*   **General Enterprise (Profile A):** Route 1 is **ON**.
+    *   Simple queries are intercepted by Route 1 for sub-second responses.
+    *   Complex queries flow to Routes 2 & 3.
+*   **High Assurance (Profile B):** Route 1 is **OFF**.
+    *   **No changes are needed to Route 2 or 3 logic.**
+    *   Queries that *would* have gone to Route 1 simply fall through to Route 2.
+    *   Route 2 (Local/Global) is perfectly capable of answering simple queries, just slower (3-5s vs 0.5s) and with higher cost, but with guaranteed evidence tracing.
+
+### 8.2. Azure OpenAI Model Selection
+
+Based on the available models (`gpt-4o`, `gpt-4.1`, `gpt-4o-mini`, `gpt-5.2`), we recommend the following assignment for optimal performance/cost ratio:
+
+| Component | Task | Recommended Model | Reasoning |
+|:----------|:-----|:------------------|:----------|
+| **Router** | Query Classification | **gpt-4o-mini** | Fast, low cost, sufficient reasoning for classification. |
+| **Route 1** | Vector Embeddings | **text-embedding-3-large** | Standard for high-quality retrieval. |
+| **Route 2** | Entity Extraction (NER) | **gpt-4o** | High precision required to identify correct seed entities. |
+| **Route 2** | Graph Traversal (PPR) | *N/A (Algorithm)* | HippoRAG uses PageRank (math), not LLM. |
+| **Route 2** | Answer Synthesis | **gpt-5.2** | Best available model for coherent, accurate final reports. |
+| **Route 3** | Query Decomposition | **gpt-4.1** | Strong reasoning capabilities for breaking down ambiguity. |
+| **Route 3** | Sub-Question Synthesis | **gpt-4o** | Good balance of speed/quality for intermediate steps. |
+| **Route 3** | Final Consolidation | **gpt-5.2** | Maximum context handling and reasoning for complex answers. |
+
+*Note: `gpt-5.2` and `gpt-4.1` refer to the high-capability models available in your specific Azure deployment.*
+
+

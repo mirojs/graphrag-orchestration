@@ -3,6 +3,10 @@ Stage 1: Intent Disambiguation (The "Interpreter")
 
 Uses LazyGraphRAG's query refinement to decompose ambiguous user queries
 into specific, graph-grounded entities (Seed Entities).
+
+Model Selection:
+- Entity Extraction (NER): HYBRID_NER_MODEL (gpt-4o) - High precision required
+- Query Decomposition (Route 3): HYBRID_DECOMPOSITION_MODEL (gpt-4.1) - Strong reasoning
 """
 
 from typing import List, Optional, Any
@@ -14,6 +18,9 @@ logger = structlog.get_logger(__name__)
 class IntentDisambiguator:
     """
     Decomposes ambiguous queries into specific entity seeds.
+    
+    Model: Uses HYBRID_NER_MODEL (gpt-4o) for entity extraction.
+    High precision is critical - incorrect seeds cascade to wrong evidence paths.
     
     Example:
         Query: "What is our exposure to the main tech partner?"

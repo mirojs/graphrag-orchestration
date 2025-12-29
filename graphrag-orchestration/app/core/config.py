@@ -20,6 +20,21 @@ class Settings(BaseSettings):
     # Query routing (intent classification: Vector vs Graph vs RAPTOR)
     AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = "o4-mini"  # Will use o4-mini when deployed
     AZURE_OPENAI_ROUTING_REASONING_EFFORT: str = "medium"  # Reasoning effort for routing
+    
+    # ========================================================================
+    # Hybrid Pipeline Model Selection (LazyGraphRAG + HippoRAG 2)
+    # See ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md Section 8.2 for rationale
+    # ========================================================================
+    # Router: Query classification (simple vs complex vs ambiguous)
+    HYBRID_ROUTER_MODEL: str = "gpt-4o-mini"  # Fast, low cost, sufficient for classification
+    # Route 2: Entity extraction (NER) - needs high precision
+    HYBRID_NER_MODEL: str = "gpt-4o"  # High precision for seed entity identification
+    # Route 2/3: Final answer synthesis - best available model
+    HYBRID_SYNTHESIS_MODEL: str = "gpt-5-2"  # Maximum coherence for final reports
+    # Route 3: Query decomposition - needs strong reasoning
+    HYBRID_DECOMPOSITION_MODEL: str = "gpt-4.1"  # Strong reasoning for breaking down ambiguity
+    # Route 3: Sub-question intermediate synthesis
+    HYBRID_INTERMEDIATE_MODEL: str = "gpt-4o"  # Good balance of speed/quality
     AZURE_OPENAI_MODEL_VERSION: str = "2024-11-20"  # gpt-4o (2024-11-20)
     
     # Embeddings (Switzerland North - Separate resource)

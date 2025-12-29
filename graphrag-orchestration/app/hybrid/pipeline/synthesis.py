@@ -4,6 +4,10 @@ Stage 3: Synthesis & Evidence Validation (The "Analyst")
 Uses LazyGraphRAG's Iterative Deepening to fetch raw text chunks
 based on the evidence nodes from Stage 2, then synthesizes a
 comprehensive, cited response.
+
+Model Selection:
+- Final Synthesis (Route 2/3): HYBRID_SYNTHESIS_MODEL (gpt-5.2) - Best coherence
+- Intermediate Synthesis (Route 3): HYBRID_INTERMEDIATE_MODEL (gpt-4o) - Speed/quality balance
 """
 
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
@@ -16,6 +20,10 @@ class EvidenceSynthesizer:
     """
     Takes evidence nodes from HippoRAG and generates a comprehensive
     response with citations using LazyGraphRAG's text retrieval.
+    
+    Model Selection:
+    - Final answers: HYBRID_SYNTHESIS_MODEL (gpt-5.2) for maximum coherence
+    - Route 3 intermediate steps: HYBRID_INTERMEDIATE_MODEL (gpt-4o) for speed
     
     Key Features:
     - Fetches RAW text chunks (not summaries) for full detail retention.

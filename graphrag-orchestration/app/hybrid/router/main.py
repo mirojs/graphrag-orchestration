@@ -50,6 +50,10 @@ class HybridRouter:
     
     Profile C (Speed-Critical):
         - Routes 1 + 2 only (no slow DRIFT)
+    
+    Model Selection:
+        Uses HYBRID_ROUTER_MODEL (default: gpt-4o-mini) for classification.
+        Fast and cost-effective for simple routing decisions.
     """
     
     def __init__(

@@ -41,11 +41,11 @@ class DimensionAwareAzureEmbeddings(AzureOpenAIEmbeddings):
     """
     Azure OpenAI embeddings wrapper that passes dimensions parameter.
     
-    text-embedding-3-small supports configurable dimensions (256-1536).
+    text-embedding-3-large supports configurable dimensions up to 3072.
     This wrapper ensures the dimensions parameter is always passed to the API.
     """
     
-    def __init__(self, dimensions: int = 1536, **kwargs):
+    def __init__(self, dimensions: int = 3072, **kwargs):
         self._dimensions = dimensions
         super().__init__(**kwargs)
     
@@ -146,7 +146,7 @@ class Neo4jGraphRAGService:
     
     @property
     def embedder(self) -> "DimensionAwareAzureEmbeddings":
-        """Lazy initialization of Azure OpenAI embeddings (text-embedding-3-small with 1536 dimensions)."""
+        """Lazy initialization of Azure OpenAI embeddings (text-embedding-3-large with 3072 dimensions)."""
         if self._embedder is None:
             # Wrap AzureOpenAIEmbeddings to always pass dimensions parameter
             self._embedder = DimensionAwareAzureEmbeddings(

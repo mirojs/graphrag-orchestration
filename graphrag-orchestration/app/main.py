@@ -111,13 +111,25 @@ app.add_middleware(GroupIsolationMiddleware)
 
 # Include Routers
 app.include_router(health.router, tags=["health"])
-app.include_router(graphrag.router, prefix="/graphrag", tags=["graphrag"])
-app.include_router(orchestration.router, prefix="/orchestrate", tags=["orchestration"])
 
-# Hybrid Pipeline Router - LazyGraphRAG + HippoRAG 2
+# ============================================================================
+# DEPRECATED V1/V2 Endpoints - Use Hybrid Pipeline or V3 instead
+# ============================================================================
+# Legacy graphrag router (replaced by hybrid pipeline)
+# app.include_router(graphrag.router, prefix="/graphrag", tags=["graphrag"])
+# Legacy orchestration router (replaced by hybrid pipeline)
+# app.include_router(orchestration.router, prefix="/orchestrate", tags=["orchestration"])
+
+# ============================================================================
+# NEW ARCHITECTURE: Hybrid Pipeline (LazyGraphRAG + HippoRAG 2)
+# ============================================================================
+# This is the primary interface for the 4-way routing system
 app.include_router(hybrid.router, prefix="/hybrid", tags=["hybrid-pipeline"])
 
-# V3 Router - Completely separate from V1/V2
+# ============================================================================
+# V3 Endpoints - Alternative DRIFT-based Implementation
+# ============================================================================
+# V3 Router - Separate from V1/V2
 # Uses Neo4j ONLY at query time, MS GraphRAG DRIFT for reasoning
 app.include_router(graphrag_v3.router, prefix="/graphrag", tags=["graphrag-v3"])
 

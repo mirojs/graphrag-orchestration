@@ -76,14 +76,14 @@ async def cleanup_raptor_data(request: CleanupRaptorRequest):
                 nodes_deleted = record["deleted"]
             logger.info(f"Deleted {nodes_deleted} RAPTOR nodes")
             
-            # Recreate index with 1536 dimensions
+            # Recreate index with 3072 dimensions (text-embedding-3-large)
             if request.recreate_index:
-                logger.info("Creating raptor_embedding index with 1536 dimensions...")
+                logger.info("Creating raptor_embedding index with 3072 dimensions...")
                 session.run("""
                     CREATE VECTOR INDEX raptor_embedding IF NOT EXISTS
                     FOR (r:RaptorNode) ON (r.embedding)
                     OPTIONS {indexConfig: {
-                        `vector.dimensions`: 1536,
+                        `vector.dimensions`: 3072,
                         `vector.similarity_function`: 'cosine'
                     }}
                 """)

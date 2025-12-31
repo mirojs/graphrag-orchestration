@@ -217,8 +217,8 @@ class IndexingConfig:
     community_report_max_chars: int = 8000
     
     # Embedding settings
-    embedding_model: str = "text-embedding-3-small"  # 1536 dims, Neo4j 5.x supports up to 4096
-    embedding_dimensions: int = 1536
+    embedding_model: str = "text-embedding-3-large"  # 3072 dims, Neo4j 5.x supports up to 4096
+    embedding_dimensions: int = 3072
     
     # LLM settings
     llm_model: str = "gpt-4o"

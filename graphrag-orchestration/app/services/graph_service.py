@@ -127,6 +127,13 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
         
         return results
 
+    async def aquery(self, query: str, params: Optional[dict] = None):
+        """
+        Async query method - delegates to astructured_query from parent class.
+        This is a convenience alias for compatibility with code expecting aquery().
+        """
+        return await self.astructured_query(query, param_map=params)
+
     def upsert_nodes(self, nodes: List[LabelledNode]) -> None:
         """
         Inject group_id into all nodes.

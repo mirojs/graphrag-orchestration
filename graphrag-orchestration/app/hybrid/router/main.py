@@ -152,12 +152,19 @@ class HybridRouter:
         return False
     
     def _apply_profile_constraints(self, base_route: QueryRoute) -> QueryRoute:
-        """Apply deployment profile constraints to route selection."""
+        """
+        Apply deployment profile constraints to route selection.
         
-        # High Assurance: No Vector RAG allowed
+        Fallback Logic for 4-way Routing:
+        - Route 1 (Vector RAG) → Route 2 (Local Search) if:
+          * High Assurance profile (no shortcuts allowed)
+          * Vector RAG not configured/unavailable
+        """
+        
+        # High Assurance: No Vector RAG allowed (always use graph-based retrieval)
         if self.profile == DeploymentProfile.HIGH_ASSURANCE:
             if base_route == QueryRoute.VECTOR_RAG:
-                # Fall through to Local Search (simplest graph route)
+                # Fall back to Local Search (simplest graph route with audit trail)
                 return QueryRoute.LOCAL_SEARCH
         
         return base_route

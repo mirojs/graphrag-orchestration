@@ -11,14 +11,14 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_BEARER_TOKEN: Optional[str] = None  # For local dev
-    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-5-2"  # Primary model for synthesis (GPT-5.2)
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-4o"  # Primary model for synthesis
     AZURE_OPENAI_REASONING_EFFORT: str = "medium"  # Reasoning effort for synthesis
     # Optional override only for DRIFT to allow faster model like gpt-4o-mini
-    AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = "gpt-5-2"
+    AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = "gpt-4o"
     # Indexing operations (entity/relationship extraction, RAPTOR clustering)
-    AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = "gpt-4.1"  # Will use gpt-4.1 when deployed
+    AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = "gpt-4.1"
     # Query routing (intent classification: Vector vs Graph vs RAPTOR)
-    AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = "o4-mini"  # Will use o4-mini when deployed
+    AZURE_OPENAI_ROUTING_DEPLOYMENT: Optional[str] = "gpt-4o-mini"
     AZURE_OPENAI_ROUTING_REASONING_EFFORT: str = "medium"  # Reasoning effort for routing
     
     # ========================================================================
@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     # Route 2: Entity extraction (NER) - needs high precision
     HYBRID_NER_MODEL: str = "gpt-4o"  # High precision for seed entity identification
     # Route 2/3: Final answer synthesis - best available model
-    HYBRID_SYNTHESIS_MODEL: str = "gpt-5-2"  # Maximum coherence for final reports
+    HYBRID_SYNTHESIS_MODEL: str = "gpt-4o"  # High quality synthesis
     # Route 3: Query decomposition - needs strong reasoning
     HYBRID_DECOMPOSITION_MODEL: str = "gpt-4.1"  # Strong reasoning for breaking down ambiguity
     # Route 3: Sub-question intermediate synthesis
@@ -40,8 +40,8 @@ class Settings(BaseSettings):
     # Embeddings (Switzerland North - Separate resource)
     AZURE_OPENAI_EMBEDDING_ENDPOINT: Optional[str] = None  # Switzerland North endpoint
     AZURE_OPENAI_EMBEDDING_API_KEY: Optional[str] = None  # Separate key for embedding resource
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
-    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 1536  # text-embedding-3-small dimensions
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-large"
+    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 3072  # text-embedding-3-large dimensions
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Latest stable version
     
     # Vector Store for RAPTOR nodes

@@ -647,8 +647,8 @@ def get_indexing_pipeline():
         deployment_name = settings.AZURE_OPENAI_INDEXING_DEPLOYMENT or settings.AZURE_OPENAI_DEPLOYMENT_NAME or "gpt-4o"
         
         config = IndexingConfig(
-            embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-small",
-            embedding_dimensions=1536,  # Neo4j 5.x supports up to 4096
+            embedding_model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT or "text-embedding-3-large",
+            embedding_dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,  # 3072 for text-embedding-3-large
             llm_model=deployment_name,  # Store deployment name as-is (e.g., "gpt-4.1")
         )
         

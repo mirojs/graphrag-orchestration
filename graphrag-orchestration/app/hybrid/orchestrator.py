@@ -201,11 +201,18 @@ class HybridPipeline:
         
         Best for: "What is X's address?", "How much is invoice Y?"
         Profile: General Enterprise only (disabled in High Assurance)
+        
+        Fallback Strategy:
+        ==================
+        If Vector RAG is unavailable or fails, automatically fall back to Route 2
+        (Local Search) to ensure query is answered using graph-based retrieval.
+        This provides graceful degradation while maintaining accuracy.
         """
         logger.info("route_1_vector_rag_start", query=query[:50])
         
         if not self.vector_rag:
-            logger.warning("vector_rag_not_configured_fallback_to_route_2")
+            logger.warning("vector_rag_not_configured_fallback_to_route_2",
+                          reason="Vector RAG client not initialized")
             return await self._execute_route_2_local_search(query, "summary")
         
         try:
@@ -223,8 +230,15 @@ class HybridPipeline:
                 }
             }
         except Exception as e:
-            logger.error("route_1_failed_fallback", error=str(e))
-            return await self._execute_route_2_local_search(query, "summary")
+            logger.error("route_1_failed_fallback_to_route_2",
+                        error=str(e),
+                        reason="Vector RAG execution failed")
+            # Fallback to Route 2 (graph-based) for reliability
+            result = await self._execute_route_2_local_search(query, "summary")
+            # Mark that this was a fallback execution
+            result["metadata"]["fallback_from"] = "route_1_vector_rag"
+            result["metadata"]["fallback_reason"] = str(e)
+            return result
     
     # =========================================================================
     # Route 2: Local Search Equivalent (LazyGraphRAG Only)

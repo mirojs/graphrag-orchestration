@@ -648,7 +648,7 @@ class DRIFTAdapter:
                 driver=self.driver,
                 group_id=group_id,
                 index_name="entity_embedding",
-                embedding_dimension=1536,  # text-embedding-3-small
+                embedding_dimension=3072,  # text-embedding-3-large
             )
 
             # Root-cause guardrail: if entity embeddings exist on the entity models,
@@ -1593,7 +1593,7 @@ Answer:"""
             except Exception as e:
                 logger.warning(f"Failed to embed community content: {e}")
                 # Fallback to zero vector if embedding fails
-                embedding = [0.0] * 1536  # Assuming 1536 dimensions
+                embedding = [0.0] * 3072  # 3072 dimensions for text-embedding-3-large
             
             community = GraphRAGCommunityReport(
                 id=row["id"],
@@ -1627,7 +1627,7 @@ class Neo4jDRIFTVectorStore:
         driver: neo4j.Driver,
         group_id: str,
         index_name: str = "entity_embedding",
-        embedding_dimension: int = 1536,
+        embedding_dimension: int = 3072,
     ):
         """
         Initialize Neo4j vector store adapter.
@@ -1636,7 +1636,7 @@ class Neo4jDRIFTVectorStore:
             driver: Neo4j driver instance
             group_id: Tenant identifier for filtering
             index_name: Name of the Neo4j vector index
-            embedding_dimension: Dimension of embeddings (default: 1536)
+            embedding_dimension: Dimension of embeddings (default: 3072 for text-embedding-3-large)
         """
         self.driver = driver
         self.group_id = group_id

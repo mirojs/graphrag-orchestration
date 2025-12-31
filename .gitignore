@@ -103,6 +103,10 @@ microsoft_sample/
 .env.*.local
 *.local
 
+# Backup env files (often contain real secrets)
+.env.backup
+**/.env.backup
+
 # Azure & Cloud
 # .azure/ is committed for easy machine transfer - contains only non-sensitive metadata
 # Secrets stored in Azure Key Vault and App Configuration (appcs-cps-y22yd4amoxqu)
@@ -151,3 +155,20 @@ cosmos_backups/
 !quick_backup.sh
 !backup_repo_to_azure.sh
 !restore_repo.sh
+
+# Benchmark artifacts (generated)
+benchmarks/*.json
+
+# Local benchmark outputs (keep out of git)
+benchmarks/
+
+# Archived scripts may contain tokenized URLs or secrets
+tests/archive/
+
+# Ad-hoc local test outputs (generated)
+test_5pdfs_results_*.json
+
+# Local ad-hoc scripts (keep out of git)
+test_5pdfs_comprehensive.py
+test_5pdfs_simple.py
+test_pos_neg_questions_existing_data.py

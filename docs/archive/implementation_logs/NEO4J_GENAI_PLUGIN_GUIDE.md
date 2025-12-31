@@ -54,7 +54,7 @@ import os
 
 driver = GraphDatabase.driver(
     'neo4j+s://a86dcf63.databases.neo4j.io',
-    auth=('neo4j', os.getenv('NEO4J_PASSWORD', 'uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI'))
+   auth=('neo4j', os.environ['NEO4J_PASSWORD'])
 )
 
 if is_genai_plugin_available(driver):

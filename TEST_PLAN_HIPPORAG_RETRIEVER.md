@@ -356,3 +356,84 @@ Run: pytest tests/test_hipporag_retriever_ppr.py -v
 **Priority 4: CI/CD**
 8. Update `.github/workflows/test.yml` with new test suites
 9. Add test coverage reporting (codecov)
+---
+
+## 9. Cloud/Deployed Testing
+
+### 9.1. Overview
+
+After local tests pass, the deployed Azure Container App must be validated against the same functional requirements. Cloud tests verify:
+- Infrastructure correctness (managed identity, secrets, network)
+- Embedding dimension alignment (3072-d text-embedding-3-large)
+- All 4 routes operational (Vector, Local, Global, DRIFT)
+- Multi-tenancy isolation in production Neo4j
+- End-to-end latency within acceptable bounds
+
+### 9.2. Prerequisites
+
+- Azure Container App deployed and healthy
+- Neo4j Aura instance with fresh indexes (3072-d vectors)
+- Test documents indexed into a known `group_id`
+- `X-Group-ID` header for multi-tenancy
+
+### 9.3. Cloud Test Categories
+
+| Test Suite | File | Description |
+|:-----------|:-----|:------------|
+| Health & Connectivity | `tests/cloud/test_cloud_health.py` | API reachability, auth, managed identity |
+| Route 1: Vector RAG | `tests/cloud/test_cloud_vector.py` | Fast-lane embedding search |
+| Route 2: Local Search | `tests/cloud/test_cloud_local.py` | Entity-focused LazyGraphRAG |
+| Route 3: Global Search | `tests/cloud/test_cloud_global.py` | Thematic + HippoRAG PPR |
+| Route 4: DRIFT | `tests/cloud/test_cloud_drift.py` | Multi-hop decomposition |
+| Question Bank | `tests/cloud/test_cloud_question_bank.py` | All 12 questions from QUESTION_BANK_HYBRID_ROUTER |
+| Multi-Tenancy | `tests/cloud/test_cloud_multitenancy.py` | Group isolation verification |
+| Performance | `tests/cloud/test_cloud_performance.py` | Latency benchmarks |
+
+### 9.4. Test Execution
+
+```bash
+# Set deployed endpoint
+export GRAPHRAG_CLOUD_URL="https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+export TEST_GROUP_ID="invoice-contract-verification"
+
+# Run all cloud tests
+pytest tests/cloud/ -v --cloud
+
+# Run specific route tests
+pytest tests/cloud/test_cloud_drift.py -v
+
+# Run question bank validation
+pytest tests/cloud/test_cloud_question_bank.py -v
+```
+
+### 9.5. Success Criteria (Cloud)
+
+| Requirement | Target |
+|:------------|:-------|
+| Health endpoint | 200 OK |
+| Route 1 (Vector) latency | <2s |
+| Route 2 (Local) latency | <5s |
+| Route 3 (Global) latency | <10s |
+| Route 4 (DRIFT) latency | <20s |
+| Question Bank pass rate | 100% (12/12) |
+| Multi-tenancy isolation | No cross-group leakage |
+
+### 9.6. Cloud Test Data Requirements
+
+**Fresh Index Required:**
+Before running cloud tests, documents must be indexed with:
+- `text-embedding-3-large` (3072 dimensions)
+- `run_raptor=true` for Global/DRIFT tests
+- `run_community_detection=true` for community-based routing
+
+**Recommended Test Documents:**
+```
+graphrag-orchestration/data/input_docs/
+├── contoso_lifts_invoice.pdf
+├── purchase_contract.pdf
+├── PROPERTY MANAGEMENT AGREEMENT.pdf
+├── BUILDERS LIMITED WARRANTY.pdf
+└── HOLDING TANK SERVICING CONTRACT.pdf
+```
+
+---

@@ -154,10 +154,11 @@ node_data = [
 ### Manual Validation Query
 ```python
 from neo4j import GraphDatabase
+import os
 
 driver = GraphDatabase.driver(
     "neo4j+s://a86dcf63.databases.neo4j.io",
-    auth=("neo4j", "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI")
+    auth=("neo4j", os.environ["NEO4J_PASSWORD"])
 )
 
 with driver.session() as session:

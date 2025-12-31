@@ -1,0 +1,629 @@
+#!/usr/bin/env python3
+
+"""Benchmark Route 1 (vector) questions against Route 2 (local).
+
+Goal
+- Use the Route 1 question bank questions (Q-V*) as inputs.
+- Run each question twice against the V3 unified endpoint:
+    - force_route="vector" (Route 1 behavior)
+    - force_route="local"  (Route 2 behavior)
+- Capture wall-clock latency + response details so we can evaluate
+  whether Route 1 is necessary.
+
+This script is intentionally dependency-free (stdlib only).
+
+Usage
+  python3 scripts/benchmark_route1_vector_vs_route2_local.py \
+    --url https://...azurecontainerapps.io \
+    --group-id test-3072-clean
+
+Environment variables (optional)
+  GRAPHRAG_CLOUD_URL  default base URL
+  TEST_GROUP_ID       default group id
+
+Outputs
+- Writes a JSON report and a Markdown summary table to ./benchmarks/
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import json
+import os
+import re
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+
+DEFAULT_URL = os.getenv(
+    "GRAPHRAG_CLOUD_URL",
+    "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+)
+DEFAULT_GROUP_ID = os.getenv("TEST_GROUP_ID", "test-3072-clean")
+
+QUESTION_BANK_MD = Path(__file__).resolve().parents[1] / "QUESTION_BANK_HYBRID_ROUTER_2025-12-29.md"
+
+
+# 10 positive + 10 negative questions used in historical route validation.
+# These are intentionally kept dependency-free (we don't import the old test file
+# because it depends on httpx which may not be installed in all environments).
+POS_NEG_SUITE_VECTOR_POSITIVE: List[str] = [
+    "What is the invoice total amount?",
+    "What is the invoice number?",
+    "Who issued the invoice?",
+    "What is the payment method?",
+    "What is the tax amount?",
+    "What services are listed on the invoice?",
+    "What is the vendor name?",
+    "What items are on the invoice?",
+    "What is the due date mentioned?",
+    "What is the subtotal before tax?",
+]
+
+POS_NEG_SUITE_VECTOR_NEGATIVE: List[str] = [
+    "What is the GDP of France?",
+    "Who won the Nobel Prize?",
+    "What is quantum entanglement?",
+    "How do you make pizza?",
+    "What is the capital of Mars?",
+    "Who wrote Hamlet?",
+    "What is photosynthesis?",
+    "How tall is the Eiffel Tower?",
+    "What is machine learning?",
+    "When did dinosaurs exist?",
+]
+
+
+@dataclass(frozen=True)
+class BankQuestion:
+    qid: str
+    query: str
+
+
+def _now_utc_stamp() -> str:
+    return _dt.datetime.now(tz=_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _normalize_answer(text: str) -> str:
+    t = (text or "").strip().lower()
+    t = re.sub(r"\s+", " ", t)
+    # Strip lightweight punctuation for rough comparisons.
+    t = re.sub(r"[^a-z0-9 $%./:-]", "", t)
+    return t
+
+
+def _snip(text: str, n: int = 120) -> str:
+    t = (text or "").strip().replace("\n", " ")
+    t = re.sub(r"\s+", " ", t)
+    if len(t) <= n:
+        return t
+    return t[: n - 3] + "..."
+
+
+def _is_no_info_answer(text: str) -> bool:
+    """Heuristic: treat these as correct 'negative' responses."""
+    t = (text or "").strip().lower()
+    if not t:
+        return True
+    phrases = [
+        "no relevant information",
+        "no data has been indexed",
+        "not specified in the provided documents",
+        "not specified",
+        "not found",
+        "cannot find",
+        "no relevant text",
+    ]
+    return any(p in t for p in phrases)
+
+
+def _avg_ms(values: List[int]) -> float:
+    return (sum(values) / len(values)) if values else 0.0
+
+
+def _read_vector_questions(path: Path) -> List[BankQuestion]:
+    if not path.exists():
+        raise FileNotFoundError(f"Question bank not found: {path}")
+
+    pattern = re.compile(r"\*\*(Q-V\d+):\*\*\s*(.+?)\s*$")
+    questions: List[BankQuestion] = []
+
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = pattern.search(line)
+        if not m:
+            continue
+        qid, qtext = m.group(1).strip(), m.group(2).strip()
+        if qid and qtext:
+            questions.append(BankQuestion(qid=qid, query=qtext))
+
+    if not questions:
+        raise RuntimeError(f"No Q-V* questions found in {path}")
+    return questions
+
+
+def _http_post_json(
+    *,
+    url: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    timeout_s: float,
+) -> Tuple[int, Dict[str, Any], float, Optional[str]]:
+    """Return (status_code, json_data_or_empty, elapsed_s, error_text)."""
+
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    for k, v in headers.items():
+        req.add_header(k, v)
+
+    t0 = time.monotonic()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+            t1 = time.monotonic()
+            try:
+                parsed = json.loads(raw) if raw else {}
+            except Exception:
+                parsed = {}
+            return int(getattr(resp, "status", 0) or 0), parsed, (t1 - t0), None
+    except urllib.error.HTTPError as e:
+        t1 = time.monotonic()
+        body = ""
+        try:
+            body = (e.read() or b"").decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        parsed: Dict[str, Any] = {}
+        try:
+            parsed = json.loads(body) if body else {}
+        except Exception:
+            parsed = {}
+        return int(getattr(e, "code", 0) or 0), parsed, (t1 - t0), body[:2000] if body else str(e)
+    except Exception as e:
+        t1 = time.monotonic()
+        return 0, {}, (t1 - t0), str(e)
+
+
+def _extract_sources_ids(resp_json: Dict[str, Any]) -> List[str]:
+    sources = resp_json.get("sources") or []
+    if not isinstance(sources, list):
+        return []
+    out: List[str] = []
+    for s in sources:
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("id")
+        if sid is None:
+            continue
+        out.append(str(sid))
+    return out
+
+
+def _sources_overlap(a: Dict[str, Any], b: Dict[str, Any]) -> float:
+    a_ids = set(_extract_sources_ids(a))
+    b_ids = set(_extract_sources_ids(b))
+    if not a_ids and not b_ids:
+        return 1.0
+    if not a_ids or not b_ids:
+        return 0.0
+    inter = len(a_ids & b_ids)
+    union = len(a_ids | b_ids)
+    return inter / union if union else 0.0
+
+
+def _sources_count(resp_json: Dict[str, Any]) -> int:
+    sources = resp_json.get("sources") or []
+    return len(sources) if isinstance(sources, list) else 0
+
+
+def _extract_retrieval_context_size(resp_json: Dict[str, Any]) -> int:
+    """Best-effort measure of retrieval-only payload size.
+
+    When /graphrag/v3/query/local is called with synthesize=false, its "answer"
+    is a context string (bulleted entity descriptions). We approximate "detail"
+    by counting characters.
+    """
+    ans = resp_json.get("answer")
+    if not isinstance(ans, str):
+        return 0
+    return len(ans)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", default=DEFAULT_URL, help="Base URL (no trailing slash preferred)")
+    parser.add_argument("--group-id", default=DEFAULT_GROUP_ID, help="X-Group-ID value")
+    parser.add_argument("--top-k", type=int, default=10, help="top_k for retrieval")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="Per-request timeout (seconds)",
+    )
+    parser.add_argument(
+        "--synthesize",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Send synthesize=true/false in the request payload. Note: /graphrag/v3/query currently still synthesizes "
+            "for vector/local routes (the server ignores this flag for that endpoint), but /graphrag/v3/query/local "
+            "does honor it."
+        ),
+    )
+    parser.add_argument(
+        "--suite",
+        choices=["qv", "posneg"],
+        default="qv",
+        help="Which question suite to run: qv (Q-V* from question bank) or posneg (10 positive + 10 negative).",
+    )
+    parser.add_argument(
+        "--sleep",
+        type=float,
+        default=0.3,
+        help="Seconds to sleep between questions (rate limiting / smoother cloud runs).",
+    )
+    parser.add_argument(
+        "--include-local-retrieval-only",
+        action="store_true",
+        help=(
+            "Also run Route 2 in retrieval-only mode by calling /graphrag/v3/query/local with synthesize=false. "
+            "This isolates Route 2 retrieval latency from LLM synthesis."
+        ),
+    )
+    args = parser.parse_args()
+
+    base_url = args.url.rstrip("/")
+    endpoint = f"{base_url}/graphrag/v3/query"
+    endpoint_local = f"{base_url}/graphrag/v3/query/local"
+
+    if args.suite == "qv":
+        questions = [BankQuestion(qid=q.qid, query=q.query) for q in _read_vector_questions(QUESTION_BANK_MD)]
+        labeled: List[Tuple[str, BankQuestion]] = [("positive", q) for q in questions]
+    else:
+        pos = [BankQuestion(qid=f"P{i:02d}", query=q) for i, q in enumerate(POS_NEG_SUITE_VECTOR_POSITIVE, 1)]
+        neg = [BankQuestion(qid=f"N{i:02d}", query=q) for i, q in enumerate(POS_NEG_SUITE_VECTOR_NEGATIVE, 1)]
+        labeled = [("positive", q) for q in pos] + [("negative", q) for q in neg]
+        questions = [q for _, q in labeled]
+
+    out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    stamp = _now_utc_stamp()
+    suffix = "qv" if args.suite == "qv" else "posneg"
+    out_json = out_dir / f"route1_vector_vs_route2_local_{suffix}_{stamp}.json"
+    out_md = out_dir / f"route1_vector_vs_route2_local_{suffix}_{stamp}.md"
+
+    headers = {
+        "Content-Type": "application/json",
+        "X-Group-ID": args.group_id,
+    }
+
+    results: List[Dict[str, Any]] = []
+
+    pos_vector_ms: List[int] = []
+    pos_local_ms: List[int] = []
+    pos_local_ro_ms: List[int] = []
+    neg_local_ro_ms: List[int] = []
+    pos_local_ro_sources: List[int] = []
+    neg_local_ro_sources: List[int] = []
+    pos_local_ro_ctx_chars: List[int] = []
+    neg_local_ro_ctx_chars: List[int] = []
+    pos_local_ro_pass = 0
+    neg_local_ro_pass = 0
+    neg_vector_ms: List[int] = []
+    neg_local_ms: List[int] = []
+    pos_vector_sources: List[int] = []
+    pos_local_sources: List[int] = []
+    neg_vector_sources: List[int] = []
+    neg_local_sources: List[int] = []
+    pos_vector_ans_len: List[int] = []
+    pos_local_ans_len: List[int] = []
+    neg_vector_ans_len: List[int] = []
+    neg_local_ans_len: List[int] = []
+    pos_vector_pass = 0
+    pos_local_pass = 0
+    neg_vector_pass = 0
+    neg_local_pass = 0
+
+    for label, q in labeled:
+        base_payload = {
+            "query": q.query,
+            "top_k": int(args.top_k),
+            "include_sources": True,
+            "synthesize": bool(args.synthesize),
+        }
+
+        status_v, json_v, t_v, err_v = _http_post_json(
+            url=endpoint,
+            headers=headers,
+            payload={**base_payload, "force_route": "vector"},
+            timeout_s=float(args.timeout),
+        )
+
+        status_l, json_l, t_l, err_l = _http_post_json(
+            url=endpoint,
+            headers=headers,
+            payload={**base_payload, "force_route": "local"},
+            timeout_s=float(args.timeout),
+        )
+
+        status_lro = None
+        json_lro: Dict[str, Any] = {}
+        t_lro = 0.0
+        err_lro: Optional[str] = None
+        if args.include_local_retrieval_only:
+            # Force local route and explicitly disable synthesis.
+            payload_ro = {
+                "query": q.query,
+                "top_k": int(args.top_k),
+                "include_sources": True,
+                "force_route": "local",
+                "synthesize": False,
+            }
+            status_lro, json_lro, t_lro, err_lro = _http_post_json(
+                url=endpoint_local,
+                headers=headers,
+                payload=payload_ro,
+                timeout_s=float(args.timeout),
+            )
+
+        answer_v = str(json_v.get("answer", "") or "")
+        answer_l = str(json_l.get("answer", "") or "")
+        answer_lro = str(json_lro.get("answer", "") or "") if args.include_local_retrieval_only else ""
+
+        norm_v = _normalize_answer(answer_v)
+        norm_l = _normalize_answer(answer_l)
+
+        sources_overlap = _sources_overlap(json_v, json_l)
+        v_sources = _sources_count(json_v)
+        l_sources = _sources_count(json_l)
+        lro_sources = _sources_count(json_lro) if args.include_local_retrieval_only else 0
+
+        row: Dict[str, Any] = {
+            "qid": q.qid,
+            "query": q.query,
+            "label": label,
+            "vector": {
+                "status": status_v,
+                "elapsed_ms": int(t_v * 1000),
+                "response": json_v,
+                "error": err_v,
+            },
+            "local": {
+                "status": status_l,
+                "elapsed_ms": int(t_l * 1000),
+                "response": json_l,
+                "error": err_l,
+            },
+            "compare": {
+                "same_answer_normalized": bool(norm_v and norm_l and norm_v == norm_l),
+                "vector_minus_local_confidence": None,
+                "sources_jaccard": sources_overlap,
+                "vector_ms": int(t_v * 1000),
+                "local_ms": int(t_l * 1000),
+            },
+        }
+
+        # Fix confidence delta only when both are numeric
+        try:
+            cv = float(json_v.get("confidence"))
+            cl = float(json_l.get("confidence"))
+            row["compare"]["vector_minus_local_confidence"] = cv - cl
+        except Exception:
+            row["compare"]["vector_minus_local_confidence"] = None
+
+        # Quality checks (very lightweight heuristics)
+        vector_ok = False
+        local_ok = False
+        if label == "negative":
+            vector_ok = _is_no_info_answer(answer_v)
+            local_ok = _is_no_info_answer(answer_l)
+        else:  # positive
+            vector_ok = (not _is_no_info_answer(answer_v)) and (len(answer_v.strip()) > 3)
+            local_ok = (not _is_no_info_answer(answer_l)) and (len(answer_l.strip()) > 3)
+
+        row["quality"] = {
+            "vector_pass": bool(vector_ok),
+            "local_pass": bool(local_ok),
+            "vector_answer_len": len(answer_v.strip()),
+            "local_answer_len": len(answer_l.strip()),
+            "vector_sources": v_sources,
+            "local_sources": l_sources,
+        }
+
+        if label == "negative":
+            neg_vector_ms.append(int(t_v * 1000))
+            neg_local_ms.append(int(t_l * 1000))
+            neg_vector_pass += 1 if vector_ok else 0
+            neg_local_pass += 1 if local_ok else 0
+            neg_vector_sources.append(v_sources)
+            neg_local_sources.append(l_sources)
+            neg_vector_ans_len.append(len(answer_v.strip()))
+            neg_local_ans_len.append(len(answer_l.strip()))
+
+            if args.include_local_retrieval_only:
+                # Retrieval-only has no synthesized answer; treat "pass" as successful retrieval.
+                lro_ok = (status_lro == 200)
+                neg_local_ro_pass += 1 if lro_ok else 0
+                neg_local_ro_ms.append(int(t_lro * 1000))
+                neg_local_ro_sources.append(lro_sources)
+                neg_local_ro_ctx_chars.append(_extract_retrieval_context_size(json_lro))
+        else:
+            pos_vector_ms.append(int(t_v * 1000))
+            pos_local_ms.append(int(t_l * 1000))
+            pos_vector_pass += 1 if vector_ok else 0
+            pos_local_pass += 1 if local_ok else 0
+            pos_vector_sources.append(v_sources)
+            pos_local_sources.append(l_sources)
+            pos_vector_ans_len.append(len(answer_v.strip()))
+            pos_local_ans_len.append(len(answer_l.strip()))
+
+            if args.include_local_retrieval_only:
+                # Retrieval-only has no synthesized answer; treat "pass" as successful retrieval.
+                lro_ok = (status_lro == 200)
+                pos_local_ro_pass += 1 if lro_ok else 0
+                pos_local_ro_ms.append(int(t_lro * 1000))
+                pos_local_ro_sources.append(lro_sources)
+                pos_local_ro_ctx_chars.append(_extract_retrieval_context_size(json_lro))
+        results.append(row)
+
+        print(
+            f"{q.qid} ({label}): vector={row['compare']['vector_ms']}ms local={row['compare']['local_ms']}ms "
+            f"| v_ok={row['quality']['vector_pass']} l_ok={row['quality']['local_pass']} | overlap={sources_overlap:.2f}"
+        )
+
+        if args.sleep and args.sleep > 0:
+            time.sleep(float(args.sleep))
+
+    report: Dict[str, Any] = {
+        "generated_at_utc": stamp,
+        "base_url": base_url,
+        "endpoint": "/graphrag/v3/query",
+        "group_id": args.group_id,
+        "top_k": int(args.top_k),
+        "synthesize": bool(args.synthesize),
+        "suite": args.suite,
+        "questions": [{"qid": q.qid, "query": q.query} for q in questions],
+        "results": results,
+        "summary": {
+            "positive": {
+                "count": len(pos_vector_ms),
+                "vector_pass": pos_vector_pass,
+                "local_pass": pos_local_pass,
+                "vector_avg_ms": _avg_ms(pos_vector_ms),
+                "local_avg_ms": _avg_ms(pos_local_ms),
+                "vector_avg_answer_chars": _avg_ms(pos_vector_ans_len),
+                "local_avg_answer_chars": _avg_ms(pos_local_ans_len),
+                "vector_avg_sources": _avg_ms(pos_vector_sources),
+                "local_avg_sources": _avg_ms(pos_local_sources),
+            },
+            "negative": {
+                "count": len(neg_vector_ms),
+                "vector_pass": neg_vector_pass,
+                "local_pass": neg_local_pass,
+                "vector_avg_ms": _avg_ms(neg_vector_ms),
+                "local_avg_ms": _avg_ms(neg_local_ms),
+                "vector_avg_answer_chars": _avg_ms(neg_vector_ans_len),
+                "local_avg_answer_chars": _avg_ms(neg_local_ans_len),
+                "vector_avg_sources": _avg_ms(neg_vector_sources),
+                "local_avg_sources": _avg_ms(neg_local_sources),
+            },
+            "local_retrieval_only": {
+                "enabled": bool(args.include_local_retrieval_only),
+                "positive": {
+                    "count": len(pos_local_ro_ms),
+                    "pass": pos_local_ro_pass,
+                    "avg_ms": _avg_ms(pos_local_ro_ms),
+                    "avg_sources": _avg_ms(pos_local_ro_sources),
+                    "avg_context_chars": _avg_ms(pos_local_ro_ctx_chars),
+                },
+                "negative": {
+                    "count": len(neg_local_ro_ms),
+                    "pass": neg_local_ro_pass,
+                    "avg_ms": _avg_ms(neg_local_ro_ms),
+                    "avg_sources": _avg_ms(neg_local_ro_sources),
+                    "avg_context_chars": _avg_ms(neg_local_ro_ctx_chars),
+                },
+            },
+        },
+    }
+
+    out_json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # Markdown summary
+    md_lines: List[str] = []
+    title_suffix = "Q-V*" if args.suite == "qv" else "10 positive + 10 negative"
+    md_lines.append(f"# Route 1 (vector) vs Route 2 (local) — {title_suffix} Benchmark")
+    md_lines.append("")
+    md_lines.append(f"- Generated (UTC): {stamp}")
+    md_lines.append(f"- Base URL: {base_url}")
+    md_lines.append(f"- Group ID: {args.group_id}")
+    md_lines.append(f"- Endpoint: /graphrag/v3/query")
+    md_lines.append(f"- top_k: {args.top_k}")
+    md_lines.append(f"- synthesize: {args.synthesize}")
+    md_lines.append(f"- suite: {args.suite}")
+    md_lines.append("")
+
+    # Summary block
+    summ = report.get("summary", {}) if isinstance(report, dict) else {}
+    pos = summ.get("positive", {}) if isinstance(summ, dict) else {}
+    neg = summ.get("negative", {}) if isinstance(summ, dict) else {}
+    if args.suite == "posneg":
+        md_lines.append("## Summary")
+        md_lines.append("")
+        md_lines.append(
+            f"- Positive pass: vector {pos.get('vector_pass')}/{pos.get('count')} | local {pos.get('local_pass')}/{pos.get('count')}"
+        )
+        md_lines.append(
+            f"- Positive avg latency (ms): vector {pos.get('vector_avg_ms'):.1f} | local {pos.get('local_avg_ms'):.1f}"
+        )
+        md_lines.append(
+            f"- Positive avg details: vector {pos.get('vector_avg_answer_chars'):.1f} chars / {pos.get('vector_avg_sources'):.1f} sources | "
+            f"local {pos.get('local_avg_answer_chars'):.1f} chars / {pos.get('local_avg_sources'):.1f} sources"
+        )
+        md_lines.append(
+            f"- Negative pass: vector {neg.get('vector_pass')}/{neg.get('count')} | local {neg.get('local_pass')}/{neg.get('count')}"
+        )
+        md_lines.append(
+            f"- Negative avg latency (ms): vector {neg.get('vector_avg_ms'):.1f} | local {neg.get('local_avg_ms'):.1f}"
+        )
+        md_lines.append(
+            f"- Negative avg details: vector {neg.get('vector_avg_answer_chars'):.1f} chars / {neg.get('vector_avg_sources'):.1f} sources | "
+            f"local {neg.get('local_avg_answer_chars'):.1f} chars / {neg.get('local_avg_sources'):.1f} sources"
+        )
+
+        lro = summ.get("local_retrieval_only", {}) if isinstance(summ, dict) else {}
+        if isinstance(lro, dict) and lro.get("enabled"):
+            lro_pos = lro.get("positive", {}) if isinstance(lro.get("positive"), dict) else {}
+            lro_neg = lro.get("negative", {}) if isinstance(lro.get("negative"), dict) else {}
+            md_lines.append(
+                f"- Local retrieval-only (no LLM): pos {lro_pos.get('pass')}/{lro_pos.get('count')} avg {float(lro_pos.get('avg_ms') or 0):.1f}ms, "
+                f"avg {float(lro_pos.get('avg_sources') or 0):.1f} sources, avg {float(lro_pos.get('avg_context_chars') or 0):.1f} ctx chars"
+            )
+            md_lines.append(
+                f"- Local retrieval-only (no LLM): neg {lro_neg.get('pass')}/{lro_neg.get('count')} avg {float(lro_neg.get('avg_ms') or 0):.1f}ms, "
+                f"avg {float(lro_neg.get('avg_sources') or 0):.1f} sources, avg {float(lro_neg.get('avg_context_chars') or 0):.1f} ctx chars"
+            )
+        md_lines.append("")
+
+    md_lines.append("| QID | label | v ms | l ms | v ok | l ok | v chars | l chars | v src | l src | Δconf (v-l) | sources Jaccard | vector answer | local answer |")
+    md_lines.append("|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---|---|")
+
+    for r in results:
+        v = r["vector"]["response"] if isinstance(r.get("vector"), dict) else {}
+        l = r["local"]["response"] if isinstance(r.get("local"), dict) else {}
+        v_ms = r["compare"].get("vector_ms")
+        l_ms = r["compare"].get("local_ms")
+        dconf = r["compare"].get("vector_minus_local_confidence")
+        jacc = r["compare"].get("sources_jaccard")
+        label = r.get("label", "")
+        qv = r.get("quality", {}) if isinstance(r.get("quality"), dict) else {}
+        vok = qv.get("vector_pass")
+        lok = qv.get("local_pass")
+        vchars = qv.get("vector_answer_len")
+        lchars = qv.get("local_answer_len")
+        vsrc = qv.get("vector_sources")
+        lsrc = qv.get("local_sources")
+
+        v_ans = _snip(str(v.get("answer", "") or ""), 90)
+        l_ans = _snip(str(l.get("answer", "") or ""), 90)
+
+        dconf_s = "" if dconf is None else f"{dconf:.3f}"
+        jacc_s = "" if jacc is None else f"{float(jacc):.2f}"
+
+        md_lines.append(
+            f"| {r['qid']} | {label} | {v_ms} | {l_ms} | {vok} | {lok} | {vchars} | {lchars} | {vsrc} | {lsrc} | {dconf_s} | {jacc_s} | {v_ans} | {l_ans} |"
+        )
+
+    out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+
+    print(f"\nWrote:\n- {out_json}\n- {out_md}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

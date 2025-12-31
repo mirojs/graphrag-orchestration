@@ -32,7 +32,7 @@ neo4j-graphrag==1.7.0  # Use 1.7.0 - no numpy constraint, works with graspologic
 rapidfuzz>=3.6.0  # Required by neo4j-graphrag
 
 # HippoRAG 2 - Deterministic multi-hop retrieval with Personalized PageRank
-hipporag>=0.1.0  # For Stage 2: Deterministic Tracing in Hybrid Pipeline
+# hipporag>=0.1.0  # Optional - not used in current LlamaIndex-native implementation
 
 # Azure SDKs
 azure-cosmos==4.9.0

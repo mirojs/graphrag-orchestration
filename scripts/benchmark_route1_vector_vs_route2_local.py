@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import difflib
 import json
 import os
 import re
@@ -126,11 +127,105 @@ def _avg_ms(values: List[int]) -> float:
     return (sum(values) / len(values)) if values else 0.0
 
 
+def _percentile(values: List[int], p: float) -> int:
+    if not values:
+        return 0
+    if p <= 0:
+        return min(values)
+    if p >= 100:
+        return max(values)
+    xs = sorted(values)
+    k = int(round((p / 100.0) * (len(xs) - 1)))
+    k = max(0, min(k, len(xs) - 1))
+    return int(xs[k])
+
+
+def _jaccard_ids(a: List[str], b: List[str]) -> float:
+    sa = set(a)
+    sb = set(b)
+    if not sa and not sb:
+        return 1.0
+    if not sa or not sb:
+        return 0.0
+    inter = len(sa & sb)
+    union = len(sa | sb)
+    return inter / union if union else 0.0
+
+
+def _similarity(a: str, b: str) -> float:
+    return float(difflib.SequenceMatcher(None, a or "", b or "").ratio())
+
+
+def _summarize_repeats(runs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Summarize per-route repeatability for one question.
+
+    runs: list of {status, elapsed_ms, answer, answer_norm, sources_ids, sources_count, confidence}
+    """
+    if not runs:
+        return {
+            "count": 0,
+            "ok_http_200": 0,
+            "answer_unique": 0,
+            "answer_norm_unique": 0,
+            "answer_norm_exact_rate": 0.0,
+            "answer_norm_min_similarity": 0.0,
+            "sources_unique": 0,
+            "sources_avg_jaccard_vs_first": 0.0,
+            "sources_min_jaccard_vs_first": 0.0,
+            "sources_count_avg": 0.0,
+            "latency_ms": {"avg": 0.0, "p50": 0, "p90": 0, "min": 0, "max": 0},
+        }
+
+    first = runs[0]
+    base_norm = str(first.get("answer_norm", "") or "")
+    base_sources = list(first.get("sources_ids") or [])
+
+    answers = [str(r.get("answer", "") or "") for r in runs]
+    norms = [str(r.get("answer_norm", "") or "") for r in runs]
+    statuses = [int(r.get("status") or 0) for r in runs]
+    ms = [int(r.get("elapsed_ms") or 0) for r in runs]
+    src_counts = [int(r.get("sources_count") or 0) for r in runs]
+
+    norm_unique = len(set(norms))
+    exact_norm = sum(1 for n in norms if n == base_norm)
+    sim = [_similarity(base_norm, n) for n in norms]
+    jacc = [_jaccard_ids(base_sources, list(r.get("sources_ids") or [])) for r in runs]
+    src_sig = ["|".join(sorted(list(r.get("sources_ids") or []))) for r in runs]
+
+    return {
+        "count": len(runs),
+        "ok_http_200": sum(1 for s in statuses if s == 200),
+        "answer_unique": len(set(answers)),
+        "answer_norm_unique": norm_unique,
+        "answer_norm_exact_rate": float(exact_norm / len(runs)) if runs else 0.0,
+        "answer_norm_min_similarity": float(min(sim) if sim else 0.0),
+        "sources_unique": len(set(src_sig)),
+        "sources_avg_jaccard_vs_first": float(sum(jacc) / len(jacc)) if jacc else 0.0,
+        "sources_min_jaccard_vs_first": float(min(jacc) if jacc else 0.0),
+        "sources_count_avg": float(sum(src_counts) / len(src_counts)) if src_counts else 0.0,
+        "latency_ms": {
+            "avg": float(sum(ms) / len(ms)) if ms else 0.0,
+            "p50": _percentile(ms, 50),
+            "p90": _percentile(ms, 90),
+            "min": int(min(ms) if ms else 0),
+            "max": int(max(ms) if ms else 0),
+        },
+    }
+
+
 def _read_vector_questions(path: Path) -> List[BankQuestion]:
+    return _read_question_bank(path, prefix="Q-V")
+
+
+def _read_local_questions(path: Path) -> List[BankQuestion]:
+    return _read_question_bank(path, prefix="Q-L")
+
+
+def _read_question_bank(path: Path, *, prefix: str) -> List[BankQuestion]:
     if not path.exists():
         raise FileNotFoundError(f"Question bank not found: {path}")
 
-    pattern = re.compile(r"\*\*(Q-V\d+):\*\*\s*(.+?)\s*$")
+    pattern = re.compile(rf"\*\*({re.escape(prefix)}\d+):\*\*\s*(.+?)\s*$")
     questions: List[BankQuestion] = []
 
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -142,7 +237,7 @@ def _read_vector_questions(path: Path) -> List[BankQuestion]:
             questions.append(BankQuestion(qid=qid, query=qtext))
 
     if not questions:
-        raise RuntimeError(f"No Q-V* questions found in {path}")
+        raise RuntimeError(f"No {prefix}* questions found in {path}")
     return questions
 
 
@@ -236,6 +331,11 @@ def _extract_retrieval_context_size(resp_json: Dict[str, Any]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=DEFAULT_URL, help="Base URL (no trailing slash preferred)")
+    parser.add_argument(
+        "--question-bank",
+        default=str(QUESTION_BANK_MD),
+        help="Path to a question bank markdown file (used by qv and repeat-qbank suites).",
+    )
     parser.add_argument("--group-id", default=DEFAULT_GROUP_ID, help="X-Group-ID value")
     parser.add_argument("--top-k", type=int, default=10, help="top_k for retrieval")
     parser.add_argument(
@@ -256,9 +356,18 @@ def main() -> int:
     )
     parser.add_argument(
         "--suite",
-        choices=["qv", "posneg"],
+        choices=["qv", "posneg", "repeat-pos", "repeat-qbank"],
         default="qv",
-        help="Which question suite to run: qv (Q-V* from question bank) or posneg (10 positive + 10 negative).",
+        help=(
+            "Which question suite to run: qv (Q-V* from question bank), posneg (10 positive + 10 negative), "
+            "repeat-pos (10 positive questions repeated N times for repeatability), or repeat-qbank (repeat Q-V* on vector and Q-L* on local)."
+        ),
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=10,
+        help="For repeat-pos: number of repeats per question per route.",
     )
     parser.add_argument(
         "--sleep",
@@ -276,24 +385,34 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    question_bank_path = Path(str(args.question_bank)).expanduser().resolve()
+
     base_url = args.url.rstrip("/")
     endpoint = f"{base_url}/graphrag/v3/query"
     endpoint_local = f"{base_url}/graphrag/v3/query/local"
 
     if args.suite == "qv":
-        questions = [BankQuestion(qid=q.qid, query=q.query) for q in _read_vector_questions(QUESTION_BANK_MD)]
+        questions = [BankQuestion(qid=q.qid, query=q.query) for q in _read_vector_questions(question_bank_path)]
         labeled: List[Tuple[str, BankQuestion]] = [("positive", q) for q in questions]
-    else:
+    elif args.suite == "posneg":
         pos = [BankQuestion(qid=f"P{i:02d}", query=q) for i, q in enumerate(POS_NEG_SUITE_VECTOR_POSITIVE, 1)]
         neg = [BankQuestion(qid=f"N{i:02d}", query=q) for i, q in enumerate(POS_NEG_SUITE_VECTOR_NEGATIVE, 1)]
         labeled = [("positive", q) for q in pos] + [("negative", q) for q in neg]
+        questions = [q for _, q in labeled]
+    else:  # repeat-pos
+        pos = [BankQuestion(qid=f"P{i:02d}", query=q) for i, q in enumerate(POS_NEG_SUITE_VECTOR_POSITIVE, 1)]
+        labeled = [("positive", q) for q in pos]
         questions = [q for _, q in labeled]
 
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     stamp = _now_utc_stamp()
-    suffix = "qv" if args.suite == "qv" else "posneg"
+    suffix = (
+        "qv"
+        if args.suite == "qv"
+        else ("posneg" if args.suite == "posneg" else ("repeat_pos" if args.suite == "repeat-pos" else "repeat_qbank"))
+    )
     out_json = out_dir / f"route1_vector_vs_route2_local_{suffix}_{stamp}.json"
     out_md = out_dir / f"route1_vector_vs_route2_local_{suffix}_{stamp}.md"
 
@@ -303,6 +422,290 @@ def main() -> int:
     }
 
     results: List[Dict[str, Any]] = []
+
+    # Repeatability mode: run N times per question per route and compute deviation.
+    if args.suite == "repeat-pos":
+        repeats = max(1, int(args.repeats))
+        repeat_rows: List[Dict[str, Any]] = []
+
+        for _, q in labeled:
+            base_payload = {
+                "query": q.query,
+                "top_k": int(args.top_k),
+                "include_sources": True,
+                "synthesize": bool(args.synthesize),
+            }
+
+            per_route: Dict[str, Any] = {}
+            for route in ("vector", "local"):
+                runs: List[Dict[str, Any]] = []
+                for i in range(repeats):
+                    status, resp_json, t_s, err = _http_post_json(
+                        url=endpoint,
+                        headers=headers,
+                        payload={**base_payload, "force_route": route},
+                        timeout_s=float(args.timeout),
+                    )
+                    ans = str(resp_json.get("answer", "") or "")
+                    run = {
+                        "repeat_index": i,
+                        "status": status,
+                        "elapsed_ms": int(t_s * 1000),
+                        "answer": ans,
+                        "answer_norm": _normalize_answer(ans),
+                        "sources_ids": _extract_sources_ids(resp_json),
+                        "sources_count": _sources_count(resp_json),
+                        "confidence": resp_json.get("confidence"),
+                        "error": err,
+                    }
+                    runs.append(run)
+                    if args.sleep and args.sleep > 0:
+                        time.sleep(float(args.sleep))
+
+                per_route[route] = {
+                    "runs": runs,
+                    "summary": _summarize_repeats(runs),
+                }
+
+            row = {
+                "qid": q.qid,
+                "query": q.query,
+                "label": "positive",
+                "repeats": repeats,
+                "vector": per_route.get("vector"),
+                "local": per_route.get("local"),
+            }
+            repeat_rows.append(row)
+
+            vsum = (per_route.get("vector") or {}).get("summary", {})
+            lsum = (per_route.get("local") or {}).get("summary", {})
+            print(
+                f"{q.qid}: v_exact={float(vsum.get('answer_norm_exact_rate') or 0):.2f} "
+                f"l_exact={float(lsum.get('answer_norm_exact_rate') or 0):.2f} "
+                f"| v_src_jacc_min={float(vsum.get('sources_min_jaccard_vs_first') or 0):.2f} "
+                f"l_src_jacc_min={float(lsum.get('sources_min_jaccard_vs_first') or 0):.2f}"
+            )
+
+        report: Dict[str, Any] = {
+            "generated_at_utc": stamp,
+            "base_url": base_url,
+            "endpoint": "/graphrag/v3/query",
+            "group_id": args.group_id,
+            "top_k": int(args.top_k),
+            "synthesize": bool(args.synthesize),
+            "suite": args.suite,
+            "repeats": repeats,
+            "questions": [{"qid": q.qid, "query": q.query} for q in questions],
+            "results": repeat_rows,
+        }
+
+        out_json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        # Markdown summary
+        md_lines: List[str] = []
+        md_lines.append("# Route 1 (vector) vs Route 2 (local) — Repeatability Benchmark (10 positives)")
+        md_lines.append("")
+        md_lines.append(f"- Generated (UTC): {stamp}")
+        md_lines.append(f"- Base URL: {base_url}")
+        md_lines.append(f"- Group ID: {args.group_id}")
+        md_lines.append(f"- Endpoint: /graphrag/v3/query")
+        md_lines.append(f"- top_k: {args.top_k}")
+        md_lines.append(f"- synthesize: {args.synthesize}")
+        md_lines.append(f"- repeats per question per route: {repeats}")
+        md_lines.append("")
+        md_lines.append(
+            "Interpretation notes: Answer repeatability is measured on normalized answer exact-match vs the first run; "
+            "source repeatability uses Jaccard overlap of source IDs vs the first run. "
+            "Non-determinism can come from LLM synthesis and from retrieval tie-breaking/updates."
+        )
+        md_lines.append("")
+
+        md_lines.append(
+            "| QID | vector answer exact rate | local answer exact rate | vector min answer sim | local min answer sim | "
+            "vector avg src | local avg src | vector min src jacc | local min src jacc | vector p50 ms | local p50 ms | vector p90 ms | local p90 ms |"
+        )
+        md_lines.append(
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+        )
+        for r in repeat_rows:
+            vs = ((r.get("vector") or {}).get("summary") or {})
+            ls = ((r.get("local") or {}).get("summary") or {})
+            vlat = vs.get("latency_ms") or {}
+            llat = ls.get("latency_ms") or {}
+            md_lines.append(
+                "| "
+                + str(r.get("qid"))
+                + " | "
+                + f"{float(vs.get('answer_norm_exact_rate') or 0):.2f}"
+                + " | "
+                + f"{float(ls.get('answer_norm_exact_rate') or 0):.2f}"
+                + " | "
+                + f"{float(vs.get('answer_norm_min_similarity') or 0):.2f}"
+                + " | "
+                + f"{float(ls.get('answer_norm_min_similarity') or 0):.2f}"
+                + " | "
+                + f"{float(vs.get('sources_count_avg') or 0):.1f}"
+                + " | "
+                + f"{float(ls.get('sources_count_avg') or 0):.1f}"
+                + " | "
+                + f"{float(vs.get('sources_min_jaccard_vs_first') or 0):.2f}"
+                + " | "
+                + f"{float(ls.get('sources_min_jaccard_vs_first') or 0):.2f}"
+                + " | "
+                + str(int(vlat.get("p50") or 0))
+                + " | "
+                + str(int(llat.get("p50") or 0))
+                + " | "
+                + str(int(vlat.get("p90") or 0))
+                + " | "
+                + str(int(llat.get("p90") or 0))
+                + " |"
+            )
+
+        out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+        print(f"\nWrote:\n- {out_json}\n- {out_md}")
+        return 0
+
+    if args.suite == "repeat-qbank":
+        repeats = max(1, int(args.repeats))
+
+        qv = _read_vector_questions(question_bank_path)
+        ql = _read_local_questions(question_bank_path)
+
+        # Each question is run only on its dedicated route.
+        jobs: List[Tuple[str, BankQuestion]] = [("vector", q) for q in qv] + [("local", q) for q in ql]
+
+        repeat_rows: List[Dict[str, Any]] = []
+        for route, q in jobs:
+            base_payload = {
+                "query": q.query,
+                "top_k": int(args.top_k),
+                "include_sources": True,
+                "synthesize": bool(args.synthesize),
+            }
+
+            runs: List[Dict[str, Any]] = []
+            for i in range(repeats):
+                status, resp_json, t_s, err = _http_post_json(
+                    url=endpoint,
+                    headers=headers,
+                    payload={**base_payload, "force_route": route},
+                    timeout_s=float(args.timeout),
+                )
+                ans = str(resp_json.get("answer", "") or "")
+                run = {
+                    "repeat_index": i,
+                    "status": status,
+                    "elapsed_ms": int(t_s * 1000),
+                    "answer": ans,
+                    "answer_norm": _normalize_answer(ans),
+                    "sources_ids": _extract_sources_ids(resp_json),
+                    "sources_count": _sources_count(resp_json),
+                    "confidence": resp_json.get("confidence"),
+                    "error": err,
+                }
+                runs.append(run)
+                if args.sleep and args.sleep > 0:
+                    time.sleep(float(args.sleep))
+
+            summary = _summarize_repeats(runs)
+            repeat_rows.append(
+                {
+                    "qid": q.qid,
+                    "query": q.query,
+                    "route": route,
+                    "repeats": repeats,
+                    "runs": runs,
+                    "summary": summary,
+                }
+            )
+            print(
+                f"{q.qid} ({route}): exact={float(summary.get('answer_norm_exact_rate') or 0):.2f} "
+                f"min_sim={float(summary.get('answer_norm_min_similarity') or 0):.2f} "
+                f"min_src_jacc={float(summary.get('sources_min_jaccard_vs_first') or 0):.2f}"
+            )
+
+        report = {
+            "generated_at_utc": stamp,
+            "base_url": base_url,
+            "endpoint": "/graphrag/v3/query",
+            "group_id": args.group_id,
+            "top_k": int(args.top_k),
+            "synthesize": bool(args.synthesize),
+            "suite": args.suite,
+            "repeats": repeats,
+            "question_bank": str(question_bank_path.name),
+            "question_bank_path": str(question_bank_path),
+            "vector_questions": [{"qid": q.qid, "query": q.query} for q in qv],
+            "local_questions": [{"qid": q.qid, "query": q.query} for q in ql],
+            "results": repeat_rows,
+        }
+
+        out_json.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        md_lines: List[str] = []
+        md_lines.append("# Route 1 (vector) & Route 2 (local) — Repeatability Benchmark (Question Bank)")
+        md_lines.append("")
+        md_lines.append(f"- Generated (UTC): {stamp}")
+        md_lines.append(f"- Base URL: {base_url}")
+        md_lines.append(f"- Group ID: {args.group_id}")
+        md_lines.append(f"- Endpoint: /graphrag/v3/query")
+        md_lines.append(f"- Question bank: {question_bank_path}")
+        md_lines.append(f"- top_k: {args.top_k}")
+        md_lines.append(f"- synthesize: {args.synthesize}")
+        md_lines.append(f"- repeats per question: {repeats}")
+        md_lines.append(f"- vector set: Q-V* (forced vector)")
+        md_lines.append(f"- local set: Q-L* (forced local)")
+        md_lines.append("")
+        md_lines.append(
+            "Note: The earlier '10 positive + 10 negative' comparison uses a separate hardcoded suite (POS_NEG_*). "
+            "This repeat-qbank mode uses the dedicated question bank sets (Q-V* vs Q-L*)."
+        )
+        md_lines.append("")
+
+        def _emit_table(title: str, route: str) -> None:
+            md_lines.append(f"## {title}")
+            md_lines.append("")
+            md_lines.append(
+                "| QID | answer exact rate | min answer similarity | unique norm answers | avg sources | min src jacc | p50 ms | p90 ms | ok/total |"
+            )
+            md_lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|")
+            for r in repeat_rows:
+                if r.get("route") != route:
+                    continue
+                s = r.get("summary") or {}
+                lat = s.get("latency_ms") or {}
+                md_lines.append(
+                    "| "
+                    + str(r.get("qid"))
+                    + " | "
+                    + f"{float(s.get('answer_norm_exact_rate') or 0):.2f}"
+                    + " | "
+                    + f"{float(s.get('answer_norm_min_similarity') or 0):.2f}"
+                    + " | "
+                    + str(int(s.get("answer_norm_unique") or 0))
+                    + " | "
+                    + f"{float(s.get('sources_count_avg') or 0):.1f}"
+                    + " | "
+                    + f"{float(s.get('sources_min_jaccard_vs_first') or 0):.2f}"
+                    + " | "
+                    + str(int(lat.get("p50") or 0))
+                    + " | "
+                    + str(int(lat.get("p90") or 0))
+                    + " | "
+                    + str(int(s.get("ok_http_200") or 0))
+                    + "/"
+                    + str(int(s.get("count") or 0))
+                    + " |"
+                )
+            md_lines.append("")
+
+        _emit_table("Vector questions (Q-V*)", "vector")
+        _emit_table("Local questions (Q-L*)", "local")
+
+        out_md.write_text("\n".join(md_lines) + "\n", encoding="utf-8")
+        print(f"\nWrote:\n- {out_json}\n- {out_md}")
+        return 0
 
     pos_vector_ms: List[int] = []
     pos_local_ms: List[int] = []
@@ -410,8 +813,12 @@ def main() -> int:
 
         # Fix confidence delta only when both are numeric
         try:
-            cv = float(json_v.get("confidence"))
-            cl = float(json_l.get("confidence"))
+            cv_raw = json_v.get("confidence")
+            cl_raw = json_l.get("confidence")
+            if cv_raw is None or cl_raw is None:
+                raise ValueError("missing confidence")
+            cv = float(cv_raw)
+            cl = float(cl_raw)
             row["compare"]["vector_minus_local_confidence"] = cv - cl
         except Exception:
             row["compare"]["vector_minus_local_confidence"] = None

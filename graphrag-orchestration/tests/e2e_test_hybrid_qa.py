@@ -7,6 +7,14 @@ import pytest
 
 from app.main import app
 
+# Mark all tests in this file as E2E tests (skip by default)
+pytestmark = pytest.mark.e2e
+
+
+def _should_skip_e2e() -> bool:
+    """Check if E2E tests should be skipped."""
+    return os.getenv("RUN_E2E_TESTS", "0") != "1"
+
 
 @lru_cache(maxsize=1)
 def _group_id() -> str:
@@ -20,6 +28,10 @@ def _group_id() -> str:
     explicit = os.getenv("E2E_GROUP_ID")
     if explicit:
         return explicit
+
+    # Skip Neo4j connection if E2E tests won't run
+    if _should_skip_e2e():
+        return "e2e"
 
     try:
         from app.services.graph_service import GraphService

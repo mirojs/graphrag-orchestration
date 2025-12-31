@@ -2,11 +2,15 @@
 """Check Neo4j for actual data created by v3 indexing"""
 
 from neo4j import GraphDatabase
+import os
 
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
 NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 GROUP_ID = "invoice-contract-verification"
+
+if not NEO4J_PASSWORD:
+    raise SystemExit("NEO4J_PASSWORD is not set")
 
 driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASSWORD))
 

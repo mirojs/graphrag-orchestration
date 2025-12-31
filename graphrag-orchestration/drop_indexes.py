@@ -11,7 +11,9 @@ if not uri:
     # Fallback to hardcoded if env not loaded correctly (since I saw them in other scripts)
     uri = "neo4j+s://a86dcf63.databases.neo4j.io"
     user = "neo4j"
-    password = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+
+if not password:
+    raise SystemExit("NEO4J_PASSWORD is not set")
 
 print(f"Connecting to {uri}...")
 driver = GraphDatabase.driver(uri, auth=(user, password))

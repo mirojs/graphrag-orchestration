@@ -25,7 +25,7 @@ for TRIPLETS in 20 40; do
     echo "📄 Indexing with group: $GROUP_ID"
     
     python3 - << EOFPYTHON
-import requests, time
+import requests, time, os
 from neo4j import GraphDatabase
 
 response = requests.post(
@@ -49,7 +49,7 @@ if response.status_code == 200:
     print("⏳ Waiting 180s...")
     time.sleep(180)
     
-    driver = GraphDatabase.driver("neo4j+s://a86dcf63.databases.neo4j.io", auth=("neo4j", "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"))
+    driver = GraphDatabase.driver("neo4j+s://a86dcf63.databases.neo4j.io", auth=("neo4j", os.environ["NEO4J_PASSWORD"]))
     with driver.session(database="neo4j") as session:
         result = session.run("MATCH (e:Entity) WHERE e.group_id = \$group_id RETURN count(e) as cnt", group_id="$GROUP_ID")
         count = result.single()["cnt"]

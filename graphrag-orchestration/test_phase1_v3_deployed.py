@@ -8,6 +8,7 @@ are properly calculated and stored in Neo4j.
 
 import requests
 import time
+import os
 from neo4j import GraphDatabase
 
 # Configuration
@@ -15,7 +16,10 @@ API_URL = "https://graphrag-orchestration.purplefield-1719ccc0.swedencentral.azu
 GROUP_ID = "phase1-v3-validation"
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
 NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+
+if not NEO4J_PASSWORD:
+    raise SystemExit("NEO4J_PASSWORD is not set")
 
 # Test documents
 TEST_DOCS = [

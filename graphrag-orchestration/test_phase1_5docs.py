@@ -23,7 +23,7 @@ API_URL = os.getenv(
 GROUP_ID = os.getenv("GROUP_ID", f"phase1-5docs-{int(time.time())}")  # Unique group ID
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
 NEO4J_USER = "neo4j"
-NEO4J_PASSWORD = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
 # Storage Account for managed identity
 STORAGE_ACCOUNT = "neo4jstorage21224"

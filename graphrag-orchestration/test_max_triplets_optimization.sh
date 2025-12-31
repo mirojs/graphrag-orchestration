@@ -101,11 +101,12 @@ echo "" | tee -a $RESULTS_FILE
 # Collect results
 python3 - "${GROUP_IDS[@]}" << 'EOFPYTHON' | tee -a $RESULTS_FILE
 import sys
+import os
 from neo4j import GraphDatabase
 
 uri = "neo4j+s://a86dcf63.databases.neo4j.io"
 username = "neo4j"
-password = "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI"
+password = os.environ["NEO4J_PASSWORD"]
 
 driver = GraphDatabase.driver(uri, auth=(username, password))
 

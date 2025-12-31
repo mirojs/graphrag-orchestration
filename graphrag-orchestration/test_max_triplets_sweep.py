@@ -17,7 +17,10 @@ from neo4j import GraphDatabase
 
 API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
-NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "uvRJoWeYwAu7ouvN25427WjGnU37oMWaKN_XMN4ySKI")
+NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+
+if not NEO4J_PASSWORD:
+    raise SystemExit("NEO4J_PASSWORD is not set")
 
 # Test configuration
 TEST_VALUES = [20, 40, 60, 80, 100]

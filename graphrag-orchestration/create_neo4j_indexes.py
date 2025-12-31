@@ -69,13 +69,13 @@ def create_indexes() -> None:
         },
         {
             "name": "entity_embedding",
-            "query": "CREATE VECTOR INDEX entity_embedding IF NOT EXISTS FOR (n:Entity) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}",
-            "description": "Vector index for entity embeddings",
+            "query": "CREATE VECTOR INDEX entity_embedding IF NOT EXISTS FOR (n:Entity) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 3072, `vector.similarity_function`: 'cosine'}}",
+            "description": "Vector index for entity embeddings (text-embedding-3-large)",
         },
         {
             "name": "chunk_vector",
-            "query": "CREATE VECTOR INDEX chunk_vector IF NOT EXISTS FOR (n:__Node__) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 1536, `vector.similarity_function`: 'cosine'}}",
-            "description": "Vector index for chunk embeddings",
+            "query": "CREATE VECTOR INDEX chunk_vector IF NOT EXISTS FOR (n:__Node__) ON (n.embedding) OPTIONS {indexConfig: {`vector.dimensions`: 3072, `vector.similarity_function`: 'cosine'}}",
+            "description": "Vector index for chunk embeddings (text-embedding-3-large)",
         },
     ]
     

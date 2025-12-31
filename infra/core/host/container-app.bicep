@@ -5,17 +5,19 @@ param containerAppsEnvironmentId string
 param containerRegistryName string
 param containerName string
 param containerImage string
+param userAssignedIdentityId string = ''
 param targetPort int = 8000
 param env array = []
 param secrets array = []
 
-resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
+resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
   name: name
   location: location
   tags: tags
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
     configuration: {
+      activeRevisionsMode: 'Single'
       ingress: {
         external: true
         targetPort: targetPort
@@ -24,7 +26,7 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
       registries: [
         {
           server: '${containerRegistryName}.azurecr.io'
-          identity: 'system'
+          identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
         }
       ]
       secrets: secrets
@@ -48,7 +50,10 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
     }
   }
   identity: {
-    type: 'SystemAssigned'
+    type: empty(userAssignedIdentityId) ? 'SystemAssigned' : 'UserAssigned'
+    userAssignedIdentities: empty(userAssignedIdentityId) ? null : {
+      '${userAssignedIdentityId}': {}
+    }
   }
 }
 

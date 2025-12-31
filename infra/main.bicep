@@ -10,9 +10,8 @@ param environmentName string
 param location string
 
 // CRITICAL: Ensure we never accidentally deploy hello-world images
-// This must point to the actual GraphRAG application image
 @description('MUST use drift-mini-optimized or later - NEVER use placeholder/hello-world images')
-var requiredImageTag = 'latest'
+param serviceGraphragImageName string
 
 @secure()
 @description('Neo4j Password')
@@ -67,7 +66,7 @@ module graphragApp './core/host/container-app.bicep' = {
     containerName: 'graphrag-orchestration'
     // CRITICAL REQUIREMENT: Must use drift-mini-optimized or later
     // NEVER allow placeholder hello-world images to sneak back in
-    containerImage: '${containerRegistry.name}.azurecr.io/graphrag-orchestration:${requiredImageTag}'
+    containerImage: serviceGraphragImageName
     targetPort: 8000
     env: concat([
       {
@@ -76,7 +75,7 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'AZURE_OPENAI_EMBEDDING_ENDPOINT'
-        value: 'https://graphrag-openai-switzerland.openai.azure.com/'
+        value: 'https://graphrag-openai-8476.openai.azure.com/'
       }
       {
         name: 'AZURE_TENANT_ID'
@@ -89,11 +88,11 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
-        value: 'gpt-5-2'
+        value: 'gpt-4o'
       }
       {
         name: 'AZURE_OPENAI_ROUTING_DEPLOYMENT'
-        value: 'o4-mini'
+        value: 'gpt-4o-mini'
       }
       {
         name: 'AZURE_OPENAI_INDEXING_DEPLOYMENT'
@@ -101,11 +100,11 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
-        value: 'text-embedding-3-small'
+        value: 'text-embedding-3-large'
       }
       {
         name: 'AZURE_OPENAI_EMBEDDING_DIMENSIONS'
-        value: '1536'
+        value: '3072'
       }
       {
         name: 'AZURE_OPENAI_REASONING_EFFORT'

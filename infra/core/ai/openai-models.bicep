@@ -7,7 +7,7 @@ resource openAiAccount 'Microsoft.CognitiveServices/accounts@2024-10-01' existin
   name: openAiResourceName
 }
 
-// GPT-4.1 - Indexing & RAPTOR (Data Zone Standard for EU compliance + 1M context)
+// GPT-4.1 - Indexing & Query Decomposition (Data Zone Standard for EU compliance + 1M context)
 resource gpt41Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
   parent: openAiAccount
   name: 'gpt-4.1'
@@ -25,67 +25,10 @@ resource gpt41Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   }
 }
 
-// o4-mini - Query Routing (Data Zone Standard, 60% cheaper than o1-mini)
-resource o4miniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+// GPT-4o - Hybrid NER, Intermediate Processing & Synthesis (Standard SKU in Sweden Central)
+resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
   parent: openAiAccount
-  name: 'o4-mini'
-  sku: {
-    name: 'DataZoneStandard'
-    capacity: 50
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'o4-mini'
-      version: '2025-04-16'
-    }
-    raiPolicyName: 'Microsoft.DefaultV2'
-  }
-  dependsOn: [gpt41Deployment]
-}
-
-// o3-pro - Answer Synthesis (Global Standard for high-end reasoning)
-resource o3proDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
-  parent: openAiAccount
-  name: 'o3-pro'
-  sku: {
-    name: 'GlobalStandard'
-    capacity: 50
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'o3-pro'
-      version: '2025-06-10'
-    }
-    raiPolicyName: 'Microsoft.DefaultV2'
-  }
-  dependsOn: [o4miniDeployment]
-}
-
-// GPT-5.2 - Primary synthesis model (Low latency, 128k context)
-resource gpt52Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
-  parent: openAiAccount
-  name: 'gpt-5-2'
-  sku: {
-    name: 'GlobalStandard'
-    capacity: 100
-  }
-  properties: {
-    model: {
-      format: 'OpenAI'
-      name: 'gpt-5.2'
-      version: '2025-12-10'
-    }
-    raiPolicyName: 'Microsoft.DefaultV2'
-  }
-  dependsOn: [o3proDeployment]
-}
-
-// text-embedding-3-small - Embeddings (Sweden Central backup)
-resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
-  parent: openAiAccount
-  name: 'text-embedding-3-small'
+  name: 'gpt-4o'
   sku: {
     name: 'Standard'
     capacity: 100
@@ -93,16 +36,37 @@ resource embeddingDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   properties: {
     model: {
       format: 'OpenAI'
-      name: 'text-embedding-3-small'
-      version: '1'
+      name: 'gpt-4o'
+      version: '2024-11-20'
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }
-  dependsOn: [gpt52Deployment]
+  dependsOn: [gpt41Deployment]
 }
 
+// GPT-4o-mini - Hybrid Router Classification (Standard SKU in Sweden Central)
+resource gpt4oMiniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+  parent: openAiAccount
+  name: 'gpt-4o-mini'
+  sku: {
+    name: 'Standard'
+    capacity: 50
+  }
+  properties: {
+    model: {
+      format: 'OpenAI'
+      name: 'gpt-4o-mini'
+      version: '2024-07-18'
+    }
+    raiPolicyName: 'Microsoft.DefaultV2'
+  }
+  dependsOn: [gpt4oDeployment]
+}
+
+// NOTE: text-embedding-3-small is deprecated and should NOT be deployed
+// NOTE: text-embedding-3-large already deployed with Standard SKU - no need to redeploy
+// Only deploying the 3 essential LLM models: gpt-4.1, gpt-4o, gpt-4o-mini
+
 output gpt41DeploymentName string = gpt41Deployment.name
-output o4miniDeploymentName string = o4miniDeployment.name
-output o3proDeploymentName string = o3proDeployment.name
-output gpt52DeploymentName string = gpt52Deployment.name
-output embeddingDeploymentName string = embeddingDeployment.name
+output gpt4oDeploymentName string = gpt4oDeployment.name
+output gpt4oMiniDeploymentName string = gpt4oMiniDeployment.name

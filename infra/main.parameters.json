@@ -13,6 +13,9 @@
     },
     "neo4jPassword": {
       "value": "${NEO4J_PASSWORD}"
+    },
+    "serviceGraphragImageName": {
+      "value": "${SERVICE_GRAPHRAG_IMAGE_NAME}"
     }
   }
 }

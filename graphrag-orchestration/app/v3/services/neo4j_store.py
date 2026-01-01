@@ -1201,6 +1201,22 @@ class Neo4jStoreV3:
             for record in result:
                 t = record["t"]
                 d = record.get("d")
+
+                chunk_metadata: Dict[str, Any] = {}
+                raw_metadata = t.get("metadata")
+                if raw_metadata:
+                    if isinstance(raw_metadata, str):
+                        try:
+                            chunk_metadata = json.loads(raw_metadata)
+                        except Exception:
+                            chunk_metadata = {}
+                    elif isinstance(raw_metadata, dict):
+                        chunk_metadata = dict(raw_metadata)
+
+                # Always attach document attribution fields
+                chunk_metadata["document_title"] = (d.get("title") if d else "")
+                chunk_metadata["document_source"] = (d.get("source") if d else "")
+
                 chunk = TextChunk(
                     id=t["id"],
                     text=t["text"],
@@ -1208,10 +1224,7 @@ class Neo4jStoreV3:
                     document_id=(d.get("id") if d else ""),
                     tokens=t.get("tokens", 0),
                     embedding=t.get("embedding"),
-                    metadata={
-                        "document_title": (d.get("title") if d else ""),
-                        "document_source": (d.get("source") if d else ""),
-                    },
+                    metadata=chunk_metadata,
                 )
                 results.append((chunk, record["score"]))
         
@@ -1294,6 +1307,7 @@ class Neo4jStoreV3:
         SET t.text = c.text,
             t.chunk_index = c.chunk_index,
             t.tokens = c.tokens,
+            t.metadata = c.metadata,
             t.group_id = $group_id,
             t.updated_at = datetime()
         
@@ -1316,6 +1330,7 @@ class Neo4jStoreV3:
                 "document_id": c.document_id,
                 "embedding": c.embedding,
                 "tokens": c.tokens,
+                "metadata": json.dumps(c.metadata) if c.metadata else "{}",
             }
             for c in chunks
         ]

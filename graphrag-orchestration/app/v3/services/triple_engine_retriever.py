@@ -237,7 +237,9 @@ Respond with ONLY the route name (vector, local, graph, raptor, or drift) on the
                 "id": chunk.id,
                 "type": "text_chunk",
                 "score": float(score),
-                "document_id": chunk.document_id
+                "document_id": chunk.document_id,
+                "text_preview": chunk.text[:200] + "..." if len(chunk.text) > 200 else chunk.text,
+                "metadata": chunk.metadata,
             })
         
         context = "\n".join(context_parts)

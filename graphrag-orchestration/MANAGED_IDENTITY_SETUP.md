@@ -62,14 +62,20 @@ async def _create_client(self) -> DocumentIntelligenceClient:
 
 **Deployed (Production):**
 ```bash
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://swedencentral.api.cognitive.microsoft.com/
+# Managed identity requires the resource's custom subdomain endpoint
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://doc-intel-graphrag.cognitiveservices.azure.com/
 # No AZURE_DOCUMENT_INTELLIGENCE_KEY - uses managed identity
 ```
 
 **Local Development:**
 ```bash
-AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://swedencentral.api.cognitive.microsoft.com/
-AZURE_DOCUMENT_INTELLIGENCE_KEY=your-key-for-local-testing  # Only for local dev
+# Option A (recommended): use API key with the regional endpoint
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-region>.api.cognitive.microsoft.com/
+AZURE_DOCUMENT_INTELLIGENCE_KEY=your-key-for-local-testing
+
+# Option B: use managed identity, but only with the custom subdomain endpoint
+# AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-di-resource-name>.cognitiveservices.azure.com/
+# (no key)
 ```
 
 ### Verification:

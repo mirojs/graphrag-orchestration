@@ -29,6 +29,7 @@ Model: prebuilt-layout (2024-11-30 API version)
 import asyncio
 import logging
 import base64
+import io
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote
@@ -37,6 +38,7 @@ from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import (
     AnalyzeDocumentRequest,
     AnalyzeResult,
+    DocumentContentFormat,
     DocumentTable,
     DocumentParagraph,
 )
@@ -230,6 +232,44 @@ class DocumentIntelligenceService:
 
         return "\n\n".join(lines)
 
+    def _slice_content_by_spans(self, content: str, spans: Any) -> str:
+        if not content or not spans:
+            return ""
+
+        start: Optional[int] = None
+        end: Optional[int] = None
+
+        for span in spans:
+            if span is None:
+                continue
+
+            # DI span objects are typically {offset, length} with attributes.
+            offset = getattr(span, "offset", None)
+            length = getattr(span, "length", None)
+            if offset is None and isinstance(span, dict):
+                offset = span.get("offset")
+                length = span.get("length")
+
+            if offset is None or length is None:
+                continue
+
+            try:
+                offset_i = int(offset)
+                length_i = int(length)
+            except Exception:
+                continue
+
+            if start is None or offset_i < start:
+                start = offset_i
+            span_end = offset_i + length_i
+            if end is None or span_end > end:
+                end = span_end
+
+        if start is None or end is None or start >= end:
+            return ""
+
+        return content[start:end].strip()
+
     def _select_model(self, url: str, default_model: str = "prebuilt-layout", explicit: Optional[str] = None) -> str:
         """Select Document Intelligence model based on hints.
 
@@ -313,14 +353,16 @@ class DocumentIntelligenceService:
                     logger.info(f"⏳ Starting Document Intelligence analysis ({len(document_bytes)} bytes)...")
                     poller = await client.begin_analyze_document(
                         selected_model,
-                        document_bytes,
+                        io.BytesIO(document_bytes),
+                        output_content_format=DocumentContentFormat.MARKDOWN,
                     )
                 else:
                     # Fallback to URL source (for public URLs or URLs with SAS tokens)
                     logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
                     poller = await client.begin_analyze_document(
                         selected_model,
-                        analyze_request=AnalyzeDocumentRequest(url_source=url),
+                        AnalyzeDocumentRequest(url_source=url),
+                        output_content_format=DocumentContentFormat.MARKDOWN,
                     )
 
                 # Wait for completion with timeout (SDK handles polling automatically)
@@ -353,6 +395,12 @@ class DocumentIntelligenceService:
                 for page in result.pages:
                     page_num = page.page_number
 
+                    # Prefer DI-native content (markdown) when available.
+                    # We still compute structured metadata from paragraphs/tables.
+                    page_markdown = ""
+                    if getattr(result, "content", None):
+                        page_markdown = self._slice_content_by_spans(result.content, getattr(page, "spans", None))
+
                     # Get paragraphs for this page
                     page_paragraphs = [
                         p for p in (result.paragraphs or [])
@@ -372,50 +420,53 @@ class DocumentIntelligenceService:
                     ]
 
                     # Build markdown for this page
-                    page_lines = []
-                    for para in page_paragraphs:
-                        if not para.content:
-                            continue
-                        
-                        role = para.role or ""
-                        content = para.content.strip()
+                    markdown = page_markdown
+                    if not markdown:
+                        # Fallback: build a basic markdown representation from paragraphs/tables.
+                        page_lines = []
+                        for para in page_paragraphs:
+                            if not para.content:
+                                continue
+                            
+                            role = para.role or ""
+                            content = para.content.strip()
 
-                        if role in ("pageHeader", "pageFooter", "pageNumber"):
-                            continue
-                        elif role == "title":
-                            page_lines.append(f"# {content}")
-                        elif role == "sectionHeading":
-                            page_lines.append(f"## {content}")
-                        else:
-                            page_lines.append(content)
+                            if role in ("pageHeader", "pageFooter", "pageNumber"):
+                                continue
+                            elif role == "title":
+                                page_lines.append(f"# {content}")
+                            elif role == "sectionHeading":
+                                page_lines.append(f"## {content}")
+                            else:
+                                page_lines.append(content)
 
-                    # Add tables
-                    for table in page_tables:
-                        if not table.cells:
-                            continue
+                        # Add tables
+                        for table in page_tables:
+                            if not table.cells:
+                                continue
 
-                        col_count = table.column_count or 0
-                        headers = [""] * col_count
+                            col_count = table.column_count or 0
+                            headers = [""] * col_count
 
-                        for cell in table.cells:
-                            if cell.row_index == 0 and cell.column_index is not None:
-                                headers[cell.column_index] = cell.content or ""
-
-                        table_md = [
-                            "| " + " | ".join(headers) + " |",
-                            "| " + " | ".join(["---"] * col_count) + " |",
-                        ]
-
-                        for row_idx in range(1, table.row_count or 0):
-                            row_cells = [""] * col_count
                             for cell in table.cells:
-                                if cell.row_index == row_idx and cell.column_index is not None:
-                                    row_cells[cell.column_index] = cell.content or ""
-                            table_md.append("| " + " | ".join(row_cells) + " |")
+                                if cell.row_index == 0 and cell.column_index is not None:
+                                    headers[cell.column_index] = cell.content or ""
 
-                        page_lines.extend(table_md)
+                            table_md = [
+                                "| " + " | ".join(headers) + " |",
+                                "| " + " | ".join(["---"] * col_count) + " |",
+                            ]
 
-                    markdown = "\n\n".join(page_lines)
+                            for row_idx in range(1, table.row_count or 0):
+                                row_cells = [""] * col_count
+                                for cell in table.cells:
+                                    if cell.row_index == row_idx and cell.column_index is not None:
+                                        row_cells[cell.column_index] = cell.content or ""
+                                table_md.append("| " + " | ".join(row_cells) + " |")
+
+                            page_lines.extend(table_md)
+
+                        markdown = "\n\n".join(page_lines)
 
                     # Extract metadata
                     section_path = self._build_section_hierarchy(page_paragraphs)

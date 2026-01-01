@@ -52,8 +52,13 @@ Azure Document Intelligence (formerly Form Recognizer) is Microsoft's mature, st
 1. Provision Azure Document Intelligence resource in Azure Portal
 2. Set environment variables:
    ```bash
-   AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://your-region.api.cognitive.microsoft.com/
-   AZURE_DOCUMENT_INTELLIGENCE_KEY=your-key  # Optional if using managed identity
+  # Preferred (Managed Identity / Entra ID): requires the resource's custom subdomain endpoint
+  AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-di-resource-name>.cognitiveservices.azure.com/
+  # Leave AZURE_DOCUMENT_INTELLIGENCE_KEY empty to use managed identity
+
+  # Alternative (API key auth): regional endpoint also works, but requires a key
+  # AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-region>.api.cognitive.microsoft.com/
+  # AZURE_DOCUMENT_INTELLIGENCE_KEY=your-key
    ```
 3. Use `"ingestion": "document-intelligence"` in indexing requests (default)
 

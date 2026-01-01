@@ -1818,6 +1818,264 @@ Corrected final answer:"""
         raise HTTPException(status_code=500, detail=f"Global search failed: {str(e)}")
 
 
+@router.post("/query/global/audit", response_model=dict)
+async def query_global_audit(request: Request, payload: V3QueryRequest):
+    """
+    Global search with deterministic extraction for audit/compliance.
+    
+    Uses PyTextRank to extract top sentences from community summaries.
+    No LLM synthesis, fully deterministic (same query = same output).
+    
+    Best for:
+    - Compliance auditing
+    - Legal discovery
+    - Financial reporting
+    - Regulatory audits (repeatable for byte-identical records)
+    
+    Returns:
+    {
+        "extracted_sentences": [{"text": "...", "rank_score": 0.95, "source_community_id": "..."}],
+        "audit_summary": "Combined text of extracted sentences",
+        "processing_deterministic": true,
+        "citations": [...]
+    }
+    """
+    group_id = get_group_id(request)
+    logger.info("v3_global_audit_search", group_id=group_id, query=payload.query[:50])
+    
+    try:
+        import time
+        t0 = time.monotonic()
+        store = get_neo4j_store()
+        
+        # Get community summaries (same as Route 3 global search)
+        use_dynamic = _get_env_bool("V3_GLOBAL_DYNAMIC_SELECTION", default=False)
+        dynamic_max_depth = _get_env_int("V3_GLOBAL_DYNAMIC_MAX_DEPTH", default=2)
+        dynamic_candidate_budget = _get_env_int("V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET", default=30)
+        dynamic_keep_per_level = _get_env_int("V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL", default=max(5, min(12, payload.top_k)))
+        dynamic_score_threshold = _get_env_int("V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD", default=25)
+        dynamic_rating_batch_size = _get_env_int("V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE", default=8)
+        build_hierarchy_on_query = _get_env_bool("V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY", default=True)
+
+        scores_by_id: dict[str, int] = {}
+
+        if use_dynamic:
+            if build_hierarchy_on_query:
+                try:
+                    store.ensure_community_hierarchy(group_id)
+                except Exception as e:
+                    logger.warning("v3_global_dynamic_build_hierarchy_failed", group_id=group_id, error=str(e))
+
+            adapter = get_drift_adapter()
+            communities, scores_by_id = _dynamic_select_communities_microsoft(
+                store=store,
+                adapter=adapter,
+                group_id=group_id,
+                query=payload.query,
+                final_top_k=payload.top_k,
+                max_depth=max(0, dynamic_max_depth),
+                candidate_budget=max(0, dynamic_candidate_budget),
+                keep_per_level=max(0, dynamic_keep_per_level),
+                score_threshold=max(0, min(100, dynamic_score_threshold)),
+                rating_batch_size=max(1, dynamic_rating_batch_size),
+            )
+        else:
+            requested_level = 0
+            communities = store.get_communities_by_level(group_id=group_id, level=requested_level)
+            if not communities:
+                try:
+                    levels = store.get_community_levels(group_id)
+                except Exception:
+                    levels = []
+                if levels:
+                    level_used = min(levels)
+                    if level_used != requested_level:
+                        communities = store.get_communities_by_level(group_id=group_id, level=level_used)
+
+        if not communities:
+            return {
+                "extracted_sentences": [],
+                "audit_summary": "Not specified in the provided documents.",
+                "processing_deterministic": True,
+                "citations": [],
+            }
+
+        # Extract sentences using PyTextRank
+        from app.v3.services.extraction_service import ExtractionService
+        extraction = ExtractionService(llm=None)  # No LLM for audit mode
+        
+        result = extraction.audit_summary(
+            communities=[
+                {
+                    "id": c.id,
+                    "title": c.title or "",
+                    "summary": c.summary or "",
+                }
+                for c in communities[:payload.top_k]
+            ],
+            query=payload.query,
+            top_k=min(5, payload.top_k),
+            include_rephrased=False,  # Audit mode: no rephrasing
+        )
+
+        # Add source citations
+        citations = []
+        for sent in result.get("extracted_sentences", []):
+            comm_id = sent.get("source_community_id")
+            comm = next((c for c in communities if c.id == comm_id), None)
+            if comm:
+                citations.append({
+                    "sentence": sent["text"],
+                    "community_id": comm_id,
+                    "community_title": comm.title or "",
+                    "community_level": getattr(comm, "level", 0),
+                })
+
+        result["citations"] = citations
+        
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "v3_global_audit_search_timing",
+            group_id=group_id,
+            total_ms=elapsed_ms,
+            extracted_count=len(result.get("extracted_sentences", [])),
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("v3_global_audit_search_failed", group_id=group_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Audit search failed: {str(e)}")
+
+
+@router.post("/query/global/client", response_model=dict)
+async def query_global_client(request: Request, payload: V3QueryRequest):
+    """
+    Global search with deterministic extraction + controlled rephrasing for client presentations.
+    
+    Same extraction as /audit, but adds optional rephrasing with temperature=0 LLM
+    for readability while maintaining determinism.
+    
+    Returns:
+    {
+        "extracted_summary": "Raw extracted sentences joined",
+        "rephrased_narrative": "Professional paragraph (temperature=0 LLM)",
+        "extracted_sentences": [...],
+        "processing_deterministic": true,
+        "citations": [...]
+    }
+    """
+    group_id = get_group_id(request)
+    logger.info("v3_global_client_search", group_id=group_id, query=payload.query[:50])
+    
+    try:
+        import time
+        t0 = time.monotonic()
+        store = get_neo4j_store()
+        adapter = get_drift_adapter()
+
+        # Retrieve communities (same as /audit)
+        use_dynamic = _get_env_bool("V3_GLOBAL_DYNAMIC_SELECTION", default=False)
+        dynamic_max_depth = _get_env_int("V3_GLOBAL_DYNAMIC_MAX_DEPTH", default=2)
+        dynamic_candidate_budget = _get_env_int("V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET", default=30)
+        dynamic_keep_per_level = _get_env_int("V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL", default=max(5, min(12, payload.top_k)))
+        dynamic_score_threshold = _get_env_int("V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD", default=25)
+        dynamic_rating_batch_size = _get_env_int("V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE", default=8)
+        build_hierarchy_on_query = _get_env_bool("V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY", default=True)
+
+        scores_by_id: dict[str, int] = {}
+
+        if use_dynamic:
+            if build_hierarchy_on_query:
+                try:
+                    store.ensure_community_hierarchy(group_id)
+                except Exception as e:
+                    logger.warning("v3_global_dynamic_build_hierarchy_failed", group_id=group_id, error=str(e))
+
+            communities, scores_by_id = _dynamic_select_communities_microsoft(
+                store=store,
+                adapter=adapter,
+                group_id=group_id,
+                query=payload.query,
+                final_top_k=payload.top_k,
+                max_depth=max(0, dynamic_max_depth),
+                candidate_budget=max(0, dynamic_candidate_budget),
+                keep_per_level=max(0, dynamic_keep_per_level),
+                score_threshold=max(0, min(100, dynamic_score_threshold)),
+                rating_batch_size=max(1, dynamic_rating_batch_size),
+            )
+        else:
+            requested_level = 0
+            communities = store.get_communities_by_level(group_id=group_id, level=requested_level)
+            if not communities:
+                try:
+                    levels = store.get_community_levels(group_id)
+                except Exception:
+                    levels = []
+                if levels:
+                    level_used = min(levels)
+                    if level_used != requested_level:
+                        communities = store.get_communities_by_level(group_id=group_id, level=level_used)
+
+        if not communities:
+            return {
+                "extracted_summary": "Not specified in the provided documents.",
+                "rephrased_narrative": "Not specified in the provided documents.",
+                "extracted_sentences": [],
+                "processing_deterministic": True,
+                "citations": [],
+            }
+
+        # Extract and rephrase
+        from app.v3.services.extraction_service import ExtractionService
+        llm_service = get_drift_adapter().llm if payload.synthesize else None
+        extraction = ExtractionService(llm=llm_service)
+        
+        result = extraction.audit_summary(
+            communities=[
+                {
+                    "id": c.id,
+                    "title": c.title or "",
+                    "summary": c.summary or "",
+                }
+                for c in communities[:payload.top_k]
+            ],
+            query=payload.query,
+            top_k=min(5, payload.top_k),
+            include_rephrased=payload.synthesize,  # Rephrase only if synthesis requested
+        )
+
+        # Add source citations
+        citations = []
+        for sent in result.get("extracted_sentences", []):
+            comm_id = sent.get("source_community_id")
+            comm = next((c for c in communities if c.id == comm_id), None)
+            if comm:
+                citations.append({
+                    "sentence": sent["text"],
+                    "community_id": comm_id,
+                    "community_title": comm.title or "",
+                    "community_level": getattr(comm, "level", 0),
+                })
+
+        result["citations"] = citations
+        
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        logger.info(
+            "v3_global_client_search_timing",
+            group_id=group_id,
+            total_ms=elapsed_ms,
+            synthesize=payload.synthesize,
+            extracted_count=len(result.get("extracted_sentences", [])),
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error("v3_global_client_search_failed", group_id=group_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Client search failed: {str(e)}")
+
+
 @router.post("/query/drift", response_model=V3DriftResponse)
 async def query_drift(request: Request, payload: V3DriftRequest):
     """

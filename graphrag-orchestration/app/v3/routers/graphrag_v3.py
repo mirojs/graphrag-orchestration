@@ -1504,8 +1504,13 @@ async def query_global(request: Request, payload: V3QueryRequest):
                 search_type="global",
             )
 
-        # Microsoft-style Map-Reduce over community reports.
         # Microsoft-style Map-Reduce over community reports (report-driven; no query-time chunk evidence).
+        # NOTE: We pass deterministic decode kwargs on every LLM call to maximize
+        # repeatability across identical requests.
+        llm_decode_kwargs: dict[str, Any] = {
+            "temperature": 0.0,
+            "top_p": 1.0,
+        }
         t_llm0 = time.monotonic()
 
         map_answers: list[dict[str, Any]] = []
@@ -1514,7 +1519,7 @@ async def query_global(request: Request, payload: V3QueryRequest):
             if not report:
                 continue
             map_prompt = _global_map_prompt(report, payload.query)
-            map_resp = adapter.llm.complete(map_prompt)
+            map_resp = adapter.llm.complete(map_prompt, **llm_decode_kwargs)
             map_text = (map_resp.text or "").strip()
 
             if debug_this_request:
@@ -1546,7 +1551,7 @@ Community Report:
 Question: {payload.query}
 
 Corrected relevant answer:"""
-                map_resp2 = adapter.llm.complete(fix_prompt)
+                map_resp2 = adapter.llm.complete(fix_prompt, **llm_decode_kwargs)
                 map_text2 = (map_resp2.text or "").strip()
                 if _is_empty_or_unhelpful_global_answer(map_text2):
                     continue
@@ -1586,7 +1591,7 @@ Corrected relevant answer:"""
         reduce_context = "\n\n".join(reduce_context_parts)
         reduce_prompt = _global_reduce_prompt(reduce_context, payload.query)
 
-        response = adapter.llm.complete(reduce_prompt)
+        response = adapter.llm.complete(reduce_prompt, **llm_decode_kwargs)
         t_llm1 = time.monotonic()
 
         logger.info(
@@ -1614,7 +1619,7 @@ Evidence:
 Question: {payload.query}
 
 Corrected final answer:"""
-            resp2 = adapter.llm.complete(fix_reduce)
+            resp2 = adapter.llm.complete(fix_reduce, **llm_decode_kwargs)
             answer2 = (resp2.text or "").strip()
             if answer2 and not _is_empty_or_unhelpful_global_answer(answer2) and _value_spans_grounded(answer2, reduce_context):
                 answer_text = answer2
@@ -1702,7 +1707,7 @@ Evidence:
 Question: {payload.query}
 
 Corrected final answer:"""
-                    respN = adapter.llm.complete(fix_notice)
+                    resp4 = adapter.llm.complete(fix_notice, **llm_decode_kwargs)
                     answerN = (respN.text or "").strip()
                     if answerN and not _is_empty_or_unhelpful_global_answer(answerN) and _value_spans_grounded(answerN, notice_evidence):
                         answer_text = answerN

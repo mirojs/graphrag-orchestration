@@ -121,6 +121,7 @@ class LLMService:
                         "api_version": settings.AZURE_OPENAI_API_VERSION,
                         "use_azure_ad": True,
                         "azure_ad_token_provider": token_provider,
+                        "temperature": 0.0,  # Deterministic outputs for repeatability
                     }
                     
                     # Add reasoning_effort for o-series models
@@ -184,6 +185,7 @@ class LLMService:
                     api_key=settings.AZURE_OPENAI_API_KEY,
                     azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
                     api_version=settings.AZURE_OPENAI_API_VERSION,
+                    temperature=0.0,  # Deterministic outputs for repeatability
                 )
                 
                 # Initialize Embedding Model with API key

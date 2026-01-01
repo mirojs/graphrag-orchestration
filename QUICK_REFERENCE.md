@@ -67,6 +67,14 @@ python -m pytest tests/ --cloud -v
 curl https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/health
 ```
 
+### Repeatability (Route 3 + Route 4; question bank)
+```bash
+python3 scripts/benchmark_route3_graph_vs_route4_drift.py \
+	--question-bank docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md \
+	--repeats 10 \
+	--sleep 0.3
+```
+
 ### Check Neo4j Data
 ```bash
 python scripts/check_test_data.py

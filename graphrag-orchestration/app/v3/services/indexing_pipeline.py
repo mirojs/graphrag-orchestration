@@ -379,6 +379,8 @@ class IndexingPipelineV3:
         documents: List[Dict[str, Any]],
         reindex: bool = False,
         ingestion: str = "none",
+        run_community_detection: bool = True,
+        run_raptor: bool = True,
     ) -> Dict[str, Any]:
         """
         Index a batch of documents.
@@ -520,67 +522,74 @@ class IndexingPipelineV3:
             logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 2 complete: Extracted {len(relationships)} relationships")
             
             # Step 3: Build communities using hierarchical Leiden
-            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3: Starting community detection")
-            communities = await self._build_communities(group_id, entities, relationships)
-            
-            # Generate community reports (with rate limit throttling)
-            chunk_by_id = {c.id: c for c in all_chunks}
-            for i, community in enumerate(communities):
-                # Add delay to respect rate limits (1 second between calls)
-                if i > 0:
-                    await asyncio.sleep(1.0)
-                summary = await self._generate_community_summary(community, entities, chunk_by_id, all_chunks)
-                community.summary = summary
-                community.full_content = summary  # DRIFT needs full_content
-            
-            # Store communities in batch (community upsert handles batch internally)
-            for community in communities:
-                self.neo4j_store.upsert_community(group_id, community)
-            stats["communities"] = len(communities)
-            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3 complete: Built {len(communities)} communities")
+            communities = []
+            if run_community_detection:
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3: Starting community detection")
+                communities = await self._build_communities(group_id, entities, relationships)
 
-            # Derive parent-child community edges for dynamic community selection
-            try:
-                self.neo4j_store.ensure_community_hierarchy(group_id)
-            except Exception as e:
-                logger.warning(f"Failed to build community hierarchy edges: {e}")
-            
-            # Step 4: Build RAPTOR hierarchical summaries
-            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4: Starting RAPTOR hierarchy")
-            raptor_nodes = await self._build_raptor_hierarchy(group_id, all_chunks)
-            self.neo4j_store.upsert_raptor_nodes_batch(group_id, raptor_nodes)
-            stats["raptor_nodes"] = len(raptor_nodes)
-            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4 complete: Built {len(raptor_nodes)} RAPTOR nodes")
-            
-            # Step 5: Index RAPTOR nodes in Azure AI Search (if enabled)
-            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 5: Indexing RAPTOR nodes in Azure AI Search")
-            if self.vector_store_provider:
+                # Generate community reports (with rate limit throttling)
+                chunk_by_id = {c.id: c for c in all_chunks}
+                for i, community in enumerate(communities):
+                    # Add delay to respect rate limits (1 second between calls)
+                    if i > 0:
+                        await asyncio.sleep(1.0)
+                    summary = await self._generate_community_summary(community, entities, chunk_by_id, all_chunks)
+                    community.summary = summary
+                    community.full_content = summary  # DRIFT needs full_content
+
+                # Store communities in batch (community upsert handles batch internally)
+                for community in communities:
+                    self.neo4j_store.upsert_community(group_id, community)
+                stats["communities"] = len(communities)
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 3 complete: Built {len(communities)} communities")
+
+                # Derive parent-child community edges for dynamic community selection
                 try:
-                    logger.info(f"Pushing {len(raptor_nodes)} RAPTOR nodes to Azure AI Search")
-                    search_docs = []
-                    for node in raptor_nodes:
-                        # Convert RaptorNode to LlamaIndex Document
-                        doc = LlamaDocument(
-                            text=node.text,
-                            id_=node.id,
-                            metadata={
-                                "raptor_level": node.level,
-                                "group_id": group_id,
-                                **node.metadata
-                            },
-                            embedding=node.embedding
-                        )
-                        search_docs.append(doc)
-                    
-                    self.vector_store_provider.add_documents(
-                        group_id=group_id,
-                        index_name="raptor",
-                        documents=search_docs
-                    )
-                    logger.info("Successfully indexed RAPTOR nodes in Azure AI Search")
+                    self.neo4j_store.ensure_community_hierarchy(group_id)
                 except Exception as e:
-                    logger.error(f"Failed to index RAPTOR nodes in Azure AI Search: {e}")
-                    # Don't fail the whole pipeline if secondary indexing fails
+                    logger.warning(f"Failed to build community hierarchy edges: {e}")
+            else:
+                logger.info(f"⏭️ Skipping community detection (run_community_detection=false)")
+
+            # Step 4/5: RAPTOR is optional (LazyGraphRAG/HippoRAG2 pipelines can own it)
+            if run_raptor:
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4: Starting RAPTOR hierarchy")
+                raptor_nodes = await self._build_raptor_hierarchy(group_id, all_chunks)
+                self.neo4j_store.upsert_raptor_nodes_batch(group_id, raptor_nodes)
+                stats["raptor_nodes"] = len(raptor_nodes)
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 4 complete: Built {len(raptor_nodes)} RAPTOR nodes")
+
+                # Step 5: Index RAPTOR nodes in Azure AI Search (if enabled)
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 5: Indexing RAPTOR nodes in Azure AI Search")
+                if self.vector_store_provider:
+                    try:
+                        logger.info(f"Pushing {len(raptor_nodes)} RAPTOR nodes to Azure AI Search")
+                        search_docs = []
+                        for node in raptor_nodes:
+                            # Convert RaptorNode to LlamaIndex Document
+                            doc = LlamaDocument(
+                                text=node.text,
+                                id_=node.id,
+                                metadata={
+                                    "raptor_level": node.level,
+                                    "group_id": group_id,
+                                    **node.metadata
+                                },
+                                embedding=node.embedding
+                            )
+                            search_docs.append(doc)
+
+                        self.vector_store_provider.add_documents(
+                            group_id=group_id,
+                            index_name="raptor",
+                            documents=search_docs
+                        )
+                        logger.info("Successfully indexed RAPTOR nodes in Azure AI Search")
+                    except Exception as e:
+                        logger.error(f"Failed to index RAPTOR nodes in Azure AI Search: {e}")
+                        # Don't fail the whole pipeline if secondary indexing fails
+            else:
+                logger.info(f"⏭️ Skipping RAPTOR (run_raptor=false)")
             
             # Log final extraction statistics
             self._log_extraction_stats()

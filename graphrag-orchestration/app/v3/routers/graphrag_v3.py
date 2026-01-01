@@ -506,7 +506,7 @@ class V3IndexRequest(BaseModel):
         description="List of documents (text strings, {text, metadata} objects, or URLs)"
     )
     run_raptor: bool = Field(
-        default=True,
+        default=False,
         description="Whether to run RAPTOR hierarchical summarization"
     )
     run_community_detection: bool = Field(
@@ -766,6 +766,8 @@ async def index_documents(
                     documents=docs_for_pipeline,
                     reindex=False,
                     ingestion=payload.ingestion,
+                    run_community_detection=payload.run_community_detection,
+                    run_raptor=payload.run_raptor,
                 )
                 logger.info("v3_index_complete", group_id=group_id, stats=stats)
             except Exception as e:

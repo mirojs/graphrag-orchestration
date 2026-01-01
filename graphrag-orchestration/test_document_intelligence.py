@@ -91,14 +91,27 @@ async def test_document_extraction():
         print(f"\n📊 Document Analysis:")
         print(f"   Text length: {len(doc.text)} characters")
         print(f"   Metadata keys: {list(doc.metadata.keys())}")
+        print(f"   Chunk type: {doc.metadata.get('chunk_type', 'page')}")
         print(f"   Page number: {doc.metadata.get('page_number')}")
         print(f"   Tables found: {len(doc.metadata.get('tables', []))}")
         print(f"   Section path: {doc.metadata.get('section_path', [])}")
+        if doc.metadata.get('chunk_type') == 'section':
+            print(f"   DI section path: {doc.metadata.get('di_section_path')}")
+            print(f"   DI section part: {doc.metadata.get('di_section_part')}")
         
         # Show markdown preview
         preview = doc.text[:500].replace("\n", "\n   ")
         print(f"\n📝 Markdown Preview (first 500 chars):")
         print(f"   {preview}")
+
+        if len(documents) > 1:
+            print(f"\n📦 Produced {len(documents)} chunks total")
+            # Show the first few chunk headers to validate section chunking locally.
+            for i, d in enumerate(documents[:5], 1):
+                sp = d.metadata.get('section_path')
+                ct = d.metadata.get('chunk_type', 'page')
+                pn = d.metadata.get('page_number')
+                print(f"   [{i}] type={ct} page={pn} section_path={sp}")
         
         # Table analysis
         tables = doc.metadata.get('tables', [])

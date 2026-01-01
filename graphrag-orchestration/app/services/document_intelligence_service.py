@@ -30,6 +30,7 @@ import asyncio
 import logging
 import base64
 import io
+import re
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote
@@ -270,6 +271,249 @@ class DocumentIntelligenceService:
 
         return content[start:end].strip()
 
+    _DI_ELEMENT_REF_RE = re.compile(r"^/(paragraphs|sections|tables)/(\d+)$")
+
+    def _parse_di_element_ref(self, ref: Any) -> Optional[Tuple[str, int]]:
+        if not isinstance(ref, str):
+            return None
+        m = self._DI_ELEMENT_REF_RE.match(ref.strip())
+        if not m:
+            return None
+        kind = m.group(1)
+        try:
+            idx = int(m.group(2))
+        except Exception:
+            return None
+        return (kind, idx)
+
+    def _collect_span_union(self, spans_list: List[Any]) -> List[Dict[str, int]]:
+        """Return a conservative union span as a list of {offset,length}.
+
+        We intentionally return a single merged span (min offset..max end)
+        to keep slicing simple and stable.
+        """
+        start: Optional[int] = None
+        end: Optional[int] = None
+
+        for spans in spans_list:
+            if not spans:
+                continue
+            for span in spans:
+                if span is None:
+                    continue
+                offset = getattr(span, "offset", None)
+                length = getattr(span, "length", None)
+                if offset is None and isinstance(span, dict):
+                    offset = span.get("offset")
+                    length = span.get("length")
+                if offset is None or length is None:
+                    continue
+                try:
+                    o = int(offset)
+                    l = int(length)
+                except Exception:
+                    continue
+                if l <= 0:
+                    continue
+                if start is None or o < start:
+                    start = o
+                e = o + l
+                if end is None or e > end:
+                    end = e
+
+        if start is None or end is None or start >= end:
+            return []
+        return [{"offset": start, "length": end - start}]
+
+    def _infer_section_title(self, paragraph_indices: List[int], paragraphs: List[DocumentParagraph], fallback: str) -> str:
+        for idx in paragraph_indices:
+            if idx < 0 or idx >= len(paragraphs):
+                continue
+            p = paragraphs[idx]
+            if not getattr(p, "content", None):
+                continue
+            role = getattr(p, "role", None) or ""
+            if role in ("title", "sectionHeading"):
+                return str(p.content).strip() or fallback
+        # fallback to first non-empty paragraph
+        for idx in paragraph_indices:
+            if idx < 0 or idx >= len(paragraphs):
+                continue
+            p = paragraphs[idx]
+            if getattr(p, "content", None):
+                return str(p.content).strip()[:120] or fallback
+        return fallback
+
+    def _build_markdown_from_paragraphs_and_tables(
+        self,
+        paragraphs: List[DocumentParagraph],
+        tables: List[DocumentTable],
+    ) -> str:
+        lines: List[str] = []
+        for para in paragraphs:
+            if not getattr(para, "content", None):
+                continue
+            role = getattr(para, "role", None) or ""
+            content = str(para.content).strip()
+            if role in ("pageHeader", "pageFooter", "pageNumber"):
+                continue
+            if role == "title":
+                lines.append(f"# {content}")
+            elif role == "sectionHeading":
+                lines.append(f"## {content}")
+            else:
+                lines.append(content)
+
+        for table in tables:
+            if not getattr(table, "cells", None):
+                continue
+            col_count = int(getattr(table, "column_count", 0) or 0)
+            if col_count <= 0:
+                continue
+            headers = [""] * col_count
+            for cell in table.cells:
+                if getattr(cell, "row_index", None) == 0 and getattr(cell, "column_index", None) is not None:
+                    headers[int(cell.column_index)] = cell.content or ""
+
+            table_md = [
+                "| " + " | ".join(headers) + " |",
+                "| " + " | ".join(["---"] * col_count) + " |",
+            ]
+            row_count = int(getattr(table, "row_count", 0) or 0)
+            for row_idx in range(1, row_count):
+                row_cells = [""] * col_count
+                for cell in table.cells:
+                    if getattr(cell, "row_index", None) == row_idx and getattr(cell, "column_index", None) is not None:
+                        row_cells[int(cell.column_index)] = cell.content or ""
+                table_md.append("| " + " | ".join(row_cells) + " |")
+            lines.extend(table_md)
+
+        return "\n\n".join(lines).strip()
+
+    def _build_section_aware_documents(self, result: AnalyzeResult, group_id: str, url: str) -> List[Document]:
+        """Create section/subsection chunks using `result.sections`.
+
+        This produces more semantically coherent chunks than per-page splitting and
+        makes downstream retrieval more precise.
+        """
+        sections = list(getattr(result, "sections", None) or [])
+        if not sections:
+            return []
+
+        paragraphs: List[DocumentParagraph] = list(getattr(result, "paragraphs", None) or [])
+        tables: List[DocumentTable] = list(getattr(result, "tables", None) or [])
+
+        content = getattr(result, "content", None) or ""
+
+        def _safe_get_paragraph(i: int) -> Optional[DocumentParagraph]:
+            if i < 0 or i >= len(paragraphs):
+                return None
+            return paragraphs[i]
+
+        def _safe_get_table(i: int) -> Optional[DocumentTable]:
+            if i < 0 or i >= len(tables):
+                return None
+            return tables[i]
+
+        # Build a conservative root set: if DI provides nested sections but doesn't
+        # provide explicit roots, treat all indices as roots.
+        # (We avoid attempting to infer parent pointers from elements to keep behavior stable.)
+        root_indices = list(range(len(sections)))
+
+        docs: List[Document] = []
+
+        def walk(section_idx: int, parent_titles: List[str], parent_ids: List[int]) -> None:
+            if section_idx < 0 or section_idx >= len(sections):
+                return
+            sec = sections[section_idx]
+            elements = list(getattr(sec, "elements", None) or [])
+
+            child_sections: List[int] = []
+            para_indices: List[int] = []
+            table_indices: List[int] = []
+
+            for el in elements:
+                parsed = self._parse_di_element_ref(el)
+                if not parsed:
+                    continue
+                kind, idx = parsed
+                if kind == "sections":
+                    child_sections.append(idx)
+                elif kind == "paragraphs":
+                    para_indices.append(idx)
+                elif kind == "tables":
+                    table_indices.append(idx)
+
+            title_fallback = f"section_{section_idx}"
+            title = self._infer_section_title(para_indices, paragraphs, title_fallback)
+            titles = [*parent_titles, title]
+            ids = [*parent_ids, section_idx]
+
+            # Prefer explicit spans on the section; otherwise aggregate paragraph spans.
+            section_spans = list(getattr(sec, "spans", None) or [])
+            direct_paras = [p for i in para_indices if (p := _safe_get_paragraph(i))]
+            direct_tables = [t for i in table_indices if (t := _safe_get_table(i))]
+
+            # If this section has children, we still may have direct content that isn't
+            # captured by child sections (common for an intro paragraph).
+            has_children = len(child_sections) > 0
+
+            def emit_chunk(*, part: str, spans: Any, paras: List[DocumentParagraph], tbls: List[DocumentTable]) -> None:
+                merged = self._collect_span_union([spans] if spans else [getattr(p, "spans", None) or [] for p in paras])
+                text = ""
+                if content and merged:
+                    text = self._slice_content_by_spans(content, merged)
+                if not text:
+                    text = self._build_markdown_from_paragraphs_and_tables(paras, tbls)
+                if not text:
+                    return
+
+                tables_metadata = [self._extract_table_metadata(t) for t in tbls]
+
+                docs.append(
+                    Document(
+                        text=text,
+                        metadata={
+                            "group_id": group_id,
+                            "source": "document-intelligence",
+                            "url": url,
+                            "chunk_type": "section",
+                            "section_path": titles,
+                            "di_section_path": ids,
+                            "di_section_part": part,
+                            "tables": tables_metadata,
+                            "table_count": len(tbls),
+                            "paragraph_count": len(paras),
+                        },
+                    )
+                )
+
+            # Emit direct content chunk (intro/body) if present.
+            if direct_paras or direct_tables:
+                emit_chunk(part="direct", spans=section_spans, paras=direct_paras, tbls=direct_tables)
+
+            # Recurse into child sections.
+            for child_idx in child_sections:
+                walk(child_idx, titles, ids)
+
+            # Leaf section with no direct content but with explicit spans: emit anyway.
+            if not has_children and not (direct_paras or direct_tables) and section_spans:
+                emit_chunk(part="spans", spans=section_spans, paras=[], tbls=[])
+
+        for idx in root_indices:
+            walk(idx, [], [])
+
+        # De-dup exact duplicates (can happen when roots include nested sections).
+        seen: set[tuple[str, str]] = set()
+        unique: List[Document] = []
+        for d in docs:
+            key = (str(d.metadata.get("url") or ""), str(d.metadata.get("di_section_path") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(d)
+        return unique
+
     def _select_model(self, url: str, default_model: str = "prebuilt-layout", explicit: Optional[str] = None) -> str:
         """Select Document Intelligence model based on hints.
 
@@ -390,6 +634,24 @@ class DocumentIntelligenceService:
                         logger.info(f"📊 DI Confidence: avg={avg_confidence:.3f}, min={min_confidence:.3f}, samples={len(confidences)}")
 
                 documents: List[Document] = []
+
+                # Prefer section-aware chunking when DI provides a sections tree.
+                # This produces higher-precision chunks and improves downstream retrieval.
+                try:
+                    if getattr(result, "sections", None) and getattr(result, "content", None):
+                        section_docs = self._build_section_aware_documents(result, group_id, url)
+                        if section_docs:
+                            logger.info(
+                                "✅ Extracted section-aware chunks",
+                                extra={
+                                    "url": url,
+                                    "chunks": len(section_docs),
+                                    "sections": len(getattr(result, "sections", None) or []),
+                                },
+                            )
+                            return (url, section_docs, None)
+                except Exception as e:
+                    logger.warning(f"Section-aware chunking failed; falling back to per-page: {e}")
                 
                 # Create one document per page (better for large docs)
                 for page in result.pages:

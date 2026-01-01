@@ -1284,6 +1284,21 @@ class Neo4jStoreV3:
                 t = record["t"]
                 d = record.get("d")
                 score = float(record.get("score") or 0.0)
+                chunk_metadata: Dict[str, Any] = {}
+                raw_metadata = t.get("metadata")
+                if raw_metadata:
+                    if isinstance(raw_metadata, str):
+                        try:
+                            chunk_metadata = json.loads(raw_metadata)
+                        except Exception:
+                            chunk_metadata = {}
+                    elif isinstance(raw_metadata, dict):
+                        chunk_metadata = dict(raw_metadata)
+
+                # Always attach document attribution fields
+                chunk_metadata["document_title"] = (d.get("title") if d else "")
+                chunk_metadata["document_source"] = (d.get("source") if d else "")
+
                 chunk = TextChunk(
                     id=t["id"],
                     text=t["text"],
@@ -1291,10 +1306,7 @@ class Neo4jStoreV3:
                     document_id=(d.get("id") if d else ""),
                     tokens=t.get("tokens", 0),
                     embedding=t.get("embedding"),
-                    metadata={
-                        "document_title": (d.get("title") if d else ""),
-                        "document_source": (d.get("source") if d else ""),
-                    },
+                    metadata=chunk_metadata,
                 )
                 results.append((chunk, score))
 
@@ -1322,18 +1334,30 @@ class Neo4jStoreV3:
         RETURN count(t) AS count
         """
         
-        chunk_data = [
-            {
-                "id": c.id,
-                "text": c.text,
-                "chunk_index": c.chunk_index,
-                "document_id": c.document_id,
-                "embedding": c.embedding,
-                "tokens": c.tokens,
-                "metadata": json.dumps(c.metadata) if c.metadata else "{}",
-            }
-            for c in chunks
-        ]
+        chunk_data = []
+        for c in chunks:
+            metadata_to_store: Dict[str, Any] = {}
+            if c.metadata and isinstance(c.metadata, dict):
+                metadata_to_store = dict(c.metadata)
+
+            # Prevent very large DI table payloads from being persisted in Neo4j.
+            # Keep a lightweight signal instead.
+            if "tables" in metadata_to_store:
+                tables_val = metadata_to_store.pop("tables")
+                if isinstance(tables_val, list) and tables_val:
+                    metadata_to_store["table_count"] = len(tables_val)
+
+            chunk_data.append(
+                {
+                    "id": c.id,
+                    "text": c.text,
+                    "chunk_index": c.chunk_index,
+                    "document_id": c.document_id,
+                    "embedding": c.embedding,
+                    "tokens": c.tokens,
+                    "metadata": json.dumps(metadata_to_store) if metadata_to_store else "{}",
+                }
+            )
         
         with self.driver.session(database=self.database) as session:
             result = session.run(query, chunks=chunk_data, group_id=group_id)

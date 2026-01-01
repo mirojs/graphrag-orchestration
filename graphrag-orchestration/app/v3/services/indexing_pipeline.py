@@ -445,33 +445,47 @@ class IndexingPipelineV3:
                         model_strategy="auto",
                     )
                     
-                    # Convert LlamaIndex Documents back to dict format for pipeline
-                    # Group pages by source URL to avoid duplicate Document nodes
-                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] ✅ Document Intelligence extracted {len(extracted_docs)} document pages")
-                    
+                    # Convert extracted DI docs back to dict format for pipeline.
+                    # IMPORTANT: Do not flatten into one big combined doc; that loses per-section metadata
+                    # (e.g., section_path) needed for section-aware retrieval.
+                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] ✅ Document Intelligence extracted {len(extracted_docs)} text units")
+
                     from collections import defaultdict
-                    pages_by_source = defaultdict(list)
+
+                    extracted_by_source: dict[str, list[LlamaDocument]] = defaultdict(list)
                     for llama_doc in extracted_docs:
-                        source_url = llama_doc.metadata.get("url", "")
-                        pages_by_source[source_url].append(llama_doc)
-                    
-                    documents = []
-                    for source_url, pages in pages_by_source.items():
-                        # Combine all pages into a single document
-                        combined_text = "\n\n".join(page.text for page in pages)
-                        # Use metadata from first page, add page_count
-                        combined_metadata = pages[0].metadata.copy()
-                        combined_metadata["page_count"] = len(pages)
-                        combined_metadata["page_numbers"] = [p.metadata.get("page_number", 0) for p in pages]
-                        
+                        source_url = (llama_doc.metadata or {}).get("url", "")
+                        extracted_by_source[source_url].append(llama_doc)
+
+                    # Keep any already-provided documents (non-URL content) as-is.
+                    retained_documents: list[dict[str, Any]] = []
+                    for doc in documents:
+                        if isinstance(doc, str):
+                            continue
+                        if not isinstance(doc, dict):
+                            continue
+                        content = doc.get("content") or doc.get("text", "")
+                        if isinstance(content, str) and content.strip() and not content.startswith("http"):
+                            retained_documents.append(doc)
+
+                    # Create one Document per source URL, but keep extracted subdocs for section-aware chunking.
+                    documents = retained_documents
+                    for source_url, subdocs in extracted_by_source.items():
+                        base_metadata = (subdocs[0].metadata or {}).copy() if subdocs else {}
+                        base_metadata["di_units"] = len(subdocs)
+                        base_metadata["page_numbers"] = [d.metadata.get("page_number") for d in subdocs if (d.metadata or {}).get("page_number") is not None]
+
                         documents.append({
-                            "content": combined_text,
+                            "content": "",  # chunk directly from di_extracted_docs
                             "title": source_url.split("/")[-1] if source_url else "Untitled",
                             "source": source_url,
-                            "metadata": combined_metadata,
+                            "metadata": base_metadata,
+                            "di_extracted_docs": subdocs,
                         })
-                    
-                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] 📄 Grouped {len(extracted_docs)} pages into {len(documents)} documents")
+
+                    logger.info(
+                        f"⏱️ [{time.time()-start_time:.1f}s] 📄 Grouped {len(extracted_docs)} extracted units into {len(extracted_by_source)} documents"
+                    )
                 else:
                     logger.info(f"ℹ️ All documents already have content, skipping Document Intelligence extraction")
             
@@ -482,7 +496,10 @@ class IndexingPipelineV3:
             all_chunks = []
             for doc in documents:
                 doc_id = doc.get("id") or str(uuid.uuid4())
-                chunks = await self._chunk_document(doc, doc_id)
+                if isinstance(doc, dict) and doc.get("di_extracted_docs"):
+                    chunks = await self._chunk_di_extracted_docs(doc, doc_id)
+                else:
+                    chunks = await self._chunk_document(doc, doc_id)
                 all_chunks.extend(chunks)
                 
                 # Store document metadata
@@ -683,6 +700,74 @@ class IndexingPipelineV3:
                 )
                 chunks.append(chunk)
         
+        return chunks
+
+    async def _chunk_di_extracted_docs(
+        self,
+        document: Dict[str, Any],
+        doc_id: str,
+    ) -> List[TextChunk]:
+        """Chunk DI-extracted sub-documents while preserving DI section metadata.
+
+        Document Intelligence extraction produces text units (often section-aware).
+        We chunk each unit with the sentence splitter, but inherit the unit's metadata
+        (section_path, di_section_path, etc.) so retrieval sources can be section-aware.
+        """
+
+        extracted_docs = document.get("di_extracted_docs") or []
+        if not extracted_docs:
+            return []
+
+        chunks: List[TextChunk] = []
+        global_chunk_index = 0
+
+        for unit_index, unit_doc in enumerate(extracted_docs):
+            unit_text = getattr(unit_doc, "text", "") or ""
+            if not unit_text.strip():
+                continue
+
+            unit_metadata = getattr(unit_doc, "metadata", {}) or {}
+
+            llama_doc = LlamaDocument(
+                text=unit_text,
+                id_=f"{doc_id}_diunit_{unit_index}",
+                metadata={
+                    "title": document.get("title", "Untitled"),
+                    "source": document.get("source", ""),
+                },
+            )
+
+            nodes = self.sentence_splitter.get_nodes_from_documents([llama_doc])
+            for node in nodes:
+                chunk_text = node.get_content()
+                if not chunk_text.strip():
+                    continue
+
+                embedding = await self._embed_text(chunk_text)
+
+                # Keep metadata small but section-aware. (Tables are intentionally not persisted here.)
+                chunk_metadata = {
+                    "chunk_type": unit_metadata.get("chunk_type"),
+                    "page_number": unit_metadata.get("page_number"),
+                    "section_path": unit_metadata.get("section_path", []),
+                    "di_section_path": unit_metadata.get("di_section_path"),
+                    "di_section_part": unit_metadata.get("di_section_part"),
+                    "url": unit_metadata.get("url"),
+                }
+                chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
+
+                chunk = TextChunk(
+                    id=f"{doc_id}_chunk_{global_chunk_index}",
+                    text=chunk_text,
+                    chunk_index=global_chunk_index,
+                    document_id=doc_id,
+                    embedding=embedding,
+                    tokens=len(chunk_text.split()),
+                    metadata=chunk_metadata,
+                )
+                chunks.append(chunk)
+                global_chunk_index += 1
+
         return chunks
     
     async def _extract_entities_and_relationships(

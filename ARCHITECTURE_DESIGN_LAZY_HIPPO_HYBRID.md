@@ -2,7 +2,9 @@
 
 ## 1. Executive Summary
 
-This document outlines the architectural transformation from a complex 6-way routing system (Local, Global, DRIFT, RAPTOR, HippoRAG 2, Vector RAG) to a streamlined **4-Way Intelligent Routing System** with **2 Deployment Profiles**. 
+This document outlines the architectural transformation from a complex 6-way routing system (Local, Global, DRIFT, HippoRAG 2, Vector RAG + legacy RAPTOR) to a streamlined **4-Way Intelligent Routing System** with **2 Deployment Profiles**.
+
+As of the January 1, 2026 update, **RAPTOR is removed from the indexing pipeline by default** (no new `RaptorNode` data is produced unless explicitly enabled).
 
 The base system is **LazyGraphRAG**, enhanced with **HippoRAG 2** for deterministic detail recovery in thematic and multi-hop queries. Designed specifically for high-stakes industries such as **auditing, finance, and insurance**, this architecture prioritizes **determinism, auditability, and high precision** over raw speed.
 
@@ -297,6 +299,34 @@ PROFILE_CONFIG = {
     *   **HippoRAG View:** Subject-Predicate-Object triples for PageRank
     *   **LazyGraphRAG View:** Text Units linked to entities for synthesis
     *   **Vector Index:** Embeddings for Route 1 fast retrieval
+
+### Document Ingestion: Azure Document Intelligence (DI)
+
+**Recommended for production**: Azure Document Intelligence (formerly Form Recognizer) for layout-aware PDF extraction.
+
+Key properties:
+*   Native Python SDK (no manual polling)
+*   Supports **Managed Identity** via `DefaultAzureCredential` when no API key is configured
+*   Produces richer layout/reading-order signals (useful for section-aware chunking and page-level metadata)
+
+Minimal configuration:
+*   `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-di-resource-name>.cognitiveservices.azure.com/`
+*   Leave `AZURE_DOCUMENT_INTELLIGENCE_KEY` unset to use Managed Identity (Azure) or developer credentials (local)
+
+### Indexing Pipeline (RAPTOR Removed)
+
+The indexing pipeline is designed to support the **4-route hybrid runtime** (LazyGraphRAG + HippoRAG 2) without requiring RAPTOR.
+
+At a high level:
+1. **Extract** document content with Azure DI (optionally preserving page/section metadata)
+2. **Chunk** into `TextChunk`-like units with stable identifiers + section/page metadata
+3. **Embed** chunks (and/or entities) for vector retrieval signals (Route 1) and entity matching
+4. **Build graph primitives** (entities/relationships/triples) in Neo4j for LazyGraphRAG + HippoRAG traversal
+5. **(Optional) Community detection** for Route 3 community matching
+
+**Explicitly not included:** RAPTOR hierarchical summarization/tree-building during indexing.
+*   `run_raptor` defaults to `false` (no new RAPTOR nodes are created)
+*   The hybrid routes (2/3/4) do not require RAPTOR data
 
 ### Python Pipeline Pseudocode
 

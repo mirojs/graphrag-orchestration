@@ -15,11 +15,13 @@ Endpoints:
 - POST /hybrid/configure - Configure pipeline settings
 """
 
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
 import structlog
+import asyncio
+import time
 
 from app.hybrid.orchestrator import HybridPipeline
 from app.hybrid.router.main import DeploymentProfile, QueryRoute
@@ -30,6 +32,9 @@ logger = structlog.get_logger(__name__)
 
 # Pipeline instance cache per group
 _pipeline_cache: Dict[str, HybridPipeline] = {}
+
+# Indexing job tracking
+_indexing_jobs: Dict[str, Dict[str, Any]] = {}
 
 
 # ============================================================================
@@ -115,6 +120,34 @@ class HealthResponse(BaseModel):
     components: Dict[str, Any]
     profile: str
     group_id: str
+
+
+# =========================================================================
+# Document Intelligence (DI) Preflight
+# =========================================================================
+
+class DiExtractRequest(BaseModel):
+    """Run Document Intelligence extraction only (no indexing).
+
+    Useful for validating that DI can access the PDF and that section/subsection
+    metadata is being produced as expected before running full indexing.
+    """
+
+    documents: List[Any] = Field(
+        ..., description="Documents to extract (URLs or dicts with {url})"
+    )
+    model_strategy: Literal["auto", "layout", "invoice", "receipt"] = Field(
+        default="auto",
+        description="DI model selection strategy",
+    )
+
+
+class DiExtractResponse(BaseModel):
+    status: Literal["success"]
+    group_id: str
+    requested: int
+    extracted_units: int
+    by_url: Dict[str, Any]
 
 
 # ============================================================================
@@ -483,6 +516,86 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/di/extract", response_model=DiExtractResponse)
+async def di_extract_preflight(request: Request, body: DiExtractRequest):
+    """Run DI extraction only and return a small summary.
+
+    This endpoint is intentionally read-only (does not write to Neo4j).
+    """
+
+    group_id = request.state.group_id
+
+    # Normalize inputs into DI input_items format.
+    input_items: List[Any] = []
+    for doc in body.documents:
+        if isinstance(doc, str):
+            input_items.append(doc)
+        elif isinstance(doc, dict):
+            if "url" in doc:
+                input_items.append({"url": doc["url"]})
+            else:
+                raise HTTPException(status_code=400, detail="DI preflight dict documents must include 'url'")
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported document type: {type(doc)}")
+
+    try:
+        from app.services.document_intelligence_service import DocumentIntelligenceService
+
+        di_service = DocumentIntelligenceService()
+        extracted = await di_service.extract_documents(
+            group_id=group_id,
+            input_items=input_items,
+            fail_fast=True,
+            model_strategy=body.model_strategy,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("di_extract_preflight_failed", extra={"group_id": group_id, "error": str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
+
+    # Summarize per URL. Do not return full text to avoid huge payloads.
+    by_url: Dict[str, Any] = {}
+    for d in extracted:
+        md = d.metadata or {}
+        url = str(md.get("url") or "")
+        if url not in by_url:
+            by_url[url] = {
+                "units": 0,
+                "has_section_path": 0,
+                "has_di_section_path": 0,
+                "has_tables": 0,
+                "sample": None,
+            }
+        entry = by_url[url]
+        entry["units"] += 1
+        if md.get("section_path"):
+            entry["has_section_path"] += 1
+        if md.get("di_section_path") is not None:
+            entry["has_di_section_path"] += 1
+        if md.get("tables"):
+            entry["has_tables"] += 1
+        if entry["sample"] is None:
+            entry["sample"] = {
+                "page_number": md.get("page_number"),
+                "chunk_type": md.get("chunk_type"),
+                "section_path": md.get("section_path"),
+                "di_section_path": md.get("di_section_path"),
+                "di_section_part": md.get("di_section_part"),
+                "table_count": md.get("table_count"),
+                "paragraph_count": md.get("paragraph_count"),
+                "text_preview": (d.text or "")[:200],
+            }
+
+    return DiExtractResponse(
+        status="success",
+        group_id=group_id,
+        requested=len(input_items),
+        extracted_units=len(extracted),
+        by_url=by_url,
+    )
+
+
 @router.get("/profiles")
 async def list_profiles():
     """
@@ -569,6 +682,225 @@ async def list_profiles():
 # ============================================================================
 # Indexing Endpoints
 # ============================================================================
+
+class HybridIndexDocumentsRequest(BaseModel):
+    """Index documents for the Hybrid (LazyGraphRAG + HippoRAG 2 + Vector RAG) system.
+
+    Notes:
+    - This indexes into Neo4j (and vector backends) via the existing V3 indexing pipeline.
+    - It does NOT require RAPTOR; by default, RAPTOR is disabled.
+    - After document indexing completes, run /hybrid/index/sync to build HippoRAG artifacts.
+    """
+
+    documents: List[Any] = Field(
+        ..., description="Documents to index (URLs, text strings, or structured dicts)"
+    )
+    ingestion: Literal["document-intelligence", "llamaparse", "none"] = Field(
+        default="document-intelligence",
+        description="Document extraction method for PDFs/images",
+    )
+    run_community_detection: bool = Field(
+        default=True,
+        description="Whether to run community detection (improves thematic routing)",
+    )
+    run_raptor: bool = Field(
+        default=False,
+        description="Legacy RAPTOR hierarchical summarization (disabled by default)",
+    )
+    reindex: bool = Field(
+        default=False,
+        description="If true, delete existing group data before indexing",
+    )
+
+
+class HybridIndexDocumentsResponse(BaseModel):
+    status: Literal["accepted", "success", "failed"]
+    group_id: str
+    job_id: str
+    documents_received: int
+    message: str
+    stats: Optional[Dict[str, Any]] = None
+
+
+class IndexingStatusResponse(BaseModel):
+    status: Literal["pending", "running", "completed", "failed"]
+    group_id: str
+    job_id: str
+    progress: Optional[str] = None
+    stats: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    started_at: Optional[float] = None
+    completed_at: Optional[float] = None
+
+
+async def _run_indexing_job(
+    job_id: str,
+    group_id: str,
+    docs_for_pipeline: List[Dict[str, Any]],
+    reindex: bool,
+    ingestion: str,
+    run_community_detection: bool,
+    run_raptor: bool,
+):
+    """Background task to run indexing."""
+    _indexing_jobs[job_id]["status"] = "running"
+    _indexing_jobs[job_id]["progress"] = "Starting indexing pipeline..."
+    
+    try:
+        from app.v3.routers.graphrag_v3 import get_indexing_pipeline
+        pipeline = get_indexing_pipeline()
+        
+        _indexing_jobs[job_id]["progress"] = "Indexing documents..."
+        stats = await pipeline.index_documents(
+            group_id=group_id,
+            documents=docs_for_pipeline,
+            reindex=reindex,
+            ingestion=ingestion,
+            run_community_detection=run_community_detection,
+            run_raptor=run_raptor,
+        )
+        
+        _indexing_jobs[job_id]["status"] = "completed"
+        _indexing_jobs[job_id]["stats"] = stats
+        _indexing_jobs[job_id]["completed_at"] = time.time()
+        _indexing_jobs[job_id]["progress"] = "Indexing complete"
+        
+        logger.info("hybrid_index_documents_complete", group_id=group_id, job_id=job_id, stats=stats)
+        
+    except Exception as e:
+        _indexing_jobs[job_id]["status"] = "failed"
+        _indexing_jobs[job_id]["error"] = str(e)
+        _indexing_jobs[job_id]["completed_at"] = time.time()
+        logger.exception(
+            "hybrid_index_documents_failed",
+            extra={"group_id": group_id, "job_id": job_id, "error": str(e)},
+        )
+
+
+@router.post("/index/documents", response_model=HybridIndexDocumentsResponse)
+async def hybrid_index_documents(
+    request: Request,
+    body: HybridIndexDocumentsRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Run document indexing for the Hybrid system.
+
+    This is the preferred indexing entrypoint for the LazyGraphRAG + HippoRAG 2 + Vector RAG architecture.
+
+    Implementation detail: runs the V3 indexing pipeline to populate Neo4j, with RAPTOR disabled by default.
+    """
+
+    group_id = request.state.group_id
+    logger.info(
+        "hybrid_index_documents_start",
+        group_id=group_id,
+        num_documents=len(body.documents),
+        ingestion=body.ingestion,
+        run_community_detection=body.run_community_detection,
+        run_raptor=body.run_raptor,
+        reindex=body.reindex,
+    )
+
+    # Keep DRIFT/triple-engine caches from serving stale results post-index.
+    try:
+        from app.v3.routers.graphrag_v3 import get_drift_adapter
+
+        adapter = get_drift_adapter()
+        adapter.clear_cache(group_id)
+        logger.info("hybrid_index_cleared_drift_cache", group_id=group_id)
+    except Exception as e:
+        logger.warning("hybrid_index_clear_drift_cache_failed", group_id=group_id, error=str(e))
+
+    # Convert documents into the V3 pipeline's expected dict format.
+    docs_for_pipeline: List[Dict[str, Any]] = []
+    for doc in body.documents:
+        if isinstance(doc, str):
+            if doc.startswith(("http://", "https://")):
+                docs_for_pipeline.append(
+                    {
+                        "content": "",
+                        "title": doc.split("/")[-1] if "/" in doc else "Untitled",
+                        "source": doc,
+                        "metadata": {},
+                    }
+                )
+            else:
+                docs_for_pipeline.append(
+                    {"content": doc, "title": "Untitled", "source": "", "metadata": {}}
+                )
+        elif isinstance(doc, dict):
+            docs_for_pipeline.append(
+                {
+                    "content": doc.get("text", doc.get("content", "")),
+                    "title": doc.get("title", "Untitled"),
+                    "source": doc.get("source", doc.get("url", "")),
+                    "metadata": doc.get("metadata", {}),
+                }
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported document type: {type(doc)}")
+
+    # Create job ID and track it
+    job_id = f"{group_id}_{int(time.time() * 1000)}"
+    _indexing_jobs[job_id] = {
+        "status": "pending",
+        "group_id": group_id,
+        "job_id": job_id,
+        "documents": len(docs_for_pipeline),
+        "started_at": time.time(),
+        "progress": "Queued",
+    }
+    
+    # Start background indexing
+    background_tasks.add_task(
+        _run_indexing_job,
+        job_id,
+        group_id,
+        docs_for_pipeline,
+        body.reindex,
+        body.ingestion,
+        body.run_community_detection,
+        body.run_raptor,
+    )
+    
+    logger.info(
+        "hybrid_index_documents_accepted",
+        group_id=group_id,
+        job_id=job_id,
+        num_documents=len(docs_for_pipeline),
+    )
+    
+    return HybridIndexDocumentsResponse(
+        status="accepted",
+        group_id=group_id,
+        job_id=job_id,
+        documents_received=len(docs_for_pipeline),
+        message=(
+            f"Indexing job {job_id} started. Poll /hybrid/index/status/{job_id} for progress. "
+            "After completion, run /hybrid/index/sync and /hybrid/index/initialize-hipporag."
+        ),
+    )
+
+
+@router.get("/index/status/{job_id}", response_model=IndexingStatusResponse)
+async def get_indexing_status(request: Request, job_id: str):
+    """Check the status of an indexing job."""
+    
+    if job_id not in _indexing_jobs:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    job = _indexing_jobs[job_id]
+    
+    return IndexingStatusResponse(
+        status=job["status"],
+        group_id=job["group_id"],
+        job_id=job_id,
+        progress=job.get("progress"),
+        stats=job.get("stats"),
+        error=job.get("error"),
+        started_at=job.get("started_at"),
+        completed_at=job.get("completed_at"),
+    )
 
 class SyncIndexRequest(BaseModel):
     """Request to sync HippoRAG index from Neo4j."""

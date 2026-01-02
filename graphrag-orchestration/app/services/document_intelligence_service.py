@@ -75,6 +75,17 @@ class DocumentIntelligenceService:
         if not self.endpoint:
             raise RuntimeError("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT not configured")
 
+        # Token authentication (Managed Identity / DefaultAzureCredential) requires the
+        # resource-specific custom subdomain endpoint. If the endpoint is the generic
+        # regional host (e.g., https://swedencentral.api.cognitive.microsoft.com/),
+        # Azure DI will reject token auth unless an API key is used.
+        if not self.api_key and ".api.cognitive.microsoft.com" in self.endpoint:
+            raise RuntimeError(
+                "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT must be the resource custom subdomain "
+                "(https://<resource-name>.cognitiveservices.azure.com/) when using Managed Identity. "
+                "Either set the correct endpoint or configure AZURE_DOCUMENT_INTELLIGENCE_KEY."
+            )
+
         logger.info(f"Document Intelligence Service Init - Endpoint: {self.endpoint}")
         logger.info(f"Document Intelligence Service Init - Using API key: {bool(self.api_key)}")
         logger.info(f"Document Intelligence Service Init - Max concurrency: {self.max_concurrency}")
@@ -559,55 +570,17 @@ class DocumentIntelligenceService:
             logger.info(f"Document Intelligence analyzing: {url[:80]}...")
             
             try:
-                # Check if URL is a blob URL and try to download content if possible
-                # This handles private blobs by downloading with Managed Identity
-                document_bytes = None
-                
-                if ".blob.core.windows.net" in url:
-                    try:
-                        logger.info(f"Attempting to download blob content from: {url}")
-                        
-                        # Use DefaultAzureCredential for blob access (Managed Identity)
-                        # This requires the Container App to have 'Storage Blob Data Reader' role.
-                        # Ensure credential is properly closed to avoid aiohttp unclosed-session warnings.
-                        async with DefaultAzureCredential() as credential:
-                            # Extract blob URL without query params (SAS tokens not needed with MI)
-                            clean_url = url.split('?')[0]
-                            logger.info(f"Using clean blob URL (no SAS): {clean_url}")
-
-                            async with BlobClient.from_blob_url(clean_url, credential=credential) as blob_client:
-                                content = await blob_client.download_blob()
-                                document_bytes = await content.readall()
-
-                                logger.info(f"✅ Successfully downloaded blob content ({len(document_bytes)} bytes)")
-                    except Exception as e:
-                        logger.error(f"❌ Failed to download blob content: {str(e)}")
-                        logger.error(f"   This likely means the Container App doesn't have 'Storage Blob Data Reader' role")
-                        logger.error(f"   or the blob doesn't exist. Cannot proceed without blob content.")
-                        # Re-raise the exception instead of silently falling back
-                        raise RuntimeError(f"Failed to download blob {url}: {str(e)}")
-
                 # Decide model
                 selected_model = self._select_model(url, default_model=default_model, explicit=explicit_model)
 
-                # Start analysis with automatic polling
-                # For bytes, pass directly as second parameter; for URL, use AnalyzeDocumentRequest
-                if document_bytes:
-                    # Pass bytes directly to the SDK (v1/v2 pattern)
-                    logger.info(f"⏳ Starting Document Intelligence analysis ({len(document_bytes)} bytes)...")
-                    poller = await client.begin_analyze_document(
-                        selected_model,
-                        io.BytesIO(document_bytes),
-                        output_content_format=DocumentContentFormat.MARKDOWN,
-                    )
-                else:
-                    # Fallback to URL source (for public URLs or URLs with SAS tokens)
-                    logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
-                    poller = await client.begin_analyze_document(
-                        selected_model,
-                        AnalyzeDocumentRequest(url_source=url),
-                        output_content_format=DocumentContentFormat.MARKDOWN,
-                    )
+                # DI can access Azure blob storage directly using its own Managed Identity
+                # No need to download locally - just pass the URL (with SAS if present)
+                logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
+                poller = await client.begin_analyze_document(
+                    selected_model,
+                    AnalyzeDocumentRequest(url_source=url),
+                    output_content_format=DocumentContentFormat.MARKDOWN,
+                )
 
                 # Wait for completion with timeout (SDK handles polling automatically)
                 # Azure DI typically takes 2-10 seconds per document
@@ -621,7 +594,7 @@ class DocumentIntelligenceService:
                     logger.error(f"❌ Document Intelligence analysis timed out after 60s for {url[:80]}")
                     raise TimeoutError(f"Document Intelligence analysis timed out for {url}")
 
-                if not result.pages:
+                if not getattr(result, "pages", None):
                     logger.warning(f"No pages extracted from {url}")
                     return (url, [], None)
 
@@ -637,21 +610,21 @@ class DocumentIntelligenceService:
 
                 # Prefer section-aware chunking when DI provides a sections tree.
                 # This produces higher-precision chunks and improves downstream retrieval.
-                try:
-                    if getattr(result, "sections", None) and getattr(result, "content", None):
-                        section_docs = self._build_section_aware_documents(result, group_id, url)
-                        if section_docs:
-                            logger.info(
-                                "✅ Extracted section-aware chunks",
-                                extra={
-                                    "url": url,
-                                    "chunks": len(section_docs),
-                                    "sections": len(getattr(result, "sections", None) or []),
-                                },
-                            )
-                            return (url, section_docs, None)
-                except Exception as e:
-                    logger.warning(f"Section-aware chunking failed; falling back to per-page: {e}")
+                if getattr(result, "sections", None) and getattr(result, "content", None):
+                    section_docs = self._build_section_aware_documents(result, group_id, url)
+                    if not section_docs:
+                        raise RuntimeError(
+                            "Document Intelligence returned a sections tree, but section-aware chunking produced 0 chunks"
+                        )
+                    logger.info(
+                        "✅ Extracted section-aware chunks",
+                        extra={
+                            "url": url,
+                            "chunks": len(section_docs),
+                            "sections": len(getattr(result, "sections", None) or []),
+                        },
+                    )
+                    return (url, section_docs, None)
                 
                 # Create one document per page (better for large docs)
                 for page in result.pages:
@@ -739,20 +712,21 @@ class DocumentIntelligenceService:
                     # Create Document with structured table metadata for schema-aware extraction
                     # The 'tables' metadata enables direct field mapping without LLM parsing
                     logger.info(f"📄 Extracted page {page_num}: {len(markdown)} chars, {len(page_paragraphs)} paragraphs, {len(page_tables)} tables")
-                    doc = Document(
-                        text=markdown,
-                        metadata={
-                            "page_number": page_num,
-                            "group_id": group_id,
-                            "source": "document-intelligence",
-                            "url": url,
-                            "section_path": section_path,  # Hierarchical section info
-                            "tables": tables_metadata,  # Structured table data for direct extraction
-                            "table_count": len(page_tables),
-                            "paragraph_count": len(page_paragraphs),
-                        },
-                    )
-                    documents.append(doc)
+                    if markdown.strip():
+                        doc = Document(
+                            text=markdown,
+                            metadata={
+                                "page_number": page_num,
+                                "group_id": group_id,
+                                "source": "document-intelligence",
+                                "url": url,
+                                "section_path": section_path,  # Hierarchical section info
+                                "tables": tables_metadata,  # Structured table data for direct extraction
+                                "table_count": len(page_tables),
+                                "paragraph_count": len(page_paragraphs),
+                            },
+                        )
+                        documents.append(doc)
 
                 logger.info(
                     f"✅ Extracted {len(result.pages)} pages from {url[:50]}... "
@@ -874,13 +848,16 @@ class DocumentIntelligenceService:
                     )
                 
                 # Run all in parallel with batch timeout
+                # Each document has 60s timeout internally; batch timeout should be generous
+                # for parallel processing (e.g., 5 docs @ 60s each = max 60s if truly parallel,
+                # but allow 120s for queueing/throttling)
                 try:
                     results = await asyncio.wait_for(
                         asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=60  # 60s for entire batch
+                        timeout=120  # 120s for entire batch
                     )
                 except asyncio.TimeoutError:
-                    logger.error("❌ Batch timeout after 60s")
+                    logger.error("❌ Batch timeout after 120s")
                     if fail_fast:
                         raise RuntimeError("Batch processing timeout")
                     return documents

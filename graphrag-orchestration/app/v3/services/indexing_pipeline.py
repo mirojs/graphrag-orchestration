@@ -436,26 +436,52 @@ class IndexingPipelineV3:
                             # Content field contains URL
                             needs_extraction.append(content)
                 
-                if needs_extraction:
-                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] 🔍 Extracting text from {len(needs_extraction)} PDF documents using Document Intelligence...")
-                    extracted_docs = await di_service.extract_documents(
-                        group_id=group_id,
-                        input_items=needs_extraction,
-                        fail_fast=False,
-                        model_strategy="auto",
+                if needs_extraction and di_service is not None:
+                    logger.info(
+                        f"⏱️ [{time.time()-start_time:.1f}s] 🔍 Extracting text from {len(needs_extraction)} PDF documents using Document Intelligence..."
                     )
+
+                    try:
+                        extracted_docs = await di_service.extract_documents(
+                            group_id=group_id,
+                            input_items=needs_extraction,
+                            fail_fast=True,
+                            model_strategy="auto",
+                        )
+                    except Exception as e:
+                        logger.exception(
+                            "❌ Document Intelligence extraction failed; aborting indexing (no fallback)",
+                            extra={"group_id": group_id, "needs_extraction": len(needs_extraction)},
+                        )
+                        raise RuntimeError(
+                            f"Document Intelligence extraction failed for group_id={group_id} "
+                            f"(items={len(needs_extraction)}): {str(e)}"
+                        )
                     
                     # Convert extracted DI docs back to dict format for pipeline.
                     # IMPORTANT: Do not flatten into one big combined doc; that loses per-section metadata
                     # (e.g., section_path) needed for section-aware retrieval.
-                    logger.info(f"⏱️ [{time.time()-start_time:.1f}s] ✅ Document Intelligence extracted {len(extracted_docs)} text units")
+                    logger.info(
+                        f"⏱️ [{time.time()-start_time:.1f}s] ✅ Document Intelligence extracted {len(extracted_docs)} text units"
+                    )
 
-                    from collections import defaultdict
+                    if not extracted_docs:
+                        logger.error(
+                            "❌ Document Intelligence returned 0 extracted text units; aborting indexing (no fallback)",
+                            extra={"group_id": group_id, "needs_extraction": len(needs_extraction)},
+                        )
+                        raise RuntimeError(
+                            "Document Intelligence returned 0 extracted text units; indexing aborted. "
+                            "Verify the PDF is accessible to DI (blob permissions/SAS), DI resource is reachable, "
+                            "and the document contains extractable text."
+                        )
+                    else:
+                        from collections import defaultdict
 
-                    extracted_by_source: dict[str, list[LlamaDocument]] = defaultdict(list)
-                    for llama_doc in extracted_docs:
-                        source_url = (llama_doc.metadata or {}).get("url", "")
-                        extracted_by_source[source_url].append(llama_doc)
+                        extracted_by_source: dict[str, list[LlamaDocument]] = defaultdict(list)
+                        for llama_doc in extracted_docs:
+                            source_url = (llama_doc.metadata or {}).get("url", "")
+                            extracted_by_source[source_url].append(llama_doc)
 
                     # Keep any already-provided documents (non-URL content) as-is.
                     retained_documents: list[dict[str, Any]] = []
@@ -469,23 +495,31 @@ class IndexingPipelineV3:
                             retained_documents.append(doc)
 
                     # Create one Document per source URL, but keep extracted subdocs for section-aware chunking.
-                    documents = retained_documents
-                    for source_url, subdocs in extracted_by_source.items():
-                        base_metadata = (subdocs[0].metadata or {}).copy() if subdocs else {}
-                        base_metadata["di_units"] = len(subdocs)
-                        base_metadata["page_numbers"] = [d.metadata.get("page_number") for d in subdocs if (d.metadata or {}).get("page_number") is not None]
+                    # Only replace the incoming documents list if we actually extracted something.
+                    if extracted_by_source:
+                        documents = retained_documents
+                        for source_url, subdocs in extracted_by_source.items():
+                            base_metadata = (subdocs[0].metadata or {}).copy() if subdocs else {}
+                            base_metadata["di_units"] = len(subdocs)
+                            base_metadata["page_numbers"] = [
+                                d.metadata.get("page_number")
+                                for d in subdocs
+                                if (d.metadata or {}).get("page_number") is not None
+                            ]
 
-                        documents.append({
-                            "content": "",  # chunk directly from di_extracted_docs
-                            "title": source_url.split("/")[-1] if source_url else "Untitled",
-                            "source": source_url,
-                            "metadata": base_metadata,
-                            "di_extracted_docs": subdocs,
-                        })
+                            documents.append(
+                                {
+                                    "content": "",  # chunk directly from di_extracted_docs
+                                    "title": source_url.split("/")[-1] if source_url else "Untitled",
+                                    "source": source_url,
+                                    "metadata": base_metadata,
+                                    "di_extracted_docs": subdocs,
+                                }
+                            )
 
-                    logger.info(
-                        f"⏱️ [{time.time()-start_time:.1f}s] 📄 Grouped {len(extracted_docs)} extracted units into {len(extracted_by_source)} documents"
-                    )
+                        logger.info(
+                            f"⏱️ [{time.time()-start_time:.1f}s] 📄 Grouped {len(extracted_docs)} extracted units into {len(extracted_by_source)} documents"
+                        )
                 else:
                     logger.info(f"ℹ️ All documents already have content, skipping Document Intelligence extraction")
             
@@ -511,6 +545,52 @@ class IndexingPipelineV3:
                         source=doc.get("source", ""),
                         metadata=doc.get("metadata", {}),
                     )
+                )
+
+            # Diagnostics: verify DI section/subsection + table metadata survived into chunks.
+            # This is intentionally low-noise (counts + a tiny sample).
+            if all_chunks:
+                with_section_path = sum(
+                    1
+                    for c in all_chunks
+                    if (c.metadata or {}).get("section_path")
+                )
+                with_di_section_path = sum(
+                    1
+                    for c in all_chunks
+                    if (c.metadata or {}).get("di_section_path") is not None
+                )
+                with_tables = sum(
+                    1
+                    for c in all_chunks
+                    if (c.metadata or {}).get("tables")
+                )
+
+                sample_meta = None
+                for c in all_chunks:
+                    md = c.metadata or {}
+                    if md.get("section_path") or md.get("di_section_path") is not None or md.get("tables"):
+                        sample_meta = {
+                            "section_path": md.get("section_path"),
+                            "di_section_path": md.get("di_section_path"),
+                            "di_section_part": md.get("di_section_part"),
+                            "page_number": md.get("page_number"),
+                            "table_count": md.get("table_count"),
+                            "paragraph_count": md.get("paragraph_count"),
+                            "has_tables": bool(md.get("tables")),
+                        }
+                        break
+
+                logger.info(
+                    "di_metadata_chunk_summary",
+                    extra={
+                        "group_id": group_id,
+                        "chunks_total": len(all_chunks),
+                        "chunks_with_section_path": with_section_path,
+                        "chunks_with_di_section_path": with_di_section_path,
+                        "chunks_with_tables": with_tables,
+                        "sample": sample_meta,
+                    },
                 )
             
             # Store chunks in batch
@@ -745,7 +825,13 @@ class IndexingPipelineV3:
 
                 embedding = await self._embed_text(chunk_text)
 
-                # Keep metadata small but section-aware. (Tables are intentionally not persisted here.)
+                # Preserve DI section hierarchy and (when present) structured table metadata.
+                # Tables can materially improve downstream entity/relationship extraction.
+                tables_meta = unit_metadata.get("tables")
+                if isinstance(tables_meta, list) and len(tables_meta) > 6:
+                    # Avoid exploding metadata size; keep a small sample + a count.
+                    tables_meta = tables_meta[:6]
+
                 chunk_metadata = {
                     "chunk_type": unit_metadata.get("chunk_type"),
                     "page_number": unit_metadata.get("page_number"),
@@ -753,6 +839,9 @@ class IndexingPipelineV3:
                     "di_section_path": unit_metadata.get("di_section_path"),
                     "di_section_part": unit_metadata.get("di_section_part"),
                     "url": unit_metadata.get("url"),
+                    "tables": tables_meta,
+                    "table_count": unit_metadata.get("table_count"),
+                    "paragraph_count": unit_metadata.get("paragraph_count"),
                 }
                 chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
 

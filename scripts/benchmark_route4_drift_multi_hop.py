@@ -40,6 +40,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from benchmark_accuracy_utils import GroundTruth, extract_ground_truth, calculate_accuracy_metrics
+
 DEFAULT_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
     "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
@@ -271,6 +273,7 @@ def benchmark_scenario(
     response_type: str,
     repeats: int,
     timeout_s: float,
+    ground_truth: Dict[str, GroundTruth],
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -327,12 +330,35 @@ def benchmark_scenario(
             )
 
         summary = _summarize_runs(runs) if runs else {}
+        
+        # Calculate accuracy metrics
+        accuracy_metrics = {}
+        if qid in ground_truth and runs:
+            gt = ground_truth[qid]
+            # Use first run for accuracy check (all repeats should be similar)
+            actual_answer = runs[0].get("text", "")
+            accuracy_metrics = calculate_accuracy_metrics(
+                expected=gt.expected,
+                actual=actual_answer,
+                is_negative=gt.is_negative
+            )
+            
+            # Add to console output
+            if gt.is_negative:
+                passed = accuracy_metrics.get("negative_test_pass", False)
+                print(f"  Accuracy: NEGATIVE_TEST {'PASS' if passed else 'FAIL'}")
+            else:
+                containment = accuracy_metrics.get("containment", 0.0)
+                f1 = accuracy_metrics.get("f1_score", 0.0)
+                print(f"  Accuracy: containment={containment:.2f}, f1={f1:.2f}")
+        
         results.append(
             {
                 "qid": qid,
                 "query": query,
                 "runs": runs,
                 "summary": summary,
+                "accuracy": accuracy_metrics,
             }
         )
 
@@ -374,6 +400,7 @@ def _write_analysis_md(
                 qid = q["qid"]
                 query = q["query"]
                 summary = q.get("summary", {})
+                accuracy = q.get("accuracy", {})
                 runs = q.get("runs", [])
 
                 f.write(f"### {qid}: {query}\n\n")
@@ -383,6 +410,27 @@ def _write_analysis_md(
                     continue
 
                 f.write(f"**Runs:** {len(runs)}\n\n")
+                
+                # Accuracy Metrics
+                if accuracy:
+                    f.write("**Accuracy Metrics:**\n\n")
+                    f.write("| Metric | Value |\n")
+                    f.write("|--------|-------|\n")
+                    
+                    if accuracy.get("is_negative", False):
+                        passed = accuracy.get("negative_test_pass", False)
+                        f.write(f"| Negative Test | {'✅ PASS' if passed else '❌ FAIL'} |\n")
+                    else:
+                        f.write(f"| Exact Match | {'✅' if accuracy.get('exact_match', False) else '❌'} |\n")
+                        f.write(f"| Fuzzy Score | {accuracy.get('fuzzy_score', 0):.2f} |\n")
+                        f.write(f"| Containment | {accuracy.get('containment', 0):.2f} |\n")
+                        f.write(f"| Precision | {accuracy.get('precision', 0):.2f} |\n")
+                        f.write(f"| Recall | {accuracy.get('recall', 0):.2f} |\n")
+                        f.write(f"| F1 Score | {accuracy.get('f1_score', 0):.2f} |\n")
+                    f.write("\n")
+                
+                # Repeatability Metrics
+                f.write("**Repeatability Metrics:**\n\n")
                 f.write("| Metric | Value |\n")
                 f.write("|--------|-------|\n")
                 f.write(f"| Exact Match Rate | {summary.get('text_norm_exact_rate', 0):.2f} |\n")
@@ -453,6 +501,10 @@ def main():
     negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))
     print(f"  Positive tests (Q-D): {positive_count}")
     print(f"  Negative tests (Q-N): {negative_count}")
+    
+    # Load ground truth
+    ground_truth = extract_ground_truth(qbank_path)
+    print(f"Loaded {len(ground_truth)} ground truth answers")
 
     # Single scenario: summary mode
     scenario_name = "hybrid_route4_summary"
@@ -468,6 +520,7 @@ def main():
         response_type=response_type,
         repeats=args.repeats,
         timeout_s=args.timeout,
+        ground_truth=ground_truth,
     )
 
     # Write outputs

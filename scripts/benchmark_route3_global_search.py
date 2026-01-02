@@ -48,6 +48,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from benchmark_accuracy_utils import GroundTruth, extract_ground_truth, calculate_accuracy_metrics
+
 DEFAULT_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
     "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
@@ -285,6 +287,10 @@ def main() -> int:
     positive_count = sum(1 for q in questions if q.qid.startswith("Q-G"))
     negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))
     print(f"Loaded {len(questions)} questions: {positive_count} positive (Q-G), {negative_count} negative (Q-N)")
+    
+    # Load ground truth
+    ground_truth = extract_ground_truth(qbank)
+    print(f"Loaded {len(ground_truth)} ground truth answers")
 
     # Single scenario: summary mode
     scenario_name = "hybrid_global_summary"
@@ -328,54 +334,76 @@ def main() -> int:
                 "force_route": "global_search",
                 "response_type": response_type,
             }
-                    "response_type": response_type,
-                    "force_route": "global_search",
-                }
 
-                status, resp, elapsed_s, err = _http_post_json(
-                    url=endpoint,
-                    headers=headers,
-                    payload=payload,
-                    timeout_s=float(args.timeout),
-                )
-
-                if isinstance(resp, dict):
-                    text = str(resp.get("response") or "")
-                else:
-                    text = ""
-
-                citations_sig = _extract_citation_ids(resp)
-                evidence_path_sig = _extract_evidence_path(resp)
-
-                run_row = {
-                    "run": ri,
-                    "status": status,
-                    "elapsed_ms": int(round(elapsed_s * 1000.0)),
-                    "text": text,
-                    "text_norm": _normalize_text(text),
-                    "citations_sig": citations_sig,
-                    "evidence_path_sig": evidence_path_sig,
-                    "error": err,
-                }
-                runs.append(run_row)
-
-            summary = _summarize_runs(runs)
-            results[sc_name][q.qid] = {
-                "qid": q.qid,
-                "query": q.query,
-                "runs": runs,
-                "summary": summary,
-            }
-
-            print(
-                f"[{sc_name}] [{qi}/{len(questions)}] {q.qid}: "
-                f"exact={summary['text_norm_exact_rate']:.2f} "
-                f"min_sim={summary['text_norm_min_similarity']:.2f} "
-                f"cite_jacc_min={summary['citations_min_jaccard_vs_first']:.2f} "
-                f"path_jacc_min={summary['evidence_path_min_jaccard_vs_first']:.2f} "
-                f"p50={summary['latency_ms']['p50']}ms",
-                flush=True,
+            status, resp, elapsed_s, err = _http_post_json(
+                url=endpoint,
+                headers=headers,
+                payload=payload,
+                timeout_s=float(args.timeout),
             )
+
+            if isinstance(resp, dict):
+                text = str(resp.get("response") or "")
+            else:
+                text = ""
+
+            citations_sig = _extract_citation_ids(resp)
+            evidence_path_sig = _extract_evidence_path(resp)
+
+            run_row = {
+                "run": ri,
+                "status": status,
+                "elapsed_ms": int(round(elapsed_s * 1000.0)),
+                "text": text,
+                "text_norm": _normalize_text(text),
+                "citations_sig": citations_sig,
+                "evidence_path_sig": evidence_path_sig,
+                "error": err,
+            }
+            runs.append(run_row)
+
+        summary = _summarize_runs(runs)
+        
+        # Calculate accuracy metrics
+        accuracy_metrics = {}
+        if q.qid in ground_truth and runs:
+            gt = ground_truth[q.qid]
+            # Use first run for accuracy check (all repeats should be similar)
+            actual_answer = runs[0].get("text", "")
+            accuracy_metrics = calculate_accuracy_metrics(
+                expected=gt.expected,
+                actual=actual_answer,
+                is_negative=gt.is_negative
+            )
+        
+        results[scenario_name][q.qid] = {
+            "qid": q.qid,
+            "query": q.query,
+            "runs": runs,
+            "summary": summary,
+            "accuracy": accuracy_metrics,
+        }
+
+        # Console output with accuracy
+        acc_str = ""
+        if accuracy_metrics:
+            if accuracy_metrics.get("is_negative", False):
+                passed = accuracy_metrics.get("negative_test_pass", False)
+                acc_str = f" | NEGATIVE_TEST {'PASS' if passed else 'FAIL'}"
+            else:
+                containment = accuracy_metrics.get("containment", 0.0)
+                f1 = accuracy_metrics.get("f1_score", 0.0)
+                acc_str = f" | acc: contain={containment:.2f} f1={f1:.2f}"
+        
+        print(
+            f"[{scenario_name}] [{qi}/{len(questions)}] {q.qid}: "
+            f"exact={summary['text_norm_exact_rate']:.2f} "
+            f"min_sim={summary['text_norm_min_similarity']:.2f} "
+            f"cite_jacc_min={summary['citations_min_jaccard_vs_first']:.2f} "
+            f"path_jacc_min={summary['evidence_path_min_jaccard_vs_first']:.2f} "
+            f"p50={summary['latency_ms']['p50']}ms{acc_str}",
+            flush=True,
+        )
 
     out_payload = {
         "meta": {
@@ -406,13 +434,24 @@ def main() -> int:
         lines.append(f"## {sc_name}\n")
         for qid, obj in qmap.items():
             summ = obj.get("summary", {})
+            acc = obj.get("accuracy", {})
             lat = summ.get("latency_ms", {})
+            
+            # Build accuracy string
+            acc_info = ""
+            if acc:
+                if acc.get("is_negative", False):
+                    passed = acc.get("negative_test_pass", False)
+                    acc_info = f", NEG_TEST={'PASS' if passed else 'FAIL'}"
+                else:
+                    acc_info = f", contain={acc.get('containment', 0):.2f}, f1={acc.get('f1_score', 0):.2f}"
+            
             lines.append(
                 f"- {qid}: exact={summ.get('text_norm_exact_rate', 0):.2f}, "
                 f"min_sim={summ.get('text_norm_min_similarity', 0):.2f}, "
                 f"cite_min_jacc={summ.get('citations_min_jaccard_vs_first', 0):.2f}, "
                 f"path_min_jacc={summ.get('evidence_path_min_jaccard_vs_first', 0):.2f}, "
-                f"p50={lat.get('p50', 0)}ms"
+                f"p50={lat.get('p50', 0)}ms{acc_info}\n"
             )
         lines.append("\n")
 

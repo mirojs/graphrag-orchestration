@@ -75,6 +75,11 @@ from app.v3.services.neo4j_store import (
     TextChunk,
     Document,
 )
+from app.v3.services.entity_deduplication import (
+    EntityDeduplicationService,
+    apply_merge_map,
+    EntityMergeResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -603,6 +608,67 @@ class IndexingPipelineV3:
             entities, relationships = await self._extract_entities_and_relationships(
                 group_id, all_chunks
             )
+            
+            # Step 2b: Entity deduplication (NLP-based, deterministic)
+            # Uses embedding cosine similarity + acronym/abbreviation rules
+            logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Step 2b: Starting entity deduplication")
+            dedup_service = EntityDeduplicationService(
+                similarity_threshold=0.95,  # Conservative threshold
+                min_entities_for_dedup=10,
+            )
+            # Convert Entity objects to dicts for dedup service
+            entity_dicts = [
+                {"name": e.name, "embedding": e.embedding, "type": e.type, "description": e.description, "properties": e.properties}
+                for e in entities
+            ]
+            rel_dicts = [
+                {"source": r.source, "target": r.target, "type": r.type, "description": r.description, "properties": r.properties}
+                for r in relationships
+            ]
+            
+            dedup_result = dedup_service.deduplicate_entities(entity_dicts, group_id=group_id)
+            
+            if dedup_result.merge_map:
+                # Apply merge map to entities and relationships
+                merged_entity_dicts, merged_rel_dicts = apply_merge_map(entity_dicts, rel_dicts, dedup_result)
+                
+                # Convert back to Entity/Relationship objects
+                entities = [
+                    Entity(
+                        id=str(uuid.uuid4()),
+                        name=d["name"],
+                        type=d.get("type", "UNKNOWN"),
+                        description=d.get("description", ""),
+                        embedding=d.get("embedding", []),
+                        properties=d.get("properties", {}),
+                    )
+                    for d in merged_entity_dicts
+                ]
+                relationships = [
+                    Relationship(
+                        source=d["source"],
+                        target=d["target"],
+                        type=d.get("type", "RELATED_TO"),
+                        description=d.get("description", ""),
+                        properties=d.get("properties", {}),
+                    )
+                    for d in merged_rel_dicts
+                ]
+                
+                logger.info(
+                    f"⏱️ [{time.time()-start_time:.1f}s] Entity deduplication: {dedup_result.total_entities} → {dedup_result.unique_after_merge} "
+                    f"(merged {len(dedup_result.merge_map)} entities, {dedup_result.embedding_merges} by embedding, {dedup_result.rule_merges} by rules)"
+                )
+                stats["deduplication"] = {
+                    "entities_before": dedup_result.total_entities,
+                    "entities_after": dedup_result.unique_after_merge,
+                    "entities_merged": len(dedup_result.merge_map),
+                    "embedding_merges": dedup_result.embedding_merges,
+                    "rule_merges": dedup_result.rule_merges,
+                }
+            else:
+                logger.info(f"⏱️ [{time.time()-start_time:.1f}s] Entity deduplication: No duplicates found")
+                stats["deduplication"] = {"entities_before": len(entities), "entities_after": len(entities), "entities_merged": 0}
             
             # Diagnostic: Check if entities have embeddings before storage
             entities_with_embeddings = sum(1 for e in entities if e.embedding and e.embedding != [0.0] * self.config.embedding_dimensions)

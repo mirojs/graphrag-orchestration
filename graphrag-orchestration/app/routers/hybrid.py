@@ -58,9 +58,9 @@ class RouteEnum(str, Enum):
 class HybridQueryRequest(BaseModel):
     """Request model for hybrid pipeline queries."""
     query: str = Field(..., description="The natural language query to execute")
-    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit"] = Field(
+    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit", "nlp_connected"] = Field(
         default="detailed_report",
-        description="Type of response to generate (nlp_audit = deterministic extraction, no LLM)"
+        description="Type of response to generate (nlp_audit = deterministic extraction, no LLM; nlp_connected = deterministic + rephrasing)"
     )
     force_route: Optional[RouteEnum] = Field(
         default=None,

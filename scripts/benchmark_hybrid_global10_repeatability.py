@@ -15,9 +15,11 @@ Important nuance
   - Evidence stability (citations / evidence_path), which is often more deterministic
 
 Scenarios
-- hybrid_global_detailed_report: response_type=detailed_report
-- hybrid_global_audit_trail:     response_type=audit_trail
-- hybrid_global_summary:         response_type=summary
+- hybrid_global_detailed_report: response_type=detailed_report (LLM synthesis)
+- hybrid_global_audit_trail:     response_type=audit_trail (LLM synthesis with audit info)
+- hybrid_global_summary:         response_type=summary (LLM synthesis, concise)
+- hybrid_global_nlp_audit:       response_type=nlp_audit (NLP extraction, 100% deterministic, no LLM)
+- hybrid_global_nlp_connected:   response_type=nlp_connected (NLP extraction + temperature=0 rephrasing)
 
 Outputs
 - Writes JSON + MD into ./benchmarks/
@@ -284,6 +286,8 @@ def main() -> int:
         {"name": "hybrid_global_detailed_report", "response_type": "detailed_report"},
         {"name": "hybrid_global_audit_trail", "response_type": "audit_trail"},
         {"name": "hybrid_global_summary", "response_type": "summary"},
+        {"name": "hybrid_global_nlp_audit", "response_type": "nlp_audit"},
+        {"name": "hybrid_global_nlp_connected", "response_type": "nlp_connected"},
     ]
 
     stamp = _now_utc_stamp()

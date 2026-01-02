@@ -69,81 +69,105 @@ class Neo4jTextUnitStore:
         self._limit = int(limit_per_entity)
 
     async def get_chunks_for_entity(self, entity_name: str) -> List[Dict[str, Any]]:
-        name = (entity_name or "").strip()
-        if not name:
-            return []
-
+        """Get chunks for a single entity (backward compatibility wrapper)."""
+        results = await self.get_chunks_for_entities([entity_name])
+        return results.get(entity_name, [])
+    
+    async def get_chunks_for_entities(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        """Get chunks for multiple entities in a single batched query (performance optimization)."""
+        if not entity_names:
+            return {}
+        
+        # Filter out empty names
+        names = [n.strip() for n in entity_names if (n or "").strip()]
+        if not names:
+            return {}
+        
         # Neo4j python driver is sync; run in a thread to avoid blocking the event loop.
-        return await asyncio.to_thread(self._get_chunks_for_entity_sync, name)
+        return await asyncio.to_thread(self._get_chunks_for_entities_batch_sync, names)
 
-    def _get_chunks_for_entity_sync(self, entity_name: str) -> List[Dict[str, Any]]:
+    def _get_chunks_for_entities_batch_sync(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch query to fetch chunks for multiple entities in a single round-trip."""
         query = """
+        UNWIND $entity_names AS entity_name
         MATCH (e:Entity {group_id: $group_id})
-        WHERE toLower(e.name) = toLower($entity_name)
+        WHERE toLower(e.name) = toLower(entity_name)
         MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
         OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-        RETURN c, d
-        ORDER BY coalesce(c.chunk_index, 0) ASC
-        LIMIT $limit
+        WITH entity_name, c, d
+        ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
+        RETURN entity_name, collect(c)[0..$limit] AS chunks, collect(d)[0..$limit] AS docs
         """
-
-        rows: List[Dict[str, Any]] = []
+        
+        results: Dict[str, List[Dict[str, Any]]] = {name: [] for name in entity_names}
+        
         with self._driver.session() as session:
             result = session.run(
                 query,
                 group_id=self._group_id,
-                entity_name=entity_name,
+                entity_names=entity_names,
                 limit=self._limit,
             )
+            
             for record in result:
-                c = record.get("c")
-                d = record.get("d")
-                if not c:
+                entity_name = record.get("entity_name")
+                chunks = record.get("chunks") or []
+                docs = record.get("docs") or []
+                
+                if not entity_name:
                     continue
-
-                raw_meta = c.get("metadata")
-                meta: Dict[str, Any] = {}
-                if raw_meta:
-                    if isinstance(raw_meta, str):
-                        try:
-                            meta = json.loads(raw_meta)
-                        except Exception:
-                            meta = {}
-                    elif isinstance(raw_meta, dict):
-                        meta = dict(raw_meta)
-
-                # Prefer Document attribution when available.
-                doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
-                doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
-                url = meta.get("url") or doc_source or ""
-
-                # Build a readable section label for citations.
-                section_path = meta.get("section_path")
-                section_label = ""
-                if isinstance(section_path, list) and section_path:
-                    section_label = " > ".join(str(x) for x in section_path if x)
-                elif isinstance(section_path, str) and section_path:
-                    section_label = section_path
-
-                source_label = doc_title or doc_source or url or "neo4j"
-                if section_label:
-                    source_label = f"{source_label} — {section_label}"
-
-                rows.append(
-                    {
-                        "id": c.get("id") or "",
-                        "source": str(source_label),
-                        "text": str(c.get("text") or ""),
-                        "entity": entity_name,
-                        "metadata": {
-                            **meta,
-                            "document_title": str(doc_title),
-                            "document_source": str(doc_source),
-                        },
-                    }
-                )
-
-        if not rows:
-            logger.debug("neo4j_text_store_no_chunks", entity=entity_name)
-
-        return rows
+                
+                rows: List[Dict[str, Any]] = []
+                for i, c in enumerate(chunks):
+                    d = docs[i] if i < len(docs) else None
+                    if not c:
+                        continue
+                    
+                    raw_meta = c.get("metadata")
+                    meta: Dict[str, Any] = {}
+                    if raw_meta:
+                        if isinstance(raw_meta, str):
+                            try:
+                                meta = json.loads(raw_meta)
+                            except Exception:
+                                meta = {}
+                        elif isinstance(raw_meta, dict):
+                            meta = dict(raw_meta)
+                    
+                    # Prefer Document attribution when available.
+                    doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
+                    doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
+                    url = meta.get("url") or doc_source or ""
+                    
+                    # Build a readable section label for citations.
+                    section_path = meta.get("section_path")
+                    section_label = ""
+                    if isinstance(section_path, list) and section_path:
+                        section_label = " > ".join(str(x) for x in section_path if x)
+                    elif isinstance(section_path, str) and section_path:
+                        section_label = section_path
+                    
+                    source_label = doc_title or doc_source or url or "neo4j"
+                    if section_label:
+                        source_label = f"{source_label} — {section_label}"
+                    
+                    rows.append(
+                        {
+                            "id": c.get("id") or "",
+                            "source": str(source_label),
+                            "text": str(c.get("text") or ""),
+                            "entity": entity_name,
+                            "metadata": {
+                                **meta,
+                                "document_title": str(doc_title),
+                                "document_source": str(doc_source),
+                            },
+                        }
+                    )
+                
+                results[entity_name] = rows
+                
+                if not rows:
+                    logger.debug("neo4j_text_store_no_chunks", entity=entity_name)
+        
+        return results

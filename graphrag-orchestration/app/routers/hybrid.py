@@ -700,8 +700,8 @@ class HybridIndexDocumentsRequest(BaseModel):
         description="Document extraction method for PDFs/images",
     )
     run_community_detection: bool = Field(
-        default=True,
-        description="Whether to run community detection (improves thematic routing)",
+        default=False,
+        description="Whether to run community detection upfront (LazyGraphRAG does this on-demand)",
     )
     run_raptor: bool = Field(
         default=False,

@@ -821,7 +821,7 @@ class DocumentIntelligenceService:
 
         # Process URLs via Document Intelligence Batch API
         if urls:
-            logger.info(f"📦 Batch processing {len(urls)} documents with 60s timeout")
+            logger.info(f"📦 Batch processing {len(urls)} documents with 600s timeout")
             
             async with self._create_client() as client:
                 # Resolve default model from strategy
@@ -850,16 +850,16 @@ class DocumentIntelligenceService:
                 # Run all in parallel with batch timeout
                 # Each document has 60s timeout internally; batch timeout should be generous
                 # for parallel processing (e.g., 5 docs @ 60s each = max 60s if truly parallel,
-                # but allow 120s for queueing/throttling)
+                # but allow much longer for queueing/throttling in production)
                 try:
                     results = await asyncio.wait_for(
                         asyncio.gather(*tasks, return_exceptions=True),
-                        timeout=120  # 120s for entire batch
+                        timeout=600  # 600s (10min) for entire batch to handle throttling
                     )
                 except asyncio.TimeoutError:
-                    logger.error("❌ Batch timeout after 120s")
+                    logger.error("❌ Batch timeout after 600s")
                     if fail_fast:
-                        raise RuntimeError("Batch processing timeout")
+                        raise RuntimeError("Batch processing timeout after 10 minutes")
                     return documents
                 
                 # Process results

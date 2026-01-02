@@ -349,7 +349,30 @@ At a high level:
 2. **Chunk** into `TextChunk` nodes with stable identifiers + full DI metadata (section_path, page_number, etc.)
 3. **Embed** chunks (and/or entities) for vector retrieval signals (Route 1) and entity matching
 4. **Build graph primitives** (entities/relationships/triples) in Neo4j for LazyGraphRAG + HippoRAG traversal
-5. **(Optional) Community detection** for Route 3 community matching
+5. **Entity Deduplication** (NLP-based, deterministic) — merge duplicate entities before storage
+6. **(Optional) Community detection** for Route 3 community matching
+
+#### Entity Deduplication (Step 2b in Indexing Pipeline)
+
+After entity extraction and before storage, the pipeline applies **NLP-based entity deduplication** to improve graph quality:
+
+| Technique | Description | Example |
+|-----------|-------------|---------|
+| **Cosine Similarity** | Cluster entities with embedding similarity ≥ 0.95 | "Microsoft Corporation" ↔ "Microsoft Corp" |
+| **Acronym Detection** | Match acronyms to expanded names | "IBM" ↔ "International Business Machines" |
+| **Abbreviation Detection** | Match common abbreviations | "Dr. Smith" ↔ "Doctor Smith" |
+
+**Why NLP over LLM?**
+- **Deterministic**: Same inputs → same merge decisions (audit-grade repeatability)
+- **No LLM variability**: Uses pre-computed embeddings from `text-embedding-3-large`
+- **Transparent**: Every merge includes a recorded reason for auditability
+- **Efficient**: O(n²) pairwise comparisons with numpy acceleration
+
+**Implementation**: `app/v3/services/entity_deduplication.py`
+- `EntityDeduplicationService` with configurable `similarity_threshold` (default 0.95)
+- `apply_merge_map()` updates entities and relationships with canonical names
+- Union-Find clustering for efficient grouping
+- Stats reported in indexing response: `entities_merged`, `embedding_merges`, `rule_merges`
 
 **Explicitly not included:** RAPTOR hierarchical summarization/tree-building during indexing.
 *   `run_raptor` defaults to `false` (no new RAPTOR nodes are created)

@@ -14,10 +14,10 @@ Important nuance
   - Response text repeatability (LLM variance)
   - Evidence stability (citations / evidence_path), which is often more deterministic
 
-Scenarios
-- hybrid_global_detailed_report: response_type=detailed_report (LLM synthesis)
-- hybrid_global_audit_trail:     response_type=audit_trail (LLM synthesis with audit info)
-- hybrid_global_summary:         response_type=summary (LLM synthesis, concise)
+Scenario
+- Uses response_type=summary (LLM synthesis, concise mode)
+- Tests Q-G1-Q-G10 (positive: global/cross-section questions)
+- Tests Q-N1-Q-N10 (negative: should return "not found")
 - hybrid_global_nlp_audit:       response_type=nlp_audit (NLP extraction, 100% deterministic, no LLM)
 - hybrid_global_nlp_connected:   response_type=nlp_connected (NLP extraction + temperature=0 rephrasing)
 
@@ -278,36 +278,36 @@ def main() -> int:
     group_id = str(args.group_id)
     qbank = Path(str(args.question_bank)).expanduser().resolve()
 
-    questions = _read_question_bank(qbank, prefix="Q-G")
+    questions = _read_question_bank(qbank, positive_prefix="Q-G", negative_prefix="Q-N")
     if args.max_questions and args.max_questions > 0:
         questions = questions[: int(args.max_questions)]
+    
+    positive_count = sum(1 for q in questions if q.qid.startswith("Q-G"))
+    negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))
+    print(f"Loaded {len(questions)} questions: {positive_count} positive (Q-G), {negative_count} negative (Q-N)")
 
-    scenarios = [
-        {"name": "hybrid_global_detailed_report", "response_type": "detailed_report"},
-        {"name": "hybrid_global_audit_trail", "response_type": "audit_trail"},
-        {"name": "hybrid_global_summary", "response_type": "summary"},
-        {"name": "hybrid_global_nlp_audit", "response_type": "nlp_audit"},
-        {"name": "hybrid_global_nlp_connected", "response_type": "nlp_connected"},
-    ]
+    # Single scenario: summary mode
+    scenario_name = "hybrid_global_summary"
+    response_type = "summary"
 
     stamp = _now_utc_stamp()
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_json = out_dir / f"repeatability_hybrid_global10_{stamp}.json"
-    out_md = out_dir / f"repeatability_hybrid_global10_{stamp}.md"
+    out_json = out_dir / f"route3_global_search_{stamp}.json"
+    out_md = out_dir / f"route3_global_search_{stamp}.md"
 
     print(
         "\n".join(
             [
-                "=== Hybrid (LazyGraphRAG) Global10 Repeatability ===",
+                "=== Route 3: Global Search (LazyGraphRAG) ===",
                 f"url={base_url}",
                 f"group_id={group_id}",
                 f"repeats={int(args.repeats)} timeout={float(args.timeout)}s",
                 f"questions={len(questions)} question_bank={qbank}",
-                "scenarios=" + ", ".join([s["name"] for s in scenarios]),
+                f"scenario={scenario_name} response_type={response_type}",
                 f"out_json={out_json}",
                 f"out_md={out_md}",
-                "===================================================",
+                "==============================================",
             ]
         ),
         flush=True,
@@ -318,16 +318,16 @@ def main() -> int:
     results: Dict[str, Dict[str, Any]] = {}
     endpoint = base_url + "/hybrid/query"
 
-    for sc in scenarios:
-        sc_name = sc["name"]
-        response_type = sc["response_type"]
-        results[sc_name] = {}
+    results[scenario_name] = {}
 
-        for qi, q in enumerate(questions, 1):
-            runs: List[Dict[str, Any]] = []
-            for ri in range(int(args.repeats)):
-                payload = {
-                    "query": q.query,
+    for qi, q in enumerate(questions, 1):
+        runs: List[Dict[str, Any]] = []
+        for ri in range(int(args.repeats)):
+            payload = {
+                "query": q.query,
+                "force_route": "global_search",
+                "response_type": response_type,
+            }
                     "response_type": response_type,
                     "force_route": "global_search",
                 }

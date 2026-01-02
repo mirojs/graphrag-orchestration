@@ -1,0 +1,59 @@
+# Deployment & Test Summary - January 2, 2026
+
+## Changes Deployed
+1. ✅ Batched Neo4j queries (text_store.py) - 20 sequential → 1 batch query
+2. ✅ Added nlp_connected response_type (deterministic extraction + temperature=0 rephrasing)
+3. ✅ Created standardized Route 1/2/3/4 repeatability benchmark scripts
+4. ✅ Updated all test patterns to optimized Route 3/4 pattern
+
+## Performance Test Results
+
+### Route 3 (Global Search) Performance
+- **Before optimization**: 14-18 seconds (p50)
+- **After optimization**: ~7.2 seconds
+- **Improvement**: ~2x speedup (50% faster)
+
+### Test Query
+Query: "Summarize who pays what across the documents (fees/charges/taxes)."
+- Force Route: global_search
+- Response Type: summary
+- Latency: 7.196 seconds
+
+### Response Quality
+✅ Comprehensive answer with proper citations
+✅ Section metadata preserved in citations (e.g., "PROPERTY MANAGEMENT AGREEMENT.pdf — PROPERTY MANAGEMENT AGREEMENT:")
+✅ All citations include source + chunk_id + text_preview
+
+## Index Status
+- Group ID: test-5pdfs-1767359749607222303
+- Entities indexed: 478
+- Triples indexed: 587
+- Text units indexed: 79
+- HippoRAG: Initialized ✅
+
+## Known Limitations
+⚠️ Old indexed data (before commit b1024c2) lacks section_path metadata in Neo4j
+- Document Intelligence extracts it correctly
+- But it wasn't being persisted to Neo4j before the fix
+- For full section metadata, re-index documents with latest code
+
+## Next Steps
+1. Monitor Route 3 performance in production
+2. Consider re-indexing historical data to get section_path metadata
+3. Run full benchmark suite (all routes, all scenarios)
+4. Test nlp_connected mode for deterministic compliance use cases
+
+## Files Changed
+- graphrag-orchestration/app/hybrid/indexing/text_store.py (batched queries)
+- graphrag-orchestration/app/hybrid/pipeline/synthesis.py (nlp_connected mode)
+- graphrag-orchestration/app/routers/hybrid.py (response_type update)
+- scripts/benchmark_hybrid_route1_repeatability.py (new)
+- scripts/benchmark_hybrid_route2_repeatability.py (new)
+- scripts/benchmark_hybrid_route3_repeatability.py (updated)
+- scripts/benchmark_hybrid_route4_repeatability.py (new)
+
+## Commits
+- 0bc13a5: test: Add Route 1/2 repeatability benchmarks
+- 460d93e: perf: Batch Neo4j queries + add nlp_connected mode
+- 512109d: Add nlp_audit response_type for deterministic synthesis
+

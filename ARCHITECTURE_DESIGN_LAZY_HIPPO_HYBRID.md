@@ -313,13 +313,37 @@ Minimal configuration:
 *   `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://<your-di-resource-name>.cognitiveservices.azure.com/`
 *   Leave `AZURE_DOCUMENT_INTELLIGENCE_KEY` unset to use Managed Identity (Azure) or developer credentials (local)
 
+#### Section/Subsection Metadata Flow (Jan 2026 Update)
+
+Azure DI extracts structural metadata from documents using the `prebuilt-layout` model. This metadata is preserved end-to-end for audit-grade citations:
+
+**Extraction Phase** (`document_intelligence_service.py`):
+*   `section_path` — Human-readable hierarchy: `["3.0 Risk Management", "3.2 Technical Risks"]`
+*   `di_section_path` — Numeric IDs for stable referencing: `["/sections/5", "/sections/5/sections/2"]`
+*   `di_section_part` — How chunk relates to section: `"direct"` (is the section) or `"spans"` (inside)
+*   `page_number` — Source page for PDF navigation
+*   `table_count` — Number of tables in chunk (for tabular data awareness)
+
+**Storage Phase** (`neo4j_store.py`):
+*   All metadata is serialized as JSON on `TextChunk.metadata` in Neo4j
+*   `Document` nodes link to their chunks via `PART_OF` relationships
+
+**Citation Phase** (`text_store.py`):
+*   `Neo4jTextUnitStore` retrieves chunks with full metadata for the `EvidenceSynthesizer`
+*   Citations include section paths: `"Project_Plan.pdf — 3.0 Risk Management > 3.2 Technical Risks"`
+
+**Why This Matters for Audit:**
+*   Citations point to specific sections, not just documents
+*   Auditors can navigate directly to the relevant section in the original PDF
+*   Section hierarchy provides context for understanding where information came from
+
 ### Indexing Pipeline (RAPTOR Removed)
 
 The indexing pipeline is designed to support the **4-route hybrid runtime** (LazyGraphRAG + HippoRAG 2) without requiring RAPTOR.
 
 At a high level:
-1. **Extract** document content with Azure DI (optionally preserving page/section metadata)
-2. **Chunk** into `TextChunk`-like units with stable identifiers + section/page metadata
+1. **Extract** document content with Azure DI (preserving section/page metadata for citations)
+2. **Chunk** into `TextChunk` nodes with stable identifiers + full DI metadata (section_path, page_number, etc.)
 3. **Embed** chunks (and/or entities) for vector retrieval signals (Route 1) and entity matching
 4. **Build graph primitives** (entities/relationships/triples) in Neo4j for LazyGraphRAG + HippoRAG traversal
 5. **(Optional) Community detection** for Route 3 community matching

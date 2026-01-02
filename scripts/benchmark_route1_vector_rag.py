@@ -82,6 +82,15 @@ class BankQuestion:
     query: str
 
 
+@dataclass(frozen=True)
+class GroundTruth:
+    """Ground truth answer for validation."""
+    qid: str
+    question: str
+    expected: str
+    is_negative: bool  # True for Q-N questions
+
+
 def _now_utc_stamp() -> str:
     return _dt.datetime.now(tz=_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -182,6 +191,148 @@ def _read_question_bank(path: Path, *, positive_prefix: str = "Q-V", negative_pr
     return questions
 
 
+def _extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
+    """Extract ground truth answers from question bank."""
+    content = question_bank_path.read_text(encoding="utf-8")
+    lines = content.splitlines()
+    
+    ground_truth: Dict[str, GroundTruth] = {}
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Match question ID pattern: **Q-X#:**
+        m = re.match(r'\*\*([QN][-A-Z]+\d+):\*\*\s*(.+)', line)
+        if m:
+            qid = m.group(1).strip()
+            question = m.group(2).strip()
+            
+            # Check if this is a negative test
+            is_negative = qid.startswith("Q-N")
+            
+            # Look for Expected: in subsequent lines
+            expected_parts = []
+            j = i + 1
+            found_expected = False
+            
+            while j < len(lines):
+                next_line = lines[j].strip()
+                
+                # Stop at next question
+                if re.match(r'\*\*[QN][-A-Z]+\d+:\*\*', next_line):
+                    break
+                
+                # Look for Expected marker
+                if next_line.startswith("- **Expected:**"):
+                    found_expected = True
+                    # Extract text after Expected:
+                    exp_text = next_line.replace("- **Expected:**", "").strip()
+                    if exp_text:
+                        expected_parts.append(exp_text)
+                    j += 1
+                    
+                    # Continue through bullet points and empty lines
+                    while j < len(lines):
+                        bullet_line = lines[j].strip()
+                        # Stop at next question or next field
+                        if re.match(r'\*\*[QN][-A-Z]+\d+:\*\*', bullet_line):
+                            break
+                        if bullet_line.startswith("- **") and not bullet_line.startswith("  -"):
+                            break
+                        # Include bullet points and text
+                        if bullet_line.startswith("-") or bullet_line.startswith("•"):
+                            expected_parts.append(bullet_line.lstrip("-•").strip())
+                        elif bullet_line and not bullet_line.startswith("**"):
+                            expected_parts.append(bullet_line)
+                        j += 1
+                    break
+                j += 1
+            
+            if found_expected:
+                expected = " ".join(expected_parts)
+                ground_truth[qid] = GroundTruth(
+                    qid=qid,
+                    question=question,
+                    expected=expected,
+                    is_negative=is_negative
+                )
+        
+        i += 1
+    
+    return ground_truth
+
+
+def _calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) -> Dict[str, Any]:
+    """Calculate accuracy metrics comparing expected vs actual answer."""
+    
+    # For negative tests, check if response indicates "not found"
+    if is_negative:
+        actual_lower = actual.lower()
+        not_found_phrases = [
+            "not found", "not specified", "not mentioned", "not provided",
+            "does not specify", "doesn't specify", "no information",
+            "not available", "cannot be determined", "information is not"
+        ]
+        negative_test_pass = any(phrase in actual_lower for phrase in not_found_phrases)
+        return {
+            "is_negative": True,
+            "negative_test_pass": negative_test_pass,
+            "exact_match": False,
+            "fuzzy_score": 0.0,
+            "containment": 0.0,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1_score": 0.0,
+        }
+    
+    # For positive tests, calculate various metrics
+    expected_norm = _normalize_text(expected)
+    actual_norm = _normalize_text(actual)
+    
+    # Exact match
+    exact_match = expected_norm == actual_norm
+    
+    # Fuzzy similarity
+    fuzzy_score = _similarity(expected_norm, actual_norm)
+    
+    # Containment: how much of expected is in actual
+    expected_tokens = set(expected_norm.split())
+    actual_tokens = set(actual_norm.split())
+    
+    if expected_tokens:
+        containment = len(expected_tokens & actual_tokens) / len(expected_tokens)
+    else:
+        containment = 1.0 if not actual_tokens else 0.0
+    
+    # Precision, Recall, F1
+    if actual_tokens:
+        precision = len(expected_tokens & actual_tokens) / len(actual_tokens)
+    else:
+        precision = 0.0
+    
+    if expected_tokens:
+        recall = len(expected_tokens & actual_tokens) / len(expected_tokens)
+    else:
+        recall = 1.0 if not actual_tokens else 0.0
+    
+    if precision + recall > 0:
+        f1_score = 2 * (precision * recall) / (precision + recall)
+    else:
+        f1_score = 0.0
+    
+    return {
+        "is_negative": False,
+        "negative_test_pass": False,
+        "exact_match": exact_match,
+        "fuzzy_score": fuzzy_score,
+        "containment": containment,
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1_score,
+    }
+
+
 def _extract_citation_ids(resp: Any) -> List[str]:
     if not isinstance(resp, dict):
         return []
@@ -270,6 +421,7 @@ def benchmark_scenario(
     response_type: str,
     repeats: int,
     timeout_s: float,
+    ground_truth: Dict[str, GroundTruth],
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -325,12 +477,35 @@ def benchmark_scenario(
             )
 
         summary = _summarize_runs(runs) if runs else {}
+        
+        # Calculate accuracy metrics
+        accuracy_metrics = {}
+        if qid in ground_truth and runs:
+            gt = ground_truth[qid]
+            # Use first run for accuracy check (all repeats should be similar)
+            actual_answer = runs[0].get("text", "")
+            accuracy_metrics = _calculate_accuracy_metrics(
+                expected=gt.expected,
+                actual=actual_answer,
+                is_negative=gt.is_negative
+            )
+            
+            # Add to console output
+            if gt.is_negative:
+                passed = accuracy_metrics.get("negative_test_pass", False)
+                print(f"  Accuracy: NEGATIVE_TEST {'PASS' if passed else 'FAIL'}")
+            else:
+                containment = accuracy_metrics.get("containment", 0.0)
+                f1 = accuracy_metrics.get("f1_score", 0.0)
+                print(f"  Accuracy: containment={containment:.2f}, f1={f1:.2f}")
+        
         results.append(
             {
                 "qid": qid,
                 "query": query,
                 "runs": runs,
                 "summary": summary,
+                "accuracy": accuracy_metrics,
             }
         )
 
@@ -372,6 +547,7 @@ def _write_analysis_md(
                 qid = q["qid"]
                 query = q["query"]
                 summary = q.get("summary", {})
+                accuracy = q.get("accuracy", {})
                 runs = q.get("runs", [])
 
                 f.write(f"### {qid}: {query}\n\n")
@@ -381,6 +557,27 @@ def _write_analysis_md(
                     continue
 
                 f.write(f"**Runs:** {len(runs)}\n\n")
+                
+                # Accuracy Metrics
+                if accuracy:
+                    f.write("**Accuracy Metrics:**\n\n")
+                    f.write("| Metric | Value |\n")
+                    f.write("|--------|-------|\n")
+                    
+                    if accuracy.get("is_negative", False):
+                        passed = accuracy.get("negative_test_pass", False)
+                        f.write(f"| Negative Test | {'✅ PASS' if passed else '❌ FAIL'} |\n")
+                    else:
+                        f.write(f"| Exact Match | {'✅' if accuracy.get('exact_match', False) else '❌'} |\n")
+                        f.write(f"| Fuzzy Score | {accuracy.get('fuzzy_score', 0):.2f} |\n")
+                        f.write(f"| Containment | {accuracy.get('containment', 0):.2f} |\n")
+                        f.write(f"| Precision | {accuracy.get('precision', 0):.2f} |\n")
+                        f.write(f"| Recall | {accuracy.get('recall', 0):.2f} |\n")
+                        f.write(f"| F1 Score | {accuracy.get('f1_score', 0):.2f} |\n")
+                    f.write("\n")
+                
+                # Repeatability Metrics
+                f.write("**Repeatability Metrics:**\n\n")
                 f.write("| Metric | Value |\n")
                 f.write("|--------|-------|\n")
                 f.write(f"| Exact Match Rate | {summary.get('text_norm_exact_rate', 0):.2f} |\n")
@@ -451,6 +648,10 @@ def main():
     negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))
     print(f"  Positive tests (Q-V): {positive_count}")
     print(f"  Negative tests (Q-N): {negative_count}")
+    
+    # Load ground truth
+    ground_truth = _extract_ground_truth(qbank_path)
+    print(f"Loaded {len(ground_truth)} ground truth answers")
 
     # Single scenario: summary mode
     scenario_name = "hybrid_route1_summary"
@@ -466,6 +667,7 @@ def main():
         response_type=response_type,
         repeats=args.repeats,
         timeout_s=args.timeout,
+        ground_truth=ground_truth,
     )
 
     # Write outputs

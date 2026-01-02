@@ -7,12 +7,10 @@ This benchmark targets the *Local Search* "Route 2" implementation exposed throu
 
 Route 2 uses HippoRAG entity retrieval with LazyGraphRAG local search.
 
-Scenarios
-- hybrid_route2_detailed_report: response_type=detailed_report (LLM synthesis)
-- hybrid_route2_audit_trail:     response_type=audit_trail (LLM synthesis with audit info)
-- hybrid_route2_summary:         response_type=summary (LLM synthesis, concise)
-- hybrid_route2_nlp_audit:       response_type=nlp_audit (NLP extraction, 100% deterministic, no LLM)
-- hybrid_route2_nlp_connected:   response_type=nlp_connected (NLP extraction + temperature=0 rephrasing)
+Scenario
+- Uses response_type=summary (LLM synthesis, concise mode)
+- Tests Q-L1-Q-L10 (positive: local/entity-focused questions)
+- Tests Q-N1-Q-N10 (negative: should return "not found")
 
 Outputs
 - Writes JSON + MD into ./benchmarks/
@@ -157,19 +155,30 @@ def _http_post_json(
         return 0, {"error": str(e)}, elapsed, str(e)
 
 
-def _read_question_bank(path: Path, *, prefix: str = "Q-L") -> List[BankQuestion]:
-    """Read local questions from question bank (Q-L prefix)."""
-    pattern = re.compile(rf"\*\*({re.escape(prefix)}\d+):\*\*\s*(.+?)\s*$")
+def _read_question_bank(path: Path, *, positive_prefix: str = "Q-L", negative_prefix: str = "Q-N") -> List[BankQuestion]:
+    """Read questions from question bank (positive + negative tests)."""
     questions: List[BankQuestion] = []
+    
+    # Read positive questions
+    pattern_pos = re.compile(rf"\*\*({re.escape(positive_prefix)}\d+):\*\*\s*(.+?)\s*$")
     for line in path.read_text(encoding="utf-8").splitlines():
-        m = pattern.search(line)
-        if not m:
-            continue
-        qid, qtext = m.group(1).strip(), m.group(2).strip()
-        if qid and qtext:
-            questions.append(BankQuestion(qid=qid, query=qtext))
+        m = pattern_pos.search(line)
+        if m:
+            qid, qtext = m.group(1).strip(), m.group(2).strip()
+            if qid and qtext:
+                questions.append(BankQuestion(qid=qid, query=qtext))
+    
+    # Read negative questions
+    pattern_neg = re.compile(rf"\*\*({re.escape(negative_prefix)}\d+):\*\*\s*(.+?)\s*$")
+    for line in path.read_text(encoding="utf-8").splitlines():
+        m = pattern_neg.search(line)
+        if m:
+            qid, qtext = m.group(1).strip(), m.group(2).strip()
+            if qid and qtext:
+                questions.append(BankQuestion(qid=qid, query=qtext))
+    
     if not questions:
-        raise RuntimeError(f"No {prefix}* questions found in {path}")
+        raise RuntimeError(f"No {positive_prefix}* or {negative_prefix}* questions found in {path}")
     return questions
 
 
@@ -434,40 +443,37 @@ def main():
     if not qbank_path.exists():
         raise FileNotFoundError(f"Question bank not found: {qbank_path}")
 
-    # Read local questions (Q-L prefix)
-    questions = _read_question_bank(qbank_path, prefix="Q-L")
-    print(f"Loaded {len(questions)} local questions from {qbank_path.name}")
+    # Read questions (positive Q-L + negative Q-N)
+    questions = _read_question_bank(qbank_path, positive_prefix="Q-L", negative_prefix="Q-N")
+    print(f"Loaded {len(questions)} questions from {qbank_path.name}")
+    
+    positive_count = sum(1 for q in questions if q.qid.startswith("Q-L"))
+    negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))
+    print(f"  Positive tests (Q-L): {positive_count}")
+    print(f"  Negative tests (Q-N): {negative_count}")
 
-    # Define scenarios
-    scenarios = [
-        {"name": "hybrid_route2_detailed_report", "response_type": "detailed_report"},
-        {"name": "hybrid_route2_audit_trail", "response_type": "audit_trail"},
-        {"name": "hybrid_route2_summary", "response_type": "summary"},
-        {"name": "hybrid_route2_nlp_audit", "response_type": "nlp_audit"},
-        {"name": "hybrid_route2_nlp_connected", "response_type": "nlp_connected"},
-    ]
+    # Single scenario: summary mode
+    scenario_name = "hybrid_route2_summary"
+    response_type = "summary"
 
     timestamp = _now_utc_stamp()
-    scenario_results = []
 
-    for s in scenarios:
-        result = benchmark_scenario(
-            api_base_url=args.url,
-            group_id=args.group_id,
-            questions=questions,
-            scenario_name=s["name"],
-            response_type=s["response_type"],
-            repeats=args.repeats,
-            timeout_s=args.timeout,
-        )
-        scenario_results.append(result)
+    result = benchmark_scenario(
+        api_base_url=args.url,
+        group_id=args.group_id,
+        questions=questions,
+        scenario_name=scenario_name,
+        response_type=response_type,
+        repeats=args.repeats,
+        timeout_s=args.timeout,
+    )
 
     # Write outputs
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_json = out_dir / f"route2_repeatability_{timestamp}.json"
-    out_md = out_dir / f"route2_repeatability_{timestamp}.md"
+    out_json = out_dir / f"route2_local_search_{timestamp}.json"
+    out_md = out_dir / f"route2_local_search_{timestamp}.md"
 
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(
@@ -476,7 +482,8 @@ def main():
                 "api_base_url": args.url,
                 "group_id": args.group_id,
                 "force_route": "local_search",
-                "scenarios": scenario_results,
+                "response_type": response_type,
+                "scenario": result,
             },
             f,
             indent=2,
@@ -488,7 +495,7 @@ def main():
         timestamp=timestamp,
         api_base_url=args.url,
         group_id=args.group_id,
-        scenario_results=scenario_results,
+        scenario_results=[result],
     )
 
     print(f"\n{'=' * 70}")

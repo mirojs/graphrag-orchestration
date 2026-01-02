@@ -61,7 +61,7 @@ class EvidenceSynthesizer:
         Args:
             query: The original user query.
             evidence_nodes: List of (entity_name, score) from Stage 2.
-            response_type: "detailed_report" | "summary" | "audit_trail"
+            response_type: "detailed_report" | "summary" | "audit_trail" | "nlp_audit"
             sub_questions: Optional list of sub-questions (Route 3 DRIFT).
             intermediate_context: Optional intermediate results from sub-questions.
             
@@ -73,6 +73,10 @@ class EvidenceSynthesizer:
         """
         # Step 1: Retrieve raw text chunks for evidence nodes
         text_chunks = await self._retrieve_text_chunks(evidence_nodes)
+        
+        # nlp_audit mode: deterministic extraction only, no LLM synthesis
+        if response_type == "nlp_audit":
+            return await self._nlp_audit_extract(query, text_chunks, evidence_nodes)
         
         # Step 2: Build context with citations
         context, citation_map = self._build_cited_context(text_chunks)
@@ -98,6 +102,7 @@ class EvidenceSynthesizer:
                    query=query,
                    num_citations=len(citations),
                    response_length=len(response),
+                   response_type=response_type)
                    is_drift_mode=sub_questions is not None)
         
         return {
@@ -298,6 +303,87 @@ Generate an audit trail that:
 4. Provides a confidence assessment
 
 Audit Trail:"""
+
+    async def _nlp_audit_extract(
+        self,
+        query: str,
+        text_chunks: List[Dict[str, Any]],
+        evidence_nodes: List[Tuple[str, float]]
+    ) -> Dict[str, Any]:
+        """
+        Deterministic NLP extraction (no LLM) for 100% repeatability.
+        
+        Uses simple regex-based sentence extraction from text chunks.
+        Same algorithm as V3 ExtractionService but on LazyGraphRAG context.
+        """
+        import re
+        
+        # Combine all text chunks
+        combined_text = " ".join([
+            chunk.get("text", "")
+            for chunk in text_chunks
+            if isinstance(chunk.get("text"), str)
+        ])
+        
+        if not combined_text.strip():
+            return {
+                "response": "Not specified in the provided documents.",
+                "citations": [],
+                "evidence_path": [node[0] for node in evidence_nodes],
+                "text_chunks_used": 0,
+                "processing_deterministic": True,
+            }
+        
+        # Extract top sentences deterministically
+        raw_sentences = re.split(r'(?<=[.!?])\s+', combined_text.strip())
+        
+        sentences = []
+        for i, sent in enumerate(raw_sentences):
+            sent = sent.strip()
+            if len(sent) < 10:  # min length
+                continue
+            
+            # Deterministic scoring: position + length
+            position_score = 1.0 / (i + 1)
+            length_penalty = min(1.0, len(sent) / 100.0)
+            rank = position_score * length_penalty
+            
+            sentences.append({
+                "text": sent,
+                "rank_score": float(rank),
+                "sentence_idx": i,
+            })
+        
+        # Sort and take top 5
+        sentences.sort(key=lambda x: (-x["rank_score"], x["sentence_idx"]))
+        top_sentences = sentences[:5]
+        
+        audit_summary = " ".join([s["text"] for s in top_sentences])
+        
+        # Build citations from text chunks
+        citations = []
+        for i, chunk in enumerate(text_chunks[:10], 1):
+            citations.append({
+                "citation": f"[{i}]",
+                "source": chunk.get("source", "unknown"),
+                "text_preview": (chunk.get("text", "") or "")[:200],
+            })
+        
+        logger.info(
+            "nlp_audit_extraction_complete",
+            query=query[:50],
+            sentences_extracted=len(top_sentences),
+            processing_deterministic=True,
+        )
+        
+        return {
+            "response": audit_summary,
+            "citations": citations,
+            "evidence_path": [node[0] for node in evidence_nodes],
+            "text_chunks_used": len(text_chunks),
+            "processing_deterministic": True,
+            "extracted_sentences": top_sentences,
+        }
 
     def _extract_citations(
         self, 

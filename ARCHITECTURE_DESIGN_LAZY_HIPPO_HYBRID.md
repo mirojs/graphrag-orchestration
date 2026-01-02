@@ -126,9 +126,10 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 *   **Output:** Rich context from entity neighborhoods
 
 #### Stage 2.3: Synthesis with Citations
-*   **Engine:** LLM
+*   **Engine:** LLM (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Generate cited response from collected context
 *   **Output:** Detailed report with `[Source: doc.pdf, page 5]` citations
+*   **Deterministic Mode:** When `response_type="nlp_audit"`, uses regex-based sentence extraction (no LLM) for 100% repeatability
 
 ### Route 3: Global Search Equivalent (LazyGraphRAG + HippoRAG 2)
 
@@ -158,9 +159,10 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Output:** Complete text content for synthesis
 
 #### Stage 3.5: Synthesis with Citations
-*   **Engine:** LLM
+*   **Engine:** LLM (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Generate comprehensive response from raw chunks
 *   **Output:** Detailed report with full audit trail
+*   **Deterministic Mode:** When `response_type="nlp_audit"`, uses position-based sentence ranking (no LLM) for byte-identical repeatability across identical inputs
 
 ### Route 4: DRIFT Equivalent (Multi-Hop Iterative Reasoning)
 
@@ -194,9 +196,10 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 *   **What:** Fetch raw text for all evidence nodes
 
 #### Stage 4.5: Multi-Source Synthesis
-*   **Engine:** LLM with DRIFT-style aggregation
+*   **Engine:** LLM with DRIFT-style aggregation (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Synthesize findings from all sub-questions into coherent report
 *   **Output:** Executive summary + detailed evidence trail
+*   **Deterministic Mode:** When `response_type="nlp_audit"`, final answer uses deterministic sentence extraction (discovery pipeline still uses LLM for decomposition/disambiguation, but final composition is 100% repeatable)
 
 ---
 

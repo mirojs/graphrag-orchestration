@@ -58,9 +58,9 @@ class RouteEnum(str, Enum):
 class HybridQueryRequest(BaseModel):
     """Request model for hybrid pipeline queries."""
     query: str = Field(..., description="The natural language query to execute")
-    response_type: Literal["detailed_report", "summary", "audit_trail"] = Field(
+    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit"] = Field(
         default="detailed_report",
-        description="Type of response to generate"
+        description="Type of response to generate (nlp_audit = deterministic extraction, no LLM)"
     )
     force_route: Optional[RouteEnum] = Field(
         default=None,
@@ -190,15 +190,17 @@ async def _get_or_create_pipeline(
         from app.services import GraphService, LLMService
         from app.services.community_service import CommunityService
         from app.hybrid.indexing.hipporag_service import get_hipporag_service
-        from app.hybrid.indexing.text_store import HippoRAGTextUnitStore
+        from app.hybrid.indexing.text_store import HippoRAGTextUnitStore, Neo4jTextUnitStore
 
         llm_service = LLMService()
         llm_client = llm_service.llm
 
         graph_store = None
+        neo4j_driver = None
         try:
             graph_service = GraphService()
             graph_store = graph_service.get_store(group_id)
+            neo4j_driver = graph_service.driver
         except Exception as e:
             logger.warning("hybrid_graph_store_unavailable", group_id=group_id, error=str(e))
 
@@ -222,7 +224,13 @@ async def _get_or_create_pipeline(
             logger.warning("hybrid_hipporag_initialize_failed", group_id=group_id, error=str(e))
 
         hipporag_instance = hipporag_service.get_instance()
-        text_unit_store = HippoRAGTextUnitStore(hipporag_service)
+
+        # Prefer Neo4j-backed text chunks for citations (preserves DI section_path/page_number).
+        # Fall back to HippoRAG on-disk index text if Neo4j is unavailable.
+        if neo4j_driver is not None:
+            text_unit_store = Neo4jTextUnitStore(neo4j_driver, group_id=group_id)
+        else:
+            text_unit_store = HippoRAGTextUnitStore(hipporag_service)
 
         pipeline = HybridPipeline(
             profile=profile,

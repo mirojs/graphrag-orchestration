@@ -48,7 +48,28 @@ DEFAULT_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
     "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
 )
-DEFAULT_GROUP_ID = os.getenv("TEST_GROUP_ID", "test-3072-clean")
+
+
+def _default_group_id() -> str:
+    env = os.getenv("TEST_GROUP_ID")
+    if env:
+        return env
+
+    # Prefer the most recent E2E group id captured by test_5pdfs_simple.py.
+    try:
+        root = Path(__file__).resolve().parents[1]
+        p = root / "last_test_group_id.txt"
+        if p.exists():
+            gid = p.read_text(encoding="utf-8").strip()
+            if gid:
+                return gid
+    except Exception:
+        pass
+
+    return "test-3072-clean"
+
+
+DEFAULT_GROUP_ID = _default_group_id()
 
 DEFAULT_QUESTION_BANK = (
     Path(__file__).resolve().parents[1] / "docs" / "archive" / "status_logs" / "QUESTION_BANK_5PDFS_2025-12-24.md"

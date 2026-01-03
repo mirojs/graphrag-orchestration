@@ -1314,7 +1314,7 @@ class Neo4jStoreV3:
     def upsert_text_chunks_batch(self, group_id: str, chunks: List[TextChunk]) -> int:
         """Batch insert/update text chunks with native vector support.
         
-        Uses db.create.setVectorProperty() per Neo4j vector search best practices:
+        Uses db.create.setNodeVectorProperty() per Neo4j vector search best practices:
         https://neo4j.com/developer/genai-ecosystem/vector-search/
         """
         query = """
@@ -1329,7 +1329,7 @@ class Neo4jStoreV3:
         
         WITH t, c
         WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
-        CALL db.create.setVectorProperty(t, 'embedding', c.embedding)
+        CALL db.create.setNodeVectorProperty(t, 'embedding', c.embedding)
         YIELD node
         
         WITH node AS t, c

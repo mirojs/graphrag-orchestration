@@ -50,7 +50,7 @@ async def lifespan(app: FastAPI):
                     username=graph_service.config.get("NEO4J_USERNAME"),
                     password=graph_service.config.get("NEO4J_PASSWORD"),
                 )
-                hybrid_store.ensure_schema()
+                hybrid_store.initialize_schema()
                 logger.info("hybrid_neo4j_schema_initialized", 
                            message="Vector indexes and constraints created")
             except Exception as e:

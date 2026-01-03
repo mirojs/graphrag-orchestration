@@ -583,6 +583,14 @@ Answer:"""
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
         sanitized = self._sanitize_query_for_fulltext(query_text)
+        
+        # DEBUG: Log the vector search parameters
+        logger.info("hybrid_rrf_vector_search_debug",
+                   group_id=group_id,
+                   embedding_dims=len(embedding) if embedding else 0,
+                   embedding_first_3=embedding[:3] if embedding else None,
+                   vector_k=vector_k,
+                   query_text=query_text[:100])
 
         # Oversample vector candidates before tenant filter.
         oversample_factor = 50

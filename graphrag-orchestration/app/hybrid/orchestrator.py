@@ -229,13 +229,21 @@ class HybridPipeline:
             llm_service = LLMService()
             
             if llm_service.embed_model is None:
-                logger.warning("vector_rag_embedding_unavailable_fallback_to_route_2",
-                              reason="Embedding model not initialized")
+                logger.warning("vector_rag_embedding_unavailable",
+                              reason="Embedding model not initialized, deriving from group chunks")
                 # Local/dev fallback: derive an approximate embedding from in-group chunks.
                 query_embedding = await self._derive_query_embedding_from_group_chunks(query)
+                if query_embedding:
+                    logger.info("vector_rag_derived_embedding_success", 
+                               embedding_dims=len(query_embedding))
+                else:
+                    logger.warning("vector_rag_derived_embedding_failed",
+                                  reason="Could not derive embedding from group chunks")
             else:
                 try:
                     query_embedding = llm_service.embed_model.get_text_embedding(query)
+                    logger.info("vector_rag_embedding_success",
+                               embedding_dims=len(query_embedding) if query_embedding else 0)
                 except Exception as e:
                     logger.warning(
                         "vector_rag_embedding_failed_deriving_from_group",
@@ -243,6 +251,12 @@ class HybridPipeline:
                         reason="Embedding generation failed; deriving from group chunks",
                     )
                     query_embedding = await self._derive_query_embedding_from_group_chunks(query)
+                    if query_embedding:
+                        logger.info("vector_rag_derived_embedding_success_after_failure",
+                                   embedding_dims=len(query_embedding))
+                    else:
+                        logger.warning("vector_rag_derived_embedding_failed_after_failure",
+                                      reason="Could not derive embedding from group chunks")
             
             # Retrieval: vector (if we have a query embedding) + lexical (always), then merge.
             results = []
@@ -531,6 +545,14 @@ Answer:"""
                         "document_source": r.get("document_source", ""),
                     }
                     rows.append((chunk, float(r.get("score") or 0.0)))
+            
+            logger.info("hybrid_rrf_search_result",
+                       group_id=group_id,
+                       num_results=len(rows),
+                       candidate_k=candidate_k,
+                       vector_k=vector_k,
+                       fulltext_k=fulltext_k,
+                       sanitized_query=sanitized[:50] if sanitized else "")
             return rows
 
         loop = asyncio.get_running_loop()
@@ -544,6 +566,7 @@ Answer:"""
         averages their embeddings, and uses that centroid for vector retrieval.
         """
         if not self.neo4j_driver:
+            logger.warning("derive_embedding_no_driver")
             return None
 
         # Cheap keyword extraction (no extra dependencies)
@@ -569,8 +592,10 @@ Answer:"""
 
         keywords = [t for t in tokens if len(t) >= 4 and t not in stop][:8]
         if not keywords:
+            logger.warning("derive_embedding_no_keywords", query=query_text[:50])
             return None
 
+        logger.info("derive_embedding_extracted_keywords", keywords=keywords)
         group_id = self.group_id
 
         min_matches = 2 if len(keywords) >= 2 else 1
@@ -599,12 +624,15 @@ Answer:"""
 
         loop = asyncio.get_running_loop()
         embeddings = await loop.run_in_executor(self._executor, _run_sync)
+        logger.info("derive_embedding_query_result", num_embeddings=len(embeddings), keywords=keywords, min_matches=min_matches)
         if not embeddings:
+            logger.warning("derive_embedding_no_matching_chunks", keywords=keywords)
             return None
 
         # Average embeddings (centroid)
         dim = len(embeddings[0])
         if dim == 0:
+            logger.warning("derive_embedding_empty_dimension")
             return None
         sums = [0.0] * dim
         count = 0
@@ -615,8 +643,12 @@ Answer:"""
                 sums[i] += float(v)
             count += 1
         if count == 0:
+            logger.warning("derive_embedding_no_valid_embeddings")
             return None
-        return [v / count for v in sums]
+        
+        centroid = [v / count for v in sums]
+        logger.info("derive_embedding_success", count=count, dims=len(centroid))
+        return centroid
 
     async def _search_text_chunks_lexical(self, query_text: str, top_k: int = 10) -> list:
         """Lexical fallback retrieval within the group (no vector search).

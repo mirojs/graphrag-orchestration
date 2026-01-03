@@ -350,20 +350,33 @@ class LazyGraphRAGIndexingPipeline:
             raise RuntimeError(f"Embedding generation failed: {e}") from e
 
         success_count = 0
+        null_count = 0
+        wrong_dim_count = 0
         for chunk, emb in zip(chunks, embeddings):
             try:
                 if emb and isinstance(emb, list) and len(emb) == self.config.embedding_dimensions:
                     chunk.embedding = emb
                     success_count += 1
-                else:
+                elif emb and isinstance(emb, list):
+                    # Wrong dimensions
                     chunk.embedding = emb
-                    if emb:
-                        success_count += 1
+                    success_count += 1
+                    wrong_dim_count += 1
+                    logger.warning(f"Embedding dimension mismatch: got {len(emb)}, expected {self.config.embedding_dimensions}")
+                else:
+                    null_count += 1
+                    logger.warning(f"Null or invalid embedding received for chunk: emb type={type(emb)}, is_list={isinstance(emb, list)}")
             except Exception as e:
                 logger.warning(f"lazy_index_chunk_embedding_assign_failed", extra={"error": str(e)})
+                null_count += 1
                 continue
         
-        logger.info(f"lazy_index_embeddings_assigned", extra={"success": success_count, "total": len(chunks)})
+        logger.info(f"✅ Embeddings assigned: {success_count} success, {null_count} null, {wrong_dim_count} wrong dimensions", extra={
+            "success": success_count, 
+            "total": len(chunks),
+            "null": null_count,
+            "wrong_dim": wrong_dim_count
+        })
 
     async def _extract_entities_and_relationships(
         self,

@@ -524,35 +524,41 @@ Answer:"""
             """
 
             rows = []
-            with self.neo4j_driver.session() as session:
-                for r in session.run(
-                    q,
-                    group_id=group_id,
-                    embedding=embedding,
-                    candidate_k=candidate_k,
-                    vector_k=vector_k,
-                    query_text=sanitized,
-                    fulltext_k=fulltext_k,
-                    rrf_k=rrf_k,
-                    top_k=top_k,
-                ):
-                    chunk = {
-                        "id": r["id"],
-                        "text": r["text"],
-                        "chunk_index": r.get("chunk_index", 0),
-                        "document_id": r.get("document_id", ""),
-                        "document_title": r.get("document_title", ""),
-                        "document_source": r.get("document_source", ""),
-                    }
-                    rows.append((chunk, float(r.get("score") or 0.0)))
-            
-            logger.info("hybrid_rrf_search_result",
-                       group_id=group_id,
-                       num_results=len(rows),
-                       candidate_k=candidate_k,
-                       vector_k=vector_k,
-                       fulltext_k=fulltext_k,
-                       sanitized_query=sanitized[:50] if sanitized else "")
+            try:
+                with self.neo4j_driver.session() as session:
+                    for r in session.run(
+                        q,
+                        group_id=group_id,
+                        embedding=embedding,
+                        candidate_k=candidate_k,
+                        vector_k=vector_k,
+                        query_text=sanitized,
+                        fulltext_k=fulltext_k,
+                        rrf_k=rrf_k,
+                        top_k=top_k,
+                    ):
+                        chunk = {
+                            "id": r["id"],
+                            "text": r["text"],
+                            "chunk_index": r.get("chunk_index", 0),
+                            "document_id": r.get("document_id", ""),
+                            "document_title": r.get("document_title", ""),
+                            "document_source": r.get("document_source", ""),
+                        }
+                        rows.append((chunk, float(r.get("score") or 0.0)))
+                
+                logger.info("hybrid_rrf_search_result",
+                           group_id=group_id,
+                           num_results=len(rows),
+                           candidate_k=candidate_k,
+                           vector_k=vector_k,
+                           fulltext_k=fulltext_k,
+                           sanitized_query=sanitized[:50] if sanitized else "")
+            except Exception as e:
+                logger.error("hybrid_rrf_search_failed",
+                            group_id=group_id,
+                            error=str(e),
+                            error_type=type(e).__name__)
             return rows
 
         loop = asyncio.get_running_loop()

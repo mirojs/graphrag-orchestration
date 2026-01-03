@@ -73,6 +73,10 @@ class LazyGraphRAGIndexingPipeline:
         run_raptor: bool = False,
     ) -> Dict[str, Any]:
         start_time = time.time()
+        
+        # Ensure Neo4j schema (vector indexes, constraints) exists
+        self.neo4j_store.ensure_schema()
+        
         logger.info(
             "lazy_index_start",
             extra={
@@ -333,8 +337,13 @@ class LazyGraphRAGIndexingPipeline:
 
         texts = [c.text for c in chunks]
         try:
+            logger.info(f"Calling embedder.aget_text_embedding_batch with {len(texts)} texts...")
             embeddings = await self.embedder.aget_text_embedding_batch(texts)
-            logger.info(f"lazy_index_embeddings_generated", extra={"chunks": len(chunks), "embeddings": len(embeddings)})
+            logger.info(f"✅ Embeddings generated: {len(embeddings)} embeddings received", extra={
+                "chunks": len(chunks), 
+                "embeddings": len(embeddings),
+                "first_embedding_length": len(embeddings[0]) if embeddings and len(embeddings) > 0 else 0
+            })
         except Exception as e:
             logger.error(f"❌ EMBEDDING FAILED: {e}", exc_info=True, extra={"error": str(e), "chunks": len(chunks)})
             # Don't silently fail - this is critical for vector search

@@ -322,8 +322,14 @@ class LazyGraphRAGIndexingPipeline:
 
     async def _embed_chunks_best_effort(self, chunks: List[TextChunk]) -> None:
         if self.embedder is None:
-            logger.warning("lazy_index_no_embedder", extra={"chunks": len(chunks)})
-            return
+            logger.error(
+                f"❌ CRITICAL: Embedder is None - vector search will not work!",
+                extra={"chunks": len(chunks), "embedder_configured": self.embedder is not None}
+            )
+            raise RuntimeError(
+                f"Embedder not configured - cannot generate embeddings for {len(chunks)} chunks. "
+                "Check LLMService initialization and AZURE_OPENAI_EMBEDDING_DEPLOYMENT settings."
+            )
 
         texts = [c.text for c in chunks]
         try:

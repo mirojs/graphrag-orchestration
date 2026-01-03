@@ -616,44 +616,109 @@ class IndexingPipelineV3:
                 similarity_threshold=0.95,  # Conservative threshold
                 min_entities_for_dedup=10,
             )
-            # Convert Entity objects to dicts for dedup service
+            # Convert entities to dicts for the dedup service. Note: the service merges by name,
+            # but our graph store uses stable entity IDs. We therefore compute a post-merge
+            # ID remap and rewrite relationships to keep referential integrity.
             entity_dicts = [
-                {"name": e.name, "embedding": e.embedding, "type": e.type, "description": e.description, "properties": e.properties}
+                {
+                    "name": e.name,
+                    "embedding": e.embedding,
+                    "type": e.type,
+                    "description": e.description,
+                    "properties": (e.metadata or {}),
+                }
                 for e in entities
             ]
-            rel_dicts = [
-                {"source": r.source, "target": r.target, "type": r.type, "description": r.description, "properties": r.properties}
-                for r in relationships
-            ]
-            
+
             dedup_result = dedup_service.deduplicate_entities(entity_dicts, group_id=group_id)
-            
+
             if dedup_result.merge_map:
-                # Apply merge map to entities and relationships
-                merged_entity_dicts, merged_rel_dicts = apply_merge_map(entity_dicts, rel_dicts, dedup_result)
-                
-                # Convert back to Entity/Relationship objects
-                entities = [
-                    Entity(
-                        id=str(uuid.uuid4()),
-                        name=d["name"],
-                        type=d.get("type", "UNKNOWN"),
-                        description=d.get("description", ""),
-                        embedding=d.get("embedding", []),
-                        properties=d.get("properties", {}),
+                merge_map = dedup_result.merge_map  # variant_name -> canonical_name
+
+                def _description_score(text: str) -> tuple[int, int]:
+                    t = (text or "").strip()
+                    if not t:
+                        return (0, 0)
+                    words = re.findall(r"[a-z0-9]+", t.lower())
+                    return (len(set(words)), len(t))
+
+                def _choose_better_description(existing: str, candidate: str) -> str:
+                    cand = (candidate or "").strip()
+                    if not cand:
+                        return (existing or "").strip()
+                    cur = (existing or "").strip()
+                    if not cur:
+                        return cand
+                    cur_dicty = cur.startswith("{") and cur.endswith("}")
+                    cand_dicty = cand.startswith("{") and cand.endswith("}")
+                    if cur_dicty and not cand_dicty:
+                        return cand
+                    if cand_dicty and not cur_dicty:
+                        return cur
+                    return cand if _description_score(cand) > _description_score(cur) else cur
+
+                # Group entities by canonical name.
+                canonical_to_entities: Dict[str, List[Entity]] = {}
+                for e in entities:
+                    canonical_name = merge_map.get(e.name, e.name)
+                    canonical_to_entities.setdefault(canonical_name, []).append(e)
+
+                # Choose a canonical entity per group (deterministic), then merge fields.
+                id_remap: Dict[str, str] = {}
+                merged_entities: List[Entity] = []
+                for canonical_name, members in sorted(canonical_to_entities.items(), key=lambda kv: kv[0]):
+                    members_sorted = sorted(members, key=lambda ent: (ent.name or "", ent.id or ""))
+                    canonical_entity = next((m for m in members_sorted if m.name == canonical_name), members_sorted[0])
+
+                    merged_text_unit_ids: Set[str] = set(getattr(canonical_entity, "text_unit_ids", []) or [])
+                    merged_metadata: Dict[str, Any] = dict(getattr(canonical_entity, "metadata", {}) or {})
+                    merged_description = getattr(canonical_entity, "description", "") or ""
+
+                    for m in members_sorted:
+                        id_remap[m.id] = canonical_entity.id
+                        merged_text_unit_ids.update(getattr(m, "text_unit_ids", []) or [])
+                        try:
+                            merged_metadata.update(getattr(m, "metadata", {}) or {})
+                        except Exception:
+                            pass
+                        merged_description = _choose_better_description(merged_description, getattr(m, "description", ""))
+
+                    merged_entities.append(
+                        Entity(
+                            id=canonical_entity.id,
+                            name=canonical_name,
+                            type=getattr(canonical_entity, "type", "UNKNOWN") or "UNKNOWN",
+                            description=merged_description,
+                            embedding=getattr(canonical_entity, "embedding", None),
+                            metadata=merged_metadata,
+                            text_unit_ids=sorted(merged_text_unit_ids),
+                        )
                     )
-                    for d in merged_entity_dicts
-                ]
-                relationships = [
-                    Relationship(
-                        source=d["source"],
-                        target=d["target"],
-                        type=d.get("type", "RELATED_TO"),
-                        description=d.get("description", ""),
-                        properties=d.get("properties", {}),
+
+                # Remap relationships to canonical entity IDs and de-duplicate.
+                merged_relationships: List[Relationship] = []
+                seen_rels: Set[tuple[str, str, str, str]] = set()
+                for r in relationships:
+                    src = id_remap.get(r.source_id, r.source_id)
+                    tgt = id_remap.get(r.target_id, r.target_id)
+                    rel_type = getattr(r, "type", "RELATED_TO") or "RELATED_TO"
+                    rel_desc = getattr(r, "description", "") or ""
+                    key = (src, tgt, rel_type, rel_desc)
+                    if key in seen_rels:
+                        continue
+                    seen_rels.add(key)
+                    merged_relationships.append(
+                        Relationship(
+                            source_id=src,
+                            target_id=tgt,
+                            type=rel_type,
+                            description=rel_desc,
+                            weight=getattr(r, "weight", 1.0) or 1.0,
+                        )
                     )
-                    for d in merged_rel_dicts
-                ]
+
+                entities = merged_entities
+                relationships = merged_relationships
                 
                 logger.info(
                     f"⏱️ [{time.time()-start_time:.1f}s] Entity deduplication: {dedup_result.total_entities} → {dedup_result.unique_after_merge} "

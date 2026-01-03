@@ -1,0 +1,806 @@
+{
+  "group_id": "test-5pdfs-1767377479",
+  "positive": [
+    {
+      "question": "What is the invoice number from Contoso Lifts?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_7",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9270411133766174,
+          "text_preview": "Arbitrations shall be conducted in Pocatello, Idaho. The provisions of this Arbitration Program shall\nsurvive any termination, amendment, or expiration hereof or of the Documents unless the Parties ot..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_25",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9270411133766174,
+          "text_preview": "Arbitrations shall be conducted in Pocatello, Idaho. The provisions of this Arbitration Program shall\nsurvive any termination, amendment, or expiration hereof or of the Documents unless the Parties ot..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_16",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9270411133766174,
+          "text_preview": "Arbitrations shall be conducted in Pocatello, Idaho. The provisions of this Arbitration Program shall\nsurvive any termination, amendment, or expiration hereof or of the Documents unless the Parties ot..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_0",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.9027016162872314,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_13",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.9027016162872314,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What is the total amount on the invoice?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_1",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.8941551446914673,
+          "text_preview": "(d) Provide Owner with a monthly statement of income and expenses for the property. To\nthe extent there are amounts available for distribution to the owner; agent shall distribute the\namount to the ow..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_13",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8905496597290039,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_0",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8905496597290039,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_4",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.886844277381897,
+          "text_preview": "## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards a..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_6",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.886844277381897,
+          "text_preview": "## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards a..."
+        }
+      ],
+      "response": "$29,900.00",
+      "response_preview": "$29,900.00",
+      "rejected": false
+    },
+    {
+      "question": "When does the property management agreement begin?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9358326196670532,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_21",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9251047372817993,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_12",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9251047372817993,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_4",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9211711883544922,
+          "text_preview": "This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warran..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_0",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9160943031311035,
+          "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What is the warranty period?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9592369794845581,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_11",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.945339560508728,
+          "text_preview": "N. Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty.\n\n5\\.\nNo Other Warranties. This expressed limite..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_20",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.945339560508728,
+          "text_preview": "N. Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty.\n\n5\\.\nNo Other Warranties. This expressed limite..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_0",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9436559677124023,
+          "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_12",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9382179975509644,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        }
+      ],
+      "response": "One (1) year or sixty (60) days, as applicable.",
+      "response_preview": "One (1) year or sixty (60) days, as applicable.",
+      "rejected": false
+    },
+    {
+      "question": "Who is the vendor in the holding tank contract?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.888167679309845,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_4",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.8805153965950012,
+          "text_preview": "This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warran..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_3",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8801924586296082,
+          "text_preview": "## 3. Changes\n\nAny changes must be agreed to in writing and will affect the next payment milestone.\n\n\n### 4. Customer Default\n\nFailure to pay may result in legal action. Legal fees are recoverable by ..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_27",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8801924586296082,
+          "text_preview": "## 3. Changes\n\nAny changes must be agreed to in writing and will affect the next payment milestone.\n\n\n### 4. Customer Default\n\nFailure to pay may result in legal action. Legal fees are recoverable by ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_16",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8801924586296082,
+          "text_preview": "## 3. Changes\n\nAny changes must be agreed to in writing and will affect the next payment milestone.\n\n\n### 4. Customer Default\n\nFailure to pay may result in legal action. Legal fees are recoverable by ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What is the purchase price?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9197719097137451,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_12",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9156970381736755,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_21",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9156970381736755,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_4",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9148838520050049,
+          "text_preview": "This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warran..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_0",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9000760316848755,
+          "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What services are covered under the holding tank contract?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9290696382522583,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_12",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9139037132263184,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_21",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9139037132263184,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_4",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9134119749069214,
+          "text_preview": "This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warran..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_0",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9123181104660034,
+          "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What is the payment term?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9302200078964233,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_12",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9163868427276611,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_21",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9163868427276611,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_0",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.916100800037384,
+          "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_4",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9129118323326111,
+          "text_preview": "This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warran..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "Who issued the invoice?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "a9682b27-27a1-4fa4-bb3f-7fd4449c7065_chunk_1",
+          "document_id": "a9682b27-27a1-4fa4-bb3f-7fd4449c7065",
+          "document_title": "contoso_lifts_invoice.pdf",
+          "score": 0.9083162546157837,
+          "text_preview": "NUMBER\nREQUISITIONER\nSHIPPED VIA\nDUE DATE\nTERMS\nJim Contoso\n30060204\n12/17/2015\nDue on contract\nsigning\nQUANTITY\nDESCRIPTION\nUNIT PRICE\nTOTAL\n1\nVertical Platform Lift (Savaria V1504)\n11200.00\n11200.00..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "a9682b27-27a1-4fa4-bb3f-7fd4449c7065_chunk_0",
+          "document_id": "a9682b27-27a1-4fa4-bb3f-7fd4449c7065",
+          "document_title": "contoso_lifts_invoice.pdf",
+          "score": 0.9037275314331055,
+          "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33304-0708\nINVOICE # 1256003\nPhone: (561) 353-5111 Fax: (561) 211-7333\nCUSTOMER ID #: 4905201\nD..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_0",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8883407711982727,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_13",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8883407711982727,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5_chunk_0",
+          "document_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5",
+          "document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT.pdf",
+          "score": 0.8499123454093933,
+          "text_preview": "# HOLDING TANK SERVICING CONTRACT\n\nContract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper.\n\n\n<figure>\n\nHolding Tank Owner(s) Name(s):\nContoso Ltd.\n\nPumper's Nam..."
+        }
+      ],
+      "response": "Contoso Lifts LLC",
+      "response_preview": "Contoso Lifts LLC",
+      "rejected": false
+    },
+    {
+      "question": "What items are excluded from warranty?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_3",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9594091176986694,
+          "text_preview": "6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_20",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9459142684936523,
+          "text_preview": "N. Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty.\n\n5\\.\nNo Other Warranties. This expressed limite..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_11",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9459142684936523,
+          "text_preview": "N. Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty.\n\n5\\.\nNo Other Warranties. This expressed limite..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_0",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9434481859207153,
+          "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_12",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9387965798377991,
+          "text_preview": "Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all..."
+        }
+      ],
+      "response": "Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewith that is incorporated into this warranty.",
+      "response_preview": "Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewith that is incorporated into this warranty.",
+      "rejected": false
+    }
+  ],
+  "negative": [
+    {
+      "question": "What is the GDP of France in 2024?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5_chunk_0",
+          "document_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5",
+          "document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT.pdf",
+          "score": 1.0,
+          "text_preview": "# HOLDING TANK SERVICING CONTRACT\n\nContract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper.\n\n\n<figure>\n\nHolding Tank Owner(s) Name(s):\nContoso Ltd.\n\nPumper's Nam..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5_chunk_1",
+          "document_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5",
+          "document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT.pdf",
+          "score": 0.8749444484710693,
+          "text_preview": "1\\. The owner agrees to file a copy of this contract with the County of Washburn, as required under WI\nCode SPS 383.21(2)5.\n\n2\\.\nThe owner agrees to have the holding tank(s) serviced by the pumper and..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5_chunk_2",
+          "document_id": "af078dda-6d2c-4b23-a5e6-9e1966b409f5",
+          "document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT.pdf",
+          "score": 0.8011065721511841,
+          "text_preview": "<table>\n<tr>\n<th>Owner(s) Names(s) (Print)</th>\n<th>Owner's Signature(s)</th>\n</tr>\n<tr>\n<td>Contoso Ltd.</td>\n<td>Contoso</td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n</tr>\n<tr>\n<td>Pumper's Name (Print) Fabr..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_13",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.7777107954025269,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_0",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.7777107954025269,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "Who won the Nobel Prize in Physics?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 0,
+      "citations": [],
+      "response": "No relevant text found for this query.",
+      "response_preview": "No relevant text found for this query.",
+      "rejected": true
+    },
+    {
+      "question": "What is the capital of Australia?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 0,
+      "citations": [],
+      "response": "No relevant text found for this query.",
+      "response_preview": "No relevant text found for this query.",
+      "rejected": true
+    },
+    {
+      "question": "How do you make chocolate chip cookies?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_0",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.9079309701919556,
+          "text_preview": "# PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietors..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "a9682b27-27a1-4fa4-bb3f-7fd4449c7065_chunk_1",
+          "document_id": "a9682b27-27a1-4fa4-bb3f-7fd4449c7065",
+          "document_title": "contoso_lifts_invoice.pdf",
+          "score": 0.9079309105873108,
+          "text_preview": "NUMBER\nREQUISITIONER\nSHIPPED VIA\nDUE DATE\nTERMS\nJim Contoso\n30060204\n12/17/2015\nDue on contract\nsigning\nQUANTITY\nDESCRIPTION\nUNIT PRICE\nTOTAL\n1\nVertical Platform Lift (Savaria V1504)\n11200.00\n11200.00..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_1",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.8644291162490845,
+          "text_preview": "(d) Provide Owner with a monthly statement of income and expenses for the property. To\nthe extent there are amounts available for distribution to the owner; agent shall distribute the\namount to the ow..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_0",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8554267883300781,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_13",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8554267883300781,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What is the speed of light?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_19",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9889037609100342,
+          "text_preview": "(Manufactures warranties will be assigned to Owner under\nparagraph 2 of this Limited Warranty).\n\nD. Damage resulting from ordinary wear and tear, abuse, neglect, or lack of due care or proper maintena..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_10",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9889037609100342,
+          "text_preview": "(Manufactures warranties will be assigned to Owner under\nparagraph 2 of this Limited Warranty).\n\nD. Damage resulting from ordinary wear and tear, abuse, neglect, or lack of due care or proper maintena..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_2",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9725737571716309,
+          "text_preview": "F. Defects in materials or items installed by the Buyer/Owner or anyone other than the Builder or subcontractors selected by Builder.\n\nG. Work by the Buyer/Owner or anyone other than the Builder or by..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_1",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9622410535812378,
+          "text_preview": "ANY CLAIMS WHICH HAVE NOT BEEN MADE IN WRITING AS PROVIDED HEREIN,\nWITHIN ONE (1) YEAR OR SIXTY (60) AS APPLICABLE, REGARDLESS OF DISCOVERABILITY, ARE NOT COVERED.\n\n3\\.\nManufacturers' Warranties. The ..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece_chunk_9",
+          "document_id": "6fdc31c9-da78-42d6-8db4-89a9ce927ece",
+          "document_title": "BUILDERS%20LIMITED%20WARRANTY.pdf",
+          "score": 0.9278882741928101,
+          "text_preview": "## 2. Term.\n\nA. The terms of the various coverages of this Builder's Limited Warranty begin on the date of final settlement or the date\nwhen the Buyer/Owner first occupies the home, whichever comes fi..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "Who is the current US president?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_4",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.9946056008338928,
+          "text_preview": "## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards a..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_6",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.9946056008338928,
+          "text_preview": "## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards a..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_2",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.9780573844909668,
+          "text_preview": "(c) A fee/commission of ten percent (10%) of the gross revenues for management services\nfor long term leases (leases of more than 180 days).\n\n(d) A pro-ration charge for advertising for short-term (va..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_1",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.9598286747932434,
+          "text_preview": "(d) Provide Owner with a monthly statement of income and expenses for the property. To\nthe extent there are amounts available for distribution to the owner; agent shall distribute the\namount to the ow..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0_chunk_0",
+          "document_id": "59786a8b-7fb4-4d91-a69e-5f4c477796f0",
+          "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+          "score": 0.9190047979354858,
+          "text_preview": "# PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietors..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "What is the plot of Harry Potter?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 0,
+      "citations": [],
+      "response": "No relevant text found for this query.",
+      "response_preview": "No relevant text found for this query.",
+      "rejected": true
+    },
+    {
+      "question": "How tall is Mount Everest?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 10,
+      "citations": [
+        {
+          "index": 1,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_13",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.9143311381340027,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 2,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_0",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.9143311381340027,
+          "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+        },
+        {
+          "index": 3,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_14",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8804993629455566,
+          "text_preview": "## 1. Scope of Work\n\nContractor agrees to furnish and install the following:\n\n\u00b7 1 Vertical Platform Lift (AscendPro VPX200)\n\n\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" w..."
+        },
+        {
+          "index": 4,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_1",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8804993629455566,
+          "text_preview": "## 1. Scope of Work\n\nContractor agrees to furnish and install the following:\n\n\u00b7 1 Vertical Platform Lift (AscendPro VPX200)\n\n\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" w..."
+        },
+        {
+          "index": 5,
+          "chunk_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf_chunk_25",
+          "document_id": "60d58f6e-9161-4f3f-ba91-0c9367478baf",
+          "document_title": "purchase_contract.pdf",
+          "score": 0.8804993629455566,
+          "text_preview": "## 1. Scope of Work\n\nContractor agrees to furnish and install the following:\n\n\u00b7 1 Vertical Platform Lift (AscendPro VPX200)\n\n\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" w..."
+        }
+      ],
+      "response": "Not specified in the provided documents.",
+      "response_preview": "Not specified in the provided documents.",
+      "rejected": true
+    },
+    {
+      "question": "When was Python programming language created?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 0,
+      "citations": [],
+      "response": "No relevant text found for this query.",
+      "response_preview": "No relevant text found for this query.",
+      "rejected": true
+    },
+    {
+      "question": "What happened in the French Revolution?",
+      "route_used": "route_1_vector_rag",
+      "num_chunks": 0,
+      "citations": [],
+      "response": "No relevant text found for this query.",
+      "response_preview": "No relevant text found for this query.",
+      "rejected": true
+    }
+  ],
+  "summary": {
+    "positive_answered": "4/10",
+    "negative_rejected": "10/10"
+  }
+}

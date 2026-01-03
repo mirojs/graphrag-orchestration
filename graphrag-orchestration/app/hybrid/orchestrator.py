@@ -42,6 +42,8 @@ Router (all routes):
 
 from typing import Dict, Any, Optional, List
 import structlog
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 from .pipeline.intent import IntentDisambiguator
 from .pipeline.tracing import DeterministicTracer
@@ -82,7 +84,6 @@ class HybridPipeline:
         graph_store=None,
         neo4j_driver=None,
         text_unit_store=None,
-        vector_rag_client=None,
         graph_communities: Optional[list] = None,
         communities_path: Optional[str] = None,
         relevance_budget: float = 0.8,
@@ -99,7 +100,6 @@ class HybridPipeline:
             graph_store: Graph database connection (Neo4j).
             neo4j_driver: Neo4j async driver for direct queries.
             text_unit_store: Store for raw text chunks.
-            vector_rag_client: Client for Vector RAG (Route 1).
             graph_communities: Community summaries for disambiguation.
             communities_path: Path to community data file.
             relevance_budget: 0.0-1.0, controls thoroughness vs speed.
@@ -110,6 +110,14 @@ class HybridPipeline:
         self.relevance_budget = relevance_budget
         self.graph_communities = graph_communities
         self.group_id = group_id
+        self.neo4j_driver = neo4j_driver
+
+        # Cached one-time checks for Neo4j indexes used by Route 1
+        self._textchunk_fulltext_index_checked = False
+        
+        # Thread pool for running sync Neo4j calls without blocking event loop
+        # This is a production best practice when mixing sync I/O with async code
+        self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="neo4j-sync")
         
         # Initialize components
         self.router = HybridRouter(
@@ -149,13 +157,11 @@ class HybridPipeline:
             relevance_budget=relevance_budget
         )
         
-        self.vector_rag = vector_rag_client
-        
         logger.info("hybrid_pipeline_initialized",
                    profile=profile.value,
                    relevance_budget=relevance_budget,
                    has_hipporag=hipporag_instance is not None,
-                   has_vector_rag=vector_rag_client is not None,
+                   has_neo4j=neo4j_driver is not None,
                    has_community_matcher=embedding_client is not None,
                    group_id=group_id)
     
@@ -202,33 +208,124 @@ class HybridPipeline:
         Best for: "What is X's address?", "How much is invoice Y?"
         Profile: General Enterprise only (disabled in High Assurance)
         
+        Implementation: Searches TextChunk nodes in Neo4j for exact text retrieval.
+        Uses concise prompts to return direct factual answers.
+        
         Fallback Strategy:
         ==================
-        If Vector RAG is unavailable or fails, automatically fall back to Route 2
-        (Local Search) to ensure query is answered using graph-based retrieval.
-        This provides graceful degradation while maintaining accuracy.
+        If Neo4j or embeddings are unavailable, fall back to Route 2 (Local Search).
         """
         logger.info("route_1_vector_rag_start", query=query[:50])
         
-        if not self.vector_rag:
-            logger.warning("vector_rag_not_configured_fallback_to_route_2",
-                          reason="Vector RAG client not initialized")
+        # Check if we have required components for vector search
+        if not self.neo4j_driver:
+            logger.warning("vector_rag_neo4j_unavailable_fallback_to_route_2",
+                          reason="Neo4j driver not available")
             return await self._execute_route_2_local_search(query, "summary")
         
         try:
-            result = await self.vector_rag.aquery(query)
+            # Get query embedding
+            from app.services.llm_service import LLMService
+            llm_service = LLMService()
+            
+            if llm_service.embed_model is None:
+                logger.warning("vector_rag_embedding_unavailable_fallback_to_route_2",
+                              reason="Embedding model not initialized")
+                # Local/dev fallback: derive an approximate embedding from in-group chunks.
+                query_embedding = await self._derive_query_embedding_from_group_chunks(query)
+            else:
+                try:
+                    query_embedding = llm_service.embed_model.get_text_embedding(query)
+                except Exception as e:
+                    logger.warning(
+                        "vector_rag_embedding_failed_deriving_from_group",
+                        error=str(e),
+                        reason="Embedding generation failed; deriving from group chunks",
+                    )
+                    query_embedding = await self._derive_query_embedding_from_group_chunks(query)
+            
+            # Retrieval: vector (if we have a query embedding) + lexical (always), then merge.
+            results = []
+            if query_embedding is not None:
+                # Future-proof path: Neo4j-native hybrid + RRF (vector + fulltext + fusion).
+                results = await self._search_text_chunks_hybrid_rrf(
+                    query_text=query,
+                    embedding=query_embedding,
+                    top_k=15,
+                    vector_k=25,
+                    fulltext_k=25,
+                )
+            else:
+                logger.warning(
+                    "vector_rag_no_query_embedding",
+                    reason="No query embedding available after derivation",
+                )
+                # If we cannot compute an embedding, fall back to fulltext-only search in Neo4j.
+                results = await self._search_text_chunks_fulltext(
+                    query_text=query,
+                    top_k=15,
+                )
+            
+            if not results:
+                return {
+                    "response": "No relevant text found for this query.",
+                    "route_used": "route_1_vector_rag",
+                    "citations": [],
+                    "evidence_path": [],
+                    "metadata": {
+                        "num_chunks": 0,
+                        "latency_estimate": "fast",
+                        "precision_level": "standard",
+                        "route_description": "Vector search on text chunks"
+                    }
+                }
+            
+            # Build context from text chunks
+            context_parts = []
+            citations = []
+            
+            for i, (chunk, score) in enumerate(results[:8], 1):  # Use top 8 for context
+                context_parts.append(f"[{i}] (Score: {score:.2f}) {chunk['text']}")
+                citations.append({
+                    "index": i,
+                    "chunk_id": chunk["id"],
+                    "document_id": chunk.get("document_id", ""),
+                    "document_title": chunk.get("document_title", ""),
+                    "score": float(score),
+                    "text_preview": chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"]
+                })
+            
+            context = "\n\n".join(context_parts)
+            
+            # Generate answer with concise prompt
+            prompt = f"""Based on the following text excerpts, answer the question.
+Provide a direct, concise answer. If the user asked for a specific value (date, amount, name), provide just that value.
+Only use the provided excerpts. If the answer is not present, respond with: "Not specified in the provided documents."
+
+Excerpts:
+{context}
+
+Question: {query}
+
+Answer:"""
+            
+            response = self.llm.complete(prompt)
+            answer = response.text if hasattr(response, 'text') else str(response)
             
             return {
-                "response": result.response if hasattr(result, 'response') else str(result),
+                "response": answer,
                 "route_used": "route_1_vector_rag",
-                "citations": [],
+                "citations": citations,
                 "evidence_path": [],
                 "metadata": {
+                    "num_chunks": len(results),
+                    "chunks_used": len(context_parts),
                     "latency_estimate": "fast",
                     "precision_level": "standard",
-                    "route_description": "Simple embedding-based retrieval"
+                    "route_description": "Vector search on text chunks"
                 }
             }
+            
         except Exception as e:
             logger.error("route_1_failed_fallback_to_route_2",
                         error=str(e),
@@ -239,6 +336,452 @@ class HybridPipeline:
             result["metadata"]["fallback_from"] = "route_1_vector_rag"
             result["metadata"]["fallback_reason"] = str(e)
             return result
+
+    def _sanitize_query_for_fulltext(self, query: str) -> str:
+        """Sanitize query for Lucene fulltext index.
+
+        Neo4j fulltext indexes use Lucene syntax. Certain characters are operators and
+        can cause parse errors or unintended semantics.
+        """
+        if not query:
+            return ""
+        # Keep alphanumerics and whitespace; replace other characters with spaces.
+        out = []
+        for ch in query:
+            if ch.isalnum() or ch.isspace():
+                out.append(ch)
+            else:
+                out.append(" ")
+        # Collapse repeated whitespace
+        return " ".join("".join(out).split())
+
+    async def _ensure_textchunk_fulltext_index(self) -> None:
+        """Ensure the TextChunk fulltext index exists.
+
+        Uses an index name that won't collide with other schemas (e.g., __Node__ based).
+        """
+        if self._textchunk_fulltext_index_checked:
+            return
+        self._textchunk_fulltext_index_checked = True
+
+        if not self.neo4j_driver:
+            return
+
+        def _run_sync():
+            with self.neo4j_driver.session() as session:
+                session.run(
+                    "CREATE FULLTEXT INDEX textchunk_fulltext IF NOT EXISTS FOR (c:TextChunk) ON EACH [c.text]"
+                )
+
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(self._executor, _run_sync)
+        except Exception as e:
+            # Don't fail Route 1 if index creation isn't permitted in the environment.
+            logger.warning(
+                "textchunk_fulltext_index_ensure_failed",
+                error=str(e),
+                reason="Could not ensure fulltext index; will continue with available retrieval",
+            )
+
+    async def _search_text_chunks_fulltext(self, query_text: str, top_k: int = 10) -> list:
+        """Fulltext search only (Neo4j Lucene index) within the group."""
+        if not self.neo4j_driver:
+            return []
+
+        await self._ensure_textchunk_fulltext_index()
+        group_id = self.group_id
+        sanitized = self._sanitize_query_for_fulltext(query_text)
+        if not sanitized:
+            return []
+
+        def _run_sync():
+            q = """
+            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $query_text, {limit: $top_k})
+            YIELD node, score
+            WHERE node.group_id = $group_id
+            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN node.id AS id,
+                   node.text AS text,
+                   node.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source,
+                   score
+            ORDER BY score DESC
+            LIMIT $top_k
+            """
+            rows = []
+            with self.neo4j_driver.session() as session:
+                for r in session.run(q, query_text=sanitized, group_id=group_id, top_k=top_k):
+                    chunk = {
+                        "id": r["id"],
+                        "text": r["text"],
+                        "chunk_index": r.get("chunk_index", 0),
+                        "document_id": r.get("document_id", ""),
+                        "document_title": r.get("document_title", ""),
+                        "document_source": r.get("document_source", ""),
+                    }
+                    rows.append((chunk, float(r.get("score") or 0.0)))
+            return rows
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, _run_sync)
+
+    async def _search_text_chunks_hybrid_rrf(
+        self,
+        query_text: str,
+        embedding: list,
+        top_k: int = 10,
+        vector_k: int = 25,
+        fulltext_k: int = 25,
+        rrf_k: int = 60,
+    ) -> list:
+        """Neo4j-native hybrid retrieval + RRF fusion.
+
+        Runs vector search (chunk_embedding) + fulltext search (textchunk_fulltext)
+        and fuses them with Reciprocal Rank Fusion inside Cypher.
+        """
+        if not self.neo4j_driver:
+            return []
+
+        await self._ensure_textchunk_fulltext_index()
+        group_id = self.group_id
+        sanitized = self._sanitize_query_for_fulltext(query_text)
+
+        # Oversample vector candidates before tenant filter.
+        oversample_factor = 50
+        oversample_cap = 2000
+        candidate_k = min(max(vector_k, vector_k * oversample_factor), oversample_cap)
+
+        def _run_sync():
+            q = """
+            // Vector candidates (global topK -> tenant filter)
+                        CALL () {
+                            WITH $candidate_k AS candidate_k, $embedding AS embedding, $group_id AS group_id
+              CALL db.index.vector.queryNodes('chunk_embedding', candidate_k, embedding)
+              YIELD node, score
+              WHERE node.group_id = group_id
+              WITH node, score
+              ORDER BY score DESC
+                            LIMIT $vector_k
+              WITH collect(node) AS nodes
+              UNWIND range(0, size(nodes)-1) AS i
+              RETURN nodes[i] AS node, (i + 1) AS rank
+            }
+            WITH collect({node: node, rank: rank}) AS vectorList
+
+            // Fulltext candidates (tenant filter)
+                        CALL () {
+                            WITH $query_text AS query_text, $group_id AS group_id
+                            CALL db.index.fulltext.queryNodes('textchunk_fulltext', query_text, {limit: $fulltext_k})
+              YIELD node, score
+              WHERE node.group_id = group_id
+              WITH node, score
+              ORDER BY score DESC
+                            LIMIT $fulltext_k
+              WITH collect(node) AS nodes
+              UNWIND range(0, size(nodes)-1) AS i
+              RETURN nodes[i] AS node, (i + 1) AS rank
+            }
+            WITH vectorList, collect({node: node, rank: rank}) AS lexList
+
+            // Union + RRF fusion
+            WITH vectorList, lexList,
+                 [x IN vectorList | x.node] + [y IN lexList | y.node] AS allNodes
+            UNWIND allNodes AS node
+            WITH DISTINCT node, vectorList, lexList
+            WITH node,
+                 [v IN vectorList WHERE v.node = node | v.rank][0] AS vRank,
+                 [l IN lexList WHERE l.node = node | l.rank][0] AS lRank
+            WITH node,
+                 (CASE WHEN vRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + vRank) END) +
+                 (CASE WHEN lRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + lRank) END) AS rrfScore
+            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN node.id AS id,
+                   node.text AS text,
+                   node.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source,
+                   rrfScore AS score
+            ORDER BY score DESC
+            LIMIT $top_k
+            """
+
+            rows = []
+            with self.neo4j_driver.session() as session:
+                for r in session.run(
+                    q,
+                    group_id=group_id,
+                    embedding=embedding,
+                    candidate_k=candidate_k,
+                    vector_k=vector_k,
+                    query_text=sanitized,
+                    fulltext_k=fulltext_k,
+                    rrf_k=rrf_k,
+                    top_k=top_k,
+                ):
+                    chunk = {
+                        "id": r["id"],
+                        "text": r["text"],
+                        "chunk_index": r.get("chunk_index", 0),
+                        "document_id": r.get("document_id", ""),
+                        "document_title": r.get("document_title", ""),
+                        "document_source": r.get("document_source", ""),
+                    }
+                    rows.append((chunk, float(r.get("score") or 0.0)))
+            return rows
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, _run_sync)
+
+    async def _derive_query_embedding_from_group_chunks(self, query_text: str) -> Optional[list]:
+        """Derive an approximate query embedding from embeddings already stored in this group.
+
+        This is a resilience path for local/dev when the external embedding service is
+        misconfigured or unavailable. It selects a small set of chunks by keyword match,
+        averages their embeddings, and uses that centroid for vector retrieval.
+        """
+        if not self.neo4j_driver:
+            return None
+
+        # Cheap keyword extraction (no extra dependencies)
+        stop = {
+            "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "is", "are",
+            "was", "were", "be", "been", "being", "what", "when", "where", "who", "how", "why",
+            "from", "by", "as", "at", "it", "this", "that", "these", "those",
+            # Common low-signal query verbs that rarely appear verbatim in contracts/invoices
+            "issued", "issue", "begin", "begins", "start", "starts", "created", "create",
+            "happen", "happened", "make", "made", "won",
+        }
+        tokens = []
+        current = []
+        for ch in query_text.lower():
+            if ch.isalnum() or ch in {"-", "_"}:
+                current.append(ch)
+            else:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+        if current:
+            tokens.append("".join(current))
+
+        keywords = [t for t in tokens if len(t) >= 4 and t not in stop][:8]
+        if not keywords:
+            return None
+
+        group_id = self.group_id
+
+        min_matches = 2 if len(keywords) >= 2 else 1
+
+        def _run_sync():
+            q = """
+            MATCH (c:TextChunk {group_id: $group_id})
+            WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+            WITH c,
+                 reduce(m=0, k IN $keywords | m + CASE WHEN toLower(c.text) CONTAINS k THEN 1 ELSE 0 END) AS match_count
+            WHERE match_count >= $min_matches
+            RETURN c.embedding AS embedding, match_count
+            ORDER BY match_count DESC
+            LIMIT 50
+            """
+            with self.neo4j_driver.session() as session:
+                return [
+                    r["embedding"]
+                    for r in session.run(
+                        q,
+                        group_id=group_id,
+                        keywords=keywords,
+                        min_matches=min_matches,
+                    )
+                ]
+
+        loop = asyncio.get_running_loop()
+        embeddings = await loop.run_in_executor(self._executor, _run_sync)
+        if not embeddings:
+            return None
+
+        # Average embeddings (centroid)
+        dim = len(embeddings[0])
+        if dim == 0:
+            return None
+        sums = [0.0] * dim
+        count = 0
+        for emb in embeddings:
+            if not emb or len(emb) != dim:
+                continue
+            for i, v in enumerate(emb):
+                sums[i] += float(v)
+            count += 1
+        if count == 0:
+            return None
+        return [v / count for v in sums]
+
+    async def _search_text_chunks_lexical(self, query_text: str, top_k: int = 10) -> list:
+        """Lexical fallback retrieval within the group (no vector search).
+
+        Intended only as a last resort when we cannot compute a query embedding.
+        """
+        if not self.neo4j_driver:
+            return []
+
+        stop = {
+            "the", "a", "an", "and", "or", "to", "of", "in", "on", "for", "with", "is", "are",
+            "was", "were", "be", "been", "being", "what", "when", "where", "who", "how", "why",
+            "from", "by", "as", "at", "it", "this", "that", "these", "those",
+            # Common low-signal query verbs that rarely appear verbatim in contracts/invoices
+            "issued", "issue", "begin", "begins", "start", "starts", "created", "create",
+            "happen", "happened", "make", "made", "won",
+        }
+        tokens = []
+        current = []
+        for ch in query_text.lower():
+            if ch.isalnum() or ch in {"-", "_"}:
+                current.append(ch)
+            else:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+        if current:
+            tokens.append("".join(current))
+
+        keywords = [t for t in tokens if len(t) >= 4 and t not in stop][:8]
+        if not keywords:
+            return []
+
+        min_matches = 2 if len(keywords) >= 2 else 1
+
+        group_id = self.group_id
+
+        def _run_sync():
+            q = """
+            MATCH (node:TextChunk {group_id: $group_id})
+            WHERE node.text IS NOT NULL
+            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            WITH node, d,
+                 reduce(m=0, k IN $keywords | m + CASE WHEN toLower(node.text) CONTAINS k THEN 1 ELSE 0 END) AS match_count
+            WHERE match_count >= $min_matches
+            RETURN node.id AS id,
+                   node.text AS text,
+                   node.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source
+                 , match_count AS score
+            ORDER BY score DESC
+            LIMIT $top_k
+            """
+            rows = []
+            with self.neo4j_driver.session() as session:
+                for r in session.run(
+                    q,
+                    group_id=group_id,
+                    keywords=keywords,
+                    min_matches=min_matches,
+                    top_k=top_k,
+                ):
+                    chunk = {
+                        "id": r["id"],
+                        "text": r["text"],
+                        "chunk_index": r["chunk_index"],
+                        "document_id": r.get("document_id"),
+                        "document_title": r.get("document_title"),
+                        "document_source": r.get("document_source"),
+                    }
+                    rows.append((chunk, float(r.get("score") or 0.0)))
+            return rows
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, _run_sync)
+    
+    async def _search_text_chunks(
+        self,
+        query_text: str,
+        embedding: list,
+        top_k: int = 10
+    ) -> list:
+        """
+        Search TextChunk nodes by vector similarity using Neo4j native vector index.
+        
+        Uses db.index.vector.queryNodes() for efficient vector search (Neo4j 5.11+).
+        This is significantly faster than gds.similarity.cosine() as it uses
+        proper vector indexes instead of computing similarity for all nodes.
+        
+        Uses ThreadPoolExecutor to run sync Neo4j call without blocking event loop.
+        This is a production best practice for mixing sync I/O with async FastAPI.
+        
+        Returns: List of (chunk_dict, score) tuples
+        """
+        group_id = self.group_id
+
+        # Neo4j's vector query returns the global topK across all TextChunk nodes.
+        # If multiple groups exist, filtering by group_id after the vector query can
+        # yield 0 results even when the group has embeddings.
+        # Fix: oversample candidates, then filter+limit within the group.
+        oversample_factor = 50
+        oversample_cap = 2000
+        candidate_k = min(max(top_k, top_k * oversample_factor), oversample_cap)
+        
+        def _run_sync_query():
+            """Execute Neo4j vector search synchronously in thread pool."""
+            # Use native vector index API (Neo4j 5.11+)
+            # Index name: chunk_embedding (created during schema initialization)
+            # This is much faster than gds.similarity.cosine()
+            query = """
+                 CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
+            YIELD node, score
+            WHERE node.group_id = $group_id
+            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN node.id AS id,
+                   node.text AS text,
+                   node.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source,
+                   score
+            ORDER BY score DESC
+                 LIMIT $top_k
+            """
+            
+            results = []
+            with self.neo4j_driver.session() as session:
+                # First, check if there are ANY results from the vector search
+                logger.info("vector_search_executing",
+                           group_id=group_id,
+                           embedding_len=len(embedding),
+                           top_k=top_k,
+                           candidate_k=candidate_k)
+                
+                result = session.run(
+                    query,
+                    group_id=group_id,
+                    embedding=embedding,
+                    top_k=top_k,
+                    candidate_k=candidate_k
+                )
+                
+                for record in result:
+                    chunk_dict = {
+                        "id": record["id"],
+                        "text": record["text"],
+                        "chunk_index": record.get("chunk_index", 0),
+                        "document_id": record.get("document_id", ""),
+                        "document_title": record.get("document_title", ""),
+                        "document_source": record.get("document_source", "")
+                    }
+                    results.append((chunk_dict, record["score"]))
+                
+                logger.info("vector_search_results",
+                           group_id=group_id,
+                           num_results=len(results))
+            
+            return results
+        
+        # Run sync query in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(self._executor, _run_sync_query)
+        return results
     
     # =========================================================================
     # Route 2: Local Search Equivalent (LazyGraphRAG Only)

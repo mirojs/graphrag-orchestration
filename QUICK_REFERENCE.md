@@ -67,6 +67,20 @@ python -m pytest tests/ --cloud -v
 curl https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/health
 ```
 
+### Initialize Neo4j Indexes (Route 1)
+```bash
+export GRAPHRAG_CLOUD_URL="https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+export TEST_GROUP_ID="test-3072-clean"
+
+# Vector index for chunk embeddings
+curl -sS -X POST "$GRAPHRAG_CLOUD_URL/hybrid/init_vector_index?force=false" \
+	-H "X-Group-ID: $TEST_GROUP_ID"
+
+# Fulltext index for hybrid + RRF retrieval
+curl -sS -X POST "$GRAPHRAG_CLOUD_URL/hybrid/init_textchunk_fulltext_index?force=false" \
+	-H "X-Group-ID: $TEST_GROUP_ID"
+```
+
 ### Repeatability (Route 3 + Route 4; question bank)
 ```bash
 python3 scripts/benchmark_route3_graph_vs_route4_drift.py \

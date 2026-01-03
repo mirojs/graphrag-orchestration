@@ -421,11 +421,35 @@ class GraphService:
                 driver.verify_connectivity()
                 self._driver = driver
                 logger.info(f"Connected to Neo4j at {settings.NEO4J_URI}")
+                
+                # Initialize vector indices for hybrid routes
+                self._initialize_vector_indices()
             except Exception as e:
                 logger.error(f"Failed to connect to Neo4j: {e}")
                 self._driver = None
         else:
             logger.warning("NEO4J_URI not configured, graph store disabled")
+
+    def _initialize_vector_indices(self) -> None:
+        """Create vector indices for TextChunk embeddings used by Route 1."""
+        if not self._driver:
+            return
+        
+        vector_index_query = """
+        CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
+        FOR (t:TextChunk) ON (t.embedding)
+        OPTIONS {indexConfig: {
+            `vector.dimensions`: 3072,
+            `vector.similarity_function`: 'cosine'
+        }}
+        """
+        
+        try:
+            with self._driver.session() as session:
+                session.run(vector_index_query)
+                logger.info("Vector index 'chunk_embedding' created/verified for TextChunk nodes")
+        except Exception as e:
+            logger.warning(f"Failed to create vector index (may already exist): {e}")
 
     def get_store(self, group_id: str) -> MultiTenantNeo4jStore:
         """

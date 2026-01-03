@@ -111,10 +111,10 @@ def _extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
     i = 0
     while i < len(lines):
         line = lines[i]
-        match = re.match(r'^(\d+)\.\s+\*\*(Q-[A-Z]\d+):\*\*\s+(.+)', line)
+        match = re.match(r'^\d*\.?\s*\*\*(Q-[A-Z]\d+):\*\*\s+(.+)', line)
         if match:
-            qid = match.group(2).strip()
-            question = match.group(3).strip()
+            qid = match.group(1).strip()
+            question = match.group(2).strip()
             expected = ""
             is_negative = qid.startswith("Q-N")
             
@@ -124,7 +124,7 @@ def _extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
             else:
                 # Look ahead for Expected field
                 j = i + 1
-                while j < len(lines) and not re.match(r'^\d+\.\s+\*\*Q-', lines[j]):
+                while j < len(lines) and not re.match(r'^\d*\.?\s*\*\*Q-', lines[j]):
                     line_content = lines[j].strip()
                     exp_match = re.match(r'-\s+\*\*Expected:\*\*\s*(.*)$', line_content)
                     if exp_match:
@@ -135,7 +135,7 @@ def _extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
                             next_line = lines[k].strip()
                             if re.match(r'-\s+\*\*(?:Source|Expected):', next_line):
                                 break
-                            if re.match(r'^\d+\.\s+\*\*Q-', next_line) or next_line.startswith('##'):
+                            if re.match(r'^\d*\.?\s*\*\*Q-', next_line) or next_line.startswith('##'):
                                 break
                             if not next_line:
                                 if k + 1 < len(lines):

@@ -13,7 +13,7 @@ Model Selection:
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
 import structlog
 
-from app.v3.services.extraction import ExtractionService
+from app.v3.services.extraction_service import ExtractionService
 
 logger = structlog.get_logger(__name__)
 

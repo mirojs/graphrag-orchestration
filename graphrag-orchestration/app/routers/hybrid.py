@@ -238,7 +238,7 @@ async def _get_or_create_pipeline(
             hipporag_instance=hipporag_instance,
             graph_store=graph_store,
             text_unit_store=text_unit_store,
-            vector_rag_client=None,
+            neo4j_driver=neo4j_driver,
             graph_communities=graph_communities,
             relevance_budget=relevance_budget,
         )
@@ -755,8 +755,11 @@ async def _run_indexing_job(
     _indexing_jobs[job_id]["progress"] = "Starting indexing pipeline..."
     
     try:
-        from app.v3.routers.graphrag_v3 import get_indexing_pipeline
-        pipeline = get_indexing_pipeline()
+        from app.hybrid.indexing.lazygraphrag_indexing_pipeline import (
+            get_lazygraphrag_indexing_pipeline,
+        )
+
+        pipeline = get_lazygraphrag_indexing_pipeline()
         
         _indexing_jobs[job_id]["progress"] = "Indexing documents..."
         stats = await pipeline.index_documents(
@@ -811,9 +814,11 @@ async def hybrid_index_documents(
 
     # Keep DRIFT/triple-engine caches from serving stale results post-index.
     try:
-        from app.v3.routers.graphrag_v3 import get_drift_adapter
+        from app.hybrid.indexing.lazygraphrag_indexing_pipeline import (
+            get_lazygraphrag_drift_adapter,
+        )
 
-        adapter = get_drift_adapter()
+        adapter = get_lazygraphrag_drift_adapter()
         adapter.clear_cache(group_id)
         logger.info("hybrid_index_cleared_drift_cache", group_id=group_id)
     except Exception as e:
@@ -1122,4 +1127,534 @@ async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_ind
         logger.error("initialize_hipporag_failed",
                     group_id=group_id,
                     error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/init_vector_index")
+async def init_vector_index(request: Request, force: bool = False):
+    """
+    Admin endpoint to create the chunk_embedding vector index.
+    Required for Route 1 (Vector RAG) to function.
+    
+    Args:
+        force: If True, drop and recreate the index (useful when new chunks are added)
+    """
+    from app.services.graph_service import GraphService
+    
+    group_id = request.state.group_id
+    graph_service = GraphService()
+    
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+    
+    try:
+        with graph_service.driver.session() as session:
+            # If force=True, drop the existing index first
+            if force:
+                try:
+                    session.run("DROP INDEX chunk_embedding IF EXISTS")
+                    logger.info("vector_index_dropped", group_id=group_id)
+                except Exception as drop_error:
+                    logger.warning("vector_index_drop_failed", error=str(drop_error))
+            
+            # Create the vector index
+            vector_index_query = """
+            CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
+            FOR (t:TextChunk) ON (t.embedding)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 3072,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """
+            session.run(vector_index_query)
+        
+        logger.info("vector_index_created", group_id=group_id, force=force)
+        return {
+            "status": "success",
+            "message": f"Vector index 'chunk_embedding' {'recreated' if force else 'created'}",
+            "group_id": group_id,
+            "force": force
+        }
+    except Exception as e:
+        logger.error("vector_index_creation_failed",
+                    group_id=group_id,
+                    error=str(e))
+        return {
+            "status": "warning",
+            "message": f"Index creation attempt completed (may already exist): {str(e)}",
+            "group_id": group_id
+        }
+
+
+@router.post("/init_textchunk_fulltext_index")
+async def init_textchunk_fulltext_index(request: Request, force: bool = False):
+    """Admin endpoint to create the TextChunk fulltext index.
+
+    Route 1 uses Neo4j fulltext search as part of hybrid + RRF retrieval.
+
+    Args:
+        force: If True, drop and recreate the index.
+    """
+    from app.services.graph_service import GraphService
+
+    group_id = request.state.group_id
+    graph_service = GraphService()
+
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+
+    try:
+        with graph_service.driver.session() as session:
+            if force:
+                try:
+                    session.run("DROP INDEX textchunk_fulltext IF EXISTS")
+                    logger.info("textchunk_fulltext_index_dropped", group_id=group_id)
+                except Exception as drop_error:
+                    logger.warning("textchunk_fulltext_index_drop_failed", error=str(drop_error))
+
+            session.run(
+                "CREATE FULLTEXT INDEX textchunk_fulltext IF NOT EXISTS FOR (c:TextChunk) ON EACH [c.text]"
+            )
+
+        logger.info("textchunk_fulltext_index_created", group_id=group_id, force=force)
+        return {
+            "status": "success",
+            "message": f"Fulltext index 'textchunk_fulltext' {'recreated' if force else 'created'}",
+            "group_id": group_id,
+            "force": force,
+        }
+    except Exception as e:
+        logger.error(
+            "textchunk_fulltext_index_creation_failed",
+            group_id=group_id,
+            error=str(e),
+        )
+        return {
+            "status": "warning",
+            "message": f"Index creation attempt completed (may already exist): {str(e)}",
+            "group_id": group_id,
+        }
+
+
+@router.post("/embed_chunks")
+async def embed_chunks(request: Request):
+    """
+    Admin endpoint to backfill embeddings for TextChunk nodes.
+    Required for Route 1 (Vector RAG) when chunks were indexed without embeddings.
+    """
+    from app.services.graph_service import GraphService
+    from app.services.llm_service import LLMService
+    
+    group_id = request.state.group_id
+    graph_service = GraphService()
+    llm_service = LLMService()
+    
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+    
+    if llm_service.embed_model is None:
+        raise HTTPException(status_code=503, detail="Embedding model not initialized")
+    
+    try:
+        # Get chunks without embeddings
+        with graph_service.driver.session() as session:
+            result = session.run("""
+                MATCH (c:TextChunk {group_id: $group_id})
+                WHERE c.embedding IS NULL
+                RETURN c.id AS id, c.text AS text
+                LIMIT 1000
+            """, group_id=group_id)
+            
+            chunks = [(record["id"], record["text"]) for record in result]
+        
+        if not chunks:
+            return {
+                "status": "success",
+                "message": "All chunks already have embeddings",
+                "chunks_updated": 0,
+                "group_id": group_id
+            }
+        
+        # Embed chunks in batches
+        updated = 0
+        batch_size = 10
+        
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i+batch_size]
+            texts = [text for _, text in batch]
+            
+            # Get embeddings
+            embeddings = []
+            for text in texts:
+                emb = llm_service.embed_model.get_text_embedding(text)
+                embeddings.append(emb)
+            
+            # Update in Neo4j
+            with graph_service.driver.session() as session:
+                for (chunk_id, _), embedding in zip(batch, embeddings):
+                    session.run("""
+                        MATCH (c:TextChunk {id: $id, group_id: $group_id})
+                        SET c.embedding = $embedding
+                    """, id=chunk_id, group_id=group_id, embedding=embedding)
+                    updated += 1
+        
+        logger.info("chunks_embedded", group_id=group_id, count=updated)
+        return {
+            "status": "success",
+            "message": f"Embedded {updated} chunks",
+            "chunks_updated": updated,
+            "group_id": group_id
+        }
+        
+    except Exception as e:
+        logger.error("chunk_embedding_failed",
+                    group_id=group_id,
+                    error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/chunks")
+async def debug_chunks(request: Request):
+    """
+    Debug endpoint to check TextChunk status for Route 1.
+    Shows total chunks, chunks with embeddings, and sample data.
+    """
+    from app.services.graph_service import GraphService
+    
+    group_id = request.state.group_id
+    graph_service = GraphService()
+    
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+    
+    try:
+        with graph_service.driver.session() as session:
+            # Count chunks and check embeddings
+            result = session.run("""
+                MATCH (c:TextChunk {group_id: $group_id})
+                RETURN 
+                    count(c) AS total_chunks,
+                    sum(CASE WHEN c.embedding IS NOT NULL THEN 1 ELSE 0 END) AS chunks_with_embedding,
+                    sum(CASE WHEN c.embedding IS NOT NULL AND size(c.embedding) > 0 THEN 1 ELSE 0 END) AS chunks_with_nonempty_embedding
+            """, group_id=group_id)
+            stats = result.single()
+            
+            # Get sample chunk
+            sample_result = session.run("""
+                MATCH (c:TextChunk {group_id: $group_id})
+                RETURN c.id AS id, 
+                       c.text AS text,
+                       c.embedding IS NOT NULL AS has_embedding,
+                       CASE WHEN c.embedding IS NOT NULL THEN size(c.embedding) ELSE 0 END AS embedding_size
+                LIMIT 1
+            """, group_id=group_id)
+            sample = sample_result.single()
+            
+            # Check vector index
+            try:
+                index_result = session.run("SHOW INDEXES YIELD name, type WHERE name = 'chunk_embedding'")
+                index_exists = index_result.single() is not None
+            except Exception:
+                index_exists = "unknown"
+            
+        return {
+            "group_id": group_id,
+            "total_chunks": stats["total_chunks"] if stats else 0,
+            "chunks_with_embedding": stats["chunks_with_embedding"] if stats else 0,
+            "chunks_with_nonempty_embedding": stats["chunks_with_nonempty_embedding"] if stats else 0,
+            "vector_index_exists": index_exists,
+            "sample_chunk": {
+                "id": sample["id"] if sample else None,
+                "text_preview": (sample["text"][:100] + "...") if sample and sample["text"] else None,
+                "has_embedding": sample["has_embedding"] if sample else None,
+                "embedding_size": sample["embedding_size"] if sample else None,
+            } if sample else None
+        }
+        
+    except Exception as e:
+        logger.error("debug_chunks_failed", group_id=group_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/debug/test_vector_search")
+async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
+    """
+    Debug endpoint to test vector search directly.
+    Tests both with and without group_id filter to diagnose issues.
+    """
+    from app.services.graph_service import GraphService
+    from app.services.llm_service import LLMService
+    
+    group_id = request.state.group_id
+    graph_service = GraphService()
+    llm_service = LLMService()
+    
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+    
+    try:
+        # Generate embedding for query using LLMService
+        embedding = llm_service.embed(body.query)
+        
+        results = {
+            "group_id": group_id,
+            "query": body.query,
+            "embedding_length": len(embedding),
+            "tests": {}
+        }
+        
+        with graph_service.driver.session() as session:
+            # Tunables for diagnosis
+            raw_k = 5
+            desired_k = 5
+            candidate_k = 500
+
+            # Test 1: Raw vector search (global topK)
+            try:
+                raw_result = session.run(
+                    """
+                    CALL db.index.vector.queryNodes('chunk_embedding', $k, $embedding)
+                    YIELD node, score
+                    RETURN node.id AS id, node.group_id AS node_group_id, score
+                    ORDER BY score DESC
+                    """,
+                    embedding=embedding,
+                    k=raw_k,
+                )
+                raw_records = list(raw_result)
+                results["tests"]["raw_vector_search"] = {
+                    "success": True,
+                    "k": raw_k,
+                    "count": len(raw_records),
+                    "results": [
+                        {"id": r["id"], "group_id": r["node_group_id"], "score": r["score"]}
+                        for r in raw_records
+                    ],
+                }
+            except Exception as e:
+                results["tests"]["raw_vector_search"] = {"success": False, "error": str(e)}
+
+            # Test 2: Naive filter (can return 0 if group isn't in global topK)
+            try:
+                filtered_result = session.run(
+                    """
+                    CALL db.index.vector.queryNodes('chunk_embedding', $k, $embedding)
+                    YIELD node, score
+                    WHERE node.group_id = $group_id
+                    RETURN node.id AS id, node.group_id AS node_group_id, score
+                    ORDER BY score DESC
+                    """,
+                    embedding=embedding,
+                    group_id=group_id,
+                    k=desired_k,
+                )
+                filtered_records = list(filtered_result)
+                results["tests"]["filtered_vector_search"] = {
+                    "success": True,
+                    "k": desired_k,
+                    "count": len(filtered_records),
+                    "results": [
+                        {"id": r["id"], "group_id": r["node_group_id"], "score": r["score"]}
+                        for r in filtered_records
+                    ],
+                }
+            except Exception as e:
+                results["tests"]["filtered_vector_search"] = {"success": False, "error": str(e)}
+
+            # Test 3: Oversample then filter+limit within group (the production fix)
+            try:
+                oversampled = session.run(
+                    """
+                    CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
+                    YIELD node, score
+                    WHERE node.group_id = $group_id
+                    RETURN node.id AS id, node.group_id AS node_group_id, score
+                    ORDER BY score DESC
+                    LIMIT $desired_k
+                    """,
+                    embedding=embedding,
+                    group_id=group_id,
+                    candidate_k=candidate_k,
+                    desired_k=desired_k,
+                )
+                oversampled_records = list(oversampled)
+                results["tests"]["oversampled_filtered_vector_search"] = {
+                    "success": True,
+                    "candidate_k": candidate_k,
+                    "desired_k": desired_k,
+                    "count": len(oversampled_records),
+                    "results": [
+                        {"id": r["id"], "group_id": r["node_group_id"], "score": r["score"]}
+                        for r in oversampled_records
+                    ],
+                }
+            except Exception as e:
+                results["tests"]["oversampled_filtered_vector_search"] = {
+                    "success": False,
+                    "error": str(e),
+                }
+
+            # Test 4: Check if chunks exist for this group_id
+            try:
+                chunk_check = session.run(
+                    """
+                    MATCH (c:TextChunk {group_id: $group_id})
+                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+                    RETURN count(c) AS count, collect(c.id)[0..3] AS sample_ids
+                    """,
+                    group_id=group_id,
+                )
+                chunk_rec = chunk_check.single()
+                results["tests"]["chunks_for_group"] = {
+                    "count": chunk_rec["count"],
+                    "sample_ids": chunk_rec["sample_ids"],
+                }
+            except Exception as e:
+                results["tests"]["chunks_for_group"] = {"error": str(e)}
+
+            # Test 5: Index info
+            try:
+                index_info = session.run(
+                    """
+                    SHOW INDEXES YIELD name, type, state, populationPercent, labelsOrTypes, properties
+                    WHERE name = 'chunk_embedding'
+                    """
+                )
+                idx_rec = index_info.single()
+                results["tests"]["index_info"] = (
+                    {
+                        "name": idx_rec["name"],
+                        "type": idx_rec["type"],
+                        "state": idx_rec["state"],
+                        "populationPercent": idx_rec["populationPercent"],
+                        "labelsOrTypes": idx_rec["labelsOrTypes"],
+                        "properties": idx_rec["properties"],
+                    }
+                    if idx_rec
+                    else {"error": "Index not found"}
+                )
+            except Exception as e:
+                results["tests"]["index_info"] = {"error": str(e)}
+
+            # Test 6: Presence check - does a chunk from this group appear in vector index results?
+            # This avoids the “tie-breaker” ambiguity by directly checking for node.id == c.id.
+            try:
+                presence = session.run(
+                    """
+                    MATCH (c:TextChunk {group_id: $group_id})
+                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+                    WITH c LIMIT 1
+                    CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, c.embedding)
+                    YIELD node, score
+                    WITH c, collect({id: node.id, group_id: node.group_id, score: score}) AS hits
+                    WITH c, [h IN hits WHERE h.id = c.id][0] AS self_hit
+                    RETURN c.id AS source_id,
+                           self_hit IS NOT NULL AS found_self,
+                           self_hit.score AS self_score
+                    """,
+                    group_id=group_id,
+                    candidate_k=candidate_k,
+                )
+                presence_rec = presence.single()
+                results["tests"]["source_chunk_presence"] = {
+                    "source_id": presence_rec["source_id"],
+                    "found_self": presence_rec["found_self"],
+                    "self_score": presence_rec["self_score"],
+                    "candidate_k": candidate_k,
+                }
+            except Exception as e:
+                results["tests"]["source_chunk_presence"] = {"error": str(e)}
+
+            # Test 7: Embedding sample from group
+            try:
+                embed_type_test = session.run(
+                    """
+                    MATCH (c:TextChunk {group_id: $group_id})
+                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+                    WITH c LIMIT 1
+                    RETURN c.id AS id,
+                           size(c.embedding) AS embed_size,
+                           c.embedding[0..5] AS embed_sample,
+                           c.updated_at AS updated_at
+                    """,
+                    group_id=group_id,
+                )
+                embed_type_rec = embed_type_test.single()
+                results["tests"]["embedding_details"] = (
+                    {
+                        "id": embed_type_rec["id"],
+                        "embed_size": embed_type_rec["embed_size"],
+                        "embed_sample": embed_type_rec["embed_sample"],
+                        "updated_at": str(embed_type_rec.get("updated_at")),
+                    }
+                    if embed_type_rec
+                    else {"error": "No chunk found"}
+                )
+            except Exception as e:
+                results["tests"]["embedding_details"] = {"error": str(e)}
+
+            # Test 8: Total chunk/embedding stats across DB
+            try:
+                total_indexed = session.run(
+                    """
+                    MATCH (c:TextChunk)
+                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+                    RETURN count(c) AS total,
+                           count(DISTINCT c.group_id) AS distinct_groups
+                    """
+                )
+                total_rec = total_indexed.single()
+                results["tests"]["total_indexed_stats"] = {
+                    "total_chunks_with_embedding": total_rec["total"],
+                    "distinct_groups": total_rec["distinct_groups"],
+                }
+            except Exception as e:
+                results["tests"]["total_indexed_stats"] = {"error": str(e)}
+            
+            # Test 6: Check embedding data type and sample values
+            try:
+                embed_type_test = session.run("""
+                    MATCH (c:TextChunk {group_id: $group_id})
+                    WHERE c.embedding IS NOT NULL
+                    WITH c LIMIT 1
+                    RETURN c.id AS id,
+                           size(c.embedding) AS embed_size,
+                           c.embedding[0..5] AS embed_sample,
+                           c.updated_at AS updated_at
+                """, group_id=group_id)
+                embed_type_rec = embed_type_test.single()
+                if embed_type_rec:
+                    results["tests"]["embedding_details"] = {
+                        "id": embed_type_rec["id"],
+                        "embed_size": embed_type_rec["embed_size"],
+                        "embed_sample": embed_type_rec["embed_sample"],
+                        "updated_at": str(embed_type_rec.get("updated_at"))
+                    }
+            except Exception as e:
+                results["tests"]["embedding_details"] = {
+                    "error": str(e)
+                }
+                
+            # Test 7: Check total indexed chunks across ALL groups
+            try:
+                total_indexed = session.run("""
+                    MATCH (c:TextChunk)
+                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
+                    RETURN count(c) AS total,
+                           count(DISTINCT c.group_id) AS distinct_groups
+                """)
+                total_rec = total_indexed.single()
+                results["tests"]["total_indexed_stats"] = {
+                    "total_chunks_with_embedding": total_rec["total"],
+                    "distinct_groups": total_rec["distinct_groups"]
+                }
+            except Exception as e:
+                results["tests"]["total_indexed_stats"] = {
+                    "error": str(e)
+                }
+        
+        return results
+        
+    except Exception as e:
+        logger.error("debug_test_vector_search_failed", group_id=group_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))

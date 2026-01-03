@@ -28,8 +28,8 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
     while i < len(lines):
         line = lines[i].strip()
         
-        # Match question ID pattern: **Q-X#:**
-        m = re.match(r'\*\*([QN][-A-Z]+\d+):\*\*\s*(.+)', line)
+        # Match question ID pattern: **Q-X#:** (with optional numbered list prefix)
+        m = re.match(r'^\d*\.?\s*\*\*([QN][-A-Z]+\d+):\*\*\s*(.+)', line)
         if m:
             qid = m.group(1).strip()
             question = m.group(2).strip()
@@ -46,7 +46,7 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
                 next_line = lines[j].strip()
                 
                 # Stop at next question
-                if re.match(r'\*\*[QN][-A-Z]+\d+:\*\*', next_line):
+                if re.match(r'^\d*\.?\s*\*\*[QN][-A-Z]+\d+:\*\*', next_line):
                     break
                 
                 # Look for Expected marker
@@ -62,7 +62,7 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
                     while j < len(lines):
                         bullet_line = lines[j].strip()
                         # Stop at next question or next field
-                        if re.match(r'\*\*[QN][-A-Z]+\d+:\*\*', bullet_line):
+                        if re.match(r'^\d*\.?\s*\*\*[QN][-A-Z]+\d+:\*\*', bullet_line):
                             break
                         if bullet_line.startswith("- **") and not bullet_line.startswith("  -"):
                             break

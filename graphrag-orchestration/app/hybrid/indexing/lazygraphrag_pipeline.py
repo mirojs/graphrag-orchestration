@@ -322,23 +322,33 @@ class LazyGraphRAGIndexingPipeline:
 
     async def _embed_chunks_best_effort(self, chunks: List[TextChunk]) -> None:
         if self.embedder is None:
+            logger.warning("lazy_index_no_embedder", extra={"chunks": len(chunks)})
             return
 
         texts = [c.text for c in chunks]
         try:
             embeddings = await self.embedder.aget_text_embedding_batch(texts)
+            logger.info(f"lazy_index_embeddings_generated", extra={"chunks": len(chunks), "embeddings": len(embeddings)})
         except Exception as e:
-            logger.warning("lazy_index_embedding_failed", extra={"error": str(e)})
-            return
+            logger.error(f"❌ EMBEDDING FAILED: {e}", exc_info=True, extra={"error": str(e), "chunks": len(chunks)})
+            # Don't silently fail - this is critical for vector search
+            raise RuntimeError(f"Embedding generation failed: {e}") from e
 
+        success_count = 0
         for chunk, emb in zip(chunks, embeddings):
             try:
                 if emb and isinstance(emb, list) and len(emb) == self.config.embedding_dimensions:
                     chunk.embedding = emb
+                    success_count += 1
                 else:
                     chunk.embedding = emb
-            except Exception:
+                    if emb:
+                        success_count += 1
+            except Exception as e:
+                logger.warning(f"lazy_index_chunk_embedding_assign_failed", extra={"error": str(e)})
                 continue
+        
+        logger.info(f"lazy_index_embeddings_assigned", extra={"success": success_count, "total": len(chunks)})
 
     async def _extract_entities_and_relationships(
         self,

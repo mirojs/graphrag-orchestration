@@ -311,8 +311,17 @@ class HybridPipeline:
             
             context = "\n\n".join(context_parts)
             
-            # Generate answer with concise prompt
-            prompt = f"""Based on the following text excerpts, answer the question.
+            # Try NLP extraction first (fast, deterministic, no hallucination)
+            nlp_answer = self._extract_with_nlp(query, results)
+            
+            if nlp_answer:
+                logger.info("route_1_nlp_extraction_success", 
+                           answer_length=len(nlp_answer))
+                answer = nlp_answer
+            else:
+                # Fallback to LLM synthesis with temperature=0 for determinism
+                logger.info("route_1_fallback_to_llm_synthesis")
+                prompt = f"""Based on the following text excerpts, answer the question.
 Provide a direct, concise answer. If the user asked for a specific value (date, amount, name), provide just that value.
 Only use the provided excerpts. If the answer is not present, respond with: "Not specified in the provided documents."
 
@@ -322,9 +331,9 @@ Excerpts:
 Question: {query}
 
 Answer:"""
-            
-            response = self.llm.complete(prompt)
-            answer = response.text if hasattr(response, 'text') else str(response)
+                
+                response = self.llm.complete(prompt, temperature=0.0)
+                answer = response.text if hasattr(response, 'text') else str(response)
             
             return {
                 "response": answer,
@@ -350,6 +359,118 @@ Answer:"""
             result["metadata"]["fallback_from"] = "route_1_vector_rag"
             result["metadata"]["fallback_reason"] = str(e)
             return result
+
+    def _extract_with_nlp(
+        self,
+        query: str,
+        chunks_with_scores: list
+    ) -> Optional[str]:
+        """
+        Try to extract answer using deterministic NLP patterns.
+        Returns None if no pattern matches (triggers LLM fallback).
+        
+        Patterns optimized for invoice/contract factual extraction:
+        - Invoice numbers, PO numbers
+        - Currency amounts (total, price)
+        - Dates (due date, start date)
+        - Names (salesperson, vendor, agent)
+        - Registration numbers, codes
+        - Durations (warranty period, term)
+        """
+        import re
+        
+        if not chunks_with_scores:
+            return None
+        
+        # Combine top chunks for pattern matching
+        combined_text = " ".join([
+            chunk["text"] for chunk, _ in chunks_with_scores[:5]
+        ])
+        
+        query_lower = query.lower()
+        
+        # Pattern 1: Invoice/PO/Registration numbers
+        if any(keyword in query_lower for keyword in ["invoice number", "po number", "p.o. number", "registration number", "license number"]):
+            patterns = [
+                r'(?:invoice|po|p\.?o\.?|registration|license)\s*(?:number|#|no\.?)?\s*:?\s*([A-Z0-9\-]+)',
+                r'#\s*([A-Z0-9\-]+)',
+                r'REG-\d+',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    return match.group(1) if match.lastindex else match.group(0)
+        
+        # Pattern 2: Currency amounts (total, price, amount, payment)
+        if any(keyword in query_lower for keyword in ["total", "amount", "price", "cost", "payment", "fee"]):
+            # Look for $ followed by numbers with optional commas and decimals
+            pattern = r'\$[\d,]+\.?\d*'
+            matches = re.findall(pattern, combined_text)
+            if matches:
+                # If multiple matches, prefer the largest (likely the total)
+                amounts = []
+                for m in matches:
+                    try:
+                        val = float(m.replace('$', '').replace(',', ''))
+                        amounts.append((val, m))
+                    except:
+                        continue
+                if amounts:
+                    if "total" in query_lower:
+                        # Return largest amount for "total" queries
+                        return max(amounts, key=lambda x: x[0])[1]
+                    else:
+                        # Return first match for other queries
+                        return matches[0]
+        
+        # Pattern 3: Dates
+        if any(keyword in query_lower for keyword in ["date", "when", "begin", "start", "due", "expir"]):
+            patterns = [
+                r'\d{1,2}/\d{1,2}/\d{4}',  # MM/DD/YYYY
+                r'\d{4}-\d{2}-\d{2}',      # YYYY-MM-DD
+                r'(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    return match.group(0)
+        
+        # Pattern 4: Names (after keywords like "salesperson:", "vendor:", "agent:")
+        if any(keyword in query_lower for keyword in ["salesperson", "vendor", "agent", "builder", "owner", "issued by"]):
+            patterns = [
+                r'(?:salesperson|vendor|agent|builder|owner|issued by)\s*:?\s*([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    return match.group(1)
+        
+        # Pattern 5: Duration/period (warranty, term)
+        if any(keyword in query_lower for keyword in ["warranty", "period", "duration", "term"]):
+            patterns = [
+                r'(\d+)\s*(?:days?|months?|years?)',
+                r'(\d+)-(?:day|month|year)',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    return match.group(0)
+        
+        # Pattern 6: Terms/conditions
+        if "terms" in query_lower or "payment terms" in query_lower:
+            # Look for common payment terms
+            patterns = [
+                r'(?:due|payable)\s+(?:on|upon)\s+[^.]+',
+                r'net\s+\d+',
+                r'\d+%\s+down',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    return match.group(0)
+        
+        # No pattern matched
+        return None
 
     def _sanitize_query_for_fulltext(self, query: str) -> str:
         """Sanitize query for Lucene fulltext index.

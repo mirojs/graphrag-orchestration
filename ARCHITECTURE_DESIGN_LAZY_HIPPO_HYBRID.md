@@ -103,12 +103,16 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 
 ### Route 1: Vector RAG (The Fast Lane)
 
-*   **What:** Standard embedding-based retrieval with top-K ranking.
+*   **What:** Neo4j-native vector similarity search with hybrid retrieval (vector + fulltext + RRF).
 *   **Why:** Not every query requires graph traversal. For simple lookups, Vector RAG is 10-100x faster.
 *   **Implementation:**
-    *   Azure AI Search or similar vector store
+    *   **Vector Index:** `chunk_embedding` on `(:TextChunk).embedding` (cosine, 3072 dims)
+    *   **Fulltext Index:** `textchunk_fulltext` on `(:TextChunk).text`
+    *   **Hybrid Retrieval:** Neo4j-native vector + fulltext search fused with Reciprocal Rank Fusion (RRF)
+    *   **Oversampling:** Global top-K vector candidates → tenant filter → trim to final top-K
     *   **Router Signal:** Single-entity query, no relationship keywords, simple question structure
 *   **Profile:** General Enterprise only (disabled in High Assurance)
+*   **Why Neo4j:** Unified storage eliminates sync issues between external vector stores and graph data
 
 ### Route 2: Local Search Equivalent (LazyGraphRAG Only)
 

@@ -340,6 +340,94 @@ Azure DI extracts structural metadata from documents using the `prebuilt-layout`
 *   Auditors can navigate directly to the relevant section in the original PDF
 *   Section hierarchy provides context for understanding where information came from
 
+#### Azure DI Model Selection & Key-Value Pairs (Jan 2026 Analysis)
+
+Azure Document Intelligence offers multiple prebuilt models with different capabilities and costs:
+
+| Model | Cost (per 1K pages) | Key Features | Best For |
+|-------|---------------------|--------------|----------|
+| `prebuilt-layout` | $1.50 | Sections, tables, paragraphs, markdown | General documents, contracts, reports |
+| `prebuilt-document` | $4.00 | Layout + **key-value pairs** | Forms with explicit "Field: Value" patterns |
+| `prebuilt-invoice` | $1.50 | Invoice-specific field extraction | AP invoices, vendor bills |
+| `prebuilt-receipt` | $1.00 | Receipt-specific extraction | Sales receipts, expense reports |
+
+**Key-Value Pairs: When They Help (and When They Don't)**
+
+Key-value extraction is most valuable for:
+- **Structured forms** with explicit label-value pairs (e.g., "Policy Number: ABC123")
+- **Insurance claim forms** with checkbox fields and labeled sections
+- **Application forms** with standardized layouts
+
+Key-value extraction provides **marginal benefit** for:
+- **Narrative documents** (contracts, agreements) — section metadata + tables suffice
+- **Invoices** — `prebuilt-invoice` already extracts invoice-specific fields
+- **Documents already in tables** — table extraction captures structured data better
+
+**Recommendation:** Use `prebuilt-layout` as the default. The combination of:
+1. Section/subsection hierarchy for context
+2. Table extraction for structured data
+3. Markdown output for LLM consumption
+4. NLP-based entity deduplication for graph quality
+
+...provides sufficient signal for high-quality triplet extraction without the 2.7x cost increase of `prebuilt-document`.
+
+#### Document Type Detection Strategy
+
+**Problem:** Auto-detecting document type to select the optimal DI model still incurs Azure DI cost per document (you pay before knowing the type).
+
+**Current Implementation** (`document_intelligence_service.py`):
+
+1. **Filename Heuristics (Free, Pre-DI)**
+   ```python
+   # _select_model() uses filename patterns before calling Azure DI
+   if "invoice" in filename.lower(): return "prebuilt-invoice"
+   if "receipt" in filename.lower(): return "prebuilt-receipt"
+   ```
+
+2. **Per-Item Override (API-level)**
+   ```python
+   # Callers can specify doc_type or di_model per document
+   {"url": "...", "doc_type": "invoice"}  # → prebuilt-invoice
+   {"url": "...", "di_model": "prebuilt-receipt"}  # → explicit override
+   ```
+
+3. **Batch Strategy (API-level)**
+   ```python
+   # model_strategy parameter: "auto" | "layout" | "invoice" | "receipt"
+   await di_service.extract_documents(group_id, urls, model_strategy="invoice")
+   ```
+
+**Recommended Approach: User-Specified Upload Categories**
+
+For cost-sensitive deployments, expose separate upload endpoints or UI categories:
+
+| Upload Category | DI Model | Use Case |
+|-----------------|----------|----------|
+| **General Documents** | `prebuilt-layout` | Contracts, reports, agreements |
+| **Invoices & Bills** | `prebuilt-invoice` | AP processing, vendor invoices |
+| **Receipts** | `prebuilt-receipt` | Expense reports, sales receipts |
+| **Insurance Claims** | `prebuilt-document` | Claim forms with key-value fields |
+
+This approach:
+- **Zero-cost detection** — user self-selects document type at upload
+- **Optimal model selection** — each category uses the best-fit model
+- **Cost transparency** — users understand why certain documents cost more to process
+
+**Non-Azure Detection Alternatives (Pre-DI, Zero Cost)**
+
+| Method | Implementation | Accuracy | Notes |
+|--------|---------------|----------|-------|
+| **Filename pattern** | Regex on filename | Medium | Already implemented; fragile if users don't name files consistently |
+| **File metadata** | PDF title/subject fields | Low | Most PDFs lack metadata |
+| **First-page sampling** | PyPDF2 extract page 1, regex for "INVOICE", "CLAIM FORM" | Medium-High | Adds ~100ms, no Azure cost |
+| **Lightweight classifier** | TF-IDF + logistic regression on first 500 chars | High | Requires training data; ~50ms inference |
+| **LLM classification** | GPT-4o-mini: "Is this an invoice, receipt, claim form, or general document?" | Very High | ~$0.0001/doc; 200ms latency |
+
+**Recommended Hybrid Strategy:**
+1. **Primary:** User-specified category at upload (zero cost, 100% accurate for user intent)
+2. **Fallback:** Filename heuristics for bulk uploads without category
+3. **Optional:** First-page keyword sampling for mixed batches
+
 ### Indexing Pipeline (RAPTOR Removed)
 
 The indexing pipeline is designed to support the **4-route hybrid runtime** (LazyGraphRAG + HippoRAG 2) without requiring RAPTOR.

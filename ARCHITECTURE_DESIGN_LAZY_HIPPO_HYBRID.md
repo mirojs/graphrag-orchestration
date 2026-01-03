@@ -456,6 +456,204 @@ Specialized models (`prebuilt-invoice`, `prebuilt-document`) add extra fields to
 
 This design ensures model selection is a **configuration choice**, not a code change.
 
+#### Complete Indexing Flow (Production-Ready)
+
+The complete indexing workflow consists of 3 API calls executed in sequence:
+
+| Step | Endpoint | Purpose | Duration |
+|------|----------|---------|----------|
+| **1. Index** | `POST /hybrid/index/documents` | Extract & store entities/relationships in Neo4j | 6-8s for 5 PDFs |
+| **2. Sync** | `POST /hybrid/index/sync` | Build HippoRAG triples from Neo4j graph | 2-5s |
+| **3. Initialize** | `POST /hybrid/index/initialize-hipporag` | Load HippoRAG retriever into memory | 2-3s |
+
+**Total time:** ~10-15 seconds for 5 PDFs (production deployment with Azure DI)
+
+**Step 1: Index Documents**
+
+```bash
+curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/documents" \
+  -H "Content-Type: application/json" \
+  -H "X-Group-ID: your-group-id" \
+  -d '{
+    "documents": [
+      {"url": "https://storage.blob.core.windows.net/docs/doc1.pdf"},
+      {"url": "https://storage.blob.core.windows.net/docs/doc2.pdf"}
+    ],
+    "ingestion": "document-intelligence",
+    "run_raptor": false,
+    "run_community_detection": false,
+    "max_triplets_per_chunk": 20,
+    "reindex": false
+  }'
+```
+
+**Response:**
+```json
+{
+  "job_id": "your-group-id_1767429340244",
+  "message": "Indexing job started. Poll /hybrid/index/status/{job_id} for progress."
+}
+```
+
+**Poll for completion:**
+```bash
+curl -H "X-Group-ID: your-group-id" \
+  "https://your-service.azurecontainerapps.io/hybrid/index/status/{job_id}"
+```
+
+**Success response:**
+```json
+{
+  "status": "completed",
+  "stats": {
+    "documents": 5,
+    "chunks": 79,
+    "entities": 474,
+    "relationships": 640
+  }
+}
+```
+
+**Step 2: Sync HippoRAG Artifacts**
+
+```bash
+curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/sync" \
+  -H "Content-Type: application/json" \
+  -H "X-Group-ID: your-group-id" \
+  -d '{
+    "output_dir": "./hipporag_index",
+    "dry_run": false
+  }'
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "entities": 474,
+  "triples": 586,
+  "text_chunks": 79
+}
+```
+
+**Step 3: Initialize HippoRAG**
+
+```bash
+curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize-hipporag" \
+  -H "X-Group-ID: your-group-id"
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "HippoRAG retriever initialized successfully"
+}
+```
+
+**Python Example** (from `test_5pdfs_simple.py`):
+
+```python
+import requests
+import time
+
+BASE_URL = "https://your-service.azurecontainerapps.io"
+GROUP_ID = f"test-{time.time_ns()}"
+HEADERS = {"Content-Type": "application/json", "X-Group-ID": GROUP_ID}
+
+# Step 1: Index
+response = requests.post(
+    f"{BASE_URL}/hybrid/index/documents",
+    headers=HEADERS,
+    json={
+        "documents": [{"url": url} for url in PDF_URLS],
+        "ingestion": "document-intelligence",
+        "run_raptor": False,
+        "run_community_detection": False,
+        "max_triplets_per_chunk": 20,
+    },
+    timeout=30,
+)
+job_id = response.json()["job_id"]
+
+# Poll for completion
+while True:
+    status = requests.get(
+        f"{BASE_URL}/hybrid/index/status/{job_id}",
+        headers=HEADERS
+    ).json()
+    if status["status"] == "completed":
+        break
+    time.sleep(2)
+
+# Step 2: Sync
+requests.post(
+    f"{BASE_URL}/hybrid/index/sync",
+    headers=HEADERS,
+    json={"output_dir": "./hipporag_index", "dry_run": False},
+    timeout=300,
+)
+
+# Step 3: Initialize
+requests.post(
+    f"{BASE_URL}/hybrid/index/initialize-hipporag",
+    headers=HEADERS,
+    timeout=180,
+)
+
+print(f"✅ Ready to query with group_id: {GROUP_ID}")
+```
+
+**Key Configuration Options:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ingestion` | `"document-intelligence"` | Use Azure DI for PDF extraction |
+| `run_raptor` | `false` | Skip RAPTOR (not needed for LazyGraphRAG) |
+| `run_community_detection` | `false` | Skip upfront communities (LazyGraphRAG computes on-demand) |
+| `max_triplets_per_chunk` | `20` | Entity/relationship extraction density |
+| `reindex` | `false` | Set `true` to clean existing data for this group |
+| `model_strategy` | `"auto"` | DI model: `"auto"`, `"layout"`, `"invoice"`, `"receipt"` |
+
+**After Indexing:**
+
+All 4 query routes are immediately available:
+
+```bash
+# Route 1: Vector RAG (fast lane)
+curl -X POST "${BASE_URL}/hybrid/query" \
+  -H "Content-Type: application/json" \
+  -H "X-Group-ID: ${GROUP_ID}" \
+  -d '{"query": "What is the invoice amount?", "force_route": "vector_rag"}'
+
+# Route 2: Local Search (entity-focused)
+curl -X POST "${BASE_URL}/hybrid/query" \
+  -H "Content-Type: application/json" \
+  -H "X-Group-ID: ${GROUP_ID}" \
+  -d '{"query": "List all contracts with ABC Corp", "force_route": "local_search"}'
+
+# Route 3: Global Search (thematic)
+curl -X POST "${BASE_URL}/hybrid/query" \
+  -H "Content-Type: application/json" \
+  -H "X-Group-ID: ${GROUP_ID}" \
+  -d '{"query": "Summarize payment terms across documents", "force_route": "global_search"}'
+
+# Route 4: DRIFT Multi-Hop (complex reasoning)
+curl -X POST "${BASE_URL}/hybrid/query" \
+  -H "Content-Type: application/json" \
+  -H "X-Group-ID: ${GROUP_ID}" \
+  -d '{"query": "How do vendor relationships connect to financial risk?", "force_route": "drift_multi_hop"}'
+```
+
+**Troubleshooting:**
+
+| Issue | Solution |
+|-------|----------|
+| 401 Unauthorized | Add `X-Group-ID` header to all requests |
+| Job timeout | Azure DI may throttle; increase poll timeout to 300s |
+| 0 chunks indexed | Check blob URLs are accessible by Azure DI service |
+| HippoRAG init fails | Run sync step first; check `./hipporag_index` exists |
+
 ### Indexing Pipeline (RAPTOR Removed)
 
 The indexing pipeline is designed to support the **4-route hybrid runtime** (LazyGraphRAG + HippoRAG 2) without requiring RAPTOR.

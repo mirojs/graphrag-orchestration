@@ -428,6 +428,34 @@ This approach:
 2. **Fallback:** Filename heuristics for bulk uploads without category
 3. **Optional:** First-page keyword sampling for mixed batches
 
+#### Code Impact of Model Switching
+
+**Important:** Switching between Azure DI prebuilt models requires **no code changes**. All models return the same `AnalyzeResult` structure:
+
+```python
+# Only the model name parameter changes
+poller = await client.begin_analyze_document(
+    selected_model,  # "prebuilt-layout" | "prebuilt-invoice" | "prebuilt-receipt" | "prebuilt-document"
+    AnalyzeDocumentRequest(url_source=url),
+    output_content_format=DocumentContentFormat.MARKDOWN,
+)
+result: AnalyzeResult = await poller.result()
+
+# All models provide the same baseline fields:
+# - result.content (markdown text)
+# - result.paragraphs (text blocks with roles)
+# - result.tables (structured table data)
+# - result.sections (document hierarchy)
+```
+
+Specialized models (`prebuilt-invoice`, `prebuilt-document`) add extra fields to the result object (e.g., `result.key_value_pairs`, `result.documents[0].fields`) that can be optionally consumed. The downstream processing code handles all models uniformly, so you can:
+
+1. Switch models at runtime via API parameter
+2. Mix models in a single batch (some documents use layout, others use invoice)
+3. Change default model without touching processing logic
+
+This design ensures model selection is a **configuration choice**, not a code change.
+
 ### Indexing Pipeline (RAPTOR Removed)
 
 The indexing pipeline is designed to support the **4-route hybrid runtime** (LazyGraphRAG + HippoRAG 2) without requiring RAPTOR.

@@ -797,6 +797,87 @@ async def hybrid_index_documents(
 ):
     """Run document indexing for the Hybrid system.
 
+    Uses V3 indexing pipeline which properly indexes embeddings into Neo4j vector index.
+    """
+
+    group_id = request.state.group_id
+    logger.info(
+        "hybrid_index_documents_start",
+        group_id=group_id,
+        num_documents=len(body.documents),
+        ingestion=body.ingestion,
+        run_community_detection=body.run_community_detection,
+        run_raptor=body.run_raptor,
+        reindex=body.reindex,
+    )
+
+    # Keep DRIFT/triple-engine caches from serving stale results post-index.
+    try:
+        from app.v3.routers.graphrag_v3 import get_drift_adapter
+        
+        adapter = get_drift_adapter()
+        adapter.clear_cache(group_id)
+        logger.info("hybrid_index_cleared_drift_cache", group_id=group_id)
+    except Exception as e:
+        logger.warning("hybrid_index_clear_drift_cache_failed", group_id=group_id, error=str(e))
+    
+    # Convert documents into the V3 pipeline's expected dict format.
+    docs_for_pipeline: List[Dict[str, Any]] = []
+    for doc in body.documents:
+        if isinstance(doc, str):
+            if doc.startswith(("http://", "https://")):
+                docs_for_pipeline.append(
+                    {
+                        "content": "",
+                        "title": doc.split("/")[-1] if "/" in doc else "Untitled",
+                        "source": doc,
+                        "metadata": {},
+                    }
+                )
+            else:
+                docs_for_pipeline.append(
+                    {"content": doc, "title": "Untitled", "source": "", "metadata": {}}
+                )
+        elif isinstance(doc, dict):
+            docs_for_pipeline.append(
+                {
+                    "content": doc.get("content", ""),
+                    "title": doc.get("title", "Untitled"),
+                    "source": doc.get("source", ""),
+                    "metadata": doc.get("metadata", {}),
+                }
+            )
+        else:
+            logger.warning("hybrid_index_unsupported_doc_type", type=type(doc).__name__)
+
+    # Use V3 indexing pipeline (which works!)
+    from app.v3.routers.graphrag_v3 import _get_or_create_pipeline_v3
+    
+    pipeline_v3 = _get_or_create_pipeline_v3(group_id)
+    
+    result = await pipeline_v3.index_documents(
+        group_id=group_id,
+        documents=docs_for_pipeline,
+        reindex=body.reindex,
+        run_community_detection=body.run_community_detection,
+        run_raptor=body.run_raptor,
+        ingestion=body.ingestion,
+    )
+
+    logger.info("hybrid_index_complete", group_id=group_id, result=result)
+    
+    return HybridIndexResponse(
+        status="completed",
+        group_id=group_id,
+        message=f"Indexed {len(body.documents)} documents",
+        statistics=result.get("statistics", {}),
+    )
+    request: Request,
+    body: HybridIndexDocumentsRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Run document indexing for the Hybrid system.
+
     This is the preferred indexing entrypoint for the LazyGraphRAG + HippoRAG 2 + Vector RAG architecture.
 
     Implementation detail: runs the V3 indexing pipeline to populate Neo4j, with RAPTOR disabled by default.

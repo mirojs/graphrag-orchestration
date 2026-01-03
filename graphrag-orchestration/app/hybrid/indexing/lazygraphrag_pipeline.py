@@ -29,7 +29,7 @@ from llama_index.core.schema import TextNode
 
 from app.services.document_intelligence_service import DocumentIntelligenceService
 from app.v3.services.entity_deduplication import EntityDeduplicationService
-from app.v3.services.neo4j_store import Document, Entity, Neo4jStoreV3, Relationship, TextChunk
+from app.hybrid.services.neo4j_store import Document, Entity, Neo4jStoreV3, Relationship, TextChunk
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +73,6 @@ class LazyGraphRAGIndexingPipeline:
         run_raptor: bool = False,
     ) -> Dict[str, Any]:
         start_time = time.time()
-        
-        # Ensure Neo4j schema (vector indexes, constraints) exists
-        self.neo4j_store.ensure_schema()
         
         logger.info(
             "lazy_index_start",

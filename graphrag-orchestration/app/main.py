@@ -41,6 +41,20 @@ async def lifespan(app: FastAPI):
                 result = session.run("RETURN 1 as ping")
                 result.single()
             logger.info("neo4j_connected", uri=graph_service.config.get("NEO4J_URI"))
+            
+            # Initialize Neo4j schema for hybrid routes (vector indexes, constraints)
+            try:
+                from app.hybrid.services.neo4j_store import Neo4jStoreV3
+                hybrid_store = Neo4jStoreV3(
+                    uri=graph_service.config.get("NEO4J_URI"),
+                    username=graph_service.config.get("NEO4J_USERNAME"),
+                    password=graph_service.config.get("NEO4J_PASSWORD"),
+                )
+                hybrid_store.ensure_schema()
+                logger.info("hybrid_neo4j_schema_initialized", 
+                           message="Vector indexes and constraints created")
+            except Exception as e:
+                logger.error("hybrid_schema_initialization_failed", error=str(e))
         else:
             logger.warning("neo4j_not_configured", 
                           message="Neo4j URI not set - graph features disabled")

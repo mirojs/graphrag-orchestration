@@ -243,7 +243,8 @@ class HybridPipeline:
                 try:
                     query_embedding = llm_service.embed_model.get_text_embedding(query)
                     logger.info("vector_rag_embedding_success",
-                               embedding_dims=len(query_embedding) if query_embedding else 0)
+                               embedding_dims=len(query_embedding) if query_embedding else 0,
+                               embedding_first_3=query_embedding[:3] if query_embedding else None)
                 except Exception as e:
                     logger.warning(
                         "vector_rag_embedding_failed_deriving_from_group",

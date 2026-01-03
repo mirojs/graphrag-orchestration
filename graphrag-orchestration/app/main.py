@@ -45,10 +45,11 @@ async def lifespan(app: FastAPI):
             # Initialize Neo4j schema for hybrid routes (vector indexes, constraints)
             try:
                 from app.hybrid.services.neo4j_store import Neo4jStoreV3
+                from app.core.config import settings as app_settings
                 hybrid_store = Neo4jStoreV3(
-                    uri=graph_service.config.get("NEO4J_URI"),
-                    username=graph_service.config.get("NEO4J_USERNAME"),
-                    password=graph_service.config.get("NEO4J_PASSWORD"),
+                    uri=app_settings.NEO4J_URI,
+                    username=app_settings.NEO4J_USERNAME,
+                    password=app_settings.NEO4J_PASSWORD,
                 )
                 hybrid_store.initialize_schema()
                 logger.info("hybrid_neo4j_schema_initialized", 

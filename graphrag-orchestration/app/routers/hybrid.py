@@ -241,6 +241,7 @@ async def _get_or_create_pipeline(
             neo4j_driver=neo4j_driver,
             graph_communities=graph_communities,
             relevance_budget=relevance_budget,
+            group_id=group_id,
         )
         
         _pipeline_cache[cache_key] = pipeline

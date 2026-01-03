@@ -872,6 +872,10 @@ async def hybrid_index_documents(
         message=f"Indexed {len(body.documents)} documents",
         statistics=result.get("statistics", {}),
     )
+
+
+@router.post("/index/documents", response_model=HybridIndexDocumentsResponse)
+async def hybrid_index_documents(
     request: Request,
     body: HybridIndexDocumentsRequest,
     background_tasks: BackgroundTasks,

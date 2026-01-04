@@ -153,7 +153,7 @@ class AsyncNeo4jService:
                e.name AS name,
                e.degree AS degree,
                e.chunk_count AS chunk_count,
-               e.importance_score AS importance_score
+               coalesce(e.degree, 0) AS importance_score
         """
         
         async with self._get_session() as session:
@@ -190,10 +190,10 @@ class AsyncNeo4jService:
              count(DISTINCT path) AS path_count
         RETURN neighbor.id AS id,
                neighbor.name AS name,
-               neighbor.importance_score AS importance_score,
+               coalesce(neighbor.degree, 0) AS importance_score,
                distance,
                path_count
-        ORDER BY distance ASC, neighbor.importance_score DESC
+        ORDER BY distance ASC, coalesce(neighbor.degree, 0) DESC
         LIMIT $limit
         """
         
@@ -229,7 +229,7 @@ class AsyncNeo4jService:
                type(r) AS relationship,
                other.name AS target,
                other.id AS target_id,
-               other.importance_score AS target_importance
+               coalesce(other.degree, 0) AS target_importance
         LIMIT $limit
         """
         
@@ -293,7 +293,7 @@ class AsyncNeo4jService:
         RETURN entity.id AS id,
                entity.name AS name,
                raw_score AS score,
-               entity.importance_score AS importance
+               coalesce(entity.degree, 0) AS importance
         ORDER BY raw_score DESC
         LIMIT $top_k
         """

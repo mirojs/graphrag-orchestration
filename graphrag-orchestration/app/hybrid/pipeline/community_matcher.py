@@ -260,8 +260,9 @@ class CommunityMatcher:
         if self.neo4j_service:
             try:
                 # Search for entities matching any keyword
+                # Note: Entity nodes are stored with label 'Entity', not '__Entity__'
                 search_query = """
-                MATCH (e:`__Entity__`)
+                MATCH (e:Entity)
                 WHERE e.group_id = $group_id
                   AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                 RETURN e.name AS name, e.description AS description
@@ -287,10 +288,13 @@ class CommunityMatcher:
         # If no entities found with keyword matching, try getting top entities by degree
         if not matching_entities and self.neo4j_service:
             try:
-                logger.info("keyword_search_empty_trying_top_entities")
+                logger.info("keyword_search_empty_trying_top_entities",
+                           group_id_used=self.group_id,
+                           service_connected=self.neo4j_service._driver is not None)
                 # Get most important entities as fallback
+                # Note: Entity nodes are stored with label 'Entity', not '__Entity__'
                 fallback_query = """
-                MATCH (e:`__Entity__`)
+                MATCH (e:Entity)
                 WHERE e.group_id = $group_id
                 RETURN e.name AS name, e.description AS description
                 ORDER BY coalesce(e.degree, 0) DESC
@@ -301,12 +305,16 @@ class CommunityMatcher:
                     result = await session.run(fallback_query, group_id=self.group_id)
                     records = await result.data()
                     matching_entities = [r["name"] for r in records]
+                    logger.info("fallback_query_raw_result",
+                               records_count=len(records),
+                               first_record=records[0] if records else None,
+                               group_id_param=self.group_id)
                     
                 logger.info("fallback_top_entities_found",
                           entities_found=len(matching_entities))
                 
             except Exception as e:
-                logger.error("fallback_entity_search_failed", error=str(e))
+                logger.error("fallback_entity_search_failed", error=str(e), error_type=type(e).__name__)
         
         # If still no entities found, return empty (will cause fail-fast)
         if not matching_entities:

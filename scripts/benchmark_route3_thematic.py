@@ -229,6 +229,10 @@ def evaluate_response_quality(response: Dict[str, Any], question: Dict[str, Any]
         "response_length": len(text),
         "overall_score": score,
         "response_preview": text[:300] + "..." if len(text) > 300 else text,
+        # New fields for enhanced graph retrieval
+        "citations": response.get("citations", []),
+        "num_citations": len(response.get("citations", [])),
+        "metadata": metadata,
     }
 
 
@@ -300,6 +304,10 @@ def run_benchmark(
         "evidence_threshold_met_rate": sum(1 for r in valid_results if r["evidence"]["meets_threshold"]) / len(valid_results) if valid_results else 0,
         "avg_hub_entities": sum(r["evidence"]["hub_entity_count"] for r in valid_results) / len(valid_results) if valid_results else 0,
         "avg_latency_ms": sum(r["elapsed_ms"] for r in valid_results) / len(valid_results) if valid_results else 0,
+        # Citation stats
+        "total_citations": sum(r.get("num_citations", 0) for r in valid_results),
+        "avg_citations_per_question": sum(r.get("num_citations", 0) for r in valid_results) / len(valid_results) if valid_results else 0,
+        "questions_with_citations": sum(1 for r in valid_results if r.get("num_citations", 0) > 0),
     }
     
     return {
@@ -327,6 +335,10 @@ def print_summary(data: Dict[str, Any]) -> None:
     print(f"Evidence Threshold Met: {s['evidence_threshold_met_rate']:.0%}")
     print(f"Avg Hub Entities: {s['avg_hub_entities']:.1f}")
     print(f"Avg Latency: {s['avg_latency_ms']:.0f}ms")
+    # Citation stats
+    print(f"Total Citations: {s.get('total_citations', 0)}")
+    print(f"Avg Citations/Question: {s.get('avg_citations_per_question', 0):.1f}")
+    print(f"Questions with Citations: {s.get('questions_with_citations', 0)}/{s['successful']}")
     print(f"{'='*60}")
 
 

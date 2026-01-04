@@ -367,6 +367,63 @@ class HybridPipeline:
         )
         return (False, intent)
     
+    async def _check_field_exists_in_evidence(
+        self,
+        query: str,
+        evidence_nodes: List[Dict[str, Any]],
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Check if a requested field exists in evidence nodes (Route 2/3 negative detection).
+        
+        Returns:
+            (field_exists, intent):
+            - (True, intent): Field found or unknown intent (proceed with LLM)
+            - (False, intent): Field definitely doesn't exist (skip LLM, return "Not found")
+        """
+        intent = self._classify_field_intent(query)
+        if not intent:
+            # Unknown intent → can't do negative detection, proceed with LLM
+            return (True, None)
+        
+        hints = self.FIELD_SECTION_HINTS.get(intent, [])
+        if not hints:
+            return (True, intent)
+        
+        # Check if ANY evidence node contains the hint keywords
+        for node in evidence_nodes:
+            # Evidence nodes have 'text' field
+            node_text_lower = (node.get("text") or "").lower()
+            if any(h in node_text_lower for h in hints):
+                logger.info(
+                    "field_existence_check_found_in_evidence",
+                    intent=intent,
+                    hint_matched=next(h for h in hints if h in node_text_lower),
+                    node_id=node.get("id"),
+                )
+                return (True, intent)
+            
+            # Also check section_path if available
+            section_path = node.get("section_path") or []
+            if isinstance(section_path, list):
+                section_text = " ".join(section_path).lower()
+                if any(h in section_text for h in hints):
+                    logger.info(
+                        "field_existence_check_found_in_evidence_section",
+                        intent=intent,
+                        section_path=section_path,
+                        node_id=node.get("id"),
+                    )
+                    return (True, intent)
+        
+        # No evidence node contains the expected field keywords → field doesn't exist
+        logger.info(
+            "field_existence_check_not_found_in_evidence",
+            intent=intent,
+            hints_checked=hints,
+            evidence_nodes_checked=len(evidence_nodes),
+        )
+        return (False, intent)
+    
     async def _execute_route_1_vector_rag(self, query: str) -> Dict[str, Any]:
         """
         Route 1: Simple Vector RAG for fast fact lookups.
@@ -1607,6 +1664,41 @@ EVIDENCE: <verbatim quote from Context, or empty>
             top_k=15
         )
         logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes))
+        
+        # ================================================================
+        # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
+        # ================================================================
+        # Before calling LLM synthesis, check if the requested field exists
+        # in the retrieved evidence. This prevents hallucinations.
+        # ================================================================
+        field_exists, detected_intent = await self._check_field_exists_in_evidence(
+            query=query,
+            evidence_nodes=evidence_nodes
+        )
+        
+        if not field_exists and detected_intent:
+            # Field doesn't exist in evidence → deterministic "Not found"
+            logger.info(
+                "route_2_negative_detection_triggered",
+                intent=detected_intent,
+                num_evidence_nodes=len(evidence_nodes)
+            )
+            return {
+                "response": f"The requested information ('{detected_intent}') was not found in the available documents.",
+                "route_used": "route_2_local_search",
+                "citations": [],
+                "evidence_path": [],
+                "metadata": {
+                    "seed_entities": seed_entities,
+                    "num_evidence_nodes": len(evidence_nodes),
+                    "text_chunks_used": 0,
+                    "latency_estimate": "fast",
+                    "precision_level": "high",
+                    "route_description": "Entity-focused with negative detection",
+                    "negative_detection": True,
+                    "field_intent": detected_intent
+                }
+            }
         
         # Stage 2.3: Synthesis with Citations
         logger.info("stage_2.3_synthesis")

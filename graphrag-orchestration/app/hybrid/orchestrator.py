@@ -260,113 +260,6 @@ class HybridPipeline:
     # Route 1: Vector RAG (Fast Lane)
     # =========================================================================
     
-    # Field intent → section/text keywords for negative detection
-    # If query matches an intent and NO chunk contains these keywords,
-    # we can confidently return "Not found" without LLM extraction.
-    FIELD_SECTION_HINTS: Dict[str, List[str]] = {
-        "vat_id": ["vat", "tax id", "tax i.d", "tax identification", "tin ", "v.a.t"],
-        "payment_portal": ["payment portal", "pay online", "online payment", "pay here", "portal url"],
-        "bank_routing": ["routing number", "routing #", "aba number", "aba #"],
-        "iban_swift": ["iban", "swift", "bic", "international bank"],
-        "bank_account": ["account number", "account #", "bank account", "acct #", "acct."],
-        "wire_transfer": ["wire transfer", "wire instructions", "ach instructions", "bank transfer"],
-        "license_number": ["license number", "license #", "licence no", "license no"],
-        "mold_clause": ["mold", "mould", "fungus", "fungi"],
-        "shipping_method": ["shipped via", "shipping method", "carrier", "delivery method"],
-    }
-    
-    # Query patterns → field intent classification
-    FIELD_INTENT_PATTERNS: Dict[str, List[str]] = {
-        "vat_id": ["vat", "tax id", "tax i.d"],
-        "payment_portal": ["payment portal", "pay online", "portal url"],
-        "bank_routing": ["routing number", "routing #", "bank routing"],
-        "iban_swift": ["iban", "swift", "bic"],
-        "bank_account": ["account number", "bank account"],
-        "wire_transfer": ["wire transfer", "ach instruction", "wire instruction"],
-        "license_number": ["license number", "agent's license", "licence"],
-        "mold_clause": ["mold damage", "mold coverage", "mould"],
-        "shipping_method": ["shipping method", "shipped via"],
-    }
-    
-    def _classify_field_intent(self, query: str) -> Optional[str]:
-        """Classify query into a field intent for negative detection."""
-        query_lower = query.lower()
-        for intent, patterns in self.FIELD_INTENT_PATTERNS.items():
-            if any(p in query_lower for p in patterns):
-                return intent
-        return None
-    
-    async def _check_field_exists_in_chunks(
-        self,
-        query: str,
-        chunks_with_scores: List[Tuple[Dict, float]],
-        doc_id: Optional[str] = None,
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Graph-based existence check: Does the document contain the requested field?
-        
-        This is a lightweight section-based check using existing Azure DI metadata.
-        If the query asks for a specific field type (VAT, payment portal, etc.) and
-        NO chunk from the target document contains relevant keywords in its text
-        or section_path, we can confidently return "Not found" without LLM.
-        
-        Args:
-            query: The user query
-            chunks_with_scores: Retrieved chunks with similarity scores
-            doc_id: Optional document ID to restrict check to
-            
-        Returns:
-            (exists, intent): Whether field likely exists, and detected intent
-        """
-        intent = self._classify_field_intent(query)
-        if not intent:
-            # Unknown intent → can't do negative detection, proceed with LLM
-            return (True, None)
-        
-        hints = self.FIELD_SECTION_HINTS.get(intent, [])
-        if not hints:
-            return (True, intent)
-        
-        # Check if ANY chunk from the target document contains the hint keywords
-        for chunk, score in chunks_with_scores:
-            # If doc_id specified, only check chunks from that document
-            if doc_id and chunk.get("document_id") != doc_id:
-                continue
-            
-            # Check chunk text for hint keywords
-            chunk_text_lower = (chunk.get("text") or "").lower()
-            if any(h in chunk_text_lower for h in hints):
-                logger.info(
-                    "field_existence_check_found",
-                    intent=intent,
-                    hint_matched=next(h for h in hints if h in chunk_text_lower),
-                    chunk_id=chunk.get("id"),
-                )
-                return (True, intent)
-            
-            # Check section_path metadata if available
-            section_path = chunk.get("section_path") or chunk.get("metadata", {}).get("section_path") or []
-            if isinstance(section_path, list):
-                section_text = " ".join(section_path).lower()
-                if any(h in section_text for h in hints):
-                    logger.info(
-                        "field_existence_check_found_in_section",
-                        intent=intent,
-                        section_path=section_path,
-                        chunk_id=chunk.get("id"),
-                    )
-                    return (True, intent)
-        
-        # No chunk contains the expected field keywords → field doesn't exist
-        logger.info(
-            "field_existence_check_not_found",
-            intent=intent,
-            hints_checked=hints,
-            chunks_checked=len(chunks_with_scores),
-            doc_id=doc_id,
-        )
-        return (False, intent)
-    
     async def _execute_route_1_vector_rag(self, query: str) -> Dict[str, Any]:
         """
         Route 1: Simple Vector RAG for fast fact lookups.
@@ -378,8 +271,8 @@ class HybridPipeline:
         Uses concise prompts to return direct factual answers.
         
         Enhanced with Graph-Based Negative Detection:
-        - Classifies query intent (VAT, payment portal, etc.)
-        - Checks if target document contains relevant section/keywords
+        - Extracts query keywords dynamically
+        - Queries Neo4j directly to check if keywords exist in document
         - If not found, returns "Not found" immediately (no LLM hallucination risk)
         
         Fallback Strategy:
@@ -486,41 +379,57 @@ class HybridPipeline:
             # ================================================================
             # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
             # ================================================================
-            # Before calling LLM, check if the requested field exists in the
-            # document. This prevents hallucinations for negative questions.
+            # Use AsyncNeo4jService to check if query keywords exist in the
+            # document chunks. This prevents hallucinations for negative questions.
             # ================================================================
-            top_doc_id = results[0][0].get("document_id") if results else None
-            field_exists, detected_intent = await self._check_field_exists_in_chunks(
-                query=query,
-                chunks_with_scores=results,
-                doc_id=top_doc_id,
-            )
+            top_doc_url = results[0][0].get("url") or results[0][0].get("source") if results else None
             
-            if not field_exists and detected_intent:
-                # Field doesn't exist in document → deterministic "Not found"
-                logger.info(
-                    "route_1_negative_detection_triggered",
-                    intent=detected_intent,
-                    doc_id=top_doc_id,
-                    reason="Field keywords not found in document chunks",
-                )
-                return {
-                    "response": "Not found in the provided documents.",
-                    "route_used": "route_1_vector_rag",
-                    "citations": citations,
-                    "evidence_path": [],
-                    "metadata": {
-                        "num_chunks": len(results),
-                        "chunks_used": len(context_parts),
-                        "latency_estimate": "fast",
-                        "precision_level": "standard",
-                        "route_description": "Vector search with graph-based negative detection",
-                        "negative_detection": True,
-                        "detected_intent": detected_intent,
-                        "debug_top_chunk_id": results[0][0]["id"] if results else None,
-                        "debug_top_chunk_preview": results[0][0]["text"][:100] if results else None,
-                    }
+            if self._async_neo4j and top_doc_url:
+                # Extract meaningful keywords from query (exclude stopwords)
+                import re
+                stopwords = {
+                    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
+                    "is", "are", "was", "were", "be", "been", "this", "that", "these", "those",
+                    "what", "which", "who", "whom", "where", "when", "why", "how", "do", "does",
+                    "did", "has", "have", "had", "will", "would", "could", "should", "may", "might",
                 }
+                query_keywords = [
+                    token for token in re.findall(r"[A-Za-z0-9]+", query.lower())
+                    if len(token) >= 3 and token not in stopwords
+                ]
+                
+                if query_keywords:
+                    field_exists, matched_section = await self._async_neo4j.check_field_exists_in_document(
+                        group_id=self.group_id,
+                        doc_url=top_doc_url,
+                        field_keywords=query_keywords,
+                    )
+                    
+                    if not field_exists:
+                        # Field doesn't exist in document → deterministic "Not found"
+                        logger.info(
+                            "route_1_negative_detection_triggered",
+                            keywords=query_keywords,
+                            doc_url=top_doc_url,
+                            reason="Query keywords not found in document via graph check",
+                        )
+                        return {
+                            "response": "Not found in the provided documents.",
+                            "route_used": "route_1_vector_rag",
+                            "citations": citations,
+                            "evidence_path": [],
+                            "metadata": {
+                                "num_chunks": len(results),
+                                "chunks_used": len(context_parts),
+                                "latency_estimate": "fast",
+                                "precision_level": "standard",
+                                "route_description": "Vector search with graph-based negative detection",
+                                "negative_detection": True,
+                                "query_keywords": query_keywords,
+                                "debug_top_chunk_id": results[0][0]["id"] if results else None,
+                                "debug_top_chunk_preview": results[0][0]["text"][:100] if results else None,
+                            }
+                        }
             
             # ================================================================
             # Route 1 Strategy: Extract from TOP-RANKED chunk only using LLM
@@ -1611,11 +1520,13 @@ EVIDENCE: <verbatim quote from Context, or empty>
         # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
         # ================================================================
-        # evidence_nodes is List[Tuple[str, float]] - entity names and scores
-        # We need to retrieve text chunks first to check for field existence
+        # Route 2 logic: Router already determined this is entity-focused.
+        # If entity extraction succeeded BUT 0 text chunks retrieved,
+        # it means the extracted entities don't exist in the corpus.
+        # No need for intent patterns - the entity itself is the intent signal.
         # ================================================================
         
-        # Retrieve text chunks for negative detection check
+        # Retrieve text chunks for evidence
         text_chunks_for_check = []
         if self.synthesizer and self.synthesizer.text_store:
             try:
@@ -1624,26 +1535,16 @@ EVIDENCE: <verbatim quote from Context, or empty>
             except Exception as e:
                 logger.warning("route_2_text_chunk_retrieval_failed", error=str(e))
         
-        # Convert text chunks to (chunk_dict, score) format for negative detection
-        chunks_with_scores = [(chunk, 1.0) for chunk in text_chunks_for_check]
-        
-        # Check if the requested field exists in the retrieved chunks
-        field_exists, detected_intent = await self._check_field_exists_in_chunks(
-            query=query,
-            chunks_with_scores=chunks_with_scores,
-            doc_id=None,  # Check all chunks
-        )
-        
-        if not field_exists and detected_intent:
-            # Field doesn't exist in evidence → deterministic "Not found"
+        # If entity extraction succeeded but 0 chunks retrieved → entity doesn't exist
+        if len(text_chunks_for_check) == 0 and len(seed_entities) > 0:
             logger.info(
                 "route_2_negative_detection_triggered",
-                intent=detected_intent,
+                seed_entities=seed_entities,
                 num_evidence_nodes=len(evidence_nodes),
-                num_chunks_checked=len(chunks_with_scores)
+                reason="entities_extracted_but_no_chunks"
             )
             return {
-                "response": f"The requested information ('{detected_intent}') was not found in the available documents.",
+                "response": f"The requested information was not found in the available documents.",
                 "route_used": "route_2_local_search",
                 "citations": [],
                 "evidence_path": [],
@@ -1654,8 +1555,7 @@ EVIDENCE: <verbatim quote from Context, or empty>
                     "latency_estimate": "fast",
                     "precision_level": "high",
                     "route_description": "Entity-focused with negative detection",
-                    "negative_detection": True,
-                    "field_intent": detected_intent
+                    "negative_detection": True
                 }
             }
         

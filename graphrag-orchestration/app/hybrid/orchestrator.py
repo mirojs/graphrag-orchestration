@@ -367,76 +367,6 @@ class HybridPipeline:
         )
         return (False, intent)
     
-    async def _check_field_exists_in_evidence(
-        self,
-        query: str,
-        evidence_nodes: List[Dict[str, Any]],
-    ) -> Tuple[bool, Optional[str]]:
-        """
-        Check if a requested field exists in evidence nodes (Route 2/3 negative detection).
-        
-        Returns:
-            (field_exists, intent):
-            - (True, intent): Field found or unknown intent (proceed with LLM)
-            - (False, intent): Field definitely doesn't exist (skip LLM, return "Not found")
-        """
-        intent = self._classify_field_intent(query)
-        if not intent:
-            # Unknown intent → can't do negative detection, proceed with LLM
-            return (True, None)
-        
-        hints = self.FIELD_SECTION_HINTS.get(intent, [])
-        if not hints:
-            return (True, intent)
-        
-        # Check if ANY evidence node contains the hint keywords
-        for item in evidence_nodes:
-            # Handle multiple formats: dict, (dict, score) tuple, or string
-            if isinstance(item, tuple):
-                node, score = item
-            elif isinstance(item, dict):
-                node = item
-            elif isinstance(item, str):
-                # If it's a string, wrap it in a dict
-                node = {"text": item}
-            else:
-                # Unknown format, skip
-                logger.warning("field_existence_check_unknown_format", item_type=type(item).__name__)
-                continue
-            
-            # Evidence nodes have 'text' field
-            node_text_lower = (node.get("text") or "").lower()
-            if any(h in node_text_lower for h in hints):
-                logger.info(
-                    "field_existence_check_found_in_evidence",
-                    intent=intent,
-                    hint_matched=next(h for h in hints if h in node_text_lower),
-                    node_id=node.get("id", "N/A"),
-                )
-                return (True, intent)
-            
-            # Also check section_path if available
-            section_path = node.get("section_path") or []
-            if isinstance(section_path, list):
-                section_text = " ".join(section_path).lower()
-                if any(h in section_text for h in hints):
-                    logger.info(
-                        "field_existence_check_found_in_evidence_section",
-                        intent=intent,
-                        section_path=section_path,
-                        node_id=node.get("id", "N/A"),
-                    )
-                    return (True, intent)
-        
-        # No evidence node contains the expected field keywords → field doesn't exist
-        logger.info(
-            "field_existence_check_not_found_in_evidence",
-            intent=intent,
-            hints_checked=hints,
-            evidence_nodes_checked=len(evidence_nodes),
-        )
-        return (False, intent)
-    
     async def _execute_route_1_vector_rag(self, query: str) -> Dict[str, Any]:
         """
         Route 1: Simple Vector RAG for fast fact lookups.
@@ -1681,12 +1611,27 @@ EVIDENCE: <verbatim quote from Context, or empty>
         # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
         # ================================================================
-        # Before calling LLM synthesis, check if the requested field exists
-        # in the retrieved evidence. This prevents hallucinations.
+        # evidence_nodes is List[Tuple[str, float]] - entity names and scores
+        # We need to retrieve text chunks first to check for field existence
         # ================================================================
-        field_exists, detected_intent = await self._check_field_exists_in_evidence(
+        
+        # Retrieve text chunks for negative detection check
+        text_chunks_for_check = []
+        if self.synthesizer and self.synthesizer.text_store:
+            try:
+                text_chunks_for_check = await self.synthesizer._retrieve_text_chunks(evidence_nodes)
+                logger.info("route_2_text_chunks_retrieved", num_chunks=len(text_chunks_for_check))
+            except Exception as e:
+                logger.warning("route_2_text_chunk_retrieval_failed", error=str(e))
+        
+        # Convert text chunks to (chunk_dict, score) format for negative detection
+        chunks_with_scores = [(chunk, 1.0) for chunk in text_chunks_for_check]
+        
+        # Check if the requested field exists in the retrieved chunks
+        field_exists, detected_intent = await self._check_field_exists_in_chunks(
             query=query,
-            evidence_nodes=evidence_nodes
+            chunks_with_scores=chunks_with_scores,
+            doc_id=None,  # Check all chunks
         )
         
         if not field_exists and detected_intent:
@@ -1694,7 +1639,8 @@ EVIDENCE: <verbatim quote from Context, or empty>
             logger.info(
                 "route_2_negative_detection_triggered",
                 intent=detected_intent,
-                num_evidence_nodes=len(evidence_nodes)
+                num_evidence_nodes=len(evidence_nodes),
+                num_chunks_checked=len(chunks_with_scores)
             )
             return {
                 "response": f"The requested information ('{detected_intent}') was not found in the available documents.",

@@ -40,7 +40,7 @@ Router (all routes):
   - Query Classification: HYBRID_ROUTER_MODEL (gpt-4o-mini)
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 import structlog
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -201,6 +201,113 @@ class HybridPipeline:
     # Route 1: Vector RAG (Fast Lane)
     # =========================================================================
     
+    # Field intent → section/text keywords for negative detection
+    # If query matches an intent and NO chunk contains these keywords,
+    # we can confidently return "Not found" without LLM extraction.
+    FIELD_SECTION_HINTS: Dict[str, List[str]] = {
+        "vat_id": ["vat", "tax id", "tax i.d", "tax identification", "tin ", "v.a.t"],
+        "payment_portal": ["payment portal", "pay online", "online payment", "pay here", "portal url"],
+        "bank_routing": ["routing number", "routing #", "aba number", "aba #"],
+        "iban_swift": ["iban", "swift", "bic", "international bank"],
+        "bank_account": ["account number", "account #", "bank account", "acct #", "acct."],
+        "wire_transfer": ["wire transfer", "wire instructions", "ach instructions", "bank transfer"],
+        "license_number": ["license number", "license #", "licence no", "license no"],
+        "mold_clause": ["mold", "mould", "fungus", "fungi"],
+        "shipping_method": ["shipped via", "shipping method", "carrier", "delivery method"],
+    }
+    
+    # Query patterns → field intent classification
+    FIELD_INTENT_PATTERNS: Dict[str, List[str]] = {
+        "vat_id": ["vat", "tax id", "tax i.d"],
+        "payment_portal": ["payment portal", "pay online", "portal url"],
+        "bank_routing": ["routing number", "routing #", "bank routing"],
+        "iban_swift": ["iban", "swift", "bic"],
+        "bank_account": ["account number", "bank account"],
+        "wire_transfer": ["wire transfer", "ach instruction", "wire instruction"],
+        "license_number": ["license number", "agent's license", "licence"],
+        "mold_clause": ["mold damage", "mold coverage", "mould"],
+        "shipping_method": ["shipping method", "shipped via"],
+    }
+    
+    def _classify_field_intent(self, query: str) -> Optional[str]:
+        """Classify query into a field intent for negative detection."""
+        query_lower = query.lower()
+        for intent, patterns in self.FIELD_INTENT_PATTERNS.items():
+            if any(p in query_lower for p in patterns):
+                return intent
+        return None
+    
+    async def _check_field_exists_in_chunks(
+        self,
+        query: str,
+        chunks_with_scores: List[Tuple[Dict, float]],
+        doc_id: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Graph-based existence check: Does the document contain the requested field?
+        
+        This is a lightweight section-based check using existing Azure DI metadata.
+        If the query asks for a specific field type (VAT, payment portal, etc.) and
+        NO chunk from the target document contains relevant keywords in its text
+        or section_path, we can confidently return "Not found" without LLM.
+        
+        Args:
+            query: The user query
+            chunks_with_scores: Retrieved chunks with similarity scores
+            doc_id: Optional document ID to restrict check to
+            
+        Returns:
+            (exists, intent): Whether field likely exists, and detected intent
+        """
+        intent = self._classify_field_intent(query)
+        if not intent:
+            # Unknown intent → can't do negative detection, proceed with LLM
+            return (True, None)
+        
+        hints = self.FIELD_SECTION_HINTS.get(intent, [])
+        if not hints:
+            return (True, intent)
+        
+        # Check if ANY chunk from the target document contains the hint keywords
+        for chunk, score in chunks_with_scores:
+            # If doc_id specified, only check chunks from that document
+            if doc_id and chunk.get("document_id") != doc_id:
+                continue
+            
+            # Check chunk text for hint keywords
+            chunk_text_lower = (chunk.get("text") or "").lower()
+            if any(h in chunk_text_lower for h in hints):
+                logger.info(
+                    "field_existence_check_found",
+                    intent=intent,
+                    hint_matched=next(h for h in hints if h in chunk_text_lower),
+                    chunk_id=chunk.get("id"),
+                )
+                return (True, intent)
+            
+            # Check section_path metadata if available
+            section_path = chunk.get("section_path") or chunk.get("metadata", {}).get("section_path") or []
+            if isinstance(section_path, list):
+                section_text = " ".join(section_path).lower()
+                if any(h in section_text for h in hints):
+                    logger.info(
+                        "field_existence_check_found_in_section",
+                        intent=intent,
+                        section_path=section_path,
+                        chunk_id=chunk.get("id"),
+                    )
+                    return (True, intent)
+        
+        # No chunk contains the expected field keywords → field doesn't exist
+        logger.info(
+            "field_existence_check_not_found",
+            intent=intent,
+            hints_checked=hints,
+            chunks_checked=len(chunks_with_scores),
+            doc_id=doc_id,
+        )
+        return (False, intent)
+    
     async def _execute_route_1_vector_rag(self, query: str) -> Dict[str, Any]:
         """
         Route 1: Simple Vector RAG for fast fact lookups.
@@ -210,6 +317,11 @@ class HybridPipeline:
         
         Implementation: Searches TextChunk nodes in Neo4j for exact text retrieval.
         Uses concise prompts to return direct factual answers.
+        
+        Enhanced with Graph-Based Negative Detection:
+        - Classifies query intent (VAT, payment portal, etc.)
+        - Checks if target document contains relevant section/keywords
+        - If not found, returns "Not found" immediately (no LLM hallucination risk)
         
         Fallback Strategy:
         ==================
@@ -259,10 +371,10 @@ class HybridPipeline:
                         logger.warning("vector_rag_derived_embedding_failed_after_failure",
                                       reason="Could not derive embedding from group chunks")
             
-            # Retrieval: vector (if we have a query embedding) + lexical (always), then merge.
+            # Retrieval: Hybrid RRF (vector + fulltext) for best precision
+            # Fulltext catches exact keyword matches, vector catches semantic similarity
             results = []
             if query_embedding is not None:
-                # Future-proof path: Neo4j-native hybrid + RRF (vector + fulltext + fusion).
                 results = await self._search_text_chunks_hybrid_rrf(
                     query_text=query,
                     embedding=query_embedding,
@@ -312,29 +424,64 @@ class HybridPipeline:
             
             context = "\n\n".join(context_parts)
             
-            # Try NLP extraction first (fast, deterministic, no hallucination)
-            nlp_answer = self._extract_with_nlp(query, results)
+            # ================================================================
+            # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
+            # ================================================================
+            # Before calling LLM, check if the requested field exists in the
+            # document. This prevents hallucinations for negative questions.
+            # ================================================================
+            top_doc_id = results[0][0].get("document_id") if results else None
+            field_exists, detected_intent = await self._check_field_exists_in_chunks(
+                query=query,
+                chunks_with_scores=results,
+                doc_id=top_doc_id,
+            )
             
-            if nlp_answer:
-                logger.info("route_1_nlp_extraction_success", 
-                           answer_length=len(nlp_answer))
-                answer = nlp_answer
+            if not field_exists and detected_intent:
+                # Field doesn't exist in document → deterministic "Not found"
+                logger.info(
+                    "route_1_negative_detection_triggered",
+                    intent=detected_intent,
+                    doc_id=top_doc_id,
+                    reason="Field keywords not found in document chunks",
+                )
+                return {
+                    "response": "Not found in the provided documents.",
+                    "route_used": "route_1_vector_rag",
+                    "citations": citations,
+                    "evidence_path": [],
+                    "metadata": {
+                        "num_chunks": len(results),
+                        "chunks_used": len(context_parts),
+                        "latency_estimate": "fast",
+                        "precision_level": "standard",
+                        "route_description": "Vector search with graph-based negative detection",
+                        "negative_detection": True,
+                        "detected_intent": detected_intent,
+                        "debug_top_chunk_id": results[0][0]["id"] if results else None,
+                        "debug_top_chunk_preview": results[0][0]["text"][:100] if results else None,
+                    }
+                }
+            
+            # ================================================================
+            # Route 1 Strategy: Extract from TOP-RANKED chunk only using LLM
+            # ================================================================
+            # This combines the precision of "Top Chunk" focus (avoiding cross-doc pollution)
+            # with the adaptability of LLM (handling synonyms, implied values, unstructured text).
+            
+            # Extract from top chunk only (most relevant)
+            llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
+            
+            if llm_answer:
+                logger.info("route_1_llm_extraction_success", 
+                           answer=llm_answer[:50],
+                           from_top_chunk=True)
+                answer = llm_answer
             else:
-                # Fallback to LLM synthesis with temperature=0 for determinism
-                logger.info("route_1_fallback_to_llm_synthesis")
-                prompt = f"""Based on the following text excerpts, answer the question.
-Provide a direct, concise answer. If the user asked for a specific value (date, amount, name), provide just that value.
-Only use the provided excerpts. If the answer is not present, respond with: "Not specified in the provided documents."
-
-Excerpts:
-{context}
-
-Question: {query}
-
-Answer:"""
-                
-                response = self.llm.complete(prompt, temperature=0.0)
-                answer = response.text if hasattr(response, 'text') else str(response)
+                # If LLM can't extract, return "not found"
+                logger.info("route_1_llm_extraction_failed",
+                           query=query[:100])
+                answer = "Not found in the provided documents."
             
             return {
                 "response": answer,
@@ -346,7 +493,9 @@ Answer:"""
                     "chunks_used": len(context_parts),
                     "latency_estimate": "fast",
                     "precision_level": "standard",
-                    "route_description": "Vector search on text chunks"
+                    "route_description": "Vector search on text chunks with LLM extraction",
+                    "debug_top_chunk_id": results[0][0]["id"] if results else None,
+                    "debug_top_chunk_preview": results[0][0]["text"][:100] if results else None
                 }
             }
             
@@ -361,22 +510,431 @@ Answer:"""
             result["metadata"]["fallback_reason"] = str(e)
             return result
 
+    async def _extract_with_llm_from_top_chunk(
+        self,
+        query: str,
+        chunks_with_scores: list
+    ) -> Optional[str]:
+        """
+        Extract answer from TOP-RANKED chunk using LLM (Temperature 0).
+        
+        Strategy: 
+        1. Take the highest scoring chunk (Rank 1).
+        2. Feed it to LLM with a strict extraction prompt.
+        3. This avoids "pollution" from lower-ranked chunks (other documents).
+        4. This avoids "brittle regex" (NLP) issues by letting LLM handle language nuances.
+        """
+        if not chunks_with_scores:
+            return None
+        
+        # If a candidate fails verification, discard it (never return it) and
+        # optionally try the next-best chunks under the same verification gate.
+        max_chunks_to_try = 3
+
+        # Route 1 must avoid cross-document pollution. If we fall back to other
+        # chunks, only consider chunks from the same document as the top-ranked
+        # chunk (e.g., later chunks of the same PDF).
+        primary_document_id = None
+        try:
+            primary_document_id = (chunks_with_scores[0][0] or {}).get("document_id")
+        except Exception:
+            primary_document_id = None
+
+        def _has_marker_near_answer(
+            evidence_text_lower: str,
+            answer_lower: str,
+            markers_lower: list[str],
+            window: int = 80,
+        ) -> bool:
+            if not evidence_text_lower or not answer_lower or not markers_lower:
+                return False
+            start = 0
+            while True:
+                idx = evidence_text_lower.find(answer_lower, start)
+                if idx == -1:
+                    return False
+                left = max(0, idx - window)
+                right = min(len(evidence_text_lower), idx + len(answer_lower) + window)
+                window_text = evidence_text_lower[left:right]
+                # Ensure markers are outside of the answer itself (e.g., avoid matching
+                # "portal" from inside "/portal/" in the URL).
+                window_text_wo_answer = window_text.replace(answer_lower, " ")
+                if any(m in window_text_wo_answer for m in markers_lower):
+                    return True
+                start = idx + len(answer_lower)
+
+        def _looks_like_url_or_email(text: str) -> bool:
+            lower = text.lower()
+            if "http://" in lower or "https://" in lower or lower.startswith("www."):
+                return True
+            # lightweight email heuristic (avoid regex)
+            if "@" in text and "." in text.split("@", 1)[-1]:
+                return True
+            return False
+
+        try:
+            from app.services.llm_service import LLMService
+            import re
+            llm_service = LLMService()
+
+            stopwords = {
+                "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
+                "is", "are", "was", "were", "be", "been", "this", "that", "these", "those",
+                "what", "which", "who", "whom", "where", "when", "why", "how",
+            }
+            query_keywords = []
+            for token in re.findall(r"[A-Za-z0-9]+", query.lower()):
+                if len(token) < 3:
+                    continue
+                if token in stopwords:
+                    continue
+                query_keywords.append(token)
+            query_keywords = sorted(set(query_keywords))
+
+            tried = 0
+            for rank, (chunk, score) in enumerate(chunks_with_scores, start=1):
+                if tried >= max_chunks_to_try:
+                    break
+
+                if primary_document_id:
+                    if (chunk or {}).get("document_id") != primary_document_id:
+                        continue
+
+                tried += 1
+                top_chunk = chunk["text"]
+
+                logger.info(
+                    "llm_extracting_from_top_chunk",
+                    query=query[:50],
+                    chunk_rank=rank,
+                    chunk_score=float(score),
+                    chunk_preview=top_chunk[:100],
+                )
+
+                prompt = f"""
+You are a precise data extraction engine.
+Context:
+{top_chunk}
+
+User Query: {query}
+
+Instructions:
+1. Extract the EXACT answer from the context above.
+2. If the answer is a specific value (price, date, name, ID), return ONLY that value.
+3. If the query asks for a total/amount and multiple exist, look for "Total", "Amount Due", or "Balance".
+4. Do not generate conversational text. Just the value.
+5. Do not guess or hallucinate. Only extract if explicitly stated in the text.
+6. If the answer is not explicitly present in the provided context, you MUST return "Not found".
+"""
+
+                response = llm_service.generate(prompt, temperature=0.0)
+                cleaned_response = response.strip()
+
+                # If model says Not found, treat as no answer and try next chunk.
+                if "not found" in cleaned_response.lower() and len(cleaned_response) < 30:
+                    continue
+
+                # Fast deterministic grounding for URLs/emails: must be exact substring.
+                if _looks_like_url_or_email(cleaned_response):
+                    if cleaned_response not in top_chunk:
+                        logger.warning(
+                            "llm_candidate_rejected_by_exact_grounding",
+                            candidate=cleaned_response,
+                            reason="URL/email must appear exactly in the source chunk",
+                            chunk_rank=rank,
+                        )
+                        continue
+
+                # ---------------------------------------------------------
+                # VERIFICATION STEP (Anti-Hallucination)
+                # ---------------------------------------------------------
+                # If verifier says NO, discard candidate and try next chunk.
+                # ---------------------------------------------------------
+                verify_prompt = f"""
+Verification Task.
+
+Context:
+{top_chunk[:2000]}
+
+Question: {query}
+Proposed Answer: {cleaned_response}
+
+Your job:
+1. Decide if the Proposed Answer is explicitly supported as the answer to the Question.
+2. If YES, provide an exact verbatim quote from the Context that proves it.
+
+Rules:
+- The evidence quote MUST be copied exactly from the Context.
+- The evidence quote MUST contain the Proposed Answer exactly.
+- If the Context contains the Proposed Answer but it is NOT answering the Question (e.g., it's a different ID/URL), reply NO.
+
+Reply in exactly two lines:
+VERDICT: YES or NO
+EVIDENCE: <verbatim quote from Context, or empty>
+"""
+
+                verification_raw = llm_service.generate(verify_prompt, temperature=0.0).strip()
+                verdict = ""
+                evidence = ""
+                for line in verification_raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    upper = line.upper()
+                    if upper.startswith("VERDICT:"):
+                        verdict = line.split(":", 1)[-1].strip().upper()
+                    elif upper.startswith("EVIDENCE:"):
+                        evidence = line.split(":", 1)[-1].strip()
+
+                if verdict != "YES":
+                    logger.warning(
+                        "llm_verification_failed",
+                        candidate=cleaned_response,
+                        reason="Verifier rejected answer",
+                        chunk_rank=rank,
+                    )
+                    continue
+
+                evidence_ok = True
+                if not evidence:
+                    evidence_ok = False
+                elif evidence not in top_chunk:
+                    evidence_ok = False
+                elif cleaned_response not in evidence:
+                    evidence_ok = False
+                elif query_keywords:
+                    evidence_lower = evidence.lower()
+                    if not any(k in evidence_lower for k in query_keywords):
+                        evidence_ok = False
+
+                # Extra precision: ensure evidence contains an explicit label that
+                # matches the question intent (not just an answer-shaped string).
+                if evidence_ok:
+                    query_lower = query.lower()
+                    evidence_lower = evidence.lower()
+                    answer_lower = cleaned_response.lower()
+                    evidence_without_answer = evidence_lower.replace(answer_lower, " ")
+
+                    required_markers: list[str] = []
+                    # Payment portal URLs: require explicit "pay online"/"portal" wording outside the URL.
+                    if (
+                        "payment portal" in query_lower
+                        or ("portal" in query_lower and "url" in query_lower)
+                        or ("payment" in query_lower and "url" in query_lower)
+                        or "pay online" in query_lower
+                    ):
+                        required_markers = [
+                            "pay online",
+                            "online payment",
+                            "payment portal",
+                            "pay here",
+                            "make a payment",
+                            "portal",
+                        ]
+
+                    # VAT / Tax ID: require explicit ID labeling (avoid matching generic "tax" amounts).
+                    if ("vat" in query_lower) or ("tax id" in query_lower) or ("tax i.d" in query_lower):
+                        required_markers = [
+                            "vat",
+                            "tax id",
+                            "tax i.d",
+                            "tax identification",
+                            "tin",
+                        ]
+
+                    if required_markers:
+                        # Require the marker to appear close to the answer (not merely
+                        # somewhere else in a large multi-line quote).
+                        if not _has_marker_near_answer(
+                            evidence_text_lower=evidence_lower,
+                            answer_lower=answer_lower,
+                            markers_lower=required_markers,
+                            window=80,
+                        ):
+                            evidence_ok = False
+
+                        # Backstop: if the verifier didn't include the marker anywhere
+                        # outside of the answer, also reject.
+                        if evidence_ok and not any(m in evidence_without_answer for m in required_markers):
+                            evidence_ok = False
+
+                if not evidence_ok:
+                    logger.warning(
+                        "llm_verification_failed",
+                        candidate=cleaned_response,
+                        reason="Verifier did not provide valid grounded evidence",
+                        chunk_rank=rank,
+                    )
+                    continue
+
+                logger.info(
+                    "llm_extraction_verified",
+                    candidate=cleaned_response[:80],
+                    chunk_rank=rank,
+                    document_id=(chunk or {}).get("document_id"),
+                    chunk_id=(chunk or {}).get("id"),
+                )
+
+                return cleaned_response
+
+            return None
+
+        except Exception as e:
+            logger.error("llm_extraction_error", error=str(e))
+            return None
+
+    # Deprecated: NLP/Regex extraction (kept for reference but unused)
+    def _extract_with_nlp_from_top_chunk_deprecated(
+        self,
+        query: str,
+        chunks_with_scores: list
+    ) -> Optional[str]:
+        """
+        Extract answer from TOP-RANKED chunk only using document-agnostic patterns.
+        
+        Strategy: Trust hybrid search ranking to put best chunk first.
+        Extract the requested value type (date, amount, ID, name) from that chunk.
+        
+        This ensures:
+        - Deterministic answers (same top chunk → same result)
+        - No confusion from multiple documents
+        - Fast extraction without LLM
+        """
+        import re
+        
+        if not chunks_with_scores:
+            return None
+        
+        # Extract from TOP chunk only (rank 1)
+        top_chunk = chunks_with_scores[0][0]["text"]
+        query_lower = query.lower()
+        
+        logger.info("nlp_extracting_from_top_chunk",
+                   query=query[:50],
+                   chunk_preview=top_chunk[:100])
+        
+        # IMPORTANT: Check patterns in priority order based on query keywords
+        # Money queries should be checked BEFORE ID patterns to avoid confusion
+        
+        # Pattern 1: Currency amounts - Check FIRST for money queries
+        if any(kw in query_lower for kw in ["amount", "total", "price", "cost", "fee", "payment", "rate", "dollar", "$"]):
+            # Strategy A: Look for explicit currency symbols ($)
+            pattern_currency = r'\$\s*([\d,]+\.?\d{0,2})'
+            matches_currency = re.findall(pattern_currency, top_chunk)
+            
+            # Strategy B: Look for numbers that look like currency (123.45) near keywords like "Total"
+            # This handles tables where $ might be in the header but not the row
+            pattern_implied = r'(?:Total|Amount|Price|Cost|Due)\s*[:\n]?\s*([\d,]+\.\d{2})\b'
+            matches_implied = re.findall(pattern_implied, top_chunk, re.IGNORECASE)
+            
+            all_matches = []
+            
+            # Add currency matches (high confidence)
+            for m in matches_currency:
+                try:
+                    val = float(m.replace(',', '').replace(' ', ''))
+                    all_matches.append((val, "$" + m, 'currency'))
+                except: continue
+                
+            # Add implied matches (medium confidence)
+            for m in matches_implied:
+                try:
+                    val = float(m.replace(',', '').replace(' ', ''))
+                    # Avoid duplicates
+                    if not any(existing[0] == val for existing in all_matches):
+                        all_matches.append((val, "$" + m, 'implied'))
+                except: continue
+
+            if all_matches:
+                # If query asks for "total", prefer largest amount
+                if "total" in query_lower or "amount" in query_lower:
+                    # Sort by value descending
+                    best_match = max(all_matches, key=lambda x: x[0])
+                    logger.info("nlp_found_amount", result=best_match[1], source=best_match[2])
+                    return best_match[1]
+                else:
+                    # Return first match found
+                    logger.info("nlp_found_amount", result=all_matches[0][1])
+                    return all_matches[0][1]
+        
+        # Pattern 2: Invoice/PO/Registration/License numbers - Only check if NOT a money query
+        if any(kw in query_lower for kw in ["number", "#", "invoice", "po", "p.o.", "registration", "license"]) and not any(kw in query_lower for kw in ["amount", "total", "price", "cost", "fee", "payment"]):
+            # Look for common ID patterns
+            patterns = [
+                r'\b\d{8}\b',  # 8 digits (like 30060204)
+                r'\b[A-Z]{3,5}-\d{4,6}\b',  # REG-54321, INV-12345
+                r'#\s*(\d+)',  # # followed by digits
+                r'\b\d{7}\b',  # 7 digits (like 1256003)
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, top_chunk)
+                if match:
+                    result = match.group(1) if match.lastindex else match.group(0)
+                    logger.info("nlp_found_id", pattern=pattern, result=result)
+                    return result
+        
+        # Pattern 3: Dates - Find ANY date in standard formats (check before general number patterns)
+        if any(kw in query_lower for kw in ["date", "when", "day"]) and not any(kw in query_lower for kw in ["amount", "total", "number"]):
+            patterns = [
+                r'\b\d{1,2}/\d{1,2}/\d{4}\b',  # MM/DD/YYYY
+                r'\b\d{4}-\d{2}-\d{2}\b',      # YYYY-MM-DD
+                r'\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, top_chunk, re.IGNORECASE)
+                if match:
+                    logger.info("nlp_found_date", result=match.group(0))
+                    return match.group(0)
+        
+        # Pattern 4: Names - Find proper nouns (capitalized words)
+        if any(kw in query_lower for kw in ["who", "name", "salesperson", "vendor", "agent", "client", "customer", "owner", "builder"]):
+            # Look for 2-3 consecutive capitalized words (typical names)
+            pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b'
+            matches = re.findall(pattern, top_chunk)
+            if matches:
+                # Return first name found (trust top chunk ranking)
+                # Filter out common non-name words
+                exclude = {"The", "This", "That", "Invoice", "Contract", "Agreement", "Document", "Date", "Total", "Amount"}
+                names = [m for m in matches if m not in exclude]
+                if names:
+                    logger.info("nlp_found_name", result=names[0])
+                    return names[0]
+        
+        # Pattern 5: Durations/periods - Find time periods
+        if any(kw in query_lower for kw in ["how long", "how many", "duration", "period", "warranty", "term", "days", "months", "years"]):
+            patterns = [
+                r'\b\d+\s*(?:day|month|year)s?\b',  # "90 days", "2 years"
+                r'\b\d+\s*(?:hour|hr)s?\b',  # "hours"
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, top_chunk, re.IGNORECASE)
+                if match:
+                    logger.info("nlp_found_duration", result=match.group(0))
+                    return match.group(0)
+        
+        # Pattern 6: Payment terms
+        if "terms" in query_lower or "payment" in query_lower:
+            patterns = [
+                r'(?:due|payable)\s+(?:on|upon)\s+[^.]{5,40}',  # "due on contract signing"
+                r'net\s+\d+',  # "Net 30"
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, top_chunk, re.IGNORECASE)
+                if match:
+                    logger.info("nlp_found_terms", result=match.group(0))
+                    return match.group(0)
+        
+        logger.info("nlp_no_pattern_matched", query=query[:100])
+        return None
+
     def _extract_with_nlp(
         self,
         query: str,
         chunks_with_scores: list
     ) -> Optional[str]:
         """
-        Try to extract answer using deterministic NLP patterns.
-        Returns None if no pattern matches (triggers LLM fallback).
-        
-        Patterns optimized for invoice/contract factual extraction:
-        - Invoice numbers, PO numbers
-        - Currency amounts (total, price)
-        - Dates (due date, start date)
-        - Names (salesperson, vendor, agent)
-        - Registration numbers, codes
-        - Durations (warranty period, term)
+        OLD METHOD: Extract from multiple chunks (kept for backwards compatibility).
+        Prefer _extract_with_nlp_from_top_chunk() for Route 1.
         """
         import re
         

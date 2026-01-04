@@ -272,7 +272,8 @@ def _calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) -
         not_found_phrases = [
             "not found", "not specified", "not mentioned", "not provided",
             "does not specify", "doesn't specify", "no information",
-            "not available", "cannot be determined", "information is not"
+            "not available", "cannot be determined", "information is not",
+            "no relevant text found"
         ]
         negative_test_pass = any(phrase in actual_lower for phrase in not_found_phrases)
         return {

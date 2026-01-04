@@ -1247,3 +1247,185 @@ Based on testing:
 
 This is **production-ready for compliance** use cases.
 
+---
+
+## 13. Graph-Based Negative Answer Detection (Route 1 Enhancement)
+
+### 13.1. The Problem: Vector Search Always Returns Results
+
+Vector search finds semantically similar content but cannot distinguish between:
+- **Positive case:** The answer exists in the document
+- **Negative case:** The answer does NOT exist (user asks for a field that isn't present)
+
+When asked "What is the VAT/Tax ID on this invoice?" and the invoice has no VAT field, vector search still returns the invoice chunk. The LLM extractor then either:
+1. Hallucinates a plausible-looking ID
+2. Grabs a similar-looking field (Customer ID, P.O. Number)
+3. Pulls from a different document that does have a Tax ID
+
+**LLM verification cannot fix this** because it's probabilistic — it may "verify" an incorrect extraction if the answer-shaped string exists anywhere in the context.
+
+### 13.2. The Solution: Graph-Based Existence Check
+
+Use the knowledge graph as a **fact oracle** to pre-filter queries before LLM extraction:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     ROUTE 1 (ENHANCED)                          │
+├─────────────────────────────────────────────────────────────────┤
+│  Query: "What is the VAT ID on the invoice?"                    │
+│           ↓                                                      │
+│  Vector Search → Top chunk from Invoice document                │
+│           ↓                                                      │
+│  Intent Classification → field_type = "vat_id"                  │
+│           ↓                                                      │
+│  ┌─────────────────────────────────────────┐                    │
+│  │  GRAPH EXISTENCE CHECK (NEW)            │                    │
+│  │  Query Neo4j:                           │                    │
+│  │  - Section metadata contains "VAT"?     │                    │
+│  │  - Entity with type "TaxID" exists?     │                    │
+│  │  - Field relationship exists?           │                    │
+│  └─────────────────────────────────────────┘                    │
+│           ↓                                                      │
+│  Found? → Proceed with LLM extraction                           │
+│  Not found? → Return "Not found" immediately (no LLM)           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 13.3. Implementation Levels
+
+#### Level 1: Section-Based Check (Lightweight, Implemented)
+
+Uses existing Azure DI `section_path` metadata stored in TextChunk nodes:
+
+```python
+# Map question intent to expected section keywords
+FIELD_SECTION_HINTS = {
+    "vat_id": ["vat", "tax id", "tax identification", "tin"],
+    "payment_portal": ["payment portal", "pay online", "online payment"],
+    "bank_routing": ["bank", "routing", "ach", "wire transfer"],
+    "iban_swift": ["iban", "swift", "bic", "international"],
+}
+
+async def _check_section_exists(self, query: str, doc_id: str) -> bool:
+    """Check if document has a section matching query intent."""
+    intent = self._classify_field_intent(query)
+    hints = FIELD_SECTION_HINTS.get(intent, [])
+    
+    # Query Neo4j for chunks with matching section_path
+    cypher = """
+    MATCH (c:TextChunk)-[:PART_OF]->(d:Document {id: $doc_id})
+    WHERE c.section_path IS NOT NULL
+      AND any(section IN c.section_path WHERE 
+          any(hint IN $hints WHERE toLower(section) CONTAINS hint))
+    RETURN count(c) > 0 AS has_section
+    """
+    # If no matching section → "Not found"
+```
+
+**Pros:** Fast, uses existing metadata, no schema changes needed
+**Cons:** Relies on section names containing expected keywords
+
+#### Level 2: Entity-Based Check (Medium Complexity)
+
+Query the graph for entities of the expected type linked to the document:
+
+```python
+async def _check_entity_exists(self, query: str, doc_id: str) -> bool:
+    """Check if document has an entity of the expected type."""
+    intent = self._classify_field_intent(query)
+    entity_types = FIELD_ENTITY_TYPES.get(intent, [])
+    
+    cypher = """
+    MATCH (c:TextChunk)-[:PART_OF]->(d:Document {id: $doc_id})
+    MATCH (c)-[:MENTIONS]->(e:Entity)
+    WHERE e.type IN $entity_types
+    RETURN count(e) > 0 AS has_entity
+    """
+```
+
+**Pros:** More precise than section names
+**Cons:** Requires entity extraction to capture field-level entities
+
+#### Level 3: Schema-Based Check (Full Solution, Future)
+
+Pre-define document schemas and store field existence during indexing:
+
+```yaml
+# invoice_schema.yaml
+invoice:
+  required_fields: [invoice_number, date, total]
+  optional_fields: [vat_id, payment_portal, po_number]
+```
+
+```cypher
+// During indexing: store which fields exist
+(doc:Document)-[:HAS_FIELD]->(:Field {name: "total", value: "$4,120"})
+(doc:Document)-[:MISSING_FIELD]->(:Field {name: "vat_id"})  // Explicit absence
+
+// Query time: deterministic check
+MATCH (d:Document {id: $doc_id})-[:HAS_FIELD|MISSING_FIELD]->(f:Field {name: $field})
+RETURN f, type(r) AS status
+```
+
+**Pros:** 100% deterministic, explicit negative knowledge
+**Cons:** Requires schema definition per document type
+
+### 13.4. Why Graph Beats LLM for Negative Detection
+
+| Scenario | LLM Verification | Graph Check |
+|----------|------------------|-------------|
+| **Answer exists** | ✅ Works | ✅ Works |
+| **Answer doesn't exist** | ❌ May hallucinate | ✅ Deterministic "Not found" |
+| **Wrong field extracted** | ⚠️ May accept if string exists | ✅ Checks field type, not just value |
+| **Cross-document pollution** | ❌ Can't detect | ✅ Scoped to document ID |
+
+### 13.5. Comparison: Pure Vector vs. Graph-Enhanced Route 1
+
+| Feature | Pure Vector RAG | Graph-Enhanced Route 1 |
+|---------|-----------------|------------------------|
+| Positive questions | ✅ Good | ✅ Good (with graph validation) |
+| Negative questions | ❌ Hallucinates | ✅ Deterministic "Not found" |
+| Multi-hop questions | ❌ Single chunk | ✅ Can follow relationships |
+| Auditability | ⚠️ Limited | ✅ Full graph trail |
+| Latency | ~500ms | ~600ms (small graph query overhead) |
+
+### 13.6. Integration with Azure Document Intelligence
+
+Azure DI already extracts rich structure that enables graph-based checks:
+
+| DI Output | Graph Usage |
+|-----------|-------------|
+| `section_path` | Section-based existence check |
+| `table_data` | Field extraction from structured tables |
+| `paragraph.role` (title, sectionHeading) | Document structure navigation |
+| Key-value pairs (invoice model) | Direct field→value mapping |
+
+**Recommendation:** Start with Level 1 (section-based) using existing `section_path` metadata, then evolve toward Level 3 (schema-based) as document type classification matures.
+
+---
+
+## 14. Future Enhancements
+
+### 14.1. Document Type Classification
+
+Automatically classify documents during indexing:
+- Invoice, Contract, Warranty, Agreement, etc.
+- Apply document-specific schemas for field extraction
+- Store expected vs. actual fields in graph
+
+### 14.2. Explicit Negative Knowledge
+
+During indexing, explicitly record which expected fields are NOT present:
+```cypher
+(doc:Document)-[:MISSING_FIELD]->(:Field {name: "vat_id", reason: "not_in_document"})
+```
+
+This enables true negative reasoning: "The invoice does not contain a VAT ID" vs. "I couldn't find a VAT ID."
+
+### 14.3. Schema Vault Integration
+
+Use Cosmos DB Schema Vault to store and version document schemas:
+- Schemas define expected fields per document type
+- Extraction validates against schema
+- Query time checks schema for field existence
+

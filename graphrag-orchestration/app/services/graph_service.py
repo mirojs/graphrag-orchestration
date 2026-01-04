@@ -200,8 +200,49 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
                     """,
                     param_map={"data": chunked_params},
                 )
+            # Update importance scores for newly upserted entities
+            entity_ids = [e["id"] for e in entity_dicts]
+            self._compute_entity_importance(entity_ids)
         
         logger.debug(f"Upserted {len(nodes)} nodes for group {self.group_id} (embeddings included)")
+
+    def _compute_entity_importance(self, entity_ids: List[str]) -> None:
+        """
+        Compute importance scores for entities using native Cypher (no GDS required).
+        
+        Properties set:
+        - degree: Total number of relationships (higher = more connected)
+        - chunk_count: Number of chunk nodes this entity mentions
+        - importance_score: Combined score (degree * 0.3 + chunk_count * 0.7)
+        
+        Args:
+            entity_ids: List of entity IDs to update. If empty, updates all entities in group.
+        """
+        if not entity_ids:
+            return
+        
+        logger.debug(f"Computing importance for {len(entity_ids)} entities in group {self.group_id}")
+        
+        try:
+            # Use COUNT{} syntax for Neo4j 5.x compatibility (size() deprecated for patterns)
+            self.structured_query(
+                """
+                UNWIND $entity_ids AS eid
+                MATCH (e:`__Entity__` {id: eid})
+                WHERE e.group_id = $group_id
+                WITH e, COUNT { (e)-[]-() } AS degree
+                SET e.degree = degree
+                WITH e
+                WITH e, COUNT { (e)<-[:MENTIONS]-(:TextChunk) } AS chunk_count
+                SET e.chunk_count = chunk_count
+                SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
+                """,
+                param_map={"entity_ids": entity_ids, "group_id": self.group_id},
+            )
+            logger.debug(f"Computed importance scores for {len(entity_ids)} entities")
+        except Exception as e:
+            # Non-fatal: importance scoring is enhancement, not critical
+            logger.warning(f"Failed to compute entity importance: {e}")
 
     def upsert_relations(self, relations: List[Relation]) -> None:
         """

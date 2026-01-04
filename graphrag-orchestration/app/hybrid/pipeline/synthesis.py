@@ -184,13 +184,15 @@ class EvidenceSynthesizer:
         if entity_context:
             full_context = entity_context + "\n\n" + full_context
         
-        # Fallback to basic synthesis if no graph context
+        # Validate that we have source chunks from MENTIONS edges
         if not graph_context.source_chunks:
-            logger.warning("no_source_chunks_from_mentions_falling_back")
-            return await self.synthesize(
-                query=query,
-                evidence_nodes=evidence_nodes,
-                response_type=response_type
+            logger.error("no_source_chunks_from_mentions",
+                        hub_entities=graph_context.hub_entities,
+                        num_relationships=len(graph_context.relationships))
+            raise RuntimeError(
+                f"No source chunks found via MENTIONS edges for hub entities: {graph_context.hub_entities}. "
+                "This indicates the group may not have been properly indexed with entity extraction, "
+                "or the entities don't have MENTIONS relationships to TextChunks."
             )
         
         # Step 5: Generate response

@@ -282,17 +282,18 @@ class HybridPipeline:
         - Queries Neo4j directly to check if keywords exist in document
         - If not found, returns "Not found" immediately (no LLM hallucination risk)
         
-        Fallback Strategy:
-        ==================
-        If Neo4j or embeddings are unavailable, fall back to Route 2 (Local Search).
+        No Fallbacks - Fails Fast:
+        =========================
+        If Neo4j or embeddings are unavailable, raises RuntimeError immediately.
+        This ensures visibility into Route 1 failures and prevents unexpected latency.
         """
         logger.info("route_1_vector_rag_start", query=query[:50])
         
         # Check if we have required components for vector search
         if not self.neo4j_driver:
-            logger.warning("vector_rag_neo4j_unavailable_fallback_to_route_2",
-                          reason="Neo4j driver not available")
-            return await self._execute_route_2_local_search(query, "summary")
+            logger.error("vector_rag_neo4j_unavailable",
+                        reason="Neo4j driver not available")
+            raise RuntimeError("Route 1 requires Neo4j driver. Neo4j is not configured.")
         
         try:
             # Get query embedding
@@ -300,57 +301,31 @@ class HybridPipeline:
             llm_service = LLMService()
             
             if llm_service.embed_model is None:
-                logger.warning("vector_rag_embedding_unavailable",
-                              reason="Embedding model not initialized, deriving from group chunks")
-                # Local/dev fallback: derive an approximate embedding from in-group chunks.
-                query_embedding = await self._derive_query_embedding_from_group_chunks(query)
-                if query_embedding:
-                    logger.info("vector_rag_derived_embedding_success", 
-                               embedding_dims=len(query_embedding))
-                else:
-                    logger.warning("vector_rag_derived_embedding_failed",
-                                  reason="Could not derive embedding from group chunks")
-            else:
-                try:
-                    query_embedding = llm_service.embed_model.get_text_embedding(query)
-                    logger.info("vector_rag_embedding_success",
-                               embedding_dims=len(query_embedding) if query_embedding else 0,
-                               embedding_first_3=query_embedding[:3] if query_embedding else None)
-                except Exception as e:
-                    logger.warning(
-                        "vector_rag_embedding_failed_deriving_from_group",
-                        error=str(e),
-                        reason="Embedding generation failed; deriving from group chunks",
-                    )
-                    query_embedding = await self._derive_query_embedding_from_group_chunks(query)
-                    if query_embedding:
-                        logger.info("vector_rag_derived_embedding_success_after_failure",
-                                   embedding_dims=len(query_embedding))
-                    else:
-                        logger.warning("vector_rag_derived_embedding_failed_after_failure",
-                                      reason="Could not derive embedding from group chunks")
+                logger.error("vector_rag_embedding_unavailable",
+                            reason="Embedding model not initialized")
+                raise RuntimeError("Route 1 requires embedding model. Embeddings are not configured.")
+            
+            try:
+                query_embedding = llm_service.embed_model.get_text_embedding(query)
+                logger.info("vector_rag_embedding_success",
+                           embedding_dims=len(query_embedding) if query_embedding else 0)
+            except Exception as e:
+                logger.error("vector_rag_embedding_failed", error=str(e))
+                raise RuntimeError(f"Failed to generate query embedding: {str(e)}") from e
             
             # Retrieval: Hybrid RRF (vector + fulltext) for best precision
             # Fulltext catches exact keyword matches, vector catches semantic similarity
-            results = []
-            if query_embedding is not None:
-                results = await self._search_text_chunks_hybrid_rrf(
-                    query_text=query,
-                    embedding=query_embedding,
-                    top_k=15,
-                    vector_k=25,
-                    fulltext_k=25,
-                )
-            else:
-                logger.warning(
-                    "vector_rag_no_query_embedding",
-                    reason="No query embedding available after derivation",
-                )
-                # If we cannot compute an embedding, fall back to fulltext-only search in Neo4j.
-                results = await self._search_text_chunks_fulltext(
-                    query_text=query,
-                    top_k=15,
-                )
+            if query_embedding is None:
+                logger.error("vector_rag_no_query_embedding")
+                raise RuntimeError("Query embedding is None after generation")
+            
+            results = await self._search_text_chunks_hybrid_rrf(
+                query_text=query,
+                embedding=query_embedding,
+                top_k=15,
+                vector_k=25,
+                fulltext_k=25,
+            )
             
             if not results:
                 return {

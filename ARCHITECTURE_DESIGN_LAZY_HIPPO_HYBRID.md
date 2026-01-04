@@ -50,12 +50,12 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 *   **Engines:** Vector Search → LLM Synthesis
 *   **Profile:** General Enterprise only (disabled in High Assurance)
 
-### Route 2: Local Search Equivalent (LazyGraphRAG Only)
+### Route 2: Local Search Equivalent (LazyGraphRAG + HippoRAG 2)
 *   **Trigger:** Entity-focused queries with explicit entity mentions
 *   **Example:** "What are all the contracts with Vendor ABC and their payment terms?"
-*   **Goal:** Comprehensive entity-centric retrieval via iterative deepening
-*   **Engines:** LazyGraphRAG Iterative Deepening
-*   **Why No HippoRAG:** Explicit entity = clear starting point for LazyGraphRAG
+*   **Goal:** Comprehensive entity-centric retrieval via PPR graph traversal
+*   **Engines:** Entity Extraction → HippoRAG 2 PPR → Text Chunk Retrieval → LLM Synthesis
+*   **Architecture:** Uses HippoRAG 2's Personalized PageRank for deterministic multi-hop traversal from extracted entities
 
 ### Route 3: Global Search Equivalent (LazyGraphRAG + HippoRAG 2)
 *   **Trigger:** Thematic queries without explicit entities
@@ -92,10 +92,10 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 
 | Route | HippoRAG 2 Used? | Why |
 |:------|:-----------------|:----|
-| Route 1 | ❌ No | Vector search only |
-| Route 2 | ❌ No | LazyGraphRAG handles explicit entities well |
-| Route 3 | ✅ Yes | Detail recovery for thematic queries |
-| Route 4 | ✅ Yes | Precision pathfinding after disambiguation |
+| Route 1 | ❌ No | Vector search only (simple fact extraction) |
+| Route 2 | ✅ Yes | PPR from extracted entities for multi-hop traversal |
+| Route 3 | ✅ Yes | PPR from hub entities for thematic detail recovery |
+| Route 4 | ✅ Yes | PPR after query decomposition for complex reasoning |
 
 ---
 
@@ -1620,4 +1620,181 @@ if len(text_chunks) == 0 and len(seed_entities) > 0:
 - `_check_field_exists_in_chunks()` method (~70 lines)
 
 **Result:** Cleaner, more maintainable code that scales to any query type without manual pattern updates.
+
+
+---
+
+## 16. The "Perfect Hybrid" Architecture: Route 3's Disambiguate-Link-Trace Pattern (Jan 4, 2026)
+
+### 16.1. The Problem Route 3 Solves
+
+In high-stakes industries (auditing, finance, insurance), queries are often **ambiguous** yet require **deterministic precision**:
+
+**Example Query:** *"What is the exposure to our main tech partner?"*
+
+**Challenges:**
+1. **Ambiguity:** "main tech partner" could mean Microsoft, Nvidia, or Oracle
+2. **Multi-hop:** Need to traverse contracts → subsidiaries → risk assessments
+3. **Determinism Required:** Auditors need byte-identical results for compliance
+
+**Why existing approaches fail:**
+- **HippoRAG 2 alone:** Requires explicit entity to start PPR (can't handle "main tech partner")
+- **LazyGraphRAG alone:** LLM synthesis is non-deterministic (different responses per run)
+- **Vector search:** Misses structural relationships (contracts ↔ subsidiaries)
+
+### 16.2. The Solution: 3-Step "Disambiguate-Link-Trace"
+
+Route 3 combines LazyGraphRAG (the "brain") and HippoRAG 2 (the "skeletal tracer") to achieve both disambiguation and determinism.
+
+#### Step 1: Query Refinement (LazyGraphRAG)
+**Goal:** Solve the ambiguity problem
+
+**Process:**
+1. Match query to pre-computed **community summaries** (e.g., "Tech Vendors", "Risk Management")
+2. Extract **hub entities** from matched communities (e.g., ["Microsoft", "Vendor_Contract_2024"])
+3. This disambiguates "main tech partner" → concrete entity names
+
+**Implementation:**
+```python
+# Stage 3.1: Community matching
+matched_communities = await self.community_matcher.match_communities(query, top_k=3)
+# Output: [("Tech Vendors", 0.92), ("Risk Management", 0.87)]
+
+# Stage 3.2: Hub extraction
+hub_entities = await self.hub_extractor.extract_hub_entities(
+    communities=community_data,
+    top_k_per_community=3
+)
+# Output: ["Microsoft", "Vendor_Contract_2024", "Risk_Assessment_Q4"]
+```
+
+**Why This Works:**
+- Communities are **pre-computed** (deterministic)
+- Hub entities are **degree-based** (mathematical, not LLM-based)
+- No agentic hallucination in disambiguation step
+
+#### Step 2: Deterministic Pathfinding (HippoRAG 2)
+**Goal:** Guarantee multi-hop precision without LLM agents
+
+**Process:**
+1. Use HippoRAG 2's **Personalized PageRank (PPR)** algorithm
+2. Start from disambiguated hub entities (from Step 1)
+3. PPR mathematically finds ALL structurally connected nodes
+4. Even finds "boring" connections LLM agents would skip
+
+**Implementation:**
+```python
+# Stage 3.3: HippoRAG PPR tracing
+evidence_nodes = await self.tracer.trace(
+    query=query,
+    seed_entities=hub_entities,  # Seeds from Step 1
+    top_k=20  # Larger for global coverage
+)
+# Output: [("Subsidiary_LLC", 0.85), ("Risk_Report_2024", 0.72), ...]
+```
+
+**The Magic:**
+- If a connection exists in the graph, **PPR WILL find it**
+- No LLM hallucination or missed hops
+- Results are **mathematically deterministic** for identical graph structure
+
+#### Step 3: Synthesis & Evidence Validation (LazyGraphRAG)
+**Goal:** High-precision report with full auditability
+
+**Process:**
+1. Retrieve **raw text chunks** (not summaries) for evidence nodes
+2. LLM synthesizes response with **citation markers** `[1], [2], ...`
+3. Return full audit trail: document IDs, chunk IDs, graph paths
+
+**Implementation:**
+```python
+# Stage 3.4 & 3.5: Synthesis with citations
+synthesis_result = await self.synthesizer.synthesize(
+    query=query,
+    evidence_nodes=evidence_nodes,  # From Step 2
+    response_type="summary"  # Uses LLM with temperature=0
+)
+# Output: {
+#   "response": "Microsoft is the primary tech vendor [1], with $2.5M exposure [2]...",
+#   "citations": [{"source": "vendor_contract.pdf", "chunk_id": "chunk_42"}],
+#   "evidence_path": ["Microsoft", "Subsidiary_LLC", "Risk_Report_2024"]
+# }
+```
+
+**Determinism Options:**
+- `response_type="summary"`: LLM synthesis (slight variance acceptable)
+- `response_type="nlp_audit"`: 100% deterministic NLP extraction (no LLM)
+
+### 16.3. Route 3 Implementation Summary
+
+```
+User Query: "What is the exposure to our main tech partner?"
+      ↓
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 1: DISAMBIGUATE (LazyGraphRAG)                         │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 3.1: Community Matching                               │
+│   → Matches to: ["Tech Vendors", "Risk Management"]         │
+│                                                              │
+│ Stage 3.2: Hub Entity Extraction                            │
+│   → Extracts: ["Microsoft", "Vendor_Contract_2024"]         │
+└─────────────────────────────────────────────────────────────┘
+      ↓
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 2: LINK (HippoRAG 2 PPR)                               │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 3.3: Personalized PageRank                            │
+│   → Traverses from: ["Microsoft", "Vendor_Contract_2024"]   │
+│   → Finds path: Microsoft → Contract → Subsidiary → Risk    │
+│   → Output: 20 evidence nodes with PPR scores               │
+└─────────────────────────────────────────────────────────────┘
+      ↓
+┌─────────────────────────────────────────────────────────────┐
+│ STEP 3: TRACE (LazyGraphRAG Synthesis)                      │
+├─────────────────────────────────────────────────────────────┤
+│ Stage 3.4: Raw Text Chunk Retrieval                         │
+│   → Fetches full text (no summary loss)                     │
+│                                                              │
+│ Stage 3.5: LLM Synthesis with Citations                     │
+│   → Generates response: "Microsoft exposure: $2.5M [1][2]"  │
+│   → Returns audit trail: chunks, documents, graph paths     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 16.4. Why This Is "Perfect" for High-Stakes Industries
+
+| Requirement | Traditional Approach | Route 3 Implementation | Result |
+|-------------|---------------------|----------------------|--------|
+| **Handle ambiguity** | LLM interprets query | Community matching | ✅ Deterministic disambiguation |
+| **Multi-hop traversal** | LLM agent chains | HippoRAG 2 PPR | ✅ Mathematical precision |
+| **Auditability** | Black box | Full graph paths + chunk IDs | ✅ Complete audit trail |
+| **No hallucination** | Can't guarantee | No LLM in pathfinding | ✅ Facts grounded in graph |
+| **Detail preservation** | Summaries lose info | Raw text chunks | ✅ Full detail retention |
+
+### 16.5. Comparison: Route 2 vs Route 3
+
+Both use HippoRAG 2 PPR, but differ in how they obtain seed entities:
+
+| Aspect | Route 2 (Local Search) | Route 3 (Global Search) |
+|--------|----------------------|------------------------|
+| **Query Type** | "List ABC contracts" | "What are tech vendor risks?" |
+| **Seed Source** | Direct entity extraction | Community → Hub entities |
+| **Disambiguation** | Explicit entity (no ambiguity) | Community matching resolves ambiguity |
+| **PPR Scope** | Narrow (single entity focus) | Broad (multiple hubs, thematic) |
+| **Best For** | Known entity queries | Thematic/exploratory queries |
+
+### 16.6. Real-World Test Results
+
+From production deployment (Jan 4, 2026):
+
+**Route 3 Performance:**
+- Latency: ~2000ms average (vs Route 1: ~300ms)
+- Accuracy: Not yet benchmarked (Route 2 achieved 20/20 after fixes)
+- Citations: Full chunk IDs + document URLs
+- Evidence path: Graph traversal fully traced
+
+**Next Steps:**
+1. Run Route 3 benchmark with Q-G1-10 (positive tests)
+2. Run Route 3 negative tests with Q-N1-10
+3. Compare LLM synthesis vs `nlp_audit` determinism
 

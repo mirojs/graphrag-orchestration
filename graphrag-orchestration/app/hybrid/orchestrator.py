@@ -1594,13 +1594,13 @@ EVIDENCE: <verbatim quote from Context, or empty>
                    query=query[:50],
                    response_type=response_type)
         
-        # Stage 3.1: Community Matching
+        # Stage 3.1: Community Matching (LazyGraphRAG: on-the-fly generation if needed)
         logger.info("stage_3.1_community_matching")
         matched_communities = await self.community_matcher.match_communities(query, top_k=3)
         community_data = [c for c, _ in matched_communities]
         logger.info("stage_3.1_complete", num_communities=len(community_data))
         
-        # Stage 3.2: Hub Entity Extraction
+        # Stage 3.2: Hub Entity Extraction (may query Neo4j directly for dynamic communities)
         logger.info("stage_3.2_hub_extraction")
         hub_entities = await self.hub_extractor.extract_hub_entities(
             communities=community_data,
@@ -1785,6 +1785,63 @@ Sub-questions:"""
         except Exception as e:
             logger.warning("drift_decompose_failed", error=str(e))
             return [query]
+    
+    async def _get_hub_entities_from_neo4j(
+        self,
+        keywords: List[str],
+        top_k: int = 10
+    ) -> List[str]:
+        """
+        Fallback method to extract hub entities directly from Neo4j when communities don't exist.
+        
+        Strategy: Get high-degree entities that match query keywords.
+        This enables Route 3 to work without pre-computed communities.
+        """
+        if not self._async_neo4j:
+            logger.warning("no_async_neo4j_for_hub_extraction")
+            return []
+        
+        try:
+            # Query for entities with highest degree (most relationships)
+            # Optionally filter by keywords if provided
+            if keywords:
+                keyword_filter = " OR ".join([f"toLower(e.name) CONTAINS '{kw}'" for kw in keywords])
+                query = f"""
+                MATCH (e)
+                WHERE (e:`__Entity__` OR e:Entity)
+                  AND ({keyword_filter})
+                WITH e
+                MATCH (e)-[r]-()
+                WITH e, count(r) as degree
+                ORDER BY degree DESC
+                LIMIT $top_k
+                RETURN e.name as name, degree
+                """
+            else:
+                # No keywords - just get top entities by degree
+                query = """
+                MATCH (e)
+                WHERE e:`__Entity__` OR e:Entity
+                WITH e
+                MATCH (e)-[r]-()
+                WITH e, count(r) as degree
+                ORDER BY degree DESC
+                LIMIT $top_k
+                RETURN e.name as name, degree
+                """
+            
+            results = await self._async_neo4j.execute_read(query, {"top_k": top_k})
+            hub_entities = [r["name"] for r in results if r.get("name")]
+            
+            logger.info("neo4j_hub_extraction_complete",
+                       num_hubs=len(hub_entities),
+                       keywords=keywords[:3])
+            
+            return hub_entities
+            
+        except Exception as e:
+            logger.error("neo4j_hub_extraction_failed", error=str(e))
+            return []
     
     # =========================================================================
     # Convenience Methods

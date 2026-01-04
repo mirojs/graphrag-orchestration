@@ -12,13 +12,12 @@ from app.core.config import settings
 
 _neo4j_store = None
 _indexing_pipeline = None
-_drift_adapter = None
 
 
 def get_neo4j_store():
     global _neo4j_store
     if _neo4j_store is None:
-        from app.v3.services.neo4j_store import Neo4jStoreV3
+        from app.hybrid.services.neo4j_store import Neo4jStoreV3
 
         _neo4j_store = Neo4jStoreV3(
             uri=settings.NEO4J_URI or "",
@@ -58,23 +57,3 @@ def get_lazygraphrag_indexing_pipeline():
         )
 
     return _indexing_pipeline
-
-
-def get_lazygraphrag_drift_adapter():
-    """DRIFT cache adapter used by hybrid indexing to avoid stale post-index results."""
-    global _drift_adapter
-
-    if _drift_adapter is None:
-        from app.services.llm_service import LLMService
-        from app.v3.services.drift_adapter import DRIFTAdapter
-
-        store = get_neo4j_store()
-        llm_service = LLMService()
-
-        _drift_adapter = DRIFTAdapter(
-            neo4j_driver=store.driver,
-            llm=llm_service.llm,
-            embedder=llm_service.embed_model,
-        )
-
-    return _drift_adapter

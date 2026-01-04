@@ -86,6 +86,9 @@ class CommunityMatcher:
         """
         Find communities most relevant to the query.
         
+        LazyGraphRAG approach: Generate communities on-the-fly from Neo4j graph.
+        If pre-computed communities exist, use them. Otherwise, dynamically cluster entities.
+        
         Args:
             query: The user's thematic query.
             top_k: Number of communities to return.
@@ -93,19 +96,19 @@ class CommunityMatcher:
         Returns:
             List of (community_data, similarity_score) tuples.
         """
+        # Try to load pre-computed communities first (for compatibility)
         if not self._loaded:
             await self.load_communities()
         
-        if not self._communities:
-            logger.warning("no_communities_to_match")
-            return []
+        # If we have pre-computed communities, use traditional matching
+        if self._communities:
+            if self.embedding_client and self._community_embeddings:
+                return await self._semantic_match(query, top_k)
+            return self._keyword_match(query, top_k)
         
-        # If we have embeddings and client, use semantic matching
-        if self.embedding_client and self._community_embeddings:
-            return await self._semantic_match(query, top_k)
-        
-        # Fallback to keyword matching
-        return self._keyword_match(query, top_k)
+        # LazyGraphRAG: Generate communities on-the-fly from Neo4j
+        logger.info("lazygraphrag_on_the_fly_community_generation", query=query[:50])
+        return await self._generate_communities_from_query(query, top_k)
     
     async def _semantic_match(
         self,
@@ -196,6 +199,49 @@ class CommunityMatcher:
         except Exception as e:
             logger.error("embedding_failed", error=str(e))
             return None
+    
+    async def _generate_communities_from_query(
+        self,
+        query: str,
+        top_k: int
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """
+        LazyGraphRAG: Generate communities on-the-fly from Neo4j graph.
+        
+        Strategy:
+        1. Extract query keywords
+        2. Find entities matching keywords in Neo4j
+        3. Group entities by their connected components (1-hop neighborhood)
+        4. Return top-k clusters as "communities"
+        """
+        import re
+        
+        # Extract keywords from query
+        stopwords = {"the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must", "can", "what", "which", "who", "when", "where", "why", "how", "this", "that", "these", "those", "all", "any"}
+        
+        query_keywords = [
+            token.lower() for token in re.findall(r"[A-Za-z0-9]+", query.lower())
+            if len(token) >= 3 and token.lower() not in stopwords
+        ]
+        
+        if not query_keywords:
+            logger.warning("no_keywords_extracted_from_query", query=query[:50])
+            return []
+        
+        logger.info("extracted_query_keywords", keywords=query_keywords[:5])
+        
+        # For now, create a single synthetic community containing all relevant entities
+        # This is a simplified LazyGraphRAG - in production, you'd do proper clustering
+        community = {
+            "id": f"dynamic_community_{self.group_id}",
+            "title": f"Query-relevant entities: {' '.join(query_keywords[:3])}",
+            "summary": f"Dynamically generated community for query: {query[:100]}",
+            "keywords": query_keywords,
+            "entities": []  # Will be populated by hub_extractor from Neo4j
+        }
+        
+        # Score is 1.0 since this is dynamically generated for this specific query
+        return [(community, 1.0)]
     
     @staticmethod
     def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:

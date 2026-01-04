@@ -28,7 +28,7 @@ from llama_index.core.schema import Document as LlamaDocument
 from llama_index.core.schema import TextNode
 
 from app.services.document_intelligence_service import DocumentIntelligenceService
-from app.v3.services.entity_deduplication import EntityDeduplicationService
+from app.hybrid.services.entity_deduplication import EntityDeduplicationService
 from app.hybrid.services.neo4j_store import Document, Entity, Neo4jStoreV3, Relationship, TextChunk
 
 logger = logging.getLogger(__name__)

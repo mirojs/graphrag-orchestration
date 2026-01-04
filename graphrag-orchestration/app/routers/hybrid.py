@@ -817,18 +817,6 @@ async def hybrid_index_documents(
         reindex=body.reindex,
     )
 
-    # Keep DRIFT/triple-engine caches from serving stale results post-index.
-    try:
-        from app.hybrid.indexing.lazygraphrag_indexing_pipeline import (
-            get_lazygraphrag_drift_adapter,
-        )
-
-        adapter = get_lazygraphrag_drift_adapter()
-        adapter.clear_cache(group_id)
-        logger.info("hybrid_index_cleared_drift_cache", group_id=group_id)
-    except Exception as e:
-        logger.warning("hybrid_index_clear_drift_cache_failed", group_id=group_id, error=str(e))
-
     # Convert documents into the V3 pipeline's expected dict format.
     docs_for_pipeline: List[Dict[str, Any]] = []
     for doc in body.documents:

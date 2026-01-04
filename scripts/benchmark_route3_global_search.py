@@ -280,7 +280,18 @@ def main() -> int:
     group_id = str(args.group_id)
     qbank = Path(str(args.question_bank)).expanduser().resolve()
 
-    questions = _read_question_bank(qbank, positive_prefix="Q-G", negative_prefix="Q-N")
+    # Load positive questions (Q-G*)
+    positive_questions = _read_question_bank(qbank, prefix="Q-G")
+    
+    # Load negative questions (Q-N*) - handle gracefully if not found
+    negative_questions = []
+    try:
+        negative_questions = _read_question_bank(qbank, prefix="Q-N")
+    except RuntimeError:
+        print("No Q-N* negative questions found in question bank")
+    
+    questions = positive_questions + negative_questions
+    
     if args.max_questions and args.max_questions > 0:
         questions = questions[: int(args.max_questions)]
     

@@ -92,7 +92,7 @@ class HubExtractor:
         if "hub_entities" in community:
             return community["hub_entities"][:top_k]
         
-        if "entities" in community:
+        if "entities" in community and community["entities"]:
             entities = community["entities"]
             # If we have degree info, sort by it
             if entities and isinstance(entities[0], dict):
@@ -105,6 +105,11 @@ class HubExtractor:
             else:
                 # Just return first k entities
                 return entities[:top_k]
+        
+        # LazyGraphRAG: Dynamically generated community - query Neo4j for hub entities
+        if "keywords" in community:
+            logger.info("lazygraphrag_dynamic_hub_extraction", keywords=community["keywords"][:3])
+            return await self._query_neo4j_hubs_by_keywords(community["keywords"], top_k)
         
         # Try Neo4j query if we have a driver and community ID
         if self.neo4j_driver and "id" in community:
@@ -156,6 +161,59 @@ class HubExtractor:
             logger.error("neo4j_hub_query_failed",
                         community_id=community_id,
                         error=str(e))
+            return []
+    
+    async def _query_neo4j_hubs_by_keywords(
+        self,
+        keywords: List[str],
+        top_k: int
+    ) -> List[str]:
+        """
+        LazyGraphRAG: Query Neo4j for hub entities matching keywords.
+        
+        This enables on-the-fly hub extraction without pre-computed communities.
+        """
+        if self.neo4j_driver is None:
+            logger.warning("no_neo4j_driver_for_dynamic_hub_extraction")
+            return []
+            
+        try:
+            # Build keyword filter (match entity names containing any keyword)
+            keyword_conditions = " OR ".join([
+                f"toLower(e.name) CONTAINS toLower('{kw}')" for kw in keywords[:5]
+            ])
+            
+            query = f"""
+            MATCH (e)
+            WHERE (e:`__Entity__` OR e:Entity)
+              AND ({keyword_conditions})
+            WITH e
+            MATCH (e)-[r]-()
+            WITH e, count(r) as degree
+            ORDER BY degree DESC
+            LIMIT $top_k
+            RETURN e.name as name, degree
+            """
+            
+            # Use sync driver with run_in_executor for async compatibility
+            import asyncio
+            loop = asyncio.get_event_loop()
+            
+            def _sync_query():
+                with self.neo4j_driver.session() as session:
+                    result = session.run(query, top_k=top_k)
+                    return [r["name"] for r in result if r.get("name")]
+            
+            hubs = await loop.run_in_executor(None, _sync_query)
+            
+            logger.info("lazygraphrag_keyword_hub_extraction_success",
+                       keywords=keywords[:3],
+                       num_hubs=len(hubs))
+            
+            return hubs
+            
+        except Exception as e:
+            logger.error("neo4j_keyword_hub_query_failed", error=str(e))
             return []
     
     async def get_high_degree_entities(

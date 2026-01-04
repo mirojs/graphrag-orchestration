@@ -1312,11 +1312,7 @@ class Neo4jStoreV3:
 
         return results
     def upsert_text_chunks_batch(self, group_id: str, chunks: List[TextChunk]) -> int:
-        """Batch insert/update text chunks with native vector support.
-        
-        Uses db.create.setNodeVectorProperty() per Neo4j vector search best practices:
-        https://neo4j.com/developer/genai-ecosystem/vector-search/
-        """
+        """Batch insert/update text chunks with native vector support."""
         query = """
         UNWIND $chunks AS c
         MERGE (t:TextChunk {id: c.id})
@@ -1328,11 +1324,11 @@ class Neo4jStoreV3:
             t.updated_at = datetime()
         
         WITH t, c
-        WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
-        CALL db.create.setNodeVectorProperty(t, 'embedding', c.embedding)
-        YIELD node
+        FOREACH (_ IN CASE WHEN c.embedding IS NOT NULL AND size(c.embedding) > 0 THEN [1] ELSE [] END |
+            SET t.embedding = c.embedding
+        )
         
-        WITH node AS t, c
+        WITH t, c
         MATCH (d:Document {id: c.document_id, group_id: $group_id})
         MERGE (t)-[:PART_OF]->(d)
         RETURN count(t) AS count

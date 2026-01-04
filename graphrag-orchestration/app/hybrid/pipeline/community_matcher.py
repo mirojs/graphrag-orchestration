@@ -32,17 +32,20 @@ class CommunityMatcher:
         self,
         embedding_client: Optional[Any] = None,
         communities_path: Optional[str] = None,
-        group_id: str = "default"
+        group_id: str = "default",
+        neo4j_service: Optional[Any] = None
     ):
         """
         Args:
             embedding_client: LlamaIndex or OpenAI embedding client.
             communities_path: Path to pre-computed community data.
             group_id: Tenant identifier.
+            neo4j_service: Neo4j service for validating dynamic communities.
         """
         self.embedding_client = embedding_client
         self.group_id = group_id
         self.communities_path = Path(communities_path) if communities_path else None
+        self.neo4j_service = neo4j_service
         
         self._communities: List[Dict[str, Any]] = []
         self._community_embeddings: Dict[str, List[float]] = {}
@@ -50,7 +53,8 @@ class CommunityMatcher:
         
         logger.info("community_matcher_created",
                    group_id=group_id,
-                   has_embedding_client=embedding_client is not None)
+                   has_embedding_client=embedding_client is not None,
+                   has_neo4j_service=neo4j_service is not None)
     
     async def load_communities(self) -> bool:
         """Load community data and embeddings."""
@@ -95,20 +99,41 @@ class CommunityMatcher:
             
         Returns:
             List of (community_data, similarity_score) tuples.
+            
+        Raises:
+            RuntimeError: If no valid communities can be found or generated.
         """
         # Try to load pre-computed communities first (for compatibility)
         if not self._loaded:
             await self.load_communities()
         
         # If we have pre-computed communities, use traditional matching
-        if self._communities:
+        if self._communities and len(self._communities) > 0:
             if self.embedding_client and self._community_embeddings:
-                return await self._semantic_match(query, top_k)
-            return self._keyword_match(query, top_k)
+                results = await self._semantic_match(query, top_k)
+            else:
+                results = self._keyword_match(query, top_k)
+            
+            # Validate that we got meaningful results
+            if results and len(results) > 0:
+                return results
+            
+            logger.warning("community_matching_found_no_results",
+                          num_communities=len(self._communities))
         
         # LazyGraphRAG: Generate communities on-the-fly from Neo4j
         logger.info("lazygraphrag_on_the_fly_community_generation", query=query[:50])
-        return await self._generate_communities_from_query(query, top_k)
+        dynamic_communities = await self._generate_communities_from_query(query, top_k)
+        
+        # Fail fast if no valid communities could be generated
+        if not dynamic_communities or len(dynamic_communities) == 0:
+            raise RuntimeError(
+                f"No communities found for query: {query[:100]}. "
+                "This indicates the group may not have community data indexed, "
+                "or the query keywords don't match any entities in the graph."
+            )
+        
+        return dynamic_communities
     
     async def _semantic_match(
         self,
@@ -230,14 +255,48 @@ class CommunityMatcher:
         
         logger.info("extracted_query_keywords", keywords=query_keywords[:5])
         
-        # For now, create a single synthetic community containing all relevant entities
-        # This is a simplified LazyGraphRAG - in production, you'd do proper clustering
+        # Validate that matching entities exist in Neo4j
+        matching_entities = []
+        if self.neo4j_service:
+            try:
+                # Search for entities matching any keyword
+                search_query = """
+                MATCH (e:`__Entity__`)
+                WHERE e.group_id = $group_id
+                  AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
+                RETURN e.name AS name, e.description AS description
+                LIMIT 20
+                """
+                
+                async with self.neo4j_service._get_session() as session:
+                    result = await session.run(
+                        search_query,
+                        group_id=self.group_id,
+                        keywords=query_keywords
+                    )
+                    records = await result.data()
+                    matching_entities = [r["name"] for r in records]
+                    
+                logger.info("dynamic_community_entity_search",
+                          keywords_searched=len(query_keywords),
+                          entities_found=len(matching_entities))
+                
+            except Exception as e:
+                logger.error("neo4j_entity_search_failed", error=str(e))
+        
+        # If no entities found, return empty (will cause fail-fast)
+        if not matching_entities:
+            logger.warning("no_entities_found_for_keywords",
+                          keywords=query_keywords[:5])
+            return []
+        
+        # Create a synthetic community with validated entities
         community = {
             "id": f"dynamic_community_{self.group_id}",
             "title": f"Query-relevant entities: {' '.join(query_keywords[:3])}",
             "summary": f"Dynamically generated community for query: {query[:100]}",
             "keywords": query_keywords,
-            "entities": []  # Will be populated by hub_extractor from Neo4j
+            "entities": matching_entities[:10]  # Top 10 matching entities
         }
         
         # Score is 1.0 since this is dynamically generated for this specific query

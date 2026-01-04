@@ -154,7 +154,7 @@ class HybridPipeline:
             embedding_client=embedding_client,
             communities_path=communities_path,
             group_id=group_id,
-            neo4j_service=neo4j_service
+            neo4j_service=self._async_neo4j
         )
         
         # Route 3: Hub extraction (for seeding HippoRAG)

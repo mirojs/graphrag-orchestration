@@ -129,8 +129,12 @@ class DeterministicTracer:
         This is the recommended approach - true async with no thread pool overhead.
         Uses distance-based decay as PPR approximation (no GDS required).
         """
-        if not self.async_neo4j or not self.group_id:
-            logger.warning("async_neo4j_not_configured")
+        if not self.async_neo4j:
+            logger.warning("async_neo4j_not_available", reason="Service not initialized")
+            return await self._trace_with_fallback(query, seed_entities, top_k)
+        
+        if not self.group_id:
+            logger.warning("async_neo4j_no_group_id")
             return await self._trace_with_fallback(query, seed_entities, top_k)
         
         try:
@@ -200,7 +204,7 @@ class DeterministicTracer:
             WITH coalesce(neighbor, seed) AS entity,
                  CASE 
                    WHEN neighbor IS NULL THEN 1.0
-                   ELSE pow(0.85, length(path))
+                   ELSE 0.85 ^ length(path)
                  END AS score
             
             WITH entity.name AS name, sum(score) AS total_score

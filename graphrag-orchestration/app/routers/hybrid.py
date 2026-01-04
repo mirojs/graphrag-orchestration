@@ -244,6 +244,10 @@ async def _get_or_create_pipeline(
             group_id=group_id,
         )
         
+        # Initialize async resources (AsyncNeo4jService connection)
+        await pipeline.initialize()
+        logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id)
+        
         _pipeline_cache[cache_key] = pipeline
     
     return _pipeline_cache[cache_key]

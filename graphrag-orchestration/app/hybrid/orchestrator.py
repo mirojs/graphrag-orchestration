@@ -1517,13 +1517,6 @@ EVIDENCE: <verbatim quote from Context, or empty>
         )
         logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes))
         
-        # ================================================================
-        # Note: Negative detection removed from Route 2
-        # Let synthesis handle empty results naturally
-        # The synthesizer will either return meaningful content or indicate
-        # no information was found through its own logic
-        # ================================================================
-        
         # Stage 2.3: Synthesis with Citations
         logger.info("stage_2.3_synthesis")
         synthesis_result = await self.synthesizer.synthesize(
@@ -1532,6 +1525,35 @@ EVIDENCE: <verbatim quote from Context, or empty>
             response_type=response_type
         )
         logger.info("stage_2.3_complete")
+        
+        # ================================================================
+        # POST-SYNTHESIS NEGATIVE DETECTION
+        # ================================================================
+        # If synthesizer returned 0 chunks used, it means no text content
+        # was found. Return "Not found" instead of LLM hallucination.
+        # ================================================================
+        if synthesis_result.get("text_chunks_used", 0) == 0:
+            logger.info(
+                "route_2_negative_detection_post_synthesis",
+                seed_entities=seed_entities,
+                num_evidence_nodes=len(evidence_nodes),
+                reason="synthesis_returned_no_chunks"
+            )
+            return {
+                "response": "The requested information was not found in the available documents.",
+                "route_used": "route_2_local_search",
+                "citations": [],
+                "evidence_path": [],
+                "metadata": {
+                    "seed_entities": seed_entities,
+                    "num_evidence_nodes": len(evidence_nodes),
+                    "text_chunks_used": 0,
+                    "latency_estimate": "fast",
+                    "precision_level": "high",
+                    "route_description": "Entity-focused with post-synthesis negative detection",
+                    "negative_detection": True
+                }
+            }
         
         return {
             "response": synthesis_result["response"],

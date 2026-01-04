@@ -50,6 +50,7 @@ from .pipeline.tracing import DeterministicTracer
 from .pipeline.synthesis import EvidenceSynthesizer
 from .pipeline.community_matcher import CommunityMatcher
 from .pipeline.hub_extractor import HubExtractor
+from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
 # Import async Neo4j service for native async operations
@@ -159,6 +160,12 @@ class HybridPipeline:
         self.hub_extractor = HubExtractor(
             graph_store=graph_store,
             neo4j_driver=neo4j_driver
+        )
+        
+        # Route 3: Enhanced graph retriever (for citations via MENTIONS & relationships)
+        self.enhanced_retriever = EnhancedGraphRetriever(
+            neo4j_driver=neo4j_driver,
+            group_id=group_id
         )
         
         # Routes 3 & 4: Deterministic tracing
@@ -1586,9 +1593,14 @@ EVIDENCE: <verbatim quote from Context, or empty>
         
         Stage 3.1: Community matching (LazyGraphRAG)
         Stage 3.2: Hub entity extraction (deterministic)
-        Stage 3.3: HippoRAG PPR tracing (detail recovery)
-        Stage 3.4: Raw text chunk fetching
-        Stage 3.5: Synthesis with citations
+        Stage 3.3: Enhanced graph context retrieval (MENTIONS + RELATED_TO)
+        Stage 3.4: HippoRAG PPR tracing (detail recovery)
+        Stage 3.5: Synthesis with citations from graph context
+        
+        Key Enhancement (v2.0):
+        - Uses MENTIONS edges to get source TextChunks for citations
+        - Traverses RELATED_TO edges for richer entity context
+        - Includes section metadata for structured citations
         """
         logger.info("route_3_global_search_start", 
                    query=query[:50],
@@ -1608,23 +1620,41 @@ EVIDENCE: <verbatim quote from Context, or empty>
         )
         logger.info("stage_3.2_complete", num_hubs=len(hub_entities))
         
-        # Stage 3.3: HippoRAG PPR Tracing (DETAIL RECOVERY)
-        logger.info("stage_3.3_hipporag_ppr_tracing")
+        # Stage 3.3: Enhanced Graph Context Retrieval (NEW)
+        # This uses MENTIONS edges for citations and RELATED_TO for entity context
+        logger.info("stage_3.3_enhanced_graph_context")
+        graph_context = await self.enhanced_retriever.get_full_context(
+            hub_entities=hub_entities,
+            expand_relationships=True,
+            get_source_chunks=True,
+            max_chunks_per_entity=3,
+            max_relationships=30,
+        )
+        logger.info("stage_3.3_complete", 
+                   num_source_chunks=len(graph_context.source_chunks),
+                   num_relationships=len(graph_context.relationships),
+                   num_related_entities=len(graph_context.related_entities))
+        
+        # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
+        # Now also includes related entities from graph traversal
+        logger.info("stage_3.4_hipporag_ppr_tracing")
+        all_seed_entities = list(set(hub_entities + graph_context.related_entities[:10]))
         evidence_nodes = await self.tracer.trace(
             query=query,
-            seed_entities=hub_entities,
+            seed_entities=all_seed_entities,
             top_k=20  # Larger for global coverage
         )
-        logger.info("stage_3.3_complete", num_evidence=len(evidence_nodes))
+        logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
         
-        # Stage 3.4 & 3.5: Synthesis with Citations
-        logger.info("stage_3.4_synthesis")
-        synthesis_result = await self.synthesizer.synthesize(
+        # Stage 3.5: Enhanced Synthesis with Graph-Based Citations
+        logger.info("stage_3.5_enhanced_synthesis")
+        synthesis_result = await self.synthesizer.synthesize_with_graph_context(
             query=query,
             evidence_nodes=evidence_nodes,
+            graph_context=graph_context,
             response_type=response_type
         )
-        logger.info("stage_3.4_complete")
+        logger.info("stage_3.5_complete")
         
         return {
             "response": synthesis_result["response"],
@@ -1634,11 +1664,14 @@ EVIDENCE: <verbatim quote from Context, or empty>
             "metadata": {
                 "matched_communities": [c.get("title", "?") for c in community_data],
                 "hub_entities": hub_entities,
+                "related_entities": graph_context.related_entities[:5],
+                "num_relationships_found": len(graph_context.relationships),
+                "num_source_chunks": len(graph_context.source_chunks),
                 "num_evidence_nodes": len(evidence_nodes),
                 "text_chunks_used": synthesis_result["text_chunks_used"],
                 "latency_estimate": "thorough",
                 "precision_level": "high",
-                "route_description": "Thematic with community matching + HippoRAG PPR detail recovery"
+                "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR"
             }
         }
     

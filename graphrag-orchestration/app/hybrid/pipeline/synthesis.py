@@ -14,6 +14,7 @@ from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
 import structlog
 
 from app.hybrid.services.extraction_service import ExtractionService
+from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphContext
 
 logger = structlog.get_logger(__name__)
 
@@ -118,6 +119,148 @@ class EvidenceSynthesizer:
             "text_chunks_used": len(text_chunks),
             "sub_questions_addressed": sub_questions or []
         }
+    
+    async def synthesize_with_graph_context(
+        self,
+        query: str,
+        evidence_nodes: List[Tuple[str, float]],
+        graph_context: EnhancedGraphContext,
+        response_type: str = "detailed_report",
+    ) -> Dict[str, Any]:
+        """
+        Enhanced synthesis using full graph context (Route 3 v2.0).
+        
+        This method uses:
+        1. Source chunks from MENTIONS edges (real citations!)
+        2. Relationship context from RELATED_TO edges
+        3. Entity descriptions for richer understanding
+        
+        Args:
+            query: The original user query.
+            evidence_nodes: List of (entity_name, score) from PPR.
+            graph_context: EnhancedGraphContext with chunks, relationships.
+            response_type: "detailed_report" | "summary" | "audit_trail"
+            
+        Returns:
+            Dictionary with response, citations, and evidence path.
+        """
+        # Step 1: Build citation context from source chunks (MENTIONS-derived)
+        context_parts = []
+        citation_map: Dict[str, Dict[str, Any]] = {}
+        
+        # Add source chunks as citations
+        for i, chunk in enumerate(graph_context.source_chunks):
+            citation_id = f"[{i+1}]"
+            section_str = " > ".join(chunk.section_path) if chunk.section_path else "General"
+            
+            citation_map[citation_id] = {
+                "source": chunk.document_source or chunk.document_title,
+                "chunk_id": chunk.chunk_id,
+                "section": section_str,
+                "entity": chunk.entity_name,
+                "text_preview": chunk.text[:150] + "..." if len(chunk.text) > 150 else chunk.text
+            }
+            
+            # Build context entry with section metadata
+            entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
+            context_parts.append(entry)
+        
+        # Step 2: Add relationship context
+        relationship_context = graph_context.get_relationship_context()
+        
+        # Step 3: Add entity descriptions
+        entity_context = ""
+        if graph_context.entity_descriptions:
+            entity_lines = ["## Entity Descriptions:"]
+            for name, desc in list(graph_context.entity_descriptions.items())[:10]:
+                if desc:
+                    entity_lines.append(f"- **{name}**: {desc[:200]}")
+            entity_context = "\n".join(entity_lines)
+        
+        # Step 4: Combine all context
+        full_context = "\n\n".join(context_parts)
+        if relationship_context:
+            full_context = relationship_context + "\n\n" + full_context
+        if entity_context:
+            full_context = entity_context + "\n\n" + full_context
+        
+        # Fallback to basic synthesis if no graph context
+        if not graph_context.source_chunks:
+            logger.warning("no_source_chunks_from_mentions_falling_back")
+            return await self.synthesize(
+                query=query,
+                evidence_nodes=evidence_nodes,
+                response_type=response_type
+            )
+        
+        # Step 5: Generate response
+        response = await self._generate_graph_response(
+            query=query,
+            context=full_context,
+            hub_entities=graph_context.hub_entities,
+            response_type=response_type
+        )
+        
+        # Step 6: Extract citations from response
+        citations = self._extract_citations(response, citation_map)
+        
+        logger.info("synthesis_with_graph_context_complete",
+                   query=query[:50],
+                   num_source_chunks=len(graph_context.source_chunks),
+                   num_relationships=len(graph_context.relationships),
+                   num_citations=len(citations),
+                   response_length=len(response))
+        
+        return {
+            "response": response,
+            "citations": citations,
+            "evidence_path": [node for node, _ in evidence_nodes],
+            "text_chunks_used": len(graph_context.source_chunks),
+            "graph_context_used": True,
+            "relationships_used": len(graph_context.relationships),
+        }
+    
+    async def _generate_graph_response(
+        self,
+        query: str,
+        context: str,
+        hub_entities: List[str],
+        response_type: str
+    ) -> str:
+        """Generate response with graph-aware prompting."""
+        if self.llm is None:
+            logger.error("llm_not_configured")
+            return "Error: LLM client not configured"
+        
+        hub_str = ", ".join(hub_entities[:5]) if hub_entities else "various"
+        
+        prompt = f"""You are an expert analyst generating a response using knowledge graph evidence.
+
+CRITICAL REQUIREMENT: You MUST cite your sources using the citation markers (e.g., [1], [2])
+for EVERY factual claim. Citations link to source documents via entity relationships.
+
+Query: {query}
+
+Hub Entities (Key Topics): {hub_str}
+
+Evidence Context (organized by entity relationships and document sections):
+{context}
+
+Generate a comprehensive {response_type.replace('_', ' ')} that:
+1. Directly answers the query
+2. Cites specific sources for EVERY claim using [N] notation
+3. Leverages the entity relationships to explain connections
+4. Organizes information by document sections where relevant
+5. Highlights cross-references between different sources
+
+Response:"""
+
+        try:
+            response = await self.llm.acomplete(prompt)
+            return response.text.strip()
+        except Exception as e:
+            logger.error("graph_response_generation_failed", error=str(e))
+            return f"Error generating response: {str(e)}"
     
     def _enrich_context_for_drift(
         self,

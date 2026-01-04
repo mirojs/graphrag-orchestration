@@ -391,11 +391,18 @@ class HybridPipeline:
         
         # Check if ANY evidence node contains the hint keywords
         for item in evidence_nodes:
-            # Handle both dict and (dict, score) tuple formats
+            # Handle multiple formats: dict, (dict, score) tuple, or string
             if isinstance(item, tuple):
                 node, score = item
-            else:
+            elif isinstance(item, dict):
                 node = item
+            elif isinstance(item, str):
+                # If it's a string, wrap it in a dict
+                node = {"text": item}
+            else:
+                # Unknown format, skip
+                logger.warning("field_existence_check_unknown_format", item_type=type(item).__name__)
+                continue
             
             # Evidence nodes have 'text' field
             node_text_lower = (node.get("text") or "").lower()
@@ -404,7 +411,7 @@ class HybridPipeline:
                     "field_existence_check_found_in_evidence",
                     intent=intent,
                     hint_matched=next(h for h in hints if h in node_text_lower),
-                    node_id=node.get("id"),
+                    node_id=node.get("id", "N/A"),
                 )
                 return (True, intent)
             
@@ -417,7 +424,7 @@ class HybridPipeline:
                         "field_existence_check_found_in_evidence_section",
                         intent=intent,
                         section_path=section_path,
-                        node_id=node.get("id"),
+                        node_id=node.get("id", "N/A"),
                     )
                     return (True, intent)
         

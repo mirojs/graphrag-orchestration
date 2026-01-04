@@ -390,7 +390,13 @@ class HybridPipeline:
             return (True, intent)
         
         # Check if ANY evidence node contains the hint keywords
-        for node in evidence_nodes:
+        for item in evidence_nodes:
+            # Handle both dict and (dict, score) tuple formats
+            if isinstance(item, tuple):
+                node, score = item
+            else:
+                node = item
+            
             # Evidence nodes have 'text' field
             node_text_lower = (node.get("text") or "").lower()
             if any(h in node_text_lower for h in hints):

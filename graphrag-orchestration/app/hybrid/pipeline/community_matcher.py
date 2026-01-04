@@ -287,25 +287,26 @@ class CommunityMatcher:
         # If no entities found with keyword matching, try getting top entities by degree
         if not matching_entities and self.neo4j_service:
             try:
-                logger.info(\"keyword_search_empty_trying_top_entities\")\n                # Get most important entities as fallback
-                fallback_query = \"\"\"
+                logger.info("keyword_search_empty_trying_top_entities")
+                # Get most important entities as fallback
+                fallback_query = """
                 MATCH (e:`__Entity__`)
                 WHERE e.group_id = $group_id
                 RETURN e.name AS name, e.description AS description
                 ORDER BY coalesce(e.degree, 0) DESC
                 LIMIT 10
-                \"\"\"
+                """
                 
                 async with self.neo4j_service._get_session() as session:
                     result = await session.run(fallback_query, group_id=self.group_id)
                     records = await result.data()
-                    matching_entities = [r[\"name\"] for r in records]
+                    matching_entities = [r["name"] for r in records]
                     
-                logger.info(\"fallback_top_entities_found\",
+                logger.info("fallback_top_entities_found",
                           entities_found=len(matching_entities))
                 
             except Exception as e:
-                logger.error(\"fallback_entity_search_failed\", error=str(e))
+                logger.error("fallback_entity_search_failed", error=str(e))
         
         # If still no entities found, return empty (will cause fail-fast)
         if not matching_entities:

@@ -1518,46 +1518,11 @@ EVIDENCE: <verbatim quote from Context, or empty>
         logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes))
         
         # ================================================================
-        # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
+        # Note: Negative detection removed from Route 2
+        # Let synthesis handle empty results naturally
+        # The synthesizer will either return meaningful content or indicate
+        # no information was found through its own logic
         # ================================================================
-        # Route 2 logic: Router already determined this is entity-focused.
-        # If entity extraction succeeded BUT 0 text chunks retrieved,
-        # it means the extracted entities don't exist in the corpus.
-        # No need for intent patterns - the entity itself is the intent signal.
-        # ================================================================
-        
-        # Retrieve text chunks for evidence
-        text_chunks_for_check = []
-        if self.synthesizer and self.synthesizer.text_store:
-            try:
-                text_chunks_for_check = await self.synthesizer._retrieve_text_chunks(evidence_nodes)
-                logger.info("route_2_text_chunks_retrieved", num_chunks=len(text_chunks_for_check))
-            except Exception as e:
-                logger.warning("route_2_text_chunk_retrieval_failed", error=str(e))
-        
-        # If entity extraction succeeded but 0 chunks retrieved → entity doesn't exist
-        if len(text_chunks_for_check) == 0 and len(seed_entities) > 0:
-            logger.info(
-                "route_2_negative_detection_triggered",
-                seed_entities=seed_entities,
-                num_evidence_nodes=len(evidence_nodes),
-                reason="entities_extracted_but_no_chunks"
-            )
-            return {
-                "response": f"The requested information was not found in the available documents.",
-                "route_used": "route_2_local_search",
-                "citations": [],
-                "evidence_path": [],
-                "metadata": {
-                    "seed_entities": seed_entities,
-                    "num_evidence_nodes": len(evidence_nodes),
-                    "text_chunks_used": 0,
-                    "latency_estimate": "fast",
-                    "precision_level": "high",
-                    "route_description": "Entity-focused with negative detection",
-                    "negative_detection": True
-                }
-            }
         
         # Stage 2.3: Synthesis with Citations
         logger.info("stage_2.3_synthesis")

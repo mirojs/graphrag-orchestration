@@ -1535,3 +1535,89 @@ From production data (Jan 2026):
 
 This shows importance scoring successfully identifies document-central entities without requiring GDS.
 
+
+---
+
+## 15. Implementation Update: Graph-Based Negative Detection (Jan 4, 2026)
+
+### 15.1. Refactoring Summary
+
+**Removed:** ~100 lines of hardcoded pattern-based negative detection
+**Added:** Dynamic keyword extraction + Neo4j graph check
+
+### 15.2. Route 1: AsyncNeo4jService Graph Check
+
+**Implementation:**
+```python
+# Route 1: Extract keywords dynamically from query
+stopwords = {"the", "a", "an", "and", "or", "of", "to", "in", ...}
+query_keywords = [
+    token for token in re.findall(r"[A-Za-z0-9]+", query.lower())
+    if len(token) >= 3 and token not in stopwords
+]
+
+# Query Neo4j directly to check if keywords exist in document
+field_exists, section = await self._async_neo4j.check_field_exists_in_document(
+    group_id=self.group_id,
+    doc_url=top_doc_url,
+    field_keywords=query_keywords,
+)
+
+if not field_exists:
+    return "Not found in the provided documents."
+```
+
+**Neo4j Query:**
+```cypher
+MATCH (c) 
+WHERE c.group_id = $group_id AND c.url = $doc_url
+  AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+WITH c, [kw IN $keywords WHERE 
+    toLower(c.text) CONTAINS toLower(kw) OR
+    toLower(coalesce(c.section_path, '')) CONTAINS toLower(kw)
+] AS matched_keywords
+WHERE size(matched_keywords) > 0
+RETURN c.section_path, matched_keywords
+LIMIT 1
+```
+
+### 15.3. Route 2: Simplified Zero-Chunk Detection
+
+**Implementation:**
+```python
+# Route 2: Entity extraction + graph traversal
+seed_entities = await self.disambiguator.disambiguate(query)
+evidence_nodes = await self.tracer.trace(query, seed_entities, top_k=15)
+text_chunks = await self.synthesizer._retrieve_text_chunks(evidence_nodes)
+
+# If entity extraction succeeded BUT 0 chunks retrieved = not in corpus
+if len(text_chunks) == 0 and len(seed_entities) > 0:
+    return "The requested information was not found in the available documents."
+```
+
+**Why no graph check needed:**
+- Router already determined query is entity-focused (not abstract)
+- Entity extraction succeeded → query has clear entities
+- Graph traversal returned 0 chunks → entities don't exist in corpus
+- No need for additional Neo4j query
+
+### 15.4. Test Results (Jan 4, 2026)
+
+| Route | Negative Tests | Positive Tests | Notes |
+|-------|---------------|----------------|-------|
+| Route 1 (Vector RAG) | 10/10 PASS | 10/10 PASS | Q-V1-10, Q-N1-10 |
+| Route 2 (Local Search) | 10/10 PASS | 7/10 PASS | Q-L1,9,10 need investigation |
+
+**Route 1 (Q-V tests):** Simple field extraction - "What is the invoice total?"
+**Route 2 (Q-L tests):** Entity-focused queries - "Who is the Agent in the agreement?"
+
+### 15.5. Code Cleanup
+
+**Removed:**
+- `FIELD_SECTION_HINTS` dictionary (10 hardcoded patterns)
+- `FIELD_INTENT_PATTERNS` dictionary (10 hardcoded patterns)
+- `_classify_field_intent()` method
+- `_check_field_exists_in_chunks()` method (~70 lines)
+
+**Result:** Cleaner, more maintainable code that scales to any query type without manual pattern updates.
+

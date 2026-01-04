@@ -52,6 +52,14 @@ from .pipeline.community_matcher import CommunityMatcher
 from .pipeline.hub_extractor import HubExtractor
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
+# Import async Neo4j service for native async operations
+try:
+    from app.services.async_neo4j_service import AsyncNeo4jService
+    ASYNC_NEO4J_AVAILABLE = True
+except ImportError:
+    ASYNC_NEO4J_AVAILABLE = False
+    AsyncNeo4jService = None
+
 logger = structlog.get_logger(__name__)
 
 
@@ -119,6 +127,15 @@ class HybridPipeline:
         # This is a production best practice when mixing sync I/O with async code
         self._executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="neo4j-sync")
         
+        # Initialize async Neo4j service for native async operations (Route 2/3)
+        self._async_neo4j: Optional[AsyncNeo4jService] = None
+        if ASYNC_NEO4J_AVAILABLE:
+            try:
+                self._async_neo4j = AsyncNeo4jService.from_settings()
+                logger.info("async_neo4j_service_configured")
+            except Exception as e:
+                logger.warning("async_neo4j_service_init_failed", error=str(e))
+        
         # Initialize components
         self.router = HybridRouter(
             profile=profile,
@@ -147,7 +164,9 @@ class HybridPipeline:
         # Routes 3 & 4: Deterministic tracing
         self.tracer = DeterministicTracer(
             hipporag_instance=hipporag_instance,
-            graph_store=graph_store
+            graph_store=graph_store,
+            async_neo4j=self._async_neo4j,
+            group_id=group_id
         )
         
         # All routes: Synthesis
@@ -162,8 +181,48 @@ class HybridPipeline:
                    relevance_budget=relevance_budget,
                    has_hipporag=hipporag_instance is not None,
                    has_neo4j=neo4j_driver is not None,
+                   has_async_neo4j=self._async_neo4j is not None,
                    has_community_matcher=embedding_client is not None,
                    group_id=group_id)
+    
+    async def initialize(self) -> None:
+        """
+        Initialize async resources (call once before queries).
+        
+        Connects the async Neo4j service for native async operations.
+        """
+        if self._async_neo4j:
+            try:
+                await self._async_neo4j.connect()
+                logger.info("async_neo4j_connected")
+            except Exception as e:
+                logger.warning("async_neo4j_connection_failed", error=str(e))
+                self._async_neo4j = None
+    
+    async def close(self) -> None:
+        """
+        Clean up async resources.
+        
+        Should be called when the pipeline is no longer needed.
+        """
+        if self._async_neo4j:
+            try:
+                await self._async_neo4j.close()
+                logger.info("async_neo4j_closed")
+            except Exception as e:
+                logger.warning("async_neo4j_close_error", error=str(e))
+        
+        if self._executor:
+            self._executor.shutdown(wait=False)
+    
+    async def __aenter__(self) -> "HybridPipeline":
+        """Async context manager entry - initializes resources."""
+        await self.initialize()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit - cleans up resources."""
+        await self.close()
     
     async def query(
         self,

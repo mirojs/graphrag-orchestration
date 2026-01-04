@@ -3,6 +3,8 @@ Stage 2: Deterministic Tracing (The "Detective")
 
 Uses HippoRAG 2's Personalized PageRank (PPR) to find mathematically
 guaranteed paths between entities. This is non-parametric and deterministic.
+
+Now with async-native Neo4j support for better performance.
 """
 
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
@@ -10,6 +12,7 @@ import structlog
 
 if TYPE_CHECKING:
     from typing import Any as HippoRAGType
+    from app.services.async_neo4j_service import AsyncNeo4jService
 
 logger = structlog.get_logger(__name__)
 
@@ -21,17 +24,33 @@ class DeterministicTracer:
     Unlike LLM-guided search, PPR is mathematical:
     - Given the same seeds and graph, results are IDENTICAL every time.
     - It will find connections through "boring" nodes that an LLM might skip.
+    
+    Now supports:
+    - HippoRAG native PPR (if available)
+    - Async Neo4j service with native PPR approximation (recommended)
+    - Sync graph_store fallback (legacy)
     """
     
-    def __init__(self, hipporag_instance: Optional[Any] = None, graph_store: Optional[Any] = None):
+    def __init__(
+        self, 
+        hipporag_instance: Optional[Any] = None, 
+        graph_store: Optional[Any] = None,
+        async_neo4j: Optional["AsyncNeo4jService"] = None,
+        group_id: Optional[str] = None,
+    ):
         """
         Args:
             hipporag_instance: An initialized HippoRAG instance.
             graph_store: Fallback graph store if HippoRAG is not available.
+            async_neo4j: AsyncNeo4jService for native async Neo4j queries (preferred).
+            group_id: Tenant ID for multi-tenant isolation.
         """
         self.hipporag = hipporag_instance
         self.graph_store = graph_store
+        self.async_neo4j = async_neo4j
+        self.group_id = group_id
         self._use_hipporag = hipporag_instance is not None
+        self._use_async_neo4j = async_neo4j is not None
     
     async def trace(
         self, 
@@ -53,6 +72,8 @@ class DeterministicTracer:
         """
         if self._use_hipporag:
             return await self._trace_with_hipporag(query, seed_entities, top_k)
+        elif self._use_async_neo4j:
+            return await self._trace_with_async_neo4j(query, seed_entities, top_k)
         else:
             return await self._trace_with_fallback(query, seed_entities, top_k)
     
@@ -91,7 +112,57 @@ class DeterministicTracer:
             
         except Exception as e:
             logger.error("hipporag_trace_failed", error=str(e))
-            # Fallback to graph-based approach
+            # Fallback to async Neo4j or sync graph_store
+            if self._use_async_neo4j:
+                return await self._trace_with_async_neo4j(query, seed_entities, top_k)
+            return await self._trace_with_fallback(query, seed_entities, top_k)
+    
+    async def _trace_with_async_neo4j(
+        self,
+        query: str,
+        seed_entities: List[str],
+        top_k: int
+    ) -> List[Tuple[str, float]]:
+        """
+        Use native async Neo4j service for PPR-like traversal.
+        
+        This is the recommended approach - true async with no thread pool overhead.
+        Uses distance-based decay as PPR approximation (no GDS required).
+        """
+        if not self.async_neo4j or not self.group_id:
+            logger.warning("async_neo4j_not_configured")
+            return await self._trace_with_fallback(query, seed_entities, top_k)
+        
+        try:
+            # First, resolve seed entity names to IDs
+            seed_records = await self.async_neo4j.get_entities_by_names(
+                group_id=self.group_id,
+                entity_names=seed_entities,
+            )
+            seed_ids = [r["id"] for r in seed_records]
+            
+            if not seed_ids:
+                logger.warning("no_seed_entities_found", seeds=seed_entities)
+                return [(entity, 1.0) for entity in seed_entities]
+            
+            # Use native PPR approximation (distance-based decay)
+            ranked_nodes = await self.async_neo4j.personalized_pagerank_native(
+                group_id=self.group_id,
+                seed_entity_ids=seed_ids,
+                damping=0.85,
+                max_iterations=20,
+                top_k=top_k,
+            )
+            
+            logger.info("async_neo4j_ppr_success",
+                       query=query[:50],
+                       num_seeds=len(seed_ids),
+                       num_results=len(ranked_nodes))
+            
+            return ranked_nodes
+            
+        except Exception as e:
+            logger.error("async_neo4j_ppr_failed", error=str(e))
             return await self._trace_with_fallback(query, seed_entities, top_k)
     
     async def _trace_with_fallback(
@@ -101,46 +172,61 @@ class DeterministicTracer:
         top_k: int
     ) -> List[Tuple[str, float]]:
         """
-        Fallback: Use Neo4j's native graph algorithms for PPR.
+        Legacy fallback: Use sync graph_store with asyncio.to_thread.
         
-        This provides similar deterministic behavior using Neo4j's
-        built-in PageRank implementation.
+        This wraps the sync LlamaIndex Neo4jPropertyGraphStore.
+        Less efficient than async_neo4j but provides compatibility.
         """
+        import asyncio
+        
         if not self.graph_store:
             logger.warning("no_graph_store_available")
             return [(entity, 1.0) for entity in seed_entities]
         
         try:
-            # Neo4j Cypher query for personalized PageRank
-            # Starting from seed entities
+            # Use simple neighbor expansion instead of GDS PPR
+            # (GDS requires separate license)
             cypher_query = """
-            CALL gds.pageRank.stream('entityGraph', {
-                maxIterations: 20,
-                dampingFactor: 0.85,
-                sourceNodes: $seedNodes
-            })
-            YIELD nodeId, score
-            RETURN gds.util.asNode(nodeId).name AS name, score
-            ORDER BY score DESC
+            UNWIND $seedNames AS seedName
+            MATCH (seed:`__Entity__`)
+            WHERE toLower(seed.name) = toLower(seedName)
+              AND seed.group_id = $group_id
+            
+            // Expand to neighbors with decay
+            OPTIONAL MATCH path = (seed)-[*1..3]-(neighbor:`__Entity__`)
+            WHERE neighbor.group_id = $group_id
+              AND ALL(r IN relationships(path) WHERE type(r) <> 'MENTIONS')
+            
+            WITH coalesce(neighbor, seed) AS entity,
+                 CASE 
+                   WHEN neighbor IS NULL THEN 1.0
+                   ELSE pow(0.85, length(path))
+                 END AS score
+            
+            WITH entity.name AS name, sum(score) AS total_score
+            RETURN name, total_score AS score
+            ORDER BY total_score DESC
             LIMIT $topK
             """
             
-            # Execute the query
-            result = await self.graph_store.aquery(
+            # Execute via sync graph_store (wrapped in to_thread)
+            result = await asyncio.to_thread(
+                self.graph_store.structured_query,
                 cypher_query,
-                params={"seedNodes": seed_entities, "topK": top_k}
+                {"seedNames": seed_entities, "topK": top_k, "group_id": self.graph_store.group_id}
             )
             
-            ranked_nodes = [(row["name"], row["score"]) for row in result]
+            if result:
+                ranked_nodes = [(row["name"], row["score"]) for row in result]
+                logger.info("fallback_ppr_trace_success",
+                           query=query[:50],
+                           num_results=len(ranked_nodes))
+                return ranked_nodes
             
-            logger.info("neo4j_ppr_trace_success",
-                       query=query,
-                       num_results=len(ranked_nodes))
-            
-            return ranked_nodes
+            return [(entity, 1.0) for entity in seed_entities]
             
         except Exception as e:
-            logger.error("neo4j_ppr_trace_failed", error=str(e))
+            logger.error("fallback_ppr_trace_failed", error=str(e))
             # Return seeds with equal weight as last resort
             return [(entity, 1.0) for entity in seed_entities]
     

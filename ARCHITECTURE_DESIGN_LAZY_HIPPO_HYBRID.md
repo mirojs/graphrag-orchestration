@@ -359,6 +359,94 @@ if result.get("text_chunks_used", 0) == 0:
 
 ---
 
+## 3.6. Summary Evaluation Methodology (Route 3 Thematic Queries)
+
+For **thematic/summary queries** where no single "correct answer" exists, Route 3 uses a **composite scoring approach** instead of exact answer matching.
+
+### Evaluation Dimensions (Benchmark: `benchmark_route3_thematic.py`)
+
+Route 3 thematic queries are evaluated on **5 dimensions**, totaling 100 points:
+
+| Dimension | Points | Evaluation Method | Example Check |
+|:----------|:-------|:------------------|:--------------|
+| **Correct Route** | 20 | Route 3 was actually used | `"route_3" in route_used` |
+| **Evidence Threshold** | 20 | Sufficient evidence nodes found | `num_evidence_nodes >= min_threshold` |
+| **Hub Entity Discovery** | 15 | Hub entities extracted from communities | `len(hub_entities) > 0` |
+| **Theme Coverage** | 30 | Expected themes mentioned in response | `percentage_of_themes_mentioned` |
+| **Response Quality** | 15 | Structured, substantive answer | `length > 50 chars + multiple sentences` |
+
+### Theme Coverage Calculation
+
+**Method**: Text matching against expected themes for each query type.
+
+```python
+def evaluate_theme_coverage(response_text: str, expected_themes: List[str]) -> float:
+    """Check what percentage of expected themes are mentioned in response."""
+    text_lower = response_text.lower()
+    found = sum(1 for theme in expected_themes if theme.lower() in text_lower)
+    return found / len(expected_themes)
+```
+
+**Example Query**: "What are the common themes across all contracts?"
+- **Expected Themes**: `["obligations", "payment", "termination", "liability", "dispute"]`
+- **Response**: "The contracts share several themes: payment terms vary by vendor, termination clauses require 30-day notice, and liability is capped at invoice amounts..."
+- **Theme Coverage**: 3/5 themes found = 60% = **18 points** (out of 30)
+
+### Evidence Quality Metrics
+
+Beyond theme coverage, evidence quality is assessed via graph signals:
+
+```python
+def evaluate_evidence_quality(metadata: Dict[str, Any], min_nodes: int) -> Dict:
+    hub_entities = metadata.get("hub_entities", [])
+    num_evidence = metadata.get("num_evidence_nodes", 0)
+    matched_communities = metadata.get("matched_communities", [])
+    
+    return {
+        "hub_entity_count": len(hub_entities),
+        "evidence_node_count": num_evidence,
+        "community_count": len(matched_communities),
+        "meets_threshold": num_evidence >= min_nodes,
+    }
+```
+
+### Why This Approach Works for Summaries
+
+| Challenge | Solution | Benefit |
+|:----------|:---------|:--------|
+| No single "correct answer" | Multi-dimensional scoring (5 metrics) | Captures quality holistically |
+| Subjective quality | Theme coverage as proxy for completeness | Objective, repeatable measure |
+| Synthesis variability | Evidence metrics (hub entities, communities) | Validates graph-based retrieval |
+| Cross-document scope | Minimum evidence node threshold | Ensures multi-source coverage |
+
+### Benchmark Results (Route 3 Thematic)
+
+**Test Suite**: 8 thematic questions + 5 cross-document questions
+- **Average Score**: 84.4/100 (January 4, 2026)
+- **Route 3 Usage**: 7/10 queries correctly routed
+- **Theme Coverage**: 72% average (themes mentioned in responses)
+- **Evidence Quality**: 94% met minimum evidence threshold
+
+**Sample Scores**:
+- T-1 (common themes): 95/100 - All themes covered, 8 hub entities, 12 evidence nodes
+- T-3 (financial patterns): 78/100 - Partial theme coverage, 3 hub entities, 5 evidence nodes  
+- T-6 (confidentiality): 65/100 - Low evidence count (privacy not prominent in test docs)
+
+### Comparison: Fact-Based vs Summary Evaluation
+
+| Query Type | Evaluation Method | Metric | Example |
+|:-----------|:------------------|:-------|:--------|
+| **Fact-Based** (Route 1) | Exact answer matching | Binary: correct/incorrect | "Invoice amount: $5000" → ✓ or ✗ |
+| **Summary** (Route 3) | Composite scoring | 0-100 scale with 5 dimensions | "Common themes..." → 84/100 |
+
+### Implementation Reference
+
+- **Benchmark Script**: [`scripts/benchmark_route3_thematic.py`](scripts/benchmark_route3_thematic.py#L150-L250)
+- **Evaluation Functions**: `evaluate_theme_coverage()`, `evaluate_evidence_quality()`, `evaluate_response_quality()`
+- **Test Questions**: `THEMATIC_QUESTIONS` (8 queries) + `CROSS_DOC_QUESTIONS` (5 queries)
+
+---
+
 ## 4. Deployment Profiles
 
 ### Profile A: General Enterprise

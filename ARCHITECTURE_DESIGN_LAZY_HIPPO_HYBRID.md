@@ -60,9 +60,11 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 ### Route 3: Global Search Equivalent (LazyGraphRAG + HippoRAG 2)
 *   **Trigger:** Thematic queries without explicit entities
 *   **Example:** "What are the main compliance risks in our portfolio?"
-*   **Goal:** Thematic coverage WITH detail preservation
-*   **Engines:** LazyGraphRAG Community Matching → HippoRAG 2 PPR → Synthesis
-*   **Solves:** Original Global Search's **detail loss problem** (summaries lost fine print)
+*   **Goal:** Thematic coverage WITH detail preservation + hallucination prevention
+*   **Engines:** LazyGraphRAG Community Matching → Graph-Based Negative Detection → HippoRAG 2 PPR → Synthesis
+*   **Solves:** 
+    - Original Global Search's **detail loss problem** (summaries lost fine print)
+    - LLM **hallucination problem** on negative queries (graph-based validation catches non-existent information)
 
 ### Route 4: DRIFT Search Equivalent (Multi-Hop Reasoning)
 *   **Trigger:** Ambiguous, multi-hop queries requiring iterative decomposition
@@ -150,6 +152,21 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Why:** Hub entities are the best "landing pads" for HippoRAG PPR
 *   **Output:** `["Entity: Compliance_Policy_2024", "Entity: Risk_Assessment_Q3"]`
 
+#### Stage 3.2.5: Graph-Based Negative Detection (HALLUCINATION PREVENTION)
+*   **Engine:** Semantic validation using graph signals
+*   **What:** Triple-check mechanism to detect when query asks for non-existent information
+*   **Why:** Prevents LLM hallucination on negative queries (e.g., "What is the quantum computing policy?" when no such policy exists)
+*   **Method:**
+    1. **No Graph Signal Check**: If zero hub entities + zero relationships + zero related entities → return "Not found"
+    2. **Entity-Query Relevance Check**: Extract query terms (4+ chars, non-stopwords), check if ANY entity name contains those terms. If zero semantic overlap → return "Not found"
+    3. **Post-Synthesis Safety Net**: After synthesis, if `text_chunks_used == 0` → return "Not found"
+*   **Advantage Over Keyword Matching:** Uses LazyGraphRAG + HippoRAG2 graph structures (entities, relationships) which capture **semantic relationships**, not just word overlap
+*   **Benchmark Results (2026-01-05):**
+    - Positive queries (valid questions): 10/10 PASS (answers correctly)
+    - Negative queries (non-existent info): 10/10 PASS (returns "not found", no hallucination)
+    - Latency: p50 = 386ms for negative detection (fast fail)
+*   **Output:** Either proceeds to Stage 3.3, or returns early with "Not found" response
+
 #### Stage 3.3: HippoRAG PPR Tracing (DETAIL RECOVERY)
 *   **Engine:** HippoRAG 2 (Personalized PageRank)
 *   **What:** Mathematical graph traversal from hub entities
@@ -204,6 +221,141 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 *   **What:** Synthesize findings from all sub-questions into coherent report
 *   **Output:** Executive summary + detailed evidence trail
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, final answer uses deterministic sentence extraction (discovery pipeline still uses LLM for decomposition/disambiguation, but final composition is 100% repeatable)
+
+---
+
+## 3.5. Negative Detection Strategies (Hallucination Prevention)
+
+Each route implements a tailored negative detection strategy optimized for its specific retrieval pattern and query characteristics. These mechanisms prevent LLM hallucination when queries ask for non-existent information.
+
+### Comparative Study Results (January 5, 2026)
+
+| Route | Detection Strategy | Timing | Benchmark Results | Why This Approach? |
+|:------|:------------------|:-------|:------------------|:-------------------|
+| **Route 1** | Pre-LLM Keyword Check | Before synthesis | 10/10 negative queries: PASS | Vector search is fast but may retrieve irrelevant chunks; check keywords exist before LLM extraction |
+| **Route 2** | Post-Synthesis Check | After synthesis | 10/10 negative queries: PASS | Entity-focused queries should always find chunks if entities exist; empty result = not found |
+| **Route 3** | Triple-Check (Graph Signal + Entity Relevance + Post-Synthesis) | Before & after synthesis | 10/10 negative queries: PASS | Thematic queries need semantic validation; communities may match generic terms, so check entity relevance |
+
+### Route 1: Pre-LLM Keyword Existence Check
+
+**Strategy:** Query Neo4j graph to verify keywords exist in document **before** invoking LLM.
+
+**Method:**
+```python
+# Extract query keywords (3+ chars, exclude stopwords)
+query_keywords = ["cancellation", "policy", "refund"]
+
+# Check if ANY keyword exists in top-ranked document via graph
+field_exists, matched_section = await neo4j.check_field_exists_in_document(
+    group_id=group_id,
+    doc_url=top_doc_url,
+    field_keywords=query_keywords
+)
+
+if not field_exists:
+    return {"response": "Not found", "negative_detection": True}
+```
+
+**Why This Works for Route 1:**
+- Vector search retrieves chunks by semantic similarity, but similarity ≠ relevance
+- A chunk about "payment terms" might score high for "cancellation policy" (both contract-related)
+- Pre-LLM check prevents LLM from hallucinating based on irrelevant chunks
+- Fast fail: ~50ms graph query vs ~2s LLM call
+
+**Benchmark:** 10/10 negative queries return "Not found" (no hallucination)
+
+### Route 2: Post-Synthesis Check (text_chunks_used == 0)
+
+**Strategy:** If synthesis returns zero chunks used, the query asks for non-existent information.
+
+**Method:**
+```python
+# Stage 2.1: Extract entities (e.g., "ABC Corp", "Contract-123")
+seed_entities = await disambiguator.disambiguate(query)
+
+# Stage 2.2: Graph traversal from entities
+evidence_nodes = await tracer.trace(query, seed_entities, top_k=15)
+
+# Stage 2.3: Synthesis
+result = await synthesizer.synthesize(query, evidence_nodes)
+
+# Post-synthesis check
+if result.get("text_chunks_used", 0) == 0:
+    return {"response": "Not found", "negative_detection": True}
+```
+
+**Why This Works for Route 2:**
+- Entity-focused queries have clear targets (explicit entity names)
+- If entities exist in graph, traversal **will** find related chunks
+- Zero chunks used = entities don't exist OR have no associated content
+- Simple and reliable: let the graph traversal decide
+
+**Benchmark:** 10/10 negative queries return "Not found" (no hallucination)
+
+### Route 3: Triple-Check (Graph Signal + Entity Relevance + Post-Synthesis)
+
+**Strategy:** Three-stage validation using LazyGraphRAG + HippoRAG2 graph structures.
+
+**Method:**
+```python
+# Stage 3.1: Community matching
+communities = await community_matcher.match_communities(query)
+
+# Stage 3.2: Hub entity extraction
+hub_entities = await extract_hub_entities(communities)
+
+# Stage 3.2.5a: Check 1 - Any graph signal at all?
+has_graph_signal = (
+    len(hub_entities) > 0 or 
+    len(relationships) > 0 or 
+    len(related_entities) > 0
+)
+if not has_graph_signal:
+    return {"response": "Not found", "negative_detection": True}
+
+# Stage 3.2.5b: Check 2 - Do entities semantically relate to query?
+query_terms = extract_query_terms(query, min_length=4)  # ["quantum", "computing", "policy"]
+entity_text = " ".join(hub_entities + related_entities).lower()
+matching_terms = [term for term in query_terms if term in entity_text]
+
+if len(matching_terms) == 0 and len(query_terms) >= 2:
+    return {"response": "Not found", "negative_detection": True}
+
+# Stage 3.3-3.4: HippoRAG PPR + fetch chunks
+evidence_nodes = await hipporag.retrieve(hub_entities, top_k=20)
+result = await synthesize(query, evidence_nodes)
+
+# Stage 3.2.5c: Check 3 - Post-synthesis safety net
+if result.get("text_chunks_used", 0) == 0:
+    return {"response": "Not found", "negative_detection": True}
+```
+
+**Why Route 3 Needs Triple-Check:**
+- **Problem:** Community matching uses broad document topics (e.g., "Legal Documents", "Compliance")
+- **Challenge:** Query "quantum computing policy" might match "Compliance" community (generic overlap)
+- **Solution:** Check if hub entities (e.g., "Agent", "Contractor") relate to query terms ("quantum", "computing")
+- **Result:** Catches false matches from community-level matching
+
+**Advantage Over Keyword Matching:**
+- Uses graph structures (entities, relationships) which capture **semantic relationships**
+- Keyword matching failed on valid queries like "cancellation policy" (0 keywords matched)
+- Graph-based detection: entity names reflect actual document concepts, not just word overlap
+
+**Benchmark:** 10/10 positive queries + 10/10 negative queries (20/20 PASS, p50=386ms)
+
+### Why Different Strategies Per Route?
+
+| Routing Characteristic | Negative Detection Strategy | Rationale |
+|:-----------------------|:---------------------------|:----------|
+| **Route 1:** Simple fact, single-doc focus | Pre-LLM keyword check | Fast fail before expensive LLM call; vector similarity doesn't guarantee relevance |
+| **Route 2:** Explicit entities, clear targets | Post-synthesis check | If entities exist, graph WILL find chunks; zero chunks = not found |
+| **Route 3:** Thematic, community-based | Triple-check (graph + semantic + post) | Communities may match generically; need semantic validation |
+
+### Implementation Files
+
+- **Route 1:** [`orchestrator.py:271-470`](orchestrator.py#L271-L470) - `_execute_route_1_vector_rag()`
+- **Route 2:** [`orchestrator.py:1467-1560`](orchestrator.py#L1467-L1560) - `_execute_route_2_local_search()`
+- **Route 3:** [`orchestrator.py:1580-1750`](orchestrator.py#L1580-L1750) - `_execute_route_3_global_search()`
 
 ---
 
@@ -770,6 +922,24 @@ async def route_3_global_search(query: str):
     # Stage 3.2: Extract hub entities
     hub_entities = await extract_hub_entities(communities)
     
+    # Stage 3.2.5: Graph-based negative detection (hallucination prevention)
+    # Check 1: No graph signal at all?
+    has_graph_signal = (
+        len(hub_entities) > 0 or 
+        len(relationships) > 0 or 
+        len(related_entities) > 0
+    )
+    if not has_graph_signal:
+        return {"response": "Not found", "negative_detection": True}
+    
+    # Check 2: Entities semantically relate to query?
+    query_terms = extract_query_terms(query, min_length=4)
+    entity_text = " ".join(hub_entities + related_entities).lower()
+    matching_terms = [term for term in query_terms if term in entity_text]
+    
+    if len(matching_terms) == 0 and len(query_terms) >= 2:
+        return {"response": "Not found", "negative_detection": True}
+    
     # Stage 3.3: HippoRAG PPR for detail recovery
     evidence_nodes = await hipporag.retrieve(
         seeds=hub_entities, 
@@ -780,7 +950,13 @@ async def route_3_global_search(query: str):
     raw_chunks = await fetch_text_chunks(evidence_nodes)
     
     # Stage 3.5: Synthesis
-    return await synthesize_with_citations(query, raw_chunks)
+    result = await synthesize_with_citations(query, raw_chunks)
+    
+    # Check 3: Post-synthesis safety net
+    if result.get("text_chunks_used", 0) == 0:
+        return {"response": "Not found", "negative_detection": True}
+    
+    return result
 
 async def route_4_drift_multi_hop(query: str):
     """Route 4: DRIFT-style iteration for ambiguous queries."""

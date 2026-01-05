@@ -243,6 +243,111 @@ class EnhancedGraphRetriever:
         except Exception as e:
             logger.error("mentions_retrieval_failed", error=str(e))
             return []
+
+    async def get_keyword_boost_chunks(
+        self,
+        keywords: List[str],
+        max_per_document: int = 2,
+        max_total: int = 10,
+        min_matches: int = 1,
+    ) -> List[SourceChunk]:
+        """Retrieve chunks by lexical keyword matching for evidence boosting.
+
+        Intended as a small additive boost to improve cross-document coverage
+        for queries where important facts may not map cleanly to hub entities.
+        """
+        if not keywords or not self.driver:
+            return []
+
+        lowered_keywords = [k.lower().strip() for k in keywords if k and k.strip()]
+        if not lowered_keywords:
+            return []
+
+        # Pull a moderate candidate set, then diversify by document in Python.
+        candidate_limit = max(50, max_total * 10)
+
+        query = """
+        MATCH (t:TextChunk)
+        WHERE t.group_id = $group_id
+        WITH t,
+             reduce(cnt = 0, k IN $keywords |
+                cnt + CASE WHEN toLower(t.text) CONTAINS k THEN 1 ELSE 0 END
+             ) AS match_count
+        WHERE match_count >= $min_matches
+        RETURN
+            t.id AS chunk_id,
+            t.text AS text,
+            t.metadata AS metadata,
+            t.chunk_index AS chunk_index,
+            match_count AS match_count
+        ORDER BY match_count DESC, chunk_index ASC
+        LIMIT $candidate_limit
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        keywords=lowered_keywords,
+                        min_matches=min_matches,
+                        candidate_limit=candidate_limit,
+                    )
+                    return list(result)
+
+            records = await loop.run_in_executor(None, _run_query)
+
+            candidates: List[SourceChunk] = []
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+
+                candidates.append(
+                    SourceChunk(
+                        chunk_id=record["chunk_id"],
+                        text=record.get("text") or "",
+                        entity_name="keyword_boost",
+                        section_path=metadata.get("section_path", []) or [],
+                        document_title=metadata.get("document_title", "") or "",
+                        document_source=metadata.get("url", "") or "",
+                        relevance_score=float(record.get("match_count") or 0.0),
+                    )
+                )
+
+            # Diversify: take up to N per document, capped to max_total.
+            by_doc: Dict[str, List[SourceChunk]] = {}
+            for chunk in candidates:
+                doc_key = (chunk.document_title or chunk.document_source or "unknown").strip().lower()
+                by_doc.setdefault(doc_key, []).append(chunk)
+
+            diversified: List[SourceChunk] = []
+            for doc_key in sorted(by_doc.keys()):
+                diversified.extend(by_doc[doc_key][:max_per_document])
+
+            diversified = diversified[:max_total]
+
+            logger.info(
+                "keyword_boost_chunks_complete",
+                num_keywords=len(lowered_keywords),
+                num_candidates=len(candidates),
+                num_chunks=len(diversified),
+                max_per_document=max_per_document,
+                max_total=max_total,
+            )
+
+            return diversified
+
+        except Exception as e:
+            logger.error("keyword_boost_chunks_failed", error=str(e))
+            return []
     
     async def _get_relationships(
         self,

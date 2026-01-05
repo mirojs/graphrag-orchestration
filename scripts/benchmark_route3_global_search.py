@@ -74,13 +74,87 @@ def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> D
     """
     if not response_text or not expected_terms:
         return {"coverage": 0.0, "matched": [], "missing": expected_terms or []}
-    
-    text_lower = response_text.lower()
+
+    def _normalize_for_theme_match(text: str) -> str:
+        # Goal: make matching robust to minor surface-form differences.
+        # Examples:
+        # - "sixty (60) days"  -> contains "60 days"
+        # - "$300,000"        -> "300000"
+        # - "25 percent"      -> "25 percent" (and "25%" -> "25 percent")
+        number_words_ones = {
+            "zero": 0,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+            "eleven": 11,
+            "twelve": 12,
+            "thirteen": 13,
+            "fourteen": 14,
+            "fifteen": 15,
+            "sixteen": 16,
+            "seventeen": 17,
+            "eighteen": 18,
+            "nineteen": 19,
+        }
+        number_words_tens = {
+            "twenty": 20,
+            "thirty": 30,
+            "forty": 40,
+            "fifty": 50,
+            "sixty": 60,
+            "seventy": 70,
+            "eighty": 80,
+            "ninety": 90,
+        }
+
+        s = text.lower()
+        # normalize some common punctuation variants
+        s = s.replace("–", " ").replace("—", " ").replace("−", " ")
+        # normalize common semantic variants
+        s = s.replace("non-transferable", "not transferable")
+        s = s.replace("nontransferable", "not transferable")
+        # normalize percent to a word so "25%" and "25 percent" match
+        s = s.replace("%", " percent ")
+        # remove currency symbols
+        s = s.replace("$", " ")
+        # remove thousands separators in numbers
+        s = re.sub(r"(?<=\d),(?=\d)", "", s)
+        # replace remaining non-alphanumerics with spaces (keep digits + letters)
+        s = re.sub(r"[^a-z0-9]+", " ", s)
+        tokens = [t for t in s.split() if t]
+
+        out: List[str] = []
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            if token in number_words_tens:
+                value = number_words_tens[token]
+                if i + 1 < len(tokens) and tokens[i + 1] in number_words_ones:
+                    value += number_words_ones[tokens[i + 1]]
+                    i += 1
+                out.append(str(value))
+            elif token in number_words_ones:
+                out.append(str(number_words_ones[token]))
+            else:
+                out.append(token)
+            i += 1
+
+        return " ".join(out)
+
+    text_norm = _normalize_for_theme_match(response_text)
     matched = []
     missing = []
     
     for term in expected_terms:
-        if term.lower() in text_lower:
+        term_norm = _normalize_for_theme_match(term)
+        if term_norm and term_norm in text_norm:
             matched.append(term)
         else:
             missing.append(term)

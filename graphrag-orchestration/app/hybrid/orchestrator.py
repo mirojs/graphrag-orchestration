@@ -1606,6 +1606,105 @@ EVIDENCE: <verbatim quote from Context, or empty>
             max_chunks_per_entity=3,
             max_relationships=30,
         )
+
+        # Targeted evidence boost (EXPERIMENTAL): for termination/cancellation queries,
+        # optionally add a small set of keyword-matched chunks (diversified per document)
+        # so synthesis consistently sees deposit/refund/forfeiture clauses.
+        #
+        # Gated behind an env var to keep baseline behavior unchanged until validated.
+        import os
+        enable_keyword_boost = os.getenv("ROUTE3_KEYWORD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
+
+        ql = query.lower()
+        is_termination_query = any(
+            k in ql
+            for k in [
+                "termination",
+                "terminate",
+                "cancellation",
+                "cancel",
+                "refund",
+                "deposit",
+                "forfeit",
+                "forfeiture",
+            ]
+        )
+
+        if enable_keyword_boost and is_termination_query:
+            boost_keywords = [
+                "termination",
+                "terminate",
+                "cancellation",
+                "cancel",
+                "notice",
+                "written notice",
+                "refund",
+                "deposit",
+                "non-refundable",
+                "not refundable",
+                "forfeit",
+                "forfeiture",
+                "transfer",
+                "transferable",
+                "3 business days",
+                "three (3) business days",
+            ]
+            boost_chunks = await self.enhanced_retriever.get_keyword_boost_chunks(
+                keywords=boost_keywords,
+                max_per_document=2,
+                max_total=10,
+                min_matches=2,
+            )
+
+            existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+            added = [c for c in boost_chunks if c.chunk_id not in existing_ids]
+            if added:
+                graph_context.source_chunks.extend(added)
+            logger.info(
+                "route_3_keyword_boost_applied",
+                is_termination_query=True,
+                boost_candidates=len(boost_chunks),
+                boost_added=len(added),
+                total_source_chunks=len(graph_context.source_chunks),
+            )
+        elif is_termination_query and not enable_keyword_boost:
+            logger.info(
+                "route_3_keyword_boost_disabled",
+                reason="ROUTE3_KEYWORD_BOOST not enabled",
+            )
+
+        # Evidence debug (optional): log what chunks we are about to synthesize over.
+        # This is useful to determine root-cause for missing terms (retrieval vs synthesis).
+        enable_evidence_debug = os.getenv("ROUTE3_DEBUG_EVIDENCE", "0").strip().lower() in {"1", "true", "yes"}
+        if enable_evidence_debug:
+            # Summarize per document + show a small sample of chunks.
+            doc_counts: Dict[str, int] = {}
+            chunk_summaries: List[Dict[str, Any]] = []
+            for chunk in (graph_context.source_chunks or [])[:20]:
+                doc = (chunk.document_title or chunk.document_source or "unknown")
+                doc_counts[doc] = doc_counts.get(doc, 0) + 1
+
+                section_str = " > ".join(chunk.section_path) if getattr(chunk, "section_path", None) else "General"
+                text = (chunk.text or "").replace("\n", " ").strip()
+                preview = (text[:180] + "...") if len(text) > 180 else text
+
+                chunk_summaries.append(
+                    {
+                        "doc": doc,
+                        "section": section_str,
+                        "entity": getattr(chunk, "entity_name", "?"),
+                        "chunk_id": getattr(chunk, "chunk_id", "?"),
+                        "preview": preview,
+                    }
+                )
+
+            logger.info(
+                "route_3_evidence_debug",
+                query=query[:80],
+                num_source_chunks=len(graph_context.source_chunks or []),
+                doc_counts=doc_counts,
+                chunk_samples=chunk_summaries,
+            )
         logger.info("stage_3.3_complete", 
                    num_source_chunks=len(graph_context.source_chunks),
                    num_relationships=len(graph_context.relationships),

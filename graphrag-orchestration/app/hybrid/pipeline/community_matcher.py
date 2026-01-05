@@ -252,24 +252,65 @@ class CommunityMatcher:
         ]
         
         if not query_keywords:
+            # Keyword matching will be skipped, but embedding search can still work.
             logger.warning("no_keywords_extracted_from_query", query=query[:50])
-            return []
         
         logger.info("extracted_query_keywords", keywords=query_keywords[:5])
         
-        # STRATEGY: Combine keyword matching with multi-document sampling
-        # This ensures we get BOTH:
-        # 1. Entities matching query keywords (semantic relevance)
-        # 2. Top entities from EACH document (cross-document coverage)
+        # STRATEGY: Combine EMBEDDING search + keyword matching + multi-document sampling
+        # Priority order:
+        # 1. Embedding similarity (most semantically relevant)
+        # 2. Keyword matching (fallback for entities without embeddings)
+        # 3. Multi-document sampling (ensures coverage)
         
+        embedding_matched_entities = []
         keyword_matched_entities = []
         multi_doc_entities = []
         
-        if self.neo4j_service:
-            # Step 1: Keyword-based entity search (name AND description)
-            # Modified to ensure cross-document coverage in keyword results too
+        # Step 1: EMBEDDING-BASED entity search (PRIMARY - most consistent & semantic)
+        if self.neo4j_service and self.embedding_client:
             try:
-                # Search entities by keyword, but diversify across documents
+                # Get query embedding
+                query_embedding = await self._get_embedding(query)
+                
+                if query_embedding:
+                    # Vector similarity search with cross-document diversity
+                    embedding_query = """
+                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                    WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta,
+                         vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
+                    WHERE similarity > 0.35
+                    WITH meta.url AS doc_url, e.name AS name, similarity
+                    ORDER BY similarity DESC
+                    // Get top entities per document for diversity
+                    WITH doc_url, collect({name: name, sim: similarity})[..4] AS entities_per_doc
+                    UNWIND entities_per_doc AS entity
+                    RETURN DISTINCT entity.name AS name, entity.sim AS similarity
+                    ORDER BY similarity DESC
+                    LIMIT 15
+                    """
+                    
+                    async with self.neo4j_service._get_session() as session:
+                        result = await session.run(
+                            embedding_query,
+                            group_id=self.group_id,
+                            query_embedding=query_embedding
+                        )
+                        records = await result.data()
+                        embedding_matched_entities = [r["name"] for r in records]
+                        
+                    logger.info("embedding_entity_search",
+                              entities_found=len(embedding_matched_entities),
+                              top_similarity=records[0].get("similarity") if records else None)
+                
+            except Exception as e:
+                logger.warning("embedding_entity_search_failed", error=str(e))
+        
+        # Step 2: Keyword-based entity search (FALLBACK for entities without embeddings)
+        if self.neo4j_service and query_keywords and len(embedding_matched_entities) < 5:
+            try:
+                # Search entities by keyword, diversify across documents
                 search_query = """
                 MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                 WHERE c.group_id = $group_id
@@ -299,52 +340,55 @@ class CommunityMatcher:
                 
             except Exception as e:
                 logger.error("neo4j_entity_search_failed", error=str(e))
-            
-            # Step 2: Multi-document sampling (ALWAYS run for cross-doc coverage)
+
+        # Step 3: Multi-document sampling (ALWAYS run for cross-doc coverage)
+        if self.neo4j_service:
             try:
                 # Get top entities from EACH document to ensure coverage
                 multi_doc_query = """
                 MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                 WHERE c.group_id = $group_id
                 WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
-                WITH meta.url AS doc_url, e, coalesce(e.degree, 0) AS deg
-                ORDER BY deg DESC
-                WITH doc_url, collect({name: e.name, degree: deg})[..2] AS top_entities
+                WITH meta.url AS doc_url, e.name AS name, coalesce(e.degree, 0) AS deg
+                ORDER BY doc_url, deg DESC
+                WITH doc_url, collect({name: name, degree: deg})[..2] AS top_entities
                 UNWIND top_entities AS entity
                 RETURN entity.name AS name, doc_url
                 LIMIT 10
                 """
-                
+
                 async with self.neo4j_service._get_session() as session:
                     result = await session.run(multi_doc_query, group_id=self.group_id)
                     records = await result.data()
                     multi_doc_entities = [r["name"] for r in records]
-                    
+
                     doc_sources = list(set(r.get("doc_url", "").split("/")[-1] for r in records if r.get("doc_url")))
-                    logger.info("multi_document_sampling",
-                              entities_from_multi_doc=len(multi_doc_entities),
-                              documents_covered=len(doc_sources),
-                              doc_sources=doc_sources)
-                
+                    logger.info(
+                        "multi_document_sampling",
+                        entities_from_multi_doc=len(multi_doc_entities),
+                        documents_covered=len(doc_sources),
+                        doc_sources=doc_sources,
+                    )
+
             except Exception as e:
                 logger.warning("multi_doc_sampling_failed", error=str(e))
         
-        # Combine: keyword matches first (more relevant), then multi-doc (coverage)
+        # Combine: embedding matches first (most semantic), then keyword, then multi-doc (coverage)
         # Deduplicate while preserving order
         seen = set()
         matching_entities = []
-        for name in keyword_matched_entities + multi_doc_entities:
+        for name in embedding_matched_entities + keyword_matched_entities + multi_doc_entities:
             if name not in seen:
                 seen.add(name)
                 matching_entities.append(name)
         
         logger.info("combined_entity_selection",
+                   embedding_matched=len(embedding_matched_entities),
                    keyword_matched=len(keyword_matched_entities),
                    multi_doc=len(multi_doc_entities),
                    final_count=len(matching_entities))
         
-        # If still no entities found, try embedding-based search
-        # This ensures we find semantically relevant entities across ALL documents
+        # If still no entities found, try broader embedding search (lower threshold)
         if not matching_entities and self.neo4j_service and self.embedding_client:
             try:
                 logger.info("keyword_search_empty_trying_embedding_search",

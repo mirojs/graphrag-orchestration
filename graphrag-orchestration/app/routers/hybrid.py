@@ -235,6 +235,7 @@ async def _get_or_create_pipeline(
         pipeline = HybridPipeline(
             profile=profile,
             llm_client=llm_client,
+            embedding_client=llm_service.embed_model,  # For semantic entity matching in Route 3
             hipporag_instance=hipporag_instance,
             graph_store=graph_store,
             text_unit_store=text_unit_store,

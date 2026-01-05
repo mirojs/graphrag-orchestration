@@ -135,13 +135,18 @@ class LLMService:
                     from app.services.azure_ad_openai_embedding import AzureADOpenAIEmbedding
 
                     logger.info("Creating AzureADOpenAIEmbedding instance...")
+                    # text-embedding-3-* models support dimensions parameter
+                    embed_dimensions = None
+                    if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
+                        embed_dimensions = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
+                        logger.info(f"Setting embedding dimensions to {embed_dimensions} for {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
+                    
                     self._embed_model = AzureADOpenAIEmbedding(
                         deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         azure_endpoint=embedding_endpoint,
                         api_version=settings.AZURE_OPENAI_API_VERSION,
                         azure_ad_token_provider=embedding_token_provider,
-                        # Keep dimensions unset by default; text-embedding-3-small defaults to 1536.
-                        dimensions=None,
+                        dimensions=embed_dimensions,
                     )
                     logger.info(f"✅ Embedding model initialized successfully: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
                 except Exception as e:

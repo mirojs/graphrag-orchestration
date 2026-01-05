@@ -406,14 +406,20 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
         # Always inject group_id parameter
         param_map["group_id"] = self.group_id
         
-        # Log a warning if the query doesn't seem to filter by group_id
-        if "group_id" not in query.lower():
+        # System-level queries that don't need group_id filtering
+        system_query_keywords = [
+            "SHOW CONSTRAINTS", "SHOW INDEXES", "CREATE CONSTRAINT", "DROP CONSTRAINT",
+            "CREATE INDEX", "DROP INDEX", "CREATE VECTOR INDEX", "DROP VECTOR INDEX",
+            "CALL apoc.", "CALL dbms.", "CALL db.", "CALL gds."
+        ]
+        is_system_query = any(keyword.lower() in query.lower() for keyword in system_query_keywords)
+        
+        # Log a warning if the query doesn't seem to filter by group_id (unless it's a system query)
+        if not is_system_query and "group_id" not in query.lower():
             logger.warning(
                 f"Cypher query may not filter by group_id! "
-                f"Query: {query}..."
+                f"Query: {query[:100]}..."
             )
-        else:
-            logger.info(f"Executing Cypher query: {query}")
         
         return super().structured_query(query, param_map)
 

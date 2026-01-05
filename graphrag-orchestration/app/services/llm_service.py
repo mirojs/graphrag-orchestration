@@ -51,37 +51,8 @@ class LLMService:
             from llama_index.core import Settings as LlamaSettings
             from azure.identity import DefaultAzureCredential, get_bearer_token_provider
             
-            # Monkey-patch llama_index to support gpt-5.2 (our deployment name is gpt-5-2)
-            # Need to patch multiple validation lists for both LLM and embedding operations
-            try:
-                # Patch context size mapping
-                from llama_index.llms.openai import utils as openai_utils
-                if hasattr(openai_utils, 'modelname_to_contextsize'):
-                    openai_utils.modelname_to_contextsize["gpt-5.2"] = 128000
-                    logger.info("✅ Patched modelname_to_contextsize for gpt-5.2")
-                
-                # Patch ALL_AVAILABLE_MODELS if it exists (can be dict or tuple)
-                if hasattr(openai_utils, 'ALL_AVAILABLE_MODELS'):
-                    if "gpt-5.2" not in openai_utils.ALL_AVAILABLE_MODELS:
-                        if isinstance(openai_utils.ALL_AVAILABLE_MODELS, dict):
-                            openai_utils.ALL_AVAILABLE_MODELS["gpt-5.2"] = True
-                        else:
-                            openai_utils.ALL_AVAILABLE_MODELS = openai_utils.ALL_AVAILABLE_MODELS + ("gpt-5.2",)
-                        logger.info("✅ Patched ALL_AVAILABLE_MODELS for gpt-5.2")
-                
-                # Patch CHAT_MODELS if it exists (can be dict or tuple)
-                if hasattr(openai_utils, 'CHAT_MODELS'):
-                    if "gpt-5.2" not in openai_utils.CHAT_MODELS:
-                        if isinstance(openai_utils.CHAT_MODELS, dict):
-                            openai_utils.CHAT_MODELS["gpt-5.2"] = True
-                        else:
-                            openai_utils.CHAT_MODELS = openai_utils.CHAT_MODELS + ("gpt-5.2",)
-                        logger.info("✅ Patched CHAT_MODELS for gpt-5.2")
-                        
-            except (ImportError, AttributeError) as e:
-                logger.warning(f"⚠️ Could not patch gpt-5.2 support: {e}. Using gpt-4o as fallback.")
-                # Fallback: use gpt-4o deployment instead
-                settings.AZURE_OPENAI_DEPLOYMENT_NAME = "gpt-4o"
+            # Note: gpt-4o and gpt-4o-mini are natively supported by llama_index
+            # No monkey-patching required for these standard models
             
             # Use Azure AD authentication if no API key is provided
             if not settings.AZURE_OPENAI_API_KEY:

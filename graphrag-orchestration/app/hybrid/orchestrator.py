@@ -1611,6 +1611,53 @@ EVIDENCE: <verbatim quote from Context, or empty>
                    num_relationships=len(graph_context.relationships),
                    num_related_entities=len(graph_context.related_entities))
         
+        # ================================================================
+        # PRE-SYNTHESIS KEYWORD VALIDATION (same pattern as Route 1)
+        # ================================================================
+        # Check if query keywords actually appear in source chunks.
+        # If not, the query is asking for info that doesn't exist.
+        # ================================================================
+        stopwords = {"what", "is", "the", "a", "an", "for", "in", "on", "to", "of", "and", "or", "are", "how", "which", "where", "who", "does", "do", "can", "will", "would", "should", "could", "has", "have", "been", "being", "was", "were"}
+        query_keywords = [
+            token for token in re.findall(r"[A-Za-z0-9]+", query.lower())
+            if len(token) >= 3 and token not in stopwords
+        ]
+        
+        if query_keywords and graph_context.source_chunks:
+            # Combine all chunk text for keyword check
+            all_chunk_text = " ".join([c.text.lower() for c in graph_context.source_chunks])
+            matched_keywords = [kw for kw in query_keywords if kw in all_chunk_text]
+            
+            # If less than 30% of keywords match, likely a negative case
+            match_ratio = len(matched_keywords) / len(query_keywords) if query_keywords else 0
+            
+            if match_ratio < 0.3:
+                logger.info(
+                    "route_3_negative_detection_pre_synthesis",
+                    query_keywords=query_keywords,
+                    matched_keywords=matched_keywords,
+                    match_ratio=match_ratio,
+                    reason="Query keywords not found in source chunks"
+                )
+                return {
+                    "response": "The requested information was not found in the available documents.",
+                    "route_used": "route_3_global_search",
+                    "citations": [],
+                    "evidence_path": [],
+                    "metadata": {
+                        "matched_communities": [c.get("title", "?") for c in community_data],
+                        "hub_entities": hub_entities,
+                        "num_source_chunks": len(graph_context.source_chunks),
+                        "query_keywords": query_keywords,
+                        "matched_keywords": matched_keywords,
+                        "match_ratio": match_ratio,
+                        "latency_estimate": "fast",
+                        "precision_level": "high",
+                        "route_description": "Thematic with pre-synthesis negative detection",
+                        "negative_detection": True
+                    }
+                }
+        
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
         # Now also includes related entities from graph traversal
         logger.info("stage_3.4_hipporag_ppr_tracing")
@@ -1631,6 +1678,38 @@ EVIDENCE: <verbatim quote from Context, or empty>
             response_type=response_type
         )
         logger.info("stage_3.5_complete")
+        
+        # ================================================================
+        # POST-SYNTHESIS NEGATIVE DETECTION (same pattern as Route 2)
+        # ================================================================
+        # If no source chunks were used, the query likely asks for info
+        # that doesn't exist in the graph. Return "Not found" instead of
+        # allowing LLM hallucination.
+        # ================================================================
+        if synthesis_result.get("text_chunks_used", 0) == 0:
+            logger.info(
+                "route_3_negative_detection_post_synthesis",
+                hub_entities=hub_entities,
+                num_evidence_nodes=len(evidence_nodes),
+                num_relationships=len(graph_context.relationships),
+                reason="synthesis_returned_no_chunks"
+            )
+            return {
+                "response": "The requested information was not found in the available documents.",
+                "route_used": "route_3_global_search",
+                "citations": [],
+                "evidence_path": [],
+                "metadata": {
+                    "matched_communities": [c.get("title", "?") for c in community_data],
+                    "hub_entities": hub_entities,
+                    "num_source_chunks": 0,
+                    "num_evidence_nodes": len(evidence_nodes),
+                    "latency_estimate": "fast",
+                    "precision_level": "high",
+                    "route_description": "Thematic with post-synthesis negative detection",
+                    "negative_detection": True
+                }
+            }
         
         return {
             "response": synthesis_result["response"],

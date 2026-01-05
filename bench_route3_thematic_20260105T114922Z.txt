@@ -1,0 +1,46 @@
+
+============================================================
+Route 3 Thematic Benchmark
+============================================================
+URL: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+Group ID: test-5pdfs-1767607148075079644
+Questions: 10
+============================================================
+
+[1/10] T-1: What are the common themes across all the contracts and agre...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 798ms
+[2/10] T-2: How do the different parties relate to each other across the...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 394ms
+[3/10] T-3: What patterns emerge in the financial terms and payment stru...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 400ms
+[4/10] T-4: Summarize the risk management and liability provisions acros...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 405ms
+[5/10] T-5: What dispute resolution mechanisms are mentioned across the ...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 391ms
+[6/10] T-6: How do the documents address confidentiality and data protec...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 399ms
+[7/10] T-7: What are the key obligations and responsibilities outlined f...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 389ms
+[8/10] T-8: Compare the termination and cancellation provisions across t...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 390ms
+[9/10] X-1: Which entities or concepts appear in multiple documents?...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 391ms
+[10/10] X-2: What are the most important entities mentioned across the en...
+  ✓ Route 3 | Theme: 0% | Evidence: 0 nodes | Score: 20/100 | 389ms
+
+============================================================
+SUMMARY
+============================================================
+Questions: 10/10 successful
+Average Score: 20.0/100
+Route 3 Usage: 100%
+Theme Coverage: 0%
+Evidence Threshold Met: 0%
+Avg Hub Entities: 0.0
+Avg Latency: 435ms
+Total Citations: 0
+Avg Citations/Question: 0.0
+Questions with Citations: 0/10
+============================================================
+
+Results saved to: /afh/projects/graphrag-orchestration/benchmarks/route3_thematic_20260105T114926Z.json

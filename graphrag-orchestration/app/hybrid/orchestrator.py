@@ -1692,8 +1692,13 @@ EVIDENCE: <verbatim quote from Context, or empty>
         
         total_matches = len(set(matching_terms + rel_matching))
         
-        if total_matches == 0 and len(query_terms) >= 2:
+        # Only apply strict entity relevance check for SHORT, specific queries
+        # Thematic queries (6+ terms) naturally use abstract language that won't match entity names
+        # Example: "What is the quantum computing policy?" (short, specific) vs
+        #          "What are common themes across contracts?" (long, thematic)
+        if total_matches == 0 and 2 <= len(query_terms) <= 5:
             # We have entities but NONE relate to the query semantically
+            # Only reject if query is SHORT and specific (2-5 terms)
             logger.info(
                 "route_3_negative_detection_no_entity_relevance",
                 query_terms=query_terms,

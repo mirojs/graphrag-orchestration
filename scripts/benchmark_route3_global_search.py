@@ -50,6 +50,52 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from benchmark_accuracy_utils import GroundTruth, extract_ground_truth, calculate_accuracy_metrics
 
+# Expected terms for Q-G* questions (for theme coverage scoring)
+# These are key terms/phrases that should appear in a comprehensive response
+EXPECTED_TERMS: Dict[str, List[str]] = {
+    "Q-G1": ["60 days", "written notice", "3 business days", "full refund", "deposit", "forfeited", "terminates", "not transferable"],
+    "Q-G2": ["idaho", "florida", "hawaii", "pocatello", "arbitration", "governing law"],
+    "Q-G3": ["29900", "25%", "10%", "installment", "commission", "$75", "$50", "tax"],
+    "Q-G4": ["pumper", "county", "monthly statement", "income", "expenses", "volumes"],
+    "Q-G5": ["arbitration", "binding", "small claims", "legal fees", "contractor", "default"],
+    "Q-G6": ["fabrikam", "contoso", "walt flood", "contoso lifts", "builder", "owner", "agent", "pumper"],
+    "Q-G7": ["60 days", "written notice", "certified mail", "10 business days", "phone", "emergency"],
+    "Q-G8": ["$300,000", "$25,000", "liability insurance", "hold harmless", "indemnify", "gross negligence"],
+    "Q-G9": ["non-refundable", "$250", "start-up fee", "deposit", "forfeited", "3 business days"],
+    "Q-G10": ["warranty", "arbitration", "servicing", "management", "invoice", "scope of work", "payment"],
+}
+
+
+def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> Dict[str, Any]:
+    """Calculate theme/keyword coverage for a response.
+    
+    Returns:
+        Dictionary with coverage metrics and matched/missing terms.
+    """
+    if not response_text or not expected_terms:
+        return {"coverage": 0.0, "matched": [], "missing": expected_terms or []}
+    
+    text_lower = response_text.lower()
+    matched = []
+    missing = []
+    
+    for term in expected_terms:
+        if term.lower() in text_lower:
+            matched.append(term)
+        else:
+            missing.append(term)
+    
+    coverage = len(matched) / len(expected_terms) if expected_terms else 0.0
+    
+    return {
+        "coverage": round(coverage, 3),
+        "matched": matched,
+        "missing": missing,
+        "total_terms": len(expected_terms),
+        "matched_count": len(matched),
+    }
+
+
 DEFAULT_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
     "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
@@ -387,15 +433,22 @@ def main() -> int:
                 is_negative=gt.is_negative
             )
         
+        # Calculate theme coverage for Q-G* questions
+        theme_coverage_metrics = {}
+        if q.qid.startswith("Q-G") and q.qid in EXPECTED_TERMS and runs:
+            actual_answer = runs[0].get("text", "")
+            theme_coverage_metrics = calculate_theme_coverage(actual_answer, EXPECTED_TERMS[q.qid])
+        
         results[scenario_name][q.qid] = {
             "qid": q.qid,
             "query": q.query,
             "runs": runs,
             "summary": summary,
             "accuracy": accuracy_metrics,
+            "theme_coverage": theme_coverage_metrics,
         }
 
-        # Console output with accuracy
+        # Console output with accuracy and theme coverage
         acc_str = ""
         if accuracy_metrics:
             if accuracy_metrics.get("is_negative", False):
@@ -406,13 +459,21 @@ def main() -> int:
                 f1 = accuracy_metrics.get("f1_score", 0.0)
                 acc_str = f" | acc: contain={containment:.2f} f1={f1:.2f}"
         
+        # Add theme coverage for Q-G* questions
+        theme_str = ""
+        if theme_coverage_metrics:
+            cov = theme_coverage_metrics.get("coverage", 0.0)
+            matched = theme_coverage_metrics.get("matched_count", 0)
+            total = theme_coverage_metrics.get("total_terms", 0)
+            theme_str = f" | theme={cov:.0%} ({matched}/{total})"
+        
         print(
             f"[{scenario_name}] [{qi}/{len(questions)}] {q.qid}: "
             f"exact={summary['text_norm_exact_rate']:.2f} "
             f"min_sim={summary['text_norm_min_similarity']:.2f} "
             f"cite_jacc_min={summary['citations_min_jaccard_vs_first']:.2f} "
             f"path_jacc_min={summary['evidence_path_min_jaccard_vs_first']:.2f} "
-            f"p50={summary['latency_ms']['p50']}ms{acc_str}",
+            f"p50={summary['latency_ms']['p50']}ms{acc_str}{theme_str}",
             flush=True,
         )
 
@@ -446,6 +507,7 @@ def main() -> int:
         for qid, obj in qmap.items():
             summ = obj.get("summary", {})
             acc = obj.get("accuracy", {})
+            theme = obj.get("theme_coverage", {})
             lat = summ.get("latency_ms", {})
             
             # Build accuracy string
@@ -457,12 +519,20 @@ def main() -> int:
                 else:
                     acc_info = f", contain={acc.get('containment', 0):.2f}, f1={acc.get('f1_score', 0):.2f}"
             
+            # Build theme coverage string
+            theme_info = ""
+            if theme:
+                cov = theme.get("coverage", 0.0)
+                matched = theme.get("matched_count", 0)
+                total = theme.get("total_terms", 0)
+                theme_info = f", theme={cov:.0%} ({matched}/{total})"
+            
             lines.append(
                 f"- {qid}: exact={summ.get('text_norm_exact_rate', 0):.2f}, "
                 f"min_sim={summ.get('text_norm_min_similarity', 0):.2f}, "
                 f"cite_min_jacc={summ.get('citations_min_jaccard_vs_first', 0):.2f}, "
                 f"path_min_jacc={summ.get('evidence_path_min_jaccard_vs_first', 0):.2f}, "
-                f"p50={lat.get('p50', 0)}ms{acc_info}\n"
+                f"p50={lat.get('p50', 0)}ms{acc_info}{theme_info}\n"
             )
         lines.append("\n")
 

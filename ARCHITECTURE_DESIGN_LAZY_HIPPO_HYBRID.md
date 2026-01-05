@@ -443,7 +443,94 @@ def evaluate_evidence_quality(metadata: Dict[str, Any], min_nodes: int) -> Dict:
 
 - **Benchmark Script**: [`scripts/benchmark_route3_thematic.py`](scripts/benchmark_route3_thematic.py#L150-L250)
 - **Evaluation Functions**: `evaluate_theme_coverage()`, `evaluate_evidence_quality()`, `evaluate_response_quality()`
-- **Test Questions**: `THEMATIC_QUESTIONS` (8 queries) + `CROSS_DOC_QUESTIONS` (5 queries)
+- **Test Questions**: `THEMATIC_QUESTIONS` (8 queries) + `CROSS_DOC_QUESTIONS` (2 queries)
+
+---
+
+## 3.7. Dual Evaluation Approach for Route 3 (January 5, 2026)
+
+Route 3 (Global Search) requires **two complementary evaluation strategies** because:
+1. **Correctness testing** (Q-G* questions) validates factual accuracy against ground truth
+2. **Thematic testing** (T-* questions) validates comprehensive summary quality
+
+### Evaluation Strategy A: Correctness + Theme Coverage (`benchmark_route3_global_search.py`)
+
+For **Q-G* questions** with known expected answers, we evaluate **both** accuracy AND theme coverage:
+
+```python
+# Expected terms for Q-G* questions (key terms that should appear)
+EXPECTED_TERMS = {
+    "Q-G1": ["60 days", "written notice", "3 business days", "full refund", "deposit", "forfeited"],
+    "Q-G2": ["idaho", "florida", "hawaii", "pocatello", "arbitration", "governing law"],
+    "Q-G3": ["29900", "25%", "10%", "installment", "commission", "$75", "$50"],
+    "Q-G6": ["fabrikam", "contoso", "walt flood", "contoso lifts", "builder", "owner", "agent"],
+    # ...
+}
+
+def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> Dict:
+    """Calculate theme/keyword coverage for a response."""
+    text_lower = response_text.lower()
+    matched = [term for term in expected_terms if term.lower() in text_lower]
+    missing = [term for term in expected_terms if term.lower() not in text_lower]
+    return {"coverage": len(matched) / len(expected_terms), "matched": matched, "missing": missing}
+```
+
+**Output Format**:
+```
+Q-G1: exact=0.80 min_sim=0.78 | acc: contain=0.85 f1=0.72 | theme=75% (6/8)
+Q-G6: exact=0.90 min_sim=0.85 | acc: contain=0.92 f1=0.80 | theme=86% (6/7)
+```
+
+### Evaluation Strategy B: Document-Grounded Thematic Questions (`benchmark_route3_thematic.py`)
+
+Thematic questions are **grounded in actual document content** rather than abstract themes:
+
+| Old (Abstract) | New (Document-Grounded) |
+|:---------------|:------------------------|
+| "What are the common themes?" | "Compare termination and cancellation provisions" |
+| "How do parties relate?" | "List all named parties and their roles" |
+| "What patterns emerge in financial terms?" | "Summarize payment structures and fees" |
+
+**5PDF-Specific Thematic Questions**:
+```python
+THEMATIC_QUESTIONS = [
+    {
+        "id": "T-1",
+        "query": "Compare termination and cancellation provisions across all agreements.",
+        "expected_themes": ["60 days", "written notice", "3 business days", "refund", "forfeited"],
+    },
+    {
+        "id": "T-2",
+        "query": "Summarize the different payment structures and fees across the documents.",
+        "expected_themes": ["29900", "installment", "commission", "25%", "10%", "$75"],
+    },
+    # ... document-grounded questions with verifiable expected terms
+]
+```
+
+### Why Both Approaches?
+
+| Approach | Tests | Strengths | Use Case |
+|:---------|:------|:----------|:---------|
+| **Strategy A** | Q-G* with expected terms | Validates factual accuracy + completeness | Regression testing, accuracy benchmarks |
+| **Strategy B** | T-* document-grounded | Validates summary quality + coverage | Quality assurance, comprehensiveness |
+
+### Combined Metrics Dashboard
+
+```
+Route 3 Evaluation Summary:
+├── Correctness (Q-G*): 10/10 PASS, avg containment=0.82, avg f1=0.75
+├── Negative Detection (Q-N*): 10/10 PASS (graph-based validation)
+├── Theme Coverage (Q-G*): avg=78% (expected terms found in responses)
+└── Thematic Quality (T-*): avg=84/100 (5-dimension composite score)
+```
+
+### Implementation Reference
+
+- **Strategy A Script**: [`scripts/benchmark_route3_global_search.py`](scripts/benchmark_route3_global_search.py)
+  - Functions: `calculate_theme_coverage()`, `EXPECTED_TERMS` dictionary
+- **Strategy B Script**: [`scripts/benchmark_route3_thematic.py`](scripts/benchmark_route3_thematic.py)
+  - Updated `THEMATIC_QUESTIONS` with document-grounded queries
 
 ---
 

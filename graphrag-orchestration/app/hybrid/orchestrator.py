@@ -1685,8 +1685,8 @@ EVIDENCE: <verbatim quote from Context, or empty>
         # Check if ANY query term appears in ANY entity name
         matching_terms = [term for term in query_terms if term in entity_text_combined]
         
-        # Also check relationship types
-        rel_types = [r.get("type", "") for r in graph_context.relationships]
+        # Also check relationship types (EntityRelationship has .relationship_type attribute)
+        rel_types = [r.relationship_type for r in graph_context.relationships]
         rel_text_combined = " ".join(rel_types).lower()
         rel_matching = [term for term in query_terms if term in rel_text_combined]
         

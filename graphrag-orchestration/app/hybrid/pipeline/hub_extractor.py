@@ -86,7 +86,12 @@ class HubExtractor:
         community: Dict[str, Any],
         top_k: int
     ) -> List[str]:
-        """Get hub entities for a single community."""
+        """Get hub entities for a single community.
+        
+        For dynamically generated communities (LazyGraphRAG), we try to
+        diversify hub selection across multiple source documents to ensure
+        cross-document coverage in global queries.
+        """
         
         # Try to get pre-computed hubs from community data
         if "hub_entities" in community:
@@ -103,7 +108,17 @@ class HubExtractor:
                 )
                 return [e.get("name", e.get("id", "")) for e in sorted_entities[:top_k]]
             else:
-                # Just return first k entities
+                # For string entities from LazyGraphRAG dynamic communities:
+                # Try to diversify across documents by querying Neo4j for document sources
+                if self.neo4j_driver and len(entities) > top_k:
+                    diversified = await self._diversify_entities_by_document(entities, top_k)
+                    if diversified:
+                        logger.info("hub_entities_diversified_by_document",
+                                   original_count=len(entities),
+                                   diversified_count=len(diversified))
+                        return diversified
+                
+                # Fallback: Just return first k entities
                 return entities[:top_k]
         
         # LazyGraphRAG: Dynamically generated community - query Neo4j for hub entities
@@ -214,6 +229,84 @@ class HubExtractor:
             
         except Exception as e:
             logger.error("neo4j_keyword_hub_query_failed", error=str(e))
+            return []
+    
+    async def _diversify_entities_by_document(
+        self,
+        entity_names: List[str],
+        top_k: int
+    ) -> List[str]:
+        """
+        Select entities that maximize document coverage.
+        
+        For global queries, we want hub entities from multiple source documents,
+        not just the largest/most-connected document.
+        """
+        if not self.neo4j_driver or not entity_names:
+            return []
+        
+        try:
+            import asyncio
+            loop = asyncio.get_event_loop()
+            
+            # Query Neo4j to get document source for each entity
+            def _sync_query():
+                with self.neo4j_driver.session() as session:
+                    result = session.run("""
+                        UNWIND $entity_names AS entity_name
+                        MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                        WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
+                        RETURN entity_name, meta.url AS doc_url
+                        LIMIT 100
+                    """, entity_names=entity_names)
+                    return [(r["entity_name"], r["doc_url"]) for r in result if r.get("doc_url")]
+            
+            entity_docs = await loop.run_in_executor(None, _sync_query)
+            
+            # Group entities by document
+            doc_to_entities = {}
+            for entity_name, doc_url in entity_docs:
+                doc_key = doc_url.split("/")[-1] if doc_url else "unknown"
+                if doc_key not in doc_to_entities:
+                    doc_to_entities[doc_key] = []
+                if entity_name not in doc_to_entities[doc_key]:
+                    doc_to_entities[doc_key].append(entity_name)
+            
+            if not doc_to_entities:
+                return []
+            
+            # Round-robin select entities from different documents
+            diversified = []
+            doc_keys = list(doc_to_entities.keys())
+            doc_indices = {doc: 0 for doc in doc_keys}
+            
+            while len(diversified) < top_k:
+                made_progress = False
+                for doc in doc_keys:
+                    if len(diversified) >= top_k:
+                        break
+                    idx = doc_indices[doc]
+                    entities = doc_to_entities[doc]
+                    if idx < len(entities):
+                        entity = entities[idx]
+                        if entity not in diversified:
+                            diversified.append(entity)
+                        doc_indices[doc] = idx + 1
+                        made_progress = True
+                
+                if not made_progress:
+                    break
+            
+            logger.info("entity_diversification_result",
+                       num_documents=len(doc_to_entities),
+                       documents=list(doc_to_entities.keys()),
+                       selected_count=len(diversified))
+            
+            return diversified
+            
+        except Exception as e:
+            logger.warning("entity_diversification_failed", error=str(e))
             return []
     
     async def get_high_degree_entities(

@@ -1592,7 +1592,7 @@ EVIDENCE: <verbatim quote from Context, or empty>
         logger.info("stage_3.2_hub_extraction")
         hub_entities = await self.hub_extractor.extract_hub_entities(
             communities=community_data,
-            top_k_per_community=3
+            top_k_per_community=10  # Increased from 3 to ensure cross-document coverage
         )
         logger.info("stage_3.2_complete", num_hubs=len(hub_entities))
         
@@ -1666,13 +1666,21 @@ EVIDENCE: <verbatim quote from Context, or empty>
         # ================================================================
         # ENTITY-QUERY RELEVANCE CHECK (semantic match validation)
         # ================================================================
-        # We have graph signal, but are the entities actually relevant to the query?
-        # If none of the hub entities relate to query terms, it's likely a false match.
-        # Extract key query terms (nouns/concepts) and check if ANY entity contains them.
+        # For global/thematic questions, we TRUST community matching and hub extraction.
+        # The entity relevance check was designed to catch false positives where
+        # entities are found but don't relate to the query (e.g., "quantum computing policy"
+        # matching random entities). However, for global search:
+        # - Community matching already provides semantic relevance
+        # - Hub entities are extracted based on community topics
+        # - Global questions ask about THEMES (termination, payment) not specific entities
+        # 
+        # We only apply strict entity relevance for VERY low signal scenarios:
+        # - Few hub entities (<=2) AND few relationships (<=5)
+        # - This catches cases where we matched noise, not genuine topic presence
         # ================================================================
         import re
         # Extract significant words from query (4+ chars, not stopwords)
-        stopwords = {"what", "when", "where", "which", "about", "does", "there", "their", "have", "this", "that", "with", "from", "they", "been", "were", "will", "would", "could", "should"}
+        stopwords = {"what", "when", "where", "which", "about", "does", "there", "their", "have", "this", "that", "with", "from", "they", "been", "were", "will", "would", "could", "should", "across", "list", "summarize", "identify"}
         query_terms = [
             w.lower() for w in re.findall(r"[A-Za-z]{4,}", query)
             if w.lower() not in stopwords
@@ -1692,20 +1700,22 @@ EVIDENCE: <verbatim quote from Context, or empty>
         
         total_matches = len(set(matching_terms + rel_matching))
         
-        # Only apply strict entity relevance check for SHORT, specific queries
-        # Thematic queries (6+ terms) naturally use abstract language that won't match entity names
-        # Example: "What is the quantum computing policy?" (short, specific) vs
-        #          "What are common themes across contracts?" (long, thematic)
-        if total_matches == 0 and 2 <= len(query_terms) <= 5:
-            # We have entities but NONE relate to the query semantically
-            # Only reject if query is SHORT and specific (2-5 terms)
+        # RELAXED CHECK: Only reject if we have VERY LOW graph signal
+        # Strong graph signal (many hubs/relationships) = trust community matching
+        # Weak graph signal + no term matches = likely false match, reject
+        has_strong_graph_signal = len(hub_entities) >= 3 or len(graph_context.relationships) >= 10
+        
+        if total_matches == 0 and not has_strong_graph_signal and len(query_terms) >= 2:
+            # Weak graph signal AND no query terms match entities
+            # This is likely noise, not genuine topic presence
             logger.info(
-                "route_3_negative_detection_no_entity_relevance",
+                "route_3_negative_detection_weak_signal",
                 query_terms=query_terms,
-                hub_entities=hub_entities[:5],
+                num_hub_entities=len(hub_entities),
+                num_relationships=len(graph_context.relationships),
                 matching_terms=matching_terms,
                 rel_matching=rel_matching,
-                reason="Entities found but none semantically relate to query"
+                reason="Weak graph signal and no entity relevance"
             )
             return {
                 "response": "The requested information was not found in the available documents.",
@@ -1721,9 +1731,9 @@ EVIDENCE: <verbatim quote from Context, or empty>
                     "num_relationships": len(graph_context.relationships),
                     "latency_estimate": "fast",
                     "precision_level": "high",
-                    "route_description": "Thematic with entity relevance check",
+                    "route_description": "Thematic with weak signal detection",
                     "negative_detection": True,
-                    "detection_reason": "no_entity_relevance"
+                    "detection_reason": "weak_graph_signal_no_relevance"
                 }
             }
         
@@ -1731,7 +1741,8 @@ EVIDENCE: <verbatim quote from Context, or empty>
             "route_3_entity_relevance_check_passed",
             query_terms=query_terms,
             matching_terms=matching_terms,
-            rel_matching=rel_matching
+            rel_matching=rel_matching,
+            has_strong_graph_signal=has_strong_graph_signal
         )
         
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)

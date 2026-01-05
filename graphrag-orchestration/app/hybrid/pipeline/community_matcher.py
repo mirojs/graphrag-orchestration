@@ -257,18 +257,25 @@ class CommunityMatcher:
         
         logger.info("extracted_query_keywords", keywords=query_keywords[:5])
         
-        # Validate that matching entities exist in Neo4j
-        matching_entities = []
+        # STRATEGY: Combine keyword matching with multi-document sampling
+        # This ensures we get BOTH:
+        # 1. Entities matching query keywords (semantic relevance)
+        # 2. Top entities from EACH document (cross-document coverage)
+        
+        keyword_matched_entities = []
+        multi_doc_entities = []
+        
         if self.neo4j_service:
+            # Step 1: Keyword-based entity search (name AND description)
             try:
-                # Search for entities matching any keyword
-                # Note: Entity nodes are stored with label 'Entity', not '__Entity__'
+                # Search entities by keyword in name OR description
                 search_query = """
                 MATCH (e:Entity)
                 WHERE e.group_id = $group_id
-                  AND any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
-                RETURN e.name AS name, e.description AS description
-                LIMIT 20
+                  AND (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
+                       OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
+                RETURN DISTINCT e.name AS name, e.description AS description
+                LIMIT 15
                 """
                 
                 async with self.neo4j_service._get_session() as session:
@@ -278,19 +285,139 @@ class CommunityMatcher:
                         keywords=query_keywords
                     )
                     records = await result.data()
-                    matching_entities = [r["name"] for r in records]
+                    keyword_matched_entities = [r["name"] for r in records]
                     
-                logger.info("dynamic_community_entity_search",
+                logger.info("keyword_entity_search",
                           keywords_searched=len(query_keywords),
-                          entities_found=len(matching_entities))
+                          entities_found=len(keyword_matched_entities))
                 
             except Exception as e:
                 logger.error("neo4j_entity_search_failed", error=str(e))
+            
+            # Step 2: Multi-document sampling (ALWAYS run for cross-doc coverage)
+            try:
+                # Get top entities from EACH document to ensure coverage
+                multi_doc_query = """
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                WHERE c.group_id = $group_id
+                WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
+                WITH meta.url AS doc_url, e, coalesce(e.degree, 0) AS deg
+                ORDER BY deg DESC
+                WITH doc_url, collect({name: e.name, degree: deg})[..2] AS top_entities
+                UNWIND top_entities AS entity
+                RETURN entity.name AS name, doc_url
+                LIMIT 10
+                """
+                
+                async with self.neo4j_service._get_session() as session:
+                    result = await session.run(multi_doc_query, group_id=self.group_id)
+                    records = await result.data()
+                    multi_doc_entities = [r["name"] for r in records]
+                    
+                    doc_sources = list(set(r.get("doc_url", "").split("/")[-1] for r in records if r.get("doc_url")))
+                    logger.info("multi_document_sampling",
+                              entities_from_multi_doc=len(multi_doc_entities),
+                              documents_covered=len(doc_sources),
+                              doc_sources=doc_sources)
+                
+            except Exception as e:
+                logger.warning("multi_doc_sampling_failed", error=str(e))
         
-        # If no entities found with keyword matching, try getting top entities by degree
+        # Combine: keyword matches first (more relevant), then multi-doc (coverage)
+        # Deduplicate while preserving order
+        seen = set()
+        matching_entities = []
+        for name in keyword_matched_entities + multi_doc_entities:
+            if name not in seen:
+                seen.add(name)
+                matching_entities.append(name)
+        
+        logger.info("combined_entity_selection",
+                   keyword_matched=len(keyword_matched_entities),
+                   multi_doc=len(multi_doc_entities),
+                   final_count=len(matching_entities))
+        
+        # If still no entities found, try embedding-based search
+        # This ensures we find semantically relevant entities across ALL documents
+        if not matching_entities and self.neo4j_service and self.embedding_client:
+            try:
+                logger.info("keyword_search_empty_trying_embedding_search",
+                           group_id_used=self.group_id)
+                
+                # Get query embedding
+                query_embedding = await self._get_embedding(query)
+                
+                if query_embedding:
+                    # Use vector similarity search to find relevant entities
+                    # This is more semantic than keyword matching
+                    embedding_query = """
+                    MATCH (e:Entity)
+                    WHERE e.group_id = $group_id AND e.embedding IS NOT NULL
+                    WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
+                    WHERE similarity > 0.3
+                    RETURN e.name AS name, e.description AS description, similarity
+                    ORDER BY similarity DESC
+                    LIMIT 20
+                    """
+                    
+                    async with self.neo4j_service._get_session() as session:
+                        result = await session.run(
+                            embedding_query,
+                            group_id=self.group_id,
+                            query_embedding=query_embedding
+                        )
+                        records = await result.data()
+                        matching_entities = [r["name"] for r in records]
+                        
+                    logger.info("embedding_search_found_entities",
+                              entities_found=len(matching_entities),
+                              top_similarity=records[0].get("similarity") if records else None)
+                
+            except Exception as e:
+                logger.warning("embedding_search_failed_trying_fallback", 
+                              error=str(e), error_type=type(e).__name__)
+        
+        # If embedding search failed or unavailable, use MULTI-DOCUMENT SAMPLING fallback
+        # This ensures we get entities from ALL documents, not just highest-degree overall
         if not matching_entities and self.neo4j_service:
             try:
-                logger.info("keyword_search_empty_trying_top_entities",
+                logger.info("trying_multi_document_sampling_fallback",
+                           group_id_used=self.group_id)
+                
+                # Get top entities from EACH document to ensure cross-document coverage
+                # This prevents the largest document from dominating results
+                multi_doc_query = """
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                WHERE c.group_id = $group_id
+                WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
+                WITH meta.url AS doc_url, e, coalesce(e.degree, 0) AS deg
+                ORDER BY deg DESC
+                WITH doc_url, collect({name: e.name, description: e.description, degree: deg})[..3] AS top_entities
+                UNWIND top_entities AS entity
+                RETURN entity.name AS name, entity.description AS description, doc_url
+                LIMIT 15
+                """
+                
+                async with self.neo4j_service._get_session() as session:
+                    result = await session.run(multi_doc_query, group_id=self.group_id)
+                    records = await result.data()
+                    matching_entities = [r["name"] for r in records]
+                    
+                    # Log which documents we got entities from
+                    doc_sources = list(set(r.get("doc_url", "").split("/")[-1] for r in records if r.get("doc_url")))
+                    logger.info("multi_document_sampling_result",
+                              entities_found=len(matching_entities),
+                              documents_covered=len(doc_sources),
+                              doc_sources=doc_sources[:5])
+                
+            except Exception as e:
+                logger.warning("multi_doc_sampling_failed_trying_degree_fallback",
+                              error=str(e), error_type=type(e).__name__)
+        
+        # Final fallback: simple degree-based (least preferred, may bias toward largest doc)
+        if not matching_entities and self.neo4j_service:
+            try:
+                logger.info("using_final_degree_fallback",
                            group_id_used=self.group_id,
                            service_connected=self.neo4j_service._driver is not None)
                 # Get most important entities as fallback

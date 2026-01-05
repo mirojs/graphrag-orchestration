@@ -267,14 +267,20 @@ class CommunityMatcher:
         
         if self.neo4j_service:
             # Step 1: Keyword-based entity search (name AND description)
+            # Modified to ensure cross-document coverage in keyword results too
             try:
-                # Search entities by keyword in name OR description
+                # Search entities by keyword, but diversify across documents
                 search_query = """
-                MATCH (e:Entity)
-                WHERE e.group_id = $group_id
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                WHERE c.group_id = $group_id
                   AND (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
-                RETURN DISTINCT e.name AS name, e.description AS description
+                WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
+                WITH meta.url AS doc_url, e.name AS name, e.description AS description
+                // Get first matching entity from each document, round-robin
+                WITH doc_url, collect(DISTINCT name)[..3] AS entities_per_doc
+                UNWIND entities_per_doc AS name
+                RETURN DISTINCT name
                 LIMIT 15
                 """
                 

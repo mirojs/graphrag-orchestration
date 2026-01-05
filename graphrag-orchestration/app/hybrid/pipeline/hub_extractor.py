@@ -99,6 +99,16 @@ class HubExtractor:
         
         if "entities" in community and community["entities"]:
             entities = community["entities"]
+            
+            # Debug: Log entity format and diversification eligibility
+            logger.info("hub_entity_selection_debug",
+                       entities_count=len(entities),
+                       entities_format=type(entities[0]).__name__ if entities else None,
+                       is_dict=isinstance(entities[0], dict) if entities else False,
+                       has_neo4j_driver=self.neo4j_driver is not None,
+                       top_k=top_k,
+                       will_diversify=(not isinstance(entities[0], dict) and self.neo4j_driver is not None and len(entities) >= top_k) if entities else False)
+            
             # If we have degree info, sort by it
             if entities and isinstance(entities[0], dict):
                 sorted_entities = sorted(
@@ -110,7 +120,7 @@ class HubExtractor:
             else:
                 # For string entities from LazyGraphRAG dynamic communities:
                 # Try to diversify across documents by querying Neo4j for document sources
-                if self.neo4j_driver and len(entities) > top_k:
+                if self.neo4j_driver and len(entities) >= top_k:
                     diversified = await self._diversify_entities_by_document(entities, top_k)
                     if diversified:
                         logger.info("hub_entities_diversified_by_document",

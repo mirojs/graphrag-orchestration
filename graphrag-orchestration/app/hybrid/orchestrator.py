@@ -1663,6 +1663,72 @@ EVIDENCE: <verbatim quote from Context, or empty>
             hub_entity_sample=hub_entities[:3] if hub_entities else []
         )
         
+        # ================================================================
+        # ENTITY-QUERY RELEVANCE CHECK (semantic match validation)
+        # ================================================================
+        # We have graph signal, but are the entities actually relevant to the query?
+        # If none of the hub entities relate to query terms, it's likely a false match.
+        # Extract key query terms (nouns/concepts) and check if ANY entity contains them.
+        # ================================================================
+        import re
+        # Extract significant words from query (4+ chars, not stopwords)
+        stopwords = {"what", "when", "where", "which", "about", "does", "there", "their", "have", "this", "that", "with", "from", "they", "been", "were", "will", "would", "could", "should"}
+        query_terms = [
+            w.lower() for w in re.findall(r"[A-Za-z]{4,}", query)
+            if w.lower() not in stopwords
+        ]
+        
+        # Collect all entity text (hub + related)
+        all_entity_names = hub_entities + graph_context.related_entities
+        entity_text_combined = " ".join(all_entity_names).lower()
+        
+        # Check if ANY query term appears in ANY entity name
+        matching_terms = [term for term in query_terms if term in entity_text_combined]
+        
+        # Also check relationship types
+        rel_types = [r.get("type", "") for r in graph_context.relationships]
+        rel_text_combined = " ".join(rel_types).lower()
+        rel_matching = [term for term in query_terms if term in rel_text_combined]
+        
+        total_matches = len(set(matching_terms + rel_matching))
+        
+        if total_matches == 0 and len(query_terms) >= 2:
+            # We have entities but NONE relate to the query semantically
+            logger.info(
+                "route_3_negative_detection_no_entity_relevance",
+                query_terms=query_terms,
+                hub_entities=hub_entities[:5],
+                matching_terms=matching_terms,
+                rel_matching=rel_matching,
+                reason="Entities found but none semantically relate to query"
+            )
+            return {
+                "response": "The requested information was not found in the available documents.",
+                "route_used": "route_3_global_search",
+                "citations": [],
+                "evidence_path": [],
+                "metadata": {
+                    "matched_communities": [c.get("title", "?") for c in community_data],
+                    "hub_entities": hub_entities,
+                    "query_terms": query_terms,
+                    "matching_terms": matching_terms,
+                    "num_source_chunks": len(graph_context.source_chunks),
+                    "num_relationships": len(graph_context.relationships),
+                    "latency_estimate": "fast",
+                    "precision_level": "high",
+                    "route_description": "Thematic with entity relevance check",
+                    "negative_detection": True,
+                    "detection_reason": "no_entity_relevance"
+                }
+            }
+        
+        logger.info(
+            "route_3_entity_relevance_check_passed",
+            query_terms=query_terms,
+            matching_terms=matching_terms,
+            rel_matching=rel_matching
+        )
+        
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
         # Now also includes related entities from graph traversal
         logger.info("stage_3.4_hipporag_ppr_tracing")

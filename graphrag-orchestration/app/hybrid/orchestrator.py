@@ -1617,6 +1617,7 @@ EVIDENCE: <verbatim quote from Context, or empty>
         # Check if query keywords actually appear in source chunks.
         # If not, the query is asking for info that doesn't exist.
         # ================================================================
+        import re
         stopwords = {"what", "is", "the", "a", "an", "for", "in", "on", "to", "of", "and", "or", "are", "how", "which", "where", "who", "does", "do", "can", "will", "would", "should", "could", "has", "have", "been", "being", "was", "were"}
         query_keywords = [
             token for token in re.findall(r"[A-Za-z0-9]+", query.lower())

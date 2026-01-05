@@ -125,13 +125,15 @@ class CommunityMatcher:
         logger.info("lazygraphrag_on_the_fly_community_generation", query=query[:50])
         dynamic_communities = await self._generate_communities_from_query(query, top_k)
         
-        # Fail fast if no valid communities could be generated
+        # If no valid communities could be generated, return empty list
+        # Let the orchestrator handle it via graph-based negative detection
         if not dynamic_communities or len(dynamic_communities) == 0:
-            raise RuntimeError(
-                f"No communities found for query: {query[:100]}. "
-                "This indicates the group may not have community data indexed, "
-                "or the query keywords don't match any entities in the graph."
+            logger.warning(
+                "lazygraphrag_no_communities_generated",
+                query=query[:100],
+                reason="Query keywords don't match any entities in the graph"
             )
+            return []
         
         return dynamic_communities
     

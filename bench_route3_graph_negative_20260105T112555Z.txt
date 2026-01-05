@@ -1,0 +1,55 @@
+# Hybrid (LazyGraphRAG) Global10 Repeatability (20260105T112307Z)
+
+- url: `https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io`
+
+- group_id: `test-5pdfs-1767607148075079644`
+
+- endpoint: `/hybrid/query` (force_route=`global_search`)
+
+- repeats: `10`
+
+
+
+## hybrid_global_summary
+
+- Q-G1: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=392ms, contain=0.02, f1=0.04
+
+- Q-G2: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=387ms, contain=0.05, f1=0.07
+
+- Q-G3: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, contain=0.02, f1=0.04
+
+- Q-G4: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, contain=0.00, f1=0.00
+
+- Q-G5: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, contain=0.00, f1=0.00
+
+- Q-G6: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, contain=0.00, f1=0.00
+
+- Q-G7: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, contain=0.06, f1=0.10
+
+- Q-G8: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=387ms, contain=0.00, f1=0.00
+
+- Q-G9: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=387ms, contain=0.00, f1=0.00
+
+- Q-G10: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, contain=0.00, f1=0.00
+
+- Q-N1: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=388ms, NEG_TEST=PASS
+
+- Q-N2: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=389ms, NEG_TEST=PASS
+
+- Q-N3: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=387ms, NEG_TEST=PASS
+
+- Q-N4: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=385ms, NEG_TEST=PASS
+
+- Q-N5: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, NEG_TEST=PASS
+
+- Q-N6: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=385ms, NEG_TEST=PASS
+
+- Q-N7: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=385ms, NEG_TEST=PASS
+
+- Q-N8: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, NEG_TEST=PASS
+
+- Q-N9: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=386ms, NEG_TEST=PASS
+
+- Q-N10: exact=1.00, min_sim=1.00, cite_min_jacc=1.00, path_min_jacc=1.00, p50=385ms, NEG_TEST=PASS
+
+

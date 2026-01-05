@@ -1612,52 +1612,56 @@ EVIDENCE: <verbatim quote from Context, or empty>
                    num_related_entities=len(graph_context.related_entities))
         
         # ================================================================
-        # PRE-SYNTHESIS KEYWORD VALIDATION (same pattern as Route 1)
+        # GRAPH-BASED NEGATIVE DETECTION (using LazyGraphRAG + HippoRAG2 signals)
         # ================================================================
-        # Check if query keywords actually appear in source chunks.
-        # If not, the query is asking for info that doesn't exist.
+        # Use graph structure to determine if query topic exists:
+        # - If NO hub entities AND NO relationships → topic doesn't exist in graph
+        # - If we have graph signal → let synthesis decide (has anti-hallucination prompt)
+        # This is more semantic than keyword matching because the graph
+        # captures conceptual relationships, not just word overlap.
         # ================================================================
-        import re
-        stopwords = {"what", "is", "the", "a", "an", "for", "in", "on", "to", "of", "and", "or", "are", "how", "which", "where", "who", "does", "do", "can", "will", "would", "should", "could", "has", "have", "been", "being", "was", "were"}
-        query_keywords = [
-            token for token in re.findall(r"[A-Za-z0-9]+", query.lower())
-            if len(token) >= 3 and token not in stopwords
-        ]
+        has_graph_signal = (
+            len(hub_entities) > 0 or 
+            len(graph_context.relationships) > 0 or
+            len(graph_context.related_entities) > 0
+        )
         
-        if query_keywords and graph_context.source_chunks:
-            # Combine all chunk text for keyword check
-            all_chunk_text = " ".join([c.text.lower() for c in graph_context.source_chunks])
-            matched_keywords = [kw for kw in query_keywords if kw in all_chunk_text]
-            
-            # If less than 30% of keywords match, likely a negative case
-            match_ratio = len(matched_keywords) / len(query_keywords) if query_keywords else 0
-            
-            if match_ratio < 0.3:
-                logger.info(
-                    "route_3_negative_detection_pre_synthesis",
-                    query_keywords=query_keywords,
-                    matched_keywords=matched_keywords,
-                    match_ratio=match_ratio,
-                    reason="Query keywords not found in source chunks"
-                )
-                return {
-                    "response": "The requested information was not found in the available documents.",
-                    "route_used": "route_3_global_search",
-                    "citations": [],
-                    "evidence_path": [],
-                    "metadata": {
-                        "matched_communities": [c.get("title", "?") for c in community_data],
-                        "hub_entities": hub_entities,
-                        "num_source_chunks": len(graph_context.source_chunks),
-                        "query_keywords": query_keywords,
-                        "matched_keywords": matched_keywords,
-                        "match_ratio": match_ratio,
-                        "latency_estimate": "fast",
-                        "precision_level": "high",
-                        "route_description": "Thematic with pre-synthesis negative detection",
-                        "negative_detection": True
-                    }
+        if not has_graph_signal:
+            # Graph traversal found nothing - topic doesn't exist
+            logger.info(
+                "route_3_negative_detection_no_graph_signal",
+                num_hub_entities=len(hub_entities),
+                num_relationships=len(graph_context.relationships),
+                num_related_entities=len(graph_context.related_entities),
+                num_communities=len(community_data),
+                reason="No entities or relationships found in graph"
+            )
+            return {
+                "response": "The requested information was not found in the available documents.",
+                "route_used": "route_3_global_search",
+                "citations": [],
+                "evidence_path": [],
+                "metadata": {
+                    "matched_communities": [c.get("title", "?") for c in community_data],
+                    "hub_entities": hub_entities,
+                    "num_source_chunks": len(graph_context.source_chunks),
+                    "num_relationships": 0,
+                    "num_related_entities": 0,
+                    "latency_estimate": "fast",
+                    "precision_level": "high",
+                    "route_description": "Thematic with graph-based negative detection",
+                    "negative_detection": True,
+                    "detection_reason": "no_graph_signal"
                 }
+            }
+        
+        logger.info(
+            "route_3_graph_signal_found",
+            num_hub_entities=len(hub_entities),
+            num_relationships=len(graph_context.relationships),
+            num_related_entities=len(graph_context.related_entities),
+            hub_entity_sample=hub_entities[:3] if hub_entities else []
+        )
         
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
         # Now also includes related entities from graph traversal

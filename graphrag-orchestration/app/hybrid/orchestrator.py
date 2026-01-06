@@ -365,7 +365,7 @@ class HybridPipeline:
             # Use AsyncNeo4jService to check if query keywords exist in the
             # document chunks. This prevents hallucinations for negative questions.
             # ================================================================
-            top_doc_url = results[0][0].get("url") or results[0][0].get("source") if results else None
+            top_doc_url = results[0][0].get("url") or results[0][0].get("source") or results[0][0].get("document_id") if results else None
             
             if self._async_neo4j and top_doc_url:
                 # Extract meaningful keywords from query (exclude stopwords)

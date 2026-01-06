@@ -366,7 +366,7 @@ class AsyncNeo4jService:
         query = """
         MATCH (c)
         WHERE c.group_id = $group_id 
-          AND c.url = $doc_url
+          AND (c.url = $doc_url OR c.document_id = $doc_url)
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
         WITH c, 
              [kw IN $keywords WHERE 

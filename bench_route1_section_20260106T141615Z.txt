@@ -1,0 +1,6 @@
+usage: benchmark_route1_vector_rag.py [-h] [--url URL]
+                                      [--group-id GROUP_ID]
+                                      [--repeats REPEATS]
+                                      [--timeout TIMEOUT]
+                                      [--qbank QBANK]
+benchmark_route1_vector_rag.py: error: unrecognized arguments: --max-questions 10

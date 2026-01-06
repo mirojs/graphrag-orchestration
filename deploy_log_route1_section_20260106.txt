@@ -1,0 +1,52 @@
+==================================================
+GraphRAG Deployment Configuration
+==================================================
+Resource Group:       rg-graphrag-feature
+Location:             swedencentral
+Container Registry:   graphragacr12153
+Container App:        graphrag-orchestration
+Image Tag:            latest
+Docker Cleanup:       true
+==================================================
+
+🔐 Checking Azure login status...
+✅ Logged in to Azure subscription: Microsoft Azure Sponsorship
+
+📦 Retrieving ACR credentials...
+✅ ACR Endpoint: graphragacr12153.azurecr.io
+
+==================================================
+🐳 Building and Pushing Docker Image
+==================================================
+Image URI: graphragacr12153.azurecr.io/graphrag-orchestration:latest
+Build Context: /afh/projects/graphrag-orchestration/graphrag-orchestration
+
+⏳ Building and pushing image in ACR (this may take 2-3 minutes)...
+WARNING: Packing source code into tar to upload...
+WARNING: Excluding '.venv' directory for performance
+WARNING: Excluding '.pytest_cache/.gitignore' based on default ignore rules
+WARNING: Uploading archived source code from '/tmp/build_archive_e7bf8bd0121c4f1ebc0534f3aa736b7f.tar.gz'...
+WARNING: Sending context (9.875 MiB) to registry: graphragacr12153...
+WARNING: Queued a build with ID: dt8x
+WARNING: Waiting for an agent...
+2026/01/06 13:54:17 Downloading source code...
+2026/01/06 13:54:18 Finished downloading source code
+2026/01/06 13:54:18 Using acb_vol_21e4c299-4cfa-4f8d-9b09-e35f6d84c35f as the home volume
+2026/01/06 13:54:18 Setting up Docker configuration...
+2026/01/06 13:54:19 Successfully set up Docker configuration
+2026/01/06 13:54:19 Logging in to registry: graphragacr12153.azurecr.io
+2026/01/06 13:54:19 Successfully logged into graphragacr12153.azurecr.io
+2026/01/06 13:54:19 Executing step ID: build. Timeout(sec): 28800, Working directory: '', Network: ''
+2026/01/06 13:54:19 Scanning for dependencies...
+2026/01/06 13:54:20 Successfully scanned dependencies
+2026/01/06 13:54:20 Launching container with name: build
+Sending build context to Docker daemon  31.22MB
+Step 1/13 : FROM python:3.11-slim as builder
+3.11-slim: Pulling from library/python
+02d7611c4eae: Pulling fs layer
+1473863bb010: Pulling fs layer
+7cc13cb22d92: Pulling fs layer
+654a090213c0: Pulling fs layer
+654a090213c0: Waiting
+1473863bb010: Verifying Checksum
+1473863bb010: Download complete

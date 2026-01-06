@@ -1,0 +1,117 @@
+Loaded 20 questions from QUESTION_BANK_5PDFS_2025-12-24.md
+  Positive tests (Q-V): 10
+  Negative tests (Q-N): 10
+Loaded 60 ground truth answers
+
+======================================================================
+Scenario: hybrid_route1_summary (response_type=summary)
+Questions: 20, Repeats: 2
+======================================================================
+
+[Q-V1] What is the invoice **TOTAL** amount?
+  [1/2] 2717ms - 36 chars
+  [2/2] 1747ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1747ms
+[Q-V2] What is the invoice **DUE DATE**?
+  [1/2] 2121ms - 36 chars
+  [2/2] 1811ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1811ms
+[Q-V3] What are the invoice **TERMS**?
+  [1/2] 453ms - 38 chars
+  [2/2] 268ms - 38 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=268ms
+[Q-V4] In the purchase contract, list the **3 installment amounts** and their triggers.
+  [1/2] 4936ms - 36 chars
+  [2/2] 7011ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4936ms
+[Q-V5] What is the **labor warranty** duration in the purchase contract?
+  [1/2] 3456ms - 7 chars
+  [2/2] 3223ms - 7 chars
+  Accuracy: containment=0.17, f1=0.25
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3223ms
+[Q-V6] In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?
+  [1/2] 3731ms - 36 chars
+  [2/2] 2993ms - 36 chars
+  Accuracy: containment=0.14, f1=0.15
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2993ms
+[Q-V7] In the holding tank contract, what is the pumper’s **registration number**?
+  [1/2] 2509ms - 9 chars
+  [2/2] 2550ms - 9 chars
+  Accuracy: containment=1.00, f1=1.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2509ms
+[Q-V8] What is the warranty’s builder address city/state/zip?
+  [1/2] 4749ms - 36 chars
+  [2/2] 3440ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3440ms
+[Q-V9] Who is the invoice **SALESPERSON**?
+  [1/2] 1352ms - 36 chars
+  [2/2] 4253ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1352ms
+[Q-V10] What is the invoice **P.O. NUMBER**?
+  [1/2] 457ms - 38 chars
+  [2/2] 974ms - 38 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=457ms
+[Q-N1] What is the invoice’s **bank routing number** for payment?
+  [1/2] 934ms - 36 chars
+  [2/2] 1133ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=934ms
+[Q-N2] What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+  [1/2] 1208ms - 36 chars
+  [2/2] 1086ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1086ms
+[Q-N3] What is the vendor’s **VAT / Tax ID number** on the invoice?
+  [1/2] 1638ms - 7 chars
+  [2/2] 1804ms - 7 chars
+  Accuracy: NEGATIVE_TEST FAIL
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1638ms
+[Q-N4] What is the invoice’s **payment portal URL** (web link to pay online)?
+  [1/2] 2378ms - 38 chars
+  [2/2] 1565ms - 38 chars
+  Accuracy: NEGATIVE_TEST FAIL
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1565ms
+[Q-N5] What is the invoice’s **bank account number** for ACH/wire payments?
+  [1/2] 751ms - 36 chars
+  [2/2] 775ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=751ms
+[Q-N6] Which documents are governed by the laws of **California**?
+  [1/2] 2081ms - 36 chars
+  [2/2] 1570ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1570ms
+[Q-N7] What is the property management Agent’s **license number**?
+  [1/2] 1747ms - 36 chars
+  [2/2] 3340ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1747ms
+[Q-N8] What is the purchase contract’s required **wire transfer / ACH instructions**?
+  [1/2] 1036ms - 36 chars
+  [2/2] 1028ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1028ms
+[Q-N9] What is the exact clause about **mold damage** coverage in the warranty?
+  [1/2] 1635ms - 36 chars
+  [2/2] 1692ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1635ms
+[Q-N10] What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+  [1/2] 1238ms - 36 chars
+  [2/2] 1245ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1238ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route1_vector_rag_20260106T143135Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route1_vector_rag_20260106T143135Z.md
+======================================================================
+

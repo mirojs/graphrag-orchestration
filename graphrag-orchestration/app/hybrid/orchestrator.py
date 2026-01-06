@@ -368,8 +368,80 @@ class HybridPipeline:
             top_doc_url = results[0][0].get("url") or results[0][0].get("source") or results[0][0].get("document_id") if results else None
             
             if self._async_neo4j and top_doc_url:
-                # Extract meaningful keywords from query (exclude stopwords)
+                # =============================================================
+                # FIELD-SPECIFIC PATTERN VALIDATION (Deterministic)
+                # =============================================================
+                # For specific field types, validate with regex patterns
+                # This catches false positives where keywords exist separately
+                # but not in the required semantic relationship.
+                # =============================================================
                 import re
+                
+                # Field type patterns for precise negative detection
+                FIELD_PATTERNS = {
+                    # VAT/Tax ID: Must have "VAT" or "Tax ID" followed by digits
+                    "vat": r"(?i).*(VAT|Tax ID|GST|TIN)[^\d]{0,20}\d{5,}.*",
+                    # URLs: Must contain actual http/https URL
+                    "url": r"(?i).*(https?://[\w\.-]+[\w/\.-]*).*",
+                    # Bank routing: Must have routing/account followed by digits
+                    "bank_routing": r"(?i).*(routing|ABA)[^\d]{0,15}\d{9}.*",
+                    # Bank account: Must have account number pattern
+                    "bank_account": r"(?i).*(account\s*(number|no|#)?)[^\d]{0,15}\d{8,}.*",
+                    # SWIFT/BIC: Must have SWIFT/BIC followed by code pattern
+                    "swift": r"(?i).*(SWIFT|BIC|IBAN)[^A-Z]{0,10}[A-Z]{4,11}.*",
+                }
+                
+                # Detect field type from query
+                query_lower = query.lower()
+                detected_field_type = None
+                
+                if any(kw in query_lower for kw in ["vat", "tax id", "gst", "tin number"]):
+                    detected_field_type = "vat"
+                elif any(kw in query_lower for kw in ["url", "link", "portal", "website", "web link"]):
+                    detected_field_type = "url"
+                elif any(kw in query_lower for kw in ["routing number", "aba"]):
+                    detected_field_type = "bank_routing"
+                elif any(kw in query_lower for kw in ["account number", "bank account"]):
+                    detected_field_type = "bank_account"
+                elif any(kw in query_lower for kw in ["swift", "bic", "iban"]):
+                    detected_field_type = "swift"
+                
+                # Pattern-based check for specific field types
+                if detected_field_type and detected_field_type in FIELD_PATTERNS:
+                    pattern_exists = await self._async_neo4j.check_field_pattern_in_document(
+                        group_id=self.group_id,
+                        doc_url=top_doc_url,
+                        pattern=FIELD_PATTERNS[detected_field_type],
+                    )
+                    
+                    if not pattern_exists:
+                        logger.info(
+                            "route_1_pattern_negative_detection_triggered",
+                            field_type=detected_field_type,
+                            pattern=FIELD_PATTERNS[detected_field_type][:50],
+                            doc_url=top_doc_url,
+                            reason="Field pattern not found in document",
+                        )
+                        return {
+                            "response": "Not found in the provided documents.",
+                            "route_used": "route_1_vector_rag",
+                            "citations": citations,
+                            "evidence_path": [],
+                            "metadata": {
+                                "num_chunks": len(results),
+                                "chunks_used": len(context_parts),
+                                "latency_estimate": "fast",
+                                "precision_level": "standard",
+                                "route_description": "Vector search with pattern-based negative detection",
+                                "negative_detection": True,
+                                "detected_field_type": detected_field_type,
+                                "debug_top_chunk_id": results[0][0]["id"] if results else None,
+                            }
+                        }
+                
+                # =============================================================
+                # KEYWORD-BASED FALLBACK (For general queries)
+                # =============================================================
                 stopwords = {
                     "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
                     "is", "are", "was", "were", "be", "been", "this", "that", "these", "those",

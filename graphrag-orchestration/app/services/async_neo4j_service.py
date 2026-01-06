@@ -404,6 +404,56 @@ class AsyncNeo4jService:
                 return True, record.get("section_path")
             return False, None
     
+    async def check_field_pattern_in_document(
+        self,
+        group_id: str,
+        doc_url: str,
+        pattern: str,
+    ) -> bool:
+        """
+        Check if a document contains chunks matching a specific regex pattern.
+        
+        This provides more precise negative detection by validating that fields
+        exist in the expected format (e.g., VAT numbers, URLs, bank accounts).
+        
+        Args:
+            group_id: The group ID for the chunks
+            doc_url: Document URL or ID to check
+            pattern: Regex pattern to match (e.g., r'(?i)(VAT|Tax ID).{0,50}\\d{5,}')
+            
+        Returns:
+            True if pattern found in any chunk, False otherwise
+        """
+        query = """
+        MATCH (c)
+        WHERE c.group_id = $group_id 
+          AND (c.url = $doc_url OR c.document_id = $doc_url)
+          AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+          AND c.text =~ $pattern
+        RETURN count(c) > 0 AS exists
+        """
+        
+        async with self._get_session() as session:
+            result = await session.run(
+                query,
+                group_id=group_id,
+                doc_url=doc_url,
+                pattern=pattern,
+            )
+            record = await result.single()
+            
+            exists = record["exists"] if record else False
+            
+            logger.info(
+                "pattern_based_negative_detection",
+                group_id=group_id,
+                doc_url=doc_url,
+                pattern=pattern[:50],  # Truncate for logging
+                found=exists,
+            )
+            
+            return exists
+    
     # =========================================================================
     # Batch Operations
     # =========================================================================

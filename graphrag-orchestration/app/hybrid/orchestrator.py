@@ -388,8 +388,7 @@ class HybridPipeline:
                         field_keywords=query_keywords,
                     )
                     
-                    # TEMPORARY DEBUG: Disable negative detection
-                    if False and not field_exists:
+                    if not field_exists:
                         # Field doesn't exist in document → deterministic "Not found"
                         logger.info(
                             "route_1_negative_detection_triggered",

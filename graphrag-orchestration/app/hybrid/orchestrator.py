@@ -1081,18 +1081,32 @@ EVIDENCE: <verbatim quote from Context, or empty>
         vector_k: int = 25,
         fulltext_k: int = 25,
         rrf_k: int = 60,
+        section_diversify: bool = True,
+        max_per_section: int = 3,
+        max_per_document: int = 6,
     ) -> list:
         """Neo4j-native hybrid retrieval + RRF fusion.
 
         Runs vector search (chunk_embedding) + fulltext search (textchunk_fulltext)
         and fuses them with Reciprocal Rank Fusion inside Cypher.
+        
+        Args:
+            section_diversify: If True, apply section-aware diversification
+            max_per_section: Max chunks per section when diversifying
+            max_per_document: Max chunks per document when diversifying
         """
+        import os
+        
         if not self.neo4j_driver:
             return []
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
         sanitized = self._sanitize_query_for_fulltext(query_text)
+        
+        # Check if section graph is enabled via environment variable
+        section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        section_diversify = section_diversify and section_graph_enabled
         
         # DEBUG: Log the vector search parameters
         logger.info("hybrid_rrf_vector_search_debug",
@@ -1151,12 +1165,15 @@ EVIDENCE: <verbatim quote from Context, or empty>
                  (CASE WHEN vRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + vRank) END) +
                  (CASE WHEN lRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + lRank) END) AS rrfScore
             OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             RETURN node.id AS id,
                    node.text AS text,
                    node.chunk_index AS chunk_index,
                    d.id AS document_id,
                    d.title AS document_title,
                    d.source AS document_source,
+                   s.id AS section_id,
+                   s.path_key AS section_path_key,
                    rrfScore AS score
             ORDER BY score DESC
             LIMIT $top_k
@@ -1183,6 +1200,8 @@ EVIDENCE: <verbatim quote from Context, or empty>
                             "document_id": r.get("document_id", ""),
                             "document_title": r.get("document_title", ""),
                             "document_source": r.get("document_source", ""),
+                            "section_id": r.get("section_id", ""),
+                            "section_path_key": r.get("section_path_key", ""),
                         }
                         rows.append((chunk, float(r.get("score") or 0.0)))
                 
@@ -1201,7 +1220,77 @@ EVIDENCE: <verbatim quote from Context, or empty>
             return rows
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._executor, _run_sync)
+        results = await loop.run_in_executor(self._executor, _run_sync)
+        
+        # Apply section-aware diversification if enabled
+        if section_diversify and results:
+            results = self._diversify_rrf_chunks_by_section(
+                results,
+                max_per_section=max_per_section,
+                max_per_document=max_per_document,
+            )
+        
+        return results
+    
+    def _diversify_rrf_chunks_by_section(
+        self,
+        chunks_with_scores: list,
+        max_per_section: int = 3,
+        max_per_document: int = 6,
+    ) -> list:
+        """Diversify RRF chunks across sections and documents.
+        
+        Uses a greedy selection algorithm that respects per-section and per-document caps
+        while preserving the original ordering (which reflects RRF relevance score).
+        
+        Args:
+            chunks_with_scores: List of (chunk_dict, score) tuples ordered by relevance
+            max_per_section: Maximum chunks to take from any single section
+            max_per_document: Maximum chunks to take from any single document
+            
+        Returns:
+            Diversified list of (chunk_dict, score) tuples
+        """
+        if not chunks_with_scores:
+            return []
+        
+        per_section_counts = {}
+        per_doc_counts = {}
+        diversified = []
+        skipped_section = 0
+        skipped_doc = 0
+        
+        for chunk, score in chunks_with_scores:
+            # Get section key (use section_id if available, else path_key, else "[unknown]")
+            section_key = chunk.get("section_id") or chunk.get("section_path_key") or "[unknown]"
+            doc_key = (chunk.get("document_title") or chunk.get("document_source") or "[unknown]").strip().lower()
+            
+            # Check section cap
+            if per_section_counts.get(section_key, 0) >= max_per_section:
+                skipped_section += 1
+                continue
+            
+            # Check document cap
+            if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                skipped_doc += 1
+                continue
+            
+            # Accept this chunk
+            diversified.append((chunk, score))
+            per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+            per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+        
+        logger.info(
+            "route1_section_diversification_complete",
+            input_chunks=len(chunks_with_scores),
+            output_chunks=len(diversified),
+            skipped_section_cap=skipped_section,
+            skipped_doc_cap=skipped_doc,
+            unique_sections=len(per_section_counts),
+            unique_docs=len(per_doc_counts),
+        )
+        
+        return diversified
 
     async def _derive_query_embedding_from_group_chunks(self, query_text: str) -> Optional[list]:
         """Derive an approximate query embedding from embeddings already stored in this group.

@@ -112,6 +112,11 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
     *   **Fulltext Index:** `textchunk_fulltext` on `(:TextChunk).text`
     *   **Hybrid Retrieval:** Neo4j-native vector + fulltext search fused with Reciprocal Rank Fusion (RRF)
     *   **Oversampling:** Global top-K vector candidates → tenant filter → trim to final top-K
+    *   **Section Diversification (added 2026-01-06):**
+        - Fetches `section_id` via `(:TextChunk)-[:IN_SECTION]->(:Section)` edge
+        - Applies greedy selection with `max_per_section=3` and `max_per_document=6` caps
+        - Ensures cross-section coverage even for simple fact lookups
+        - Controlled via `SECTION_GRAPH_ENABLED` env var (default: enabled)
     *   **Router Signal:** Single-entity query, no relationship keywords, simple question structure
 *   **Profile:** General Enterprise only (disabled in High Assurance)
 *   **Why Neo4j:** Unified storage eliminates sync issues between external vector stores and graph data

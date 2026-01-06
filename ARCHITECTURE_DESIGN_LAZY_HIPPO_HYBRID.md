@@ -253,15 +253,40 @@ Each route implements a tailored negative detection strategy optimized for its s
 
 | Route | Detection Strategy | Timing | Benchmark Results | Why This Approach? |
 |:------|:------------------|:-------|:------------------|:-------------------|
-| **Route 1** | Pre-LLM Keyword Check | Before synthesis | 10/10 negative queries: PASS | Vector search is fast but may retrieve irrelevant chunks; check keywords exist before LLM extraction |
+| **Route 1** | Pattern + Keyword Check | Before synthesis | 10/10 negative queries: PASS | Pattern validation for specialized fields (VAT, URL, bank) + keyword fallback for general queries |
 | **Route 2** | Post-Synthesis Check | After synthesis | 10/10 negative queries: PASS | Entity-focused queries should always find chunks if entities exist; empty result = not found |
 | **Route 3** | Triple-Check (Graph Signal + Entity Relevance + Post-Synthesis) | Before & after synthesis | 10/10 negative queries: PASS | Thematic queries need semantic validation; communities may match generic terms, so check entity relevance |
 
-### Route 1: Pre-LLM Keyword Existence Check
+### Route 1: Pattern-Based + Keyword Negative Detection
 
-**Strategy:** Query Neo4j graph to verify keywords exist in document **before** invoking LLM.
+**Strategy:** Two-layer validation via Neo4j graph **before** invoking LLM.
 
-**Method:**
+**Layer 1 - Pattern Validation (Specialized Fields):**
+```python
+# Field-specific regex patterns for precise validation
+FIELD_PATTERNS = {
+    "vat": r"(?i).*(VAT|Tax ID|GST|TIN)[^\d]{0,20}\d{5,}.*",
+    "url": r"(?i).*(https?://[\w\.-]+[\w/\.-]*).*",
+    "bank_routing": r"(?i).*(routing|ABA)[^\d]{0,15}\d{9}.*",
+    "bank_account": r"(?i).*(account\s*(number|no|#)?)[^\d]{0,15}\d{8,}.*",
+    "swift": r"(?i).*(SWIFT|BIC|IBAN)[^A-Z]{0,10}[A-Z]{4,11}.*",
+}
+
+# Detect field type from query
+if "vat" in query.lower() or "tax id" in query.lower():
+    detected_field_type = "vat"
+
+# Pattern check via Neo4j regex
+pattern_exists = await neo4j.check_field_pattern_in_document(
+    group_id=group_id,
+    doc_url=top_doc_url,
+    pattern=FIELD_PATTERNS[detected_field_type]
+)
+if not pattern_exists:
+    return {"response": "Not found", "negative_detection": True}
+```
+
+**Layer 2 - Keyword Fallback (General Queries):**
 ```python
 # Extract query keywords (3+ chars, exclude stopwords)
 query_keywords = ["cancellation", "policy", "refund"]
@@ -277,13 +302,13 @@ if not field_exists:
     return {"response": "Not found", "negative_detection": True}
 ```
 
-**Why This Works for Route 1:**
-- Vector search retrieves chunks by semantic similarity, but similarity ≠ relevance
-- A chunk about "payment terms" might score high for "cancellation policy" (both contract-related)
-- Pre-LLM check prevents LLM from hallucinating based on irrelevant chunks
-- Fast fail: ~50ms graph query vs ~2s LLM call
+**Why Two Layers?**
+- Keywords alone cause false positives: "VAT number" matches chunks with "number" (invoice number)
+- Pattern validation ensures **semantic relationship**: "VAT" must be followed by digits
+- Fast fail: ~500ms pattern check vs ~2s LLM call
+- Deterministic: No LLM verification needed (aligns with Route 1's fast/precise design)
 
-**Benchmark:** 10/10 negative queries return "Not found" (no hallucination)
+**Benchmark (Jan 6, 2026):** 10/10 negative queries return "Not found" (100% accuracy)
 
 ### Route 2: Post-Synthesis Check (text_chunks_used == 0)
 
@@ -1968,6 +1993,58 @@ if len(text_chunks) == 0 and len(seed_entities) > 0:
 ```
 
 **Why no graph check needed:**
+
+### 15.4. Route 1: Pattern-Based Negative Detection (Jan 6, 2026)
+
+**Problem Solved:** Keyword-only checks caused false positives for specialized field queries:
+- Q-N3: "VAT number" → matched chunks with "number" (invoice number) → extracted wrong value
+- Q-N4: "payment URL" → keywords exist separately but no actual URL present
+
+**Solution:** Pattern-based validation using Neo4j regex queries.
+
+**New Neo4j Method:**
+```python
+async def check_field_pattern_in_document(
+    self,
+    group_id: str,
+    doc_url: str,
+    pattern: str,  # Regex pattern
+) -> bool:
+    """
+    Check if document chunks match a specific regex pattern.
+    Validates semantic relationship (e.g., VAT followed by digits).
+    """
+    query = """
+    MATCH (c)
+    WHERE c.group_id = $group_id 
+      AND (c.url = $doc_url OR c.document_id = $doc_url)
+      AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+      AND c.text =~ $pattern
+    RETURN count(c) > 0 AS exists
+    """
+    result = await session.run(query, ...)
+    return result["exists"]
+```
+
+**Field Type Detection:**
+```python
+# Detect specialized field types from query keywords
+query_lower = query.lower()
+if any(kw in query_lower for kw in ["vat", "tax id", "gst"]):
+    detected_field_type = "vat"
+elif any(kw in query_lower for kw in ["url", "link", "portal"]):
+    detected_field_type = "url"
+elif any(kw in query_lower for kw in ["routing number", "aba"]):
+    detected_field_type = "bank_routing"
+# ... etc.
+```
+
+**Results:**
+- Before: 8/10 negative tests (80%) - Q-N3, Q-N4 failed
+- After: 10/10 negative tests (100%) - All passing
+- Latency: ~500ms (deterministic, no LLM call needed)
+
+**Design Principle:** Pattern validation is **deterministic** and **graph-based**, aligning with Route 1's architecture: "LLM verification cannot fix this because it's probabilistic."**
 - Router already determined query is entity-focused (not abstract)
 - Entity extraction succeeded → query has clear entities
 - Graph traversal returned 0 chunks → entities don't exist in corpus

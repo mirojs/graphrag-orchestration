@@ -167,13 +167,29 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
     - Latency: p50 = 386ms for negative detection (fast fail)
 *   **Output:** Either proceeds to Stage 3.3, or returns early with "Not found" response
 
-#### Stage 3.3: HippoRAG PPR Tracing (DETAIL RECOVERY)
+#### Stage 3.3: Enhanced Graph Context Retrieval (SECTION-AWARE)
+*   **Engine:** EnhancedGraphRetriever with Section Graph traversal
+*   **What:** Retrieve source chunks via MENTIONS edges, diversified across sections
+*   **Why:** Ensures comprehensive coverage of different document sections/clauses
+*   **Section Graph (added 2026-01-06):**
+    - `(:Section)` nodes represent document sections/subsections
+    - `(:TextChunk)-[:IN_SECTION]->(:Section)` links chunks to their leaf section
+    - `(:Section)-[:SUBSECTION_OF]->(:Section)` captures hierarchy
+    - `(:Document)-[:HAS_SECTION]->(:Section)` links top-level sections to documents
+*   **Diversification Logic:**
+    - `max_per_section`: Caps chunks from any single section (default: 3)
+    - `max_per_document`: Caps chunks from any single document (default: 6)
+    - Controlled via `SECTION_GRAPH_ENABLED` env var (default: enabled)
+*   **Benchmark Results (2026-01-06):** 6/10 questions at 100% theme coverage, avg 85%
+*   **Output:** Diversified source chunks with section metadata
+
+#### Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
 *   **Engine:** HippoRAG 2 (Personalized PageRank)
 *   **What:** Mathematical graph traversal from hub entities
 *   **Why:** Finds ALL structurally connected nodes (even "boring" ones LLM might skip)
 *   **Output:** Ranked evidence nodes with PPR scores
 
-#### Stage 3.4: Raw Text Chunk Fetching
+#### Stage 3.5: Raw Text Chunk Fetching
 *   **Engine:** Storage backend (Neo4j / Parquet)
 *   **What:** Fetch raw text chunks for all evidence nodes
 *   **Why:** This is where detail recovery happens (no summary loss)

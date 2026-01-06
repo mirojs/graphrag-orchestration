@@ -5,12 +5,14 @@ This module provides graph-aware retrieval that fully utilizes:
 2. RELATED_TO edges: Entity → Entity relationships (for context)
 3. Section metadata: Document structure (for organized citations)
 4. Entity embeddings: Semantic entity discovery
+5. Section graph: IN_SECTION edges for section-aware diversification
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 import structlog
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -25,6 +27,7 @@ class SourceChunk:
     text: str
     entity_name: str  # Which entity this was retrieved via
     section_path: List[str] = field(default_factory=list)
+    section_id: str = ""  # Section node ID from IN_SECTION edge
     document_title: str = ""
     document_source: str = ""
     relevance_score: float = 0.0
@@ -102,6 +105,9 @@ class EnhancedGraphRetriever:
         get_source_chunks: bool = True,
         max_chunks_per_entity: int = 3,
         max_relationships: int = 30,
+        section_diversify: bool = True,
+        max_per_section: int = 3,
+        max_per_document: int = 6,
     ) -> EnhancedGraphContext:
         """
         Get complete graph context for the given hub entities.
@@ -114,10 +120,17 @@ class EnhancedGraphRetriever:
             get_source_chunks: Whether to retrieve source TextChunks via MENTIONS
             max_chunks_per_entity: Max chunks to retrieve per entity
             max_relationships: Max relationships to retrieve
+            section_diversify: Whether to diversify chunks across sections
+            max_per_section: Max chunks per section (when section_diversify=True)
+            max_per_document: Max chunks per document (when section_diversify=True)
             
         Returns:
             EnhancedGraphContext with all retrieved information
         """
+        # Check if section graph is enabled via environment variable
+        section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        section_diversify = section_diversify and section_graph_enabled
+        
         if not hub_entities:
             return EnhancedGraphContext(
                 hub_entities=[],
@@ -151,6 +164,14 @@ class EnhancedGraphRetriever:
         
         relationships, source_chunks, entity_descriptions = await asyncio.gather(*tasks)
         
+        # Apply section-aware diversification if enabled
+        if section_diversify and source_chunks:
+            source_chunks = await self._diversify_chunks_by_section(
+                chunks=source_chunks,
+                max_per_section=max_per_section,
+                max_per_document=max_per_document,
+            )
+        
         # Extract related entities from relationships
         related_entities = set()
         for rel in relationships:
@@ -176,6 +197,7 @@ class EnhancedGraphRetriever:
         Get source TextChunks that MENTION these entities.
         
         Uses the MENTIONS edge: (TextChunk)-[:MENTIONS]->(Entity)
+        Also fetches section_id via IN_SECTION edge for diversification.
         This provides the source text for citations.
         """
         if not entity_names or not self.driver:
@@ -186,20 +208,30 @@ class EnhancedGraphRetriever:
         MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
         WHERE toLower(e.name) = toLower(entity_name)
           AND t.group_id = $group_id
-        WITH entity_name, t, e
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        WITH entity_name, t, e, s, d
         ORDER BY t.chunk_index
         WITH entity_name, collect({
             chunk_id: t.id,
             text: t.text,
             metadata: t.metadata,
-            chunk_index: t.chunk_index
+            chunk_index: t.chunk_index,
+            section_id: s.id,
+            section_path_key: s.path_key,
+            doc_title: d.title,
+            doc_source: d.source
         })[0..$max_per_entity] as chunks
         UNWIND chunks as chunk
         RETURN 
             entity_name,
             chunk.chunk_id as chunk_id,
             chunk.text as text,
-            chunk.metadata as metadata
+            chunk.metadata as metadata,
+            chunk.section_id as section_id,
+            chunk.section_path_key as section_path_key,
+            chunk.doc_title as doc_title,
+            chunk.doc_source as doc_source
         """
         
         try:
@@ -226,13 +258,19 @@ class EnhancedGraphRetriever:
                     except:
                         pass
                 
+                # Use section_path from graph if available, else from metadata
+                section_path = metadata.get("section_path", [])
+                if record.get("section_path_key"):
+                    section_path = record["section_path_key"].split(" > ")
+                
                 chunks.append(SourceChunk(
                     chunk_id=record["chunk_id"],
                     text=record["text"] or "",
                     entity_name=record["entity_name"],
-                    section_path=metadata.get("section_path", []),
-                    document_title=metadata.get("document_title", ""),
-                    document_source=metadata.get("url", ""),
+                    section_path=section_path,
+                    section_id=record.get("section_id") or "",
+                    document_title=record.get("doc_title") or metadata.get("document_title", ""),
+                    document_source=record.get("doc_source") or metadata.get("url", ""),
                 ))
             
             logger.info("mentions_retrieval_complete",
@@ -243,6 +281,66 @@ class EnhancedGraphRetriever:
         except Exception as e:
             logger.error("mentions_retrieval_failed", error=str(e))
             return []
+
+    async def _diversify_chunks_by_section(
+        self,
+        chunks: List[SourceChunk],
+        max_per_section: int = 3,
+        max_per_document: int = 6,
+    ) -> List[SourceChunk]:
+        """Diversify chunks across sections and documents.
+        
+        Uses a greedy selection algorithm that respects per-section and per-document caps
+        while preserving the original ordering (which reflects entity relevance).
+        
+        Args:
+            chunks: List of SourceChunks (already ordered by relevance)
+            max_per_section: Maximum chunks to take from any single section
+            max_per_document: Maximum chunks to take from any single document
+            
+        Returns:
+            Diversified list of chunks
+        """
+        if not chunks:
+            return []
+        
+        per_section_counts: Dict[str, int] = {}
+        per_doc_counts: Dict[str, int] = {}
+        diversified: List[SourceChunk] = []
+        skipped_section = 0
+        skipped_doc = 0
+        
+        for chunk in chunks:
+            # Get section key (use section_id if available, else path_key, else "[unknown]")
+            section_key = chunk.section_id or " > ".join(chunk.section_path) if chunk.section_path else "[unknown]"
+            doc_key = (chunk.document_title or chunk.document_source or "[unknown]").strip().lower()
+            
+            # Check section cap
+            if per_section_counts.get(section_key, 0) >= max_per_section:
+                skipped_section += 1
+                continue
+            
+            # Check document cap
+            if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                skipped_doc += 1
+                continue
+            
+            # Accept this chunk
+            diversified.append(chunk)
+            per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+            per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+        
+        logger.info(
+            "section_diversification_complete",
+            input_chunks=len(chunks),
+            output_chunks=len(diversified),
+            skipped_section_cap=skipped_section,
+            skipped_doc_cap=skipped_doc,
+            unique_sections=len(per_section_counts),
+            unique_docs=len(per_doc_counts),
+        )
+        
+        return diversified
 
     async def get_keyword_boost_chunks(
         self,
@@ -322,17 +420,19 @@ class EnhancedGraphRetriever:
                     )
                 )
 
-            # Diversify: take up to N per document, capped to max_total.
-            by_doc: Dict[str, List[SourceChunk]] = {}
+            # Diversify while preserving relevance:
+            # candidates are already sorted by match_count DESC, then chunk order.
+            # Greedily take the best remaining chunk, respecting per-document caps.
+            per_doc_counts: Dict[str, int] = {}
+            diversified: List[SourceChunk] = []
             for chunk in candidates:
                 doc_key = (chunk.document_title or chunk.document_source or "unknown").strip().lower()
-                by_doc.setdefault(doc_key, []).append(chunk)
-
-            diversified: List[SourceChunk] = []
-            for doc_key in sorted(by_doc.keys()):
-                diversified.extend(by_doc[doc_key][:max_per_document])
-
-            diversified = diversified[:max_total]
+                if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                    continue
+                diversified.append(chunk)
+                per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+                if len(diversified) >= max_total:
+                    break
 
             logger.info(
                 "keyword_boost_chunks_complete",

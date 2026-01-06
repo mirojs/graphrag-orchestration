@@ -1607,13 +1607,16 @@ EVIDENCE: <verbatim quote from Context, or empty>
             max_relationships=30,
         )
 
-        # Targeted evidence boost (EXPERIMENTAL): for termination/cancellation queries,
-        # optionally add a small set of keyword-matched chunks (diversified per document)
-        # so synthesis consistently sees deposit/refund/forfeiture clauses.
+        # Targeted evidence boost (EXPERIMENTAL): add a small set of keyword-matched chunks
+        # (diversified per document) so synthesis sees important clauses that may not map
+        # cleanly to hub entities (e.g., monthly statements, insurance limits, default/legal fees).
         #
         # Gated behind an env var to keep baseline behavior unchanged until validated.
         import os
-        enable_keyword_boost = os.getenv("ROUTE3_KEYWORD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
+        # Default ON: this boost helps diverse clause-style questions (reporting, remedies,
+        # insurance, termination) surface explicit obligations/numbers that may not map to hub
+        # entities. Can be disabled in deployment via ROUTE3_KEYWORD_BOOST=0.
+        enable_keyword_boost = os.getenv("ROUTE3_KEYWORD_BOOST", "1").strip().lower() in {"1", "true", "yes"}
 
         ql = query.lower()
         is_termination_query = any(
@@ -1630,44 +1633,170 @@ EVIDENCE: <verbatim quote from Context, or empty>
             ]
         )
 
-        if enable_keyword_boost and is_termination_query:
-            boost_keywords = [
-                "termination",
-                "terminate",
-                "cancellation",
-                "cancel",
-                "notice",
-                "written notice",
-                "refund",
-                "deposit",
-                "non-refundable",
-                "not refundable",
-                "forfeit",
-                "forfeiture",
-                "transfer",
-                "transferable",
-                "3 business days",
-                "three (3) business days",
+        is_reporting_query = any(
+            k in ql
+            for k in [
+                "reporting",
+                "record-keeping",
+                "record keeping",
+                "recordkeeping",
+                "monthly statement",
+                "statement",
+                "income",
+                "expenses",
             ]
-            boost_chunks = await self.enhanced_retriever.get_keyword_boost_chunks(
-                keywords=boost_keywords,
-                max_per_document=2,
-                max_total=10,
-                min_matches=2,
-            )
+        )
+
+        is_remedies_query = any(
+            k in ql
+            for k in [
+                "remedies",
+                "remedy",
+                "dispute",
+                "arbitration",
+                "default",
+                "legal fees",
+                "attorney",
+                "contractor",
+                "small claims",
+            ]
+        )
+
+        is_insurance_query = any(
+            k in ql
+            for k in [
+                "insurance",
+                "liability",
+                "liability insurance",
+                "additional insured",
+                "indemnify",
+                "indemnity",
+                "hold harmless",
+                "gross negligence",
+            ]
+        )
+
+        if enable_keyword_boost and (is_termination_query or is_reporting_query or is_remedies_query or is_insurance_query):
+            keyword_sets: List[Tuple[str, List[str], int]] = []
+
+            if is_termination_query:
+                keyword_sets.append(
+                    (
+                        "termination",
+                        [
+                            "termination",
+                            "terminate",
+                            "cancellation",
+                            "cancel",
+                            "notice",
+                            "written notice",
+                            "refund",
+                            "deposit",
+                            "non-refundable",
+                            "not refundable",
+                            "forfeit",
+                            "forfeiture",
+                            "transfer",
+                            "transferable",
+                            "3 business days",
+                            "three (3) business days",
+                        ],
+                        2,
+                    )
+                )
+
+            if is_reporting_query:
+                keyword_sets.append(
+                    (
+                        "reporting",
+                        [
+                            "reporting",
+                            "record-keeping",
+                            "record keeping",
+                            "monthly statement",
+                            "income",
+                            "expenses",
+                            "statement",
+                            "accounting",
+                            "servicing report",
+                            "volumes",
+                            "gallons",
+                        ],
+                        1,
+                    )
+                )
+
+            if is_remedies_query:
+                keyword_sets.append(
+                    (
+                        "remedies",
+                        [
+                            "default",
+                            "customer default",
+                            "breach",
+                            "contractor",
+                            "legal fees",
+                            "attorney fees",
+                            "costs and fees",
+                            "arbitration",
+                            "binding",
+                            "small claims",
+                        ],
+                        1,
+                    )
+                )
+
+            if is_insurance_query:
+                keyword_sets.append(
+                    (
+                        "insurance",
+                        [
+                            "liability insurance",
+                            "additional insured",
+                            "hold harmless",
+                            "indemnify",
+                            "indemnification",
+                            "gross negligence",
+                            "$300,000",
+                            "300,000",
+                            "300000",
+                            "$25,000",
+                            "25,000",
+                            "25000",
+                        ],
+                        1,
+                    )
+                )
 
             existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-            added = [c for c in boost_chunks if c.chunk_id not in existing_ids]
-            if added:
-                graph_context.source_chunks.extend(added)
+            total_candidates = 0
+            total_added = 0
+            applied_profiles: List[str] = []
+
+            for profile, keywords, min_matches in keyword_sets:
+                boost_chunks = await self.enhanced_retriever.get_keyword_boost_chunks(
+                    keywords=keywords,
+                    max_per_document=2,
+                    max_total=10,
+                    min_matches=min_matches,
+                )
+                total_candidates += len(boost_chunks)
+                added = [c for c in boost_chunks if c.chunk_id not in existing_ids]
+                if added:
+                    graph_context.source_chunks.extend(added)
+                    for c in added:
+                        existing_ids.add(c.chunk_id)
+                    total_added += len(added)
+                applied_profiles.append(profile)
+
             logger.info(
                 "route_3_keyword_boost_applied",
-                is_termination_query=True,
-                boost_candidates=len(boost_chunks),
-                boost_added=len(added),
+                profiles=applied_profiles,
+                boost_candidates=total_candidates,
+                boost_added=total_added,
                 total_source_chunks=len(graph_context.source_chunks),
             )
-        elif is_termination_query and not enable_keyword_boost:
+        elif (is_termination_query or is_reporting_query or is_remedies_query or is_insurance_query) and not enable_keyword_boost:
             logger.info(
                 "route_3_keyword_boost_disabled",
                 reason="ROUTE3_KEYWORD_BOOST not enabled",

@@ -118,8 +118,11 @@ def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> D
         # normalize some common punctuation variants
         s = s.replace("–", " ").replace("—", " ").replace("−", " ")
         # normalize common semantic variants
-        s = s.replace("non-transferable", "not transferable")
-        s = s.replace("nontransferable", "not transferable")
+        # Note: handle both adjective and noun forms.
+        # - non-transferable / nontransferable
+        # - non-transferability / nontransferability
+        s = re.sub(r"\bnon[-\s]?transferable\b", "not transferable", s)
+        s = re.sub(r"\bnon[-\s]?transferability\b", "not transferable", s)
         # normalize percent to a word so "25%" and "25 percent" match
         s = s.replace("%", " percent ")
         # remove currency symbols

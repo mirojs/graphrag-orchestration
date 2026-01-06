@@ -254,6 +254,7 @@ Generate a comprehensive {response_type.replace('_', ' ')} that:
 3. Leverages the entity relationships to explain connections
 4. Organizes information by document sections where relevant
 5. Highlights cross-references between different sources
+6. Includes any explicit numeric values found in evidence (e.g., dollar amounts, time periods/deadlines, percentages, counts) verbatim
 
 Response:"""
 
@@ -450,7 +451,11 @@ Question: {query}
 Evidence Context:
 {context}
 
-Provide a brief summary (2-3 paragraphs) with key citations [N].
+Instructions:
+1. Provide a brief summary (2-3 paragraphs).
+2. Include citations [N] for factual claims (aim for every sentence that states a fact).
+3. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+4. Prefer concrete obligations/thresholds over general paraphrases.
 
 Summary:"""
 

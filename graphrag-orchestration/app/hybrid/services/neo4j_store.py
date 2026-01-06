@@ -212,6 +212,11 @@ class Neo4jStoreV3:
             # Determinism: chunk-level extraction cache
             "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE",
             
+            # Section graph (section-aware retrieval)
+            "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
+            "CREATE INDEX section_group IF NOT EXISTS FOR (s:Section) ON (s.group_id)",
+            "CREATE INDEX section_doc IF NOT EXISTS FOR (s:Section) ON (s.doc_id)",
+            
             # Regular indexes for filtering
             "CREATE INDEX entity_group IF NOT EXISTS FOR (e:Entity) ON (e.group_id)",
             "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",

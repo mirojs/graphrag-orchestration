@@ -132,6 +132,11 @@ class LazyGraphRAGIndexingPipeline:
         self.neo4j_store.upsert_text_chunks_batch(group_id, all_chunks)
         stats["chunks"] = len(all_chunks)
 
+        # 4.5) Build Section graph from chunk metadata.
+        section_stats = await self._build_section_graph(group_id, all_chunks, chunk_to_doc_id)
+        stats["sections"] = section_stats.get("sections_created", 0)
+        stats["section_edges"] = section_stats.get("in_section_edges", 0)
+
         # 5) Entity/relationship extraction (best-effort, but recommended).
         entities: List[Entity] = []
         relationships: List[Relationship] = []
@@ -617,3 +622,194 @@ class LazyGraphRAGIndexingPipeline:
         h.update(b"\n")
         h.update(canonical_key.encode("utf-8", errors="ignore"))
         return f"entity_{h.hexdigest()[:12]}"
+
+    @staticmethod
+    def _stable_section_id(group_id: str, doc_id: str, path_key: str) -> str:
+        """Generate a stable hash-based section ID."""
+        h = hashlib.sha256()
+        h.update(group_id.encode("utf-8", errors="ignore"))
+        h.update(b"\n")
+        h.update(doc_id.encode("utf-8", errors="ignore"))
+        h.update(b"\n")
+        h.update(path_key.encode("utf-8", errors="ignore"))
+        return f"section_{h.hexdigest()[:12]}"
+
+    @staticmethod
+    def _parse_section_path(metadata: Dict[str, Any]) -> List[str]:
+        """Extract section path from chunk metadata.
+        
+        Handles multiple formats:
+        - section_path: List[str] (preferred)
+        - di_section_path: str (fallback, may be " > " joined)
+        - di_section_part: str (fallback, single section name)
+        """
+        # Preferred: section_path as list
+        section_path = metadata.get("section_path")
+        if isinstance(section_path, list) and section_path:
+            return [str(s).strip() for s in section_path if str(s).strip()]
+        
+        # Fallback: di_section_path as string
+        di_section_path = metadata.get("di_section_path")
+        if isinstance(di_section_path, str) and di_section_path.strip():
+            if " > " in di_section_path:
+                return [s.strip() for s in di_section_path.split(" > ") if s.strip()]
+            return [di_section_path.strip()]
+        
+        # Fallback: di_section_part as single section
+        di_section_part = metadata.get("di_section_part")
+        if isinstance(di_section_part, str) and di_section_part.strip():
+            return [di_section_part.strip()]
+        
+        return []
+
+    async def _build_section_graph(
+        self,
+        group_id: str,
+        chunks: List[TextChunk],
+        chunk_to_doc_id: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Build Section graph from chunk metadata.
+        
+        Creates:
+        - (:Section) nodes with id, group_id, doc_id, path_key, title, depth
+        - (:Document)-[:HAS_SECTION]->(:Section) for top-level sections
+        - (:Section)-[:SUBSECTION_OF]->(:Section) for hierarchy
+        - (:TextChunk)-[:IN_SECTION]->(:Section) for leaf linkage
+        """
+        DEFAULT_ROOT_SECTION = "[Document Root]"
+        
+        # Collect all unique sections
+        all_sections: Dict[Tuple[str, str], Dict[str, Any]] = {}  # (doc_id, path_key) -> section_info
+        chunk_to_leaf_section: Dict[str, str] = {}  # chunk_id -> section_id
+        
+        for chunk in chunks:
+            doc_id = chunk_to_doc_id.get(chunk.id, chunk.document_id or "unknown_doc")
+            metadata = chunk.metadata or {}
+            section_path = self._parse_section_path(metadata)
+            
+            if not section_path:
+                section_path = [DEFAULT_ROOT_SECTION]
+            
+            # Build hierarchy
+            for depth, title in enumerate(section_path):
+                path_key = " > ".join(section_path[: depth + 1])
+                parent_path_key = " > ".join(section_path[:depth]) if depth > 0 else None
+                
+                key = (doc_id, path_key)
+                if key not in all_sections:
+                    all_sections[key] = {
+                        "id": self._stable_section_id(group_id, doc_id, path_key),
+                        "group_id": group_id,
+                        "doc_id": doc_id,
+                        "path_key": path_key,
+                        "title": title,
+                        "depth": depth,
+                        "parent_path_key": parent_path_key,
+                    }
+            
+            # Map chunk to leaf section
+            leaf_path_key = " > ".join(section_path)
+            leaf_key = (doc_id, leaf_path_key)
+            if leaf_key in all_sections:
+                chunk_to_leaf_section[chunk.id] = all_sections[leaf_key]["id"]
+        
+        if not all_sections:
+            return {"sections_created": 0, "in_section_edges": 0}
+        
+        # Create Section nodes via Neo4j
+        section_data = list(all_sections.values())
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # Create sections
+            result = session.run(
+                """
+                UNWIND $sections AS s
+                MERGE (sec:Section {id: s.id})
+                SET sec.group_id = s.group_id,
+                    sec.doc_id = s.doc_id,
+                    sec.path_key = s.path_key,
+                    sec.title = s.title,
+                    sec.depth = s.depth,
+                    sec.updated_at = datetime()
+                RETURN count(sec) AS count
+                """,
+                sections=section_data,
+            )
+            sections_created = result.single()["count"]
+            
+            # Create HAS_SECTION edges (Document -> top-level Section)
+            top_level = [
+                {"doc_id": s["doc_id"], "section_id": s["id"]}
+                for s in section_data
+                if s["depth"] == 0
+            ]
+            if top_level:
+                session.run(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (d:Document {id: e.doc_id, group_id: $group_id})
+                    MATCH (s:Section {id: e.section_id})
+                    MERGE (d)-[:HAS_SECTION]->(s)
+                    """,
+                    edges=top_level,
+                    group_id=group_id,
+                )
+            
+            # Create SUBSECTION_OF edges (child -> parent)
+            subsection_edges = []
+            for s in section_data:
+                if s["parent_path_key"]:
+                    parent_key = (s["doc_id"], s["parent_path_key"])
+                    parent = all_sections.get(parent_key)
+                    if parent:
+                        subsection_edges.append({
+                            "child_id": s["id"],
+                            "parent_id": parent["id"],
+                        })
+            
+            if subsection_edges:
+                session.run(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (child:Section {id: e.child_id})
+                    MATCH (parent:Section {id: e.parent_id})
+                    MERGE (child)-[:SUBSECTION_OF]->(parent)
+                    """,
+                    edges=subsection_edges,
+                )
+            
+            # Create IN_SECTION edges (TextChunk -> leaf Section)
+            in_section_edges = [
+                {"chunk_id": chunk_id, "section_id": section_id}
+                for chunk_id, section_id in chunk_to_leaf_section.items()
+            ]
+            
+            in_section_count = 0
+            batch_size = 1000
+            for i in range(0, len(in_section_edges), batch_size):
+                batch = in_section_edges[i : i + batch_size]
+                result = session.run(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (t:TextChunk {id: e.chunk_id})
+                    MATCH (s:Section {id: e.section_id})
+                    MERGE (t)-[:IN_SECTION]->(s)
+                    RETURN count(*) AS count
+                    """,
+                    edges=batch,
+                )
+                in_section_count += result.single()["count"]
+        
+        logger.info(
+            "section_graph_built",
+            extra={
+                "group_id": group_id,
+                "sections_created": sections_created,
+                "in_section_edges": in_section_count,
+            },
+        )
+        
+        return {
+            "sections_created": sections_created,
+            "in_section_edges": in_section_count,
+        }

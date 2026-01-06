@@ -597,123 +597,15 @@ Instructions:
                         continue
 
                 # ---------------------------------------------------------
-                # VERIFICATION STEP (Anti-Hallucination)
+                # SIMPLIFIED VALIDATION (Graph negative detection handles hallucinations)
                 # ---------------------------------------------------------
-                # If verifier says NO, discard candidate and try next chunk.
+                # Basic sanity check: answer must appear in chunk (substring match)
                 # ---------------------------------------------------------
-                verify_prompt = f"""
-Verification Task.
-
-Context:
-{top_chunk[:2000]}
-
-Question: {query}
-Proposed Answer: {cleaned_response}
-
-Your job:
-1. Decide if the Proposed Answer is explicitly supported as the answer to the Question.
-2. If YES, provide an exact verbatim quote from the Context that proves it.
-
-Rules:
-- The evidence quote MUST be copied exactly from the Context.
-- The evidence quote MUST contain the Proposed Answer exactly.
-- If the Context contains the Proposed Answer but it is NOT answering the Question (e.g., it's a different ID/URL), reply NO.
-
-Reply in exactly two lines:
-VERDICT: YES or NO
-EVIDENCE: <verbatim quote from Context, or empty>
-"""
-
-                verification_raw = llm_service.generate(verify_prompt, temperature=0.0).strip()
-                verdict = ""
-                evidence = ""
-                for line in verification_raw.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    upper = line.upper()
-                    if upper.startswith("VERDICT:"):
-                        verdict = line.split(":", 1)[-1].strip().upper()
-                    elif upper.startswith("EVIDENCE:"):
-                        evidence = line.split(":", 1)[-1].strip()
-
-                if verdict != "YES":
+                if cleaned_response not in top_chunk:
                     logger.warning(
-                        "llm_verification_failed",
+                        "llm_candidate_rejected_substring_check",
                         candidate=cleaned_response,
-                        reason="Verifier rejected answer",
-                        chunk_rank=rank,
-                    )
-                    continue
-
-                evidence_ok = True
-                if not evidence:
-                    evidence_ok = False
-                elif evidence not in top_chunk:
-                    evidence_ok = False
-                elif cleaned_response not in evidence:
-                    evidence_ok = False
-                elif query_keywords:
-                    evidence_lower = evidence.lower()
-                    if not any(k in evidence_lower for k in query_keywords):
-                        evidence_ok = False
-
-                # Extra precision: ensure evidence contains an explicit label that
-                # matches the question intent (not just an answer-shaped string).
-                if evidence_ok:
-                    query_lower = query.lower()
-                    evidence_lower = evidence.lower()
-                    answer_lower = cleaned_response.lower()
-                    evidence_without_answer = evidence_lower.replace(answer_lower, " ")
-
-                    required_markers: list[str] = []
-                    # Payment portal URLs: require explicit "pay online"/"portal" wording outside the URL.
-                    if (
-                        "payment portal" in query_lower
-                        or ("portal" in query_lower and "url" in query_lower)
-                        or ("payment" in query_lower and "url" in query_lower)
-                        or "pay online" in query_lower
-                    ):
-                        required_markers = [
-                            "pay online",
-                            "online payment",
-                            "payment portal",
-                            "pay here",
-                            "make a payment",
-                            "portal",
-                        ]
-
-                    # VAT / Tax ID: require explicit ID labeling (avoid matching generic "tax" amounts).
-                    if ("vat" in query_lower) or ("tax id" in query_lower) or ("tax i.d" in query_lower):
-                        required_markers = [
-                            "vat",
-                            "tax id",
-                            "tax i.d",
-                            "tax identification",
-                            "tin",
-                        ]
-
-                    if required_markers:
-                        # Require the marker to appear close to the answer (not merely
-                        # somewhere else in a large multi-line quote).
-                        if not _has_marker_near_answer(
-                            evidence_text_lower=evidence_lower,
-                            answer_lower=answer_lower,
-                            markers_lower=required_markers,
-                            window=80,
-                        ):
-                            evidence_ok = False
-
-                        # Backstop: if the verifier didn't include the marker anywhere
-                        # outside of the answer, also reject.
-                        if evidence_ok and not any(m in evidence_without_answer for m in required_markers):
-                            evidence_ok = False
-
-                if not evidence_ok:
-                    logger.warning(
-                        "llm_verification_failed",
-                        candidate=cleaned_response,
-                        reason="Verifier did not provide valid grounded evidence",
+                        reason="Answer not found as substring in source chunk",
                         chunk_rank=rank,
                     )
                     continue

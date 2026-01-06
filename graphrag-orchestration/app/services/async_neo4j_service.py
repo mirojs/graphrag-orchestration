@@ -389,6 +389,17 @@ class AsyncNeo4jService:
             )
             record = await result.single()
             
+            # Debug logging
+            logger.info(
+                "negative_detection_query_result",
+                group_id=group_id,
+                doc_url=doc_url,
+                keywords=field_keywords,
+                found=record is not None,
+                matched_keywords=record.get("matched_keywords") if record else None,
+                preview=record.get("preview") if record else None,
+            )
+            
             if record:
                 return True, record.get("section_path")
             return False, None

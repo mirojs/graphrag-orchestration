@@ -1307,6 +1307,69 @@ async def embed_chunks(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/backfill_document_id")
+async def backfill_document_id(request: Request):
+    """
+    Admin endpoint to backfill document_id property on TextChunk nodes.
+    Required for negative detection in Route 1 when chunks were indexed without document_id property.
+    
+    The document_id is derived from the PART_OF relationship to Document nodes.
+    """
+    from app.services.graph_service import GraphService
+    
+    group_id = request.state.group_id
+    graph_service = GraphService()
+    
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+    
+    try:
+        with graph_service.driver.session() as session:
+            # Backfill document_id from PART_OF relationship
+            update_query = """
+            MATCH (t:TextChunk {group_id: $group_id})-[:PART_OF]->(d:Document)
+            WHERE t.document_id IS NULL
+            SET t.document_id = d.id
+            RETURN count(t) AS updated_chunks
+            """
+            
+            result = session.run(update_query, group_id=group_id)
+            record = result.single()
+            updated = record["updated_chunks"] if record else 0
+            
+            # Verify results
+            verify_query = """
+            MATCH (t:TextChunk {group_id: $group_id})
+            RETURN 
+                count(t) AS total_chunks,
+                count(t.document_id) AS chunks_with_document_id
+            """
+            
+            result = session.run(verify_query, group_id=group_id)
+            record = result.single()
+            
+            logger.info("document_id_backfilled", 
+                       group_id=group_id,
+                       updated=updated,
+                       total=record["total_chunks"],
+                       with_document_id=record["chunks_with_document_id"])
+            
+            return {
+                "status": "success",
+                "message": f"Backfilled document_id for {updated} chunks",
+                "updated_chunks": updated,
+                "total_chunks": record["total_chunks"],
+                "chunks_with_document_id": record["chunks_with_document_id"],
+                "group_id": group_id
+            }
+        
+    except Exception as e:
+        logger.error("document_id_backfill_failed",
+                    group_id=group_id,
+                    error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/debug/chunks")
 async def debug_chunks(request: Request):
     """

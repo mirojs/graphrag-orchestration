@@ -1323,6 +1323,7 @@ class Neo4jStoreV3:
         MERGE (t:TextChunk {id: c.id})
         SET t.text = c.text,
             t.chunk_index = c.chunk_index,
+            t.document_id = c.document_id,
             t.tokens = c.tokens,
             t.metadata = c.metadata,
             t.group_id = $group_id,

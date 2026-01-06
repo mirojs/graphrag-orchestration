@@ -1,0 +1,97 @@
+Loaded 20 questions from QUESTION_BANK_5PDFS_2025-12-24.md
+  Positive tests (Q-V): 10
+  Negative tests (Q-N): 10
+Loaded 60 ground truth answers
+
+======================================================================
+Scenario: hybrid_route1_summary (response_type=summary)
+Questions: 20, Repeats: 1
+======================================================================
+
+[Q-V1] What is the invoice **TOTAL** amount?
+  [1/1] 3728ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3728ms
+[Q-V2] What is the invoice **DUE DATE**?
+  [1/1] 1924ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1924ms
+[Q-V3] What are the invoice **TERMS**?
+  [1/1] 457ms - 38 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=457ms
+[Q-V4] In the purchase contract, list the **3 installment amounts** and their triggers.
+  [1/1] 5392ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=5392ms
+[Q-V5] What is the **labor warranty** duration in the purchase contract?
+  [1/1] 6709ms - 7 chars
+  Accuracy: containment=0.17, f1=0.25
+  Summary: exact=1.00, min_sim=1.00, latency_p50=6709ms
+[Q-V6] In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?
+  [1/1] 3084ms - 36 chars
+  Accuracy: containment=0.14, f1=0.15
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3084ms
+[Q-V7] In the holding tank contract, what is the pumper’s **registration number**?
+  [1/1] 2592ms - 9 chars
+  Accuracy: containment=1.00, f1=1.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2592ms
+[Q-V8] What is the warranty’s builder address city/state/zip?
+  [1/1] 4556ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4556ms
+[Q-V9] Who is the invoice **SALESPERSON**?
+  [1/1] 1614ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1614ms
+[Q-V10] What is the invoice **P.O. NUMBER**?
+  [1/1] 472ms - 38 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=472ms
+[Q-N1] What is the invoice’s **bank routing number** for payment?
+  [1/1] 1199ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1199ms
+[Q-N2] What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+  [1/1] 1672ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1672ms
+[Q-N3] What is the vendor’s **VAT / Tax ID number** on the invoice?
+  [1/1] 2674ms - 7 chars
+  Accuracy: NEGATIVE_TEST FAIL
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2674ms
+[Q-N4] What is the invoice’s **payment portal URL** (web link to pay online)?
+  [1/1] 2722ms - 38 chars
+  Accuracy: NEGATIVE_TEST FAIL
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2722ms
+[Q-N5] What is the invoice’s **bank account number** for ACH/wire payments?
+  [1/1] 1016ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1016ms
+[Q-N6] Which documents are governed by the laws of **California**?
+  [1/1] 1944ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1944ms
+[Q-N7] What is the property management Agent’s **license number**?
+  [1/1] 1826ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1826ms
+[Q-N8] What is the purchase contract’s required **wire transfer / ACH instructions**?
+  [1/1] 1224ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1224ms
+[Q-N9] What is the exact clause about **mold damage** coverage in the warranty?
+  [1/1] 1868ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1868ms
+[Q-N10] What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+  [1/1] 1419ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1419ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route1_vector_rag_20260106T161131Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route1_vector_rag_20260106T161131Z.md
+======================================================================
+

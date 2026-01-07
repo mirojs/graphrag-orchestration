@@ -45,6 +45,16 @@ for label, q in questions:
         print(f"  applied: {sb.get('applied')}")
         print(f"  profiles: {sb.get('profiles')}")
         print(f"  boost_added: {sb.get('boost_added')}")
+
+        sem = (sb.get('semantic') or {}) if isinstance(sb, dict) else {}
+        if isinstance(sem, dict):
+            if 'seed_evidence_added' in sem:
+                print(f"  seed_evidence_added: {sem.get('seed_evidence_added')}")
+            top_sections = sem.get('top_sections') or []
+            if isinstance(top_sections, list) and top_sections:
+                top_paths = [s.get('path_key') for s in top_sections[:3] if isinstance(s, dict) and s.get('path_key')]
+                if top_paths:
+                    print(f"  top_section_paths: {top_paths}")
         
         citations = data.get('citations', [])
         print(f"\ncitations: {len(citations)} total")

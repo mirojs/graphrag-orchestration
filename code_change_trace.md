@@ -35,7 +35,9 @@ logger.info(
 - Keyword boost disabled or tuned down
 - This is when Q-G4 dropped from 100% to 50% 
 - Missing terms: "monthly statement", "income", "expenses"
-- No code changes to logging or structure, just configuration
+- Most likely cause: `ROUTE3_KEYWORD_BOOST`/related config changed, because the missing terms are exactly in the Route 3 reporting keyword profile.
+- Less likely: "only enabled section graph nodes" — `SECTION_GRAPH_ENABLED` is documented as default ON, and section-graph enabling would normally increase (not decrease) recall.
+- Alternate possibility (if config did not change): retrieval nondeterminism in the seed/section discovery (same group_id, minutes apart) led to different evidence being surfaced.
 
 ---
 

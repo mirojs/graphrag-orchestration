@@ -744,6 +744,7 @@ class EnhancedGraphRetriever:
         max_per_section: int = 3,
         max_per_document: int = 3,
         max_total: int = 12,
+        spread_within_section: bool = False,
     ) -> List[SourceChunk]:
         """Retrieve chunks from explicitly selected section IDs.
 
@@ -824,24 +825,115 @@ class EnhancedGraphRetriever:
                     )
                 )
 
-            # Diversify across sections + documents, preserving chunk order.
+            # Diversify across sections + documents.
+            #
+            # Default behavior historically preserved: take earliest chunks (chunk_index ASC)
+            # per section/doc. For long agreements, key clauses (e.g., "monthly statement of
+            # income and expenses") may appear later; `spread_within_section=True` samples
+            # across each section (head+tail) to improve clause recall.
+
             per_section_counts: Dict[str, int] = {}
             per_doc_counts: Dict[str, int] = {}
             diversified: List[SourceChunk] = []
-            for chunk in candidates:
-                section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
-                doc_key = self._doc_key(chunk)
+            seen_chunk_ids: set[str] = set()
 
-                if per_section_counts.get(section_key, 0) >= max_per_section:
-                    continue
-                if per_doc_counts.get(doc_key, 0) >= max_per_document:
-                    continue
+            if not spread_within_section:
+                for chunk in candidates:
+                    section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
+                    doc_key = self._doc_key(chunk)
 
-                diversified.append(chunk)
-                per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
-                per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
-                if len(diversified) >= max_total:
-                    break
+                    if per_section_counts.get(section_key, 0) >= max_per_section:
+                        continue
+                    if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                        continue
+
+                    diversified.append(chunk)
+                    seen_chunk_ids.add(chunk.chunk_id)
+                    per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+                    per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+                    if len(diversified) >= max_total:
+                        break
+            else:
+                from collections import defaultdict, deque
+
+                by_section: Dict[str, List[SourceChunk]] = defaultdict(list)
+                for chunk in candidates:
+                    section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
+                    by_section[section_key].append(chunk)
+
+                def _spread_indices(n: int, first_pass: int) -> List[int]:
+                    if n <= 0:
+                        return []
+                    if n == 1:
+                        return [0]
+
+                    m = max(1, min(n, first_pass))
+                    if m == 1:
+                        return [0]
+
+                    out: List[int] = []
+                    seen: set[int] = set()
+
+                    # Evenly spaced coverage first (hits the middle for large sections).
+                    for i in range(m):
+                        pos = int(round(i * (n - 1) / (m - 1)))
+                        if pos not in seen:
+                            out.append(pos)
+                            seen.add(pos)
+
+                    # Fill remaining indices with a head/tail zigzag.
+                    left, right = 0, n - 1
+                    while left <= right:
+                        if left not in seen:
+                            out.append(left)
+                            seen.add(left)
+                        if right != left and right not in seen:
+                            out.append(right)
+                            seen.add(right)
+                        left += 1
+                        right -= 1
+
+                    return out
+
+                section_iters: Dict[str, deque[int]] = {
+                    sk: deque(_spread_indices(len(lst), max_per_section * 4))
+                    for sk, lst in by_section.items()
+                    if lst
+                }
+                section_keys = list(section_iters.keys())
+
+                made_progress = True
+                while made_progress and len(diversified) < max_total and section_keys:
+                    made_progress = False
+                    for section_key in section_keys:
+                        if len(diversified) >= max_total:
+                            break
+                        if per_section_counts.get(section_key, 0) >= max_per_section:
+                            continue
+
+                        idxs = section_iters.get(section_key)
+                        if not idxs:
+                            continue
+
+                        # Advance until we either add something or run out.
+                        while idxs and per_section_counts.get(section_key, 0) < max_per_section and len(diversified) < max_total:
+                            idx = idxs.popleft()
+                            lst = by_section.get(section_key) or []
+                            if idx < 0 or idx >= len(lst):
+                                continue
+                            chunk = lst[idx]
+                            if chunk.chunk_id in seen_chunk_ids:
+                                continue
+                            doc_key = self._doc_key(chunk)
+                            if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                                continue
+
+                            diversified.append(chunk)
+                            seen_chunk_ids.add(chunk.chunk_id)
+                            per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+                            per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+                            made_progress = True
+                            break
 
             logger.info(
                 "section_id_boost_chunks_complete",
@@ -851,6 +943,7 @@ class EnhancedGraphRetriever:
                 max_per_section=max_per_section,
                 max_per_document=max_per_document,
                 max_total=max_total,
+                spread_within_section=spread_within_section,
             )
 
             return diversified

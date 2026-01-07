@@ -1488,6 +1488,68 @@ async def debug_chunks(request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/debug/search_chunks")
+async def debug_search_chunks(request: Request, contains: str, limit: int = 10):
+    """Debug endpoint to find chunks whose text contains a substring.
+
+    Notes:
+    - Scopes results to the request's `group_id`.
+    - Intended for diagnostics only (e.g., verifying whether phrases like
+      "monthly statement" exist anywhere in the indexed text).
+    """
+    from app.services.graph_service import GraphService
+
+    group_id = request.state.group_id
+    graph_service = GraphService()
+
+    if not graph_service.driver:
+        raise HTTPException(status_code=503, detail="Neo4j driver not initialized")
+
+    contains = (contains or "").strip()
+    if not contains:
+        raise HTTPException(status_code=400, detail="Query param 'contains' is required")
+    if len(contains) > 200:
+        raise HTTPException(status_code=400, detail="Query param 'contains' is too long")
+
+    limit = int(limit or 10)
+    limit = max(1, min(limit, 25))
+
+    try:
+        with graph_service.driver.session() as session:
+            rows = session.run(
+                """
+                MATCH (t:TextChunk {group_id: $group_id})
+                WHERE toLower(t.text) CONTAINS toLower($contains)
+                OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+                OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+                RETURN
+                    t.id AS chunk_id,
+                    substring(t.text, 0, 400) AS text_preview,
+                    d.title AS document_title,
+                    d.source AS document_source,
+                    d.id AS document_id,
+                    s.id AS section_id,
+                    s.path_key AS section_path
+                LIMIT $limit
+                """,
+                group_id=group_id,
+                contains=contains,
+                limit=limit,
+            )
+            matches = [dict(r) for r in rows]
+
+        return {
+            "group_id": group_id,
+            "contains": contains,
+            "limit": limit,
+            "count": len(matches),
+            "matches": matches,
+        }
+    except Exception as e:
+        logger.error("debug_search_chunks_failed", group_id=group_id, error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/debug/test_vector_search")
 async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
     """

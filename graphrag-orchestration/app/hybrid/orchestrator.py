@@ -1696,6 +1696,23 @@ Instructions:
             try:
                 from app.services.llm_service import LLMService
                 llm_service = LLMService()
+
+                # Light query expansion for semantic *section discovery only*.
+                # Some reporting clauses are phrased as "monthly statement of income and expenses"
+                # and may not rank well for a query that only says "reporting/record-keeping".
+                seed_query = query
+                ql_seed = (query or "").lower()
+                is_reporting_query_seed = any(
+                    k in ql_seed
+                    for k in [
+                        "reporting",
+                        "record-keeping",
+                        "record keeping",
+                        "recordkeeping",
+                    ]
+                )
+                if is_reporting_query_seed:
+                    seed_query = f"{query} servicing report monthly statement income expenses accounting"
                 
                 section_boost_metadata["semantic"]["enabled"] = True
                 
@@ -1703,28 +1720,112 @@ Instructions:
                 seed_chunks: List[Tuple[Dict[str, Any], float]] = []
                 if llm_service.embed_model is not None:
                     try:
-                        query_embedding = llm_service.embed_model.get_text_embedding(query)
-                        seed_chunks = await self._search_text_chunks_hybrid_rrf(
-                            query_text=query,
-                            embedding=query_embedding,
-                            top_k=24,
-                            vector_k=60,
-                            fulltext_k=60,
-                            section_diversify=True,
-                            max_per_section=3,
-                            max_per_document=5,
+                        # For reporting/record-keeping queries, run two semantic seed queries to
+                        # cover both clause families (e.g., "monthly statement" and "pumper/volumes"),
+                        # then merge/deduplicate by chunk id. This helps avoid a single document
+                        # dominating the seed set while still using the section-boost mechanism.
+                        seed_queries = [seed_query]
+                        if is_reporting_query_seed:
+                            seed_queries = [
+                                f"{query} monthly statement income expenses accounting",
+                                f"{query} pumper county volumes servicing report",
+                            ]
+
+                        merged_by_id: Dict[str, Tuple[Dict[str, Any], float]] = {}
+                        for sq in seed_queries:
+                            query_embedding = llm_service.embed_model.get_text_embedding(sq)
+                            chunks = await self._search_text_chunks_hybrid_rrf(
+                                query_text=sq,
+                                embedding=query_embedding,
+                                top_k=24,
+                                vector_k=60,
+                                fulltext_k=60,
+                                section_diversify=True,
+                                max_per_section=3,
+                                max_per_document=1 if is_reporting_query_seed else 5,
+                            )
+                            for chunk_dict, score in chunks:
+                                cid = (chunk_dict.get("id") or "").strip()
+                                if not cid:
+                                    continue
+                                prev = merged_by_id.get(cid)
+                                if prev is None or float(score or 0.0) > float(prev[1] or 0.0):
+                                    merged_by_id[cid] = (chunk_dict, float(score or 0.0))
+
+                        seed_chunks = sorted(merged_by_id.values(), key=lambda kv: kv[1], reverse=True)
+                        section_boost_metadata["semantic"]["seed_mode"] = (
+                            "hybrid_rrf_multi" if is_reporting_query_seed else "hybrid_rrf"
                         )
-                        section_boost_metadata["semantic"]["seed_mode"] = "hybrid_rrf"
+                        section_boost_metadata["semantic"]["seed_query_count"] = len(seed_queries)
                     except Exception as e:
                         logger.warning("route_3_section_boost_embedding_failed", error=str(e))
-                        seed_chunks = await self._search_text_chunks_fulltext(query_text=query, top_k=30)
+                        seed_chunks = await self._search_text_chunks_fulltext(query_text=seed_query, top_k=30)
                         section_boost_metadata["semantic"]["seed_mode"] = "fulltext"
                 else:
                     # Fallback to fulltext if embeddings unavailable
-                    seed_chunks = await self._search_text_chunks_fulltext(query_text=query, top_k=30)
+                    seed_chunks = await self._search_text_chunks_fulltext(query_text=seed_query, top_k=30)
                     section_boost_metadata["semantic"]["seed_mode"] = "fulltext"
 
                 section_boost_metadata["semantic"]["seed_candidates"] = len(seed_chunks)
+
+                if is_reporting_query_seed and seed_chunks:
+                    try:
+                        preview = []
+                        for chunk_dict, score in seed_chunks[:5]:
+                            preview.append(
+                                {
+                                    "score": float(score or 0.0),
+                                    "document_title": (chunk_dict.get("document_title") or "")[:160],
+                                    "section_path_key": (chunk_dict.get("section_path_key") or "")[:220],
+                                }
+                            )
+                        logger.info(
+                            "route_3_section_boost_seed_debug",
+                            seed_mode=section_boost_metadata["semantic"].get("seed_mode"),
+                            seed_candidates=len(seed_chunks),
+                            seed_preview=preview,
+                        )
+                    except Exception as e:
+                        logger.warning("route_3_section_boost_seed_debug_failed", error=str(e))
+
+                # If we already found highly relevant chunks during the semantic *section discovery* seed
+                # (especially after light expansion for reporting clauses), include a small number of
+                # those chunks directly as evidence. This stays within the section-boost mechanism and
+                # prevents losing clause-style obligations that may appear late in long sections.
+                seed_evidence_added = 0
+                try:
+                    from .pipeline.enhanced_graph_retriever import SourceChunk
+
+                    seed_evidence_take = 6 if is_reporting_query_seed else 0
+                    if seed_evidence_take > 0 and seed_chunks:
+                        existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                        for chunk_dict, score in seed_chunks[:seed_evidence_take]:
+                            cid = (chunk_dict.get("id") or "").strip()
+                            if not cid or cid in existing_ids:
+                                continue
+
+                            spk = (chunk_dict.get("section_path_key") or "").strip()
+                            section_path = spk.split(" > ") if spk else []
+
+                            graph_context.source_chunks.append(
+                                SourceChunk(
+                                    chunk_id=cid,
+                                    text=chunk_dict.get("text") or "",
+                                    entity_name="section_seed",
+                                    section_path=section_path,
+                                    section_id=(chunk_dict.get("section_id") or "").strip(),
+                                    document_id=(chunk_dict.get("document_id") or "").strip(),
+                                    document_title=(chunk_dict.get("document_title") or "").strip(),
+                                    document_source=(chunk_dict.get("document_source") or "").strip(),
+                                    relevance_score=float(score or 0.0),
+                                )
+                            )
+                            existing_ids.add(cid)
+                            seed_evidence_added += 1
+
+                    section_boost_metadata["semantic"]["seed_evidence_added"] = seed_evidence_added
+                except Exception as e:
+                    logger.warning("route_3_section_boost_seed_evidence_failed", error=str(e))
 
                 # Extract section IDs and rank by relevance score
                 section_scores: Dict[str, float] = {}
@@ -1738,9 +1839,11 @@ Instructions:
                     if spk and section_id not in section_paths:
                         section_paths[section_id] = spk
 
-                # Get top 10 sections
+                # Get top sections (slightly larger for reporting/record-keeping so we don't miss
+                # clause-style obligations that appear later in long agreements).
                 ranked_sections = sorted(section_scores.items(), key=lambda kv: kv[1], reverse=True)
-                semantic_section_ids = [sid for sid, _ in ranked_sections[:10]]
+                top_n_sections = 15 if is_reporting_query_seed else 10
+                semantic_section_ids = [sid for sid, _ in ranked_sections[:top_n_sections]]
                 section_boost_metadata["semantic"]["top_sections"] = [
                     {
                         "section_id": sid,
@@ -1752,11 +1855,18 @@ Instructions:
 
                 # Fetch all chunks from these sections via IN_SECTION graph expansion
                 if semantic_section_ids:
+                    # For reporting/record-keeping, increase budgets so we include later chunks in
+                    # the selected sections (e.g., monthly statement clauses), while keeping other
+                    # queries on the tighter default budget.
+                    max_per_section = 6 if is_reporting_query_seed else 3
+                    max_per_document = 6 if is_reporting_query_seed else 4
+                    max_total = 30 if is_reporting_query_seed else 20
                     boost_chunks = await self.enhanced_retriever.get_section_id_boost_chunks(
                         section_ids=semantic_section_ids,
-                        max_per_section=3,
-                        max_per_document=4,
-                        max_total=20,
+                        max_per_section=max_per_section,
+                        max_per_document=max_per_document,
+                        max_total=max_total,
+                        spread_within_section=is_reporting_query_seed,
                     )
                     
                     # Merge into existing chunks (deduplicated)
@@ -1776,6 +1886,7 @@ Instructions:
                             boost_added=len(added_chunks),
                             total_source_chunks=len(graph_context.source_chunks),
                         )
+
             except Exception as e:
                 logger.warning("route_3_section_boost_failed", error=str(e))
 

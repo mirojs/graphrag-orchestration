@@ -235,6 +235,17 @@ class EvidenceSynthesizer:
             return "Error: LLM client not configured"
         
         hub_str = ", ".join(hub_entities[:5]) if hub_entities else "various"
+
+        ql = (query or "").lower()
+        reporting_hint = ""
+        if any(k in ql for k in ["reporting", "record-keeping", "record keeping", "recordkeeping"]):
+            reporting_hint = """
+
+    Additional requirements for reporting/record-keeping questions:
+    - Enumerate distinct reporting/record-keeping obligations as bullet points.
+    - For each bullet, cite at least one source chunk that explicitly states it.
+    - If the evidence uses specific wording (e.g., periodic statements, income/expenses, volumes/pumper/county), quote those phrases verbatim and cite them.
+    """
         
         prompt = f"""You are an expert analyst generating a response using knowledge graph evidence.
 
@@ -247,6 +258,8 @@ Hub Entities (Key Topics): {hub_str}
 
 Evidence Context (organized by entity relationships and document sections):
 {context}
+
+{reporting_hint}
 
 Generate a comprehensive {response_type.replace('_', ' ')} that:
 1. Directly answers the query

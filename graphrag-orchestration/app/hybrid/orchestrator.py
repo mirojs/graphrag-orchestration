@@ -2006,10 +2006,6 @@ Instructions:
                 doc_counts=doc_counts,
                 chunk_samples=chunk_summaries,
             )
-        logger.info("stage_3.3_complete", 
-                   num_source_chunks=len(graph_context.source_chunks),
-                   num_relationships=len(graph_context.relationships),
-                   num_related_entities=len(graph_context.related_entities))
         
         # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (using LazyGraphRAG + HippoRAG2 signals)

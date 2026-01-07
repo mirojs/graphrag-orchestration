@@ -64,6 +64,15 @@ except ImportError:
 logger = structlog.get_logger(__name__)
 
 
+class HighQualityError(RuntimeError):
+    """Raised when strict high quality mode fails to meet evidence requirements."""
+    
+    def __init__(self, message: str, *, code: str = "ROUTE3_STRICT_HIGH_QUALITY", details: Optional[Dict[str, Any]] = None):
+        super().__init__(message)
+        self.code = code
+        self.details = details or {}
+
+
 class HybridPipeline:
     """
     The main orchestrator for the 4-way routing system.
@@ -1659,6 +1668,116 @@ Instructions:
             max_chunks_per_entity=3,
             max_relationships=30,
         )
+        logger.info("stage_3.3_complete",
+                   num_source_chunks=len(graph_context.source_chunks),
+                   num_relationships=len(graph_context.relationships),
+                   num_related_entities=len(graph_context.related_entities))
+
+        # ==================================================================
+        # Section Boost: Semantic Section Discovery (UNIVERSAL)
+        # Use vector/fulltext search on chunks → extract section IDs → graph expand
+        # This provides document-structure-aware retrieval complementing entity-based retrieval
+        # ==================================================================
+        import os
+        enable_section_boost = os.getenv("ROUTE3_SECTION_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        section_boost_metadata: Dict[str, Any] = {
+            "enabled": enable_section_boost,
+            "applied": False,
+            "strategy": None,
+            "semantic": {
+                "enabled": False,
+                "seed_candidates": 0,
+                "seed_mode": None,
+                "top_sections": []
+            }
+        }
+
+        if enable_section_boost:
+            try:
+                from app.services.llm_service import LLMService
+                llm_service = LLMService()
+                
+                section_boost_metadata["semantic"]["enabled"] = True
+                
+                # Semantic section discovery via hybrid RRF (vector + fulltext)
+                seed_chunks: List[Tuple[Dict[str, Any], float]] = []
+                if llm_service.embed_model is not None:
+                    try:
+                        query_embedding = llm_service.embed_model.get_text_embedding(query)
+                        seed_chunks = await self._search_text_chunks_hybrid_rrf(
+                            query_text=query,
+                            embedding=query_embedding,
+                            top_k=24,
+                            vector_k=60,
+                            fulltext_k=60,
+                            section_diversify=True,
+                            max_per_section=3,
+                            max_per_document=5,
+                        )
+                        section_boost_metadata["semantic"]["seed_mode"] = "hybrid_rrf"
+                    except Exception as e:
+                        logger.warning("route_3_section_boost_embedding_failed", error=str(e))
+                        seed_chunks = await self._search_text_chunks_fulltext(query_text=query, top_k=30)
+                        section_boost_metadata["semantic"]["seed_mode"] = "fulltext"
+                else:
+                    # Fallback to fulltext if embeddings unavailable
+                    seed_chunks = await self._search_text_chunks_fulltext(query_text=query, top_k=30)
+                    section_boost_metadata["semantic"]["seed_mode"] = "fulltext"
+
+                section_boost_metadata["semantic"]["seed_candidates"] = len(seed_chunks)
+
+                # Extract section IDs and rank by relevance score
+                section_scores: Dict[str, float] = {}
+                section_paths: Dict[str, str] = {}
+                for chunk_dict, score in seed_chunks:
+                    section_id = (chunk_dict.get("section_id") or "").strip()
+                    if not section_id:
+                        continue
+                    section_scores[section_id] = section_scores.get(section_id, 0.0) + float(score or 0.0)
+                    spk = (chunk_dict.get("section_path_key") or "").strip()
+                    if spk and section_id not in section_paths:
+                        section_paths[section_id] = spk
+
+                # Get top 10 sections
+                ranked_sections = sorted(section_scores.items(), key=lambda kv: kv[1], reverse=True)
+                semantic_section_ids = [sid for sid, _ in ranked_sections[:10]]
+                section_boost_metadata["semantic"]["top_sections"] = [
+                    {
+                        "section_id": sid,
+                        "path_key": section_paths.get(sid, ""),
+                        "score": round(section_scores.get(sid, 0.0), 6),
+                    }
+                    for sid in semantic_section_ids
+                ]
+
+                # Fetch all chunks from these sections via IN_SECTION graph expansion
+                if semantic_section_ids:
+                    boost_chunks = await self.enhanced_retriever.get_section_id_boost_chunks(
+                        section_ids=semantic_section_ids,
+                        max_per_section=3,
+                        max_per_document=4,
+                        max_total=20,
+                    )
+                    
+                    # Merge into existing chunks (deduplicated)
+                    existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                    added_chunks = [c for c in boost_chunks if c.chunk_id not in existing_ids]
+                    if added_chunks:
+                        graph_context.source_chunks.extend(added_chunks)
+                        section_boost_metadata["applied"] = True
+                        section_boost_metadata["strategy"] = "semantic_section_discovery"
+                        section_boost_metadata["boost_candidates"] = len(boost_chunks)
+                        section_boost_metadata["boost_added"] = len(added_chunks)
+                        
+                        logger.info(
+                            "route_3_section_boost_applied",
+                            strategy="semantic_section_discovery",
+                            boost_candidates=len(boost_chunks),
+                            boost_added=len(added_chunks),
+                            total_source_chunks=len(graph_context.source_chunks),
+                        )
+            except Exception as e:
+                logger.warning("route_3_section_boost_failed", error=str(e))
 
         # Targeted evidence boost (EXPERIMENTAL): add a small set of keyword-matched chunks
         # (diversified per document) so synthesis sees important clauses that may not map
@@ -2037,6 +2156,14 @@ Instructions:
         )
         logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
         
+        # Initialize PPR metadata
+        ppr_metadata = {
+            "enabled": True,
+            "ppr_entities": len(all_seed_entities),
+            "ppr_evidence_nodes": len(evidence_nodes),
+            "top_ppr_entities": all_seed_entities[:5]
+        }
+        
         # Stage 3.5: Enhanced Synthesis with Graph-Based Citations
         logger.info("stage_3.5_enhanced_synthesis")
         synthesis_result = await self.synthesizer.synthesize_with_graph_context(
@@ -2094,7 +2221,9 @@ Instructions:
                 "text_chunks_used": synthesis_result["text_chunks_used"],
                 "latency_estimate": "thorough",
                 "precision_level": "high",
-                "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR"
+                "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR",
+                "section_boost": section_boost_metadata,
+                "ppr_detail_recovery": ppr_metadata
             }
         }
     

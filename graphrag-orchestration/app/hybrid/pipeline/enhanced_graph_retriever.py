@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import structlog
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
@@ -28,6 +29,7 @@ class SourceChunk:
     entity_name: str  # Which entity this was retrieved via
     section_path: List[str] = field(default_factory=list)
     section_id: str = ""  # Section node ID from IN_SECTION edge
+    document_id: str = ""  # Document node ID (stable per doc)
     document_title: str = ""
     document_source: str = ""
     relevance_score: float = 0.0
@@ -97,6 +99,39 @@ class EnhancedGraphRetriever:
         """
         self.driver = neo4j_driver
         self.group_id = group_id
+
+    @staticmethod
+    def _doc_key(chunk: SourceChunk) -> str:
+        """Stable key for per-document diversification.
+
+        Prefer Document.id when available; fall back to source/title.
+        """
+
+        return (chunk.document_id or chunk.document_source or chunk.document_title or "unknown").strip().lower()
+
+    @staticmethod
+    def _keyword_to_regex(keyword: str) -> str:
+        """Convert a keyword/phrase into a whitespace-robust Neo4j regex.
+
+        Neo4j's `=~` matches the *entire* string, so we wrap with a leading/trailing
+        match-all. To be robust to embedded newlines (common in PDF text), we use
+        `[\s\S]*` instead of relying on DOTALL flags.
+
+        Example: "monthly statement" -> (?i)[\s\S]*monthly\s+statement[\s\S]*
+        """
+
+        cleaned = (keyword or "").strip()
+        if not cleaned:
+            return ""
+
+        parts = [p for p in re.split(r"\s+", cleaned) if p]
+        if not parts:
+            return ""
+
+        # IMPORTANT: Neo4j regex patterns are values, not Python string literals.
+        # Use single backslashes so Java regex receives patterns like \s and \S.
+        joined = r"\s+".join(re.escape(p) for p in parts)
+        return rf"(?i)[\s\S]*{joined}[\s\S]*"
     
     async def get_full_context(
         self,
@@ -219,6 +254,7 @@ class EnhancedGraphRetriever:
             chunk_index: t.chunk_index,
             section_id: s.id,
             section_path_key: s.path_key,
+            doc_id: d.id,
             doc_title: d.title,
             doc_source: d.source
         })[0..$max_per_entity] as chunks
@@ -230,6 +266,7 @@ class EnhancedGraphRetriever:
             chunk.metadata as metadata,
             chunk.section_id as section_id,
             chunk.section_path_key as section_path_key,
+            chunk.doc_id as doc_id,
             chunk.doc_title as doc_title,
             chunk.doc_source as doc_source
         """
@@ -269,6 +306,7 @@ class EnhancedGraphRetriever:
                     entity_name=record["entity_name"],
                     section_path=section_path,
                     section_id=record.get("section_id") or "",
+                    document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
                     document_title=record.get("doc_title") or metadata.get("document_title", ""),
                     document_source=record.get("doc_source") or metadata.get("url", ""),
                 ))
@@ -281,6 +319,82 @@ class EnhancedGraphRetriever:
         except Exception as e:
             logger.error("mentions_retrieval_failed", error=str(e))
             return []
+
+    async def get_ppr_evidence_chunks(
+        self,
+        evidence_nodes: List[Tuple[str, float]],
+        max_per_entity: int = 2,
+        max_per_section: int = 3,
+        max_per_document: int = 5,
+        max_total: int = 25,
+    ) -> List[SourceChunk]:
+        """
+        Fetch text chunks for HippoRAG PPR evidence nodes (DETAIL RECOVERY).
+        
+        This is the critical "Stage 3.5" from the architecture:
+        - PPR gives us ranked entities that are mathematically connected to the query
+        - We fetch the raw text chunks that MENTION those entities
+        - These chunks provide the fine-grained detail that community summaries would lose
+        
+        The PPR score determines entity priority - higher-scored entities get their
+        chunks fetched first, ensuring the most relevant details are captured.
+        
+        Args:
+            evidence_nodes: List of (entity_name, ppr_score) from HippoRAG PPR tracing
+            max_per_entity: Max chunks to fetch per PPR entity
+            max_per_section: Max chunks from any single section (diversification)
+            max_per_document: Max chunks from any single document (diversification)
+            max_total: Total cap on returned chunks
+            
+        Returns:
+            List of SourceChunks with section metadata, ordered by PPR relevance then diversified
+        """
+        if not evidence_nodes:
+            return []
+        
+        # Sort by PPR score descending (should already be sorted, but ensure)
+        sorted_nodes = sorted(evidence_nodes, key=lambda x: x[1], reverse=True)
+        entity_names = [name for name, _ in sorted_nodes]
+        
+        # Fetch chunks via MENTIONS edges
+        all_chunks = await self._get_source_chunks_via_mentions(
+            entity_names=entity_names,
+            max_per_entity=max_per_entity,
+        )
+        
+        if not all_chunks:
+            logger.warning("ppr_evidence_no_chunks_found",
+                          num_entities=len(entity_names),
+                          top_entities=entity_names[:5])
+            return []
+        
+        # Assign PPR scores to chunks based on their source entity
+        entity_scores = {name: score for name, score in sorted_nodes}
+        for chunk in all_chunks:
+            chunk.relevance_score = entity_scores.get(chunk.entity_name, 0.0)
+        
+        # Sort by PPR score (entity-level relevance)
+        all_chunks.sort(key=lambda c: c.relevance_score, reverse=True)
+        
+        # Diversify across sections and documents
+        diversified = await self._diversify_chunks_by_section(
+            chunks=all_chunks,
+            max_per_section=max_per_section,
+            max_per_document=max_per_document,
+        )
+        
+        # Apply total cap
+        result = diversified[:max_total]
+        
+        logger.info("ppr_evidence_chunks_retrieved",
+                   num_ppr_entities=len(entity_names),
+                   raw_chunks=len(all_chunks),
+                   diversified_chunks=len(diversified),
+                   final_chunks=len(result),
+                   top_entities=entity_names[:5],
+                   top_ppr_scores=[round(s, 4) for _, s in sorted_nodes[:5]])
+        
+        return result
 
     async def _diversify_chunks_by_section(
         self,
@@ -313,7 +427,7 @@ class EnhancedGraphRetriever:
         for chunk in chunks:
             # Get section key (use section_id if available, else path_key, else "[unknown]")
             section_key = chunk.section_id or " > ".join(chunk.section_path) if chunk.section_path else "[unknown]"
-            doc_key = (chunk.document_title or chunk.document_source or "[unknown]").strip().lower()
+            doc_key = self._doc_key(chunk)
             
             # Check section cap
             if per_section_counts.get(section_key, 0) >= max_per_section:
@@ -357,8 +471,14 @@ class EnhancedGraphRetriever:
         if not keywords or not self.driver:
             return []
 
-        lowered_keywords = [k.lower().strip() for k in keywords if k and k.strip()]
-        if not lowered_keywords:
+        # Neo4j regex matching (`=~`) proved brittle across versions/configs and
+        # tends to miss phrases split by newlines/punctuation from PDF extraction.
+        # Instead, normalize both chunk text and keywords by removing whitespace
+        # and a small punctuation set, then use CONTAINS.
+        cleaned_keywords = [k.strip() for k in keywords if k and k.strip()]
+        keyword_needles = [re.sub(r"[\s\-\.,:;()\[\]{}]", "", k.lower()) for k in cleaned_keywords]
+        keyword_needles = [k for k in keyword_needles if k]
+        if not keyword_needles:
             return []
 
         # Pull a moderate candidate set, then diversify by document in Python.
@@ -368,16 +488,49 @@ class EnhancedGraphRetriever:
         MATCH (t:TextChunk)
         WHERE t.group_id = $group_id
         WITH t,
-             reduce(cnt = 0, k IN $keywords |
-                cnt + CASE WHEN toLower(t.text) CONTAINS k THEN 1 ELSE 0 END
+             replace(
+                 replace(
+                     replace(
+                         replace(
+                             replace(
+                                 replace(
+                                     replace(
+                                         replace(
+                                             replace(
+                                                 replace(
+                                                     replace(
+                                                         replace(
+                                                             replace(toLower(coalesce(t.text, "")), " ", ""),
+                                                         "\n", ""),
+                                                     "\r", ""),
+                                                 "\t", ""),
+                                             "-", ""),
+                                         ".", ""),
+                                     ",", ""),
+                                 ":", ""),
+                             ";", ""),
+                         "(", ""),
+                     ")", ""),
+                 "[", ""),
+             "]", "") AS t_norm
+        WITH t, t_norm,
+             reduce(cnt = 0, k IN $keyword_needles |
+                 cnt + CASE WHEN t_norm CONTAINS k THEN 1 ELSE 0 END
              ) AS match_count
         WHERE match_count >= $min_matches
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
         RETURN
             t.id AS chunk_id,
             t.text AS text,
             t.metadata AS metadata,
             t.chunk_index AS chunk_index,
-            match_count AS match_count
+            match_count AS match_count,
+            s.id AS section_id,
+            s.path_key AS section_path_key,
+            d.id AS doc_id,
+            d.title AS doc_title,
+            d.source AS doc_source
         ORDER BY match_count DESC, chunk_index ASC
         LIMIT $candidate_limit
         """
@@ -390,7 +543,7 @@ class EnhancedGraphRetriever:
                     result = session.run(
                         query,
                         group_id=self.group_id,
-                        keywords=lowered_keywords,
+                        keyword_needles=keyword_needles,
                         min_matches=min_matches,
                         candidate_limit=candidate_limit,
                     )
@@ -408,14 +561,21 @@ class EnhancedGraphRetriever:
                     except Exception:
                         metadata = {}
 
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+
                 candidates.append(
                     SourceChunk(
                         chunk_id=record["chunk_id"],
                         text=record.get("text") or "",
                         entity_name="keyword_boost",
-                        section_path=metadata.get("section_path", []) or [],
-                        document_title=metadata.get("document_title", "") or "",
-                        document_source=metadata.get("url", "") or "",
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
+                        document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                        document_source=record.get("doc_source") or metadata.get("url", "") or "",
                         relevance_score=float(record.get("match_count") or 0.0),
                     )
                 )
@@ -426,7 +586,7 @@ class EnhancedGraphRetriever:
             per_doc_counts: Dict[str, int] = {}
             diversified: List[SourceChunk] = []
             for chunk in candidates:
-                doc_key = (chunk.document_title or chunk.document_source or "unknown").strip().lower()
+                doc_key = self._doc_key(chunk)
                 if per_doc_counts.get(doc_key, 0) >= max_per_document:
                     continue
                 diversified.append(chunk)
@@ -436,7 +596,7 @@ class EnhancedGraphRetriever:
 
             logger.info(
                 "keyword_boost_chunks_complete",
-                num_keywords=len(lowered_keywords),
+                num_keywords=len(keyword_needles),
                 num_candidates=len(candidates),
                 num_chunks=len(diversified),
                 max_per_document=max_per_document,
@@ -447,6 +607,256 @@ class EnhancedGraphRetriever:
 
         except Exception as e:
             logger.error("keyword_boost_chunks_failed", error=str(e))
+            return []
+
+    async def get_section_boost_chunks(
+        self,
+        section_keywords: List[str],
+        max_per_section: int = 3,
+        max_per_document: int = 3,
+        max_total: int = 12,
+        min_matches: int = 1,
+    ) -> List[SourceChunk]:
+        """Retrieve chunks from sections whose path_key matches section keywords.
+
+        This is meant as a Route-1-like alternative to brittle keyword matching over
+        raw chunk text. It uses the Section graph (IN_SECTION edges) and section
+        path metadata to pull likely-relevant clauses, then diversifies across
+        sections and documents.
+        """
+        if not section_keywords or not self.driver:
+            return []
+
+        lowered = [k.strip().lower() for k in section_keywords if k and k.strip()]
+        if not lowered:
+            return []
+
+        candidate_limit = max(60, max_total * 10)
+
+        query = """
+        MATCH (s:Section)<-[:IN_SECTION]-(t:TextChunk)
+        WHERE t.group_id = $group_id
+          AND s.group_id = $group_id
+        WITH t, s,
+             reduce(cnt = 0, k IN $section_keywords |
+                cnt + CASE WHEN toLower(coalesce(s.path_key, "")) CONTAINS k THEN 1 ELSE 0 END
+             ) AS match_count
+        WHERE match_count >= $min_matches
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        RETURN
+            t.id AS chunk_id,
+            t.text AS text,
+            t.metadata AS metadata,
+            t.chunk_index AS chunk_index,
+            match_count AS match_count,
+            s.id AS section_id,
+            s.path_key AS section_path_key,
+            d.id AS doc_id,
+            d.title AS doc_title,
+            d.source AS doc_source
+        ORDER BY match_count DESC, chunk_index ASC
+        LIMIT $candidate_limit
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        section_keywords=lowered,
+                        min_matches=min_matches,
+                        candidate_limit=candidate_limit,
+                    )
+                    return list(result)
+
+            records = await loop.run_in_executor(None, _run_query)
+
+            candidates: List[SourceChunk] = []
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+
+                candidates.append(
+                    SourceChunk(
+                        chunk_id=record["chunk_id"],
+                        text=record.get("text") or "",
+                        entity_name="section_boost",
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
+                        document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                        document_source=record.get("doc_source") or metadata.get("url", "") or "",
+                        relevance_score=float(record.get("match_count") or 0.0),
+                    )
+                )
+
+            # Diversify across sections + documents, preserving match_count/chunk order.
+            per_section_counts: Dict[str, int] = {}
+            per_doc_counts: Dict[str, int] = {}
+            diversified: List[SourceChunk] = []
+            for chunk in candidates:
+                section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
+                doc_key = self._doc_key(chunk)
+
+                if per_section_counts.get(section_key, 0) >= max_per_section:
+                    continue
+                if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                    continue
+
+                diversified.append(chunk)
+                per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+                per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+                if len(diversified) >= max_total:
+                    break
+
+            logger.info(
+                "section_boost_chunks_complete",
+                num_keywords=len(lowered),
+                num_candidates=len(candidates),
+                num_chunks=len(diversified),
+                max_per_section=max_per_section,
+                max_per_document=max_per_document,
+                max_total=max_total,
+            )
+
+            return diversified
+
+        except Exception as e:
+            logger.error("section_boost_chunks_failed", error=str(e))
+            return []
+
+    async def get_section_id_boost_chunks(
+        self,
+        section_ids: List[str],
+        max_per_section: int = 3,
+        max_per_document: int = 3,
+        max_total: int = 12,
+    ) -> List[SourceChunk]:
+        """Retrieve chunks from explicitly selected section IDs.
+
+        This is used by Route 3 "semantic section discovery": we first find the
+        most relevant sections for a user query (via vector/fulltext chunk search),
+        then expand within those sections using the section graph.
+        """
+        if not section_ids or not self.driver:
+            return []
+
+        normalized = [s.strip() for s in section_ids if s and s.strip()]
+        if not normalized:
+            return []
+
+        candidate_limit = max(60, max_total * 10)
+
+        query = """
+        MATCH (s:Section)<-[:IN_SECTION]-(t:TextChunk)
+        WHERE t.group_id = $group_id
+          AND s.group_id = $group_id
+          AND s.id IN $section_ids
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        RETURN
+            t.id AS chunk_id,
+            t.text AS text,
+            t.metadata AS metadata,
+            t.chunk_index AS chunk_index,
+            s.id AS section_id,
+            s.path_key AS section_path_key,
+            d.id AS doc_id,
+            d.title AS doc_title,
+            d.source AS doc_source
+        ORDER BY chunk_index ASC
+        LIMIT $candidate_limit
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        section_ids=normalized,
+                        candidate_limit=candidate_limit,
+                    )
+                    return list(result)
+
+            records = await loop.run_in_executor(None, _run_query)
+
+            candidates: List[SourceChunk] = []
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+
+                candidates.append(
+                    SourceChunk(
+                        chunk_id=record["chunk_id"],
+                        text=record.get("text") or "",
+                        entity_name="section_boost",
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
+                        document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                        document_source=record.get("doc_source") or metadata.get("url", "") or "",
+                        relevance_score=1.0,
+                    )
+                )
+
+            # Diversify across sections + documents, preserving chunk order.
+            per_section_counts: Dict[str, int] = {}
+            per_doc_counts: Dict[str, int] = {}
+            diversified: List[SourceChunk] = []
+            for chunk in candidates:
+                section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
+                doc_key = self._doc_key(chunk)
+
+                if per_section_counts.get(section_key, 0) >= max_per_section:
+                    continue
+                if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                    continue
+
+                diversified.append(chunk)
+                per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+                per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+                if len(diversified) >= max_total:
+                    break
+
+            logger.info(
+                "section_id_boost_chunks_complete",
+                num_sections=len(normalized),
+                num_candidates=len(candidates),
+                num_chunks=len(diversified),
+                max_per_section=max_per_section,
+                max_per_document=max_per_document,
+                max_total=max_total,
+            )
+
+            return diversified
+
+        except Exception as e:
+            logger.error("section_id_boost_chunks_failed", error=str(e))
             return []
     
     async def _get_relationships(

@@ -16,6 +16,7 @@ Endpoints:
 """
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
 from enum import Enum
@@ -23,7 +24,7 @@ import structlog
 import asyncio
 import time
 
-from app.hybrid.orchestrator import HybridPipeline
+from app.hybrid.orchestrator import HybridPipeline, HighQualityError
 from app.hybrid.router.main import DeploymentProfile, QueryRoute
 from app.hybrid.indexing import DualIndexService, get_hipporag_service
 
@@ -299,6 +300,24 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
             result = await pipeline.query(body.query, body.response_type)
         
         return HybridQueryResponse(**result)
+
+    except HighQualityError as e:
+        logger.warning(
+            "hybrid_query_strict_high_quality_failed",
+            group_id=group_id,
+            code=getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY"),
+            error=str(e),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY"),
+                    "message": str(e),
+                    "details": getattr(e, "details", {}) or {},
+                }
+            },
+        )
         
     except Exception as e:
         logger.error("hybrid_query_failed",
@@ -335,6 +354,24 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
         
         result = await pipeline.query_with_audit_trail(body.query)
         return HybridQueryResponse(**result)
+
+    except HighQualityError as e:
+        logger.warning(
+            "audit_query_strict_high_quality_failed",
+            group_id=group_id,
+            code=getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY"),
+            error=str(e),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY"),
+                    "message": str(e),
+                    "details": getattr(e, "details", {}) or {},
+                }
+            },
+        )
         
     except Exception as e:
         logger.error("audit_query_failed",
@@ -419,6 +456,24 @@ async def hybrid_query_drift(request: Request, body: HybridQueryRequest):
             response_type=body.response_type
         )
         return HybridQueryResponse(**result)
+
+    except HighQualityError as e:
+        logger.warning(
+            "drift_query_strict_high_quality_failed",
+            group_id=group_id,
+            code=getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY"),
+            error=str(e),
+        )
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": {
+                    "code": getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY"),
+                    "message": str(e),
+                    "details": getattr(e, "details", {}) or {},
+                }
+            },
+        )
         
     except Exception as e:
         logger.error("drift_query_failed",

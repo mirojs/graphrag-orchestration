@@ -427,8 +427,11 @@ Your response:"""
     def _get_detailed_report_prompt(self, query: str, context: str) -> str:
         return f"""You are an expert analyst generating a detailed report.
 
-CRITICAL REQUIREMENT: You MUST cite your sources using the citation markers (e.g., [1], [2]) 
-for EVERY factual claim you make. Uncited claims are not acceptable for audit purposes.
+CRITICAL REQUIREMENTS:
+1. First, carefully evaluate if the Evidence Context contains the SPECIFIC information requested in the question.
+2. If the EXACT information is NOT present in the evidence context, respond ONLY with this exact phrase: "The requested information is not found in the provided documents."
+3. Do NOT provide related information, tangential facts, or workarounds when the specific requested information is missing.
+4. ONLY if relevant information IS present, you MUST cite your sources using the citation markers (e.g., [1], [2]) for EVERY factual claim you make. Uncited claims are not acceptable for audit purposes.
 
 Question: {query}
 
@@ -452,10 +455,13 @@ Evidence Context:
 {context}
 
 Instructions:
-1. Provide a brief summary (2-3 paragraphs).
-2. Include citations [N] for factual claims (aim for every sentence that states a fact).
-3. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
-4. Prefer concrete obligations/thresholds over general paraphrases.
+1. CRITICAL: First, carefully evaluate if the Evidence Context contains the SPECIFIC information requested in the question.
+2. If the EXACT information is NOT present (e.g., the question asks for a routing number and no routing number exists in the evidence), you MUST respond with ONLY this exact phrase: "The requested information is not found in the provided documents."
+3. Do NOT provide related information, tangential facts, or workarounds when the specific requested information is missing.
+4. ONLY if the evidence DOES contain the specific requested information, provide a brief summary (2-3 paragraphs).
+5. Include citations [N] for factual claims (aim for every sentence that states a fact).
+6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+7. Prefer concrete obligations/thresholds over general paraphrases.
 
 Summary:"""
 

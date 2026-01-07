@@ -1,0 +1,1390 @@
+nohup: ignoring input
+==================================================
+GraphRAG Deployment Configuration
+==================================================
+Resource Group:       rg-graphrag-feature
+Location:             swedencentral
+Container Registry:   graphragacr12153
+Container App:        graphrag-orchestration
+Image Tag:            latest
+Docker Cleanup:       true
+==================================================
+
+🔐 Checking Azure login status...
+✅ Logged in to Azure subscription: Microsoft Azure Sponsorship
+
+📦 Retrieving ACR credentials...
+✅ ACR Endpoint: graphragacr12153.azurecr.io
+
+==================================================
+🐳 Building and Pushing Docker Image
+==================================================
+Image URI: graphragacr12153.azurecr.io/graphrag-orchestration:latest
+Build Context: /afh/projects/graphrag-orchestration/graphrag-orchestration
+
+⏳ Building and pushing image in ACR (this may take 2-3 minutes)...
+WARNING: Packing source code into tar to upload...
+WARNING: Excluding '.venv' directory for performance
+WARNING: Excluding '.pytest_cache/.gitignore' based on default ignore rules
+WARNING: Uploading archived source code from '/tmp/build_archive_50d04469d2694ed6a6aed58133741b54.tar.gz'...
+WARNING: Sending context (9.881 MiB) to registry: graphragacr12153...
+WARNING: Queued a build with ID: dt9m
+WARNING: Waiting for an agent...
+2026/01/07 08:47:41 Downloading source code...
+2026/01/07 08:47:42 Finished downloading source code
+2026/01/07 08:47:42 Using acb_vol_f43169d0-65e2-4ffe-8b73-d385089d3344 as the home volume
+2026/01/07 08:47:42 Setting up Docker configuration...
+2026/01/07 08:47:43 Successfully set up Docker configuration
+2026/01/07 08:47:43 Logging in to registry: graphragacr12153.azurecr.io
+2026/01/07 08:47:43 Successfully logged into graphragacr12153.azurecr.io
+2026/01/07 08:47:43 Executing step ID: build. Timeout(sec): 28800, Working directory: '', Network: ''
+2026/01/07 08:47:43 Scanning for dependencies...
+2026/01/07 08:47:44 Successfully scanned dependencies
+2026/01/07 08:47:44 Launching container with name: build
+Sending build context to Docker daemon  31.25MB
+Step 1/13 : FROM python:3.11-slim as builder
+3.11-slim: Pulling from library/python
+02d7611c4eae: Pulling fs layer
+1473863bb010: Pulling fs layer
+7cc13cb22d92: Pulling fs layer
+654a090213c0: Pulling fs layer
+654a090213c0: Waiting
+1473863bb010: Verifying Checksum
+1473863bb010: Download complete
+7cc13cb22d92: Verifying Checksum
+7cc13cb22d92: Download complete
+02d7611c4eae: Verifying Checksum
+02d7611c4eae: Download complete
+654a090213c0: Verifying Checksum
+654a090213c0: Download complete
+02d7611c4eae: Pull complete
+1473863bb010: Pull complete
+7cc13cb22d92: Pull complete
+654a090213c0: Pull complete
+Digest: sha256:1dd3dca85e22886e44fcad1bb7ccab6691dfa83db52214cf9e20696e095f3e36
+Status: Downloaded newer image for python:3.11-slim
+ ---> 955f4ccb5624
+Step 2/13 : WORKDIR /tmp
+ ---> Running in d479aa891aad
+Removing intermediate container d479aa891aad
+ ---> 80d0bb576d60
+Step 3/13 : RUN apt-get update && apt-get install -y     build-essential     && rm -rf /var/lib/apt/lists/*
+ ---> Running in 352a8cca81e9
+Hit:1 http://deb.debian.org/debian trixie InRelease
+Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9670 kB]
+Get:5 http://deb.debian.org/debian trixie-updates/main amd64 Packages [5412 B]
+Get:6 http://deb.debian.org/debian-security trixie-security/main amd64 Packages [94.2 kB]
+Fetched 9860 kB in 1s (9320 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu bzip2 cpp cpp-14
+  cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu dpkg-dev fakeroot g++ g++-14
+  g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu gcc gcc-14
+  gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libalgorithm-diff-perl
+  libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan8 libatomic1
+  libbinutils libc-dev-bin libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0
+  libctf0 libdpkg-perl libfakeroot libfile-fcntllock-perl libgcc-14-dev
+  libgdbm-compat4t64 libgomp1 libgprofng0 libhwasan0 libisl23 libitm1
+  libjansson4 liblocale-gettext-perl liblsan0 libmpc3 libmpfr6 libperl5.40
+  libquadmath0 libsframe1 libstdc++-14-dev libtsan2 libubsan1 linux-libc-dev
+  make manpages manpages-dev patch perl perl-modules-5.40 rpcsvc-proto sq
+  xz-utils
+Suggested packages:
+  binutils-doc gprofng-gui binutils-gold bzip2-doc cpp-doc gcc-14-locales
+  cpp-14-doc debian-keyring debian-tag2upload-keyring g++-multilib
+  g++-14-multilib gcc-14-doc gcc-multilib autoconf automake libtool flex bison
+  gdb gcc-doc gcc-14-multilib gdb-x86-64-linux-gnu libc-devtools glibc-doc
+  sensible-utils git bzr libstdc++-14-doc make-doc man-browser ed
+  diffutils-doc perl-doc libterm-readline-gnu-perl
+  | libterm-readline-perl-perl libtap-harness-archive-perl
+The following NEW packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu build-essential bzip2 cpp
+  cpp-14 cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu dpkg-dev fakeroot g++
+  g++-14 g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu gcc gcc-14
+  gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libalgorithm-diff-perl
+  libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan8 libatomic1
+  libbinutils libc-dev-bin libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0
+  libctf0 libdpkg-perl libfakeroot libfile-fcntllock-perl libgcc-14-dev
+  libgdbm-compat4t64 libgomp1 libgprofng0 libhwasan0 libisl23 libitm1
+  libjansson4 liblocale-gettext-perl liblsan0 libmpc3 libmpfr6 libperl5.40
+  libquadmath0 libsframe1 libstdc++-14-dev libtsan2 libubsan1 linux-libc-dev
+  make manpages manpages-dev patch perl perl-modules-5.40 rpcsvc-proto sq
+  xz-utils
+0 upgraded, 62 newly installed, 0 to remove and 0 not upgraded.
+Need to get 91.7 MB of archives.
+After this operation, 365 MB of additional disk space will be used.
+Get:1 http://deb.debian.org/debian trixie/main amd64 liblocale-gettext-perl amd64 1.07-7+b1 [15.3 kB]
+Get:2 http://deb.debian.org/debian trixie/main amd64 bzip2 amd64 1.0.8-6 [40.5 kB]
+Get:3 http://deb.debian.org/debian trixie/main amd64 manpages all 6.9.1-1 [1393 kB]
+Get:4 http://deb.debian.org/debian trixie/main amd64 perl-modules-5.40 all 5.40.1-6 [3019 kB]
+Get:5 http://deb.debian.org/debian trixie/main amd64 libgdbm-compat4t64 amd64 1.24-2 [50.3 kB]
+Get:6 http://deb.debian.org/debian trixie/main amd64 libperl5.40 amd64 5.40.1-6 [4341 kB]
+Get:7 http://deb.debian.org/debian trixie/main amd64 perl amd64 5.40.1-6 [267 kB]
+Get:8 http://deb.debian.org/debian trixie/main amd64 xz-utils amd64 5.8.1-1 [660 kB]
+Get:9 http://deb.debian.org/debian trixie/main amd64 libsframe1 amd64 2.44-3 [78.4 kB]
+Get:10 http://deb.debian.org/debian trixie/main amd64 binutils-common amd64 2.44-3 [2509 kB]
+Get:11 http://deb.debian.org/debian trixie/main amd64 libbinutils amd64 2.44-3 [534 kB]
+Get:12 http://deb.debian.org/debian trixie/main amd64 libgprofng0 amd64 2.44-3 [808 kB]
+Get:13 http://deb.debian.org/debian trixie/main amd64 libctf-nobfd0 amd64 2.44-3 [156 kB]
+Get:14 http://deb.debian.org/debian trixie/main amd64 libctf0 amd64 2.44-3 [88.6 kB]
+Get:15 http://deb.debian.org/debian trixie/main amd64 libjansson4 amd64 2.14-2+b3 [39.8 kB]
+Get:16 http://deb.debian.org/debian trixie/main amd64 binutils-x86-64-linux-gnu amd64 2.44-3 [1014 kB]
+Get:17 http://deb.debian.org/debian trixie/main amd64 binutils amd64 2.44-3 [265 kB]
+Get:18 http://deb.debian.org/debian trixie/main amd64 libc-dev-bin amd64 2.41-12 [58.2 kB]
+Get:19 http://deb.debian.org/debian trixie/main amd64 linux-libc-dev all 6.12.57-1 [2692 kB]
+Get:20 http://deb.debian.org/debian trixie/main amd64 libcrypt-dev amd64 1:4.4.38-1 [119 kB]
+Get:21 http://deb.debian.org/debian trixie/main amd64 rpcsvc-proto amd64 1.4.3-1 [63.3 kB]
+Get:22 http://deb.debian.org/debian trixie/main amd64 libc6-dev amd64 2.41-12 [1991 kB]
+Get:23 http://deb.debian.org/debian trixie/main amd64 libisl23 amd64 0.27-1 [659 kB]
+Get:24 http://deb.debian.org/debian trixie/main amd64 libmpfr6 amd64 4.2.2-1 [729 kB]
+Get:25 http://deb.debian.org/debian trixie/main amd64 libmpc3 amd64 1.3.1-1+b3 [52.2 kB]
+Get:26 http://deb.debian.org/debian trixie/main amd64 cpp-14-x86-64-linux-gnu amd64 14.2.0-19 [11.0 MB]
+Get:27 http://deb.debian.org/debian trixie/main amd64 cpp-14 amd64 14.2.0-19 [1280 B]
+Get:28 http://deb.debian.org/debian trixie/main amd64 cpp-x86-64-linux-gnu amd64 4:14.2.0-1 [4840 B]
+Get:29 http://deb.debian.org/debian trixie/main amd64 cpp amd64 4:14.2.0-1 [1568 B]
+Get:30 http://deb.debian.org/debian trixie/main amd64 libcc1-0 amd64 14.2.0-19 [42.8 kB]
+Get:31 http://deb.debian.org/debian trixie/main amd64 libgomp1 amd64 14.2.0-19 [137 kB]
+Get:32 http://deb.debian.org/debian trixie/main amd64 libitm1 amd64 14.2.0-19 [26.0 kB]
+Get:33 http://deb.debian.org/debian trixie/main amd64 libatomic1 amd64 14.2.0-19 [9308 B]
+Get:34 http://deb.debian.org/debian trixie/main amd64 libasan8 amd64 14.2.0-19 [2725 kB]
+Get:35 http://deb.debian.org/debian trixie/main amd64 liblsan0 amd64 14.2.0-19 [1204 kB]
+Get:36 http://deb.debian.org/debian trixie/main amd64 libtsan2 amd64 14.2.0-19 [2460 kB]
+Get:37 http://deb.debian.org/debian trixie/main amd64 libubsan1 amd64 14.2.0-19 [1074 kB]
+Get:38 http://deb.debian.org/debian trixie/main amd64 libhwasan0 amd64 14.2.0-19 [1488 kB]
+Get:39 http://deb.debian.org/debian trixie/main amd64 libquadmath0 amd64 14.2.0-19 [145 kB]
+Get:40 http://deb.debian.org/debian trixie/main amd64 libgcc-14-dev amd64 14.2.0-19 [2672 kB]
+Get:41 http://deb.debian.org/debian trixie/main amd64 gcc-14-x86-64-linux-gnu amd64 14.2.0-19 [21.4 MB]
+Get:42 http://deb.debian.org/debian trixie/main amd64 gcc-14 amd64 14.2.0-19 [540 kB]
+Get:43 http://deb.debian.org/debian trixie/main amd64 gcc-x86-64-linux-gnu amd64 4:14.2.0-1 [1436 B]
+Get:44 http://deb.debian.org/debian trixie/main amd64 gcc amd64 4:14.2.0-1 [5136 B]
+Get:45 http://deb.debian.org/debian trixie/main amd64 libstdc++-14-dev amd64 14.2.0-19 [2376 kB]
+Get:46 http://deb.debian.org/debian trixie/main amd64 g++-14-x86-64-linux-gnu amd64 14.2.0-19 [12.1 MB]
+Get:47 http://deb.debian.org/debian trixie/main amd64 g++-14 amd64 14.2.0-19 [22.5 kB]
+Get:48 http://deb.debian.org/debian trixie/main amd64 g++-x86-64-linux-gnu amd64 4:14.2.0-1 [1200 B]
+Get:49 http://deb.debian.org/debian trixie/main amd64 g++ amd64 4:14.2.0-1 [1344 B]
+Get:50 http://deb.debian.org/debian trixie/main amd64 make amd64 4.4.1-2 [463 kB]
+Get:51 http://deb.debian.org/debian trixie/main amd64 libdpkg-perl all 1.22.21 [650 kB]
+Get:52 http://deb.debian.org/debian trixie/main amd64 patch amd64 2.8-2 [134 kB]
+Get:53 http://deb.debian.org/debian trixie/main amd64 dpkg-dev all 1.22.21 [1338 kB]
+Get:54 http://deb.debian.org/debian trixie/main amd64 build-essential amd64 12.12 [4624 B]
+Get:55 http://deb.debian.org/debian trixie/main amd64 libfakeroot amd64 1.37.1.1-1 [29.6 kB]
+Get:56 http://deb.debian.org/debian trixie/main amd64 fakeroot amd64 1.37.1.1-1 [76.0 kB]
+Get:57 http://deb.debian.org/debian trixie/main amd64 libalgorithm-diff-perl all 1.201-1 [43.3 kB]
+Get:58 http://deb.debian.org/debian trixie/main amd64 libalgorithm-diff-xs-perl amd64 0.04-9 [11.1 kB]
+Get:59 http://deb.debian.org/debian trixie/main amd64 libalgorithm-merge-perl all 0.08-5 [11.8 kB]
+Get:60 http://deb.debian.org/debian trixie/main amd64 libfile-fcntllock-perl amd64 0.22-4+b4 [34.6 kB]
+Get:61 http://deb.debian.org/debian trixie/main amd64 manpages-dev all 6.9.1-1 [2122 kB]
+Get:62 http://deb.debian.org/debian trixie/main amd64 sq amd64 1.3.1-2+b1 [5654 kB]
+debconf: unable to initialize frontend: Dialog
+debconf: (TERM is not set, so the dialog frontend is not usable.)
+debconf: falling back to frontend: Readline
+debconf: unable to initialize frontend: Readline
+debconf: (Can't locate Term/ReadLine.pm in @INC (you may need to install the Term::ReadLine module) (@INC entries checked: /etc/perl /usr/local/lib/x86_64-linux-gnu/perl/5.40.1 /usr/local/share/perl/5.40.1 /usr/lib/x86_64-linux-gnu/perl5/5.40 /usr/share/perl5 /usr/lib/x86_64-linux-gnu/perl-base /usr/lib/x86_64-linux-gnu/perl/5.40 /usr/share/perl/5.40 /usr/local/lib/site_perl) at /usr/share/perl5/Debconf/FrontEnd/Readline.pm line 8, <STDIN> line 62.)
+debconf: falling back to frontend: Teletype
+debconf: unable to initialize frontend: Teletype
+debconf: (This frontend requires a controlling tty.)
+debconf: falling back to frontend: Noninteractive
+Fetched 91.7 MB in 1s (81.7 MB/s)
+Selecting previously unselected package liblocale-gettext-perl.
+(Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 5644 files and directories currently installed.)
+Preparing to unpack .../00-liblocale-gettext-perl_1.07-7+b1_amd64.deb ...
+Unpacking liblocale-gettext-perl (1.07-7+b1) ...
+Selecting previously unselected package bzip2.
+Preparing to unpack .../01-bzip2_1.0.8-6_amd64.deb ...
+Unpacking bzip2 (1.0.8-6) ...
+Selecting previously unselected package manpages.
+Preparing to unpack .../02-manpages_6.9.1-1_all.deb ...
+Unpacking manpages (6.9.1-1) ...
+Selecting previously unselected package perl-modules-5.40.
+Preparing to unpack .../03-perl-modules-5.40_5.40.1-6_all.deb ...
+Unpacking perl-modules-5.40 (5.40.1-6) ...
+Selecting previously unselected package libgdbm-compat4t64:amd64.
+Preparing to unpack .../04-libgdbm-compat4t64_1.24-2_amd64.deb ...
+Unpacking libgdbm-compat4t64:amd64 (1.24-2) ...
+Selecting previously unselected package libperl5.40:amd64.
+Preparing to unpack .../05-libperl5.40_5.40.1-6_amd64.deb ...
+Unpacking libperl5.40:amd64 (5.40.1-6) ...
+Selecting previously unselected package perl.
+Preparing to unpack .../06-perl_5.40.1-6_amd64.deb ...
+Unpacking perl (5.40.1-6) ...
+Selecting previously unselected package xz-utils.
+Preparing to unpack .../07-xz-utils_5.8.1-1_amd64.deb ...
+Unpacking xz-utils (5.8.1-1) ...
+Selecting previously unselected package libsframe1:amd64.
+Preparing to unpack .../08-libsframe1_2.44-3_amd64.deb ...
+Unpacking libsframe1:amd64 (2.44-3) ...
+Selecting previously unselected package binutils-common:amd64.
+Preparing to unpack .../09-binutils-common_2.44-3_amd64.deb ...
+Unpacking binutils-common:amd64 (2.44-3) ...
+Selecting previously unselected package libbinutils:amd64.
+Preparing to unpack .../10-libbinutils_2.44-3_amd64.deb ...
+Unpacking libbinutils:amd64 (2.44-3) ...
+Selecting previously unselected package libgprofng0:amd64.
+Preparing to unpack .../11-libgprofng0_2.44-3_amd64.deb ...
+Unpacking libgprofng0:amd64 (2.44-3) ...
+Selecting previously unselected package libctf-nobfd0:amd64.
+Preparing to unpack .../12-libctf-nobfd0_2.44-3_amd64.deb ...
+Unpacking libctf-nobfd0:amd64 (2.44-3) ...
+Selecting previously unselected package libctf0:amd64.
+Preparing to unpack .../13-libctf0_2.44-3_amd64.deb ...
+Unpacking libctf0:amd64 (2.44-3) ...
+Selecting previously unselected package libjansson4:amd64.
+Preparing to unpack .../14-libjansson4_2.14-2+b3_amd64.deb ...
+Unpacking libjansson4:amd64 (2.14-2+b3) ...
+Selecting previously unselected package binutils-x86-64-linux-gnu.
+Preparing to unpack .../15-binutils-x86-64-linux-gnu_2.44-3_amd64.deb ...
+Unpacking binutils-x86-64-linux-gnu (2.44-3) ...
+Selecting previously unselected package binutils.
+Preparing to unpack .../16-binutils_2.44-3_amd64.deb ...
+Unpacking binutils (2.44-3) ...
+Selecting previously unselected package libc-dev-bin.
+Preparing to unpack .../17-libc-dev-bin_2.41-12_amd64.deb ...
+Unpacking libc-dev-bin (2.41-12) ...
+Selecting previously unselected package linux-libc-dev.
+Preparing to unpack .../18-linux-libc-dev_6.12.57-1_all.deb ...
+Unpacking linux-libc-dev (6.12.57-1) ...
+Selecting previously unselected package libcrypt-dev:amd64.
+Preparing to unpack .../19-libcrypt-dev_1%3a4.4.38-1_amd64.deb ...
+Unpacking libcrypt-dev:amd64 (1:4.4.38-1) ...
+Selecting previously unselected package rpcsvc-proto.
+Preparing to unpack .../20-rpcsvc-proto_1.4.3-1_amd64.deb ...
+Unpacking rpcsvc-proto (1.4.3-1) ...
+Selecting previously unselected package libc6-dev:amd64.
+Preparing to unpack .../21-libc6-dev_2.41-12_amd64.deb ...
+Unpacking libc6-dev:amd64 (2.41-12) ...
+Selecting previously unselected package libisl23:amd64.
+Preparing to unpack .../22-libisl23_0.27-1_amd64.deb ...
+Unpacking libisl23:amd64 (0.27-1) ...
+Selecting previously unselected package libmpfr6:amd64.
+Preparing to unpack .../23-libmpfr6_4.2.2-1_amd64.deb ...
+Unpacking libmpfr6:amd64 (4.2.2-1) ...
+Selecting previously unselected package libmpc3:amd64.
+Preparing to unpack .../24-libmpc3_1.3.1-1+b3_amd64.deb ...
+Unpacking libmpc3:amd64 (1.3.1-1+b3) ...
+Selecting previously unselected package cpp-14-x86-64-linux-gnu.
+Preparing to unpack .../25-cpp-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...
+Unpacking cpp-14-x86-64-linux-gnu (14.2.0-19) ...
+Selecting previously unselected package cpp-14.
+Preparing to unpack .../26-cpp-14_14.2.0-19_amd64.deb ...
+Unpacking cpp-14 (14.2.0-19) ...
+Selecting previously unselected package cpp-x86-64-linux-gnu.
+Preparing to unpack .../27-cpp-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...
+Unpacking cpp-x86-64-linux-gnu (4:14.2.0-1) ...
+Selecting previously unselected package cpp.
+Preparing to unpack .../28-cpp_4%3a14.2.0-1_amd64.deb ...
+Unpacking cpp (4:14.2.0-1) ...
+Selecting previously unselected package libcc1-0:amd64.
+Preparing to unpack .../29-libcc1-0_14.2.0-19_amd64.deb ...
+Unpacking libcc1-0:amd64 (14.2.0-19) ...
+Selecting previously unselected package libgomp1:amd64.
+Preparing to unpack .../30-libgomp1_14.2.0-19_amd64.deb ...
+Unpacking libgomp1:amd64 (14.2.0-19) ...
+Selecting previously unselected package libitm1:amd64.
+Preparing to unpack .../31-libitm1_14.2.0-19_amd64.deb ...
+Unpacking libitm1:amd64 (14.2.0-19) ...
+Selecting previously unselected package libatomic1:amd64.
+Preparing to unpack .../32-libatomic1_14.2.0-19_amd64.deb ...
+Unpacking libatomic1:amd64 (14.2.0-19) ...
+Selecting previously unselected package libasan8:amd64.
+Preparing to unpack .../33-libasan8_14.2.0-19_amd64.deb ...
+Unpacking libasan8:amd64 (14.2.0-19) ...
+Selecting previously unselected package liblsan0:amd64.
+Preparing to unpack .../34-liblsan0_14.2.0-19_amd64.deb ...
+Unpacking liblsan0:amd64 (14.2.0-19) ...
+Selecting previously unselected package libtsan2:amd64.
+Preparing to unpack .../35-libtsan2_14.2.0-19_amd64.deb ...
+Unpacking libtsan2:amd64 (14.2.0-19) ...
+Selecting previously unselected package libubsan1:amd64.
+Preparing to unpack .../36-libubsan1_14.2.0-19_amd64.deb ...
+Unpacking libubsan1:amd64 (14.2.0-19) ...
+Selecting previously unselected package libhwasan0:amd64.
+Preparing to unpack .../37-libhwasan0_14.2.0-19_amd64.deb ...
+Unpacking libhwasan0:amd64 (14.2.0-19) ...
+Selecting previously unselected package libquadmath0:amd64.
+Preparing to unpack .../38-libquadmath0_14.2.0-19_amd64.deb ...
+Unpacking libquadmath0:amd64 (14.2.0-19) ...
+Selecting previously unselected package libgcc-14-dev:amd64.
+Preparing to unpack .../39-libgcc-14-dev_14.2.0-19_amd64.deb ...
+Unpacking libgcc-14-dev:amd64 (14.2.0-19) ...
+Selecting previously unselected package gcc-14-x86-64-linux-gnu.
+Preparing to unpack .../40-gcc-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...
+Unpacking gcc-14-x86-64-linux-gnu (14.2.0-19) ...
+Selecting previously unselected package gcc-14.
+Preparing to unpack .../41-gcc-14_14.2.0-19_amd64.deb ...
+Unpacking gcc-14 (14.2.0-19) ...
+Selecting previously unselected package gcc-x86-64-linux-gnu.
+Preparing to unpack .../42-gcc-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...
+Unpacking gcc-x86-64-linux-gnu (4:14.2.0-1) ...
+Selecting previously unselected package gcc.
+Preparing to unpack .../43-gcc_4%3a14.2.0-1_amd64.deb ...
+Unpacking gcc (4:14.2.0-1) ...
+Selecting previously unselected package libstdc++-14-dev:amd64.
+Preparing to unpack .../44-libstdc++-14-dev_14.2.0-19_amd64.deb ...
+Unpacking libstdc++-14-dev:amd64 (14.2.0-19) ...
+Selecting previously unselected package g++-14-x86-64-linux-gnu.
+Preparing to unpack .../45-g++-14-x86-64-linux-gnu_14.2.0-19_amd64.deb ...
+Unpacking g++-14-x86-64-linux-gnu (14.2.0-19) ...
+Selecting previously unselected package g++-14.
+Preparing to unpack .../46-g++-14_14.2.0-19_amd64.deb ...
+Unpacking g++-14 (14.2.0-19) ...
+Selecting previously unselected package g++-x86-64-linux-gnu.
+Preparing to unpack .../47-g++-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb ...
+Unpacking g++-x86-64-linux-gnu (4:14.2.0-1) ...
+Selecting previously unselected package g++.
+Preparing to unpack .../48-g++_4%3a14.2.0-1_amd64.deb ...
+Unpacking g++ (4:14.2.0-1) ...
+Selecting previously unselected package make.
+Preparing to unpack .../49-make_4.4.1-2_amd64.deb ...
+Unpacking make (4.4.1-2) ...
+Selecting previously unselected package libdpkg-perl.
+Preparing to unpack .../50-libdpkg-perl_1.22.21_all.deb ...
+Unpacking libdpkg-perl (1.22.21) ...
+Selecting previously unselected package patch.
+Preparing to unpack .../51-patch_2.8-2_amd64.deb ...
+Unpacking patch (2.8-2) ...
+Selecting previously unselected package dpkg-dev.
+Preparing to unpack .../52-dpkg-dev_1.22.21_all.deb ...
+Unpacking dpkg-dev (1.22.21) ...
+Selecting previously unselected package build-essential.
+Preparing to unpack .../53-build-essential_12.12_amd64.deb ...
+Unpacking build-essential (12.12) ...
+Selecting previously unselected package libfakeroot:amd64.
+Preparing to unpack .../54-libfakeroot_1.37.1.1-1_amd64.deb ...
+Unpacking libfakeroot:amd64 (1.37.1.1-1) ...
+Selecting previously unselected package fakeroot.
+Preparing to unpack .../55-fakeroot_1.37.1.1-1_amd64.deb ...
+Unpacking fakeroot (1.37.1.1-1) ...
+Selecting previously unselected package libalgorithm-diff-perl.
+Preparing to unpack .../56-libalgorithm-diff-perl_1.201-1_all.deb ...
+Unpacking libalgorithm-diff-perl (1.201-1) ...
+Selecting previously unselected package libalgorithm-diff-xs-perl.
+Preparing to unpack .../57-libalgorithm-diff-xs-perl_0.04-9_amd64.deb ...
+Unpacking libalgorithm-diff-xs-perl (0.04-9) ...
+Selecting previously unselected package libalgorithm-merge-perl.
+Preparing to unpack .../58-libalgorithm-merge-perl_0.08-5_all.deb ...
+Unpacking libalgorithm-merge-perl (0.08-5) ...
+Selecting previously unselected package libfile-fcntllock-perl.
+Preparing to unpack .../59-libfile-fcntllock-perl_0.22-4+b4_amd64.deb ...
+Unpacking libfile-fcntllock-perl (0.22-4+b4) ...
+Selecting previously unselected package manpages-dev.
+Preparing to unpack .../60-manpages-dev_6.9.1-1_all.deb ...
+Unpacking manpages-dev (6.9.1-1) ...
+Selecting previously unselected package sq.
+Preparing to unpack .../61-sq_1.3.1-2+b1_amd64.deb ...
+Unpacking sq (1.3.1-2+b1) ...
+Setting up libgdbm-compat4t64:amd64 (1.24-2) ...
+Setting up manpages (6.9.1-1) ...
+Setting up binutils-common:amd64 (2.44-3) ...
+Setting up linux-libc-dev (6.12.57-1) ...
+Setting up libctf-nobfd0:amd64 (2.44-3) ...
+Setting up sq (1.3.1-2+b1) ...
+Setting up libgomp1:amd64 (14.2.0-19) ...
+Setting up bzip2 (1.0.8-6) ...
+Setting up libsframe1:amd64 (2.44-3) ...
+Setting up libfakeroot:amd64 (1.37.1.1-1) ...
+Setting up libjansson4:amd64 (2.14-2+b3) ...
+Setting up fakeroot (1.37.1.1-1) ...
+update-alternatives: using /usr/bin/fakeroot-sysv to provide /usr/bin/fakeroot (fakeroot) in auto mode
+update-alternatives: warning: skip creation of /usr/share/man/man1/fakeroot.1.gz because associated file /usr/share/man/man1/fakeroot-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/faked.1.gz because associated file /usr/share/man/man1/faked-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/es/man1/fakeroot.1.gz because associated file /usr/share/man/es/man1/fakeroot-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/es/man1/faked.1.gz because associated file /usr/share/man/es/man1/faked-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/fr/man1/fakeroot.1.gz because associated file /usr/share/man/fr/man1/fakeroot-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/fr/man1/faked.1.gz because associated file /usr/share/man/fr/man1/faked-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/sv/man1/fakeroot.1.gz because associated file /usr/share/man/sv/man1/fakeroot-sysv.1.gz (of link group fakeroot) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/sv/man1/faked.1.gz because associated file /usr/share/man/sv/man1/faked-sysv.1.gz (of link group fakeroot) doesn't exist
+Setting up rpcsvc-proto (1.4.3-1) ...
+Setting up make (4.4.1-2) ...
+Setting up libmpfr6:amd64 (4.2.2-1) ...
+Setting up xz-utils (5.8.1-1) ...
+update-alternatives: using /usr/bin/xz to provide /usr/bin/lzma (lzma) in auto mode
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzma.1.gz because associated file /usr/share/man/man1/xz.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/unlzma.1.gz because associated file /usr/share/man/man1/unxz.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzcat.1.gz because associated file /usr/share/man/man1/xzcat.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzmore.1.gz because associated file /usr/share/man/man1/xzmore.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzless.1.gz because associated file /usr/share/man/man1/xzless.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzdiff.1.gz because associated file /usr/share/man/man1/xzdiff.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzcmp.1.gz because associated file /usr/share/man/man1/xzcmp.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzgrep.1.gz because associated file /usr/share/man/man1/xzgrep.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzegrep.1.gz because associated file /usr/share/man/man1/xzegrep.1.gz (of link group lzma) doesn't exist
+update-alternatives: warning: skip creation of /usr/share/man/man1/lzfgrep.1.gz because associated file /usr/share/man/man1/xzfgrep.1.gz (of link group lzma) doesn't exist
+Setting up libquadmath0:amd64 (14.2.0-19) ...
+Setting up libmpc3:amd64 (1.3.1-1+b3) ...
+Setting up libatomic1:amd64 (14.2.0-19) ...
+Setting up patch (2.8-2) ...
+Setting up libubsan1:amd64 (14.2.0-19) ...
+Setting up perl-modules-5.40 (5.40.1-6) ...
+Setting up libhwasan0:amd64 (14.2.0-19) ...
+Setting up libcrypt-dev:amd64 (1:4.4.38-1) ...
+Setting up libasan8:amd64 (14.2.0-19) ...
+Setting up libtsan2:amd64 (14.2.0-19) ...
+Setting up libbinutils:amd64 (2.44-3) ...
+Setting up libisl23:amd64 (0.27-1) ...
+Setting up libc-dev-bin (2.41-12) ...
+Setting up libcc1-0:amd64 (14.2.0-19) ...
+Setting up liblocale-gettext-perl (1.07-7+b1) ...
+Setting up liblsan0:amd64 (14.2.0-19) ...
+Setting up libitm1:amd64 (14.2.0-19) ...
+Setting up libctf0:amd64 (2.44-3) ...
+Setting up manpages-dev (6.9.1-1) ...
+Setting up libperl5.40:amd64 (5.40.1-6) ...
+Setting up perl (5.40.1-6) ...
+Setting up libgprofng0:amd64 (2.44-3) ...
+Setting up cpp-14-x86-64-linux-gnu (14.2.0-19) ...
+Setting up libdpkg-perl (1.22.21) ...
+Setting up cpp-14 (14.2.0-19) ...
+Setting up libc6-dev:amd64 (2.41-12) ...
+Setting up libgcc-14-dev:amd64 (14.2.0-19) ...
+Setting up libstdc++-14-dev:amd64 (14.2.0-19) ...
+Setting up binutils-x86-64-linux-gnu (2.44-3) ...
+Setting up cpp-x86-64-linux-gnu (4:14.2.0-1) ...
+Setting up libfile-fcntllock-perl (0.22-4+b4) ...
+Setting up libalgorithm-diff-perl (1.201-1) ...
+Setting up binutils (2.44-3) ...
+Setting up dpkg-dev (1.22.21) ...
+Setting up cpp (4:14.2.0-1) ...
+Setting up gcc-14-x86-64-linux-gnu (14.2.0-19) ...
+Setting up libalgorithm-diff-xs-perl (0.04-9) ...
+Setting up libalgorithm-merge-perl (0.08-5) ...
+Setting up gcc-x86-64-linux-gnu (4:14.2.0-1) ...
+Setting up gcc-14 (14.2.0-19) ...
+Setting up g++-14-x86-64-linux-gnu (14.2.0-19) ...
+Setting up g++-x86-64-linux-gnu (4:14.2.0-1) ...
+Setting up g++-14 (14.2.0-19) ...
+Setting up gcc (4:14.2.0-1) ...
+Setting up g++ (4:14.2.0-1) ...
+update-alternatives: using /usr/bin/g++ to provide /usr/bin/c++ (c++) in auto mode
+Setting up build-essential (12.12) ...
+Processing triggers for libc-bin (2.41-12) ...
+Removing intermediate container 352a8cca81e9
+ ---> f65ee8876521
+Step 4/13 : COPY requirements.txt .
+ ---> 916c4c5d8318
+Step 5/13 : RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt
+ ---> Running in cb754e9293f1
+Requirement already satisfied: pip in /usr/local/lib/python3.11/site-packages (24.0)
+Collecting pip
+  Downloading pip-25.3-py3-none-any.whl.metadata (4.7 kB)
+Downloading pip-25.3-py3-none-any.whl (1.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 13.0 MB/s eta 0:00:00
+Installing collected packages: pip
+  Attempting uninstall: pip
+    Found existing installation: pip 24.0
+    Uninstalling pip-24.0:
+      Successfully uninstalled pip-24.0
+Successfully installed pip-25.3
+Collecting fastapi>=0.115.0 (from -r requirements.txt (line 2))
+  Downloading fastapi-0.128.0-py3-none-any.whl.metadata (30 kB)
+Collecting uvicorn>=0.30.0 (from uvicorn[standard]>=0.30.0->-r requirements.txt (line 3))
+  Downloading uvicorn-0.40.0-py3-none-any.whl.metadata (6.7 kB)
+Collecting pydantic>=2.10.3 (from -r requirements.txt (line 4))
+  Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+Collecting pydantic-settings>=2.1.0 (from -r requirements.txt (line 5))
+  Downloading pydantic_settings-2.12.0-py3-none-any.whl.metadata (3.4 kB)
+Collecting graphrag==2.7.0 (from -r requirements.txt (line 8))
+  Downloading graphrag-2.7.0-py3-none-any.whl.metadata (6.7 kB)
+Collecting llama-index-core==0.12.52 (from -r requirements.txt (line 11))
+  Downloading llama_index_core-0.12.52-py3-none-any.whl.metadata (2.5 kB)
+Collecting llama-index-llms-azure-openai==0.3.4 (from -r requirements.txt (line 12))
+  Downloading llama_index_llms_azure_openai-0.3.4-py3-none-any.whl.metadata (3.7 kB)
+Collecting llama-index-llms-openai==0.4.3 (from -r requirements.txt (line 13))
+  Downloading llama_index_llms_openai-0.4.3-py3-none-any.whl.metadata (3.0 kB)
+Collecting llama-index-embeddings-azure-openai==0.3.3 (from -r requirements.txt (line 14))
+  Downloading llama_index_embeddings_azure_openai-0.3.3-py3-none-any.whl.metadata (503 bytes)
+Collecting llama-index-vector-stores-azureaisearch==0.3.0 (from -r requirements.txt (line 15))
+  Downloading llama_index_vector_stores_azureaisearch-0.3.0-py3-none-any.whl.metadata (741 bytes)
+Collecting llama-index-graph-stores-neo4j==0.4.1 (from -r requirements.txt (line 16))
+  Downloading llama_index_graph_stores_neo4j-0.4.1-py3-none-any.whl.metadata (694 bytes)
+Collecting llama-index-packs-raptor==0.3.5 (from -r requirements.txt (line 17))
+  Downloading llama_index_packs_raptor-0.3.5-py3-none-any.whl.metadata (3.8 kB)
+Collecting scikit-learn>=1.4.0 (from -r requirements.txt (line 18))
+  Downloading scikit_learn-1.8.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (11 kB)
+Collecting graspologic==3.4.1 (from -r requirements.txt (line 21))
+  Downloading graspologic-3.4.1-py3-none-any.whl.metadata (5.8 kB)
+Collecting networkx==3.4.2 (from -r requirements.txt (line 22))
+  Downloading networkx-3.4.2-py3-none-any.whl.metadata (6.3 kB)
+Collecting llama-parse>=0.6.0 (from -r requirements.txt (line 24))
+  Downloading llama_parse-0.6.88-py3-none-any.whl.metadata (6.6 kB)
+Collecting azure-search-documents==11.6.0 (from -r requirements.txt (line 27))
+  Downloading azure_search_documents-11.6.0-py3-none-any.whl.metadata (23 kB)
+Collecting neo4j>=5.15.0 (from -r requirements.txt (line 30))
+  Downloading neo4j-6.0.3-py3-none-any.whl.metadata (5.2 kB)
+Collecting neo4j-graphrag==1.7.0 (from -r requirements.txt (line 31))
+  Downloading neo4j_graphrag-1.7.0-py3-none-any.whl.metadata (18 kB)
+Collecting rapidfuzz>=3.6.0 (from -r requirements.txt (line 32))
+  Downloading rapidfuzz-3.14.3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (12 kB)
+Collecting azure-cosmos==4.9.0 (from -r requirements.txt (line 38))
+  Downloading azure_cosmos-4.9.0-py3-none-any.whl.metadata (80 kB)
+Collecting azure-storage-blob==12.24.0 (from -r requirements.txt (line 39))
+  Downloading azure_storage_blob-12.24.0-py3-none-any.whl.metadata (26 kB)
+Collecting azure-identity==1.20.0 (from -r requirements.txt (line 40))
+  Downloading azure_identity-1.20.0-py3-none-any.whl.metadata (81 kB)
+Collecting azure-ai-documentintelligence==1.0.2 (from -r requirements.txt (line 41))
+  Downloading azure_ai_documentintelligence-1.0.2-py3-none-any.whl.metadata (53 kB)
+Collecting openai<2.0.0,>=1.14.0 (from -r requirements.txt (line 42))
+  Downloading openai-1.109.1-py3-none-any.whl.metadata (29 kB)
+Collecting python-dotenv>=1.0.0 (from -r requirements.txt (line 45))
+  Downloading python_dotenv-1.2.1-py3-none-any.whl.metadata (25 kB)
+Collecting structlog>=24.1.0 (from -r requirements.txt (line 46))
+  Downloading structlog-25.5.0-py3-none-any.whl.metadata (9.5 kB)
+Collecting tenacity>=8.2.3 (from -r requirements.txt (line 47))
+  Downloading tenacity-9.1.2-py3-none-any.whl.metadata (1.2 kB)
+Collecting json-repair>=0.9.0 (from -r requirements.txt (line 48))
+  Downloading json_repair-0.55.0-py3-none-any.whl.metadata (12 kB)
+Collecting anyio>=4.0.0 (from -r requirements.txt (line 51))
+  Downloading anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+Collecting httpx>=0.25.0 (from -r requirements.txt (line 54))
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Collecting environs>=11.0.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading environs-14.5.0-py3-none-any.whl.metadata (16 kB)
+Collecting lancedb>=0.17.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading lancedb-0.26.1-cp39-abi3-manylinux_2_28_x86_64.whl.metadata (4.8 kB)
+Collecting aiofiles>=24.1.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading aiofiles-25.1.0-py3-none-any.whl.metadata (6.3 kB)
+Collecting fnllm>=0.4.1 (from fnllm[azure,openai]>=0.4.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading fnllm-0.4.1-py3-none-any.whl.metadata (6.6 kB)
+Collecting nltk==3.9.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading nltk-3.9.1-py3-none-any.whl.metadata (2.9 kB)
+Collecting tiktoken>=0.11.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading tiktoken-0.12.0-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+Collecting numpy>=1.25.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading numpy-2.4.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting pandas>=2.2.3 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading pandas-2.3.3-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+Collecting pyarrow>=17.0.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading pyarrow-22.0.0-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (3.2 kB)
+Collecting umap-learn>=0.5.6 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading umap_learn-0.5.9.post2-py3-none-any.whl.metadata (25 kB)
+Collecting pyyaml>=6.0.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+Collecting devtools>=0.12.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading devtools-0.12.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting typing-extensions>=4.12.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting future>=1.0.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading future-1.0.0-py3-none-any.whl.metadata (4.0 kB)
+Collecting typer>=0.16.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading typer-0.21.1-py3-none-any.whl.metadata (16 kB)
+Collecting tqdm>=4.67.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading tqdm-4.67.1-py3-none-any.whl.metadata (57 kB)
+Collecting textblob>=0.18.0.post0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading textblob-0.19.0-py3-none-any.whl.metadata (4.4 kB)
+Collecting spacy>=3.8.4 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading spacy-3.8.11-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (27 kB)
+Collecting litellm>=1.77.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading litellm-1.80.11-py3-none-any.whl.metadata (29 kB)
+Collecting aiohttp<4,>=3.8.6 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading aiohttp-3.13.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+Collecting aiosqlite (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading aiosqlite-0.22.1-py3-none-any.whl.metadata (4.3 kB)
+Collecting banks<3,>=2.2.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading banks-2.2.0-py3-none-any.whl.metadata (12 kB)
+Collecting dataclasses-json (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading dataclasses_json-0.6.7-py3-none-any.whl.metadata (25 kB)
+Collecting deprecated>=1.2.9.3 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading deprecated-1.3.1-py2.py3-none-any.whl.metadata (5.9 kB)
+Collecting dirtyjson<2,>=1.0.8 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading dirtyjson-1.0.8-py3-none-any.whl.metadata (11 kB)
+Collecting filetype<2,>=1.2.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading filetype-1.2.0-py2.py3-none-any.whl.metadata (6.5 kB)
+Collecting fsspec>=2023.5.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading fsspec-2025.12.0-py3-none-any.whl.metadata (10 kB)
+Collecting llama-index-workflows<2,>=1.0.1 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading llama_index_workflows-1.3.0-py3-none-any.whl.metadata (6.4 kB)
+Collecting nest-asyncio<2,>=1.5.8 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading nest_asyncio-1.6.0-py3-none-any.whl.metadata (2.8 kB)
+Collecting pillow>=9.0.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading pillow-12.1.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (8.8 kB)
+Collecting platformdirs (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading platformdirs-4.5.1-py3-none-any.whl.metadata (12 kB)
+Collecting requests>=2.31.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+Collecting setuptools>=80.9.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading setuptools-80.9.0-py3-none-any.whl.metadata (6.6 kB)
+Collecting sqlalchemy>=1.4.49 (from sqlalchemy[asyncio]>=1.4.49->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading sqlalchemy-2.0.45-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+Collecting typing-inspect>=0.8.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading typing_inspect-0.9.0-py3-none-any.whl.metadata (1.5 kB)
+Collecting wrapt (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading wrapt-2.0.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (9.0 kB)
+Collecting azure-core>=1.31.0 (from azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading azure_core-1.37.0-py3-none-any.whl.metadata (47 kB)
+Collecting cryptography>=2.5 (from azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading cryptography-46.0.3-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (5.7 kB)
+Collecting msal>=1.30.0 (from azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading msal-1.34.0-py3-none-any.whl.metadata (11 kB)
+Collecting msal-extensions>=1.2.0 (from azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading msal_extensions-1.3.1-py3-none-any.whl.metadata (7.8 kB)
+Collecting llama-index-embeddings-openai<0.4,>=0.3.0 (from llama-index-embeddings-azure-openai==0.3.3->-r requirements.txt (line 14))
+  Downloading llama_index_embeddings_openai-0.3.1-py3-none-any.whl.metadata (684 bytes)
+Collecting azure-common>=1.1 (from azure-search-documents==11.6.0->-r requirements.txt (line 27))
+  Downloading azure_common-1.1.28-py2.py3-none-any.whl.metadata (5.0 kB)
+Collecting isodate>=0.6.0 (from azure-search-documents==11.6.0->-r requirements.txt (line 27))
+  Downloading isodate-0.7.2-py3-none-any.whl.metadata (11 kB)
+Collecting neo4j>=5.15.0 (from -r requirements.txt (line 30))
+  Downloading neo4j-5.28.2-py3-none-any.whl.metadata (5.9 kB)
+Collecting POT<0.10,>=0.9 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading pot-0.9.6.post1-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+Collecting anytree<3.0.0,>=2.12.1 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading anytree-2.13.0-py3-none-any.whl.metadata (8.0 kB)
+Collecting beartype<0.19.0,>=0.18.5 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading beartype-0.18.5-py3-none-any.whl.metadata (30 kB)
+Collecting gensim<5.0.0,>=4.3.2 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading gensim-4.4.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (8.4 kB)
+Collecting graspologic-native<2.0.0,>=1.2.1 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading graspologic_native-1.2.5-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.6 kB)
+Collecting hyppo<0.5.0,>=0.4.0 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading hyppo-0.4.0-py3-none-any.whl.metadata (1.7 kB)
+Collecting joblib<2.0.0,>=1.4.2 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading joblib-1.5.3-py3-none-any.whl.metadata (5.5 kB)
+Collecting matplotlib<4.0.0,>=3.8.4 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading matplotlib-3.10.8-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (52 kB)
+Collecting numpy>=1.25.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+Collecting scipy==1.12.0 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading scipy-1.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (60 kB)
+Collecting seaborn<0.14.0,>=0.13.2 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading seaborn-0.13.2-py3-none-any.whl.metadata (5.4 kB)
+Collecting statsmodels<0.15.0,>=0.14.2 (from graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading statsmodels-0.14.6-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+Collecting fsspec>=2023.5.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading fsspec-2024.12.0-py3-none-any.whl.metadata (11 kB)
+Collecting json-repair>=0.9.0 (from -r requirements.txt (line 48))
+  Downloading json_repair-0.39.1-py3-none-any.whl.metadata (11 kB)
+Collecting pypdf<6.0.0,>=5.1.0 (from neo4j-graphrag==1.7.0->-r requirements.txt (line 31))
+  Downloading pypdf-5.9.0-py3-none-any.whl.metadata (7.1 kB)
+Collecting types-pyyaml<7.0.0.0,>=6.0.12.20240917 (from neo4j-graphrag==1.7.0->-r requirements.txt (line 31))
+  Downloading types_pyyaml-6.0.12.20250915-py3-none-any.whl.metadata (1.7 kB)
+Collecting click (from nltk==3.9.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading click-8.3.1-py3-none-any.whl.metadata (2.6 kB)
+Collecting regex>=2021.8.3 (from nltk==3.9.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading regex-2025.11.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+Collecting annotated-types>=0.6.0 (from pydantic>=2.10.3->-r requirements.txt (line 4))
+  Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+Collecting pydantic-core==2.41.5 (from pydantic>=2.10.3->-r requirements.txt (line 4))
+  Downloading pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Collecting typing-inspection>=0.4.2 (from pydantic>=2.10.3->-r requirements.txt (line 4))
+  Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+Collecting threadpoolctl>=3.2.0 (from scikit-learn>=1.4.0->-r requirements.txt (line 18))
+  Downloading threadpoolctl-3.6.0-py3-none-any.whl.metadata (13 kB)
+Collecting pytz (from neo4j>=5.15.0->-r requirements.txt (line 30))
+  Downloading pytz-2025.2-py2.py3-none-any.whl.metadata (22 kB)
+Collecting distro<2,>=1.7.0 (from openai<2.0.0,>=1.14.0->-r requirements.txt (line 42))
+  Downloading distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+Collecting jiter<1,>=0.4.0 (from openai<2.0.0,>=1.14.0->-r requirements.txt (line 42))
+  Downloading jiter-0.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+Collecting sniffio (from openai<2.0.0,>=1.14.0->-r requirements.txt (line 42))
+  Downloading sniffio-1.3.1-py3-none-any.whl.metadata (3.9 kB)
+Collecting idna>=2.8 (from anyio>=4.0.0->-r requirements.txt (line 51))
+  Downloading idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+Collecting certifi (from httpx>=0.25.0->-r requirements.txt (line 54))
+  Downloading certifi-2026.1.4-py3-none-any.whl.metadata (2.5 kB)
+Collecting httpcore==1.* (from httpx>=0.25.0->-r requirements.txt (line 54))
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting aiohappyeyeballs>=2.5.0 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl.metadata (5.9 kB)
+Collecting aiosignal>=1.4.0 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading aiosignal-1.4.0-py3-none-any.whl.metadata (3.7 kB)
+Collecting attrs>=17.3.0 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading attrs-25.4.0-py3-none-any.whl.metadata (10 kB)
+Collecting frozenlist>=1.1.1 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (20 kB)
+Collecting multidict<7.0,>=4.5 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading multidict-6.7.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.3 kB)
+Collecting propcache>=0.2.0 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading propcache-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (13 kB)
+Collecting yarl<2.0,>=1.17.0 (from aiohttp<4,>=3.8.6->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading yarl-1.22.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (75 kB)
+Collecting griffe (from banks<3,>=2.2.0->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading griffe-1.15.0-py3-none-any.whl.metadata (5.2 kB)
+Collecting jinja2 (from banks<3,>=2.2.0->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting smart_open>=1.8.1 (from gensim<5.0.0,>=4.3.2->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading smart_open-7.5.0-py3-none-any.whl.metadata (24 kB)
+Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.25.0->-r requirements.txt (line 54))
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting numba>=0.46 (from hyppo<0.5.0,>=0.4.0->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading numba-0.63.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.9 kB)
+Collecting autograd>=1.3 (from hyppo<0.5.0,>=0.4.0->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading autograd-1.8.0-py3-none-any.whl.metadata (7.5 kB)
+Collecting llama-index-instrumentation>=0.1.0 (from llama-index-workflows<2,>=1.0.1->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading llama_index_instrumentation-0.4.2-py3-none-any.whl.metadata (1.1 kB)
+Collecting contourpy>=1.0.1 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading contourpy-1.3.3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (5.5 kB)
+Collecting cycler>=0.10 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading cycler-0.12.1-py3-none-any.whl.metadata (3.8 kB)
+Collecting fonttools>=4.22.0 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading fonttools-4.61.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (114 kB)
+Collecting kiwisolver>=1.3.1 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading kiwisolver-1.4.9-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.3 kB)
+Collecting packaging>=20.0 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading packaging-25.0-py3-none-any.whl.metadata (3.3 kB)
+Collecting pyparsing>=3 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading pyparsing-3.3.1-py3-none-any.whl.metadata (5.6 kB)
+Collecting python-dateutil>=2.7 (from matplotlib<4.0.0,>=3.8.4->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Collecting patsy>=0.5.6 (from statsmodels<0.15.0,>=0.14.2->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading patsy-1.0.2-py2.py3-none-any.whl.metadata (3.6 kB)
+Collecting pynndescent>=0.5 (from umap-learn>=0.5.6->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading pynndescent-0.5.13-py3-none-any.whl.metadata (6.8 kB)
+Collecting starlette<0.51.0,>=0.40.0 (from fastapi>=0.115.0->-r requirements.txt (line 2))
+  Downloading starlette-0.50.0-py3-none-any.whl.metadata (6.3 kB)
+Collecting annotated-doc>=0.0.2 (from fastapi>=0.115.0->-r requirements.txt (line 2))
+  Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+Collecting llama-cloud-services>=0.6.88 (from llama-parse>=0.6.0->-r requirements.txt (line 24))
+  Downloading llama_cloud_services-0.6.88-py3-none-any.whl.metadata (3.3 kB)
+Collecting cffi>=2.0.0 (from cryptography>=2.5->azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading cffi-2.0.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.6 kB)
+Collecting pycparser (from cffi>=2.0.0->cryptography>=2.5->azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading pycparser-2.23-py3-none-any.whl.metadata (993 bytes)
+Collecting asttokens<3.0.0,>=2.0.0 (from devtools>=0.12.2->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading asttokens-2.4.1-py2.py3-none-any.whl.metadata (5.2 kB)
+Collecting executing>=1.1.1 (from devtools>=0.12.2->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading executing-2.2.1-py2.py3-none-any.whl.metadata (8.9 kB)
+Collecting pygments>=2.15.0 (from devtools>=0.12.2->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+Collecting six>=1.12.0 (from asttokens<3.0.0,>=2.0.0->devtools>=0.12.2->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Collecting marshmallow>=3.18.0 (from environs>=11.0.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading marshmallow-4.2.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting aiolimiter>=1.1.0 (from fnllm>=0.4.1->fnllm[azure,openai]>=0.4.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading aiolimiter-1.2.1-py3-none-any.whl.metadata (4.5 kB)
+Collecting deprecation (from lancedb>=0.17.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading deprecation-2.1.0-py2.py3-none-any.whl.metadata (4.6 kB)
+Collecting overrides>=0.7 (from lancedb>=0.17.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading overrides-7.7.0-py3-none-any.whl.metadata (5.8 kB)
+Collecting lance-namespace>=0.3.2 (from lancedb>=0.17.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading lance_namespace-0.4.3-py3-none-any.whl.metadata (1.6 kB)
+Collecting lance-namespace-urllib3-client==0.4.3 (from lance-namespace>=0.3.2->lancedb>=0.17.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading lance_namespace_urllib3_client-0.4.3-py3-none-any.whl.metadata (25 kB)
+Collecting urllib3<3.0.0,>=1.25.3 (from lance-namespace-urllib3-client==0.4.3->lance-namespace>=0.3.2->lancedb>=0.17.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading urllib3-2.6.2-py3-none-any.whl.metadata (6.6 kB)
+Collecting fastuuid>=0.13.0 (from litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading fastuuid-0.14.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.1 kB)
+Collecting grpcio<1.68.0,>=1.62.3 (from litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading grpcio-1.67.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (3.9 kB)
+Collecting importlib-metadata>=6.8.0 (from litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading importlib_metadata-8.7.1-py3-none-any.whl.metadata (4.7 kB)
+Collecting jsonschema<5.0.0,>=4.23.0 (from litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading jsonschema-4.25.1-py3-none-any.whl.metadata (7.6 kB)
+INFO: pip is looking at multiple versions of litellm to determine which version is compatible with other requirements. This could take a while.
+Collecting litellm>=1.77.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading litellm-1.80.10-py3-none-any.whl.metadata (30 kB)
+  Downloading litellm-1.80.9-py3-none-any.whl.metadata (30 kB)
+  Downloading litellm-1.80.8-py3-none-any.whl.metadata (30 kB)
+  Downloading litellm-1.80.7-py3-none-any.whl.metadata (30 kB)
+  Downloading litellm-1.80.6-py3-none-any.whl.metadata (30 kB)
+  Downloading litellm-1.80.5-py3-none-any.whl.metadata (30 kB)
+  Downloading litellm-1.80.0-py3-none-any.whl.metadata (30 kB)
+Collecting tokenizers (from litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Collecting MarkupSafe>=2.0 (from jinja2->banks<3,>=2.2.0->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading markupsafe-3.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+Collecting jsonschema-specifications>=2023.03.6 (from jsonschema<5.0.0,>=4.23.0->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+Collecting referencing>=0.28.4 (from jsonschema<5.0.0,>=4.23.0->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+Collecting rpds-py>=0.7.1 (from jsonschema<5.0.0,>=4.23.0->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading rpds_py-0.30.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+Collecting zipp>=3.20 (from importlib-metadata>=6.8.0->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading zipp-3.23.0-py3-none-any.whl.metadata (3.6 kB)
+Collecting llama-cloud==0.1.45 (from llama-cloud-services>=0.6.88->llama-parse>=0.6.0->-r requirements.txt (line 24))
+  Downloading llama_cloud-0.1.45-py3-none-any.whl.metadata (2.7 kB)
+Collecting PyJWT<3,>=1.0.0 (from PyJWT[crypto]<3,>=1.0.0->msal>=1.30.0->azure-identity==1.20.0->-r requirements.txt (line 40))
+  Downloading PyJWT-2.10.1-py3-none-any.whl.metadata (4.0 kB)
+Collecting charset_normalizer<4,>=2 (from requests>=2.31.0->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading charset_normalizer-3.4.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (37 kB)
+Collecting llvmlite<0.47,>=0.46.0dev0 (from numba>=0.46->hyppo<0.5.0,>=0.4.0->graspologic==3.4.1->-r requirements.txt (line 21))
+  Downloading llvmlite-0.46.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (5.0 kB)
+Collecting tzdata>=2022.7 (from pandas>=2.2.3->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading tzdata-2025.3-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting spacy-legacy<3.1.0,>=3.0.11 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading spacy_legacy-3.0.12-py2.py3-none-any.whl.metadata (2.8 kB)
+Collecting spacy-loggers<2.0.0,>=1.0.0 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading spacy_loggers-1.0.5-py3-none-any.whl.metadata (23 kB)
+Collecting murmurhash<1.1.0,>=0.28.0 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading murmurhash-1.0.15-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl.metadata (2.3 kB)
+Collecting cymem<2.1.0,>=2.0.2 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading cymem-2.0.13-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (9.7 kB)
+Collecting preshed<3.1.0,>=3.0.2 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading preshed-3.0.12-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl.metadata (2.5 kB)
+Collecting thinc<8.4.0,>=8.3.4 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading thinc-8.3.10-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (15 kB)
+Collecting wasabi<1.2.0,>=0.9.1 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading wasabi-1.1.3-py3-none-any.whl.metadata (28 kB)
+Collecting srsly<3.0.0,>=2.4.3 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading srsly-2.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (19 kB)
+Collecting catalogue<2.1.0,>=2.0.6 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading catalogue-2.0.10-py3-none-any.whl.metadata (14 kB)
+Collecting weasel<0.5.0,>=0.4.2 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading weasel-0.4.3-py3-none-any.whl.metadata (4.6 kB)
+Collecting typer-slim<1.0.0,>=0.3.0 (from spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading typer_slim-0.21.1-py3-none-any.whl.metadata (16 kB)
+Collecting blis<1.4.0,>=1.3.0 (from thinc<8.4.0,>=8.3.4->spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading blis-1.3.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (7.5 kB)
+Collecting confection<1.0.0,>=0.0.1 (from thinc<8.4.0,>=8.3.4->spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading confection-0.1.5-py3-none-any.whl.metadata (19 kB)
+Collecting cloudpathlib<1.0.0,>=0.7.0 (from weasel<0.5.0,>=0.4.2->spacy>=3.8.4->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading cloudpathlib-0.23.0-py3-none-any.whl.metadata (16 kB)
+Collecting greenlet>=1 (from sqlalchemy>=1.4.49->sqlalchemy[asyncio]>=1.4.49->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading greenlet-3.3.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (4.1 kB)
+Collecting shellingham>=1.3.0 (from typer>=0.16.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+Collecting rich>=10.11.0 (from typer>=0.16.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading rich-14.2.0-py3-none-any.whl.metadata (18 kB)
+Collecting markdown-it-py>=2.2.0 (from rich>=10.11.0->typer>=0.16.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=10.11.0->typer>=0.16.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+Collecting mypy-extensions>=0.3.0 (from typing-inspect>=0.8.0->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading mypy_extensions-1.1.0-py3-none-any.whl.metadata (1.1 kB)
+Collecting httptools>=0.6.3 (from uvicorn[standard]>=0.30.0->-r requirements.txt (line 3))
+  Downloading httptools-0.7.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+Collecting uvloop>=0.15.1 (from uvicorn[standard]>=0.30.0->-r requirements.txt (line 3))
+  Downloading uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (4.9 kB)
+Collecting watchfiles>=0.13 (from uvicorn[standard]>=0.30.0->-r requirements.txt (line 3))
+  Downloading watchfiles-1.1.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+Collecting websockets>=10.4 (from uvicorn[standard]>=0.30.0->-r requirements.txt (line 3))
+  Downloading websockets-15.0.1-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (6.8 kB)
+Collecting marshmallow>=3.18.0 (from environs>=11.0.0->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading marshmallow-3.26.2-py3-none-any.whl.metadata (7.3 kB)
+Collecting colorama>=0.4 (from griffe->banks<3,>=2.2.0->llama-index-core==0.12.52->-r requirements.txt (line 11))
+  Downloading colorama-0.4.6-py2.py3-none-any.whl.metadata (17 kB)
+Collecting huggingface-hub<2.0,>=0.16.4 (from tokenizers->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading huggingface_hub-1.2.4-py3-none-any.whl.metadata (13 kB)
+Collecting filelock (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading filelock-3.20.2-py3-none-any.whl.metadata (2.1 kB)
+Collecting hf-xet<2.0.0,>=1.2.0 (from huggingface-hub<2.0,>=0.16.4->tokenizers->litellm>=1.77.1->graphrag==2.7.0->-r requirements.txt (line 8))
+  Downloading hf_xet-1.2.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+Downloading graphrag-2.7.0-py3-none-any.whl (400 kB)
+Downloading llama_index_core-0.12.52-py3-none-any.whl (7.6 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.6/7.6 MB 83.8 MB/s  0:00:00
+Downloading llama_index_llms_azure_openai-0.3.4-py3-none-any.whl (7.3 kB)
+Downloading llama_index_llms_openai-0.4.3-py3-none-any.whl (24 kB)
+Downloading azure_identity-1.20.0-py3-none-any.whl (188 kB)
+Downloading llama_index_embeddings_azure_openai-0.3.3-py3-none-any.whl (4.4 kB)
+Downloading llama_index_vector_stores_azureaisearch-0.3.0-py3-none-any.whl (12 kB)
+Downloading azure_search_documents-11.6.0-py3-none-any.whl (307 kB)
+Downloading llama_index_graph_stores_neo4j-0.4.1-py3-none-any.whl (12 kB)
+Downloading llama_index_packs_raptor-0.3.5-py3-none-any.whl (9.1 kB)
+Downloading graspologic-3.4.1-py3-none-any.whl (5.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.2/5.2 MB 163.6 MB/s  0:00:00
+Downloading networkx-3.4.2-py3-none-any.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 749.5 MB/s  0:00:00
+Downloading neo4j_graphrag-1.7.0-py3-none-any.whl (180 kB)
+Downloading azure_cosmos-4.9.0-py3-none-any.whl (303 kB)
+Downloading azure_storage_blob-12.24.0-py3-none-any.whl (408 kB)
+Downloading azure_ai_documentintelligence-1.0.2-py3-none-any.whl (106 kB)
+Downloading nltk-3.9.1-py3-none-any.whl (1.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 657.9 MB/s  0:00:00
+Downloading scipy-1.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (38.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 38.4/38.4 MB 119.7 MB/s  0:00:00
+Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+Downloading pydantic_core-2.41.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 736.3 MB/s  0:00:00
+Downloading scikit_learn-1.8.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (9.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 9.1/9.1 MB 132.0 MB/s  0:00:00
+Downloading neo4j-5.28.2-py3-none-any.whl (313 kB)
+Downloading openai-1.109.1-py3-none-any.whl (948 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 948.6/948.6 kB 687.0 MB/s  0:00:00
+Downloading tenacity-9.1.2-py3-none-any.whl (28 kB)
+Downloading json_repair-0.39.1-py3-none-any.whl (20 kB)
+Downloading anyio-4.12.1-py3-none-any.whl (113 kB)
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+Downloading aiohttp-3.13.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.7/1.7 MB 398.9 MB/s  0:00:00
+Downloading anytree-2.13.0-py3-none-any.whl (45 kB)
+Downloading banks-2.2.0-py3-none-any.whl (29 kB)
+Downloading beartype-0.18.5-py3-none-any.whl (917 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 917.8/917.8 kB 828.0 MB/s  0:00:00
+Downloading dirtyjson-1.0.8-py3-none-any.whl (25 kB)
+Downloading distro-1.9.0-py3-none-any.whl (20 kB)
+Downloading filetype-1.2.0-py2.py3-none-any.whl (19 kB)
+Downloading fsspec-2024.12.0-py3-none-any.whl (183 kB)
+Downloading gensim-4.4.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (27.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 27.8/27.8 MB 133.2 MB/s  0:00:00
+Downloading graspologic_native-1.2.5-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (364 kB)
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+Downloading hyppo-0.4.0-py3-none-any.whl (146 kB)
+Downloading jiter-0.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (364 kB)
+Downloading joblib-1.5.3-py3-none-any.whl (309 kB)
+Downloading llama_index_embeddings_openai-0.3.1-py3-none-any.whl (6.2 kB)
+Downloading llama_index_workflows-1.3.0-py3-none-any.whl (42 kB)
+Downloading matplotlib-3.10.8-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (8.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 8.7/8.7 MB 154.6 MB/s  0:00:00
+Downloading multidict-6.7.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (246 kB)
+Downloading nest_asyncio-1.6.0-py3-none-any.whl (5.2 kB)
+Downloading numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (18.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 18.3/18.3 MB 121.1 MB/s  0:00:00
+Downloading pot-0.9.6.post1-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (1.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.5/1.5 MB 329.5 MB/s  0:00:00
+Downloading pypdf-5.9.0-py3-none-any.whl (313 kB)
+Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (806 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 806.6/806.6 kB 744.4 MB/s  0:00:00
+Downloading seaborn-0.13.2-py3-none-any.whl (294 kB)
+Downloading statsmodels-0.14.6-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (10.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.4/10.4 MB 137.9 MB/s  0:00:00
+Downloading tqdm-4.67.1-py3-none-any.whl (78 kB)
+Downloading types_pyyaml-6.0.12.20250915-py3-none-any.whl (20 kB)
+Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+Downloading umap_learn-0.5.9.post2-py3-none-any.whl (90 kB)
+Downloading yarl-1.22.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (365 kB)
+Downloading fastapi-0.128.0-py3-none-any.whl (103 kB)
+Downloading starlette-0.50.0-py3-none-any.whl (74 kB)
+Downloading uvicorn-0.40.0-py3-none-any.whl (68 kB)
+Downloading pydantic_settings-2.12.0-py3-none-any.whl (51 kB)
+Downloading llama_parse-0.6.88-py3-none-any.whl (4.9 kB)
+Downloading rapidfuzz-3.14.3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (3.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.2/3.2 MB 126.1 MB/s  0:00:00
+Downloading python_dotenv-1.2.1-py3-none-any.whl (21 kB)
+Downloading structlog-25.5.0-py3-none-any.whl (72 kB)
+Downloading aiofiles-25.1.0-py3-none-any.whl (14 kB)
+Downloading aiohappyeyeballs-2.6.1-py3-none-any.whl (15 kB)
+Downloading aiosignal-1.4.0-py3-none-any.whl (7.5 kB)
+Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+Downloading attrs-25.4.0-py3-none-any.whl (67 kB)
+Downloading autograd-1.8.0-py3-none-any.whl (51 kB)
+Downloading azure_common-1.1.28-py2.py3-none-any.whl (14 kB)
+Downloading azure_core-1.37.0-py3-none-any.whl (214 kB)
+Downloading click-8.3.1-py3-none-any.whl (108 kB)
+Downloading contourpy-1.3.3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (355 kB)
+Downloading cryptography-46.0.3-cp311-abi3-manylinux_2_34_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 137.4 MB/s  0:00:00
+Downloading cffi-2.0.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (215 kB)
+Downloading cycler-0.12.1-py3-none-any.whl (8.3 kB)
+Downloading deprecated-1.3.1-py2.py3-none-any.whl (11 kB)
+Downloading wrapt-2.0.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (114 kB)
+Downloading devtools-0.12.2-py3-none-any.whl (19 kB)
+Downloading asttokens-2.4.1-py2.py3-none-any.whl (27 kB)
+Downloading environs-14.5.0-py3-none-any.whl (17 kB)
+Downloading executing-2.2.1-py2.py3-none-any.whl (28 kB)
+Downloading fnllm-0.4.1-py3-none-any.whl (79 kB)
+Downloading aiolimiter-1.2.1-py3-none-any.whl (6.7 kB)
+Downloading fonttools-4.61.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (5.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 5.0/5.0 MB 165.4 MB/s  0:00:00
+Downloading frozenlist-1.8.0-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (231 kB)
+Downloading future-1.0.0-py3-none-any.whl (491 kB)
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading idna-3.11-py3-none-any.whl (71 kB)
+Downloading isodate-0.7.2-py3-none-any.whl (22 kB)
+Downloading kiwisolver-1.4.9-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (1.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.4/1.4 MB 677.2 MB/s  0:00:00
+Downloading lancedb-0.26.1-cp39-abi3-manylinux_2_28_x86_64.whl (48.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 48.4/48.4 MB 124.2 MB/s  0:00:00
+Downloading lance_namespace-0.4.3-py3-none-any.whl (11 kB)
+Downloading lance_namespace_urllib3_client-0.4.3-py3-none-any.whl (268 kB)
+Downloading urllib3-2.6.2-py3-none-any.whl (131 kB)
+Downloading litellm-1.80.0-py3-none-any.whl (10.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.5/10.5 MB 130.9 MB/s  0:00:00
+Downloading jinja2-3.1.6-py3-none-any.whl (134 kB)
+Downloading jsonschema-4.25.1-py3-none-any.whl (90 kB)
+Downloading fastuuid-0.14.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (279 kB)
+Downloading importlib_metadata-8.7.1-py3-none-any.whl (27 kB)
+Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+Downloading llama_cloud_services-0.6.88-py3-none-any.whl (76 kB)
+Downloading llama_cloud-0.1.45-py3-none-any.whl (397 kB)
+Downloading platformdirs-4.5.1-py3-none-any.whl (18 kB)
+Downloading certifi-2026.1.4-py3-none-any.whl (152 kB)
+Downloading llama_index_instrumentation-0.4.2-py3-none-any.whl (15 kB)
+Downloading markupsafe-3.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+Downloading msal-1.34.0-py3-none-any.whl (116 kB)
+Downloading PyJWT-2.10.1-py3-none-any.whl (22 kB)
+Downloading requests-2.32.5-py3-none-any.whl (64 kB)
+Downloading charset_normalizer-3.4.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (151 kB)
+Downloading msal_extensions-1.3.1-py3-none-any.whl (20 kB)
+Downloading numba-0.63.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (3.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.7/3.7 MB 138.6 MB/s  0:00:00
+Downloading llvmlite-0.46.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (56.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 56.3/56.3 MB 106.1 MB/s  0:00:00
+Downloading overrides-7.7.0-py3-none-any.whl (17 kB)
+Downloading packaging-25.0-py3-none-any.whl (66 kB)
+Downloading pandas-2.3.3-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (12.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.8/12.8 MB 129.1 MB/s  0:00:00
+Downloading patsy-1.0.2-py2.py3-none-any.whl (233 kB)
+Downloading pillow-12.1.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (7.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 7.0/7.0 MB 138.8 MB/s  0:00:00
+Downloading propcache-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (210 kB)
+Downloading pyarrow-22.0.0-cp311-cp311-manylinux_2_28_x86_64.whl (47.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 47.7/47.7 MB 130.9 MB/s  0:00:00
+Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 745.6 MB/s  0:00:00
+Downloading pynndescent-0.5.13-py3-none-any.whl (56 kB)
+Downloading pyparsing-3.3.1-py3-none-any.whl (121 kB)
+Downloading python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Downloading pytz-2025.2-py2.py3-none-any.whl (509 kB)
+Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+Downloading regex-2025.11.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (800 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 800.4/800.4 kB 638.9 MB/s  0:00:00
+Downloading rpds_py-0.30.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (390 kB)
+Downloading setuptools-80.9.0-py3-none-any.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 674.4 MB/s  0:00:00
+Downloading six-1.17.0-py2.py3-none-any.whl (11 kB)
+Downloading smart_open-7.5.0-py3-none-any.whl (63 kB)
+Downloading spacy-3.8.11-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (32.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 32.3/32.3 MB 130.2 MB/s  0:00:00
+Downloading catalogue-2.0.10-py3-none-any.whl (17 kB)
+Downloading cymem-2.0.13-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (244 kB)
+Downloading murmurhash-1.0.15-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl (128 kB)
+Downloading preshed-3.0.12-cp311-cp311-manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64.whl (824 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 824.7/824.7 kB 766.6 MB/s  0:00:00
+Downloading spacy_legacy-3.0.12-py2.py3-none-any.whl (29 kB)
+Downloading spacy_loggers-1.0.5-py3-none-any.whl (22 kB)
+Downloading srsly-2.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 708.5 MB/s  0:00:00
+Downloading thinc-8.3.10-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.1/4.1 MB 153.7 MB/s  0:00:00
+Downloading blis-1.3.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (11.4 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 11.4/11.4 MB 148.6 MB/s  0:00:00
+Downloading confection-0.1.5-py3-none-any.whl (35 kB)
+Downloading typer_slim-0.21.1-py3-none-any.whl (47 kB)
+Downloading wasabi-1.1.3-py3-none-any.whl (27 kB)
+Downloading weasel-0.4.3-py3-none-any.whl (50 kB)
+Downloading cloudpathlib-0.23.0-py3-none-any.whl (62 kB)
+Downloading sqlalchemy-2.0.45-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 128.7 MB/s  0:00:00
+Downloading greenlet-3.3.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (590 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 590.2/590.2 kB 589.6 MB/s  0:00:00
+Downloading textblob-0.19.0-py3-none-any.whl (624 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 624.3/624.3 kB 756.4 MB/s  0:00:00
+Downloading threadpoolctl-3.6.0-py3-none-any.whl (18 kB)
+Downloading tiktoken-0.12.0-cp311-cp311-manylinux_2_28_x86_64.whl (1.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 737.4 MB/s  0:00:00
+Downloading typer-0.21.1-py3-none-any.whl (47 kB)
+Downloading rich-14.2.0-py3-none-any.whl (243 kB)
+Downloading markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+Downloading typing_inspect-0.9.0-py3-none-any.whl (8.8 kB)
+Downloading mypy_extensions-1.1.0-py3-none-any.whl (5.0 kB)
+Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+Downloading tzdata-2025.3-py2.py3-none-any.whl (348 kB)
+Downloading httptools-0.7.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (456 kB)
+Downloading uvloop-0.22.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (3.8 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.8/3.8 MB 128.9 MB/s  0:00:00
+Downloading watchfiles-1.1.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (456 kB)
+Downloading websockets-15.0.1-cp311-cp311-manylinux_2_5_x86_64.manylinux1_x86_64.manylinux_2_17_x86_64.manylinux2014_x86_64.whl (182 kB)
+Downloading zipp-3.23.0-py3-none-any.whl (10 kB)
+Downloading aiosqlite-0.22.1-py3-none-any.whl (17 kB)
+Downloading dataclasses_json-0.6.7-py3-none-any.whl (28 kB)
+Downloading marshmallow-3.26.2-py3-none-any.whl (50 kB)
+Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+Downloading griffe-1.15.0-py3-none-any.whl (150 kB)
+Downloading colorama-0.4.6-py2.py3-none-any.whl (25 kB)
+Downloading pycparser-2.23-py3-none-any.whl (118 kB)
+Downloading sniffio-1.3.1-py3-none-any.whl (10 kB)
+Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 130.0 MB/s  0:00:00
+Downloading huggingface_hub-1.2.4-py3-none-any.whl (520 kB)
+Downloading hf_xet-1.2.0-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 132.2 MB/s  0:00:00
+Downloading filelock-3.20.2-py3-none-any.whl (16 kB)
+Installing collected packages: pytz, filetype, dirtyjson, azure-common, zipp, wrapt, websockets, wasabi, uvloop, urllib3, tzdata, typing-extensions, types-pyyaml, tqdm, threadpoolctl, tenacity, structlog, spacy-loggers, spacy-legacy, sniffio, six, shellingham, setuptools, rpds-py, regex, rapidfuzz, pyyaml, python-dotenv, pypdf, pyparsing, PyJWT, pygments, pycparser, pyarrow, propcache, platformdirs, pillow, packaging, overrides, numpy, networkx, nest-asyncio, neo4j, mypy-extensions, murmurhash, multidict, mdurl, MarkupSafe, llvmlite, kiwisolver, json-repair, joblib, jiter, isodate, idna, httptools, hf-xet, h11, greenlet, graspologic-native, future, fsspec, frozenlist, fonttools, filelock, fastuuid, executing, distro, cymem, cycler, colorama, cloudpathlib, click, charset_normalizer, certifi, catalogue, beartype, attrs, anytree, annotated-types, annotated-doc, aiosqlite, aiolimiter, aiohappyeyeballs, aiofiles, yarl, uvicorn, typing-inspection, typing-inspect, typer-slim, srsly, sqlalchemy, smart_open, scipy, requests, referencing, python-dateutil, pydantic-core, preshed, patsy, numba, nltk, marshmallow, markdown-it-py, jinja2, importlib-metadata, httpcore, griffe, deprecation, deprecated, contourpy, cffi, blis, autograd, asttokens, anyio, aiosignal, watchfiles, tiktoken, textblob, starlette, scikit-learn, rich, pydantic, POT, pandas, matplotlib, jsonschema-specifications, httpx, gensim, environs, devtools, dataclasses-json, cryptography, azure-core, aiohttp, typer, statsmodels, seaborn, pynndescent, pydantic-settings, openai, neo4j-graphrag, llama-index-instrumentation, llama-cloud, lance-namespace-urllib3-client, jsonschema, hyppo, huggingface-hub, fnllm, fastapi, confection, banks, azure-storage-blob, azure-search-documents, azure-cosmos, azure-ai-documentintelligence, weasel, umap-learn, tokenizers, thinc, msal, llama-index-workflows, lance-namespace, spacy, msal-extensions, llama-index-core, litellm, lancedb, graspologic, llama-index-vector-stores-azureaisearch, llama-index-llms-openai, llama-index-graph-stores-neo4j, llama-index-embeddings-openai, llama-cloud-services, azure-identity, llama-parse, llama-index-packs-raptor, llama-index-llms-azure-openai, llama-index-embeddings-azure-openai, graphrag
+
+Successfully installed MarkupSafe-3.0.3 POT-0.9.6.post1 PyJWT-2.10.1 aiofiles-25.1.0 aiohappyeyeballs-2.6.1 aiohttp-3.13.3 aiolimiter-1.2.1 aiosignal-1.4.0 aiosqlite-0.22.1 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.12.1 anytree-2.13.0 asttokens-2.4.1 attrs-25.4.0 autograd-1.8.0 azure-ai-documentintelligence-1.0.2 azure-common-1.1.28 azure-core-1.37.0 azure-cosmos-4.9.0 azure-identity-1.20.0 azure-search-documents-11.6.0 azure-storage-blob-12.24.0 banks-2.2.0 beartype-0.18.5 blis-1.3.3 catalogue-2.0.10 certifi-2026.1.4 cffi-2.0.0 charset_normalizer-3.4.4 click-8.3.1 cloudpathlib-0.23.0 colorama-0.4.6 confection-0.1.5 contourpy-1.3.3 cryptography-46.0.3 cycler-0.12.1 cymem-2.0.13 dataclasses-json-0.6.7 deprecated-1.3.1 deprecation-2.1.0 devtools-0.12.2 dirtyjson-1.0.8 distro-1.9.0 environs-14.5.0 executing-2.2.1 fastapi-0.128.0 fastuuid-0.14.0 filelock-3.20.2 filetype-1.2.0 fnllm-0.4.1 fonttools-4.61.1 frozenlist-1.8.0 fsspec-2024.12.0 future-1.0.0 gensim-4.4.0 graphrag-2.7.0 graspologic-3.4.1 graspologic-native-1.2.5 greenlet-3.3.0 griffe-1.15.0 h11-0.16.0 hf-xet-1.2.0 httpcore-1.0.9 httptools-0.7.1 httpx-0.28.1 huggingface-hub-1.2.4 hyppo-0.4.0 idna-3.11 importlib-metadata-8.7.1 isodate-0.7.2 jinja2-3.1.6 jiter-0.12.0 joblib-1.5.3 json-repair-0.39.1 jsonschema-4.25.1 jsonschema-specifications-2025.9.1 kiwisolver-1.4.9 lance-namespace-0.4.3 lance-namespace-urllib3-client-0.4.3 lancedb-0.26.1 litellm-1.80.0 llama-cloud-0.1.45 llama-cloud-services-0.6.88 llama-index-core-0.12.52 llama-index-embeddings-azure-openai-0.3.3 llama-index-embeddings-openai-0.3.1 llama-index-graph-stores-neo4j-0.4.1 llama-index-instrumentation-0.4.2 llama-index-llms-azure-openai-0.3.4 llama-index-llms-openai-0.4.3 llama-index-packs-raptor-0.3.5 llama-index-vector-stores-azureaisearch-0.3.0 llama-index-workflows-1.3.0 llama-parse-0.6.88 llvmlite-0.46.0 markdown-it-py-4.0.0 marshmallow-3.26.2 matplotlib-3.10.8 mdurl-0.1.2 msal-1.34.0 msal-extensions-1.3.1 multidict-6.7.0 murmurhash-1.0.15 mypy-extensions-1.1.0 neo4j-5.28.2 neo4j-graphrag-1.7.0 nest-asyncio-1.6.0 networkx-3.4.2 nltk-3.9.1 numba-0.63.1 numpy-1.26.4 openai-1.109.1 overrides-7.7.0 packaging-25.0 pandas-2.3.3 patsy-1.0.2 pillow-12.1.0 platformdirs-4.5.1 preshed-3.0.12 propcache-0.4.1 pyarrow-22.0.0 pycparser-2.23 pydantic-2.12.5 pydantic-core-2.41.5 pydantic-settings-2.12.0 pygments-2.19.2 pynndescent-0.5.13 pyparsing-3.3.1 pypdf-5.9.0 python-dateutil-2.9.0.post0 python-dotenv-1.2.1 pytz-2025.2 pyyaml-6.0.3 rapidfuzz-3.14.3 referencing-0.37.0 regex-2025.11.3 requests-2.32.5 rich-14.2.0 rpds-py-0.30.0 scikit-learn-1.8.0 scipy-1.12.0 seaborn-0.13.2 setuptools-80.9.0 shellingham-1.5.4 six-1.17.0 smart_open-7.5.0 sniffio-1.3.1 spacy-3.8.11 spacy-legacy-3.0.12 spacy-loggers-1.0.5 sqlalchemy-2.0.45 srsly-2.5.2 starlette-0.50.0 statsmodels-0.14.6 structlog-25.5.0 tenacity-9.1.2 textblob-0.19.0 thinc-8.3.10 threadpoolctl-3.6.0 tiktoken-0.12.0 tokenizers-0.22.2 tqdm-4.67.1 typer-0.21.1 typer-slim-0.21.1 types-pyyaml-6.0.12.20250915 typing-extensions-4.15.0 typing-inspect-0.9.0 typing-inspection-0.4.2 tzdata-2025.3 umap-learn-0.5.9.post2 urllib3-2.6.2 uvicorn-0.40.0 uvloop-0.22.1 wasabi-1.1.3 watchfiles-1.1.1 weasel-0.4.3 websockets-15.0.1 wrapt-2.0.1 yarl-1.22.0 zipp-3.23.0
+Removing intermediate container cb754e9293f1
+ ---> 26f4ead1d24b
+Step 6/13 : FROM python:3.11-slim
+3.11-slim: Pulling from library/python
+Digest: sha256:1dd3dca85e22886e44fcad1bb7ccab6691dfa83db52214cf9e20696e095f3e36
+Status: Image is up to date for python:3.11-slim
+ ---> 955f4ccb5624
+Step 7/13 : WORKDIR /app
+ ---> Running in cffd4e4ff455
+Removing intermediate container cffd4e4ff455
+ ---> 5c8a4eb10c80
+Step 8/13 : COPY --from=builder /root/.local /root/.local
+
+ ---> 34241addbcd1
+Step 9/13 : RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache
+ ---> Running in 88bacf0fc203
+Removing intermediate container 88bacf0fc203
+ ---> 4b8d3bc9acdd
+Step 10/13 : COPY . .
+ ---> 106e14cbf7ef
+Step 11/13 : ENV PATH=/root/.local/bin:$PATH     PYTHONUNBUFFERED=1     PYTHONPATH=/app
+ ---> Running in c36313aaef81
+Removing intermediate container c36313aaef81
+ ---> 20df3b245ad0
+Step 12/13 : EXPOSE 8000
+ ---> Running in e5e4435f852a
+Removing intermediate container e5e4435f852a
+ ---> 9e717062c06b
+Step 13/13 : CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ ---> Running in e32b96fb74cd
+Removing intermediate container e32b96fb74cd
+ ---> af52c2382bd4
+[Warning] One or more build-args [BUILD_DATE VERSION] were not consumed
+Successfully built af52c2382bd4
+Successfully tagged graphragacr12153.azurecr.io/graphrag-orchestration:latest
+2026/01/07 08:50:10 Successfully executed container: build
+2026/01/07 08:50:10 Executing step ID: push. Timeout(sec): 3600, Working directory: '', Network: ''
+2026/01/07 08:50:10 Pushing image: graphragacr12153.azurecr.io/graphrag-orchestration:latest, attempt 1
+The push refers to repository [graphragacr12153.azurecr.io/graphrag-orchestration]
+545eecd4ed18: Preparing
+4b2b67d2140b: Preparing
+f589e13731d9: Preparing
+3339d151bf84: Preparing
+253032e9f52a: Preparing
+72533f233c8a: Preparing
+501421e049a1: Preparing
+6a7f953ae30c: Preparing
+72533f233c8a: Waiting
+6a7f953ae30c: Waiting
+501421e049a1: Waiting
+253032e9f52a: Layer already exists
+72533f233c8a: Layer already exists
+501421e049a1: Layer already exists
+4b2b67d2140b: Pushed
+3339d151bf84: Pushed
+545eecd4ed18: Pushed
+6a7f953ae30c: Pushed
+f589e13731d9: Pushed
+latest: digest: sha256:876dfe6d8fb936d2f1fb3d7dae2860a8891e47c6f43084693d26b586adb1de50 size: 1996
+2026/01/07 08:51:22 Successfully pushed image: graphragacr12153.azurecr.io/graphrag-orchestration:latest
+2026/01/07 08:51:22 Step ID: build marked as successful (elapsed time in seconds: 146.304542)
+2026/01/07 08:51:22 Populating digests for step ID: build...
+2026/01/07 08:51:22 Successfully populated digests for step ID: build
+2026/01/07 08:51:22 Step ID: push marked as successful (elapsed time in seconds: 71.991584)
+2026/01/07 08:51:22 The following dependencies were found:
+2026/01/07 08:51:22 
+- image:
+    registry: graphragacr12153.azurecr.io
+    repository: graphrag-orchestration
+    tag: latest
+    digest: sha256:876dfe6d8fb936d2f1fb3d7dae2860a8891e47c6f43084693d26b586adb1de50
+  runtime-dependency:
+    registry: registry.hub.docker.com
+    repository: library/python
+    tag: 3.11-slim
+    digest: sha256:1dd3dca85e22886e44fcad1bb7ccab6691dfa83db52214cf9e20696e095f3e36
+  git: {}
+
+
+Run ID: dt9m was successful after 3m42s
+✅ Image built and pushed: graphragacr12153.azurecr.io/graphrag-orchestration:latest
+
+==================================================
+🚀 Updating Container App
+==================================================
+✅ Container App found: graphrag-orchestration
+
+🔍 Auto-detecting managed identity...
+✅ Found system-assigned managed identity
+✅ ACR authentication already configured, skipping...
+⏳ Updating Container App with new image...
+/ Running ..| Running ..\ Running ..- Running ../ Running ..| Running ..[K{
+  "id": "/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/rg-graphrag-feature/providers/Microsoft.App/containerapps/graphrag-orchestration",
+  "identity": {
+    "principalId": "ca5a6edd-d68d-462d-89ff-9981fc00fdd2",
+    "tenantId": "ecaa729a-f04c-4558-a31a-ab714740ee8b",
+    "type": "SystemAssigned"
+  },
+  "location": "Sweden Central",
+  "name": "graphrag-orchestration",
+  "properties": {
+    "configuration": {
+      "activeRevisionsMode": "Single",
+      "dapr": null,
+      "identitySettings": [],
+      "ingress": {
+        "additionalPortMappings": null,
+        "allowInsecure": false,
+        "clientCertificateMode": null,
+        "corsPolicy": null,
+        "customDomains": null,
+        "exposedPort": 0,
+        "external": true,
+        "fqdn": "graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+        "ipSecurityRestrictions": null,
+        "stickySessions": null,
+        "targetPort": 8000,
+        "traffic": [
+          {
+            "latestRevision": true,
+            "weight": 100
+          }
+        ],
+        "transport": "Http"
+      },
+      "maxInactiveRevisions": null,
+      "registries": [
+        {
+          "identity": "system",
+          "passwordSecretRef": "graphragacr12153azurecrio-graphragacr12153",
+          "server": "graphragacr12153.azurecr.io",
+          "username": "graphragacr12153"
+        }
+      ],
+      "runtime": null,
+      "secrets": [
+        {
+          "name": "neo4j-password"
+        },
+        {
+          "name": "graphragacr12153azurecrio-graphragacr12153"
+        }
+      ],
+      "service": null
+    },
+    "customDomainVerificationId": "E77512E83746649F4DC4B57E162EF7EA7F87A1A1C8AF2DEFB2A2E70DC42BF221",
+    "delegatedIdentities": [],
+    "environmentId": "/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/rg-graphrag-feature/providers/Microsoft.App/managedEnvironments/graphrag-env",
+    "eventStreamEndpoint": "https://swedencentral.azurecontainerapps.dev/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/rg-graphrag-feature/containerApps/graphrag-orchestration/eventstream",
+    "latestReadyRevisionName": "graphrag-orchestration--0000121",
+    "latestRevisionFqdn": "graphrag-orchestration--0000122.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+    "latestRevisionName": "graphrag-orchestration--0000122",
+    "managedEnvironmentId": "/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/rg-graphrag-feature/providers/Microsoft.App/managedEnvironments/graphrag-env",
+    "outboundIpAddresses": [
+      "9.223.80.154"
+    ],
+    "provisioningState": "Succeeded",
+    "runningStatus": "Running",
+    "template": {
+      "containers": [
+        {
+          "env": [
+            {
+              "name": "AZURE_OPENAI_ENDPOINT"
+            },
+            {
+              "name": "NEO4J_URI"
+            },
+            {
+              "name": "NEO4J_USERNAME"
+            },
+            {
+              "name": "NEO4J_PASSWORD"
+            },
+            {
+              "name": "NEO4J_DATABASE"
+            },
+            {
+              "name": "REFRESH_TIMESTAMP"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_SELECTION"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_MAX_DEPTH"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE"
+            },
+            {
+              "name": "V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY"
+            },
+            {
+              "name": "AZURE_OPENAI_DEPLOYMENT_NAME"
+            },
+            {
+              "name": "AZURE_OPENAI_ROUTING_DEPLOYMENT"
+            },
+            {
+              "name": "AZURE_OPENAI_INDEXING_DEPLOYMENT"
+            },
+            {
+              "name": "AZURE_OPENAI_EMBEDDING_DEPLOYMENT"
+            },
+            {
+              "name": "AZURE_OPENAI_EMBEDDING_DIMENSIONS"
+            },
+            {
+              "name": "ROUTE3_DEBUG_EVIDENCE"
+            },
+            {
+              "name": "ROUTE3_KEYWORD_BOOST"
+            }
+          ],
+          "image": "graphragacr12153.azurecr.io/graphrag-orchestration:latest",
+          "name": "graphrag-orchestration",
+          "probes": [],
+          "resources": {
+            "cpu": 1,
+            "ephemeralStorage": "4Gi",
+            "memory": "2Gi"
+          }
+        }
+      ],
+      "initContainers": null,
+      "revisionSuffix": "",
+      "scale": {
+        "cooldownPeriod": 300,
+        "maxReplicas": 10,
+        "minReplicas": 1,
+        "pollingInterval": 30,
+        "rules": null
+      },
+      "serviceBinds": null,
+      "terminationGracePeriodSeconds": null,
+      "volumes": null
+    },
+    "workloadProfileName": null
+  },
+  "resourceGroup": "rg-graphrag-feature",
+  "systemData": {
+    "createdAt": "2025-12-30T09:52:18.2686364",
+    "createdBy": "j.liu@hulkdesign.com",
+    "createdByType": "User",
+    "lastModifiedAt": "2026-01-07T08:51:35.0087842",
+    "lastModifiedBy": "j.liu@hulkdesign.com",
+    "lastModifiedByType": "User"
+  },
+  "tags": {
+    "app": "graphrag-orchestration",
+    "azd-service-name": "graphrag",
+    "azd_env_name": "default"
+  },
+  "type": "Microsoft.App/containerApps"
+}
+✅ Container App updated successfully
+
+🌐 Application URL: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+   Swagger UI:      https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/docs
+   Health Check:    https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/health
+
+==================================================
+🧹 Cleaning up Docker resources
+==================================================
+Removing dangling images and build cache...
+Total reclaimed space: 0B
+✅ Docker cleanup complete
+
+==================================================
+🔍 Neo4j Health Check
+==================================================
+✅ Neo4j is running
+   FQDN: neo4j-graphrag-23987.swedencentral.azurecontainer.io
+   Bolt: bolt://neo4j-graphrag-23987.swedencentral.azurecontainer.io:7687
+   HTTP: http://neo4j-graphrag-23987.swedencentral.azurecontainer.io:7474
+
+==================================================
+✅ Deployment Complete!
+==================================================
+
+📋 Summary:
+  • Image:     graphragacr12153.azurecr.io/graphrag-orchestration:latest
+  • App URL:   https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+  • Timestamp: 20260107085131
+
+🔧 Next steps:
+  1. Test health endpoint:    curl https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/health
+  2. View Swagger docs:       open https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/docs
+  3. Check application logs:  az containerapp logs show -n graphrag-orchestration -g rg-graphrag-feature --follow
+  4. Run test suite:          python test_managed_identity_pdfs.py
+
+==================================================

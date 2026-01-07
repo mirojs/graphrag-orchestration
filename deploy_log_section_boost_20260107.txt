@@ -1,0 +1,180 @@
+==================================================
+GraphRAG Deployment Configuration
+==================================================
+Resource Group:       rg-graphrag-feature
+Location:             swedencentral
+Container Registry:   graphragacr12153
+Container App:        graphrag-orchestration
+Image Tag:            latest
+Docker Cleanup:       true
+==================================================
+
+🔐 Checking Azure login status...
+✅ Logged in to Azure subscription: Microsoft Azure Sponsorship
+
+📦 Retrieving ACR credentials...
+✅ ACR Endpoint: graphragacr12153.azurecr.io
+
+==================================================
+🐳 Building and Pushing Docker Image
+==================================================
+Image URI: graphragacr12153.azurecr.io/graphrag-orchestration:latest
+Build Context: /afh/projects/graphrag-orchestration/graphrag-orchestration
+
+⏳ Building and pushing image in ACR (this may take 2-3 minutes)...
+WARNING: Packing source code into tar to upload...
+WARNING: Excluding '.venv' directory for performance
+WARNING: Excluding '.pytest_cache/.gitignore' based on default ignore rules
+WARNING: Uploading archived source code from '/tmp/build_archive_654f9af8a20242aeafc244bea22f21bd.tar.gz'...
+WARNING: Sending context (9.881 MiB) to registry: graphragacr12153...
+WARNING: Queued a build with ID: dt9k
+WARNING: Waiting for an agent...
+2026/01/07 08:43:09 Downloading source code...
+2026/01/07 08:43:09 Finished downloading source code
+2026/01/07 08:43:10 Using acb_vol_f52f486d-d3a3-4993-90c7-189f6a76248b as the home volume
+2026/01/07 08:43:10 Setting up Docker configuration...
+2026/01/07 08:43:10 Successfully set up Docker configuration
+2026/01/07 08:43:10 Logging in to registry: graphragacr12153.azurecr.io
+2026/01/07 08:43:11 Successfully logged into graphragacr12153.azurecr.io
+2026/01/07 08:43:11 Executing step ID: build. Timeout(sec): 28800, Working directory: '', Network: ''
+2026/01/07 08:43:11 Scanning for dependencies...
+2026/01/07 08:43:11 Successfully scanned dependencies
+2026/01/07 08:43:11 Launching container with name: build
+Sending build context to Docker daemon  31.25MB
+Step 1/13 : FROM python:3.11-slim as builder
+3.11-slim: Pulling from library/python
+02d7611c4eae: Pulling fs layer
+1473863bb010: Pulling fs layer
+7cc13cb22d92: Pulling fs layer
+654a090213c0: Pulling fs layer
+654a090213c0: Waiting
+1473863bb010: Verifying Checksum
+1473863bb010: Download complete
+7cc13cb22d92: Verifying Checksum
+7cc13cb22d92: Download complete
+02d7611c4eae: Verifying Checksum
+02d7611c4eae: Download complete
+654a090213c0: Verifying Checksum
+654a090213c0: Download complete
+02d7611c4eae: Pull complete
+1473863bb010: Pull complete
+7cc13cb22d92: Pull complete
+654a090213c0: Pull complete
+Digest: sha256:1dd3dca85e22886e44fcad1bb7ccab6691dfa83db52214cf9e20696e095f3e36
+Status: Downloaded newer image for python:3.11-slim
+ ---> 955f4ccb5624
+Step 2/13 : WORKDIR /tmp
+ ---> Running in 7d59370e59e7
+Removing intermediate container 7d59370e59e7
+ ---> 42bc3569bbd8
+Step 3/13 : RUN apt-get update && apt-get install -y     build-essential     && rm -rf /var/lib/apt/lists/*
+ ---> Running in 20f8080b45e3
+Hit:1 http://deb.debian.org/debian trixie InRelease
+Get:2 http://deb.debian.org/debian trixie-updates InRelease [47.3 kB]
+Get:3 http://deb.debian.org/debian-security trixie-security InRelease [43.4 kB]
+Get:4 http://deb.debian.org/debian trixie/main amd64 Packages [9670 kB]
+Get:5 http://deb.debian.org/debian trixie-updates/main amd64 Packages [5412 B]
+Get:6 http://deb.debian.org/debian-security trixie-security/main amd64 Packages [94.2 kB]
+Fetched 9860 kB in 1s (9076 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu bzip2 cpp cpp-14
+  cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu dpkg-dev fakeroot g++ g++-14
+  g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu gcc gcc-14
+  gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libalgorithm-diff-perl
+  libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan8 libatomic1
+  libbinutils libc-dev-bin libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0
+  libctf0 libdpkg-perl libfakeroot libfile-fcntllock-perl libgcc-14-dev
+  libgdbm-compat4t64 libgomp1 libgprofng0 libhwasan0 libisl23 libitm1
+  libjansson4 liblocale-gettext-perl liblsan0 libmpc3 libmpfr6 libperl5.40
+  libquadmath0 libsframe1 libstdc++-14-dev libtsan2 libubsan1 linux-libc-dev
+  make manpages manpages-dev patch perl perl-modules-5.40 rpcsvc-proto sq
+  xz-utils
+Suggested packages:
+  binutils-doc gprofng-gui binutils-gold bzip2-doc cpp-doc gcc-14-locales
+  cpp-14-doc debian-keyring debian-tag2upload-keyring g++-multilib
+  g++-14-multilib gcc-14-doc gcc-multilib autoconf automake libtool flex bison
+  gdb gcc-doc gcc-14-multilib gdb-x86-64-linux-gnu libc-devtools glibc-doc
+  sensible-utils git bzr libstdc++-14-doc make-doc man-browser ed
+  diffutils-doc perl-doc libterm-readline-gnu-perl
+  | libterm-readline-perl-perl libtap-harness-archive-perl
+The following NEW packages will be installed:
+  binutils binutils-common binutils-x86-64-linux-gnu build-essential bzip2 cpp
+  cpp-14 cpp-14-x86-64-linux-gnu cpp-x86-64-linux-gnu dpkg-dev fakeroot g++
+  g++-14 g++-14-x86-64-linux-gnu g++-x86-64-linux-gnu gcc gcc-14
+  gcc-14-x86-64-linux-gnu gcc-x86-64-linux-gnu libalgorithm-diff-perl
+  libalgorithm-diff-xs-perl libalgorithm-merge-perl libasan8 libatomic1
+  libbinutils libc-dev-bin libc6-dev libcc1-0 libcrypt-dev libctf-nobfd0
+  libctf0 libdpkg-perl libfakeroot libfile-fcntllock-perl libgcc-14-dev
+  libgdbm-compat4t64 libgomp1 libgprofng0 libhwasan0 libisl23 libitm1
+  libjansson4 liblocale-gettext-perl liblsan0 libmpc3 libmpfr6 libperl5.40
+  libquadmath0 libsframe1 libstdc++-14-dev libtsan2 libubsan1 linux-libc-dev
+  make manpages manpages-dev patch perl perl-modules-5.40 rpcsvc-proto sq
+  xz-utils
+0 upgraded, 62 newly installed, 0 to remove and 0 not upgraded.
+Need to get 91.7 MB of archives.
+After this operation, 365 MB of additional disk space will be used.
+Get:1 http://deb.debian.org/debian trixie/main amd64 liblocale-gettext-perl amd64 1.07-7+b1 [15.3 kB]
+Get:2 http://deb.debian.org/debian trixie/main amd64 bzip2 amd64 1.0.8-6 [40.5 kB]
+Get:3 http://deb.debian.org/debian trixie/main amd64 manpages all 6.9.1-1 [1393 kB]
+Get:4 http://deb.debian.org/debian trixie/main amd64 perl-modules-5.40 all 5.40.1-6 [3019 kB]
+Get:5 http://deb.debian.org/debian trixie/main amd64 libgdbm-compat4t64 amd64 1.24-2 [50.3 kB]
+Get:6 http://deb.debian.org/debian trixie/main amd64 libperl5.40 amd64 5.40.1-6 [4341 kB]
+Get:7 http://deb.debian.org/debian trixie/main amd64 perl amd64 5.40.1-6 [267 kB]
+Get:8 http://deb.debian.org/debian trixie/main amd64 xz-utils amd64 5.8.1-1 [660 kB]
+Get:9 http://deb.debian.org/debian trixie/main amd64 libsframe1 amd64 2.44-3 [78.4 kB]
+Get:10 http://deb.debian.org/debian trixie/main amd64 binutils-common amd64 2.44-3 [2509 kB]
+Get:11 http://deb.debian.org/debian trixie/main amd64 libbinutils amd64 2.44-3 [534 kB]
+Get:12 http://deb.debian.org/debian trixie/main amd64 libgprofng0 amd64 2.44-3 [808 kB]
+Get:13 http://deb.debian.org/debian trixie/main amd64 libctf-nobfd0 amd64 2.44-3 [156 kB]
+Get:14 http://deb.debian.org/debian trixie/main amd64 libctf0 amd64 2.44-3 [88.6 kB]
+Get:15 http://deb.debian.org/debian trixie/main amd64 libjansson4 amd64 2.14-2+b3 [39.8 kB]
+Get:16 http://deb.debian.org/debian trixie/main amd64 binutils-x86-64-linux-gnu amd64 2.44-3 [1014 kB]
+Get:17 http://deb.debian.org/debian trixie/main amd64 binutils amd64 2.44-3 [265 kB]
+Get:18 http://deb.debian.org/debian trixie/main amd64 libc-dev-bin amd64 2.41-12 [58.2 kB]
+Get:19 http://deb.debian.org/debian trixie/main amd64 linux-libc-dev all 6.12.57-1 [2692 kB]
+Get:20 http://deb.debian.org/debian trixie/main amd64 libcrypt-dev amd64 1:4.4.38-1 [119 kB]
+Get:21 http://deb.debian.org/debian trixie/main amd64 rpcsvc-proto amd64 1.4.3-1 [63.3 kB]
+Get:22 http://deb.debian.org/debian trixie/main amd64 libc6-dev amd64 2.41-12 [1991 kB]
+Get:23 http://deb.debian.org/debian trixie/main amd64 libisl23 amd64 0.27-1 [659 kB]
+Get:24 http://deb.debian.org/debian trixie/main amd64 libmpfr6 amd64 4.2.2-1 [729 kB]
+Get:25 http://deb.debian.org/debian trixie/main amd64 libmpc3 amd64 1.3.1-1+b3 [52.2 kB]
+Get:26 http://deb.debian.org/debian trixie/main amd64 cpp-14-x86-64-linux-gnu amd64 14.2.0-19 [11.0 MB]
+Get:27 http://deb.debian.org/debian trixie/main amd64 cpp-14 amd64 14.2.0-19 [1280 B]
+Get:28 http://deb.debian.org/debian trixie/main amd64 cpp-x86-64-linux-gnu amd64 4:14.2.0-1 [4840 B]
+Get:29 http://deb.debian.org/debian trixie/main amd64 cpp amd64 4:14.2.0-1 [1568 B]
+Get:30 http://deb.debian.org/debian trixie/main amd64 libcc1-0 amd64 14.2.0-19 [42.8 kB]
+Get:31 http://deb.debian.org/debian trixie/main amd64 libgomp1 amd64 14.2.0-19 [137 kB]
+Get:32 http://deb.debian.org/debian trixie/main amd64 libitm1 amd64 14.2.0-19 [26.0 kB]
+Get:33 http://deb.debian.org/debian trixie/main amd64 libatomic1 amd64 14.2.0-19 [9308 B]
+Get:34 http://deb.debian.org/debian trixie/main amd64 libasan8 amd64 14.2.0-19 [2725 kB]
+Get:35 http://deb.debian.org/debian trixie/main amd64 liblsan0 amd64 14.2.0-19 [1204 kB]
+Get:36 http://deb.debian.org/debian trixie/main amd64 libtsan2 amd64 14.2.0-19 [2460 kB]
+Get:37 http://deb.debian.org/debian trixie/main amd64 libubsan1 amd64 14.2.0-19 [1074 kB]
+Get:38 http://deb.debian.org/debian trixie/main amd64 libhwasan0 amd64 14.2.0-19 [1488 kB]
+Get:39 http://deb.debian.org/debian trixie/main amd64 libquadmath0 amd64 14.2.0-19 [145 kB]
+Get:40 http://deb.debian.org/debian trixie/main amd64 libgcc-14-dev amd64 14.2.0-19 [2672 kB]
+Get:41 http://deb.debian.org/debian trixie/main amd64 gcc-14-x86-64-linux-gnu amd64 14.2.0-19 [21.4 MB]
+Get:42 http://deb.debian.org/debian trixie/main amd64 gcc-14 amd64 14.2.0-19 [540 kB]
+Get:43 http://deb.debian.org/debian trixie/main amd64 gcc-x86-64-linux-gnu amd64 4:14.2.0-1 [1436 B]
+Get:44 http://deb.debian.org/debian trixie/main amd64 gcc amd64 4:14.2.0-1 [5136 B]
+Get:45 http://deb.debian.org/debian trixie/main amd64 libstdc++-14-dev amd64 14.2.0-19 [2376 kB]
+Get:46 http://deb.debian.org/debian trixie/main amd64 g++-14-x86-64-linux-gnu amd64 14.2.0-19 [12.1 MB]
+Get:47 http://deb.debian.org/debian trixie/main amd64 g++-14 amd64 14.2.0-19 [22.5 kB]
+Get:48 http://deb.debian.org/debian trixie/main amd64 g++-x86-64-linux-gnu amd64 4:14.2.0-1 [1200 B]
+Get:49 http://deb.debian.org/debian trixie/main amd64 g++ amd64 4:14.2.0-1 [1344 B]
+Get:50 http://deb.debian.org/debian trixie/main amd64 make amd64 4.4.1-2 [463 kB]
+Get:51 http://deb.debian.org/debian trixie/main amd64 libdpkg-perl all 1.22.21 [650 kB]
+Get:52 http://deb.debian.org/debian trixie/main amd64 patch amd64 2.8-2 [134 kB]
+Get:53 http://deb.debian.org/debian trixie/main amd64 dpkg-dev all 1.22.21 [1338 kB]
+Get:54 http://deb.debian.org/debian trixie/main amd64 build-essential amd64 12.12 [4624 B]
+Get:55 http://deb.debian.org/debian trixie/main amd64 libfakeroot amd64 1.37.1.1-1 [29.6 kB]
+Get:56 http://deb.debian.org/debian trixie/main amd64 fakeroot amd64 1.37.1.1-1 [76.0 kB]
+Get:57 http://deb.debian.org/debian trixie/main amd64 libalgorithm-diff-perl all 1.201-1 [43.3 kB]
+Get:58 http://deb.debian.org/debian trixie/main amd64 libalgorithm-diff-xs-perl amd64 0.04-9 [11.1 kB]
+Get:59 http://deb.debian.org/debian trixie/main amd64 libalgorithm-merge-perl all 0.08-5 [11.8 kB]
+Get:60 http://deb.debian.org/debian trixie/main amd64 libfile-fcntllock-perl amd64 0.22-4+b4 [34.6 kB]
+Get:61 http://deb.debian.org/debian trixie/main amd64 manpages-dev all 6.9.1-1 [2122 kB]

@@ -1003,7 +1003,11 @@ Instructions:
             )
 
     async def _search_text_chunks_fulltext(self, query_text: str, top_k: int = 10) -> list:
-        """Fulltext search only (Neo4j Lucene index) within the group."""
+        """Fulltext search only (Neo4j Lucene index) within the group.
+        
+        Returns chunks with section metadata for integration with Route 3's
+        section-aware evidence collection.
+        """
         if not self.neo4j_driver:
             return []
 
@@ -1019,12 +1023,15 @@ Instructions:
             YIELD node, score
             WHERE node.group_id = $group_id
             OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             RETURN node.id AS id,
                    node.text AS text,
                    node.chunk_index AS chunk_index,
                    d.id AS document_id,
                    d.title AS document_title,
                    d.source AS document_source,
+                   s.id AS section_id,
+                   s.path_key AS section_path_key,
                    score
             ORDER BY score DESC
             LIMIT $top_k
@@ -1039,6 +1046,8 @@ Instructions:
                         "document_id": r.get("document_id", ""),
                         "document_title": r.get("document_title", ""),
                         "document_source": r.get("document_source", ""),
+                        "section_id": r.get("section_id", ""),
+                        "section_path_key": r.get("section_path_key", ""),
                     }
                     rows.append((chunk, float(r.get("score") or 0.0)))
             return rows
@@ -1674,11 +1683,92 @@ Instructions:
                    num_related_entities=len(graph_context.related_entities))
 
         # ==================================================================
+        # Stage 3.3.5: Fulltext Candidate Injection (DETERMINISTIC PHRASE MATCHING)
+        # ==================================================================
+        # Use Neo4j native fulltext index to find exact phrase matches.
+        # This complements entity-based retrieval by catching specific phrases
+        # (e.g., "monthly statement of income and expenses") that may not map
+        # cleanly to hub entities but exist verbatim in the corpus.
+        #
+        # Key advantage over keyword boost:
+        # - 100% deterministic (Neo4j Lucene index, no embedding variance)
+        # - Native index scan (fast, ~10-50ms)
+        # - Already proven in Route 1 at 100% accuracy
+        # ==================================================================
+        import os
+        enable_fulltext_boost = os.getenv("ROUTE3_FULLTEXT_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        fulltext_boost_metadata: Dict[str, Any] = {
+            "enabled": enable_fulltext_boost,
+            "applied": False,
+            "candidates": 0,
+            "added": 0,
+        }
+
+        if enable_fulltext_boost:
+            try:
+                from .pipeline.enhanced_graph_retriever import SourceChunk
+
+                # Query the fulltext index for exact phrase matches
+                fulltext_chunks = await self._search_text_chunks_fulltext(
+                    query_text=query,
+                    top_k=15,  # Generous top-k; will dedupe against existing
+                )
+                fulltext_boost_metadata["candidates"] = len(fulltext_chunks)
+
+                # Merge into graph_context.source_chunks (deduplicated by chunk_id)
+                existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                added_count = 0
+
+                for chunk_dict, score in fulltext_chunks:
+                    cid = (chunk_dict.get("id") or "").strip()
+                    if not cid or cid in existing_ids:
+                        continue
+
+                    # Extract section path from section_path_key if available
+                    spk = (chunk_dict.get("section_path_key") or "").strip()
+                    section_path = spk.split(" > ") if spk else []
+
+                    graph_context.source_chunks.append(
+                        SourceChunk(
+                            chunk_id=cid,
+                            text=chunk_dict.get("text") or "",
+                            entity_name="fulltext_match",  # Mark source for traceability
+                            section_path=section_path,
+                            section_id=(chunk_dict.get("section_id") or "").strip(),
+                            document_id=(chunk_dict.get("document_id") or "").strip(),
+                            document_title=(chunk_dict.get("document_title") or "").strip(),
+                            document_source=(chunk_dict.get("document_source") or "").strip(),
+                            relevance_score=float(score or 0.0),
+                        )
+                    )
+                    existing_ids.add(cid)
+                    added_count += 1
+
+                fulltext_boost_metadata["applied"] = added_count > 0
+                fulltext_boost_metadata["added"] = added_count
+
+                if added_count > 0:
+                    logger.info(
+                        "stage_3.3.5_fulltext_boost_applied",
+                        candidates=len(fulltext_chunks),
+                        added=added_count,
+                        total_source_chunks=len(graph_context.source_chunks),
+                    )
+                else:
+                    logger.info(
+                        "stage_3.3.5_fulltext_boost_no_new_chunks",
+                        candidates=len(fulltext_chunks),
+                        reason="All fulltext matches already in source_chunks",
+                    )
+
+            except Exception as e:
+                logger.warning("stage_3.3.5_fulltext_boost_failed", error=str(e))
+
+        # ==================================================================
         # Section Boost: Semantic Section Discovery (UNIVERSAL)
         # Use vector/fulltext search on chunks → extract section IDs → graph expand
         # This provides document-structure-aware retrieval complementing entity-based retrieval
         # ==================================================================
-        import os
         enable_section_boost = os.getenv("ROUTE3_SECTION_BOOST", "1").strip().lower() in {"1", "true", "yes"}
         section_boost_metadata: Dict[str, Any] = {
             "enabled": enable_section_boost,
@@ -2329,6 +2419,7 @@ Instructions:
                 "latency_estimate": "thorough",
                 "precision_level": "high",
                 "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR",
+                "fulltext_boost": fulltext_boost_metadata,
                 "section_boost": section_boost_metadata,
                 "ppr_detail_recovery": ppr_metadata
             }

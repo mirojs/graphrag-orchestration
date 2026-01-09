@@ -2627,6 +2627,10 @@ Instructions:
                 chunk_samples=chunk_summaries,
             )
 
+        # Graph-signal summary (used by generic negative detection downstream).
+        # Define this early so it is always available even if later stages short-circuit.
+        has_graph_signal = bool(hub_entities) or bool(graph_context.related_entities) or bool(graph_context.relationships or [])
+
         # ================================================================
         # PRE-SYNTHESIS NEGATIVE DETECTION (Evidence Field/Clause Existence)
         # ================================================================
@@ -2681,7 +2685,7 @@ Instructions:
         def _scope_text_for_invoice_field() -> Optional[str]:
             # If the user explicitly asks about the invoice, prefer scanning invoice chunks
             # to avoid accidentally "finding" the field in other documents.
-            if "invoice" in ql and invoice_text:
+            if "invoice" in ql:
                 return invoice_text
             return None
 
@@ -2782,8 +2786,6 @@ Instructions:
             scan_chunks=scan_chunks,
         )
 
-        has_graph_signal = bool(hub_entities) or bool(graph_context.related_entities) or bool(graph_context.relationships or [])
-        
         # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (using LazyGraphRAG + HippoRAG2 signals)
         # ================================================================

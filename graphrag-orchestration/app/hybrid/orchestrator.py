@@ -2556,12 +2556,25 @@ Instructions:
             )
 
         # Cross-document lead boost: add one early chunk per document to improve
-        # thematic coverage for questions like "across the agreements" and
-        # "summarize each document" (invoices and short contracts often have
-        # weak entity graphs and can be missed otherwise).
-        # Default OFF until we validate it improves thematic metrics end-to-end.
-        enable_doc_lead_boost = os.getenv("ROUTE3_DOC_LEAD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
-        if enable_doc_lead_boost:
+        # thematic coverage for explicitly cross-document questions (invoices and
+        # short contracts often have weak entity graphs and can be missed otherwise).
+        ql_cross = (query or "").lower()
+        is_cross_document_query = any(
+            k in ql_cross
+            for k in [
+                "across the agreements",
+                "across agreements",
+                "across the documents",
+                "across documents",
+                "across the set",
+                "across the contracts",
+                "each document",
+                "main purpose",
+            ]
+        )
+
+        enable_doc_lead_boost = os.getenv("ROUTE3_DOC_LEAD_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        if enable_doc_lead_boost and is_cross_document_query:
             try:
                 lead_chunks = await self.enhanced_retriever.get_document_lead_chunks(
                     max_total=8,

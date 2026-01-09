@@ -609,6 +609,117 @@ class EnhancedGraphRetriever:
             logger.error("keyword_boost_chunks_failed", error=str(e))
             return []
 
+    async def get_document_lead_chunks(
+        self,
+        *,
+        max_total: int = 8,
+        candidate_chunk_indexes: Optional[List[int]] = None,
+        min_text_chars: int = 80,
+    ) -> List[SourceChunk]:
+        """Return one early ("lead") chunk per document.
+
+        Motivation: Route-3 is frequently cross-document/thematic. Entity- and
+        section-driven retrieval can under-surface documents with weak entity
+        graphs (e.g., invoices). Adding a small, diversified set of lead chunks
+        improves thematic coverage without relying on specific query terms.
+        """
+        if not self.driver:
+            return []
+
+        if candidate_chunk_indexes is None:
+            candidate_chunk_indexes = [0, 1, 2]
+
+        if max_total <= 0:
+            return []
+
+        query = """
+        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        WHERE d.group_id = $group_id
+          AND t.group_id = $group_id
+          AND t.chunk_index IN $chunk_indexes
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        RETURN
+            t.id AS chunk_id,
+            t.text AS text,
+            t.metadata AS metadata,
+            t.chunk_index AS chunk_index,
+            s.id AS section_id,
+            s.path_key AS section_path_key,
+            d.id AS doc_id,
+            d.title AS doc_title,
+            d.source AS doc_source
+        ORDER BY doc_id ASC, chunk_index ASC
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        chunk_indexes=candidate_chunk_indexes,
+                    )
+                    return list(result)
+
+            records = await loop.run_in_executor(None, _run_query)
+
+            # Pick the first sufficiently-informative chunk per document.
+            chosen_by_doc: Dict[str, SourceChunk] = {}
+            for record in records:
+                doc_id = (record.get("doc_id") or "").strip()
+                if not doc_id or doc_id in chosen_by_doc:
+                    continue
+
+                text = (record.get("text") or "").strip()
+                if len(text) < int(min_text_chars):
+                    continue
+
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+
+                chosen_by_doc[doc_id] = SourceChunk(
+                    chunk_id=record["chunk_id"],
+                    text=text,
+                    entity_name="doc_lead",
+                    section_path=section_path,
+                    section_id=record.get("section_id") or "",
+                    document_id=doc_id,
+                    document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                    document_source=record.get("doc_source") or metadata.get("url", "") or "",
+                    relevance_score=1.0,
+                )
+
+                if len(chosen_by_doc) >= max_total:
+                    break
+
+            chunks = list(chosen_by_doc.values())
+
+            logger.info(
+                "document_lead_chunks_complete",
+                num_docs=len(chosen_by_doc),
+                max_total=max_total,
+                chunk_indexes=candidate_chunk_indexes,
+                min_text_chars=min_text_chars,
+            )
+
+            return chunks
+
+        except Exception as e:
+            logger.error("document_lead_chunks_failed", error=str(e))
+            return []
+
     async def get_section_boost_chunks(
         self,
         section_keywords: List[str],

@@ -1991,11 +1991,77 @@ Instructions:
                 
                 bm25_phrase_metadata["results"] = len(bm25_results)
 
-                # Merge into graph_context.source_chunks (deduplicated by chunk_id)
+                # When integrating BM25 hits into a thematic/cross-document route,
+                # prefer document diversity over taking many hits from the same doc.
+                # This helps coverage for cases like invoices/short docs that may
+                # otherwise be drowned out by longer agreements.
+                bm25_merge_top_k = int(os.getenv("ROUTE3_BM25_MERGE_TOP_K", "20"))
+                bm25_max_per_doc = int(os.getenv("ROUTE3_BM25_MAX_PER_DOC", "2"))
+                bm25_min_docs = int(os.getenv("ROUTE3_BM25_MIN_DOCS", "3"))
+
+                def _bm25_doc_key(chunk_dict: Dict[str, Any]) -> str:
+                    return (
+                        (chunk_dict.get("document_id") or "")
+                        or (chunk_dict.get("doc_id") or "")
+                        or (chunk_dict.get("document_source") or "")
+                        or (chunk_dict.get("document_title") or "")
+                        or (chunk_dict.get("url") or "")
+                        or "unknown"
+                    ).strip()
+
+                # Compute which BM25 candidates are actually addable (not already present).
                 existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+
+                sorted_bm25 = sorted(bm25_results, key=lambda t: float(t[1] or 0.0), reverse=True)
+
+                diversified_bm25: List[Tuple[Dict[str, Any], float, bool]] = []
+                picked_chunk_ids: set[str] = set()
+                per_doc_counts: Dict[str, int] = {}
+                picked_docs: set[str] = set()
+
+                # Pass 1: pick the best new chunk per document until we hit bm25_min_docs.
+                for chunk_dict, score, is_anchor in sorted_bm25:
+                    if len(diversified_bm25) >= bm25_merge_top_k:
+                        break
+                    cid = (chunk_dict.get("id") or "").strip()
+                    if not cid or cid in existing_ids or cid in picked_chunk_ids:
+                        continue
+                    doc_key = _bm25_doc_key(chunk_dict)
+                    if doc_key in picked_docs:
+                        continue
+                    diversified_bm25.append((chunk_dict, score, is_anchor))
+                    picked_chunk_ids.add(cid)
+                    picked_docs.add(doc_key)
+                    per_doc_counts[doc_key] = 1
+                    if len(picked_docs) >= bm25_min_docs:
+                        break
+
+                # Pass 2: fill remaining slots, respecting per-document caps.
+                for chunk_dict, score, is_anchor in sorted_bm25:
+                    if len(diversified_bm25) >= bm25_merge_top_k:
+                        break
+                    cid = (chunk_dict.get("id") or "").strip()
+                    if not cid or cid in existing_ids or cid in picked_chunk_ids:
+                        continue
+                    doc_key = _bm25_doc_key(chunk_dict)
+                    if per_doc_counts.get(doc_key, 0) >= bm25_max_per_doc:
+                        continue
+                    diversified_bm25.append((chunk_dict, score, is_anchor))
+                    picked_chunk_ids.add(cid)
+                    per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
+
+                bm25_phrase_metadata["merge"] = {
+                    "top_k": bm25_merge_top_k,
+                    "max_per_doc": bm25_max_per_doc,
+                    "min_docs": bm25_min_docs,
+                    "selected": len(diversified_bm25),
+                    "unique_docs": len(per_doc_counts),
+                }
+
+                # Merge into graph_context.source_chunks (deduplicated by chunk_id)
                 added_count = 0
 
-                for chunk_dict, score, is_anchor in bm25_results:
+                for chunk_dict, score, is_anchor in diversified_bm25:
                     cid = (chunk_dict.get("id") or "").strip()
                     if not cid or cid in existing_ids:
                         continue
@@ -2488,6 +2554,33 @@ Instructions:
                 "route_3_keyword_boost_disabled",
                 reason="ROUTE3_KEYWORD_BOOST not enabled",
             )
+
+        # Cross-document lead boost: add one early chunk per document to improve
+        # thematic coverage for questions like "across the agreements" and
+        # "summarize each document" (invoices and short contracts often have
+        # weak entity graphs and can be missed otherwise).
+        # Default OFF until we validate it improves thematic metrics end-to-end.
+        enable_doc_lead_boost = os.getenv("ROUTE3_DOC_LEAD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
+        if enable_doc_lead_boost:
+            try:
+                lead_chunks = await self.enhanced_retriever.get_document_lead_chunks(
+                    max_total=8,
+                    candidate_chunk_indexes=[0, 1, 2],
+                    min_text_chars=80,
+                )
+                if lead_chunks:
+                    existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                    added = [c for c in lead_chunks if c.chunk_id not in existing_ids]
+                    if added:
+                        graph_context.source_chunks.extend(added)
+                        logger.info(
+                            "route_3_doc_lead_boost_applied",
+                            candidates=len(lead_chunks),
+                            added=len(added),
+                            total_source_chunks=len(graph_context.source_chunks),
+                        )
+            except Exception as e:
+                logger.warning("route_3_doc_lead_boost_failed", error=str(e))
 
         # Evidence debug (optional): log what chunks we are about to synthesize over.
         # This is useful to determine root-cause for missing terms (retrieval vs synthesis).

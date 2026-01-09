@@ -2626,70 +2626,24 @@ Instructions:
                 doc_counts=doc_counts,
                 chunk_samples=chunk_summaries,
             )
-        
+
         # ================================================================
-        # PRE-SYNTHESIS NEGATIVE DETECTION (BM25 + Section Scores)
+        # PRE-SYNTHESIS NEGATIVE DETECTION (Evidence Field/Clause Existence)
         # ================================================================
-        # Check retrieval confidence BEFORE sending to LLM synthesis.
-        # This prevents false positives where the LLM tries to be "helpful"
-        # by providing related information when the specific requested info
-        # is missing.
-        # 
-        # Detection signals:
-        # 1. BM25 results: weak if < 3 results OR top score < 2.0
-        # 2. Section boost: weak if 0 sections matched
-        # 3. Graph signal: weak if no hub entities + no relationships
+        # We should NOT gate negatives on BM25 scores or "graph signal".
+        # Negatives can still retrieve highly-relevant chunks (e.g., invoice payment terms)
+        # even though the SPECIFIC requested field is absent (routing number, IBAN, etc.).
+        #
+        # Instead: if the query asks for a specific field/value/clause type, verify it exists
+        # in the retrieved evidence text. If it does not exist, return a deterministic
+        # "not specified" response and skip PPR + synthesis.
         # ================================================================
-        
-        # Signal 1: BM25 retrieval quality
-        bm25_confidence = "none"
-        if bm25_phrase_metadata.get("results", 0) >= 5:
-            bm25_confidence = "strong"
-        elif bm25_phrase_metadata.get("results", 0) >= 2:
-            bm25_confidence = "moderate"
-        elif bm25_phrase_metadata.get("results", 0) >= 1:
-            bm25_confidence = "weak"
-        
-        # Signal 2: Section boost quality
-        section_confidence = "none"
-        if section_boost_metadata.get("applied"):
-            added = section_boost_metadata.get("boost_added", 0)
-            if added >= 5:
-                section_confidence = "strong"
-            elif added >= 2:
-                section_confidence = "moderate"
-            elif added >= 1:
-                section_confidence = "weak"
-        
-        # Signal 3: Graph signal (hub entities + relationships)
-        has_graph_signal = (
-            len(hub_entities) > 0 or 
-            len(graph_context.relationships) > 0 or
-            len(graph_context.related_entities) > 0
-        )
-        
-        # REFUSE if ALL signals are weak (likely a negative question)
-        # Allow through if ANY signal is moderate+ (LLM can evaluate evidence quality)
-        refuse_negative = (
-            bm25_confidence in ["none", "weak"] and
-            section_confidence in ["none", "weak"] and
-            not has_graph_signal
-        )
-        
-        if refuse_negative:
-            logger.info(
-                "route_3_pre_synthesis_negative_detection",
-                bm25_confidence=bm25_confidence,
-                bm25_results=bm25_phrase_metadata.get("results", 0),
-                section_confidence=section_confidence,
-                section_added=section_boost_metadata.get("boost_added", 0),
-                has_graph_signal=has_graph_signal,
-                num_hub_entities=len(hub_entities),
-                num_relationships=len(graph_context.relationships),
-                reason="All retrieval signals weak - likely negative question"
-            )
+
+        import re
+
+        def _not_specified(reason: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
             return {
-                "response": "The requested information is not found in the provided documents.",
+                "response": "The requested information is not specified in the provided documents.",
                 "route_used": "route_3_global_search",
                 "citations": [],
                 "evidence_path": [],
@@ -2697,23 +2651,106 @@ Instructions:
                     "matched_communities": [c.get("title", "?") for c in community_data],
                     "hub_entities": hub_entities,
                     "num_source_chunks": len(graph_context.source_chunks),
-                    "bm25_confidence": bm25_confidence,
-                    "section_confidence": section_confidence,
-                    "has_graph_signal": has_graph_signal,
+                    "num_relationships": len(graph_context.relationships),
                     "latency_estimate": "fast",
                     "precision_level": "high",
-                    "route_description": "Pre-synthesis negative detection",
+                    "route_description": "Pre-synthesis negative detection (field existence)",
                     "negative_detection": True,
-                    "detection_stage": "pre_synthesis"
-                }
+                    "detection_stage": "pre_synthesis_field_existence",
+                    "detection_reason": reason,
+                    **({"detection_details": details} if details else {}),
+                },
             }
-        
+
+        ql = (query or "").lower()
+        scan_chunks = int(os.getenv("ROUTE3_NEGATIVE_SCAN_CHUNKS", "40"))
+        texts = [(c.text or "") for c in (graph_context.source_chunks or [])[: max(scan_chunks, 0)]]
+        evidence_text = "\n".join(texts)
+
+        def _has(pattern: str, *, flags: int = re.IGNORECASE) -> bool:
+            return bool(re.search(pattern, evidence_text, flags))
+
+        # Routing number (ABA): require a 9-digit number near 'routing'/'aba'.
+        if re.search(r"\brouting\s+number\b|\bbank\s+routing\b|\baba\b", ql):
+            has_routing = _has(r"(routing|aba)[^\d]{0,40}\b\d{9}\b") or _has(r"\b\d{9}\b[^\n]{0,40}(routing|aba)")
+            if not has_routing:
+                logger.info("route_3_negative_field_missing", field="routing_number")
+                return _not_specified("missing_routing_number")
+
+        # SWIFT / BIC
+        if re.search(r"\bswift\b|\bbic\b", ql):
+            # SWIFT/BIC often looks like: AAAABBCC or AAAABBCCDDD
+            has_swift = _has(r"(swift|bic)[^A-Z0-9]{0,30}\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b", flags=0)
+            if not has_swift:
+                logger.info("route_3_negative_field_missing", field="swift_bic")
+                return _not_specified("missing_swift_bic")
+
+        # IBAN
+        if re.search(r"\biban\b", ql):
+            has_iban = _has(r"\bIBAN\b[^A-Z0-9]{0,30}\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", flags=0) or _has(
+                r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", flags=0
+            )
+            if not has_iban:
+                logger.info("route_3_negative_field_missing", field="iban")
+                return _not_specified("missing_iban")
+
+        # VAT / Tax ID (require a number near VAT/Tax ID label)
+        if re.search(r"\bvat\b|tax\s+id", ql):
+            has_vat = _has(r"\bvat\b[^\dA-Z]{0,20}[A-Z0-9\-]{6,}")
+            has_taxid = _has(r"tax\s*id[^\d]{0,30}(\d{2}-\d{7}|\b\d{9}\b)") or _has(r"\bein\b[^\d]{0,30}\d{2}-\d{7}")
+            if not (has_vat or has_taxid):
+                logger.info("route_3_negative_field_missing", field="vat_tax_id")
+                return _not_specified("missing_vat_tax_id")
+
+        # Payment portal URL
+        if re.search(r"portal\s+url|payment\s+portal|web\s+link|url\b.*pay|pay\s+online", ql):
+            has_url = _has(r"https?://[^\s\]\)]+|www\.[^\s\]\)]+")
+            if not has_url:
+                logger.info("route_3_negative_field_missing", field="payment_portal_url")
+                return _not_specified("missing_payment_portal_url")
+
+        # Bank account number / ACH / wire instructions
+        if re.search(r"bank\s+account\s+number|account\s+number|ach|wire\s+transfer", ql):
+            has_account_number = _has(r"account[^\d]{0,30}(number|no\.?|#)?[^\d]{0,30}\b\d{6,17}\b")
+            has_wire_like = _has(r"\bwire\b") or _has(r"\bach\b")
+            has_routing = _has(r"(routing|aba)[^\d]{0,40}\b\d{9}\b")
+            if not (has_account_number or (has_wire_like and has_routing)):
+                logger.info("route_3_negative_field_missing", field="ach_wire_instructions")
+                return _not_specified("missing_ach_wire_instructions")
+
+        # Shipping method / SHIPPED VIA
+        if re.search(r"shipping\s+method|shipped\s+via", ql):
+            has_shipped_via = _has(r"shipped\s+via\s*[:\-]?\s*\S{2,}")
+            if not has_shipped_via:
+                logger.info("route_3_negative_field_missing", field="shipping_method")
+                return _not_specified("missing_shipping_method")
+
+        # License number
+        if re.search(r"license\s+number", ql):
+            has_license = _has(r"license[^\n]{0,40}(no\.?|number|#)?[^\n]{0,10}[A-Z0-9\-]{4,}")
+            if not has_license:
+                logger.info("route_3_negative_field_missing", field="license_number")
+                return _not_specified("missing_license_number")
+
+        # Governing law: California
+        if re.search(r"california", ql) and re.search(r"govern|law", ql):
+            has_ca_law = _has(r"(governed\s+by|laws\s+of|governing\s+law)[^\n]{0,80}california") or _has(
+                r"california[^\n]{0,80}(governed\s+by|laws\s+of|governing\s+law)"
+            )
+            if not has_ca_law:
+                logger.info("route_3_negative_field_missing", field="california_governing_law")
+                return _not_specified("missing_california_governing_law")
+
+        # Clause existence: mold damage
+        if re.search(r"mold", ql):
+            has_mold = _has(r"\bmold\b")
+            if not has_mold:
+                logger.info("route_3_negative_field_missing", field="mold_clause")
+                return _not_specified("missing_mold_clause")
+
         logger.info(
-            "route_3_pre_synthesis_confidence_check",
-            bm25_confidence=bm25_confidence,
-            section_confidence=section_confidence,
-            has_graph_signal=has_graph_signal,
-            decision="proceed_to_synthesis"
+            "route_3_pre_synthesis_field_existence_check_passed",
+            scan_chunks=scan_chunks,
         )
         
         # ================================================================

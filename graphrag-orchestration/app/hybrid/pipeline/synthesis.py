@@ -144,6 +144,34 @@ class EvidenceSynthesizer:
         Returns:
             Dictionary with response, citations, and evidence path.
         """
+        # nlp_audit mode: deterministic extraction only, no LLM synthesis.
+        # IMPORTANT: Route 3 uses synthesize_with_graph_context(), so we must
+        # handle this here (not only in synthesize()).
+        if response_type in {"nlp_audit", "nlp_connected"}:
+            text_chunks: List[Dict[str, Any]] = []
+            for i, chunk in enumerate(graph_context.source_chunks or []):
+                section_str = " > ".join(chunk.section_path) if chunk.section_path else "General"
+                source = chunk.document_source or chunk.document_title or "Unknown"
+                text_chunks.append(
+                    {
+                        "id": chunk.chunk_id or f"chunk_{i}",
+                        "source": source,
+                        "section": section_str,
+                        "entity": chunk.entity_name,
+                        "text": chunk.text or "",
+                    }
+                )
+
+            if response_type == "nlp_audit":
+                result = await self._nlp_audit_extract(query, text_chunks, evidence_nodes)
+            else:
+                result = await self._nlp_connected_extract(query, text_chunks, evidence_nodes)
+
+            # Preserve graph context flags for downstream consumers.
+            result.setdefault("graph_context_used", True)
+            result.setdefault("relationships_used", len(graph_context.relationships))
+            return result
+
         # Step 1: Build citation context from source chunks (MENTIONS-derived)
         context_parts = []
         citation_map: Dict[str, Dict[str, Any]] = {}

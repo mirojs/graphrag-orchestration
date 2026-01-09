@@ -470,9 +470,13 @@ Your response:"""
 
 CRITICAL REQUIREMENTS:
 1. First, carefully evaluate if the Evidence Context contains the SPECIFIC information requested in the question.
-2. If the EXACT information is NOT present in the evidence context, respond ONLY with this exact phrase: "The requested information is not found in the provided documents."
-3. Do NOT provide related information, tangential facts, or workarounds when the specific requested information is missing.
-4. ONLY if relevant information IS present, you MUST cite your sources using the citation markers (e.g., [1], [2]) for EVERY factual claim you make. Uncited claims are not acceptable for audit purposes.
+2. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
+   - If the question asks for "bank routing number" and the evidence shows payment portal URLs but NO routing number → REFUSE
+   - If the question asks for "VAT/Tax ID" and the evidence shows Tax IDs (U.S. Federal) but NO VAT number → REFUSE  
+   - If the question asks for "governed by California law" and the evidence shows Texas/other states → REFUSE
+   - When refusing, respond ONLY with: "The requested information is not found in the provided documents."
+3. Do NOT be "helpful" by providing alternative/related information when the specific item is missing.
+4. ONLY if the EXACT requested information IS present: cite sources [N] for EVERY claim.
 
 Question: {query}
 
@@ -496,10 +500,12 @@ Evidence Context:
 {context}
 
 Instructions:
-1. CRITICAL: First, carefully evaluate if the Evidence Context contains the SPECIFIC information requested in the question.
-2. If the EXACT information is NOT present (e.g., the question asks for a routing number and no routing number exists in the evidence), you MUST respond with ONLY this exact phrase: "The requested information is not found in the provided documents."
-3. Do NOT provide related information, tangential facts, or workarounds when the specific requested information is missing.
-4. ONLY if the evidence DOES contain the specific requested information, provide a brief summary (2-3 paragraphs).
+1. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
+   - Question asks for "bank routing number" but evidence only has payment portal URL → Output: "The requested information is not found in the provided documents."
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Output: "The requested information is not found in the provided documents."
+   - Question asks for "California law" but evidence shows Texas law → Output: "The requested information is not found in the provided documents."
+   - Do NOT say "The invoice does not provide X, but here is Y" — Just refuse entirely.
+2. ONLY if the EXACT requested information IS present: provide a brief summary (2-3 paragraphs).
 5. Include citations [N] for factual claims (aim for every sentence that states a fact).
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.

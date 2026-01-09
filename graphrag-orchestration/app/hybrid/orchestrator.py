@@ -2628,6 +2628,95 @@ Instructions:
             )
         
         # ================================================================
+        # PRE-SYNTHESIS NEGATIVE DETECTION (BM25 + Section Scores)
+        # ================================================================
+        # Check retrieval confidence BEFORE sending to LLM synthesis.
+        # This prevents false positives where the LLM tries to be "helpful"
+        # by providing related information when the specific requested info
+        # is missing.
+        # 
+        # Detection signals:
+        # 1. BM25 results: weak if < 3 results OR top score < 2.0
+        # 2. Section boost: weak if 0 sections matched
+        # 3. Graph signal: weak if no hub entities + no relationships
+        # ================================================================
+        
+        # Signal 1: BM25 retrieval quality
+        bm25_confidence = "none"
+        if bm25_phrase_metadata.get("results", 0) >= 5:
+            bm25_confidence = "strong"
+        elif bm25_phrase_metadata.get("results", 0) >= 2:
+            bm25_confidence = "moderate"
+        elif bm25_phrase_metadata.get("results", 0) >= 1:
+            bm25_confidence = "weak"
+        
+        # Signal 2: Section boost quality
+        section_confidence = "none"
+        if section_boost_metadata.get("applied"):
+            added = section_boost_metadata.get("boost_added", 0)
+            if added >= 5:
+                section_confidence = "strong"
+            elif added >= 2:
+                section_confidence = "moderate"
+            elif added >= 1:
+                section_confidence = "weak"
+        
+        # Signal 3: Graph signal (hub entities + relationships)
+        has_graph_signal = (
+            len(hub_entities) > 0 or 
+            len(graph_context.relationships) > 0 or
+            len(graph_context.related_entities) > 0
+        )
+        
+        # REFUSE if ALL signals are weak (likely a negative question)
+        # Allow through if ANY signal is moderate+ (LLM can evaluate evidence quality)
+        refuse_negative = (
+            bm25_confidence in ["none", "weak"] and
+            section_confidence in ["none", "weak"] and
+            not has_graph_signal
+        )
+        
+        if refuse_negative:
+            logger.info(
+                "route_3_pre_synthesis_negative_detection",
+                bm25_confidence=bm25_confidence,
+                bm25_results=bm25_phrase_metadata.get("results", 0),
+                section_confidence=section_confidence,
+                section_added=section_boost_metadata.get("boost_added", 0),
+                has_graph_signal=has_graph_signal,
+                num_hub_entities=len(hub_entities),
+                num_relationships=len(graph_context.relationships),
+                reason="All retrieval signals weak - likely negative question"
+            )
+            return {
+                "response": "The requested information is not found in the provided documents.",
+                "route_used": "route_3_global_search",
+                "citations": [],
+                "evidence_path": [],
+                "metadata": {
+                    "matched_communities": [c.get("title", "?") for c in community_data],
+                    "hub_entities": hub_entities,
+                    "num_source_chunks": len(graph_context.source_chunks),
+                    "bm25_confidence": bm25_confidence,
+                    "section_confidence": section_confidence,
+                    "has_graph_signal": has_graph_signal,
+                    "latency_estimate": "fast",
+                    "precision_level": "high",
+                    "route_description": "Pre-synthesis negative detection",
+                    "negative_detection": True,
+                    "detection_stage": "pre_synthesis"
+                }
+            }
+        
+        logger.info(
+            "route_3_pre_synthesis_confidence_check",
+            bm25_confidence=bm25_confidence,
+            section_confidence=section_confidence,
+            has_graph_signal=has_graph_signal,
+            decision="proceed_to_synthesis"
+        )
+        
+        # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (using LazyGraphRAG + HippoRAG2 signals)
         # ================================================================
         # Use graph structure to determine if query topic exists:
@@ -2636,11 +2725,6 @@ Instructions:
         # This is more semantic than keyword matching because the graph
         # captures conceptual relationships, not just word overlap.
         # ================================================================
-        has_graph_signal = (
-            len(hub_entities) > 0 or 
-            len(graph_context.relationships) > 0 or
-            len(graph_context.related_entities) > 0
-        )
         
         if not has_graph_signal:
             # Graph traversal found nothing - topic doesn't exist

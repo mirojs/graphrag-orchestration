@@ -2648,10 +2648,10 @@ Instructions:
                 "citations": [],
                 "evidence_path": [],
                 "metadata": {
-                    "matched_communities": [c.get("title", "?") for c in community_data],
+                    "matched_communities": [c.get("title", "?") for c in (community_data or [])],
                     "hub_entities": hub_entities,
-                    "num_source_chunks": len(graph_context.source_chunks),
-                    "num_relationships": len(graph_context.relationships),
+                    "num_source_chunks": len(graph_context.source_chunks or []),
+                    "num_relationships": len(graph_context.relationships or []),
                     "latency_estimate": "fast",
                     "precision_level": "high",
                     "route_description": "Pre-synthesis negative detection (field existence)",

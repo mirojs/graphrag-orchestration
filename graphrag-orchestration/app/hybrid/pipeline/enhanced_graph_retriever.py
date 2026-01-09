@@ -614,20 +614,25 @@ class EnhancedGraphRetriever:
         *,
         max_total: int = 8,
         candidate_chunk_indexes: Optional[List[int]] = None,
-        min_text_chars: int = 80,
+        min_text_chars: int = 20,
     ) -> List[SourceChunk]:
-        """Return one early ("lead") chunk per document.
+        """Return one early ("lead") chunk per document — guaranteed for every doc.
+
+        Strategy: For each document, pick the **longest** chunk among its early
+        chunk_index candidates. This ensures every document in the group is
+        represented, even invoices or short structured docs whose early chunks
+        might all be small.
 
         Motivation: Route-3 is frequently cross-document/thematic. Entity- and
         section-driven retrieval can under-surface documents with weak entity
-        graphs (e.g., invoices). Adding a small, diversified set of lead chunks
-        improves thematic coverage without relying on specific query terms.
+        graphs (e.g., invoices). Guaranteeing one chunk per document improves
+        thematic coverage without relying on specific query terms.
         """
         if not self.driver:
             return []
 
         if candidate_chunk_indexes is None:
-            candidate_chunk_indexes = [0, 1, 2]
+            candidate_chunk_indexes = [0, 1, 2, 3, 4, 5]
 
         if max_total <= 0:
             return []
@@ -665,17 +670,7 @@ class EnhancedGraphRetriever:
 
             records = await loop.run_in_executor(None, _run_query)
 
-            # Pick the first sufficiently-informative chunk per document.
-            chosen_by_doc: Dict[str, SourceChunk] = {}
-            for record in records:
-                doc_id = (record.get("doc_id") or "").strip()
-                if not doc_id or doc_id in chosen_by_doc:
-                    continue
-
-                text = (record.get("text") or "").strip()
-                if len(text) < int(min_text_chars):
-                    continue
-
+            def _make_chunk(record: Any, *, text: str) -> SourceChunk:
                 metadata: Dict[str, Any] = {}
                 raw_meta = record.get("metadata")
                 if raw_meta:
@@ -689,7 +684,8 @@ class EnhancedGraphRetriever:
                 if section_path_key:
                     section_path = section_path_key.split(" > ")
 
-                chosen_by_doc[doc_id] = SourceChunk(
+                doc_id = (record.get("doc_id") or "").strip()
+                return SourceChunk(
                     chunk_id=record["chunk_id"],
                     text=text,
                     entity_name="doc_lead",
@@ -701,14 +697,37 @@ class EnhancedGraphRetriever:
                     relevance_score=1.0,
                 )
 
+            # Collect all candidate chunks per document, then pick the longest.
+            # This guarantees every document is represented (even if chunks are short).
+            candidates_by_doc: Dict[str, List[Tuple[int, Any]]] = {}
+            for record in records:
+                doc_id = (record.get("doc_id") or "").strip()
+                if not doc_id:
+                    continue
+                text = (record.get("text") or "").strip()
+                if len(text) < int(min_text_chars):
+                    continue
+                if doc_id not in candidates_by_doc:
+                    candidates_by_doc[doc_id] = []
+                candidates_by_doc[doc_id].append((len(text), record))
+
+            # Pick longest chunk per doc.
+            chosen_by_doc: Dict[str, SourceChunk] = {}
+            for doc_id, cands in candidates_by_doc.items():
                 if len(chosen_by_doc) >= max_total:
                     break
+                # Sort by text length descending, pick the longest.
+                cands.sort(key=lambda x: x[0], reverse=True)
+                best_len, best_record = cands[0]
+                text = (best_record.get("text") or "").strip()
+                chosen_by_doc[doc_id] = _make_chunk(best_record, text=text)
 
             chunks = list(chosen_by_doc.values())
 
             logger.info(
                 "document_lead_chunks_complete",
                 num_docs=len(chosen_by_doc),
+                total_docs_in_group=len(candidates_by_doc),
                 max_total=max_total,
                 chunk_indexes=candidate_chunk_indexes,
                 min_text_chars=min_text_chars,

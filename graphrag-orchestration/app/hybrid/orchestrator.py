@@ -2577,9 +2577,8 @@ Instructions:
         if enable_doc_lead_boost and is_cross_document_query:
             try:
                 lead_chunks = await self.enhanced_retriever.get_document_lead_chunks(
-                    max_total=8,
-                    candidate_chunk_indexes=[0, 1, 2],
-                    min_text_chars=80,
+                    max_total=10,  # Ensure all docs in typical groups are covered
+                    min_text_chars=20,
                 )
                 if lead_chunks:
                     existing_ids = {c.chunk_id for c in graph_context.source_chunks}

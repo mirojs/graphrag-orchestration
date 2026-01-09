@@ -61,7 +61,8 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 *   **Trigger:** Thematic queries without explicit entities
 *   **Example:** "What are the main compliance risks in our portfolio?"
 *   **Goal:** Thematic coverage WITH detail preservation + hallucination prevention
-*   **Engines:** LazyGraphRAG Community Matching → Graph-Based Negative Detection → HippoRAG 2 PPR → Synthesis
+*   **Engines (Positive):** LazyGraphRAG Community Matching → Hub Entities → Graph Evidence Retrieval → Neo4j Fulltext BM25 Merge → Section-Node Expansion (IN_SECTION) → Keyword Boost Merge → HippoRAG 2 PPR (detail recovery) → Synthesis
+*   **Engines (Negative):** Deterministic pre-synthesis evidence scan gate (field/value existence) → Strict refusal response
 *   **Solves:** 
     - Original Global Search's **detail loss problem** (summaries lost fine print)
     - LLM **hallucination problem** on negative queries (graph-based validation catches non-existent information)
@@ -157,25 +158,22 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Why:** Hub entities are the best "landing pads" for HippoRAG PPR
 *   **Output:** `["Entity: Compliance_Policy_2024", "Entity: Risk_Assessment_Q3"]`
 
-#### Stage 3.2.5: Graph-Based Negative Detection (HALLUCINATION PREVENTION)
-*   **Engine:** Semantic validation using graph signals
-*   **What:** Triple-check mechanism to detect when query asks for non-existent information
-*   **Why:** Prevents LLM hallucination on negative queries (e.g., "What is the quantum computing policy?" when no such policy exists)
-*   **Method:**
-    1. **No Graph Signal Check**: If zero hub entities + zero relationships + zero related entities → return "Not found"
-    2. **Entity-Query Relevance Check**: Extract query terms (4+ chars, non-stopwords), check if ANY entity name contains those terms. If zero semantic overlap → return "Not found"
-    3. **Post-Synthesis Safety Net**: After synthesis, if `text_chunks_used == 0` → return "Not found"
-*   **Advantage Over Keyword Matching:** Uses LazyGraphRAG + HippoRAG2 graph structures (entities, relationships) which capture **semantic relationships**, not just word overlap
-*   **Benchmark Results (2026-01-05):**
-    - Positive queries (valid questions): 10/10 PASS (answers correctly)
-    - Negative queries (non-existent info): 10/10 PASS (returns "not found", no hallucination)
-    - Latency: p50 = 386ms for negative detection (fast fail)
-*   **Output:** Either proceeds to Stage 3.3, or returns early with "Not found" response
+#### Stage 3.2.5: Deterministic Negative Handling (STRICT “NOT FOUND”)
+*   **Engine:** Pre-synthesis evidence scan gate (deterministic)
+*   **What:** For queries that ask for a specific field/value/clause (e.g., routing number, IBAN, SWIFT/BIC, VAT/Tax ID, shipment method, governing law, portal URL), the system checks whether the retrieved evidence actually contains that requested datum.
+*   **Why:** The Route 3 negative evaluator is intentionally strict: answers must contain an explicit refusal phrase and must not add “helpful” related details when the specific field is missing.
+*   **Method (high level):**
+    1. **Trigger**: If the query matches one of the supported “missing-field” patterns.
+    2. **Evidence scan**: Concatenate text from the top-N retrieved chunks and look for deterministic regex patterns / field markers.
+    3. **Early return**: If patterns are absent, return a refusal-only answer (no extra context).
+*   **Bounded cost:** Evidence scan is capped via `ROUTE3_NEGATIVE_SCAN_CHUNKS` (default bounded to avoid latency spikes).
+*   **Safety note:** Field checks can be scoped to a document type when the query explicitly asks about it (e.g., invoice-only checks when the query says “invoice”), reducing false positives from other documents.
+*   **Output:** Either returns immediately with a strict “not found / not specified” response or proceeds to positive retrieval and synthesis.
 
 #### Stage 3.3: Enhanced Graph Context Retrieval (SECTION-AWARE)
 *   **Engine:** EnhancedGraphRetriever with Section Graph traversal
-*   **What:** Retrieve source chunks via MENTIONS edges, diversified across sections
-*   **Why:** Ensures comprehensive coverage of different document sections/clauses
+*   **What:** Retrieve source chunks via MENTIONS edges and expand within the document structure using `(:TextChunk)-[:IN_SECTION]->(:Section)`.
+*   **Why (positive questions):** Section-node retrieval is used to pull the *right local neighborhood* of clauses around a hit (same section / adjacent section context), improving precision for clause-heavy documents.
 *   **Section Graph (added 2026-01-06):**
     - `(:Section)` nodes represent document sections/subsections
     - `(:TextChunk)-[:IN_SECTION]->(:Section)` links chunks to their leaf section
@@ -187,6 +185,12 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
     - Controlled via `SECTION_GRAPH_ENABLED` env var (default: enabled)
 *   **Benchmark Results (2026-01-06):** 6/10 questions at 100% theme coverage, avg 85%
 *   **Output:** Diversified source chunks with section metadata
+
+#### Stage 3.3.5: Neo4j Fulltext BM25 Merge (POSITIVE RECALL + PHRASE MATCHING)
+*   **Engine:** Neo4j native fulltext index (BM25/Lucene)
+*   **What:** Run a fulltext query against chunk text to surface exact/near-exact matches that graph traversal may miss (numbers, notice periods, “SHIPPED VIA”, clause headings, etc.).
+*   **Why (positive questions):** Improves deterministic recall for phrase-sensitive contract/invoice details without requiring per-document forcing.
+*   **How it integrates:** BM25 candidates are merged/deduped with graph-derived chunks (and then section expansion + keyword boosts can be applied) before synthesis.
 
 #### Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
 *   **Engine:** HippoRAG 2 (Personalized PageRank)

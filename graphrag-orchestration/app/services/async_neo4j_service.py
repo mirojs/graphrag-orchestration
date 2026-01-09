@@ -253,6 +253,8 @@ class AsyncNeo4jService:
         damping: float = 0.85,
         max_iterations: int = 20,
         top_k: int = 20,
+        per_seed_limit: int = 25,
+        per_neighbor_limit: int = 10,
     ) -> List[Tuple[str, float]]:
         """
         Native Cypher approximation of Personalized PageRank.
@@ -264,40 +266,70 @@ class AsyncNeo4jService:
         1. Install GDS Community (free for self-managed Neo4j)
         2. Use NetworkX in Python (slower but more accurate)
         """
-        # Multi-hop expansion with distance-based decay (PPR approximation)
+        # Performance note:
+        # A naive variable-length path expansion like (seed)-[*1..3]-(neighbor)
+        # can explode combinatorially and produce multi-second (or worse) queries
+        # even on modest graphs. For Route 3, we primarily need a deterministic,
+        # fast evidence spread. We approximate PPR by sampling top neighbors
+        # (by degree) at 1 hop and optionally 2 hops, with strict per-seed limits.
+        #
+        # max_iterations is kept for API compatibility but is not used by this
+        # approximation.
         query = """
-        // Start from seeds with score 1.0
-        UNWIND $seed_ids AS seed_id
-        MATCH (seed:`__Entity__` {id: seed_id})
-        WHERE seed.group_id = $group_id
+                UNWIND $seed_ids AS seed_id
+                MATCH (seed:`__Entity__` {id: seed_id})
+                WHERE seed.group_id = $group_id
+
+                // Always include the seed itself
+                WITH seed
+                CALL {
+                    WITH seed
+                    MATCH (seed)-[r1]-(n1:`__Entity__`)
+                    WHERE n1.group_id = $group_id
+                        AND type(r1) <> 'MENTIONS'
+                    WITH n1
+                    ORDER BY coalesce(n1.degree, 0) DESC
+                    LIMIT $per_seed_limit
+                    RETURN collect(n1) AS hop1
+                }
+
+                WITH seed, hop1
+                UNWIND (hop1 + [seed]) AS hop1_node
+                WITH seed, hop1_node
+
+                // Optional 2-hop expansion capped per hop1_node
+                CALL {
+                    WITH seed, hop1_node
+                    MATCH (hop1_node)-[r2]-(n2:`__Entity__`)
+                    WHERE n2.group_id = $group_id
+                        AND type(r2) <> 'MENTIONS'
+                    WITH n2
+                    ORDER BY coalesce(n2.degree, 0) DESC
+                    LIMIT $per_neighbor_limit
+                    RETURN collect(n2) AS hop2
+                }
+
+                WITH seed, hop1_node, hop2
+                UNWIND (hop2 + [hop1_node]) AS entity
+                WITH entity,
+                         sum(
+                             CASE
+                                 WHEN entity.id = seed.id THEN 1.0
+                                 WHEN entity.id = hop1_node.id THEN $damping
+                                 ELSE $damping * $damping
+                             END
+                         ) AS score
+                RETURN entity.id AS id,
+                             entity.name AS name,
+                             score AS score,
+                             coalesce(entity.degree, 0) AS importance
+                ORDER BY score DESC
+                LIMIT $top_k
+                """
         
-        // Expand 3 hops with decay
-        OPTIONAL MATCH path = (seed)-[*1..3]-(neighbor:`__Entity__`)
-        WHERE neighbor.group_id = $group_id
-          AND ALL(r IN relationships(path) WHERE type(r) <> 'MENTIONS')
-        
-        WITH neighbor, 
-             seed,
-             CASE 
-               WHEN neighbor IS NULL THEN 0
-               ELSE pow($damping, length(path))  // Decay by distance
-             END AS contribution
-        
-        // Aggregate scores across all seeds
-        WITH coalesce(neighbor, seed) AS entity,
-             sum(contribution) AS raw_score
-        
-        // Normalize and return top-K
-        WITH entity, raw_score
-        WHERE raw_score > 0
-        RETURN entity.id AS id,
-               entity.name AS name,
-               raw_score AS score,
-               coalesce(entity.degree, 0) AS importance
-        ORDER BY raw_score DESC
-        LIMIT $top_k
-        """
-        
+        import time
+
+        t0 = time.perf_counter()
         async with self._get_session() as session:
             result = await session.run(
                 query,
@@ -305,11 +337,23 @@ class AsyncNeo4jService:
                 seed_ids=seed_entity_ids,
                 damping=damping,
                 top_k=top_k,
+                per_seed_limit=per_seed_limit,
+                per_neighbor_limit=per_neighbor_limit,
             )
             records = await result.data()
-            
-            # Return as (name, score) tuples for compatibility
-            return [(r["name"], r["score"]) for r in records]
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "async_neo4j_ppr_native_complete",
+            group_id=group_id,
+            seeds=len(seed_entity_ids),
+            top_k=top_k,
+            duration_ms=dt_ms,
+            per_seed_limit=per_seed_limit,
+            per_neighbor_limit=per_neighbor_limit,
+        )
+
+        # Return as (name, score) tuples for compatibility
+        return [(r["name"], r["score"]) for r in records]
     
     # =========================================================================
     # Chunk Retrieval (Route 2/3)

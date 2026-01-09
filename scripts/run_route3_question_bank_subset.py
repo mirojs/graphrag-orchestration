@@ -209,6 +209,9 @@ def main() -> int:
                     keys = [
                         "ppr_detail_recovery",
                         "section_boost",
+                        "bm25_phrase",
+                        "fulltext_boost",
+                        "graph_native_bm25",
                         "keyword_boost",
                         "route3_section_boost_semantic",
                         "route3_section_boost",

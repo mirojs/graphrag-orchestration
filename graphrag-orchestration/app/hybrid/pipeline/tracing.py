@@ -138,6 +138,19 @@ class DeterministicTracer:
             return await self._trace_with_fallback(query, seed_entities, top_k)
         
         try:
+            import os
+
+            def _get_int_env(name: str, default: int) -> int:
+                raw = (os.getenv(name, str(default)) or "").strip()
+                try:
+                    v = int(raw)
+                    return v if v > 0 else default
+                except Exception:
+                    return default
+
+            per_seed_limit = _get_int_env("ROUTE3_PPR_PER_SEED_LIMIT", 25)
+            per_neighbor_limit = _get_int_env("ROUTE3_PPR_PER_NEIGHBOR_LIMIT", 10)
+
             # First, resolve seed entity names to IDs
             seed_records = await self.async_neo4j.get_entities_by_names(
                 group_id=self.group_id,
@@ -156,6 +169,8 @@ class DeterministicTracer:
                 damping=0.85,
                 max_iterations=20,
                 top_k=top_k,
+                per_seed_limit=per_seed_limit,
+                per_neighbor_limit=per_neighbor_limit,
             )
             
             logger.info("async_neo4j_ppr_success",

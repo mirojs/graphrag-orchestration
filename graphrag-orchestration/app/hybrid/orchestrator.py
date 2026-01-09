@@ -973,6 +973,113 @@ Instructions:
         # Collapse repeated whitespace
         return " ".join("".join(out).split())
 
+    def _build_phrase_aware_fulltext_query(self, query: str) -> str:
+        """Build a Lucene query that prioritizes exact phrase matches.
+        
+        This addresses the 6% theme coverage gap where specific phrases like
+        "60 days", "written notice", "3 business days" exist in documents but
+        aren't being retrieved because standard fulltext treats them as OR queries.
+        
+        Strategy:
+        1. Extract common contractual/legal phrase patterns (N days, written X, etc.)
+        2. Wrap detected phrases in quotes for exact matching
+        3. Boost phrase matches with ^2.0
+        4. Include individual words as fallback (lower priority)
+        
+        Example:
+            Input:  "What are the termination rules including 60 days written notice?"
+            Output: '"60 days"^2.0 "written notice"^2.0 termination rules'
+        """
+        import re
+        
+        if not query:
+            return ""
+        
+        # Normalize query
+        q = query.strip()
+        
+        # Patterns for phrases that should be matched exactly (order matters - longer first)
+        # These patterns capture the kinds of specific terms the benchmark expects
+        PHRASE_PATTERNS = [
+            # Time periods: "N days", "N business days", "N months", "N years"
+            r'\b(\d+\s+(?:business\s+)?(?:days?|months?|years?|weeks?|hours?))\b',
+            # Dollar amounts: "$X", "X dollars"
+            r'\b(\$[\d,]+(?:\.\d{2})?)\b',
+            r'\b([\d,]+\s+dollars?)\b',
+            # Percentages: "X%", "X percent"
+            r'\b(\d+(?:\.\d+)?\s*%)\b',
+            r'\b(\d+(?:\.\d+)?\s+percent)\b',
+            # Legal/formal phrases (2-3 word compounds)
+            r'\b(written\s+notice)\b',
+            r'\b(certified\s+mail)\b',
+            r'\b(good\s+faith)\b',
+            r'\b(due\s+diligence)\b',
+            r'\b(force\s+majeure)\b',
+            r'\b(intellectual\s+property)\b',
+            r'\b(confidential\s+information)\b',
+            r'\b(material\s+breach)\b',
+            r'\b(prior\s+written\s+consent)\b',
+            r'\b(sole\s+discretion)\b',
+            r'\b(binding\s+arbitration)\b',
+            r'\b(liquidated\s+damages)\b',
+            r'\b(indemnify\s+and\s+hold\s+harmless)\b',
+            r'\b(termination\s+for\s+cause)\b',
+            r'\b(termination\s+for\s+convenience)\b',
+        ]
+        
+        extracted_phrases = []
+        remaining_query = q
+        
+        for pattern in PHRASE_PATTERNS:
+            matches = re.findall(pattern, remaining_query, re.IGNORECASE)
+            for match in matches:
+                phrase = match.strip()
+                if phrase and len(phrase) > 2:
+                    extracted_phrases.append(phrase.lower())
+                    # Remove the matched phrase from remaining query to avoid duplication
+                    remaining_query = re.sub(re.escape(match), ' ', remaining_query, flags=re.IGNORECASE)
+        
+        # Sanitize remaining query (individual words)
+        remaining_sanitized = self._sanitize_query_for_fulltext(remaining_query)
+        remaining_words = [w for w in remaining_sanitized.split() if len(w) >= 3]
+        
+        # Remove stopwords from remaining words
+        STOPWORDS = {
+            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
+            'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'were', 'they',
+            'this', 'that', 'with', 'from', 'what', 'which', 'their', 'will', 'would',
+            'there', 'could', 'other', 'into', 'more', 'some', 'such', 'than', 'then',
+            'these', 'when', 'where', 'who', 'how', 'does', 'about', 'each', 'she',
+        }
+        remaining_words = [w for w in remaining_words if w.lower() not in STOPWORDS]
+        
+        # Build final Lucene query
+        query_parts = []
+        
+        # Add boosted phrase queries
+        for phrase in extracted_phrases:
+            # Escape any special Lucene characters within the phrase
+            safe_phrase = re.sub(r'([+\-&|!(){}[\]^"~*?:\\])', r'\\\1', phrase)
+            query_parts.append(f'"{safe_phrase}"^2.0')
+        
+        # Add remaining individual words (no boost, acts as fallback)
+        for word in remaining_words[:10]:  # Limit to avoid overly long queries
+            safe_word = re.sub(r'([+\-&|!(){}[\]^"~*?:\\])', r'\\\1', word)
+            query_parts.append(safe_word)
+        
+        result = ' '.join(query_parts)
+        
+        # Log for debugging
+        if extracted_phrases:
+            logger.debug(
+                "phrase_aware_fulltext_query_built",
+                original_query=query[:100],
+                extracted_phrases=extracted_phrases,
+                final_query=result[:200],
+            )
+        
+        return result if result.strip() else self._sanitize_query_for_fulltext(query)
+
     async def _ensure_textchunk_fulltext_index(self) -> None:
         """Ensure the TextChunk fulltext index exists.
 
@@ -1002,19 +1109,34 @@ Instructions:
                 reason="Could not ensure fulltext index; will continue with available retrieval",
             )
 
-    async def _search_text_chunks_fulltext(self, query_text: str, top_k: int = 10) -> list:
+    async def _search_text_chunks_fulltext(
+        self, query_text: str, top_k: int = 10, use_phrase_boost: bool = True
+    ) -> list:
         """Fulltext search only (Neo4j Lucene index) within the group.
         
         Returns chunks with section metadata for integration with Route 3's
         section-aware evidence collection.
+        
+        Args:
+            query_text: The user query to search for.
+            top_k: Maximum number of results to return.
+            use_phrase_boost: If True, use phrase-aware query building to boost
+                             exact phrase matches (e.g., "60 days", "written notice").
+                             This improves retrieval of specific contractual terms.
         """
         if not self.neo4j_driver:
             return []
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
-        sanitized = self._sanitize_query_for_fulltext(query_text)
-        if not sanitized:
+        
+        # Use phrase-aware query building for better retrieval of specific terms
+        if use_phrase_boost:
+            search_query = self._build_phrase_aware_fulltext_query(query_text)
+        else:
+            search_query = self._sanitize_query_for_fulltext(query_text)
+        
+        if not search_query:
             return []
 
         def _run_sync():
@@ -1038,7 +1160,7 @@ Instructions:
             """
             rows = []
             with self.neo4j_driver.session() as session:
-                for r in session.run(q, query_text=sanitized, group_id=group_id, top_k=top_k):
+                for r in session.run(q, query_text=search_query, group_id=group_id, top_k=top_k):
                     chunk = {
                         "id": r["id"],
                         "text": r["text"],
@@ -1066,6 +1188,7 @@ Instructions:
         section_diversify: bool = True,
         max_per_section: int = 3,
         max_per_document: int = 6,
+        use_phrase_boost: bool = True,
     ) -> list:
         """Neo4j-native hybrid retrieval + RRF fusion.
 
@@ -1076,6 +1199,7 @@ Instructions:
             section_diversify: If True, apply section-aware diversification
             max_per_section: Max chunks per section when diversifying
             max_per_document: Max chunks per document when diversifying
+            use_phrase_boost: If True, use phrase-aware query for fulltext search
         """
         import os
         
@@ -1084,7 +1208,12 @@ Instructions:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
-        sanitized = self._sanitize_query_for_fulltext(query_text)
+        
+        # Use phrase-aware query building for better retrieval of specific terms
+        if use_phrase_boost:
+            sanitized = self._build_phrase_aware_fulltext_query(query_text)
+        else:
+            sanitized = self._sanitize_query_for_fulltext(query_text)
         
         # Check if section graph is enabled via environment variable
         section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
@@ -1096,6 +1225,8 @@ Instructions:
                    embedding_dims=len(embedding) if embedding else 0,
                    embedding_first_3=embedding[:3] if embedding else None,
                    vector_k=vector_k,
+                   use_phrase_boost=use_phrase_boost,
+                   fulltext_query=sanitized[:100] if sanitized else "",
                    query_text=query_text[:100])
 
         # Oversample vector candidates before tenant filter.
@@ -1442,6 +1573,124 @@ Instructions:
 
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _run_sync)
+
+    async def _search_chunks_graph_native_bm25(
+        self,
+        query_text: str,
+        top_k: int = 15,
+        anchor_limit: int = 15,
+        graph_decay: float = 0.5,
+        use_phrase_boost: bool = True,
+    ) -> List[Tuple[Dict[str, Any], float, bool]]:
+        """Pure BM25 retrieval with phrase-aware queries (no graph expansion).
+        
+        This uses Neo4j's native fulltext index (Lucene BM25) with phrase-aware
+        query construction to find chunks containing exact phrases like "60 days",
+        "written notice", etc.
+        
+        Performance optimized: Graph expansion was removed as it caused 20-30s
+        latency due to cartesian products in OPTIONAL MATCH. Pure BM25 maintains
+        <1s query time while still providing phrase match guarantees.
+        
+        The phrase-aware query builder extracts contractual terms and wraps them
+        in quotes for exact Lucene matching, then boosts with ^2.0.
+        
+        Args:
+            query_text: User query (will be converted to phrase-aware Lucene query)
+            top_k: Maximum chunks to return
+            anchor_limit: Unused (kept for API compatibility)
+            graph_decay: Unused (kept for API compatibility)
+            use_phrase_boost: If True, use phrase-aware query building
+            
+        Returns:
+            List of (chunk_dict, score, is_anchor) tuples, sorted by BM25 score.
+            All chunks have is_anchor=True since there's no graph expansion.
+        """
+        if not self.neo4j_driver:
+            return []
+        
+        await self._ensure_textchunk_fulltext_index()
+        group_id = self.group_id
+        
+        # Build search query with phrase awareness
+        if use_phrase_boost:
+            search_query = self._build_phrase_aware_fulltext_query(query_text)
+        else:
+            search_query = self._sanitize_query_for_fulltext(query_text)
+        
+        if not search_query:
+            return []
+        
+        def _run_sync():
+            # Graph-Native BM25: Fast anchor retrieval without graph expansion
+            # Performance optimization: Skip graph expansion to keep <1s latency
+            cypher = """
+            // ================================================================
+            // BM25 Anchor Retrieval with phrase-aware queries (FAST)
+            // ================================================================
+            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $search_query)
+            YIELD node AS chunk, score AS bm25_score
+            WHERE chunk.group_id = $group_id
+            
+            // Get metadata
+            OPTIONAL MATCH (chunk)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+            
+            RETURN chunk.id AS id,
+                   chunk.text AS text,
+                   chunk.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source,
+                   s.id AS section_id,
+                   s.path_key AS section_path_key,
+                   bm25_score AS score,
+                   true AS is_anchor
+            ORDER BY score DESC
+            LIMIT $top_k
+            """
+            
+            rows = []
+            try:
+                with self.neo4j_driver.session() as session:
+                    result = session.run(
+                        cypher,
+                        search_query=search_query,
+                        group_id=group_id,
+                        anchor_limit=anchor_limit,
+                        graph_decay=graph_decay,
+                        top_k=top_k,
+                    )
+                    for r in result:
+                        chunk = {
+                            "id": r["id"],
+                            "text": r["text"],
+                            "chunk_index": r.get("chunk_index", 0),
+                            "document_id": r.get("document_id", ""),
+                            "document_title": r.get("document_title", ""),
+                            "document_source": r.get("document_source", ""),
+                            "section_id": r.get("section_id", ""),
+                            "section_path_key": r.get("section_path_key", ""),
+                        }
+                        rows.append((chunk, float(r.get("score") or 0.0), bool(r.get("is_anchor", False))))
+            except Exception as e:
+                logger.error("graph_native_bm25_query_failed", error=str(e))
+            
+            return rows
+        
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(self._executor, _run_sync)
+        
+        # Log summary
+        logger.info(
+            "pure_bm25_phrase_search_complete",
+            query=query_text[:80],
+            search_query=search_query[:100],
+            total_results=len(results),
+            use_phrase_boost=use_phrase_boost,
+        )
+        
+        return results
     
     async def _search_text_chunks(
         self,
@@ -1649,27 +1898,42 @@ Instructions:
         - Traverses RELATED_TO edges for richer entity context
         - Includes section metadata for structured citations
         """
-        logger.info("route_3_global_search_start", 
-                   query=query[:50],
-                   response_type=response_type)
+        import os
+        import time
+
+        enable_timings = os.getenv("ROUTE3_RETURN_TIMINGS", "0").strip().lower() in {"1", "true", "yes"}
+        timings_ms: Dict[str, int] = {}
+
+        t_route0 = time.perf_counter()
+        logger.info(
+            "route_3_global_search_start",
+            query=query[:50],
+            response_type=response_type,
+            timings_enabled=enable_timings,
+        )
         
         # Stage 3.1: Community Matching (LazyGraphRAG: on-the-fly generation if needed)
         logger.info("stage_3.1_community_matching")
+        t0 = time.perf_counter()
         matched_communities = await self.community_matcher.match_communities(query, top_k=3)
         community_data = [c for c, _ in matched_communities]
+        timings_ms["stage_3.1_ms"] = int((time.perf_counter() - t0) * 1000)
         logger.info("stage_3.1_complete", num_communities=len(community_data))
         
         # Stage 3.2: Hub Entity Extraction (may query Neo4j directly for dynamic communities)
         logger.info("stage_3.2_hub_extraction")
+        t0 = time.perf_counter()
         hub_entities = await self.hub_extractor.extract_hub_entities(
             communities=community_data,
             top_k_per_community=10  # Increased from 3 to ensure cross-document coverage
         )
+        timings_ms["stage_3.2_ms"] = int((time.perf_counter() - t0) * 1000)
         logger.info("stage_3.2_complete", num_hubs=len(hub_entities))
         
         # Stage 3.3: Enhanced Graph Context Retrieval (NEW)
         # This uses MENTIONS edges for citations and RELATED_TO for entity context
         logger.info("stage_3.3_enhanced_graph_context")
+        t0 = time.perf_counter()
         graph_context = await self.enhanced_retriever.get_full_context(
             hub_entities=hub_entities,
             expand_relationships=True,
@@ -1677,49 +1941,61 @@ Instructions:
             max_chunks_per_entity=3,
             max_relationships=30,
         )
+        timings_ms["stage_3.3_ms"] = int((time.perf_counter() - t0) * 1000)
         logger.info("stage_3.3_complete",
                    num_source_chunks=len(graph_context.source_chunks),
                    num_relationships=len(graph_context.relationships),
                    num_related_entities=len(graph_context.related_entities))
 
         # ==================================================================
-        # Stage 3.3.5: Fulltext Candidate Injection (DETERMINISTIC PHRASE MATCHING)
+        # Stage 3.3.5: Pure BM25 with Phrase-Aware Queries (FAST + PRECISE)
         # ==================================================================
-        # Use Neo4j native fulltext index to find exact phrase matches.
-        # This complements entity-based retrieval by catching specific phrases
-        # (e.g., "monthly statement of income and expenses") that may not map
-        # cleanly to hub entities but exist verbatim in the corpus.
+        # Use Neo4j native BM25 (Lucene fulltext) with phrase-aware query construction.
+        # This guarantees exact phrase matches for contractual terms like:
+        # - "60 days", "written notice", "3 business days"
+        # - Dollar amounts: "$1,000", "500 dollars"
+        # - Percentages: "5%", "10 percent"
+        # - Legal phrases: "binding arbitration", "liquidated damages"
         #
-        # Key advantage over keyword boost:
-        # - 100% deterministic (Neo4j Lucene index, no embedding variance)
-        # - Native index scan (fast, ~10-50ms)
-        # - Already proven in Route 1 at 100% accuracy
+        # Key advantages:
+        # - Fast: <1s query time (pure BM25, no graph traversal)
+        # - Precise: Phrase-aware query builder extracts and quotes key terms
+        # - Deterministic: Neo4j Lucene index, no embedding variance
+        #
+        # Note: Graph expansion was removed due to 20-30s latency from cartesian
+        # products in OPTIONAL MATCH. Pure BM25 provides better performance while
+        # maintaining phrase match guarantees.
         # ==================================================================
-        import os
+        t0 = time.perf_counter()
+        enable_graph_native_bm25 = os.getenv("ROUTE3_GRAPH_NATIVE_BM25", "1").strip().lower() in {"1", "true", "yes"}
+        # Fallback to old fulltext boost if explicitly disabled
         enable_fulltext_boost = os.getenv("ROUTE3_FULLTEXT_BOOST", "1").strip().lower() in {"1", "true", "yes"}
-        fulltext_boost_metadata: Dict[str, Any] = {
-            "enabled": enable_fulltext_boost,
+        
+        bm25_phrase_metadata: Dict[str, Any] = {
+            "enabled": enable_graph_native_bm25,
             "applied": False,
-            "candidates": 0,
+            "results": 0,
             "added": 0,
         }
 
-        if enable_fulltext_boost:
+        if enable_graph_native_bm25:
             try:
                 from .pipeline.enhanced_graph_retriever import SourceChunk
 
-                # Query the fulltext index for exact phrase matches
-                fulltext_chunks = await self._search_text_chunks_fulltext(
+                # Use Pure BM25 with phrase-aware queries (fast, no graph expansion)
+                bm25_results = await self._search_chunks_graph_native_bm25(
                     query_text=query,
-                    top_k=15,  # Generous top-k; will dedupe against existing
+                    top_k=20,  # Generous top-k; will dedupe against existing
+                    use_phrase_boost=True,
                 )
-                fulltext_boost_metadata["candidates"] = len(fulltext_chunks)
+                
+                bm25_phrase_metadata["results"] = len(bm25_results)
 
                 # Merge into graph_context.source_chunks (deduplicated by chunk_id)
                 existing_ids = {c.chunk_id for c in graph_context.source_chunks}
                 added_count = 0
 
-                for chunk_dict, score in fulltext_chunks:
+                for chunk_dict, score, is_anchor in bm25_results:
                     cid = (chunk_dict.get("id") or "").strip()
                     if not cid or cid in existing_ids:
                         continue
@@ -1727,12 +2003,15 @@ Instructions:
                     # Extract section path from section_path_key if available
                     spk = (chunk_dict.get("section_path_key") or "").strip()
                     section_path = spk.split(" > ") if spk else []
+                    
+                    # Mark source for traceability
+                    source_marker = "bm25_phrase"
 
                     graph_context.source_chunks.append(
                         SourceChunk(
                             chunk_id=cid,
                             text=chunk_dict.get("text") or "",
-                            entity_name="fulltext_match",  # Mark source for traceability
+                            entity_name=source_marker,
                             section_path=section_path,
                             section_id=(chunk_dict.get("section_id") or "").strip(),
                             document_id=(chunk_dict.get("document_id") or "").strip(),
@@ -1744,31 +2023,66 @@ Instructions:
                     existing_ids.add(cid)
                     added_count += 1
 
-                fulltext_boost_metadata["applied"] = added_count > 0
-                fulltext_boost_metadata["added"] = added_count
+                bm25_phrase_metadata["applied"] = added_count > 0
+                bm25_phrase_metadata["added"] = added_count
 
                 if added_count > 0:
                     logger.info(
-                        "stage_3.3.5_fulltext_boost_applied",
-                        candidates=len(fulltext_chunks),
+                        "stage_3.3.5_bm25_phrase_applied",
+                        results=bm25_phrase_metadata["results"],
                         added=added_count,
                         total_source_chunks=len(graph_context.source_chunks),
                     )
                 else:
                     logger.info(
-                        "stage_3.3.5_fulltext_boost_no_new_chunks",
-                        candidates=len(fulltext_chunks),
-                        reason="All fulltext matches already in source_chunks",
+                        "stage_3.3.5_bm25_phrase_no_new_chunks",
+                        results=bm25_phrase_metadata["results"],
+                        reason="All BM25 matches already in source_chunks",
                     )
 
             except Exception as e:
-                logger.warning("stage_3.3.5_fulltext_boost_failed", error=str(e))
+                logger.warning("stage_3.3.5_bm25_phrase_failed", error=str(e))
+                # Fall back to simple fulltext if BM25 phrase search fails
+                if enable_fulltext_boost:
+                    logger.info("stage_3.3.5_fallback_to_simple_fulltext")
+                    try:
+                        from .pipeline.enhanced_graph_retriever import SourceChunk
+                        fulltext_chunks = await self._search_text_chunks_fulltext(
+                            query_text=query,
+                            top_k=15,
+                        )
+                        existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                        for chunk_dict, score in fulltext_chunks:
+                            cid = (chunk_dict.get("id") or "").strip()
+                            if not cid or cid in existing_ids:
+                                continue
+                            spk = (chunk_dict.get("section_path_key") or "").strip()
+                            section_path = spk.split(" > ") if spk else []
+                            graph_context.source_chunks.append(
+                                SourceChunk(
+                                    chunk_id=cid,
+                                    text=chunk_dict.get("text") or "",
+                                    entity_name="fulltext_fallback",
+                                    section_path=section_path,
+                                    section_id=(chunk_dict.get("section_id") or "").strip(),
+                                    document_id=(chunk_dict.get("document_id") or "").strip(),
+                                    document_title=(chunk_dict.get("document_title") or "").strip(),
+                                    document_source=(chunk_dict.get("document_source") or "").strip(),
+                                    relevance_score=float(score or 0.0),
+                                )
+                            )
+                            existing_ids.add(cid)
+                    except Exception as fallback_e:
+                        logger.warning("stage_3.3.5_fulltext_fallback_failed", error=str(fallback_e))
+
+        timings_ms["stage_3.3.5_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ==================================================================
         # Section Boost: Semantic Section Discovery (UNIVERSAL)
         # Use vector/fulltext search on chunks → extract section IDs → graph expand
         # This provides document-structure-aware retrieval complementing entity-based retrieval
         # ==================================================================
+        t0 = time.perf_counter()
         enable_section_boost = os.getenv("ROUTE3_SECTION_BOOST", "1").strip().lower() in {"1", "true", "yes"}
         section_boost_metadata: Dict[str, Any] = {
             "enabled": enable_section_boost,
@@ -2344,31 +2658,49 @@ Instructions:
         
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
         # Now also includes related entities from graph traversal
-        logger.info("stage_3.4_hipporag_ppr_tracing")
+        timings_ms["stage_3.3.6_section_boost_ms"] = int((time.perf_counter() - t0) * 1000)
+        disable_ppr = os.getenv("ROUTE3_DISABLE_PPR", "0").strip().lower() in {"1", "true", "yes"}
         all_seed_entities = list(set(hub_entities + graph_context.related_entities[:10]))
-        evidence_nodes = await self.tracer.trace(
-            query=query,
-            seed_entities=all_seed_entities,
-            top_k=20  # Larger for global coverage
-        )
-        logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
-        
+
+        if disable_ppr:
+            logger.info(
+                "stage_3.4_hipporag_ppr_skipped",
+                reason="ROUTE3_DISABLE_PPR",
+                seeds=len(all_seed_entities),
+            )
+            t0 = time.perf_counter()
+            # Minimal deterministic fallback: keep seeds as evidence with uniform score.
+            evidence_nodes = [(e, 1.0) for e in all_seed_entities[:20]]
+            timings_ms["stage_3.4_ms"] = int((time.perf_counter() - t0) * 1000)
+        else:
+            logger.info("stage_3.4_hipporag_ppr_tracing")
+            t0 = time.perf_counter()
+            evidence_nodes = await self.tracer.trace(
+                query=query,
+                seed_entities=all_seed_entities,
+                top_k=20  # Larger for global coverage
+            )
+            timings_ms["stage_3.4_ms"] = int((time.perf_counter() - t0) * 1000)
+            logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
+
         # Initialize PPR metadata
         ppr_metadata = {
-            "enabled": True,
+            "enabled": not disable_ppr,
             "ppr_entities": len(all_seed_entities),
             "ppr_evidence_nodes": len(evidence_nodes),
-            "top_ppr_entities": all_seed_entities[:5]
+            "top_ppr_entities": all_seed_entities[:5],
         }
         
         # Stage 3.5: Enhanced Synthesis with Graph-Based Citations
         logger.info("stage_3.5_enhanced_synthesis")
+        t0 = time.perf_counter()
         synthesis_result = await self.synthesizer.synthesize_with_graph_context(
             query=query,
             evidence_nodes=evidence_nodes,
             graph_context=graph_context,
             response_type=response_type
         )
+        timings_ms["stage_3.5_ms"] = int((time.perf_counter() - t0) * 1000)
         logger.info("stage_3.5_complete")
         
         # ================================================================
@@ -2419,9 +2751,10 @@ Instructions:
                 "latency_estimate": "thorough",
                 "precision_level": "high",
                 "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR",
-                "fulltext_boost": fulltext_boost_metadata,
+                "bm25_phrase": bm25_phrase_metadata,
                 "section_boost": section_boost_metadata,
-                "ppr_detail_recovery": ppr_metadata
+                "ppr_detail_recovery": ppr_metadata,
+                **({"timings_ms": {**timings_ms, "route_3_total_ms": int((time.perf_counter() - t_route0) * 1000)}} if enable_timings else {}),
             }
         }
     

@@ -1,0 +1,11 @@
+Loaded 20 questions: 10 positive (Q-G), 10 negative (Q-N)
+Loaded 60 ground truth answers
+=== Route 3: Global Search (LazyGraphRAG) ===
+url=https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+group_id=test-5pdfs-1767429340223041632
+repeats=10 timeout=180.0s
+questions=20 question_bank=/afh/projects/graphrag-orchestration/docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md
+scenario=hybrid_global_summary response_type=summary
+out_json=/afh/projects/graphrag-orchestration/benchmarks/route3_global_search_20260109T111527Z.json
+out_md=/afh/projects/graphrag-orchestration/benchmarks/route3_global_search_20260109T111527Z.md
+==============================================

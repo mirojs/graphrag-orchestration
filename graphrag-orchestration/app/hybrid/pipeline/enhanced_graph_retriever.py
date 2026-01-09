@@ -616,17 +616,13 @@ class EnhancedGraphRetriever:
         candidate_chunk_indexes: Optional[List[int]] = None,
         min_text_chars: int = 20,
     ) -> List[SourceChunk]:
-        """Return one early ("lead") chunk per document — guaranteed for every doc.
+        """Return one early ("lead") chunk per document.
 
-        Strategy: For each document, pick the **longest** chunk among its early
-        chunk_index candidates. This ensures every document in the group is
-        represented, even invoices or short structured docs whose early chunks
-        might all be small.
+        Strategy: For each document, pick the **earliest** chunk (lowest
+        chunk_index) among candidates that meets the minimum length threshold.
 
-        Motivation: Route-3 is frequently cross-document/thematic. Entity- and
-        section-driven retrieval can under-surface documents with weak entity
-        graphs (e.g., invoices). Guaranteeing one chunk per document improves
-        thematic coverage without relying on specific query terms.
+        Note: This feature is experimental and disabled by default. The BM25 +
+        graph section search approach is more scalable for cross-document queries.
         """
         if not self.driver:
             return []
@@ -697,8 +693,7 @@ class EnhancedGraphRetriever:
                     relevance_score=1.0,
                 )
 
-            # Collect all candidate chunks per document, then pick the longest.
-            # This guarantees every document is represented (even if chunks are short).
+            # Collect all candidate chunks per document, then pick the earliest.
             candidates_by_doc: Dict[str, List[Tuple[int, Any]]] = {}
             for record in records:
                 doc_id = (record.get("doc_id") or "").strip()
@@ -711,29 +706,32 @@ class EnhancedGraphRetriever:
                     candidates_by_doc[doc_id] = []
                 candidates_by_doc[doc_id].append((len(text), record))
 
-            # Pick longest chunk per doc.
-            chosen_by_doc: Dict[str, SourceChunk] = {}
+            # Pick the "Lead" chunk per doc.
+            # Strategy: Prefer the EARLIEST chunk (lowest index) that meets the length threshold.
+            choices: List[SourceChunk] = []
+
             for doc_id, cands in candidates_by_doc.items():
-                if len(chosen_by_doc) >= max_total:
+                if len(choices) >= max_total:
                     break
-                # Sort by text length descending, pick the longest.
-                cands.sort(key=lambda x: x[0], reverse=True)
+                
+                # Sort by chunk_index ASC (primary) to get the true "lead" chunk.
+                # cands is List[Tuple[int, Record]] -> x[1] is the record.
+                cands.sort(key=lambda x: x[1].get("chunk_index", 999))
+                
                 best_len, best_record = cands[0]
                 text = (best_record.get("text") or "").strip()
-                chosen_by_doc[doc_id] = _make_chunk(best_record, text=text)
-
-            chunks = list(chosen_by_doc.values())
+                choices.append(_make_chunk(best_record, text=text))
 
             logger.info(
                 "document_lead_chunks_complete",
-                num_docs=len(chosen_by_doc),
+                num_docs=len(choices),
                 total_docs_in_group=len(candidates_by_doc),
                 max_total=max_total,
                 chunk_indexes=candidate_chunk_indexes,
                 min_text_chars=min_text_chars,
             )
 
-            return chunks
+            return choices
 
         except Exception as e:
             logger.error("document_lead_chunks_failed", error=str(e))

@@ -2573,7 +2573,7 @@ Instructions:
             ]
         )
 
-        enable_doc_lead_boost = os.getenv("ROUTE3_DOC_LEAD_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        enable_doc_lead_boost = os.getenv("ROUTE3_DOC_LEAD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
         if enable_doc_lead_boost and is_cross_document_query:
             try:
                 lead_chunks = await self.enhanced_retriever.get_document_lead_chunks(

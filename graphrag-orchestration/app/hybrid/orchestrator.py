@@ -2664,32 +2664,58 @@ Instructions:
 
         ql = (query or "").lower()
         scan_chunks = int(os.getenv("ROUTE3_NEGATIVE_SCAN_CHUNKS", "40"))
-        texts = [(c.text or "") for c in (graph_context.source_chunks or [])[: max(scan_chunks, 0)]]
+        source_chunks = (graph_context.source_chunks or [])
+        texts = [(c.text or "") for c in source_chunks[: max(scan_chunks, 0)]]
         evidence_text = "\n".join(texts)
 
-        def _has(pattern: str, *, flags: int = re.IGNORECASE) -> bool:
-            return bool(re.search(pattern, evidence_text, flags))
+        invoice_chunks = [
+            c
+            for c in source_chunks
+            if "invoice" in ((c.document_source or "").lower() + " " + (c.document_title or "").lower())
+        ]
+        invoice_text = "\n".join([(c.text or "") for c in invoice_chunks[: max(scan_chunks, 0)]])
+
+        def _has(pattern: str, *, flags: int = re.IGNORECASE, text: Optional[str] = None) -> bool:
+            return bool(re.search(pattern, (text if text is not None else evidence_text), flags))
+
+        def _scope_text_for_invoice_field() -> Optional[str]:
+            # If the user explicitly asks about the invoice, prefer scanning invoice chunks
+            # to avoid accidentally "finding" the field in other documents.
+            if "invoice" in ql and invoice_text:
+                return invoice_text
+            return None
 
         # Routing number (ABA): require a 9-digit number near 'routing'/'aba'.
         if re.search(r"\brouting\s+number\b|\bbank\s+routing\b|\baba\b", ql):
-            has_routing = _has(r"(routing|aba)[^\d]{0,40}\b\d{9}\b") or _has(r"\b\d{9}\b[^\n]{0,40}(routing|aba)")
+            scoped = _scope_text_for_invoice_field()
+            has_routing = _has(r"(routing|aba)[^\d]{0,40}\b\d{9}\b", text=scoped) or _has(
+                r"\b\d{9}\b[^\n]{0,40}(routing|aba)", text=scoped
+            )
             if not has_routing:
                 logger.info("route_3_negative_field_missing", field="routing_number")
                 return _not_specified("missing_routing_number")
 
         # SWIFT / BIC
         if re.search(r"\bswift\b|\bbic\b", ql):
+            scoped = _scope_text_for_invoice_field()
             # SWIFT/BIC often looks like: AAAABBCC or AAAABBCCDDD
-            has_swift = _has(r"(swift|bic)[^A-Z0-9]{0,30}\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b", flags=0)
+            has_swift = _has(
+                r"(swift|bic)[^A-Z0-9]{0,30}\b[A-Z]{4}[A-Z]{2}[A-Z0-9]{2}([A-Z0-9]{3})?\b",
+                flags=0,
+                text=scoped,
+            )
             if not has_swift:
                 logger.info("route_3_negative_field_missing", field="swift_bic")
                 return _not_specified("missing_swift_bic")
 
         # IBAN
         if re.search(r"\biban\b", ql):
-            has_iban = _has(r"\bIBAN\b[^A-Z0-9]{0,30}\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", flags=0) or _has(
-                r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", flags=0
-            )
+            scoped = _scope_text_for_invoice_field()
+            has_iban = _has(
+                r"\bIBAN\b[^A-Z0-9]{0,30}\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b",
+                flags=0,
+                text=scoped,
+            ) or _has(r"\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b", flags=0, text=scoped)
             if not has_iban:
                 logger.info("route_3_negative_field_missing", field="iban")
                 return _not_specified("missing_iban")
@@ -2704,23 +2730,26 @@ Instructions:
 
         # Payment portal URL
         if re.search(r"portal\s+url|payment\s+portal|web\s+link|url\b.*pay|pay\s+online", ql):
-            has_url = _has(r"https?://[^\s\]\)]+|www\.[^\s\]\)]+")
+            scoped = _scope_text_for_invoice_field()
+            has_url = _has(r"https?://[^\s\]\)]+|www\.[^\s\]\)]+", text=scoped)
             if not has_url:
                 logger.info("route_3_negative_field_missing", field="payment_portal_url")
                 return _not_specified("missing_payment_portal_url")
 
         # Bank account number / ACH / wire instructions
         if re.search(r"bank\s+account\s+number|account\s+number|ach|wire\s+transfer", ql):
-            has_account_number = _has(r"account[^\d]{0,30}(number|no\.?|#)?[^\d]{0,30}\b\d{6,17}\b")
-            has_wire_like = _has(r"\bwire\b") or _has(r"\bach\b")
-            has_routing = _has(r"(routing|aba)[^\d]{0,40}\b\d{9}\b")
+            scoped = _scope_text_for_invoice_field()
+            has_account_number = _has(r"account[^\d]{0,30}(number|no\.?|#)?[^\d]{0,30}\b\d{6,17}\b", text=scoped)
+            has_wire_like = _has(r"\bwire\b", text=scoped) or _has(r"\bach\b", text=scoped)
+            has_routing = _has(r"(routing|aba)[^\d]{0,40}\b\d{9}\b", text=scoped)
             if not (has_account_number or (has_wire_like and has_routing)):
                 logger.info("route_3_negative_field_missing", field="ach_wire_instructions")
                 return _not_specified("missing_ach_wire_instructions")
 
         # Shipping method / SHIPPED VIA
         if re.search(r"shipping\s+method|shipped\s+via", ql):
-            has_shipped_via = _has(r"shipped\s+via\s*[:\-]?\s*\S{2,}")
+            scoped = _scope_text_for_invoice_field()
+            has_shipped_via = _has(r"shipped\s+via\s*[:\-]?\s*\S{2,}", text=scoped)
             if not has_shipped_via:
                 logger.info("route_3_negative_field_missing", field="shipping_method")
                 return _not_specified("missing_shipping_method")
@@ -2752,6 +2781,8 @@ Instructions:
             "route_3_pre_synthesis_field_existence_check_passed",
             scan_chunks=scan_chunks,
         )
+
+        has_graph_signal = bool(hub_entities) or bool(graph_context.related_entities) or bool(graph_context.relationships or [])
         
         # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (using LazyGraphRAG + HippoRAG2 signals)
@@ -2768,9 +2799,9 @@ Instructions:
             logger.info(
                 "route_3_negative_detection_no_graph_signal",
                 num_hub_entities=len(hub_entities),
-                num_relationships=len(graph_context.relationships),
-                num_related_entities=len(graph_context.related_entities),
-                num_communities=len(community_data),
+                num_relationships=len(graph_context.relationships or []),
+                num_related_entities=len(graph_context.related_entities or []),
+                num_communities=len(community_data or []),
                 reason="No entities or relationships found in graph"
             )
             return {
@@ -2779,9 +2810,9 @@ Instructions:
                 "citations": [],
                 "evidence_path": [],
                 "metadata": {
-                    "matched_communities": [c.get("title", "?") for c in community_data],
+                    "matched_communities": [c.get("title", "?") for c in (community_data or [])],
                     "hub_entities": hub_entities,
-                    "num_source_chunks": len(graph_context.source_chunks),
+                    "num_source_chunks": len(graph_context.source_chunks or []),
                     "num_relationships": 0,
                     "num_related_entities": 0,
                     "latency_estimate": "fast",

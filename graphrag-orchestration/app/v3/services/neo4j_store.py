@@ -547,10 +547,10 @@ class Neo4jStoreV3:
         candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
         
         query = """
-        // Step 1: Vector Search (Native - using gds.similarity.cosine for Neo4j 5.x compatibility)
+        // Step 1: Vector Search (Native - using vector.similarity.cosine)
         MATCH (e:Entity {group_id: $group_id})
         WHERE e.embedding IS NOT NULL
-        WITH e, gds.similarity.cosine(e.embedding, $embedding) AS vectorScore
+        WITH e, vector.similarity.cosine(e.embedding, $embedding) AS vectorScore
         ORDER BY vectorScore DESC
         LIMIT $retrieval_k
         WITH collect({node: e, score: vectorScore}) AS vectorResults
@@ -1132,12 +1132,12 @@ class Neo4jStoreV3:
     ) -> List[Tuple[RaptorNode, float]]:
         """Vector similarity search for RAPTOR nodes using native vector functions."""
         
-        # Use gds.similarity.cosine for efficient calculation (Neo4j 5.x compatible)
+        # Use native vector similarity for efficient calculation.
         if level is not None:
             query = """
             MATCH (r:RaptorNode {group_id: $group_id, level: $level})
             WHERE r.embedding IS NOT NULL
-            WITH r, gds.similarity.cosine(r.embedding, $embedding) AS score
+            WITH r, vector.similarity.cosine(r.embedding, $embedding) AS score
             ORDER BY score DESC
             LIMIT $top_k
             RETURN r, score
@@ -1147,7 +1147,7 @@ class Neo4jStoreV3:
             query = """
             MATCH (r:RaptorNode {group_id: $group_id})
             WHERE r.embedding IS NOT NULL
-            WITH r, gds.similarity.cosine(r.embedding, $embedding) AS score
+            WITH r, vector.similarity.cosine(r.embedding, $embedding) AS score
             ORDER BY score DESC
             LIMIT $top_k
             RETURN r, score
@@ -1182,13 +1182,13 @@ class Neo4jStoreV3:
         Vector search for TextChunk nodes.
         Used for pure Vector RAG (finding exact quotes).
         """
-        # Use gds.similarity.cosine for efficient calculation.
+        # Use native vector similarity for efficient calculation.
         # Also pull the related Document (via PART_OF) so callers can attribute
         # concrete terms (jurisdiction/amounts) per document.
         query = """
         MATCH (t:TextChunk {group_id: $group_id})
         WHERE t.embedding IS NOT NULL
-        WITH t, gds.similarity.cosine(t.embedding, $embedding) AS score
+        WITH t, vector.similarity.cosine(t.embedding, $embedding) AS score
         ORDER BY score DESC
         LIMIT $top_k
         OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})

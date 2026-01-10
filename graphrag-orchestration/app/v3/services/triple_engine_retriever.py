@@ -279,7 +279,7 @@ Answer:"""
         Local Route: Entity-specific fact lookups using Hybrid+Boost search.
         
         Uses Neo4j's native vector search on ENTITIES with:
-        - Vector similarity (gds.similarity.cosine)
+        - Vector similarity (vector.similarity.cosine)
         - Full-text search (lexical matching)
         - RRF fusion
         - Community rank boost

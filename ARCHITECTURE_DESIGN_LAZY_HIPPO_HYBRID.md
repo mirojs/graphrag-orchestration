@@ -62,7 +62,7 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 *   **Example:** "What are the main compliance risks in our portfolio?"
 *   **Goal:** Thematic coverage WITH detail preservation + hallucination prevention
 *   **Engines (Positive):** LazyGraphRAG Community Matching → Hub Entities → Graph Evidence Retrieval → Neo4j Fulltext BM25 Merge → Section-Node Expansion (IN_SECTION) → Keyword Boost Merge → HippoRAG 2 PPR (detail recovery) → Synthesis
-*   **Engines (Negative):** Deterministic pre-synthesis evidence scan gate (field/value existence) → Strict refusal response
+*   **Engines (Negative):** Deterministic Neo4j-backed field validation (post-synthesis, field-specific) → Strict refusal response
 *   **Solves:** 
     - Original Global Search's **detail loss problem** (summaries lost fine print)
     - LLM **hallucination problem** on negative queries (graph-based validation catches non-existent information)
@@ -159,16 +159,18 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Output:** `["Entity: Compliance_Policy_2024", "Entity: Risk_Assessment_Q3"]`
 
 #### Stage 3.2.5: Deterministic Negative Handling (STRICT “NOT FOUND”)
-*   **Engine:** Pre-synthesis evidence scan gate (deterministic)
-*   **What:** For queries that ask for a specific field/value/clause (e.g., routing number, IBAN, SWIFT/BIC, VAT/Tax ID, shipment method, governing law, portal URL), the system checks whether the retrieved evidence actually contains that requested datum.
-*   **Why:** The Route 3 negative evaluator is intentionally strict: answers must contain an explicit refusal phrase and must not add “helpful” related details when the specific field is missing.
+*   **Engine:** Neo4j-backed, deterministic field/pattern existence checks (field-specific)
+*   **What:** For a small, known set of “field lookup” negative failure modes (observed in benchmarks), Route 3 validates that the requested datum actually exists in the graph-backed text chunks before allowing a field-specific answer.
+*   **Why:** Route 3 negatives must be strict: if the exact requested field/clause is not present, the system must refuse and must not provide related but incorrect information.
 *   **Method (high level):**
-    1. **Trigger**: If the query matches one of the supported “missing-field” patterns.
-    2. **Evidence scan**: Concatenate text from the top-N retrieved chunks and look for deterministic regex patterns / field markers.
-    3. **Early return**: If patterns are absent, return a refusal-only answer (no extra context).
-*   **Bounded cost:** Evidence scan is capped via `ROUTE3_NEGATIVE_SCAN_CHUNKS` (default bounded to avoid latency spikes).
-*   **Safety note:** Field checks can be scoped to a document type when the query explicitly asks about it (e.g., invoice-only checks when the query says “invoice”), reducing false positives from other documents.
-*   **Output:** Either returns immediately with a strict “not found / not specified” response or proceeds to positive retrieval and synthesis.
+    1. **Trigger**: Only when the query matches narrow “field lookup” intent (e.g., routing number, IBAN/SWIFT/BIC, VAT/Tax ID, payment portal URL, SHIPPED VIA / shipping method, governing law, license number, wire/ACH instructions, mold clause).
+    2. **LLM synthesis first**: Route 3 runs the normal retrieval + synthesis flow.
+    3. **Post-synthesis validation**: Use Neo4j regex matching against chunk text to confirm the field label/value pattern exists.
+    4. **Override**: If not found, return a refusal-only answer.
+*   **Doc scoping:** When applicable, checks are scoped via a document keyword (e.g., invoice-only checks when the query says “invoice”) to reduce cross-document false positives.
+*   **Canonical refusal:** When refusing, respond ONLY with: "The requested information was not found in the available documents."
+*   **Secondary guardrail:** The synthesis prompts are aligned to the same canonical refusal sentence, but the deterministic validator is the authoritative enforcement.
+*   **Output:** Either returns a strict refusal or proceeds with the synthesized answer.
 
 #### Stage 3.3: Enhanced Graph Context Retrieval (SECTION-AWARE)
 *   **Engine:** EnhancedGraphRetriever with Section Graph traversal

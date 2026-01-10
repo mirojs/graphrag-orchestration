@@ -183,7 +183,73 @@ class DeterministicTracer:
         except Exception as e:
             logger.error("async_neo4j_ppr_failed", error=str(e))
             return await self._trace_with_fallback(query, seed_entities, top_k)
-    
+
+    async def trace_semantic_beam(
+        self,
+        query: str,
+        query_embedding: List[float],
+        seed_entities: List[str],
+        max_hops: int = 3,
+        beam_width: int = 10,
+    ) -> List[Tuple[str, float]]:
+        """
+        Semantic-guided multi-hop using beam search + native vector similarity.
+
+        Unlike PPR (graph-structure-only), this uses query embedding at each hop
+        to prune candidates, keeping only the most query-relevant expansions.
+        This is ideal for Route 4 deep reasoning where semantic alignment matters.
+
+        Requires:
+            - Entities have embeddings (`.embedding` property in Neo4j)
+            - async_neo4j service configured
+
+        Args:
+            query: User query (for logging).
+            query_embedding: Query vector (same model as entity embeddings).
+            seed_entities: Starting entity names.
+            max_hops: Number of hops (default 3).
+            beam_width: Candidates per hop (default 10).
+
+        Returns:
+            List of (entity_name, accumulated_score) sorted descending.
+        """
+        if not self.async_neo4j or not self.group_id:
+            logger.warning("semantic_beam_not_available", reason="async_neo4j/group_id missing")
+            return await self.trace(query, seed_entities, top_k=beam_width)
+
+        try:
+            # Resolve seed names to IDs
+            seed_records = await self.async_neo4j.get_entities_by_names(
+                group_id=self.group_id,
+                entity_names=seed_entities,
+            )
+            seed_ids = [r["id"] for r in seed_records]
+
+            if not seed_ids:
+                logger.warning("semantic_beam_no_seeds", seeds=seed_entities)
+                return [(e, 1.0) for e in seed_entities]
+
+            ranked = await self.async_neo4j.semantic_multihop_beam(
+                group_id=self.group_id,
+                query_embedding=query_embedding,
+                seed_entity_ids=seed_ids,
+                max_hops=max_hops,
+                beam_width=beam_width,
+            )
+
+            logger.info(
+                "semantic_beam_trace_success",
+                query=query[:50],
+                seeds=len(seed_ids),
+                results=len(ranked),
+            )
+            return ranked
+
+        except Exception as e:
+            logger.error("semantic_beam_trace_failed", error=str(e))
+            # Fallback to structure-only PPR
+            return await self.trace(query, seed_entities, top_k=beam_width)
+
     async def _trace_with_fallback(
         self, 
         query: str, 

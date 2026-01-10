@@ -555,6 +555,112 @@ class AsyncNeo4jService:
             return exists
     
     # =========================================================================
+    # Semantic-Guided Multi-Hop (Beam Search with Vector Pruning)
+    # =========================================================================
+
+    async def semantic_multihop_beam(
+        self,
+        group_id: str,
+        query_embedding: List[float],
+        seed_entity_ids: List[str],
+        max_hops: int = 3,
+        beam_width: int = 10,
+        damping: float = 0.85,
+    ) -> List[Tuple[str, float]]:
+        """
+        Semantic-guided multi-hop expansion using beam search + vector similarity.
+
+        At each hop, expands neighbors and prunes to the top beam_width candidates
+        using `vector.similarity.cosine(entity.embedding, $query_embedding)`.
+        This avoids the classic "enumerate all paths then filter" trap.
+
+        Requires entities to have embeddings stored in `.embedding` property.
+
+        Args:
+            group_id: Tenant isolation key.
+            query_embedding: Query vector for semantic scoring.
+            seed_entity_ids: Starting entity IDs (from Route 4 decomposition).
+            max_hops: Number of expansion rounds (default 3).
+            beam_width: How many candidates to keep per hop (default 10).
+            damping: Decay applied per hop to accumulator score.
+
+        Returns:
+            List of (entity_name, score) sorted descending by accumulated score.
+        """
+        # Query uses native vector.similarity.cosine (available in Neo4j 5.18+/Aura)
+        # Runs a single hop at a time; Python loop controls iteration.
+        hop_query = """
+        UNWIND $current_ids AS eid
+        MATCH (src:`__Entity__` {id: eid})-[r]-(neighbor:`__Entity__`)
+        WHERE neighbor.group_id = $group_id
+          AND type(r) <> 'MENTIONS'
+          AND neighbor.embedding IS NOT NULL
+        WITH DISTINCT neighbor,
+             vector.similarity.cosine(neighbor.embedding, $query_embedding) AS sim
+        ORDER BY sim DESC
+        LIMIT $beam_width
+        RETURN neighbor.id AS id,
+               neighbor.name AS name,
+               sim AS similarity
+        """
+
+        import time
+
+        t0 = time.perf_counter()
+
+        # Initialize beam with seeds (each seed gets full score 1.0)
+        scores: Dict[str, float] = {eid: 1.0 for eid in seed_entity_ids}
+        names: Dict[str, str] = {}
+        current_ids = list(seed_entity_ids)
+
+        for hop in range(max_hops):
+            if not current_ids:
+                break
+
+            async with self._get_session() as session:
+                result = await session.run(
+                    hop_query,
+                    current_ids=current_ids,
+                    group_id=group_id,
+                    query_embedding=query_embedding,
+                    beam_width=beam_width,
+                )
+                records = await result.data()
+
+            if not records:
+                break
+
+            # Accumulate scores with damping
+            hop_factor = damping ** (hop + 1)
+            next_ids: List[str] = []
+            for r in records:
+                eid = r["id"]
+                sim = float(r["similarity"])
+                added_score = hop_factor * sim
+                scores[eid] = scores.get(eid, 0.0) + added_score
+                names[eid] = r["name"]
+                next_ids.append(eid)
+
+            # Keep top beam_width for next hop
+            sorted_ids = sorted(next_ids, key=lambda x: scores.get(x, 0), reverse=True)
+            current_ids = sorted_ids[:beam_width]
+
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "semantic_multihop_beam_complete",
+            group_id=group_id,
+            seeds=len(seed_entity_ids),
+            max_hops=max_hops,
+            beam_width=beam_width,
+            results=len(scores),
+            duration_ms=dt_ms,
+        )
+
+        # Return sorted by accumulated score
+        ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+        return [(names.get(eid, eid), score) for eid, score in ranked]
+
+    # =========================================================================
     # Batch Operations
     # =========================================================================
     

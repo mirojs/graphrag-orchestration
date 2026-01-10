@@ -123,4 +123,49 @@ This is where the upgrade becomes accuracy-meaningful:
 
 1. Decide the target Aura version track (exact `2025.xx` if known).
 2. Run Stage 2 benchmarks and capture p50/p95/p99 for Route 3 and Route 4.
-3. If performance headroom improves, implement the Stage 4 multi-hop pruning change.
+3. Monitor if performance headroom improves.
+
+---
+
+## Appendix: Experimental — Semantic-Guided Multi-Hop (not enabled)
+
+An alternative multi-hop approach was implemented but is **not wired into the default pipeline** to stay faithful to HippoRAG 2's PPR-based architecture.
+
+### What it is
+
+- `AsyncNeo4jService.semantic_multihop_beam(...)` — uses `vector.similarity.cosine` at each hop to prune candidates by query relevance.
+- `DeterministicTracer.trace_semantic_beam(...)` — entry point for this alternative approach.
+
+### How it differs from HippoRAG 2 (PPR)
+
+| Aspect | HippoRAG 2 (current default) | Semantic Beam (experimental) |
+|--------|------------------------------|------------------------------|
+| Guidance signal | Graph topology (random walk) | Query embedding |
+| Finds structurally central nodes | Yes | No |
+| Stays semantically aligned | Not guaranteed | Yes |
+| Theoretical basis | Personalized PageRank | Greedy semantic search |
+
+### When to consider enabling
+
+- If Route 4 benchmarks show evidence quality issues (irrelevant but structurally central nodes)
+- If you want tighter semantic alignment at the cost of "discovery" capability
+- For comparison A/B testing against PPR
+
+### How to test (if needed later)
+
+Replace in Route 4 orchestration:
+```python
+# Current (PPR-based, HippoRAG 2 faithful):
+ranked = await tracer.trace(query, seed_entities, top_k=15)
+
+# Experimental (semantic beam):
+ranked = await tracer.trace_semantic_beam(
+    query=query,
+    query_embedding=query_embedding,
+    seed_entities=seed_entities,
+    max_hops=3,
+    beam_width=10,
+)
+```
+
+**Decision (2026-01-10):** Keep as optional/experimental. Default pipeline remains PPR-based per HippoRAG 2 design.

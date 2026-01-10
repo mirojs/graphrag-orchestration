@@ -474,7 +474,7 @@ CRITICAL REQUIREMENTS:
    - If the question asks for "bank routing number" and the evidence shows payment portal URLs but NO routing number → REFUSE
    - If the question asks for "VAT/Tax ID" and the evidence shows Tax IDs (U.S. Federal) but NO VAT number → REFUSE  
    - If the question asks for "governed by California law" and the evidence shows Texas/other states → REFUSE
-   - When refusing, respond ONLY with: "The requested information is not found in the provided documents."
+    - When refusing, respond ONLY with: "The requested information was not found in the available documents."
 3. Do NOT be "helpful" by providing alternative/related information when the specific item is missing.
 4. ONLY if the EXACT requested information IS present: cite sources [N] for EVERY claim.
 
@@ -501,9 +501,9 @@ Evidence Context:
 
 Instructions:
 1. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
-   - Question asks for "bank routing number" but evidence only has payment portal URL → Output: "The requested information is not found in the provided documents."
-   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Output: "The requested information is not found in the provided documents."
-   - Question asks for "California law" but evidence shows Texas law → Output: "The requested information is not found in the provided documents."
+    - Question asks for "bank routing number" but evidence only has payment portal URL → Output: "The requested information was not found in the available documents."
+    - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Output: "The requested information was not found in the available documents."
+    - Question asks for "California law" but evidence shows Texas law → Output: "The requested information was not found in the available documents."
    - Do NOT say "The invoice does not provide X, but here is Y" — Just refuse entirely.
 2. ONLY if the EXACT requested information IS present: provide a brief summary (2-3 paragraphs).
 5. Include citations [N] for factual claims (aim for every sentence that states a fact).

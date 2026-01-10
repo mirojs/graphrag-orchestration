@@ -497,6 +497,62 @@ class AsyncNeo4jService:
             )
             
             return exists
+
+    async def check_pattern_in_docs_by_keyword(
+        self,
+        group_id: str,
+        doc_keyword: str,
+        pattern: str,
+        *,
+        limit: int = 1,
+    ) -> bool:
+        """
+        Check if any chunk in documents whose title/source contains doc_keyword matches pattern.
+
+        This is a lightweight, graph-backed existence check that avoids relying on a specific
+        document URL (useful for Route 3 where multiple docs may be in evidence).
+
+        Args:
+            group_id: Tenant/group id
+            doc_keyword: Lowercase keyword to match against document_title/document_source
+            pattern: Cypher regex pattern (Neo4j '=~' syntax)
+            limit: early-exit limit (kept small for speed)
+
+        Returns:
+            True if any matching chunk exists, else False.
+        """
+        query = """
+        MATCH (c)
+        WHERE c.group_id = $group_id
+          AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+          AND (
+            toLower(coalesce(c.document_title, '')) CONTAINS $doc_keyword OR
+            toLower(coalesce(c.document_source, '')) CONTAINS $doc_keyword OR
+            toLower(coalesce(c.url, '')) CONTAINS $doc_keyword
+          )
+          AND c.text =~ $pattern
+        RETURN count(c) > 0 AS exists
+        LIMIT $limit
+        """
+
+        async with self._get_session() as session:
+            result = await session.run(
+                query,
+                group_id=group_id,
+                doc_keyword=(doc_keyword or "").lower(),
+                pattern=pattern,
+                limit=limit,
+            )
+            record = await result.single()
+            exists = record["exists"] if record else False
+            logger.info(
+                "pattern_exists_in_docs_by_keyword",
+                group_id=group_id,
+                doc_keyword=doc_keyword,
+                pattern=pattern[:60],
+                found=exists,
+            )
+            return exists
     
     # =========================================================================
     # Batch Operations

@@ -1938,6 +1938,52 @@ From production data (Jan 2026):
 
 This shows importance scoring successfully identifies document-central entities without requiring GDS.
 
+### 14.5. Neo4j Native Vector Migration (Jan 2026)
+
+**Status:** ✅ **Completed** (Jan 10, 2026)
+
+#### 14.5.1. Migration Summary
+
+Migrated all query-time vector similarity operations from GDS (`gds.similarity.cosine`) to Neo4j's native `vector.similarity.cosine()` function (available since Neo4j 5.15).
+
+| Aspect | Before (GDS) | After (Native) |
+|--------|--------------|----------------|
+| **Function** | `gds.similarity.cosine(a, b)` | `vector.similarity.cosine(a, b)` |
+| **Dependency** | Requires GDS plugin | Built into Neo4j 5.15+ |
+| **Aura Support** | GDS licensed add-on | ✅ Native (no extra cost) |
+| **Performance** | Good | Equivalent or better |
+| **Syntax** | Identical | Identical |
+
+#### 14.5.2. Files Changed
+
+| File | Function | Change |
+|------|----------|--------|
+| `app/v3/services/neo4j_store.py` | `search_entities_hybrid()` | `gds.similarity.cosine` → `vector.similarity.cosine` |
+| `app/v3/services/neo4j_store.py` | `search_raptor_by_embedding()` | Same |
+| `app/v3/services/neo4j_store.py` | `search_text_chunks()` | Same |
+| `app/hybrid/services/neo4j_store.py` | `search_text_chunks()` | Same |
+| `app/hybrid/pipeline/enhanced_graph_retriever.py` | `search_entities_by_embedding()` | Same |
+
+#### 14.5.3. GDS Still Used For
+
+- **Community Detection (index-time):** `gds.leiden.write()` and `gds.louvain.write()` in `graph_service.py`
+- **Graph Projection:** `gds.graph.project.cypher()` for community algorithms
+
+These remain GDS-dependent because Neo4j does not have native community detection algorithms. Aura Professional includes GDS for this purpose.
+
+#### 14.5.4. Compatibility
+
+Confirmed via capability probe (`scripts/neo4j_capability_probe.py`):
+
+```
+Neo4j Version: 5.27-aura (Aura Professional)
+Native Functions Available:
+  ✅ vector.similarity.cosine
+  ✅ vector.similarity.euclidean
+  ✅ db.index.vector.queryNodes
+  ✅ db.index.fulltext.queryNodes
+```
+
 
 ---
 

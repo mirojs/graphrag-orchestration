@@ -1702,8 +1702,8 @@ Instructions:
         Search TextChunk nodes by vector similarity using Neo4j native vector index.
         
         Uses db.index.vector.queryNodes() for efficient vector search (Neo4j 5.11+).
-        This is significantly faster than gds.similarity.cosine() as it uses
-        proper vector indexes instead of computing similarity for all nodes.
+        This uses proper vector indexes instead of computing similarity for all nodes,
+        providing O(log n) retrieval via HNSW index rather than O(n) full scan.
         
         Uses ThreadPoolExecutor to run sync Neo4j call without blocking event loop.
         This is a production best practice for mixing sync I/O with async FastAPI.
@@ -1724,7 +1724,7 @@ Instructions:
             """Execute Neo4j vector search synchronously in thread pool."""
             # Use native vector index API (Neo4j 5.11+)
             # Index name: chunk_embedding (created during schema initialization)
-            # This is much faster than gds.similarity.cosine()
+            # HNSW index provides efficient approximate nearest neighbor search
             query = """
                  CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
             YIELD node, score

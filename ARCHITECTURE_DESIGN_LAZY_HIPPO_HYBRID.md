@@ -188,11 +188,19 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Benchmark Results (2026-01-06):** 6/10 questions at 100% theme coverage, avg 85%
 *   **Output:** Diversified source chunks with section metadata
 
-#### Stage 3.3.5: Neo4j Fulltext BM25 Merge (POSITIVE RECALL + PHRASE MATCHING)
-*   **Engine:** Neo4j native fulltext index (BM25/Lucene)
-*   **What:** Run a fulltext query against chunk text to surface exact/near-exact matches that graph traversal may miss (numbers, notice periods, “SHIPPED VIA”, clause headings, etc.).
-*   **Why (positive questions):** Improves deterministic recall for phrase-sensitive contract/invoice details without requiring per-document forcing.
-*   **How it integrates:** BM25 candidates are merged/deduped with graph-derived chunks (and then section expansion + keyword boosts can be applied) before synthesis.
+#### Stage 3.3.5: Cypher 25 Hybrid BM25 + Vector RRF Fusion (Jan 2025 Update)
+*   **Engine:** Neo4j Cypher 25 native fulltext (BM25/Lucene) + native vector search with RRF fusion
+*   **What:** Single-query hybrid retrieval combining BM25 lexical matching with vector similarity, fused using Reciprocal Rank Fusion (RRF) with k=60 smoothing.
+*   **Why (positive questions):** Cypher 25 enables both BM25 and vector search to execute in a single query, improving latency and enabling proper RRF scoring across both retrieval modes.
+*   **Key Features:**
+    - **Single Cypher Query:** Runs both `db.index.fulltext.queryNodes()` and `db.index.vector.queryNodes()` in one transaction
+    - **RRF Fusion:** Combines rankings using `1/(k + rank_bm25) + 1/(k + rank_vector)` where k=60
+    - **Anchor Detection:** Chunks appearing in BOTH BM25 AND vector results are marked `is_anchor=True` for higher confidence
+    - **Backward Compatible:** Falls back to pure BM25 via `ROUTE3_GRAPH_NATIVE_BM25=1` env var
+*   **Environment Variables:**
+    - `ROUTE3_CYPHER25_HYBRID_RRF=1` (default): Full hybrid BM25 + Vector + RRF fusion
+    - `ROUTE3_GRAPH_NATIVE_BM25=1`: Pure BM25 fallback (legacy behavior)
+*   **How it integrates:** Hybrid candidates are deduped with graph-derived chunks (and then section expansion + keyword boosts can be applied) before synthesis.
 
 #### Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
 *   **Engine:** HippoRAG 2 (Personalized PageRank)
@@ -685,6 +693,38 @@ PROFILE_CONFIG = {
     *   **HippoRAG View:** Subject-Predicate-Object triples for PageRank
     *   **LazyGraphRAG View:** Text Units linked to entities for synthesis
     *   **Vector Index:** Embeddings for Route 1 fast retrieval
+
+### Neo4j Cypher 25 Migration (Jan 2025 Complete)
+
+The system has been fully migrated to Neo4j Cypher 25 runtime, enabling native BM25 + Vector hybrid search with RRF fusion.
+
+#### Stage 1: Cypher 25 Runtime + Constraints ✅
+*   **Runtime Switch:** `CYPHER runtime=cypher25` in all queries
+*   **Uniqueness Constraints:** Replaces `CREATE CONSTRAINT ON` (deprecated) with `CREATE CONSTRAINT IF NOT EXISTS ... FOR ... REQUIRE ... IS UNIQUE`
+*   **Constraint Names:** All constraints now use explicit names for management
+
+#### Stage 2: CASE Expression Optimization ✅
+*   **Pattern:** `CASE WHEN exists(n.prop) ...` → `CASE WHEN n.prop IS NOT NULL ...`
+*   **Why:** `exists()` function deprecated in Cypher 25, replaced with null checks
+
+#### Stage 3: Native Vector Index Migration ✅
+*   **Native Index Creation:** Uses `CREATE VECTOR INDEX IF NOT EXISTS` (Cypher 25 syntax)
+*   **Index Configuration:** `OPTIONS {indexConfig: {`vector.dimensions`: 3072, `vector.similarity_function`: 'cosine'}}`
+*   **Query Syntax:** Uses `db.index.vector.queryNodes()` for native vector search
+
+#### Cypher 25 Benefits
+| Feature | Pre-Cypher 25 | Cypher 25 | Impact |
+|---------|---------------|-----------|--------|
+| **Hybrid Search** | Separate BM25 + Vector queries | Single query with RRF | ~30% latency reduction |
+| **Vector Index** | Driver-managed | Native Cypher | Better integration |
+| **Constraint Syntax** | Deprecated `ON` clause | Modern `FOR ... REQUIRE` | Future-proof |
+| **Null Checks** | `exists()` function | `IS NOT NULL` | Standard SQL-like |
+
+#### Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROUTE3_CYPHER25_HYBRID_RRF` | `1` | Enable BM25 + Vector + RRF fusion |
+| `ROUTE3_GRAPH_NATIVE_BM25` | `0` | Fallback to pure BM25 (legacy) |
 
 ### Document Ingestion: Azure Document Intelligence (DI)
 

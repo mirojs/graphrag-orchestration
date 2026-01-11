@@ -11,11 +11,13 @@
   - `app/hybrid/indexing/lazygraphrag_pipeline.py` — added:
     - `dry_run` support and validation thresholds (`min_entities`, `min_mentions`)
     - LlamaIndex fallback extractor `_extract_with_llamaindex_extractor`
-    - lightweight NER seeder `_nlp_seed_entities` (regex money/percent seeding)
+    - lightweight NER seeder `_nlp_seed_entities` (initially included regex money/percent seeding)
     - `_validate_and_commit_entities` (commit gate that prevents partial commits)
   - `scripts/index_with_hybrid_pipeline.py` — added `--dry-run` and validation logging
   - `tests/test_indexing_fallback.py` — initial unit test for NLP seeding
 
+- **Reverted (2026-01-11):**
+  - Per the user's request, numeric-fee seeding (percent/money regex seeder) and the corresponding numeric-fee unit test were reverted and the original `_nlp_seed_entities` behavior restored. The revert was validated locally (unit test passed) and the working tree is clean. The revert commit message: `revert: remove numeric-fee seeding and numeric fee unit test per user request` (working tree clean; change recorded locally).
 ## What I ran & findings
 - Dry-run indexing (validation only) for `test-5pdfs-1767429340223041632` — verified extraction diagnostics.
 - Committed reindex (no `--dry-run`) and verified entities were persisted:

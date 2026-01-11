@@ -10,6 +10,8 @@ RUN apt-get update && apt-get install -y \
 
 # Copy requirements and install to user site packages
 COPY requirements.txt .
+# Copy local optional stubs used for base builds (e.g., graspologic stub)
+COPY third_party/graspologic_stub third_party/graspologic_stub
 # Upgrade pip to latest before installs to avoid resolver bugs on older pip
 RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore \
     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt

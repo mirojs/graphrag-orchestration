@@ -1646,8 +1646,8 @@ Instructions:
             // ================================================================
             
             // Step 1: BM25 Search (phrase-aware, exact match precision)
-            CALL {
-                WITH $bm25_query AS bm25_query, $group_id AS group_id, $bm25_k AS bm25_k
+            WITH $bm25_query AS bm25_query, $group_id AS group_id, $bm25_k AS bm25_k, $embedding AS embedding, $vector_k AS vector_k, $rrf_k AS rrf_k, $top_k AS top_k
+            CALL (bm25_query, group_id) {
                 CALL db.index.fulltext.queryNodes('textchunk_fulltext', bm25_query)
                 YIELD node, score
                 WHERE node.group_id = group_id
@@ -1658,12 +1658,11 @@ Instructions:
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank
             }
-            WITH collect({node: node, rank: rank}) AS bm25List
+            WITH collect({node: node, rank: rank}) AS bm25List, embedding, group_id, vector_k, rrf_k, top_k
             
             // Step 2: Vector Search (semantic matching)
-            CALL {
-                WITH $embedding AS embedding, $group_id AS group_id, $vector_k AS vector_k
-                CALL db.index.vector.queryNodes('chunk_embedding', vector_k * 10, embedding)
+            CALL (embedding, group_id) {
+                CALL db.index.vector.queryNodes('chunk_embedding', $vector_k * 10, embedding)
                 YIELD node, score
                 WHERE node.group_id = group_id
                 WITH node, score
@@ -1673,25 +1672,25 @@ Instructions:
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank
             }
-            WITH bm25List, collect({node: node, rank: rank}) AS vectorList
+            WITH bm25List, collect({node: node, rank: rank}) AS vectorList, group_id, rrf_k, top_k
             
             // Step 3: RRF Fusion (rank-based, scale-invariant)
-            WITH bm25List, vectorList,
+            WITH bm25List, vectorList, group_id, rrf_k, top_k,
                  [x IN bm25List | x.node] + [y IN vectorList | y.node] AS allNodes
             UNWIND allNodes AS node
-            WITH DISTINCT node, bm25List, vectorList
-            WITH node,
+            WITH DISTINCT node, bm25List, vectorList, group_id, rrf_k, top_k
+            WITH node, group_id, rrf_k, top_k,
                  [b IN bm25List WHERE b.node = node | b.rank][0] AS bm25Rank,
                  [v IN vectorList WHERE v.node = node | v.rank][0] AS vectorRank
-            WITH node,
+            WITH node, group_id, top_k,
                  // RRF: 1/(k + rank) - handles null ranks gracefully
-                 (CASE WHEN bm25Rank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + bm25Rank) END) +
-                 (CASE WHEN vectorRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + vectorRank) END) AS rrfScore,
+                 (CASE WHEN bm25Rank IS NULL THEN 0.0 ELSE 1.0 / (rrf_k + bm25Rank) END) +
+                 (CASE WHEN vectorRank IS NULL THEN 0.0 ELSE 1.0 / (rrf_k + vectorRank) END) AS rrfScore,
                  bm25Rank IS NOT NULL AS hasBM25,
                  vectorRank IS NOT NULL AS hasVector
             
             // Step 4: Get metadata
-            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: group_id})
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             
             RETURN node.id AS id,

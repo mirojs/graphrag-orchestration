@@ -330,42 +330,40 @@ class AsyncNeo4jService:
                 WHERE seed.group_id = $group_id
 
                 // Always include the seed itself
-                WITH seed
-                CALL {
-                    WITH seed
+                WITH seed, seed_id, group_id, per_seed_limit, per_neighbor_limit, damping, top_k
+                CALL (seed, group_id, per_seed_limit) {
                     MATCH (seed)-[r1]-(n1:`__Entity__`)
-                    WHERE n1.group_id = $group_id
+                    WHERE n1.group_id = group_id
                         AND type(r1) <> 'MENTIONS'
                     WITH n1
                     ORDER BY coalesce(n1.degree, 0) DESC
-                    LIMIT $per_seed_limit
+                    LIMIT per_seed_limit
                     RETURN collect(n1) AS hop1
                 }
 
-                WITH seed, hop1
+                WITH seed, hop1, group_id, per_neighbor_limit, damping, top_k
                 UNWIND (hop1 + [seed]) AS hop1_node
-                WITH seed, hop1_node
+                WITH seed, hop1_node, group_id, per_neighbor_limit, damping, top_k
 
                 // Optional 2-hop expansion capped per hop1_node
-                CALL {
-                    WITH seed, hop1_node
+                CALL (seed, hop1_node, group_id, per_neighbor_limit) {
                     MATCH (hop1_node)-[r2]-(n2:`__Entity__`)
-                    WHERE n2.group_id = $group_id
+                    WHERE n2.group_id = group_id
                         AND type(r2) <> 'MENTIONS'
                     WITH n2
                     ORDER BY coalesce(n2.degree, 0) DESC
-                    LIMIT $per_neighbor_limit
+                    LIMIT per_neighbor_limit
                     RETURN collect(n2) AS hop2
                 }
 
-                WITH seed, hop1_node, hop2
+                WITH seed, hop1_node, hop2, damping, top_k
                 UNWIND (hop2 + [hop1_node]) AS entity
-                WITH entity,
+                WITH entity, seed, hop1_node, damping,
                          sum(
                              CASE
                                  WHEN entity.id = seed.id THEN 1.0
-                                 WHEN entity.id = hop1_node.id THEN $damping
-                                 ELSE $damping * $damping
+                                 WHEN entity.id = hop1_node.id THEN damping
+                                 ELSE damping * damping
                              END
                          ) AS score
                 RETURN entity.id AS id,

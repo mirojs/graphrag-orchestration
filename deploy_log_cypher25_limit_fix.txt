@@ -1,0 +1,25 @@
+
+Deploying services (azd deploy)
+
+Deploying service graphrag
+Packaging service graphrag (Tagging container image)
+Publishing service graphrag (Tagging container image)
+Publishing service graphrag (Logging into container registry)
+Publishing service graphrag (Pushing container image)
+Deploying service graphrag (Updating container app revision)
+  (x) Failed: Deploying service graphrag
+
+ERROR: failed deploying service 'graphrag': updating container app service: updating container app revision: begin updating ingress traffic: PATCH https://management.azure.com/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/rg-graphrag-feature/providers/Microsoft.App/containerApps/graphrag-orchestration
+--------------------------------------------------------------------------------
+RESPONSE 409: 409 Conflict
+ERROR CODE: ContainerAppOperationInProgress
+--------------------------------------------------------------------------------
+{
+  "error": {
+    "code": "ContainerAppOperationInProgress",
+    "message": "Cannot modify a container app 'graphrag-orchestration' because there is an active provisioning operation in progress. OperationId: '134ec828-9d53-4ac1-b5f9-ebdd71d38d26'."
+  }
+}
+--------------------------------------------------------------------------------
+
+TraceID: a10dcec8c2711a26de2317f48ea08c9e

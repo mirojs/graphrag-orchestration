@@ -1090,23 +1090,29 @@ class EnhancedGraphRetriever:
         max_relationships: int = 30,
     ) -> List[EntityRelationship]:
         """
-        Get RELATED_TO relationships for the given entities.
+        Get co-mentioned entity relationships via shared TextChunks.
         
-        Expands entity context by traversing relationship edges.
+        Finds entities that appear together in the same chunks (via MENTIONS edges).
         """
         if not entity_names or not self.driver:
             return []
         
+        # Note: Hybrid pipeline creates Entity-[:MENTIONS]->TextChunk relationships
+        # This query finds entities that co-occur in the same chunks
         query = """
-        MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
-        WHERE toLower(e1.name) IN $entity_names_lower
-           OR toLower(e2.name) IN $entity_names_lower
+        MATCH (e1:Entity)-[:MENTIONS]->(c:TextChunk)<-[:MENTIONS]-(e2:Entity)
+        WHERE e1.group_id = $group_id
+          AND e2.group_id = $group_id
+          AND c.group_id = $group_id
+          AND e1 <> e2
+          AND (toLower(e1.name) IN $entity_names_lower OR toLower(e2.name) IN $entity_names_lower)
+        WITH e1, e2, count(DISTINCT c) as shared_chunks, collect(DISTINCT c.id)[0..2] as chunk_ids
         RETURN 
             e1.name as source,
             e2.name as target,
-            r.description as description,
-            type(r) as rel_type
-        ORDER BY size(r.description) DESC
+            'Co-occur in ' + toString(shared_chunks) + ' chunk(s)' as description,
+            'CO_MENTIONED' as rel_type
+        ORDER BY shared_chunks DESC
         LIMIT $max_rels
         """
         
@@ -1119,6 +1125,7 @@ class EnhancedGraphRetriever:
                     result = session.run(
                         query,
                         entity_names_lower=entity_names_lower,
+                        group_id=self.group_id,
                         max_rels=max_relationships,
                     )
                     return list(result)
@@ -1140,7 +1147,7 @@ class EnhancedGraphRetriever:
             return relationships
             
         except Exception as e:
-            logger.error("relationship_retrieval_failed", error=str(e))
+            logger.error("relationship_retrieval_failed", error=str(e), num_entities=len(entity_names))
             return []
     
     async def _get_entity_descriptions(

@@ -147,9 +147,7 @@ class LazyGraphRAGIndexingPipeline:
                 group_id=group_id,
                 chunks=all_chunks,
             )
-            logger.info("entity_extraction_complete", 
-                       entities=len(entities), 
-                       relationships=len(relationships))
+            logger.info(f"entity_extraction_complete: {len(entities)} entities, {len(relationships)} relationships")
 
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
@@ -413,7 +411,7 @@ class LazyGraphRAGIndexingPipeline:
             )
 
         extracted_nodes = await extractor.acall(nodes)
-        logger.info("extractor_complete", num_nodes=len(extracted_nodes))
+        logger.info(f"extractor_complete: {len(extracted_nodes)} nodes extracted")
 
         # Collect entities/relations and link to originating chunk via text_unit_ids.
         entities_by_key: Dict[str, Entity] = {}

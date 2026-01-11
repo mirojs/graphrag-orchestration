@@ -579,10 +579,9 @@ class Neo4jHybridSearchService:
         cypher = """
         UNWIND $entity_ids AS start_id
         MATCH (start:`__Entity__` {id: start_id, group_id: $group_id})
-        CALL {
-            WITH start
-            MATCH path = (start)-[r*1..$depth]-(end:`__Entity__`)
-            WHERE end.group_id = $group_id
+        CALL (start, group_id, depth) {
+            MATCH path = (start)-[r*1..depth]-(end:`__Entity__`)
+            WHERE end.group_id = group_id
             UNWIND relationships(path) AS rel
             WITH startNode(rel) AS source, rel, endNode(rel) AS target
             RETURN source.name AS source_name, 

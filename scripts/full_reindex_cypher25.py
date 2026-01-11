@@ -206,8 +206,8 @@ async def main():
     llm_service = LLMService()
     
     try:
-        llm = await llm_service.get_llm()
-        embedder = await llm_service.get_embedding_model()
+        llm = llm_service.get_llm_model()
+        embedder = llm_service.get_embedding_model()
     except Exception as e:
         logger.warning(f"Failed to initialize LLM/embedder: {e}")
         logger.warning("Continuing without entity extraction...")

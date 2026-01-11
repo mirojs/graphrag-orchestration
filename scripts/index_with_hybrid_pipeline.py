@@ -116,10 +116,10 @@ async def main():
         if text and not text.startswith("["):
             documents.append({
                 "text": text,
+                "title": pdf.stem,  # Top-level title for Document node
+                "source": str(pdf),  # Top-level source for Document node
                 "metadata": {
                     "file_name": pdf.name,
-                    "source": str(pdf),
-                    "title": pdf.stem
                 }
             })
             logger.info(f"  ✅ {pdf.name}: {len(text):,} chars")

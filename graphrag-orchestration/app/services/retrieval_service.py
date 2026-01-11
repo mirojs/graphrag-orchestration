@@ -112,7 +112,7 @@ class RetrievalService:
         
         retriever = VectorCypherRetriever(
             driver=self._get_neo4j_driver(),
-            index_name="chunk_vector",  # Search chunks which have text content
+            index_name="chunk_embedding",  # Vector index on TextChunk.embedding
             embedder=self._get_native_embedder(),
             retrieval_query=f"""
                 WITH node, score

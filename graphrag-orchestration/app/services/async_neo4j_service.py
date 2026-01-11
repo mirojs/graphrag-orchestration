@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Cypher 25 prefix for opting into new runtime optimizations
 # Set USE_CYPHER_25 = True to enable Cypher 25 features globally
 # Toggle this to False to run legacy (pre-Cypher25) benchmarks
-USE_CYPHER_25: bool = False
+USE_CYPHER_25: bool = True
 CYPHER_25_PREFIX: str = "CYPHER 25\n"
 
 

@@ -31,9 +31,10 @@ from llama_index.core.agent.workflow import FunctionAgent
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core import PropertyGraphIndex
 from llama_index.core.query_engine import RetrieverQueryEngine
-from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+# Removed llama-index-graph-stores-neo4j import for driver v6.0+ compatibility
+# Neo4jPropertyGraphStore replaced by MultiTenantNeo4jStore (StandaloneNeo4jStore)
 
-from app.services.graph_service import GraphService
+from app.services.graph_service import GraphService, MultiTenantNeo4jStore
 from app.services.llm_service import LLMService
 from app.core.config import settings
 
@@ -77,8 +78,8 @@ class RetrievalService:
             # Get Neo4j store for this group
             neo4j_store = self.graph_service.get_store(group_id)
             
-            if not isinstance(neo4j_store, Neo4jPropertyGraphStore):
-                raise ValueError(f"Expected Neo4jPropertyGraphStore, got {type(neo4j_store)}")
+            if not isinstance(neo4j_store, MultiTenantNeo4jStore):
+                raise ValueError(f"Expected MultiTenantNeo4jStore, got {type(neo4j_store)}")
             
             # Use LlamaIndex's VectorContextRetriever as base, extended for multi-index search
             # This follows Neo4j best practices (db.index.vector.queryNodes) while leveraging

@@ -1,11 +1,13 @@
 """
-Multi-Tenant Neo4j Graph Service using LlamaIndex PropertyGraphIndex.
+Multi-Tenant Neo4j Graph Service.
 
 This module provides application-level tenant isolation for Neo4j Community Edition,
 which lacks native Row Level Security. All nodes and relationships are tagged with
 group_id and all queries enforce group_id filtering.
 
-Reference: https://github.com/run-llama/llama_index/tree/main/llama-index-integrations/graph_stores/llama-index-graph-stores-neo4j
+MIGRATION NOTE (2025-01):
+Migrated from llama-index-graph-stores-neo4j to standalone implementation.
+This enables neo4j driver v6.0+ compatibility for native Vector type support.
 """
 
 from typing import List, Optional, Dict, Any, Tuple
@@ -13,9 +15,17 @@ import logging
 import neo4j
 from neo4j import GraphDatabase
 
-from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
-from llama_index.core.graph_stores.types import LabelledNode, Relation, EntityNode, ChunkNode
-from llama_index.core.schema import TextNode
+# Use standalone store (compatible with neo4j driver v6.0+)
+from app.services.neo4j_standalone_store import (
+    StandaloneNeo4jStore,
+    LabelledNode,
+    Relation,
+    EntityNode,
+    ChunkNode,
+    BASE_ENTITY_LABEL,
+    BASE_NODE_LABEL,
+    remove_empty_values,
+)
 from llama_index.core.vector_stores.types import (
     VectorStoreQuery,
     MetadataFilters,
@@ -27,19 +37,13 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Constants matching Neo4j PropertyGraphStore label conventions
-BASE_ENTITY_LABEL = "__Entity__"
-BASE_NODE_LABEL = "__Node__"
 
-
-def remove_empty_values(d: Dict[str, Any]) -> Dict[str, Any]:
-    """Remove keys with None or empty values from a dictionary."""
-    return {k: v for k, v in d.items() if v is not None and v != ""}
-
-
-class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
+class MultiTenantNeo4jStore(StandaloneNeo4jStore):
     """
-    A tenant-aware wrapper around Neo4jPropertyGraphStore.
+    A tenant-aware Neo4j store extending StandaloneNeo4jStore.
+    
+    MIGRATION NOTE: Previously extended llama-index Neo4jPropertyGraphStore.
+    Now extends our standalone implementation for neo4j driver v6.0+ compatibility.
     
     Security Model:
     - All nodes/edges get a `group_id` property on insert
@@ -47,10 +51,8 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
     - This is CRITICAL because Neo4j Community Edition has no native RLS
     
     Vector Query Handling:
-    - Disables vector index support even if Neo4j reports it
-    - Neo4j may have version >= 5.23.0 but lack vector.similarity.cosine in some configurations
-    - This prevents PropertyGraphIndex from auto-adding VectorContextRetriever
-    - Prevents Cypher generation errors when vector functions aren't actually available
+    - Supports vector similarity search via Neo4j vector indices
+    - Compatible with neo4j driver v6.0+ native Vector type
     """
     
     def __init__(
@@ -62,8 +64,8 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
         database: str = "neo4j",
         **kwargs
     ):
-        self.group_id = group_id
         super().__init__(
+            group_id=group_id,
             username=username,
             password=password,
             url=url,
@@ -81,55 +83,35 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
         """
         return True
 
-    def vector_query(
+    def vector_query_llama(
         self,
         query: VectorStoreQuery,
         **kwargs: Any,
     ) -> Tuple[List[LabelledNode], List[float]]:
         """
         Execute a vector query with mandatory group_id filtering.
+        
+        NOTE: This method accepts LlamaIndex VectorStoreQuery format for backward compatibility.
+        It extracts the embedding and calls the parent's simpler vector_query method.
         """
-        # Ensure filters exist
-        if query.filters is None:
-            query.filters = MetadataFilters(filters=[])
+        # Extract embedding from LlamaIndex query
+        if query.query_embedding is None:
+            raise ValueError("query_embedding is required for vector search")
         
-        # Add group_id filter
-        # Check if it's already there to avoid duplication
-        has_group_filter = any(
-            f.key == "group_id" for f in query.filters.filters if isinstance(f, MetadataFilter)
+        # Get index name from kwargs or use default
+        index_name = kwargs.get("index_name", "entity_embedding")
+        top_k = query.similarity_top_k or 10
+        
+        # Call parent's vector_query with simpler signature
+        return super().vector_query(
+            embedding=query.query_embedding,
+            index_name=index_name,
+            top_k=top_k,
         )
-        
-        if not has_group_filter:
-            query.filters.filters.append(
-                MetadataFilter(
-                    key="group_id",
-                    value=self.group_id,
-                    operator=FilterOperator.EQ,
-                )
-            )
-            
-        logger.info(f"Executing vector query with filters: {query.filters}")
-        results = super().vector_query(query, **kwargs)
-        nodes, scores = results
-
-        logger.info(f"Vector query returned {len(nodes)} nodes")
-        if nodes:
-            logger.info(f"First node type: {type(nodes[0])}")
-            logger.info(f"First node: {nodes[0]}")
-            # Check for both id and node_id
-            node_id = getattr(nodes[0], "id", getattr(nodes[0], "node_id", "N/A"))
-            logger.info(f"First node id: {node_id}")
-            
-            if hasattr(nodes[0], "text"):
-                logger.info(f"First node text: {nodes[0].text[:50]}...")
-            elif hasattr(nodes[0], "properties") and nodes[0].properties:
-                logger.info(f"First node text property: {nodes[0].properties.get('text', 'N/A')[:50]}...")
-        
-        return results
 
     async def aquery(self, query: str, params: Optional[dict] = None):
         """
-        Async query method - delegates to astructured_query from parent class.
+        Async query method - delegates to structured_query.
         This is a convenience alias for compatibility with code expecting aquery().
         """
         return await self.astructured_query(query, param_map=params)
@@ -138,7 +120,7 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
         """
         Inject group_id into all nodes.
         """
-        from llama_index.core.graph_stores.types import EntityNode, ChunkNode
+        # EntityNode and ChunkNode already imported from neo4j_standalone_store
         
         # Separate and prepare nodes
         entity_dicts = []
@@ -286,11 +268,11 @@ class MultiTenantNeo4jStore(Neo4jPropertyGraphStore):
             properties = {}
         properties["group_id"] = self.group_id
         
+        # Parent uses relation_types, we accept relation_names for backward compatibility
         results = super().get_triplets(
             entity_names=entity_names,
-            relation_names=relation_names,
+            relation_types=relation_names,  # Map relation_names to relation_types
             properties=properties,
-            ids=ids,
         )
         logger.info(f"get_triplets returned {len(results)} triplets")
         if results:

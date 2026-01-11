@@ -75,7 +75,10 @@ class HippoRAGRetriever(BaseRetriever):
         ```python
         from llama_index.llms.azure_openai import AzureOpenAI
         from llama_index.embeddings.azure_openai import AzureOpenAIEmbedding
-        from llama_index.graph_stores.neo4j import Neo4jPropertyGraphStore
+        from app.services.graph_service import GraphService
+        
+        graph_service = GraphService()
+        neo4j_store = graph_service.get_store(group_id)
         
         retriever = HippoRAGRetriever(
             graph_store=neo4j_store,

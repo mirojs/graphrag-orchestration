@@ -13,7 +13,8 @@ llama-index-llms-azure-openai==0.3.4
 llama-index-llms-openai==0.4.3
 llama-index-embeddings-azure-openai==0.3.3
 llama-index-vector-stores-azureaisearch==0.3.0
-llama-index-graph-stores-neo4j==0.4.1
+# llama-index-graph-stores-neo4j removed - replaced by app/services/neo4j_standalone_store.py
+# This enables neo4j driver v6.0+ compatibility for native Vector type support
 llama-index-packs-raptor==0.3.5
 scikit-learn>=1.4.0
 
@@ -27,6 +28,8 @@ llama-parse>=0.6.0  # Layout-aware PDF parsing
 azure-search-documents==11.6.0
 
 # Graph stores
+# neo4j driver v6.0+ required for native Vector type (Cypher 25)
+# Previously blocked by llama-index-graph-stores-neo4j (neo4j<6,>=5.16.0)
 neo4j>=5.15.0
 neo4j-graphrag==1.7.0  # Use 1.7.0 - no numpy constraint, works with graspologic
 rapidfuzz>=3.6.0  # Required by neo4j-graphrag

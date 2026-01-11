@@ -147,9 +147,9 @@ class LazyGraphRAGIndexingPipeline:
                 group_id=group_id,
                 chunks=all_chunks,
             )
-            logger.info(f"🔍 EXTRACTION DEBUG: {len(entities)} entities, {len(relationships)} relationships")
-            if entities:
-                logger.info(f"   Sample entities: {[e.name for e in entities[:5]]}")
+            logger.info("entity_extraction_complete", 
+                       entities=len(entities), 
+                       relationships=len(relationships))
 
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
@@ -413,12 +413,7 @@ class LazyGraphRAGIndexingPipeline:
             )
 
         extracted_nodes = await extractor.acall(nodes)
-        logger.info(f"🔍 Extractor returned {len(extracted_nodes)} nodes")
-        if extracted_nodes:
-            sample_meta = getattr(extracted_nodes[0], "metadata", {}) or {}
-            logger.info(f"🔍 Sample metadata keys: {list(sample_meta.keys())}")
-            if "kg_nodes" in sample_meta:
-                logger.info(f"🔍 Sample has {len(sample_meta.get('kg_nodes', []))} kg_nodes")
+        logger.info("extractor_complete", num_nodes=len(extracted_nodes))
 
         # Collect entities/relations and link to originating chunk via text_unit_ids.
         entities_by_key: Dict[str, Entity] = {}

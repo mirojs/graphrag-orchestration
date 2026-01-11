@@ -53,6 +53,9 @@ class LazyGraphRAGIndexingConfig:
     embedding_dimensions: int = 3072
     # Phase 2: neo4j-graphrag LLMEntityRelationExtractor (DEFAULT for easy re-indexing)
     use_native_extractor: bool = True
+    # Validation thresholds for reliable indexing (Option 2)
+    min_entities: int = 3
+    min_mentions: int = 5
 
 
 class LazyGraphRAGIndexingPipeline:
@@ -85,6 +88,7 @@ class LazyGraphRAGIndexingPipeline:
         # community/raptor work, so we ignore them but keep signature compatibility.
         run_community_detection: bool = False,
         run_raptor: bool = False,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -172,11 +176,19 @@ class LazyGraphRAGIndexingPipeline:
             )
             stats["deduplication"] = dedup_stats
 
-        # 7) Persist entities + relationships.
-        if entities:
-            await self.neo4j_store.aupsert_entities_batch(group_id, entities)
-        if relationships:
-            self.neo4j_store.upsert_relationships_batch(group_id, relationships)
+        # 7) Validate and (conditionally) persist entities + relationships.
+        commit_result = await self._validate_and_commit_entities(
+            group_id=group_id,
+            entities=entities,
+            relationships=relationships,
+            dry_run=dry_run,
+        )
+        stats["validation_passed"] = commit_result.get("passed", False)
+        stats["validation_details"] = commit_result.get("details", {})
+        if not commit_result.get("passed", False) and not dry_run:
+            stats["skipped"].append("entity_validation_failed")
+            stats["elapsed_s"] = round(time.time() - start_time, 2)
+            return stats
 
         stats["entities"] = len(entities)
         stats["relationships"] = len(relationships)
@@ -408,7 +420,17 @@ class LazyGraphRAGIndexingPipeline:
         # Phase 2: Use native neo4j-graphrag extractor (DEFAULT)
         # Fallback to LlamaIndex only if native unavailable or explicitly disabled
         if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
-            return await self._extract_with_native_extractor(group_id, chunks)
+            entities, relationships = await self._extract_with_native_extractor(group_id, chunks)
+            # If native extractor produced too few entities or no relationships, run fallback
+            if len(entities) < self.config.min_entities or len(relationships) < self.config.min_mentions:
+                logger.warning("native extractor produced insufficient entities/relationships; running fallback LlamaIndex extractor")
+                llm_entities, llm_relationships = await self._extract_with_llamaindex_extractor(chunks)
+                entities, relationships = self._merge_entity_relationships(entities, relationships, llm_entities, llm_relationships)
+                # If still insufficient, run a lightweight NLP seeding pass
+                if len(entities) < self.config.min_entities:
+                    seeded = self._nlp_seed_entities(group_id, chunks)
+                    entities.extend(seeded)
+            return entities, relationships
 
         # Fallback: Use LlamaIndex SchemaLLMPathExtractor (if native disabled)
         logger.warning(f"Using LlamaIndex fallback extractor (use_native_extractor={self.config.use_native_extractor}, available={NATIVE_EXTRACTOR_AVAILABLE})")
@@ -580,27 +602,31 @@ class LazyGraphRAGIndexingPipeline:
         entity_id_map: Dict[str, str] = {}  # Map native node ID to our entity ID
         
         for node in graph.nodes:
-            if not node.labels or "Chunk" in node.labels:
+            # neo4j-graphrag may expose either `.labels` (list) or `.label` (single)
+            node_labels = getattr(node, "labels", None) or ([] if getattr(node, "label", None) is None else [getattr(node, "label")])
+            if not node_labels or "Chunk" in node_labels:
                 continue  # Skip chunk nodes
-            
-            name = node.properties.get("name", "") if node.properties else ""
+
+            props = getattr(node, "properties", None) or {}
+            name = props.get("name", "") if isinstance(props, dict) else (getattr(node, "name", "") or "")
             if not name:
-                name = node.id
-            
+                name = getattr(node, "id", None) or getattr(node, "node_id", None) or ""
+
             key = self._canonical_entity_key(name)
             if not key:
                 continue
-            
+
             ent_id = self._stable_entity_id(group_id, key)
-            entity_id_map[node.id] = ent_id
-            
+            node_id_key = getattr(node, "id", None) or getattr(node, "node_id", None) or name
+            entity_id_map[node_id_key] = ent_id
+
             entities.append(Entity(
                 id=ent_id,
                 name=name,
-                type=node.labels[0] if node.labels else "CONCEPT",
-                description=node.properties.get("description", "") if node.properties else "",
+                type=node_labels[0] if node_labels else "CONCEPT",
+                description=props.get("description", "") if isinstance(props, dict) else "",
                 embedding=None,
-                metadata=node.properties or {},
+                metadata=props or {},
                 text_unit_ids=[],
             ))
         
@@ -633,6 +659,187 @@ class LazyGraphRAGIndexingPipeline:
         
         logger.info(f"Native extraction complete: {len(entities)} entities, {len(relationships)} relationships")
         return entities, relationships
+
+    async def _extract_with_llamaindex_extractor(self, chunks: List[TextChunk]) -> Tuple[List[Entity], List[Relationship]]:
+        """Fallback extractor using LlamaIndex SchemaLLMPathExtractor."""
+        logger.warning("Using LlamaIndex fallback extractor")
+        extractor = SchemaLLMPathExtractor(
+            llm=cast(Any, self.llm),
+            possible_entities=None,
+            possible_relations=None,
+            strict=False,
+            num_workers=1,
+            max_triplets_per_chunk=12,
+        )
+
+        nodes: List[TextNode] = []
+        for c in chunks:
+            nodes.append(
+                TextNode(
+                    id_=c.id,
+                    text=c.text,
+                    metadata={"chunk_index": c.chunk_index, "document_id": c.document_id},
+                )
+            )
+
+        extracted_nodes = await extractor.acall(nodes)
+        logger.info(f"llamaindex_extractor_complete: {len(extracted_nodes)} nodes extracted")
+
+        entities_by_key: Dict[str, Entity] = {}
+        rel_keys: set[tuple[str, str, str]] = set()
+        relationships: List[Relationship] = []
+
+        for n in extracted_nodes:
+            chunk_id = getattr(n, "id_", None) or getattr(n, "id", None) or ""
+            meta = getattr(n, "metadata", {}) or {}
+            kg_nodes = meta.get("nodes") or meta.get("kg_nodes") or []
+            kg_rels = meta.get("relations") or meta.get("kg_relations") or []
+
+            for kn in kg_nodes:
+                name = getattr(kn, "name", None)
+                if name is None and isinstance(kn, dict):
+                    name = kn.get("name")
+                name = (str(name) if name is not None else "").strip()
+                if not name:
+                    continue
+
+                key = self._canonical_entity_key(name)
+                if not key:
+                    continue
+
+                ent = entities_by_key.get(key)
+                if ent is None:
+                    ent_id = self._stable_entity_id("fallback", key)
+                    ent = Entity(
+                        id=ent_id,
+                        name=name,
+                        type=getattr(kn, "label", None) or (kn.get("label") if isinstance(kn, dict) else None) or "CONCEPT",
+                        description="",
+                        embedding=None,
+                        metadata={},
+                        text_unit_ids=[],
+                    )
+                    entities_by_key[key] = ent
+
+                if chunk_id and chunk_id not in ent.text_unit_ids:
+                    ent.text_unit_ids.append(chunk_id)
+
+            for kr in kg_rels:
+                subj = getattr(kr, "source", None) or getattr(kr, "subject", None)
+                obj = getattr(kr, "target", None) or getattr(kr, "object", None)
+                label = getattr(kr, "label", None) or getattr(kr, "relation", None)
+
+                if isinstance(kr, dict):
+                    subj = subj or kr.get("source") or kr.get("subject")
+                    obj = obj or kr.get("target") or kr.get("object")
+                    label = label or kr.get("label") or kr.get("relation")
+
+                subj_name = (str(subj) if subj is not None else "").strip()
+                obj_name = (str(obj) if obj is not None else "").strip()
+                if not subj_name or not obj_name:
+                    continue
+
+                skey = self._canonical_entity_key(subj_name)
+                okey = self._canonical_entity_key(obj_name)
+                if not skey or not okey:
+                    continue
+
+                sid = self._stable_entity_id("fallback", skey)
+                tid = self._stable_entity_id("fallback", okey)
+
+                rel_desc = (str(label) if label is not None else "RELATED_TO").strip() or "RELATED_TO"
+                rel_key = (sid, tid, rel_desc)
+                if rel_key in rel_keys:
+                    continue
+                rel_keys.add(rel_key)
+
+                relationships.append(
+                    Relationship(
+                        source_id=sid,
+                        target_id=tid,
+                        type="RELATED_TO",
+                        description=rel_desc,
+                        weight=1.0,
+                    )
+                )
+
+        entities = list(entities_by_key.values())
+        # Note: embedding assignment skipped for fallback to keep it lightweight
+        return entities, relationships
+
+    def _nlp_seed_entities(self, group_id: str, chunks: List[TextChunk]) -> List[Entity]:
+        """Lightweight NER seeding from chunk text (heuristic)."""
+        candidates = {}
+        import re
+        pattern = re.compile(r"([A-Z][a-z]{1,}\s(?:[A-Z][a-z]{1,}\s?){0,3})")
+        for c in chunks:
+            for m in pattern.findall(c.text or ""):
+                name = m.strip()
+                key = self._canonical_entity_key(name)
+                if not key or key in candidates:
+                    continue
+                ent_id = self._stable_entity_id(group_id, key)
+                candidates[key] = Entity(
+                    id=ent_id,
+                    name=name,
+                    type="CONCEPT",
+                    description="",
+                    embedding=None,
+                    metadata={},
+                    text_unit_ids=[c.id],
+                )
+        return list(candidates.values())
+
+    async def _validate_and_commit_entities(
+        self,
+        *,
+        group_id: str,
+        entities: List[Entity],
+        relationships: List[Relationship],
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """Validate entity graph and commit if thresholds are met. In dry-run mode, only return diagnostics."""
+        details = {
+            "entities_found": len(entities),
+            "relationships_found": len(relationships),
+        }
+        passed = True
+        if len(entities) < self.config.min_entities or len(relationships) < self.config.min_mentions:
+            passed = False
+            details["reason"] = "insufficient_entities_or_relationships"
+        # Dry-run: return diagnostics only.
+        if dry_run or not passed:
+            return {"passed": passed, "details": details, "stats": {}}
+        # Commit to DB
+        if entities:
+            await self.neo4j_store.aupsert_entities_batch(group_id, entities)
+            details["entities_committed"] = len(entities)
+        if relationships:
+            self.neo4j_store.upsert_relationships_batch(group_id, relationships)
+            details["relationships_committed"] = len(relationships)
+        return {"passed": True, "details": details, "stats": {"entities": len(entities), "relationships": len(relationships)}}
+
+    def _merge_entity_relationships(self, ents_a: List[Entity], rels_a: List[Relationship], ents_b: List[Entity], rels_b: List[Relationship]) -> Tuple[List[Entity], List[Relationship]]:
+        """Merge two entity/relationship lists deduplicating by canonical key."""
+        by_key: Dict[str, Entity] = {}
+        for e in ents_a + ents_b:
+            key = self._canonical_entity_key(e.name)
+            if key in by_key:
+                # merge text_unit_ids
+                exist = by_key[key]
+                exist.text_unit_ids = sorted(set(exist.text_unit_ids + (e.text_unit_ids or [])))
+            else:
+                by_key[key] = e
+        # dedup relationships by (src,target,desc)
+        seen = set()
+        out_rels = []
+        for r in rels_a + rels_b:
+            k = (r.source_id, r.target_id, r.description or r.type or "RELATED_TO")
+            if k in seen:
+                continue
+            seen.add(k)
+            out_rels.append(r)
+        return list(by_key.values()), out_rels
 
     def _deduplicate_entities(
         self,

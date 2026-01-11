@@ -7,16 +7,16 @@ pydantic-settings>=2.1.0
 # Minimal local stub for graspologic to avoid pulling heavy community deps in base builds
 # The real graspologic package is optional and can be installed with `requirements.community.txt`.
 # This local stub provides a no-op implementation and satisfies packaging constraints.
-graspologic @ file:./third_party/graspologic_stub
+graspologic @ ./third_party/graspologic_stub
 
 # GraphRAG (pinned to stable version)
 graphrag==2.7.0
 
 # LlamaIndex core + integrations (0.12.x series - compatible with raptor)
-llama-index-core==0.12.52
-llama-index-llms-azure-openai==0.3.4
-llama-index-llms-openai==0.4.3
-llama-index-embeddings-azure-openai==0.3.3
+llama-index-core==0.14.12  # upgrade candidate - requires testing
+llama-index-llms-azure-openai==0.4.2  # upgraded to match llama-index-core 0.14.x
+llama-index-llms-openai==0.6.12  # upgrade candidate - requires testing
+llama-index-embeddings-azure-openai==0.4.1  # upgrade to match llama-index-core 0.14.x
 llama-index-vector-stores-azureaisearch==0.3.0
 # llama-index-graph-stores-neo4j removed - replaced by app/services/neo4j_standalone_store.py
 # This enables neo4j driver v6.0+ compatibility for native Vector type support

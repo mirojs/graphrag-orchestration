@@ -83,6 +83,11 @@ async def main():
         default=5,
         help="Maximum number of documents to index"
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run indexing in dry-run/validation mode (do not persist entities/relationships)"
+    )
     args = parser.parse_args()
     
     print("=" * 70)
@@ -176,8 +181,14 @@ async def main():
         result = await pipeline.index_documents(
             group_id=args.group_id,
             documents=documents,
-            reindex=True
+            reindex=True,
+            dry_run=args.dry_run,
         )
+
+        logger.info(f"  ✅ Validation passed: {result.get('validation_passed', False)}")
+        logger.info(f"  🔍 Validation details: {result.get('validation_details', {})}")
+        if args.dry_run:
+            logger.info("  ⚠️ Dry-run mode: no entities/relationships were persisted.")
         
         print()
         logger.info("=" * 70)

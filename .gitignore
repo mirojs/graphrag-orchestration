@@ -162,6 +162,9 @@ benchmarks/*.json
 # Local benchmark outputs (keep out of git)
 benchmarks/
 
+# Backups created by scripts/remove_legacy_groups.py
+backups/
+
 # Archived scripts may contain tokenized URLs or secrets
 tests/archive/
 

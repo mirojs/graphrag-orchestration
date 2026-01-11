@@ -569,13 +569,16 @@ class AsyncNeo4jService:
         Returns:
             True if any matching chunk exists, else False.
         """
+        # Prefer checking the parent Document node for title/source metadata
+        # to avoid UnknownPropertyKey warnings when those properties are not set on chunks.
         query = cypher25_query("""
         MATCH (c)
+        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
         WHERE c.group_id = $group_id
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
           AND (
-            toLower(coalesce(c.document_title, '')) CONTAINS $doc_keyword OR
-            toLower(coalesce(c.document_source, '')) CONTAINS $doc_keyword OR
+            toLower(coalesce(d.title, '')) CONTAINS $doc_keyword OR
+            toLower(coalesce(d.source, '')) CONTAINS $doc_keyword OR
             toLower(coalesce(c.url, '')) CONTAINS $doc_keyword
           )
           AND c.text =~ $pattern
@@ -593,6 +596,36 @@ class AsyncNeo4jService:
             )
             record = await result.single()
             exists = record["exists"] if record else False
+
+            # If the scoped keyword search didn't find a match, fall back to a
+            # lightweight group-wide search for the pattern (keeps limit small).
+            if not exists:
+                fallback_query = cypher25_query("""
+                MATCH (c)
+                WHERE c.group_id = $group_id
+                  AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+                  AND c.text =~ $pattern
+                RETURN count(c) > 0 AS exists
+                LIMIT $limit
+                """)
+                async with self._get_session() as s2:
+                    result2 = await s2.run(
+                        fallback_query,
+                        group_id=group_id,
+                        pattern=pattern,
+                        limit=limit,
+                    )
+                    record2 = await result2.single()
+                    fallback_exists = record2["exists"] if record2 else False
+                    if fallback_exists:
+                        logger.info(
+                            "pattern_exists_in_docs_by_keyword_fallback_hit",
+                            group_id=group_id,
+                            doc_keyword=doc_keyword,
+                            pattern=pattern[:60],
+                        )
+                        exists = True
+
             logger.info(
                 "pattern_exists_in_docs_by_keyword",
                 group_id=group_id,

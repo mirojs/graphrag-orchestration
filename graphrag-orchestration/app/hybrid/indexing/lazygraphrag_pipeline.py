@@ -147,6 +147,9 @@ class LazyGraphRAGIndexingPipeline:
                 group_id=group_id,
                 chunks=all_chunks,
             )
+            logger.info(f"🔍 EXTRACTION DEBUG: {len(entities)} entities, {len(relationships)} relationships")
+            if entities:
+                logger.info(f"   Sample entities: {[e.name for e in entities[:5]]}")
 
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
@@ -410,6 +413,12 @@ class LazyGraphRAGIndexingPipeline:
             )
 
         extracted_nodes = await extractor.acall(nodes)
+        logger.info(f"🔍 Extractor returned {len(extracted_nodes)} nodes")
+        if extracted_nodes:
+            sample_meta = getattr(extracted_nodes[0], "metadata", {}) or {}
+            logger.info(f"🔍 Sample metadata keys: {list(sample_meta.keys())}")
+            if "kg_nodes" in sample_meta:
+                logger.info(f"🔍 Sample has {len(sample_meta.get('kg_nodes', []))} kg_nodes")
 
         # Collect entities/relations and link to originating chunk via text_unit_ids.
         entities_by_key: Dict[str, Entity] = {}
@@ -419,8 +428,9 @@ class LazyGraphRAGIndexingPipeline:
         for n in extracted_nodes:
             chunk_id = getattr(n, "id_", None) or getattr(n, "id", None) or ""
             meta = getattr(n, "metadata", {}) or {}
-            kg_nodes = meta.get("kg_nodes") or []
-            kg_rels = meta.get("kg_relations") or meta.get("kg_relations", []) or []
+            # LlamaIndex SchemaLLMPathExtractor uses 'nodes' and 'relations' (not 'kg_nodes'/'kg_relations')
+            kg_nodes = meta.get("nodes") or meta.get("kg_nodes") or []
+            kg_rels = meta.get("relations") or meta.get("kg_relations") or []
 
             for kn in kg_nodes:
                 name = getattr(kn, "name", None)

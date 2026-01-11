@@ -150,6 +150,8 @@ async def main():
         embedder = llm_service.embed_model
         logger.info(f"  ✅ LLM: {settings.AZURE_OPENAI_DEPLOYMENT_NAME}")
         logger.info(f"  ✅ Embedder: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
+        logger.info(f"  ✅ LLM is None: {llm is None}")
+        logger.info(f"  ✅ Embedder is None: {embedder is None}")
     except Exception as e:
         logger.error(f"Failed to initialize LLM/embedder: {e}")
         return 1

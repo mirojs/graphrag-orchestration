@@ -1646,7 +1646,7 @@ Instructions:
             // ================================================================
             
             // Step 1: BM25 Search (phrase-aware, exact match precision)
-            CALL () {
+            CALL {
                 WITH $bm25_query AS bm25_query, $group_id AS group_id, $bm25_k AS bm25_k
                 CALL db.index.fulltext.queryNodes('textchunk_fulltext', bm25_query)
                 YIELD node, score
@@ -1661,7 +1661,7 @@ Instructions:
             WITH collect({node: node, rank: rank}) AS bm25List
             
             // Step 2: Vector Search (semantic matching)
-            CALL () {
+            CALL {
                 WITH $embedding AS embedding, $group_id AS group_id, $vector_k AS vector_k
                 CALL db.index.vector.queryNodes('chunk_embedding', vector_k * 10, embedding)
                 YIELD node, score

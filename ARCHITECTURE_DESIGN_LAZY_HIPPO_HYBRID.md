@@ -2339,3 +2339,306 @@ From production deployment (Jan 4, 2026):
 2. Run Route 3 negative tests with Q-N1-10
 3. Compare LLM synthesis vs `nlp_audit` determinism
 
+---
+
+## 17. Neo4j-GraphRAG Native Integration (Phase 1 & 2 Migration)
+
+**Date:** January 11, 2026  
+**Scope:** Migrate from custom LlamaIndex components to official neo4j-graphrag package  
+**Commit:** `07b3913` - "Phase 1 & 2: Migrate to neo4j-graphrag native retrievers and extractors"
+
+### 17.1. Migration Overview
+
+As part of the Neo4j driver v6.0+ upgrade and Cypher 25 adoption, we migrated key components from custom LlamaIndex implementations to the official `neo4j-graphrag` package. This reduces code complexity while improving alignment with Neo4j's recommended patterns.
+
+| Phase | Component | Before | After | Lines Saved |
+|-------|-----------|--------|-------|-------------|
+| **Phase 1** | Retrieval | Custom `MultiIndexVectorContextRetriever` | Native `VectorCypherRetriever` | ~150 lines |
+| **Phase 2** | Extraction | Only `SchemaLLMPathExtractor` | Added `LLMEntityRelationExtractor` option | - |
+
+### 17.2. Phase 1: Retrieval Migration
+
+#### What Changed
+
+**File:** `app/services/retrieval_service.py`
+
+**Before (Custom Implementation):**
+```python
+class MultiIndexVectorContextRetriever(VectorContextRetriever):
+    """
+    Extended VectorContextRetriever that queries BOTH entity and chunk vector indexes.
+    ~180 lines of custom code for:
+    - Vector search on entity + chunk indexes
+    - Graph traversal via get_rel_map()
+    - Result deduplication and merging
+    """
+    def retrieve_from_graph(self, query_bundle):
+        # Custom vector search
+        entity_results = self._query_vector_index("entity", embedding)
+        chunk_results = self._query_vector_index("chunk_vector", embedding)
+        
+        # Custom graph traversal
+        triplets = self._graph_store.get_rel_map(nodes=kg_nodes, depth=2)
+        
+        # Custom result merging (180+ lines total)
+        ...
+```
+
+**After (Native Integration):**
+```python
+from neo4j_graphrag.retrievers import VectorCypherRetriever
+
+def _get_native_retriever(self, group_id: str) -> VectorCypherRetriever:
+    """Native neo4j-graphrag retriever (~20 lines config)"""
+    return VectorCypherRetriever(
+        driver=self._get_neo4j_driver(),
+        index_name="chunk_vector",
+        embedder=self._get_native_embedder(),
+        retrieval_query=f"""
+            WITH node, score
+            WHERE node.group_id = '{group_id}'
+            OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK]->(node)
+            WHERE entity.group_id = '{group_id}'
+            WITH node, score, collect(DISTINCT entity.name) AS related_entities
+            RETURN node.text AS text, node.id AS chunk_id, 
+                   related_entities, labels(node)[0] AS type, score
+        """,
+        neo4j_database=settings.NEO4J_DATABASE or "neo4j",
+    )
+```
+
+**Key Benefits:**
+- **Simplicity:** 180 lines → 20 lines of configuration
+- **Official Support:** Uses Neo4j's recommended patterns
+- **Native Cypher:** Vector search + graph traversal in single query
+- **Driver v6 Compatibility:** Fully aligned with neo4j driver v6.0+
+
+#### Why Retrieval Has NO Fallback
+
+Phase 1 retrieval migration **does not keep fallback code** because:
+
+1. **Backward Compatibility:** The `VectorCypherRetriever` is wrapped in a compatibility layer (`NativeRetrieverWrapper`) that implements the same LlamaIndex interface. Existing code calling `query_engine.query()` continues to work without changes.
+
+2. **Feature Parity:** The native retriever provides **equivalent or better** functionality:
+   - Vector similarity search ✅ (same quality)
+   - Graph traversal ✅ (Cypher-based, more efficient)
+   - Multi-tenant filtering ✅ (via `WHERE node.group_id`)
+   - Result scoring ✅ (native vector scores)
+
+3. **No Risk of Regression:** Since the wrapper maintains API compatibility and feature parity, there's no scenario where we'd need to "fall back" to the old implementation.
+
+4. **Code Maintenance:** Keeping 180 lines of deprecated code would create technical debt with no benefit.
+
+### 17.3. Phase 2: Extraction Migration
+
+#### What Changed
+
+**Files:** 
+- `app/services/indexing_service.py` (legacy V1/V2 indexing)
+- `app/hybrid/indexing/lazygraphrag_pipeline.py` (V3 production indexing)
+
+**Before (Single Option):**
+```python
+# Only option: LlamaIndex SchemaLLMPathExtractor
+extractor = SchemaLLMPathExtractor(
+    llm=self.llm_service.llm,
+    possible_entity_props=entity_types,
+    possible_relation_props=relation_types,
+    strict=False,
+    num_workers=num_workers,
+)
+```
+
+**After (Dual Options):**
+```python
+# Option 1: Native neo4j-graphrag (new, opt-in)
+if extraction_mode == "native":
+    extractor = LLMEntityRelationExtractor(
+        llm=native_llm,  # AzureOpenAILLM from neo4j-graphrag
+        create_lexical_graph=True,
+        max_concurrency=settings.GRAPHRAG_NUM_WORKERS,
+    )
+    # Uses GraphSchema with NodeType/RelationshipType
+    graph = await extractor.run(chunks=text_chunks, schema=schema)
+
+# Option 2: LlamaIndex (default, fallback)
+else:
+    extractor = SchemaLLMPathExtractor(
+        llm=self.llm_service.llm,
+        possible_entity_props=entity_types,
+        possible_relation_props=relation_types,
+        strict=False,
+        num_workers=num_workers,
+    )
+```
+
+**Configuration:**
+- **Legacy endpoints:** `extraction_mode="native"` (explicit opt-in)
+- **V3/Hybrid pipeline:** `config.use_native_extractor=True` (defaults to `False`)
+
+#### Why Extraction REQUIRES Fallback Code
+
+Phase 2 extraction migration **keeps fallback code** for critical reasons:
+
+##### 1. **Production Risk Mitigation**
+
+The extraction phase is **data-critical** — bad extraction permanently damages the knowledge graph:
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| Schema mismatch | Wrong entity types in Neo4j | Keep LlamaIndex as proven baseline |
+| API changes | neo4j-graphrag experimental APIs unstable | Fallback ensures uptime |
+| Quality regression | Lower entity/relation quality | A/B test before full migration |
+
+**Real Example:** If `LLMEntityRelationExtractor` produces lower-quality entities (e.g., misses relationships), the graph becomes less useful for Route 2/3. With fallback, we can:
+```python
+# Safe rollback in production
+config = LazyGraphRAGIndexingConfig(
+    use_native_extractor=False  # ← One line rollback
+)
+```
+
+##### 2. **Experimental Status of neo4j-graphrag APIs**
+
+From `neo4j-graphrag` v1.12.0 documentation:
+
+```python
+from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
+#                      ^^^^^^^^^^^^^^ This is still experimental!
+```
+
+**What "Experimental" Means:**
+- API signatures may change in future versions
+- Return types may change (breaking changes)
+- Performance characteristics not yet stable
+- Limited production validation
+
+**Fallback Protects Against:**
+- Breaking API changes in `neo4j-graphrag` v1.13+
+- Unexpected behavior in edge cases
+- Performance regressions
+
+##### 3. **Different Integration Patterns**
+
+The two extractors have fundamentally different integration points:
+
+| Aspect | LlamaIndex (Fallback) | neo4j-graphrag (Native) |
+|--------|----------------------|-------------------------|
+| **LLM Type** | LlamaIndex LLM interface | AzureOpenAILLM (separate) |
+| **Schema Format** | List[str] entity/relation types | GraphSchema with NodeType/RelationshipType |
+| **Output Format** | LlamaIndex nodes with metadata | Neo4jGraph with nodes/relationships |
+| **Write Pattern** | Via PropertyGraphIndex → Neo4j | Direct Neo4j driver writes |
+
+**Migration Challenge:** These aren't drop-in replacements. Converting between the two requires:
+- Schema translation logic
+- Different LLM clients
+- Different write patterns
+
+**With Fallback:**
+```python
+# During migration, we can A/B test
+if experiment_group == "control":
+    use_native = False  # Proven LlamaIndex path
+else:
+    use_native = True   # Test native extractor
+```
+
+##### 4. **Gradual Migration Strategy**
+
+Fallback code enables **zero-downtime migration**:
+
+**Phase 2a (Current):** Add native as option, default to LlamaIndex
+```python
+# V3 production: LlamaIndex (proven)
+config = LazyGraphRAGIndexingConfig(use_native_extractor=False)
+
+# Test environments: neo4j-graphrag (testing)
+config = LazyGraphRAGIndexingConfig(use_native_extractor=True)
+```
+
+**Phase 2b (Future):** After validation, switch default
+```python
+# Default to native after validation
+config = LazyGraphRAGIndexingConfig(use_native_extractor=True)
+```
+
+**Phase 2c (Much Later):** Remove LlamaIndex code (only after months of production validation)
+
+##### 5. **Audit Trail & Rollback Path**
+
+High-stakes industries (auditing, finance, insurance) require:
+
+| Requirement | How Fallback Helps |
+|-------------|-------------------|
+| **Reproducibility** | "We indexed with LlamaIndex v0.12.52 on Jan 1" |
+| **Rollback** | Quick reversion if native extractor causes issues |
+| **Comparison** | Run both extractors, compare results |
+| **Audit** | "We can prove we used the same extractor for all 2025 data" |
+
+### 17.4. Migration Decision Matrix
+
+When to use which extractor:
+
+| Scenario | Use Native (`LLMEntityRelationExtractor`) | Use Fallback (`SchemaLLMPathExtractor`) |
+|----------|-------------------------------------------|----------------------------------------|
+| **New projects** | ✅ Yes (test native first) | ❌ No (unless native fails) |
+| **Production V3/Hybrid** | ❌ No (not yet validated) | ✅ Yes (proven stable) |
+| **Development/Testing** | ✅ Yes (validate quality) | ⚠️ Compare both |
+| **After 3 months validation** | ✅ Yes (switch default) | ⚠️ Keep as emergency fallback |
+| **Breaking API change** | ❌ No (wait for fix) | ✅ Yes (rollback immediately) |
+
+### 17.5. Code Organization
+
+```
+app/services/retrieval_service.py
+├── _get_native_retriever()           ← Phase 1: Always uses native
+├── NativeRetrieverWrapper             ← Compatibility layer
+└── _get_or_create_query_engine()     ← Entry point
+
+app/services/indexing_service.py
+├── index_documents()
+│   ├── extraction_mode="native"      ← Phase 2: Opt-in
+│   └── extraction_mode="schema"      ← Fallback (default)
+└── _index_with_native_extractor()    ← Phase 2 implementation
+
+app/hybrid/indexing/lazygraphrag_pipeline.py
+├── LazyGraphRAGIndexingConfig
+│   └── use_native_extractor: bool = False  ← V3 config (defaults to fallback)
+├── _extract_entities_and_relationships()
+│   ├── if use_native_extractor:      ← Phase 2: Conditional
+│   │   └── _extract_with_native_extractor()
+│   └── else:                         ← Fallback (default)
+│       └── SchemaLLMPathExtractor
+```
+
+### 17.6. Benefits Summary
+
+| Benefit | Phase 1 (Retrieval) | Phase 2 (Extraction) |
+|---------|-------------------|---------------------|
+| **Code Simplification** | ✅ -150 lines | ⚠️ +130 lines (adds option) |
+| **Official Support** | ✅ Stable neo4j-graphrag API | ⚠️ Experimental API |
+| **Maintenance** | ✅ Neo4j maintains it | ⚠️ We maintain both paths |
+| **Risk** | ✅ Low (feature parity) | ⚠️ Medium (data quality risk) |
+| **Migration Status** | ✅ Complete | 🔄 In progress (testing) |
+
+### 17.7. Future Work
+
+**Short Term (Q1 2026):**
+1. Run extraction quality benchmarks (native vs LlamaIndex)
+2. A/B test in development environments
+3. Validate entity/relationship counts match
+
+**Medium Term (Q2 2026):**
+4. Switch V3/Hybrid default to native extractor
+5. Monitor production for 30 days
+6. Document any edge cases or quality differences
+
+**Long Term (Q3 2026):**
+7. Remove LlamaIndex fallback if native proven stable
+8. Update all documentation to recommend native path
+9. Archive fallback code with clear "deprecated" markers
+
+**The Golden Rule:**
+> For retrieval, we migrated completely (no fallback needed).  
+> For extraction, we keep both paths until native is **proven in production** for 3+ months.
+

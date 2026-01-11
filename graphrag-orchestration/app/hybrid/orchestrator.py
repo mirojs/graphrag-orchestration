@@ -1582,6 +1582,181 @@ Instructions:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _run_sync)
 
+    async def _search_chunks_cypher25_hybrid_rrf(
+        self,
+        query_text: str,
+        embedding: list,
+        top_k: int = 20,
+        vector_k: int = 30,
+        bm25_k: int = 30,
+        rrf_k: int = 60,
+        use_phrase_boost: bool = True,
+    ) -> List[Tuple[Dict[str, Any], float, bool]]:
+        """Cypher 25 optimized hybrid search with native BM25 + Vector RRF fusion.
+        
+        This leverages Cypher 25 enhancements:
+        - Native BM25 scoring via Lucene fulltext (optimized in Cypher 25)
+        - Native VECTOR type for seamless cosine similarity
+        - Reciprocal Rank Fusion (RRF) for robust score combination
+        
+        RRF Formula: score(d) = sum(1 / (k + rank(d)))
+        - Uses position (rank) not raw score, avoiding scale mismatch
+        - k=60 (standard) prevents single top rank from dominating
+        
+        Performance: Single Cypher query, no multiple round-trips.
+        
+        Args:
+            query_text: User query (phrase-aware for BM25)
+            embedding: Query embedding for vector search
+            top_k: Final results to return
+            vector_k: Candidates from vector search
+            bm25_k: Candidates from BM25 search  
+            rrf_k: RRF smoothing constant (default 60)
+            use_phrase_boost: Enable phrase-aware BM25 query building
+            
+        Returns:
+            List of (chunk_dict, rrf_score, is_anchor) tuples, sorted by RRF score.
+        """
+        if not self.neo4j_driver:
+            return []
+        
+        await self._ensure_textchunk_fulltext_index()
+        group_id = self.group_id
+        
+        # Build phrase-aware BM25 query
+        if use_phrase_boost:
+            bm25_query = self._build_phrase_aware_fulltext_query(query_text)
+        else:
+            bm25_query = self._sanitize_query_for_fulltext(query_text)
+        
+        if not bm25_query:
+            bm25_query = query_text  # Fallback to raw query
+        
+        def _run_sync():
+            # Cypher 25 Hybrid RRF: BM25 + Vector in single query
+            cypher = """
+            CYPHER 25
+            // ================================================================
+            // Cypher 25 Hybrid Search with BM25 + Vector RRF Fusion
+            // ================================================================
+            // This query combines:
+            // 1. Native BM25 (Lucene fulltext) - keyword precision
+            // 2. Native VECTOR search - semantic depth
+            // 3. RRF fusion - robust rank-based combination
+            // ================================================================
+            
+            // Step 1: BM25 Search (phrase-aware, exact match precision)
+            CALL {
+                WITH $bm25_query AS bm25_query, $group_id AS group_id, $bm25_k AS bm25_k
+                CALL db.index.fulltext.queryNodes('textchunk_fulltext', bm25_query)
+                YIELD node, score
+                WHERE node.group_id = group_id
+                WITH node, score
+                ORDER BY score DESC
+                LIMIT bm25_k
+                WITH collect(node) AS nodes
+                UNWIND range(0, size(nodes)-1) AS i
+                RETURN nodes[i] AS node, (i + 1) AS rank
+            }
+            WITH collect({node: node, rank: rank}) AS bm25List
+            
+            // Step 2: Vector Search (semantic matching)
+            CALL {
+                WITH $embedding AS embedding, $group_id AS group_id, $vector_k AS vector_k
+                CALL db.index.vector.queryNodes('chunk_embedding', vector_k * 10, embedding)
+                YIELD node, score
+                WHERE node.group_id = group_id
+                WITH node, score
+                ORDER BY score DESC
+                LIMIT vector_k
+                WITH collect(node) AS nodes
+                UNWIND range(0, size(nodes)-1) AS i
+                RETURN nodes[i] AS node, (i + 1) AS rank
+            }
+            WITH bm25List, collect({node: node, rank: rank}) AS vectorList
+            
+            // Step 3: RRF Fusion (rank-based, scale-invariant)
+            WITH bm25List, vectorList,
+                 [x IN bm25List | x.node] + [y IN vectorList | y.node] AS allNodes
+            UNWIND allNodes AS node
+            WITH DISTINCT node, bm25List, vectorList
+            WITH node,
+                 [b IN bm25List WHERE b.node = node | b.rank][0] AS bm25Rank,
+                 [v IN vectorList WHERE v.node = node | v.rank][0] AS vectorRank
+            WITH node,
+                 // RRF: 1/(k + rank) - handles null ranks gracefully
+                 (CASE WHEN bm25Rank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + bm25Rank) END) +
+                 (CASE WHEN vectorRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + vectorRank) END) AS rrfScore,
+                 bm25Rank IS NOT NULL AS hasBM25,
+                 vectorRank IS NOT NULL AS hasVector
+            
+            // Step 4: Get metadata
+            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
+            
+            RETURN node.id AS id,
+                   node.text AS text,
+                   node.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source,
+                   s.id AS section_id,
+                   s.path_key AS section_path_key,
+                   rrfScore AS score,
+                   hasBM25,
+                   hasVector
+            ORDER BY rrfScore DESC
+            LIMIT $top_k
+            """
+            
+            rows = []
+            try:
+                with self.neo4j_driver.session() as session:
+                    result = session.run(
+                        cypher,
+                        bm25_query=bm25_query,
+                        embedding=embedding,
+                        group_id=group_id,
+                        vector_k=vector_k,
+                        bm25_k=bm25_k,
+                        rrf_k=rrf_k,
+                        top_k=top_k,
+                    )
+                    for r in result:
+                        chunk = {
+                            "id": r["id"],
+                            "text": r["text"],
+                            "chunk_index": r.get("chunk_index", 0),
+                            "document_id": r.get("document_id", ""),
+                            "document_title": r.get("document_title", ""),
+                            "document_source": r.get("document_source", ""),
+                            "section_id": r.get("section_id", ""),
+                            "section_path_key": r.get("section_path_key", ""),
+                        }
+                        # is_anchor = True if found in both BM25 and Vector (highest confidence)
+                        is_anchor = bool(r.get("hasBM25")) and bool(r.get("hasVector"))
+                        rows.append((chunk, float(r.get("score") or 0.0), is_anchor))
+            except Exception as e:
+                logger.error("cypher25_hybrid_rrf_failed", error=str(e), error_type=type(e).__name__)
+            
+            return rows
+        
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(self._executor, _run_sync)
+        
+        # Log summary
+        logger.info(
+            "cypher25_hybrid_rrf_complete",
+            query=query_text[:80],
+            bm25_query=bm25_query[:100],
+            total_results=len(results),
+            anchors=sum(1 for _, _, is_anchor in results if is_anchor),
+            use_phrase_boost=use_phrase_boost,
+            rrf_k=rrf_k,
+        )
+        
+        return results
+
     async def _search_chunks_graph_native_bm25(
         self,
         query_text: str,
@@ -1956,43 +2131,66 @@ Instructions:
                    num_related_entities=len(graph_context.related_entities))
 
         # ==================================================================
-        # Stage 3.3.5: Pure BM25 with Phrase-Aware Queries (FAST + PRECISE)
+        # Stage 3.3.5: Cypher 25 Hybrid BM25 + Vector with RRF Fusion
         # ==================================================================
-        # Use Neo4j native BM25 (Lucene fulltext) with phrase-aware query construction.
-        # This guarantees exact phrase matches for contractual terms like:
-        # - "60 days", "written notice", "3 business days"
-        # - Dollar amounts: "$1,000", "500 dollars"
-        # - Percentages: "5%", "10 percent"
-        # - Legal phrases: "binding arbitration", "liquidated damages"
+        # Enhanced in Cypher 25 with native BM25 scoring (Lucene optimized)
+        # and native VECTOR type for seamless hybrid search.
         #
-        # Key advantages:
-        # - Fast: <1s query time (pure BM25, no graph traversal)
-        # - Precise: Phrase-aware query builder extracts and quotes key terms
-        # - Deterministic: Neo4j Lucene index, no embedding variance
+        # Options (via environment variables):
+        # - ROUTE3_CYPHER25_HYBRID_RRF=1: Use BM25 + Vector + RRF (recommended)
+        # - ROUTE3_GRAPH_NATIVE_BM25=1: Pure BM25 only (fallback)
         #
-        # Note: Graph expansion was removed due to 20-30s latency from cartesian
-        # products in OPTIONAL MATCH. Pure BM25 provides better performance while
-        # maintaining phrase match guarantees.
+        # RRF Fusion advantages over weighted sum:
+        # - Scale-invariant: BM25 scores (0-∞) vs Vector (0-1) don't conflict
+        # - Outlier-resistant: Single high score doesn't dominate
+        # - Rank-based: Uses position, not raw score
         # ==================================================================
         t0 = time.perf_counter()
+        enable_cypher25_hybrid_rrf = os.getenv("ROUTE3_CYPHER25_HYBRID_RRF", "1").strip().lower() in {"1", "true", "yes"}
         enable_graph_native_bm25 = os.getenv("ROUTE3_GRAPH_NATIVE_BM25", "1").strip().lower() in {"1", "true", "yes"}
         # Fallback to old fulltext boost if explicitly disabled
         enable_fulltext_boost = os.getenv("ROUTE3_FULLTEXT_BOOST", "1").strip().lower() in {"1", "true", "yes"}
         
         bm25_phrase_metadata: Dict[str, Any] = {
-            "enabled": enable_graph_native_bm25,
+            "enabled": enable_graph_native_bm25 or enable_cypher25_hybrid_rrf,
+            "hybrid_rrf": enable_cypher25_hybrid_rrf,
             "applied": False,
             "results": 0,
             "added": 0,
         }
 
-        if enable_graph_native_bm25:
+        if enable_cypher25_hybrid_rrf or enable_graph_native_bm25:
             try:
                 from .pipeline.enhanced_graph_retriever import SourceChunk
-
-                # Use Pure BM25 with phrase-aware queries (fast, no graph expansion)
-                bm25_results = await self._search_chunks_graph_native_bm25(
-                    query_text=query,
+                
+                # Get query embedding for hybrid search
+                query_embedding = None
+                if enable_cypher25_hybrid_rrf:
+                    try:
+                        from app.services.llm_service import LLMService
+                        llm_service = LLMService()
+                        if llm_service.embed_model:
+                            query_embedding = llm_service.embed_model.get_text_embedding(query)
+                    except Exception as emb_err:
+                        logger.warning("cypher25_hybrid_rrf_embedding_failed", error=str(emb_err))
+                
+                # Choose search strategy
+                if enable_cypher25_hybrid_rrf and query_embedding:
+                    # Cypher 25 Hybrid: BM25 + Vector + RRF (best quality)
+                    bm25_results = await self._search_chunks_cypher25_hybrid_rrf(
+                        query_text=query,
+                        embedding=query_embedding,
+                        top_k=20,
+                        vector_k=30,
+                        bm25_k=30,
+                        rrf_k=60,
+                        use_phrase_boost=True,
+                    )
+                    bm25_phrase_metadata["hybrid_rrf"] = True
+                else:
+                    # Fallback: Pure BM25 (fast, no embedding required)
+                    bm25_results = await self._search_chunks_graph_native_bm25(
+                        query_text=query,
                     top_k=20,  # Generous top-k; will dedupe against existing
                     use_phrase_boost=True,
                 )

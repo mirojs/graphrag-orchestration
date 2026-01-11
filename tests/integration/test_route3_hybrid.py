@@ -1,5 +1,17 @@
 import os
+import sys
+import pathlib
 import pytest
+
+# Ensure inner package dir is on PYTHONPATH for test discovery
+root = pathlib.Path(__file__).resolve().parents[2]
+# inner package folder (where 'app' package lives)
+pkg_dir = root / "graphrag-orchestration"
+if pkg_dir.exists():
+    sys.path.insert(0, str(pkg_dir))
+else:
+    # fallback: add repo root
+    sys.path.insert(0, str(root))
 
 from app.services.graph_service import GraphService
 from app.services.llm_service import LLMService

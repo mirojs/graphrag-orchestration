@@ -9,11 +9,21 @@ Key features:
 - Connection pooling with async driver
 - Optimized for read-heavy graph traversal queries
 - Multi-tenant isolation via group_id filtering
+- Cypher 25 runtime support for performance optimizations
 
 Usage:
     async with AsyncNeo4jService.from_settings() as service:
         entities = await service.get_entities_by_importance(group_id, top_k=50)
         neighbors = await service.expand_neighbors(group_id, entity_ids, depth=2)
+
+Cypher 25 Migration (January 2026):
+    Queries can optionally use CYPHER_25_PREFIX to access Cypher 25 optimizations:
+    - MergeUniqueNode: Faster MERGE on uniquely constrained properties
+    - State-aware pruning (allReduce): Kill invalid paths mid-expansion
+    - WHEN...THEN...ELSE: Native conditional branching
+    - REPEATABLE ELEMENTS: Native cyclic path support
+    
+    Use cypher25_query() helper for automatic prefix injection.
 """
 
 import asyncio
@@ -27,6 +37,44 @@ from neo4j.exceptions import Neo4jError
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Cypher 25 Runtime Support
+# =============================================================================
+
+# Cypher 25 prefix for opting into new runtime optimizations
+# Set USE_CYPHER_25 = True to enable Cypher 25 features globally
+USE_CYPHER_25: bool = True
+CYPHER_25_PREFIX: str = "CYPHER 25\n"
+
+
+def cypher25_query(query: str, *, use_cypher25: bool = USE_CYPHER_25) -> str:
+    """
+    Optionally prepend CYPHER 25 prefix to a query.
+    
+    Cypher 25 unlocks:
+    - MergeUniqueNode: Faster MERGE with uniqueness constraints
+    - MergeInto: Optimized MERGE when endpoints are known
+    - allReduce: State-aware path pruning (mid-expansion termination)
+    - WHEN...THEN...ELSE: Native conditional branching
+    - REPEATABLE ELEMENTS: Cyclic path traversal
+    - Parallel runtime optimizations for declarative patterns
+    
+    Args:
+        query: The Cypher query string
+        use_cypher25: Whether to add the CYPHER 25 prefix (default: USE_CYPHER_25 global)
+        
+    Returns:
+        Query with CYPHER 25 prefix if enabled, otherwise unchanged
+        
+    Example:
+        >>> cypher25_query("MATCH (n) RETURN n")
+        'CYPHER 25\\nMATCH (n) RETURN n'
+    """
+    if use_cypher25 and not query.strip().upper().startswith("CYPHER"):
+        return f"{CYPHER_25_PREFIX}{query}"
+    return query
 
 
 class AsyncNeo4jService:
@@ -111,7 +159,7 @@ class AsyncNeo4jService:
         
         Uses pre-computed importance_score from entity importance scoring.
         """
-        query = """
+        query = cypher25_query("""
         MATCH (e:`__Entity__`)
         WHERE e.group_id = $group_id 
           AND coalesce(e.importance_score, 0) >= $min_importance
@@ -123,7 +171,7 @@ class AsyncNeo4jService:
                labels(e) AS labels
         ORDER BY e.importance_score DESC
         LIMIT $top_k
-        """
+        """)
         
         async with self._get_session() as session:
             result = await session.run(
@@ -144,7 +192,7 @@ class AsyncNeo4jService:
         """
         Get specific entities by name (case-insensitive).
         """
-        query = """
+        query = cypher25_query("""
         UNWIND $names AS name
         MATCH (e:`__Entity__`)
         WHERE e.group_id = $group_id 
@@ -154,7 +202,7 @@ class AsyncNeo4jService:
                e.degree AS degree,
                e.chunk_count AS chunk_count,
                coalesce(e.degree, 0) AS importance_score
-        """
+        """)
         
         async with self._get_session() as session:
             result = await session.run(query, group_id=group_id, names=entity_names)
@@ -177,7 +225,7 @@ class AsyncNeo4jService:
         
         Uses native Cypher path patterns - no GDS required.
         """
-        query = f"""
+        query = cypher25_query(f"""
         UNWIND $entity_ids AS eid
         MATCH (seed:`__Entity__` {{id: eid}})
         WHERE seed.group_id = $group_id
@@ -195,7 +243,7 @@ class AsyncNeo4jService:
                path_count
         ORDER BY distance ASC, coalesce(neighbor.degree, 0) DESC
         LIMIT $limit
-        """
+        """)
         
         async with self._get_session() as session:
             # Cast to str to satisfy Neo4j type checker
@@ -221,7 +269,7 @@ class AsyncNeo4jService:
         """
         Get all relationships for a specific entity.
         """
-        query = """
+        query = cypher25_query("""
         MATCH (e:`__Entity__` {id: $entity_id})-[r]-(other:`__Entity__`)
         WHERE e.group_id = $group_id AND other.group_id = $group_id
           AND type(r) <> 'MENTIONS'
@@ -231,7 +279,7 @@ class AsyncNeo4jService:
                other.id AS target_id,
                coalesce(other.degree, 0) AS target_importance
         LIMIT $limit
-        """
+        """)
         
         async with self._get_session() as session:
             result = await session.run(
@@ -275,7 +323,7 @@ class AsyncNeo4jService:
         #
         # max_iterations is kept for API compatibility but is not used by this
         # approximation.
-        query = """
+        query = cypher25_query("""
                 UNWIND $seed_ids AS seed_id
                 MATCH (seed:`__Entity__` {id: seed_id})
                 WHERE seed.group_id = $group_id
@@ -325,7 +373,7 @@ class AsyncNeo4jService:
                              coalesce(entity.degree, 0) AS importance
                 ORDER BY score DESC
                 LIMIT $top_k
-                """
+                """)
         
         import time
 
@@ -368,7 +416,7 @@ class AsyncNeo4jService:
         """
         Get text chunks that mention the given entities.
         """
-        query = """
+        query = cypher25_query("""
         UNWIND $entity_ids AS eid
         MATCH (e:`__Entity__` {id: eid})-[:MENTIONS]->(c)
         WHERE e.group_id = $group_id
@@ -380,7 +428,7 @@ class AsyncNeo4jService:
                c.page_number AS page,
                c.section_path AS section_path
         LIMIT $limit
-        """
+        """)
         
         async with self._get_session() as session:
             result = await session.run(
@@ -407,7 +455,7 @@ class AsyncNeo4jService:
         Returns:
             (exists: bool, matched_section: Optional[str])
         """
-        query = """
+        query = cypher25_query("""
         MATCH (c)
         WHERE c.group_id = $group_id 
           AND (c.url = $doc_url OR c.document_id = $doc_url)
@@ -422,7 +470,7 @@ class AsyncNeo4jService:
                matched_keywords,
                substring(c.text, 0, 200) AS preview
         LIMIT 1
-        """
+        """)
         
         async with self._get_session() as session:
             result = await session.run(
@@ -468,14 +516,14 @@ class AsyncNeo4jService:
         Returns:
             True if pattern found in any chunk, False otherwise
         """
-        query = """
+        query = cypher25_query("""
         MATCH (c)
         WHERE c.group_id = $group_id 
           AND (c.url = $doc_url OR c.document_id = $doc_url)
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
           AND c.text =~ $pattern
         RETURN count(c) > 0 AS exists
-        """
+        """)
         
         async with self._get_session() as session:
             result = await session.run(
@@ -521,7 +569,7 @@ class AsyncNeo4jService:
         Returns:
             True if any matching chunk exists, else False.
         """
-        query = """
+        query = cypher25_query("""
         MATCH (c)
         WHERE c.group_id = $group_id
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
@@ -533,7 +581,7 @@ class AsyncNeo4jService:
           AND c.text =~ $pattern
         RETURN count(c) > 0 AS exists
         LIMIT $limit
-        """
+        """)
 
         async with self._get_session() as session:
             result = await session.run(
@@ -589,7 +637,7 @@ class AsyncNeo4jService:
         """
         # Query uses native vector.similarity.cosine (available in Neo4j 5.18+/Aura)
         # Runs a single hop at a time; Python loop controls iteration.
-        hop_query = """
+        hop_query = cypher25_query("""
         UNWIND $current_ids AS eid
         MATCH (src:`__Entity__` {id: eid})-[r]-(neighbor:`__Entity__`)
         WHERE neighbor.group_id = $group_id
@@ -602,7 +650,7 @@ class AsyncNeo4jService:
         RETURN neighbor.id AS id,
                neighbor.name AS name,
                sim AS similarity
-        """
+        """)
 
         import time
 

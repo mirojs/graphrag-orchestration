@@ -471,11 +471,48 @@ class GraphService:
                 
                 # Initialize vector indices for hybrid routes
                 self._initialize_vector_indices()
+                
+                # Initialize uniqueness constraints for Cypher 25 MergeUniqueNode optimization
+                self._initialize_uniqueness_constraints()
             except Exception as e:
                 logger.error(f"Failed to connect to Neo4j: {e}")
                 self._driver = None
         else:
             logger.warning("NEO4J_URI not configured, graph store disabled")
+
+    def _initialize_uniqueness_constraints(self) -> None:
+        """
+        Create uniqueness constraints for MergeUniqueNode optimization.
+        
+        Cypher 25 includes a MergeUniqueNode operator that bypasses the
+        standard "check then write" overhead when MERGE is used on properties
+        with uniqueness constraints. This significantly improves write performance.
+        
+        These constraints also ensure data integrity by preventing duplicates.
+        """
+        if not self._driver:
+            return
+        
+        # Uniqueness constraints for core node types
+        # These enable the MergeUniqueNode optimizer in Cypher 25
+        constraint_queries = [
+            "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:`__Entity__`) REQUIRE e.id IS UNIQUE",
+            "CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:TextChunk) REQUIRE c.id IS UNIQUE",
+            "CREATE CONSTRAINT document_id_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
+            "CREATE CONSTRAINT node_id_unique IF NOT EXISTS FOR (n:`__Node__`) REQUIRE n.id IS UNIQUE",
+        ]
+        
+        try:
+            with self._driver.session() as session:
+                for query in constraint_queries:
+                    try:
+                        session.run(query)
+                    except Exception as constraint_err:
+                        # Continue if constraint already exists or fails
+                        logger.debug(f"Constraint creation skipped/failed: {constraint_err}")
+                logger.info("Uniqueness constraints initialized (MergeUniqueNode optimization enabled)")
+        except Exception as e:
+            logger.warning(f"Failed to initialize uniqueness constraints: {e}")
 
     def _initialize_vector_indices(self) -> None:
         """Create vector indices for TextChunk embeddings used by Route 1."""

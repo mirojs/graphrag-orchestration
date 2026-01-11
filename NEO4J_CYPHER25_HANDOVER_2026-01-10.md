@@ -68,25 +68,206 @@ a637782 - Docs: Neo4j Aura 2025 migration plan
 
 ## What's NOT Done Yet: Full Cypher 25 Adoption
 
-### Phase 2 Tasks (NOT STARTED)
+### Phase 2 Tasks — Combined Query-Time Migration Checklist
 
-#### 1. Enable Cypher 25 Runtime
-**Impact:** Required to access Cypher 25 optimizations
+> **Updated:** January 11, 2026 — Merged with Cypher 25 query-time improvements
 
-- [ ] Add `CYPHER 25` prefix to all Cypher queries OR
-- [ ] Set database default: `CALL dbms.setDefaultRuntime('cypher-25')`
-- [ ] Test all routes with Cypher 25 runtime
-- [ ] Benchmark latency differences
+---
 
-**Files to Update:**
-- `app/services/graph_service.py` (all Cypher queries)
-- `app/hybrid/orchestrator.py` (vector/fulltext searches)
-- `app/hybrid/services/neo4j_store.py` (all queries)
-- `app/v3/services/neo4j_store.py` (all queries)
-- `app/services/async_neo4j_service.py` (all queries)
+### 🚀 STAGE 1: Low Risk (Do Now)
 
-#### 2. Migrate to Native VECTOR Type
-**Impact:** Performance improvement for vector operations
+> **Status:** ✅ IMPLEMENTED (January 11, 2026)
+
+#### 1.1 Enable Cypher 25 Runtime
+**Impact:** Required to access all Cypher 25 optimizations  
+**Risk:** Low (reversible via query prefix)
+
+- [x] Add `CYPHER 25` prefix support via `cypher25_query()` helper
+- [x] Global toggle: `USE_CYPHER_25 = True` in `async_neo4j_service.py`
+- [x] Update all hot-path queries in `async_neo4j_service.py`
+- [ ] Test all routes with Cypher 25 runtime (use benchmark script)
+- [ ] Benchmark latency differences (use baseline comparison script)
+
+**Queries Updated with Cypher 25:**
+- ✅ `get_entities_by_importance()` — Entity retrieval by importance score
+- ✅ `get_entities_by_names()` — Entity lookup by name
+- ✅ `expand_neighbors()` — Multi-hop neighbor expansion
+- ✅ `get_entity_relationships()` — Relationship retrieval
+- ✅ `personalized_pagerank_native()` — PPR approximation
+- ✅ `get_chunks_for_entities()` — Chunk retrieval via MENTIONS
+- ✅ `check_field_exists_in_document()` — Negative detection
+- ✅ `check_field_pattern_in_document()` — Pattern-based validation
+- ✅ `check_pattern_in_docs_by_keyword()` — Document keyword check
+- ✅ `semantic_multihop_beam()` — Semantic-guided beam search
+
+**Files Updated:**
+- ✅ `app/services/async_neo4j_service.py` — Added `CYPHER_25_PREFIX`, `cypher25_query()` helper, updated 10 critical queries
+- ✅ `scripts/run_cypher25_baseline_benchmark.py` — New baseline benchmark runner
+
+#### 1.2 Add Uniqueness Constraints (MergeUniqueNode Operator)
+**Impact:** Unlocks `MergeUniqueNode` operator — bypasses "check then write" overhead  
+**Risk:** Low (validate no duplicates first)
+
+- [x] Create constraints on `graph_service.py` initialization
+- [x] Create migration script: `scripts/cypher25_migration.py`
+- [ ] Test MERGE performance before/after
+
+**Constraints Created:**
+```cypher
+CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:`__Entity__`) REQUIRE e.id IS UNIQUE;
+CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:TextChunk) REQUIRE c.id IS UNIQUE;
+CREATE CONSTRAINT document_id_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE;
+CREATE CONSTRAINT node_id_unique IF NOT EXISTS FOR (n:`__Node__`) REQUIRE n.id IS UNIQUE;
+```
+
+**Files Updated:**
+- ✅ `app/services/graph_service.py` — Added `_initialize_uniqueness_constraints()`
+- ✅ `scripts/cypher25_migration.py` — New migration script for existing deployments
+
+#### 1.3 Run Baseline Benchmarks
+**Impact:** Establish before/after comparison  
+**Risk:** None
+
+- [ ] Capture Route 3 performance (positive + negative tests)
+- [ ] Document query plans with `PROFILE`
+- [ ] Record p50/p95/p99 latencies
+
+**To run migration and baseline benchmarks:**
+```bash
+cd /afh/projects/graphrag-orchestration
+source .venv/bin/activate
+
+# Step 1: Apply constraints to database
+python scripts/cypher25_migration.py
+
+# Step 2: Run BEFORE baseline (optional if testing locally)
+python scripts/run_cypher25_baseline_benchmark.py --phase before
+
+# Step 3: Deploy code with USE_CYPHER_25 = True (already set)
+
+# Step 4: Run AFTER baseline
+python scripts/run_cypher25_baseline_benchmark.py --phase after
+
+# Step 5: Compare results
+python scripts/run_cypher25_baseline_benchmark.py --compare \
+  benchmarks/cypher25_baseline_before_*.json \
+  benchmarks/cypher25_baseline_after_*.json
+```
+
+---
+
+### 🔧 STAGE 2: Medium Risk (After Baseline Validated)
+
+#### 2.1 Conditional Query Branching (WHEN...THEN...ELSE)
+**Impact:** Lower CPU overhead for conditional logic  
+**Cypher 5 (Old):** `CASE` expressions or APOC `do.when`  
+**Cypher 25 (New):** Native `WHEN...THEN...ELSE` blocks
+
+**Query Planner Benefit:** Optimizes branches independently — only executes the branch that meets condition
+
+**Example:**
+```cypher
+CYPHER 25
+MATCH (n:Entity {id: $id})
+WHEN n.type = 'PERSON' THEN
+  RETURN n.name, n.description
+ELSE
+  RETURN n.name, n.metadata
+```
+
+**Potential Use Cases:**
+- Route selection logic in orchestrator
+- Entity-type-specific retrieval paths
+- Conditional community expansion
+
+**Files to Evaluate:**
+- [ ] `app/hybrid/orchestrator.py` (route branching)
+- [ ] `app/services/async_neo4j_service.py` (conditional entity retrieval)
+
+#### 2.2 Evaluate REPEATABLE ELEMENTS (Cyclic Paths)
+**Impact:** Faster "looping" logic without APOC/procedural workarounds  
+**Cypher 5 (Old):** Strictly enforced relationship uniqueness (no revisiting edges)  
+**Cypher 25 (New):** `MATCH REPEATABLE ELEMENTS` allows cycles natively
+
+**Example:**
+```cypher
+CYPHER 25
+MATCH REPEATABLE ELEMENTS (start:Entity)-[*1..5]->(end:Entity)
+WHERE start.id = $id
+RETURN path
+```
+
+**Potential Use Cases:**
+- Route 4 multi-hop where returning to a previous entity is valid
+- HippoRAG PPR paths that may loop through central nodes
+- Charging/state-loop patterns in domain graphs
+
+**Decision:** Evaluate if Route 4 traversals have valid cyclic patterns
+
+#### 2.3 MergeInto Optimization (Known Start/End Nodes)
+**Impact:** Faster MERGE when both endpoints are already matched  
+**Cypher 25:** New internal `MergeInto` operator
+
+**Current Pattern:**
+```cypher
+MATCH (a:Entity {id: $source_id}), (b:Entity {id: $target_id})
+MERGE (a)-[r:RELATED_TO]->(b)
+```
+
+**Benefit:** Query planner automatically uses `MergeInto` when pattern endpoints are known
+
+**Files to Audit:**
+- [ ] `app/hybrid/services/neo4j_store.py` (relationship creation)
+- [ ] `app/services/graph_service.py` (relationship MERGE patterns)
+
+#### 2.4 Leverage Dynamic Label Indexing
+**Impact:** Use indexes for runtime-determined labels  
+**Cypher 5 (Old):** Cannot use index for parameterized labels  
+**Cypher 25 (New):** Index-backed dynamic label lookup
+
+**Example:**
+```cypher
+CYPHER 25
+MATCH (n:$(labelParam) {id: $id})  -- Now uses index!
+RETURN n
+```
+
+**Potential Use Cases:**
+- Multi-tenant entity types (different labels per tenant)
+- Parameterized node type queries
+- Generic entity retrieval by type parameter
+
+**Decision:** Evaluate if dynamic labels would benefit our multi-tenant architecture
+
+---
+
+### ⚠️ STAGE 3: High Risk (Defer Until Benchmarks Stable)
+
+#### 3.1 State-Aware Pruning (allReduce)
+**Impact:** 10x–100x speedups for complex pathfinding  
+**Cypher 5 (Old):** Find all paths, then filter with WHERE/APOC  
+**Cypher 25 (New):** `allReduce` kills invalid paths mid-expansion
+
+**Example — Stop if total cost exceeds limit:**
+```cypher
+CYPHER 25
+MATCH path = (start:Entity)-[r*]->(end:Entity)
+WHERE allReduce(0, cost IN [rel IN relationships(path) | rel.weight], cost + weight < 100)
+RETURN path
+```
+
+**Use Cases:**
+- Route 4 multi-hop with edge weight limits
+- EV routing / supply chain with energy constraints
+- "Best path under budget" queries
+
+**Files to Update (When Ready):**
+- [ ] `app/services/async_neo4j_service.py` (semantic_multihop_beam)
+- [ ] `app/hybrid/pipeline/enhanced_graph_retriever.py`
+
+#### 3.2 Migrate to Native VECTOR Type
+**Impact:** Native vector math at engine level (faster Top-K similarity)  
+**Risk:** High (requires schema migration)
 
 **Current State:**
 ```cypher
@@ -106,6 +287,7 @@ FOR (t:TextChunk) ON (t.embedding::VECTOR<FLOAT>)
 - [ ] Drop old vector indexes
 - [ ] Recreate indexes with VECTOR type
 - [ ] Update application code to handle VECTOR type
+- [ ] Plan downtime or live migration strategy
 
 **Files to Update:**
 - `app/services/graph_service.py` (`_initialize_vector_indices()`)
@@ -113,52 +295,25 @@ FOR (t:TextChunk) ON (t.embedding::VECTOR<FLOAT>)
 - `app/v3/services/neo4j_store.py` (index creation)
 - All embedding upsert queries
 
-#### 3. Add Uniqueness Constraints for MERGE Optimization
-**Impact:** Leverages MergeUniqueNode operator for faster writes
-
-**Current State:** MERGE operations without constraints (slower)
-
-**Target State:**
-```cypher
-CREATE CONSTRAINT entity_id_unique IF NOT EXISTS
-FOR (e:Entity) REQUIRE e.id IS UNIQUE;
-
-CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS
-FOR (c:TextChunk) REQUIRE c.id IS UNIQUE;
-
-CREATE CONSTRAINT document_id_unique IF NOT EXISTS
-FOR (d:Document) REQUIRE d.id IS UNIQUE;
-```
-
-**Files to Update:**
-- [ ] `app/services/graph_service.py` (add constraint creation method)
-- [ ] Schema initialization scripts
-- [ ] Test MERGE performance before/after
-
-#### 4. Leverage Dynamic Label Indexing
-**Impact:** Use indexes for runtime-determined labels
-
-**Current State:** Static labels in all MATCH clauses
-
-**Potential Use Cases:**
-- Multi-tenant filtering by dynamic entity types
-- Parameterized label matching
-
-**Example:**
-```cypher
-CYPHER 25
-MATCH (n:$(labelParam) {id: $id})  -- Can now use index
-RETURN n
-```
-
-**Decision Needed:** Evaluate if dynamic labels would benefit our use cases
-
-#### 5. Update Index Provider Syntax
+#### 3.3 Update Index Provider Syntax
 **Impact:** Ensure using latest index syntax (future-proof)
 
 **Current State:** Using older VECTOR INDEX syntax
 
 **Target State:** Verify we're on latest Neo4j 2025.x index syntax (may require no changes)
+
+---
+
+### 📊 Cypher 25 Performance Comparison Table
+
+| Feature | Cypher 5 (Old) | Cypher 25 (New) | Time Benefit |
+|---------|----------------|-----------------|--------------|
+| Path Pruning | Post-traversal filtering | `allReduce` in-flight pruning | 10x–100x faster |
+| Cycles | Requires APOC/Procedural | `REPEATABLE ELEMENTS` | Faster looping logic |
+| Conditionals | `CASE` or APOC | `WHEN...THEN...ELSE` | Lower CPU overhead |
+| Writes | Generic MERGE | `MergeUniqueNode` / `MergeInto` | Reduced lock contention |
+| Vector Search | LIST<FLOAT> translation | Native VECTOR type | Lower GenAI/RAG latency |
+| Dynamic Labels | No index support | Index-backed `$(labelParam)` | Faster parameterized queries |
 
 ---
 

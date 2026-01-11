@@ -58,7 +58,7 @@ python scripts/run_cypher25_baseline_benchmark.py --phase after
 # Route 3 Global Search (comprehensive)
 python scripts/benchmark_route3_global_search.py \
   --url https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io \
-  --group-id test-5pdfs-1767429340223041632 \
+  --group-id test-cypher25-final-1768129960 \
   --repeats 3
 
 # All 4 Routes (positive + negative)

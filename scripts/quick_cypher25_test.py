@@ -21,7 +21,7 @@ async def main():
     print(f"USE_CYPHER_25 = {USE_CYPHER_25}")
     print()
     
-    group_id = "test-5pdfs-1767429340223041632"
+    group_id = "test-cypher25-final-1768129960"
     
     async with AsyncNeo4jService.from_settings() as service:
         print("✅ Connected to Neo4j")

@@ -288,7 +288,7 @@ def main():
     )
     parser.add_argument(
         "--group-id",
-        default=os.getenv("TEST_GROUP_ID", "test-5pdfs-1767429340223041632"),
+        default=os.getenv("TEST_GROUP_ID", "test-cypher25-final-1768129960"),
         help="Test group ID"
     )
     

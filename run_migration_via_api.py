@@ -7,7 +7,7 @@ import requests
 import json
 
 url = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
-group_id = "test-5pdfs-1767429340223041632"
+group_id = "test-cypher25-final-1768129960"
 
 # Use the graphrag/debug endpoint which has Neo4j access
 response = requests.post(

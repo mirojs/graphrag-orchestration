@@ -32,7 +32,7 @@ print("=" * 70)
 print(f"USE_CYPHER_25 = {USE_CYPHER_25}")
 print()
 
-GROUP_ID = "test-5pdfs-1767429340223041632"
+GROUP_ID = "test-cypher25-final-1768129960"
 
 async def test_keyword_matching():
     """Test keyword matching queries with CASE expressions."""

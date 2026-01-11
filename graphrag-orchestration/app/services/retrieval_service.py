@@ -1,12 +1,14 @@
 """
 Retrieval Service for GraphRAG Query Operations.
 
-Uses LlamaIndex ReActAgent with PropertyGraphIndex for Multi-Step Reasoning.
+Phase 1 Migration: Now uses native neo4j-graphrag VectorCypherRetriever instead of
+custom LlamaIndex MultiIndexVectorContextRetriever. This reduces code complexity and
+leverages official Neo4j GraphRAG package for vector + Cypher retrieval.
 
 Architecture:
 - ReActAgent orchestrates reasoning (Plan → Act → Observe loop)
-- PropertyGraphIndex performs Hybrid Search (Vector + Keyword + Graph)
-- Neo4j executes Cypher and returns structured results
+- VectorCypherRetriever performs Vector Search with custom Cypher for graph context
+- Neo4j executes optimized Cypher and returns structured results
 - Agent iteratively reasons and synthesizes results across multi-hop queries
 
 This enables true multi-step reasoning where the agent can:
@@ -31,8 +33,11 @@ from llama_index.core.agent.workflow import FunctionAgent
 from llama_index.core.tools import QueryEngineTool
 from llama_index.core import PropertyGraphIndex
 from llama_index.core.query_engine import RetrieverQueryEngine
-# Removed llama-index-graph-stores-neo4j import for driver v6.0+ compatibility
-# Neo4jPropertyGraphStore replaced by MultiTenantNeo4jStore (StandaloneNeo4jStore)
+from llama_index.core.schema import TextNode, NodeWithScore
+
+# neo4j-graphrag native retrievers (Phase 1 migration)
+from neo4j_graphrag.retrievers import VectorCypherRetriever
+from neo4j_graphrag.embeddings import AzureOpenAIEmbeddings
 
 from app.services.graph_service import GraphService, MultiTenantNeo4jStore
 from app.services.llm_service import LLMService
@@ -62,224 +67,130 @@ class RetrievalService:
         self._query_engine_cache: Dict[str, RetrieverQueryEngine] = {}
         # Cache for agents per group
         self._agent_cache: Dict[str, ReActAgent] = {}
+        # Cache for native neo4j-graphrag retrievers
+        self._native_retriever_cache: Dict[str, VectorCypherRetriever] = {}
+        # Neo4j driver (shared across retrievers)
+        self._neo4j_driver = None
+        # Native embedder for neo4j-graphrag
+        self._native_embedder = None
+
+    def _get_neo4j_driver(self):
+        """Get or create Neo4j driver for native retrievers."""
+        if self._neo4j_driver is None:
+            import neo4j
+            self._neo4j_driver = neo4j.GraphDatabase.driver(
+                settings.NEO4J_URI,
+                auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+            )
+        return self._neo4j_driver
+    
+    def _get_native_embedder(self):
+        """Get or create native neo4j-graphrag embedder."""
+        if self._native_embedder is None:
+            self._native_embedder = AzureOpenAIEmbeddings(
+                model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+                api_key=settings.AZURE_OPENAI_API_KEY,
+                api_version=settings.AZURE_OPENAI_API_VERSION or "2024-10-21",
+            )
+        return self._native_embedder
+
+    def _get_native_retriever(self, group_id: str) -> VectorCypherRetriever:
+        """
+        Get or create a native neo4j-graphrag VectorCypherRetriever.
+        
+        Phase 1 Migration: Replaces custom MultiIndexVectorContextRetriever (180+ lines)
+        with native VectorCypherRetriever (~20 lines of config).
+        
+        Features:
+        - Vector similarity search on chunk embeddings
+        - Custom Cypher for graph traversal to related entities
+        - Multi-tenant filtering via group_id
+        """
+        if group_id in self._native_retriever_cache:
+            return self._native_retriever_cache[group_id]
+        
+        retriever = VectorCypherRetriever(
+            driver=self._get_neo4j_driver(),
+            index_name="chunk_vector",  # Search chunks which have text content
+            embedder=self._get_native_embedder(),
+            retrieval_query=f"""
+                WITH node, score
+                WHERE node.group_id = '{group_id}'
+                // Get chunk text and traverse to related entities
+                OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
+                WHERE entity.group_id = '{group_id}'
+                WITH node, score, collect(DISTINCT entity.name) AS related_entities
+                RETURN node.text AS text,
+                       node.id AS chunk_id,
+                       related_entities,
+                       labels(node)[0] AS type,
+                       score
+            """,
+            neo4j_database=settings.NEO4J_DATABASE or "neo4j",
+        )
+        
+        self._native_retriever_cache[group_id] = retriever
+        logger.info(f"Created native VectorCypherRetriever for group {group_id}")
+        return retriever
 
     def _get_or_create_query_engine(self, group_id: str) -> RetrieverQueryEngine:
         """
-        Get or create a RetrieverQueryEngine with PropertyGraphIndex.
+        Get or create a RetrieverQueryEngine with native neo4j-graphrag retriever.
         
-        Uses VectorContextRetriever for full GraphRAG with:
-        1. Vector Search (Semantic) - Find similar nodes
-        2. Graph Traversal - Expand to related nodes via get_rel_map
+        Phase 1 Migration: Uses VectorCypherRetriever (native) for:
+        1. Vector Search (Semantic) - Find similar chunks
+        2. Graph Traversal - Expand to related entities via Cypher
         """
         if group_id in self._query_engine_cache:
             return self._query_engine_cache[group_id]
         
         try:
-            # Get Neo4j store for this group
-            neo4j_store = self.graph_service.get_store(group_id)
+            # Get native retriever (Phase 1 migration)
+            native_retriever = self._get_native_retriever(group_id)
             
-            if not isinstance(neo4j_store, MultiTenantNeo4jStore):
-                raise ValueError(f"Expected MultiTenantNeo4jStore, got {type(neo4j_store)}")
-            
-            # Use LlamaIndex's VectorContextRetriever as base, extended for multi-index search
-            # This follows Neo4j best practices (db.index.vector.queryNodes) while leveraging
-            # LlamaIndex's battle-tested graph traversal logic (get_rel_map)
-            from llama_index.core.indices.property_graph import VectorContextRetriever
-            from llama_index.core.schema import NodeWithScore, TextNode, QueryBundle
-            from llama_index.core.graph_stores.types import EntityNode as LabelledEntityNode
-            from typing import List
-            
-            class MultiIndexVectorContextRetriever(VectorContextRetriever):
-                """
-                Extended VectorContextRetriever that queries BOTH entity and chunk vector indexes.
+            # Create a LlamaIndex-compatible wrapper for the native retriever
+            class NativeRetrieverWrapper:
+                """Wrapper to make neo4j-graphrag retriever compatible with LlamaIndex query engine."""
                 
-                LlamaIndex's VectorContextRetriever only queries the 'entity' index by default.
-                This extension adds chunk retrieval for complete GraphRAG:
-                
-                1. Entity index: Finds semantically similar entities (people, companies, etc.)
-                2. Chunk index: Finds source text chunks containing relevant information
-                3. Graph traversal: Expands via get_rel_map() to related entities
-                
-                Architecture follows:
-                - Neo4j best practices: Uses db.index.vector.queryNodes() for native vector search
-                - LlamaIndex patterns: Inherits proven graph traversal and result formatting
-                """
-                
-                def __init__(
-                    self,
-                    graph_store,
-                    group_id: str,
-                    embed_model=None,
-                    similarity_top_k: int = 10,
-                    path_depth: int = 2,
-                    chunk_index_name: str = "chunk_vector",
-                    **kwargs
-                ):
-                    # Initialize parent VectorContextRetriever
-                    super().__init__(
-                        graph_store=graph_store,
-                        embed_model=embed_model,
-                        similarity_top_k=similarity_top_k,
-                        path_depth=path_depth,
-                        include_text=True,
-                        **kwargs
-                    )
+                def __init__(self, native_retriever, group_id, llm_service):
+                    self._native = native_retriever
                     self._group_id = group_id
-                    self._chunk_index_name = chunk_index_name
+                    self._llm_service = llm_service
                 
-                def retrieve_from_graph(self, query_bundle: QueryBundle, limit=None) -> List[NodeWithScore]:
-                    """
-                    Override to query both entity and chunk indexes, then use parent's graph traversal.
-                    """
-                    # Get embedding
-                    if query_bundle.embedding is None:
-                        query_bundle.embedding = self._embed_model.get_agg_embedding_from_queries(
-                            query_bundle.embedding_strs
-                        )
+                def retrieve(self, query_bundle):
+                    """Retrieve nodes using native neo4j-graphrag retriever."""
+                    query_text = query_bundle.query_str if hasattr(query_bundle, 'query_str') else str(query_bundle)
                     
-                    # Step 1: Query BOTH vector indexes (Neo4j native)
-                    entity_results = self._query_vector_index("entity", query_bundle.embedding)
-                    chunk_results = self._query_vector_index(self._chunk_index_name, query_bundle.embedding)
+                    # Use native retriever
+                    result = self._native.search(query_text=query_text, top_k=10)
                     
-                    logger.info(f"Vector search: {len(entity_results)} entities, {len(chunk_results)} chunks")
-                    
-                    # Step 2: Graph traversal on entity nodes (use parent's proven logic)
-                    kg_nodes = []
-                    entity_scores = {}
-                    for node_data, score in entity_results:
-                        node_name = node_data.get('name', node_data.get('entity_id', ''))
-                        if node_name:
-                            kg_nodes.append(LabelledEntityNode(
-                                name=node_name,
-                                label=node_data.get('label', '__Entity__'),
-                                properties={'group_id': self._group_id}
-                            ))
-                            entity_scores[node_name] = score
-                    
-                    triplets = []
-                    if kg_nodes:
-                        triplets = self._graph_store.get_rel_map(
-                            nodes=kg_nodes,
-                            depth=self._path_depth,
-                            limit=limit or self._limit,
-                            ignore_rels=["MENTIONS"],  # Skip generic MENTIONS edges
-                        )
-                    logger.info(f"Graph traversal: {len(triplets)} triplets")
-                    
-                    # Step 3: Build results combining chunks + entities + traversal
-                    seen_ids = set()
-                    results = []
-                    
-                    # Add chunk results first (highest priority - contains source text)
-                    for node_data, score in chunk_results:
-                        node_id = node_data.get('entity_id', '')
-                        if node_id and node_id not in seen_ids:
-                            seen_ids.add(node_id)
-                            text = node_data.get('text', '')
-                            if text:
-                                results.append(NodeWithScore(
-                                    node=TextNode(
-                                        text=text,
-                                        id_=node_id,
-                                        metadata={'source': 'chunk', 'group_id': self._group_id}
-                                    ),
-                                    score=score
-                                ))
-                    
-                    # Add entity results
-                    for node_data, score in entity_results:
-                        node_id = node_data.get('entity_id', node_data.get('name', ''))
-                        if node_id and node_id not in seen_ids:
-                            seen_ids.add(node_id)
-                            text = node_data.get('text', '') or f"Entity: {node_data.get('name', node_id)}"
-                            results.append(NodeWithScore(
+                    # Convert to LlamaIndex NodeWithScore format
+                    nodes = []
+                    if result and hasattr(result, 'items'):
+                        for item in result.items:
+                            content = item.content if hasattr(item, 'content') else str(item)
+                            metadata = item.metadata if hasattr(item, 'metadata') else {}
+                            score = getattr(item, 'score', 0.8)
+                            
+                            nodes.append(NodeWithScore(
                                 node=TextNode(
-                                    text=text,
-                                    id_=node_id,
+                                    text=content,
+                                    id_=metadata.get('chunk_id', ''),
                                     metadata={
-                                        'source': 'entity',
-                                        'name': node_data.get('name', ''),
-                                        'label': node_data.get('label', ''),
-                                        'group_id': self._group_id
+                                        'source': 'native_vector_cypher',
+                                        'group_id': self._group_id,
+                                        'related_entities': metadata.get('related_entities', []),
                                     }
                                 ),
                                 score=score
                             ))
                     
-                    # Add graph traversal results (use parent's _get_nodes_with_score pattern)
-                    for triplet in triplets:
-                        source_node, relation, target_node = triplet
-                        for graph_node in [source_node, target_node]:
-                            node_name = graph_node.name if hasattr(graph_node, 'name') else str(graph_node)
-                            if node_name and node_name not in seen_ids:
-                                seen_ids.add(node_name)
-                                text = ""
-                                if hasattr(graph_node, 'properties') and graph_node.properties:
-                                    text = graph_node.properties.get('text', '')
-                                if not text:
-                                    text = f"Entity: {node_name}"
-                                
-                                # Score from original entity search, or 0.5 for traversed nodes
-                                score = entity_scores.get(node_name, 0.5)
-                                results.append(NodeWithScore(
-                                    node=TextNode(
-                                        text=text,
-                                        id_=node_name,
-                                        metadata={
-                                            'source': 'graph_traversal',
-                                            'name': node_name,
-                                            'relation': relation.label if hasattr(relation, 'label') else '',
-                                            'group_id': self._group_id
-                                        }
-                                    ),
-                                    score=score
-                                ))
-                    
-                    logger.info(f"MultiIndexVectorContextRetriever: {len(results)} total results")
-                    return results
-                
-                def _query_vector_index(self, index_name: str, embedding: List[float]) -> List[tuple]:
-                    """
-                    Query Neo4j vector index using native db.index.vector.queryNodes().
-                    Follows Neo4j GenAI best practices.
-                    """
-                    try:
-                        cypher = """
-                        CALL db.index.vector.queryNodes($index_name, $top_k, $embedding)
-                        YIELD node, score
-                        WHERE node.group_id = $group_id
-                        RETURN node.id AS entity_id, 
-                               node.name AS name, 
-                               node.text AS text,
-                               labels(node)[0] AS label, 
-                               score
-                        ORDER BY score DESC
-                        """
-                        
-                        result = self._graph_store.structured_query(
-                            cypher,
-                            param_map={
-                                "index_name": index_name,
-                                "embedding": embedding,
-                                "group_id": self._group_id,
-                                "top_k": self._similarity_top_k,
-                            }
-                        )
-                        
-                        return [(dict(row), row.get("score", 0.0)) for row in (result or [])]
-                    except Exception as e:
-                        logger.warning(f"Vector search on '{index_name}' failed: {e}")
-                        return []
+                    logger.info(f"NativeRetrieverWrapper: {len(nodes)} results for '{query_text[:50]}...'")
+                    return nodes
             
-            # Create retriever using our extended class
-            retriever = MultiIndexVectorContextRetriever(
-                graph_store=neo4j_store,
-                group_id=group_id,
-                embed_model=self.llm_service.embed_model,
-                similarity_top_k=10,
-                path_depth=2,  # 2-hop traversal for multi-hop reasoning
-                chunk_index_name="chunk_vector",
-            )
+            # Create retriever wrapper
+            retriever = NativeRetrieverWrapper(native_retriever, group_id, self.llm_service)
             
             # Create query engine with our retriever
             from llama_index.core.response_synthesizers import get_response_synthesizer
@@ -296,7 +207,7 @@ class RetrievalService:
             
             # Cache it
             self._query_engine_cache[group_id] = query_engine
-            logger.info(f"Created GraphRAGRetriever QueryEngine for group {group_id}")
+            logger.info(f"Created native VectorCypherRetriever QueryEngine for group {group_id}")
             
             return query_engine
             
@@ -443,8 +354,9 @@ class RetrievalService:
                 "answer": str(response),
                 "sources": sources,
                 "metadata": {
-                    "retriever_type": "MultiIndexVectorContextRetriever",
-                    "indexes_searched": ["entity", "chunk_vector"],
+                    "retriever_type": "VectorCypherRetriever",
+                    "package": "neo4j-graphrag",
+                    "indexes_searched": ["chunk_vector"],
                 }
             }
             
@@ -534,8 +446,9 @@ class RetrievalService:
                 "answer": str(response),
                 "sources": sources,
                 "metadata": {
-                    "retriever_type": "MultiIndexVectorContextRetriever",
-                    "indexes_searched": ["entity", "chunk_vector", "entity_fulltext"],
+                    "retriever_type": "VectorCypherRetriever",
+                    "package": "neo4j-graphrag",
+                    "indexes_searched": ["chunk_vector"],
                 }
             }
             

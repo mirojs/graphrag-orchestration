@@ -6,6 +6,9 @@ indexing entrypoint that populates the Neo4j schema used by:
 - Route 1 (Neo4j vector search over :TextChunk.embedding)
 - Route 2/3 (LazyGraphRAG + HippoRAG over :Entity / :TextChunk / :MENTIONS)
 
+Phase 2 Migration: Added optional neo4j-graphrag LLMEntityRelationExtractor support.
+Set use_native_extractor=True in config to use the native extractor.
+
 Design goals:
 - No imports from `app.v3.routers.*`
 - Minimal surface area: one async `index_documents` method
@@ -19,13 +22,22 @@ import logging
 import re
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
 
 from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.schema import Document as LlamaDocument
 from llama_index.core.schema import TextNode
+
+# neo4j-graphrag native extractor (Phase 2 migration - optional)
+try:
+    from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
+    from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
+    from neo4j_graphrag.llm import AzureOpenAILLM
+    NATIVE_EXTRACTOR_AVAILABLE = True
+except ImportError:
+    NATIVE_EXTRACTOR_AVAILABLE = False
 
 from app.services.document_intelligence_service import DocumentIntelligenceService
 from app.hybrid.services.entity_deduplication import EntityDeduplicationService
@@ -39,6 +51,8 @@ class LazyGraphRAGIndexingConfig:
     chunk_size: int = 512
     chunk_overlap: int = 64
     embedding_dimensions: int = 3072
+    # Phase 2: Set to True to use neo4j-graphrag LLMEntityRelationExtractor
+    use_native_extractor: bool = False
 
 
 class LazyGraphRAGIndexingPipeline:
@@ -391,6 +405,11 @@ class LazyGraphRAGIndexingPipeline:
         if self.llm is None:
             return [], []
 
+        # Phase 2: Optionally use native neo4j-graphrag extractor
+        if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
+            return await self._extract_with_native_extractor(group_id, chunks)
+
+        # Default: Use LlamaIndex SchemaLLMPathExtractor
         extractor = SchemaLLMPathExtractor(
             llm=cast(Any, self.llm),
             possible_entities=None,
@@ -505,6 +524,112 @@ class LazyGraphRAGIndexingPipeline:
             except Exception as e:
                 logger.warning("lazy_index_entity_embedding_failed", extra={"error": str(e)})
 
+        return entities, relationships
+
+    async def _extract_with_native_extractor(
+        self,
+        group_id: str,
+        chunks: List[TextChunk],
+    ) -> Tuple[List[Entity], List[Relationship]]:
+        """
+        Phase 2: Extract entities/relationships using neo4j-graphrag LLMEntityRelationExtractor.
+        
+        This provides an alternative to SchemaLLMPathExtractor using the official
+        neo4j-graphrag package, potentially providing better extraction quality
+        and tighter Neo4j integration.
+        """
+        from app.core.config import settings
+        
+        logger.info(f"Using native LLMEntityRelationExtractor for {len(chunks)} chunks")
+        
+        # Create neo4j-graphrag LLM (separate from LlamaIndex LLM)
+        native_llm = AzureOpenAILLM(
+            model_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+            api_key=settings.AZURE_OPENAI_API_KEY,
+            api_version=settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
+        )
+        
+        # Create native extractor
+        extractor = LLMEntityRelationExtractor(
+            llm=native_llm,
+            create_lexical_graph=False,  # We already have chunks, don't create duplicate
+            max_concurrency=1,
+        )
+        
+        # Convert to neo4j-graphrag TextChunks
+        native_chunks = []
+        for c in chunks:
+            native_chunks.append(NativeTextChunk(
+                text=c.text,
+                index=c.chunk_index,
+                metadata={"chunk_id": c.id, "document_id": c.document_id},
+                uid=c.id,
+            ))
+        text_chunks = TextChunks(chunks=native_chunks)
+        
+        # Run extraction
+        graph = await extractor.run(chunks=text_chunks)
+        
+        logger.info(f"Native extractor produced {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")
+        
+        # Convert to our Entity/Relationship format
+        entities: List[Entity] = []
+        entity_id_map: Dict[str, str] = {}  # Map native node ID to our entity ID
+        
+        for node in graph.nodes:
+            if not node.labels or "Chunk" in node.labels:
+                continue  # Skip chunk nodes
+            
+            name = node.properties.get("name", "") if node.properties else ""
+            if not name:
+                name = node.id
+            
+            key = self._canonical_entity_key(name)
+            if not key:
+                continue
+            
+            ent_id = self._stable_entity_id(group_id, key)
+            entity_id_map[node.id] = ent_id
+            
+            entities.append(Entity(
+                id=ent_id,
+                name=name,
+                type=node.labels[0] if node.labels else "CONCEPT",
+                description=node.properties.get("description", "") if node.properties else "",
+                embedding=None,
+                metadata=node.properties or {},
+                text_unit_ids=[],
+            ))
+        
+        # Convert relationships
+        relationships: List[Relationship] = []
+        for rel in graph.relationships:
+            source_id = entity_id_map.get(rel.start_node_id)
+            target_id = entity_id_map.get(rel.end_node_id)
+            
+            if not source_id or not target_id:
+                continue
+            
+            relationships.append(Relationship(
+                source_id=source_id,
+                target_id=target_id,
+                type=rel.type or "RELATED_TO",
+                description=rel.type or "RELATED_TO",
+                weight=1.0,
+            ))
+        
+        # Embeddings for entities (best-effort)
+        if entities and self.embedder is not None:
+            texts = [f"{e.name}: {e.description}" if e.description else e.name for e in entities]
+            try:
+                embs = await self.embedder.aget_text_embedding_batch(texts)
+                for ent, emb in zip(entities, embs):
+                    ent.embedding = emb
+            except Exception as e:
+                logger.warning("native_extractor_entity_embedding_failed", extra={"error": str(e)})
+        
+        logger.info(f"Native extraction complete: {len(entities)} entities, {len(relationships)} relationships")
         return entities, relationships
 
     def _deduplicate_entities(

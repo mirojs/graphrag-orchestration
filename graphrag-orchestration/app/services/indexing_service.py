@@ -4,8 +4,12 @@ Indexing Service for GraphRAG Knowledge Graph Construction.
 Uses LlamaIndex PropertyGraphIndex with SchemaLLMPathExtractor to extract
 entities and relationships from documents, storing them in Neo4j.
 
+Phase 2 Migration: Added neo4j-graphrag LLMEntityRelationExtractor as 'native' mode.
+This uses the official neo4j-graphrag package for entity/relation extraction.
+
 Supports multiple extraction modes:
-- schema: SchemaLLMPathExtractor with entity/relation type hints
+- native: LLMEntityRelationExtractor from neo4j-graphrag (Phase 2 - recommended)
+- schema: SchemaLLMPathExtractor with entity/relation type hints (legacy)
 - schema_aware: SchemaAwareExtractor with full schema descriptions + table support
 - simple: SimpleLLMPathExtractor for free-form extraction
 - dynamic: DynamicLLMPathExtractor with allowed types
@@ -21,6 +25,12 @@ from llama_index.core.indices.property_graph import (
     DynamicLLMPathExtractor,
 )
 from llama_index.core.schema import TextNode
+
+# neo4j-graphrag native extractor (Phase 2 migration)
+from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
+from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
+from neo4j_graphrag.experimental.components.schema import GraphSchema, NodeType, RelationshipType
+from neo4j_graphrag.llm import AzureOpenAILLM
 
 from app.services.graph_service import GraphService, MultiTenantNeo4jStore
 from app.services.schema_aware_extractor import SchemaAwareExtractor, TableAwareExtractor
@@ -125,7 +135,7 @@ class IndexingService:
         documents: List[Document],
         entity_types: Optional[List[str]] = None,
         relation_types: Optional[List[str]] = None,
-        extraction_mode: str = "schema",  # schema, schema_aware, simple, dynamic
+        extraction_mode: str = "schema",  # native, schema, schema_aware, simple, dynamic
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -137,7 +147,8 @@ class IndexingService:
             entity_types: Custom entity types (uses defaults if None)
             relation_types: Custom relation types (uses defaults if None)
             extraction_mode: Extraction strategy:
-                - schema: SchemaLLMPathExtractor with type hints
+                - native: LLMEntityRelationExtractor from neo4j-graphrag (Phase 2 - recommended)
+                - schema: SchemaLLMPathExtractor with type hints (legacy)
                 - schema_aware: SchemaAwareExtractor with full schema + table support
                 - simple: SimpleLLMPathExtractor for free extraction
                 - dynamic: DynamicLLMPathExtractor with allowed types
@@ -164,7 +175,16 @@ class IndexingService:
         graph_store = self.graph_service.get_store(group_id)
         
         # Configure extractor based on mode
-        if extraction_mode == "schema_aware":
+        if extraction_mode == "native":
+            # Phase 2: Use neo4j-graphrag LLMEntityRelationExtractor
+            return await self._index_with_native_extractor(
+                group_id=group_id,
+                documents=documents,
+                entity_types=entity_types,
+                relation_types=relation_types,
+                **kwargs,
+            )
+        elif extraction_mode == "schema_aware":
             # NEW: Schema-aware extractor with full schema descriptions + table support
             if not self.llm_service.llm:
                 raise ValueError("LLM service not configured for schema-aware extraction")
@@ -276,6 +296,139 @@ class IndexingService:
         }
         
         logger.info(f"Indexing complete: {stats}")
+        return stats
+
+    async def _index_with_native_extractor(
+        self,
+        group_id: str,
+        documents: List[Document],
+        entity_types: List[str],
+        relation_types: List[str],
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Phase 2: Index documents using neo4j-graphrag LLMEntityRelationExtractor.
+        
+        This uses the official neo4j-graphrag package for entity/relation extraction,
+        providing better integration with Neo4j and potentially improved extraction quality.
+        
+        Args:
+            group_id: Tenant identifier
+            documents: List of documents to index
+            entity_types: Entity types to extract
+            relation_types: Relation types to extract
+            
+        Returns:
+            Indexing statistics
+        """
+        import neo4j
+        
+        logger.info(f"Phase 2 native indexing for group {group_id}: {len(documents)} documents")
+        
+        # Create neo4j-graphrag LLM
+        native_llm = AzureOpenAILLM(
+            model_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
+            api_key=settings.AZURE_OPENAI_API_KEY,
+            api_version=settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
+        )
+        
+        # Build GraphSchema from entity/relation types
+        node_types = [
+            NodeType(label=et, description=f"A {et} entity", properties=[], additional_properties=True)
+            for et in entity_types
+        ]
+        relationship_types = [
+            RelationshipType(label=rt, description=f"A {rt} relationship", properties=[], additional_properties=True)
+            for rt in relation_types
+        ]
+        schema = GraphSchema(node_types=node_types, relationship_types=relationship_types)
+        
+        # Create native extractor
+        extractor = LLMEntityRelationExtractor(
+            llm=native_llm,
+            create_lexical_graph=True,  # Also create text chunk nodes
+            max_concurrency=settings.GRAPHRAG_NUM_WORKERS,
+        )
+        
+        # Convert documents to neo4j-graphrag TextChunks
+        chunks = []
+        for i, doc in enumerate(documents):
+            text = doc.text if hasattr(doc, 'text') else str(doc)
+            chunks.append(NativeTextChunk(
+                text=text,
+                index=i,
+                metadata={"group_id": group_id, "document_index": i},
+                uid=f"{group_id}_doc_{i}",
+            ))
+        text_chunks = TextChunks(chunks=chunks)
+        
+        # Run extraction
+        logger.info(f"Running native LLMEntityRelationExtractor on {len(chunks)} chunks...")
+        graph = await extractor.run(chunks=text_chunks, schema=schema)
+        
+        # Add group_id to all nodes and relationships
+        for node in graph.nodes:
+            if node.properties is None:
+                node.properties = {}
+            node.properties["group_id"] = group_id
+        
+        for rel in graph.relationships:
+            if rel.properties is None:
+                rel.properties = {}
+            rel.properties["group_id"] = group_id
+        
+        # Write to Neo4j using driver
+        driver = neo4j.GraphDatabase.driver(
+            settings.NEO4J_URI,
+            auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+        )
+        
+        try:
+            with driver.session(database=settings.NEO4J_DATABASE or "neo4j") as session:
+                # Write nodes
+                for node in graph.nodes:
+                    labels = ":".join(node.labels) if node.labels else "Entity"
+                    props = node.properties or {}
+                    props["id"] = node.id
+                    
+                    session.run(
+                        f"MERGE (n:{labels} {{id: $id}}) SET n += $props",
+                        id=node.id,
+                        props=props,
+                    )
+                
+                # Write relationships
+                for rel in graph.relationships:
+                    session.run(
+                        f"""
+                        MATCH (a {{id: $start_id}})
+                        MATCH (b {{id: $end_id}})
+                        MERGE (a)-[r:{rel.type}]->(b)
+                        SET r += $props
+                        """,
+                        start_id=rel.start_node_id,
+                        end_id=rel.end_node_id,
+                        props=rel.properties or {},
+                    )
+                
+                logger.info(f"Native extraction wrote {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")
+        finally:
+            driver.close()
+        
+        stats = {
+            "group_id": group_id,
+            "documents_indexed": len(documents),
+            "nodes_created": len(graph.nodes),
+            "relationships_created": len(graph.relationships),
+            "extraction_mode": "native",
+            "extractor": "LLMEntityRelationExtractor",
+            "package": "neo4j-graphrag",
+            "entity_types": entity_types,
+            "relation_types": relation_types,
+        }
+        
+        logger.info(f"Native indexing complete: {stats}")
         return stats
 
     async def index_from_schema(

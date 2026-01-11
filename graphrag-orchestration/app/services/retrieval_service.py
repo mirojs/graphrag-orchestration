@@ -160,33 +160,39 @@ class RetrievalService:
                 
                 def retrieve(self, query_bundle):
                     """Retrieve nodes using native neo4j-graphrag retriever."""
+                    from llama_index.core.schema import QueryBundle
+                    
                     query_text = query_bundle.query_str if hasattr(query_bundle, 'query_str') else str(query_bundle)
                     
-                    # Use native retriever
+                    # Use native retriever (returns RawSearchResult with Neo4j records)
+                    logger.info(f"Native retriever searching for: '{query_text[:50]}...'")
                     result = self._native.search(query_text=query_text, top_k=10)
                     
-                    # Convert to LlamaIndex NodeWithScore format
+                    # Convert Neo4j records to LlamaIndex NodeWithScore format
                     nodes = []
-                    if result and hasattr(result, 'items'):
-                        for item in result.items:
-                            content = item.content if hasattr(item, 'content') else str(item)
-                            metadata = item.metadata if hasattr(item, 'metadata') else {}
-                            score = getattr(item, 'score', 0.8)
+                    if result and result.records:
+                        for record in result.records:
+                            # Extract fields from Neo4j record based on retrieval_query
+                            text = record.get('text', '')
+                            chunk_id = record.get('chunk_id', '')
+                            score = record.get('score', 0.0)
+                            related_entities = record.get('related_entities', [])
                             
-                            nodes.append(NodeWithScore(
-                                node=TextNode(
-                                    text=content,
-                                    id_=metadata.get('chunk_id', ''),
-                                    metadata={
-                                        'source': 'native_vector_cypher',
-                                        'group_id': self._group_id,
-                                        'related_entities': metadata.get('related_entities', []),
-                                    }
-                                ),
-                                score=score
-                            ))
+                            if text:
+                                nodes.append(NodeWithScore(
+                                    node=TextNode(
+                                        text=text,
+                                        id_=chunk_id,
+                                        metadata={
+                                            'source': 'native_vector_cypher',
+                                            'group_id': self._group_id,
+                                            'related_entities': related_entities,
+                                        }
+                                    ),
+                                    score=float(score) if score else 0.0
+                                ))
                     
-                    logger.info(f"NativeRetrieverWrapper: {len(nodes)} results for '{query_text[:50]}...'")
+                    logger.info(f"Native retriever returned {len(nodes)} nodes")
                     return nodes
             
             # Create retriever wrapper

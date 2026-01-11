@@ -254,8 +254,14 @@ class CommunityService:
         try:
             from graspologic.partition import hierarchical_leiden
         except ImportError:
-            logger.error("graspologic not installed. Run: pip install graspologic")
-            raise ImportError("graspologic required for community detection")
+            logger.warning(
+                "graspologic not installed; skipping community detection. To enable, run: pip install -r requirements.community.txt"
+            )
+            return {
+                "community_count": 0,
+                "node_count": 0,
+                "summaries_generated": 0,
+            }
         
         # Create NetworkX graph from Neo4j
         nx_graph = self._create_nx_graph_from_neo4j(group_id)

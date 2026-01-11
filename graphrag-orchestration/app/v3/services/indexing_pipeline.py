@@ -2259,12 +2259,35 @@ class IndexingPipelineV3:
         
         # Run hierarchical Leiden
         try:
+            # Import locally so we can make this dependency optional
+            from graspologic.partition import hierarchical_leiden
+
             partition_map = hierarchical_leiden(
                 adj_matrix,
                 resolution=self.config.community_resolution,
                 max_cluster_size=len(entities) // 2,  # Allow larger communities
             )
-            
+        except ImportError:
+            logger.warning(
+                "graspologic not installed; skipping Leiden community detection. Using single-community fallback."
+            )
+            partition_map = []
+        except Exception as e:
+            logger.error("Leiden clustering failed: %s", e)
+            partition_map = []
+
+        # If Leiden didn't produce a partition (e.g., missing package), fallback to single community
+        if not partition_map:
+            logger.info("Falling back to single community containing all entities")
+            community = Community(
+                id=f"community_L0_all_{uuid.uuid4().hex[:8]}",
+                level=0,
+                entity_ids=entity_ids,
+                title="Community Level 0 - all",
+                rank=1.0,
+            )
+            communities = [community]
+        else:
             # Convert partition map to Community objects
             communities = []
             
@@ -2282,8 +2305,6 @@ class IndexingPipelineV3:
                     level_communities[level] = {}
                 if comm_id not in level_communities[level]:
                     level_communities[level][comm_id] = []
-                # node_idx is the index into entity_ids
-                if isinstance(node_idx, int) and node_idx < len(entity_ids):
                     level_communities[level][comm_id].append(entity_ids[node_idx])
             
             # Normalize levels so the minimum level becomes 0.

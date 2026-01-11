@@ -171,8 +171,10 @@ class GraphRAGStore(MultiTenantNeo4jStore):
         try:
             from graspologic.partition import hierarchical_leiden
         except ImportError:
-            logger.error("graspologic not installed. Run: pip install graspologic")
-            raise ImportError("graspologic required for community detection. Install with: pip install graspologic")
+            logger.warning(
+                "graspologic not installed; skipping community detection. To enable, run: pip install -r requirements.community.txt"
+            )
+            return
         
         logger.info(f"Building communities for group {self.group_id}...")
         

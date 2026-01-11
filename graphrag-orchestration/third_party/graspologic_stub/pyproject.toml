@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graspologic"
+version = "3.4.4"
+description = "Lightweight stub of graspologic for packaging (no heavy deps)."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10,<3.13"
+
+[tool.setuptools]
+packages = ["graspologic"]

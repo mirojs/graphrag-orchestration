@@ -1,0 +1,261 @@
+
+Deploying services (azd deploy)
+
+Deploying service graphrag
+  (x) Failed: Deploying service graphrag
+
+ERROR: failed building service 'graphrag': building container: graphrag at .: building image: exit code: 1, stdout: , stderr: #0 building with "default" instance using docker driver
+
+#1 [internal] load .dockerignore
+#1 transferring context: 417B done
+#1 DONE 0.0s
+
+#2 [internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.30kB done
+#2 DONE 0.0s
+
+#3 [internal] load metadata for docker.io/library/python:3.11-slim
+#3 DONE 0.8s
+
+#4 [builder 1/5] FROM docker.io/library/python:3.11-slim@sha256:1dd3dca85e22886e44fcad1bb7ccab6691dfa83db52214cf9e20696e095f3e36
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 716.10kB 0.0s done
+#5 DONE 0.0s
+
+#6 [builder 2/5] WORKDIR /tmp
+#6 CACHED
+
+#7 [builder 3/5] RUN apt-get update && apt-get install -y     build-essential     && rm -rf /var/lib/apt/lists/*
+#7 CACHED
+
+#8 [builder 4/5] COPY requirements.txt .
+#8 DONE 0.1s
+
+#9 [builder 5/5] RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt
+#9 2.531 Requirement already satisfied: pip in /usr/local/lib/python3.11/site-packages (24.0)
+#9 2.718 Collecting pip
+#9 2.808   Downloading pip-25.3-py3-none-any.whl.metadata (4.7 kB)
+#9 2.849 Downloading pip-25.3-py3-none-any.whl (1.8 MB)
+#9 2.994    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 12.7 MB/s eta 0:00:00
+#9 3.055 Installing collected packages: pip
+#9 3.055   Attempting uninstall: pip
+#9 3.059     Found existing installation: pip 24.0
+#9 3.106     Uninstalling pip-24.0:
+#9 3.137       Successfully uninstalled pip-24.0
+#9 4.186 Successfully installed pip-25.3
+#9 5.044 Collecting fastapi>=0.115.0 (from -r requirements.txt (line 2))
+#9 5.151   Downloading fastapi-0.128.0-py3-none-any.whl.metadata (30 kB)
+#9 5.242 Collecting uvicorn>=0.30.0 (from uvicorn[standard]>=0.30.0->-r requirements.txt (line 3))
+#9 5.273   Downloading uvicorn-0.40.0-py3-none-any.whl.metadata (6.7 kB)
+#9 5.472 Collecting pydantic>=2.10.3 (from -r requirements.txt (line 4))
+#9 5.501   Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+#9 5.570 Collecting pydantic-settings>=2.1.0 (from -r requirements.txt (line 5))
+#9 5.616   Downloading pydantic_settings-2.12.0-py3-none-any.whl.metadata (3.4 kB)
+#9 5.747 Collecting graphrag==2.7.0 (from -r requirements.txt (line 8))
+#9 5.776   Downloading graphrag-2.7.0-py3-none-any.whl.metadata (6.7 kB)
+#9 5.854 Collecting llama-index-core==0.12.52 (from -r requirements.txt (line 11))
+#9 5.886   Downloading llama_index_core-0.12.52-py3-none-any.whl.metadata (2.5 kB)
+#9 5.922 Collecting llama-index-llms-azure-openai==0.3.4 (from -r requirements.txt (line 12))
+#9 5.952   Downloading llama_index_llms_azure_openai-0.3.4-py3-none-any.whl.metadata (3.7 kB)
+#9 6.022 Collecting llama-index-llms-openai==0.4.3 (from -r requirements.txt (line 13))
+#9 6.052   Downloading llama_index_llms_openai-0.4.3-py3-none-any.whl.metadata (3.0 kB)
+#9 6.090 Collecting llama-index-embeddings-azure-openai==0.3.3 (from -r requirements.txt (line 14))
+#9 6.121   Downloading llama_index_embeddings_azure_openai-0.3.3-py3-none-any.whl.metadata (503 bytes)
+#9 6.166 Collecting llama-index-vector-stores-azureaisearch==0.3.0 (from -r requirements.txt (line 15))
+#9 6.195   Downloading llama_index_vector_stores_azureaisearch-0.3.0-py3-none-any.whl.metadata (741 bytes)
+#9 6.336 Collecting llama-index-packs-raptor==0.3.5 (from -r requirements.txt (line 18))
+#9 6.367   Downloading llama_index_packs_raptor-0.3.5-py3-none-any.whl.metadata (3.8 kB)
+#9 6.487 Collecting scikit-learn>=1.4.0 (from -r requirements.txt (line 19))
+#9 6.523   Downloading scikit_learn-1.8.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (11 kB)
+#9 6.668 Collecting graspologic==3.4.1 (from -r requirements.txt (line 22))
+#9 6.704   Downloading graspologic-3.4.1-py3-none-any.whl.metadata (5.8 kB)
+#9 6.761 Collecting networkx==3.4.2 (from -r requirements.txt (line 23))
+#9 6.790   Downloading networkx-3.4.2-py3-none-any.whl.metadata (6.3 kB)
+#9 6.851 Collecting llama-parse>=0.6.0 (from -r requirements.txt (line 25))
+#9 6.884   Downloading llama_parse-0.6.89-py3-none-any.whl.metadata (6.6 kB)
+#9 6.934 Collecting azure-search-documents==11.6.0 (from -r requirements.txt (line 28))
+#9 6.985   Downloading azure_search_documents-11.6.0-py3-none-any.whl.metadata (23 kB)
+#9 7.028 Collecting neo4j>=6.0.0 (from -r requirements.txt (line 33))
+#9 7.057   Downloading neo4j-6.0.3-py3-none-any.whl.metadata (5.2 kB)
+#9 7.097 Collecting neo4j-graphrag==1.12.0 (from -r requirements.txt (line 34))
+#9 7.126   Downloading neo4j_graphrag-1.12.0-py3-none-any.whl.metadata (19 kB)
+#9 7.864 Collecting rapidfuzz>=3.6.0 (from -r requirements.txt (line 35))
+#9 7.891   Downloading rapidfuzz-3.14.3-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (12 kB)
+#9 7.959 Collecting azure-cosmos==4.9.0 (from -r requirements.txt (line 41))
+#9 7.991   Downloading azure_cosmos-4.9.0-py3-none-any.whl.metadata (80 kB)
+#9 8.042 Collecting azure-storage-blob==12.24.0 (from -r requirements.txt (line 42))
+#9 8.072   Downloading azure_storage_blob-12.24.0-py3-none-any.whl.metadata (26 kB)
+#9 8.115 Collecting azure-identity==1.20.0 (from -r requirements.txt (line 43))
+#9 8.143   Downloading azure_identity-1.20.0-py3-none-any.whl.metadata (81 kB)
+#9 8.184 Collecting azure-ai-documentintelligence==1.0.2 (from -r requirements.txt (line 44))
+#9 8.213   Downloading azure_ai_documentintelligence-1.0.2-py3-none-any.whl.metadata (53 kB)
+#9 8.327 Collecting openai<2.0.0,>=1.14.0 (from -r requirements.txt (line 45))
+#9 8.355   Downloading openai-1.109.1-py3-none-any.whl.metadata (29 kB)
+#9 8.399 Collecting python-dotenv>=1.0.0 (from -r requirements.txt (line 48))
+#9 8.428   Downloading python_dotenv-1.2.1-py3-none-any.whl.metadata (25 kB)
+#9 8.469 Collecting structlog>=24.1.0 (from -r requirements.txt (line 49))
+#9 8.501   Downloading structlog-25.5.0-py3-none-any.whl.metadata (9.5 kB)
+#9 8.540 Collecting tenacity>=8.2.3 (from -r requirements.txt (line 50))
+#9 8.568   Downloading tenacity-9.1.2-py3-none-any.whl.metadata (1.2 kB)
+#9 8.627 Collecting json-repair>=0.9.0 (from -r requirements.txt (line 51))
+#9 8.656   Downloading json_repair-0.55.0-py3-none-any.whl.metadata (12 kB)
+#9 8.699 Collecting anyio>=4.0.0 (from -r requirements.txt (line 54))
+#9 8.726   Downloading anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+#9 8.769 Collecting httpx>=0.25.0 (from -r requirements.txt (line 57))
+#9 8.797   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+#9 8.845 Collecting environs>=11.0.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 8.879   Downloading environs-14.5.0-py3-none-any.whl.metadata (16 kB)
+#9 8.948 Collecting lancedb>=0.17.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 8.977   Downloading lancedb-0.26.1-cp39-abi3-manylinux_2_28_x86_64.whl.metadata (4.8 kB)
+#9 9.019 Collecting aiofiles>=24.1.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 9.051   Downloading aiofiles-25.1.0-py3-none-any.whl.metadata (6.3 kB)
+#9 9.188 Collecting fnllm>=0.4.1 (from fnllm[azure,openai]>=0.4.1->graphrag==2.7.0->-r requirements.txt (line 8))
+#9 9.217   Downloading fnllm-0.4.1-py3-none-any.whl.metadata (6.6 kB)
+#9 9.302 Collecting nltk==3.9.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 9.335   Downloading nltk-3.9.1-py3-none-any.whl.metadata (2.9 kB)
+#9 9.397 Collecting tiktoken>=0.11.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 9.431   Downloading tiktoken-0.12.0-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (6.7 kB)
+#9 9.665 Collecting numpy>=1.25.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 9.695   Downloading numpy-2.4.1-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+#9 9.926 Collecting pandas>=2.2.3 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 9.956   Downloading pandas-2.3.3-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (91 kB)
+#9 10.11 Collecting pyarrow>=17.0.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.14   Downloading pyarrow-22.0.0-cp311-cp311-manylinux_2_28_x86_64.whl.metadata (3.2 kB)
+#9 10.18 Collecting umap-learn>=0.5.6 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.21   Downloading umap_learn-0.5.9.post2-py3-none-any.whl.metadata (25 kB)
+#9 10.28 Collecting pyyaml>=6.0.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.31   Downloading pyyaml-6.0.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+#9 10.44 Collecting devtools>=0.12.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.47   Downloading devtools-0.12.2-py3-none-any.whl.metadata (4.8 kB)
+#9 10.51 Collecting typing-extensions>=4.12.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.54   Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+#9 10.59 Collecting future>=1.0.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.62   Downloading future-1.0.0-py3-none-any.whl.metadata (4.0 kB)
+#9 10.67 Collecting typer>=0.16.0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.70   Downloading typer-0.21.1-py3-none-any.whl.metadata (16 kB)
+#9 10.76 Collecting tqdm>=4.67.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.79   Downloading tqdm-4.67.1-py3-none-any.whl.metadata (57 kB)
+#9 10.84 Collecting textblob>=0.18.0.post0 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 10.87   Downloading textblob-0.19.0-py3-none-any.whl.metadata (4.4 kB)
+#9 11.02 Collecting spacy>=3.8.4 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 11.05   Downloading spacy-3.8.11-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (27 kB)
+#9 11.39 Collecting litellm>=1.77.1 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 11.42   Downloading litellm-1.80.13-py3-none-any.whl.metadata (29 kB)
+#9 12.13 Collecting aiohttp<4,>=3.8.6 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.16   Downloading aiohttp-3.13.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (8.1 kB)
+#9 12.20 Collecting aiosqlite (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.23   Downloading aiosqlite-0.22.1-py3-none-any.whl.metadata (4.3 kB)
+#9 12.29 Collecting banks<3,>=2.2.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.33   Downloading banks-2.2.0-py3-none-any.whl.metadata (12 kB)
+#9 12.38 Collecting dataclasses-json (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.41   Downloading dataclasses_json-0.6.7-py3-none-any.whl.metadata (25 kB)
+#9 12.46 Collecting deprecated>=1.2.9.3 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.49   Downloading deprecated-1.3.1-py2.py3-none-any.whl.metadata (5.9 kB)
+#9 12.52 Collecting dirtyjson<2,>=1.0.8 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.56   Downloading dirtyjson-1.0.8-py3-none-any.whl.metadata (11 kB)
+#9 12.59 Collecting filetype<2,>=1.2.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.62   Downloading filetype-1.2.0-py2.py3-none-any.whl.metadata (6.5 kB)
+#9 12.67 Collecting fsspec>=2023.5.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.70   Downloading fsspec-2026.1.0-py3-none-any.whl.metadata (10 kB)
+#9 12.77 Collecting llama-index-workflows<2,>=1.0.1 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.80   Downloading llama_index_workflows-1.3.0-py3-none-any.whl.metadata (6.4 kB)
+#9 12.84 Collecting nest-asyncio<2,>=1.5.8 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 12.87   Downloading nest_asyncio-1.6.0-py3-none-any.whl.metadata (2.8 kB)
+#9 13.10 Collecting pillow>=9.0.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 13.13   Downloading pillow-12.1.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (8.8 kB)
+#9 13.17 Collecting platformdirs (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 13.20   Downloading platformdirs-4.5.1-py3-none-any.whl.metadata (12 kB)
+#9 13.27 Collecting requests>=2.31.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 13.30   Downloading requests-2.32.5-py3-none-any.whl.metadata (4.9 kB)
+#9 13.45 Collecting setuptools>=80.9.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 13.47   Downloading setuptools-80.9.0-py3-none-any.whl.metadata (6.6 kB)
+#9 13.94 Collecting sqlalchemy>=1.4.49 (from sqlalchemy[asyncio]>=1.4.49->llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 13.97   Downloading sqlalchemy-2.0.45-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+#9 14.03 Collecting typing-inspect>=0.8.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 14.06   Downloading typing_inspect-0.9.0-py3-none-any.whl.metadata (1.5 kB)
+#9 14.23 Collecting wrapt (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 14.26   Downloading wrapt-2.0.1-cp311-cp311-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (9.0 kB)
+#9 14.40 Collecting azure-core>=1.31.0 (from azure-identity==1.20.0->-r requirements.txt (line 43))
+#9 14.42   Downloading azure_core-1.37.0-py3-none-any.whl.metadata (47 kB)
+#9 14.66 Collecting cryptography>=2.5 (from azure-identity==1.20.0->-r requirements.txt (line 43))
+#9 14.69   Downloading cryptography-46.0.3-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (5.7 kB)
+#9 14.75 Collecting msal>=1.30.0 (from azure-identity==1.20.0->-r requirements.txt (line 43))
+#9 14.78   Downloading msal-1.34.0-py3-none-any.whl.metadata (11 kB)
+#9 14.81 Collecting msal-extensions>=1.2.0 (from azure-identity==1.20.0->-r requirements.txt (line 43))
+#9 14.84   Downloading msal_extensions-1.3.1-py3-none-any.whl.metadata (7.8 kB)
+#9 14.89 Collecting llama-index-embeddings-openai<0.4,>=0.3.0 (from llama-index-embeddings-azure-openai==0.3.3->-r requirements.txt (line 14))
+#9 14.91   Downloading llama_index_embeddings_openai-0.3.1-py3-none-any.whl.metadata (684 bytes)
+#9 14.97 Collecting azure-common>=1.1 (from azure-search-documents==11.6.0->-r requirements.txt (line 28))
+#9 15.01   Downloading azure_common-1.1.28-py2.py3-none-any.whl.metadata (5.0 kB)
+#9 15.04 Collecting isodate>=0.6.0 (from azure-search-documents==11.6.0->-r requirements.txt (line 28))
+#9 15.07   Downloading isodate-0.7.2-py3-none-any.whl.metadata (11 kB)
+#9 15.16 Collecting POT<0.10,>=0.9 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.19   Downloading pot-0.9.6.post1-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+#9 15.24 Collecting anytree<3.0.0,>=2.12.1 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.27   Downloading anytree-2.13.0-py3-none-any.whl.metadata (8.0 kB)
+#9 15.31 Collecting beartype<0.19.0,>=0.18.5 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.34   Downloading beartype-0.18.5-py3-none-any.whl.metadata (30 kB)
+#9 15.42 Collecting gensim<5.0.0,>=4.3.2 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.45   Downloading gensim-4.4.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (8.4 kB)
+#9 15.64 Collecting graspologic-native<2.0.0,>=1.2.1 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.67   Downloading graspologic_native-1.2.5-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (2.6 kB)
+#9 15.80 Collecting hyppo<0.5.0,>=0.4.0 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.83   Downloading hyppo-0.4.0-py3-none-any.whl.metadata (1.7 kB)
+#9 15.88 Collecting joblib<2.0.0,>=1.4.2 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 15.91   Downloading joblib-1.5.3-py3-none-any.whl.metadata (5.5 kB)
+#9 16.24 Collecting matplotlib<4.0.0,>=3.8.4 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 16.26   Downloading matplotlib-3.10.8-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (52 kB)
+#9 16.30 Collecting numpy>=1.25.2 (from graphrag==2.7.0->-r requirements.txt (line 8))
+#9 16.32   Downloading numpy-1.26.4-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+#9 16.52 Collecting scipy==1.12.0 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 16.55   Downloading scipy-1.12.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (60 kB)
+#9 16.62 Collecting seaborn<0.14.0,>=0.13.2 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 16.65   Downloading seaborn-0.13.2-py3-none-any.whl.metadata (5.4 kB)
+#9 16.72 Collecting statsmodels<0.15.0,>=0.14.2 (from graspologic==3.4.1->-r requirements.txt (line 22))
+#9 16.75   Downloading statsmodels-0.14.6-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (9.5 kB)
+#9 16.78 Collecting fsspec>=2023.5.0 (from llama-index-core==0.12.52->-r requirements.txt (line 11))
+#9 16.81   Downloading fsspec-2024.12.0-py3-none-any.whl.metadata (11 kB)
+#9 16.84 Collecting json-repair>=0.9.0 (from -r requirements.txt (line 51))
+#9 16.87   Downloading json_repair-0.44.1-py3-none-any.whl.metadata (12 kB)
+#9 16.89 INFO: pip is looking at multiple versions of neo4j-graphrag to determine which version is compatible with other requirements. This could take a while.
+#9 16.90 ERROR: Cannot install -r requirements.txt (line 11), -r requirements.txt (line 22), -r requirements.txt (line 34) and -r requirements.txt (line 8) because these package versions have conflicting dependencies.
+#9 16.90 
+#9 16.90 The conflict is caused by:
+#9 16.90     graphrag 2.7.0 depends on numpy>=1.25.2
+#9 16.90     llama-index-core 0.12.52 depends on numpy
+#9 16.90     graspologic 3.4.1 depends on numpy<2.0.0 and >=1.26.4
+#9 16.90     neo4j-graphrag 1.12.0 depends on numpy<3.0.0 and >=2.0.0; python_version >= "3.9" and python_version < "3.13"
+#9 16.90 
+#9 16.90 Additionally, some packages in these conflicts have no matching distributions available for your environment:
+#9 16.90     numpy
+#9 16.90 
+#9 16.90 To fix this you could try to:
+#9 16.90 1. loosen the range of package versions you've specified
+#9 16.90 2. remove package versions to allow pip to attempt to solve the dependency conflict
+#9 16.90 
+#9 17.06 ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
+#9 ERROR: process "/bin/sh -c pip install --upgrade pip --no-warn-script-location --root-user-action=ignore     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt" did not complete successfully: exit code: 1
+------
+ > [builder 5/5] RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt:
+16.90     neo4j-graphrag 1.12.0 depends on numpy<3.0.0 and >=2.0.0; python_version >= "3.9" and python_version < "3.13"
+16.90 
+16.90 Additionally, some packages in these conflicts have no matching distributions available for your environment:
+16.90     numpy
+16.90 
+16.90 To fix this you could try to:
+16.90 1. loosen the range of package versions you've specified
+16.90 2. remove package versions to allow pip to attempt to solve the dependency conflict
+16.90 
+17.06 ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
+------
+Dockerfile:14
+--------------------
+  13 |     # Upgrade pip to latest before installs to avoid resolver bugs on older pip
+  14 | >>> RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore \
+  15 | >>>     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt
+  16 |     
+--------------------
+ERROR: failed to build: failed to solve: process "/bin/sh -c pip install --upgrade pip --no-warn-script-location --root-user-action=ignore     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt" did not complete successfully: exit code: 1
+

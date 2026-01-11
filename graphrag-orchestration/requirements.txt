@@ -4,6 +4,11 @@ uvicorn[standard]>=0.30.0
 pydantic>=2.10.3
 pydantic-settings>=2.1.0
 
+# Minimal local stub for graspologic to avoid pulling heavy community deps in base builds
+# The real graspologic package is optional and can be installed with `requirements.community.txt`.
+# This local stub provides a no-op implementation and satisfies packaging constraints.
+graspologic @ file:///afh/projects/graphrag-orchestration/graphrag-orchestration/third_party/graspologic_stub
+
 # GraphRAG (pinned to stable version)
 graphrag==2.7.0
 
@@ -19,7 +24,9 @@ llama-index-packs-raptor==0.3.5
 scikit-learn>=1.4.0
 
 # Community Detection (GraphRAG Global Search)
-graspologic==3.4.1
+# Optional - moved to `requirements.community.txt` to avoid heavy deps in base image.
+# Install community detection deps with: pip install -r requirements.community.txt
+# graspologic==3.4.1  # moved to optional requirements
 networkx==3.4.2
 
 llama-parse>=0.6.0  # Layout-aware PDF parsing

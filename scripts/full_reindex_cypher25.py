@@ -197,7 +197,12 @@ async def main():
     
     # Step 2: Initialize services
     logger.info("Step 2: Initializing services...")
-    neo4j_store = Neo4jStoreV3(group_id=group_id)
+    neo4j_store = Neo4jStoreV3(
+        uri=settings.NEO4J_URI,
+        username=settings.NEO4J_USERNAME,
+        password=settings.NEO4J_PASSWORD,
+        database=settings.NEO4J_DATABASE
+    )
     llm_service = LLMService()
     
     try:

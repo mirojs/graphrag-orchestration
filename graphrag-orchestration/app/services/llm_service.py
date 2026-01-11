@@ -142,6 +142,7 @@ class LLMService:
                         logger.info(f"Setting embedding dimensions to {embed_dimensions} for {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
                     
                     self._embed_model = AzureADOpenAIEmbedding(
+                        model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # model_name for the deployment
                         deployment_name=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                         azure_endpoint=embedding_endpoint,
                         api_version=settings.AZURE_OPENAI_API_VERSION,
@@ -167,6 +168,7 @@ class LLMService:
                 # Initialize Embedding Model with API key
                 # Only pass dimensions if using embedding-3 models (ada-002 doesn't support it)
                 embed_kwargs = {
+                    "model": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # model_name for the deployment
                     "engine": settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                     "api_key": settings.AZURE_OPENAI_API_KEY,
                     "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,

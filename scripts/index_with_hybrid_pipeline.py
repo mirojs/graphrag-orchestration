@@ -146,8 +146,8 @@ async def main():
     # Initialize LLM service
     llm_service = LLMService()
     try:
-        llm = await llm_service.get_llm()
-        embedder = await llm_service.get_embedding_model()
+        llm = llm_service.get_indexing_llm() if llm_service.llm is not None else None
+        embedder = llm_service.embed_model
         logger.info(f"  ✅ LLM: {settings.AZURE_OPENAI_DEPLOYMENT_NAME}")
         logger.info(f"  ✅ Embedder: {settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT}")
     except Exception as e:
@@ -192,10 +192,9 @@ async def main():
         from app.services.graph_service import GraphService
         
         graph_service = GraphService()
-        await graph_service.async_init()
         
-        async with graph_service.async_driver.session() as session:
-            result = await session.run(
+        with graph_service.driver.session() as session:
+            result = session.run(
                 """
                 MATCH (c:TextChunk {group_id: $group_id})
                 RETURN count(c) AS chunks,
@@ -203,13 +202,13 @@ async def main():
                 """,
                 group_id=args.group_id
             )
-            record = await result.single()
+            record = result.single()
             
             if record:
                 logger.info(f"  ✅ Chunks in DB: {record['chunks']}")
                 logger.info(f"  ✅ With embeddings: {record['with_embeddings']}")
         
-        await graph_service.close()
+        graph_service.close()
         print()
         
         logger.info("Next Steps:")

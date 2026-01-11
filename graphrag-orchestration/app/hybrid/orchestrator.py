@@ -1653,7 +1653,7 @@ Instructions:
                 WHERE node.group_id = group_id
                 WITH node, score
                 ORDER BY score DESC
-                LIMIT bm25_k
+                LIMIT $bm25_k
                 WITH collect(node) AS nodes
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank
@@ -1668,7 +1668,7 @@ Instructions:
                 WHERE node.group_id = group_id
                 WITH node, score
                 ORDER BY score DESC
-                LIMIT vector_k
+                LIMIT $vector_k
                 WITH collect(node) AS nodes
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank

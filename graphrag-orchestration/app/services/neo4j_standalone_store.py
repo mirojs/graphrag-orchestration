@@ -104,7 +104,8 @@ class StandaloneNeo4jStore:
         """
         Convert embedding to native Vector if supported, else return list.
         
-        For neo4j driver v6.0+, uses native Vector type.
+        For neo4j driver v6.0+, uses native Vector type from neo4j.vector module.
+        Uses float32 (f32) dtype which is standard for embeddings.
         For older drivers, returns List[float] which still works.
         """
         if embedding is None:
@@ -112,8 +113,9 @@ class StandaloneNeo4jStore:
         
         if self._supports_native_vector:
             try:
-                from neo4j import Vector
-                return Vector(embedding)
+                from neo4j.vector import Vector
+                # Use f32 (float32) dtype for embeddings - standard format
+                return Vector(embedding, 'f32')
             except ImportError:
                 pass
         

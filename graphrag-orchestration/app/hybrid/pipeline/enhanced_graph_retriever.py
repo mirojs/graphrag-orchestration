@@ -501,9 +501,9 @@ class EnhancedGraphRetriever:
                                                      replace(
                                                          replace(
                                                              replace(toLower(coalesce(t.text, "")), " ", ""),
-                                                         "\n", ""),
-                                                     "\r", ""),
-                                                 "\t", ""),
+                                                         "\\n", ""),
+                                                     "\\r", ""),
+                                                 "\\t", ""),
                                              "-", ""),
                                          ".", ""),
                                      ",", ""),
@@ -534,6 +534,10 @@ class EnhancedGraphRetriever:
         ORDER BY match_count DESC, chunk_index ASC
         LIMIT $candidate_limit
         """
+        
+        # Use Cypher 25 for optimized CASE expression handling
+        from app.services.async_neo4j_service import cypher25_query
+        query = cypher25_query(query)
 
         try:
             loop = asyncio.get_event_loop()

@@ -1292,6 +1292,10 @@ Instructions:
             LIMIT $top_k
             """
 
+            # Wrap with Cypher 25 for optimized query planner
+            from app.services.async_neo4j_service import cypher25_query
+            q = cypher25_query(q)
+
             rows = []
             try:
                 with self.neo4j_driver.session() as session:
@@ -1458,6 +1462,8 @@ Instructions:
             ORDER BY match_count DESC
             LIMIT 50
             """
+            from app.services.async_neo4j_service import cypher25_query
+            q = cypher25_query(q)
             with self.neo4j_driver.session() as session:
                 return [
                     r["embedding"]
@@ -1551,6 +1557,8 @@ Instructions:
             ORDER BY score DESC
             LIMIT $top_k
             """
+            from app.services.async_neo4j_service import cypher25_query
+            q = cypher25_query(q)
             rows = []
             with self.neo4j_driver.session() as session:
                 for r in session.run(

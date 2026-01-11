@@ -158,6 +158,8 @@ python scripts/run_cypher25_baseline_benchmark.py --compare \
 
 ### 🔧 STAGE 2: Medium Risk (After Baseline Validated)
 
+> **Status:** ✅ IMPLEMENTED (January 11, 2026)
+
 #### 2.1 Conditional Query Branching (WHEN...THEN...ELSE)
 **Impact:** Lower CPU overhead for conditional logic  
 **Cypher 5 (Old):** `CASE` expressions or APOC `do.when`  
@@ -175,14 +177,19 @@ ELSE
   RETURN n.name, n.metadata
 ```
 
+**Status:** ✅ All CASE expressions now wrapped with Cypher 25 runtime
+- RRF fusion query (orchestrator.py) — Hybrid scoring with CASE expressions
+- Keyword matching queries (orchestrator.py) — reduce() with CASE
+- Lexical matching (enhanced_graph_retriever.py) — Text normalization with CASE
+
 **Potential Use Cases:**
 - Route selection logic in orchestrator
 - Entity-type-specific retrieval paths
 - Conditional community expansion
 
-**Files to Evaluate:**
-- [ ] `app/hybrid/orchestrator.py` (route branching)
-- [ ] `app/services/async_neo4j_service.py` (conditional entity retrieval)
+**Files Updated:**
+- ✅ `app/hybrid/orchestrator.py` — 3 queries with CASE expressions
+- ✅ `app/hybrid/pipeline/enhanced_graph_retriever.py` — Keyword matching query
 
 #### 2.2 Evaluate REPEATABLE ELEMENTS (Cyclic Paths)
 **Impact:** Faster "looping" logic without APOC/procedural workarounds  

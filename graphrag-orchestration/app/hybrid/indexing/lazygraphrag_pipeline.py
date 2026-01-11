@@ -51,8 +51,8 @@ class LazyGraphRAGIndexingConfig:
     chunk_size: int = 512
     chunk_overlap: int = 64
     embedding_dimensions: int = 3072
-    # Phase 2: Set to True to use neo4j-graphrag LLMEntityRelationExtractor
-    use_native_extractor: bool = False
+    # Phase 2: neo4j-graphrag LLMEntityRelationExtractor (DEFAULT for easy re-indexing)
+    use_native_extractor: bool = True
 
 
 class LazyGraphRAGIndexingPipeline:
@@ -405,11 +405,13 @@ class LazyGraphRAGIndexingPipeline:
         if self.llm is None:
             return [], []
 
-        # Phase 2: Optionally use native neo4j-graphrag extractor
+        # Phase 2: Use native neo4j-graphrag extractor (DEFAULT)
+        # Fallback to LlamaIndex only if native unavailable or explicitly disabled
         if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
             return await self._extract_with_native_extractor(group_id, chunks)
 
-        # Default: Use LlamaIndex SchemaLLMPathExtractor
+        # Fallback: Use LlamaIndex SchemaLLMPathExtractor (if native disabled)
+        logger.warning(f"Using LlamaIndex fallback extractor (use_native_extractor={self.config.use_native_extractor}, available={NATIVE_EXTRACTOR_AVAILABLE})")
         extractor = SchemaLLMPathExtractor(
             llm=cast(Any, self.llm),
             possible_entities=None,

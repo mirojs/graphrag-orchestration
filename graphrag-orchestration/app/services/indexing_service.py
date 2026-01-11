@@ -135,7 +135,7 @@ class IndexingService:
         documents: List[Document],
         entity_types: Optional[List[str]] = None,
         relation_types: Optional[List[str]] = None,
-        extraction_mode: str = "schema",  # native, schema, schema_aware, simple, dynamic
+        extraction_mode: str = "native",  # native (recommended), schema_aware, simple, dynamic
         **kwargs,
     ) -> Dict[str, Any]:
         """
@@ -147,8 +147,7 @@ class IndexingService:
             entity_types: Custom entity types (uses defaults if None)
             relation_types: Custom relation types (uses defaults if None)
             extraction_mode: Extraction strategy:
-                - native: LLMEntityRelationExtractor from neo4j-graphrag (Phase 2 - recommended)
-                - schema: SchemaLLMPathExtractor with type hints (legacy)
+                - native: LLMEntityRelationExtractor from neo4j-graphrag (DEFAULT - recommended)
                 - schema_aware: SchemaAwareExtractor with full schema + table support
                 - simple: SimpleLLMPathExtractor for free extraction
                 - dynamic: DynamicLLMPathExtractor with allowed types
@@ -176,7 +175,7 @@ class IndexingService:
         
         # Configure extractor based on mode
         if extraction_mode == "native":
-            # Phase 2: Use neo4j-graphrag LLMEntityRelationExtractor
+            # Phase 2: Use neo4j-graphrag LLMEntityRelationExtractor (DEFAULT)
             return await self._index_with_native_extractor(
                 group_id=group_id,
                 documents=documents,

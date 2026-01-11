@@ -2478,7 +2478,31 @@ else:
 
 #### Why Extraction REQUIRES Fallback Code
 
-Phase 2 extraction migration **keeps fallback code** for critical reasons:
+**UPDATE (January 11, 2026):** For projects with **small datasets that can be easily re-indexed** (e.g., 5 PDFs), the fallback code is unnecessary complexity. We've simplified the implementation to use native by default.
+
+**When fallback IS needed:**
+- Large production datasets (millions of documents)
+- Expensive/time-consuming re-indexing (hours or days)
+- Regulatory/audit requirements for data stability
+- Cannot afford downtime for re-indexing
+
+**When fallback is NOT needed (your case):**
+- ✅ Small dataset (5 PDFs)
+- ✅ Can re-index in seconds/minutes
+- ✅ Development/testing phase
+- ✅ No audit trail requirements yet
+
+For small datasets, **just use native extraction** and re-index if issues occur:
+```python
+# Small dataset approach: Native by default
+config = LazyGraphRAGIndexingConfig(
+    use_native_extractor=True  # ← DEFAULT (easy rollback = just re-index)
+)
+```
+
+**Original Fallback Rationale (For Large Production Systems):**
+
+Phase 2 extraction migration **keeps fallback code** for critical reasons in large-scale production:
 
 ##### 1. **Production Risk Mitigation**
 
@@ -2581,11 +2605,14 @@ When to use which extractor:
 
 | Scenario | Use Native (`LLMEntityRelationExtractor`) | Use Fallback (`SchemaLLMPathExtractor`) |
 |----------|-------------------------------------------|----------------------------------------|
-| **New projects** | ✅ Yes (test native first) | ❌ No (unless native fails) |
-| **Production V3/Hybrid** | ❌ No (not yet validated) | ✅ Yes (proven stable) |
-| **Development/Testing** | ✅ Yes (validate quality) | ⚠️ Compare both |
+| **Small dataset (<100 docs)** | ✅ Yes (DEFAULT - easy to re-index) | ❌ No (unnecessary complexity) |
+| **New projects** | ✅ Yes (native is recommended) | ❌ No (unless native fails) |
+| **Large production (1M+ docs)** | ⚠️ Test first | ✅ Yes (until validated) |
+| **Development/Testing** | ✅ Yes (validate quality) | ❌ No (just re-index if issues) |
 | **After 3 months validation** | ✅ Yes (switch default) | ⚠️ Keep as emergency fallback |
 | **Breaking API change** | ❌ No (wait for fix) | ✅ Yes (rollback immediately) |
+
+**Your Case (5 PDFs):** Use native, no fallback needed. If issues occur, just re-index.
 
 ### 17.5. Code Organization
 
@@ -2639,6 +2666,32 @@ app/hybrid/indexing/lazygraphrag_pipeline.py
 9. Archive fallback code with clear "deprecated" markers
 
 **The Golden Rule:**
-> For retrieval, we migrated completely (no fallback needed).  
-> For extraction, we keep both paths until native is **proven in production** for 3+ months.
+> **For small datasets (your case):** Use native by default, re-index if issues occur.  
+> **For large production systems:** Keep fallback until native proven for 3+ months.
+
+**Simplified Configuration (5 PDFs):**
+```python
+# Small dataset - native by default (no fallback needed)
+config = LazyGraphRAGIndexingConfig(
+    use_native_extractor=True  # DEFAULT
+)
+
+# If native fails: Just re-index with fallback
+config = LazyGraphRAGIndexingConfig(
+    use_native_extractor=False  # Takes 30 seconds to re-index
+)
+```
+
+**Complex Configuration (Large Production):**
+```python
+# Production - fallback by default (proven stable)
+config = LazyGraphRAGIndexingConfig(
+    use_native_extractor=False  # DEFAULT for large datasets
+)
+
+# Test environment - validate native
+config = LazyGraphRAGIndexingConfig(
+    use_native_extractor=True  # Test with subset
+)
+```
 

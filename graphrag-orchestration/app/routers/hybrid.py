@@ -1554,7 +1554,7 @@ async def debug_search_chunks(request: Request, contains: str, limit: int = 10):
 async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
     """
     Debug endpoint to test vector search directly.
-    Tests both with and without group_id filter to diagnose issues.
+    All queries are tenant-scoped (no cross-tenant diagnostics returned).
     """
     from app.services.graph_service import GraphService
     from app.services.llm_service import LLMService
@@ -1579,43 +1579,17 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
         
         with graph_service.driver.session() as session:
             # Tunables for diagnosis
-            raw_k = 5
             desired_k = 5
             candidate_k = 500
 
-            # Test 1: Raw vector search (global topK)
-            try:
-                raw_result = session.run(
-                    """
-                    CALL db.index.vector.queryNodes('chunk_embedding', $k, $embedding)
-                    YIELD node, score
-                    RETURN node.id AS id, node.group_id AS node_group_id, score
-                    ORDER BY score DESC
-                    """,
-                    embedding=embedding,
-                    k=raw_k,
-                )
-                raw_records = list(raw_result)
-                results["tests"]["raw_vector_search"] = {
-                    "success": True,
-                    "k": raw_k,
-                    "count": len(raw_records),
-                    "results": [
-                        {"id": r["id"], "group_id": r["node_group_id"], "score": r["score"]}
-                        for r in raw_records
-                    ],
-                }
-            except Exception as e:
-                results["tests"]["raw_vector_search"] = {"success": False, "error": str(e)}
-
-            # Test 2: Naive filter (can return 0 if group isn't in global topK)
+            # Test 1: Naive filter (can return 0 if group isn't in global topK)
             try:
                 filtered_result = session.run(
                     """
                     CALL db.index.vector.queryNodes('chunk_embedding', $k, $embedding)
                     YIELD node, score
                     WHERE node.group_id = $group_id
-                    RETURN node.id AS id, node.group_id AS node_group_id, score
+                    RETURN node.id AS id, score
                     ORDER BY score DESC
                     """,
                     embedding=embedding,
@@ -1628,21 +1602,21 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
                     "k": desired_k,
                     "count": len(filtered_records),
                     "results": [
-                        {"id": r["id"], "group_id": r["node_group_id"], "score": r["score"]}
+                        {"id": r["id"], "score": r["score"]}
                         for r in filtered_records
                     ],
                 }
             except Exception as e:
                 results["tests"]["filtered_vector_search"] = {"success": False, "error": str(e)}
 
-            # Test 3: Oversample then filter+limit within group (the production fix)
+            # Test 2: Oversample then filter+limit within group (the production fix)
             try:
                 oversampled = session.run(
                     """
                     CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
                     YIELD node, score
                     WHERE node.group_id = $group_id
-                    RETURN node.id AS id, node.group_id AS node_group_id, score
+                    RETURN node.id AS id, score
                     ORDER BY score DESC
                     LIMIT $desired_k
                     """,
@@ -1658,7 +1632,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
                     "desired_k": desired_k,
                     "count": len(oversampled_records),
                     "results": [
-                        {"id": r["id"], "group_id": r["node_group_id"], "score": r["score"]}
+                        {"id": r["id"], "score": r["score"]}
                         for r in oversampled_records
                     ],
                 }
@@ -1668,7 +1642,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
                     "error": str(e),
                 }
 
-            # Test 4: Check if chunks exist for this group_id
+            # Test 3: Check if chunks exist for this group_id
             try:
                 chunk_check = session.run(
                     """
@@ -1686,7 +1660,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
             except Exception as e:
                 results["tests"]["chunks_for_group"] = {"error": str(e)}
 
-            # Test 5: Index info
+            # Test 4: Index info
             try:
                 index_info = session.run(
                     """
@@ -1710,7 +1684,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
             except Exception as e:
                 results["tests"]["index_info"] = {"error": str(e)}
 
-            # Test 6: Presence check - does a chunk from this group appear in vector index results?
+            # Test 5: Presence check - does a chunk from this group appear in vector index results?
             # This avoids the “tie-breaker” ambiguity by directly checking for node.id == c.id.
             try:
                 presence = session.run(
@@ -1720,7 +1694,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
                     WITH c LIMIT 1
                     CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, c.embedding)
                     YIELD node, score
-                    WITH c, collect({id: node.id, group_id: node.group_id, score: score}) AS hits
+                    WITH c, collect({id: node.id, score: score}) AS hits
                     WITH c, [h IN hits WHERE h.id = c.id][0] AS self_hit
                     RETURN c.id AS source_id,
                            self_hit IS NOT NULL AS found_self,
@@ -1739,7 +1713,7 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
             except Exception as e:
                 results["tests"]["source_chunk_presence"] = {"error": str(e)}
 
-            # Test 7: Embedding sample from group
+            # Test 6: Embedding sample from group
             try:
                 embed_type_test = session.run(
                     """
@@ -1766,66 +1740,6 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
                 )
             except Exception as e:
                 results["tests"]["embedding_details"] = {"error": str(e)}
-
-            # Test 8: Total chunk/embedding stats across DB
-            try:
-                total_indexed = session.run(
-                    """
-                    MATCH (c:TextChunk)
-                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
-                    RETURN count(c) AS total,
-                           count(DISTINCT c.group_id) AS distinct_groups
-                    """
-                )
-                total_rec = total_indexed.single()
-                results["tests"]["total_indexed_stats"] = {
-                    "total_chunks_with_embedding": total_rec["total"],
-                    "distinct_groups": total_rec["distinct_groups"],
-                }
-            except Exception as e:
-                results["tests"]["total_indexed_stats"] = {"error": str(e)}
-            
-            # Test 6: Check embedding data type and sample values
-            try:
-                embed_type_test = session.run("""
-                    MATCH (c:TextChunk {group_id: $group_id})
-                    WHERE c.embedding IS NOT NULL
-                    WITH c LIMIT 1
-                    RETURN c.id AS id,
-                           size(c.embedding) AS embed_size,
-                           c.embedding[0..5] AS embed_sample,
-                           c.updated_at AS updated_at
-                """, group_id=group_id)
-                embed_type_rec = embed_type_test.single()
-                if embed_type_rec:
-                    results["tests"]["embedding_details"] = {
-                        "id": embed_type_rec["id"],
-                        "embed_size": embed_type_rec["embed_size"],
-                        "embed_sample": embed_type_rec["embed_sample"],
-                        "updated_at": str(embed_type_rec.get("updated_at"))
-                    }
-            except Exception as e:
-                results["tests"]["embedding_details"] = {
-                    "error": str(e)
-                }
-                
-            # Test 7: Check total indexed chunks across ALL groups
-            try:
-                total_indexed = session.run("""
-                    MATCH (c:TextChunk)
-                    WHERE c.embedding IS NOT NULL AND size(c.embedding) > 0
-                    RETURN count(c) AS total,
-                           count(DISTINCT c.group_id) AS distinct_groups
-                """)
-                total_rec = total_indexed.single()
-                results["tests"]["total_indexed_stats"] = {
-                    "total_chunks_with_embedding": total_rec["total"],
-                    "distinct_groups": total_rec["distinct_groups"]
-                }
-            except Exception as e:
-                results["tests"]["total_indexed_stats"] = {
-                    "error": str(e)
-                }
         
         return results
         

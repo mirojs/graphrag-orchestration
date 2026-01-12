@@ -32,7 +32,8 @@ class HubExtractor:
     def __init__(
         self,
         graph_store: Optional[Any] = None,
-        neo4j_driver: Optional[Any] = None
+        neo4j_driver: Optional[Any] = None,
+        group_id: str = "default",
     ):
         """
         Args:
@@ -41,10 +42,12 @@ class HubExtractor:
         """
         self.graph_store = graph_store
         self.neo4j_driver = neo4j_driver
+        self.group_id = group_id
         
         logger.info("hub_extractor_created",
                    has_graph_store=graph_store is not None,
-                   has_neo4j=neo4j_driver is not None)
+                   has_neo4j=neo4j_driver is not None,
+                   group_id=group_id)
     
     async def extract_hub_entities(
         self,
@@ -267,48 +270,56 @@ class HubExtractor:
                         CALL {
                             WITH entity_name
                             MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                             UNION
                             WITH entity_name
                             MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
-                            WHERE toLower(e.name) = toLower(entity_name)
+                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                                                            AND toLower(e.name) = toLower(entity_name)
                             RETURN c
                         }
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
                         RETURN entity_name, meta.url AS doc_url
                         LIMIT 100
-                    """, entity_names=entity_names)
+                                        """, entity_names=entity_names, group_id=self.group_id)
                     return [(r["entity_name"], r["doc_url"]) for r in result if r.get("doc_url")]
             
             entity_docs = await loop.run_in_executor(None, _sync_query)

@@ -114,12 +114,12 @@ class RetrievalService:
             driver=self._get_neo4j_driver(),
             index_name="chunk_embedding",  # Vector index on TextChunk.embedding
             embedder=self._get_native_embedder(),
-            retrieval_query=f"""
+            retrieval_query="""
                 WITH node, score
-                WHERE node.group_id = '{group_id}'
+                WHERE node.group_id = $group_id
                 // Get chunk text and traverse to related entities
                 OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
-                WHERE entity.group_id = '{group_id}'
+                WHERE entity.group_id = $group_id
                 WITH node, score, collect(DISTINCT entity.name) AS related_entities
                 RETURN node.text AS text,
                        node.id AS chunk_id,
@@ -166,7 +166,13 @@ class RetrievalService:
                     
                     # Use native retriever (returns RawSearchResult with Neo4j records)
                     logger.info(f"Native retriever searching for: '{query_text[:50]}...'")
-                    result = self._native.search(query_text=query_text, top_k=10)
+                    result = self._native.search(
+                        query_text=query_text,
+                        top_k=10,
+                        effective_search_ratio=10,
+                        query_params={"group_id": self._group_id},
+                        filters={"group_id": self._group_id},
+                    )
                     
                     # Convert Neo4j records to LlamaIndex NodeWithScore format
                     nodes = []

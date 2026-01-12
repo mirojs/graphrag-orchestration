@@ -153,7 +153,7 @@ class HippoRAGRetriever(BaseRetriever):
             group_filter = ""
             params: Dict[str, Any] = {}
             if self.group_id:
-                group_filter = "WHERE n.group_id = $group_id AND m.group_id = $group_id"
+                group_filter = "WHERE n.group_id = $group_id AND m.group_id = $group_id AND r.group_id = $group_id"
                 params["group_id"] = self.group_id
             
             # Query all relationships to build adjacency

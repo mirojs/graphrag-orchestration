@@ -361,7 +361,7 @@ class Neo4jStoreV3:
     def upsert_entity(self, group_id: str, entity: Entity) -> str:
         """Insert or update an entity using native vector storage."""
         query = """
-        MERGE (e:Entity {id: $id})
+        MERGE (e:Entity {id: $id, group_id: $group_id})
         SET e.name = $name,
             e.type = $type,
             e.description = $description,
@@ -398,7 +398,7 @@ class Neo4jStoreV3:
         
         query = """
         UNWIND $entities AS e
-        MERGE (entity:Entity {id: e.id})
+        MERGE (entity:Entity {id: e.id, group_id: $group_id})
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
@@ -414,7 +414,8 @@ class Neo4jStoreV3:
         WITH entity, e
         UNWIND e.text_unit_ids AS chunk_id
         MATCH (chunk:TextChunk {id: chunk_id, group_id: $group_id})
-        MERGE (chunk)-[:MENTIONS]->(entity)
+        MERGE (chunk)-[m:MENTIONS]->(entity)
+        SET m.group_id = $group_id
         
         RETURN count(DISTINCT entity) AS count
         """
@@ -619,12 +620,14 @@ class Neo4jStoreV3:
         top_k: int = 10,
     ) -> List[Tuple[Entity, float]]:
         """Vector similarity search for entities using native vector index."""
+        fetch_k = min(max(int(top_k) * 10, int(top_k)), 500)
         query = """
-        CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
+        CALL db.index.vector.queryNodes('entity_embedding', $fetch_k, $embedding)
         YIELD node, score
         WHERE node.group_id = $group_id
         RETURN node, score
         ORDER BY score DESC
+        LIMIT $top_k
         """
         
         results = []
@@ -633,6 +636,7 @@ class Neo4jStoreV3:
                 query,
                 embedding=embedding,
                 top_k=top_k,
+                fetch_k=fetch_k,
                 group_id=group_id,
             )
             for record in result:
@@ -767,7 +771,7 @@ class Neo4jStoreV3:
     def upsert_community(self, group_id: str, community: Community) -> str:
         """Insert or update a community."""
         query = """
-        MERGE (c:Community {id: $id})
+        MERGE (c:Community {id: $id, group_id: $group_id})
         SET c.level = $level,
             c.title = $title,
             c.summary = $summary,
@@ -794,10 +798,11 @@ class Neo4jStoreV3:
             # Link entities to community
             if community.entity_ids:
                 link_query = """
-                MATCH (c:Community {id: $community_id})
+                MATCH (c:Community {id: $community_id, group_id: $group_id})
                 UNWIND $entity_ids AS entity_id
                 MATCH (e:Entity {id: entity_id, group_id: $group_id})
-                MERGE (e)-[:BELONGS_TO]->(c)
+                MERGE (e)-[r:BELONGS_TO]->(c)
+                SET r.group_id = $group_id
                 """
                 session.run(
                     link_query,
@@ -812,7 +817,8 @@ class Neo4jStoreV3:
         """Get all communities at a specific level."""
         query = """
         MATCH (c:Community {group_id: $group_id, level: $level})
-        OPTIONAL MATCH (e:Entity)-[:BELONGS_TO]->(c)
+        OPTIONAL MATCH (e:Entity {group_id: $group_id})-[r:BELONGS_TO]->(c)
+        WHERE r.group_id = $group_id
         RETURN c, collect(DISTINCT e.id) AS entity_ids
         ORDER BY c.rank DESC
         """
@@ -1002,8 +1008,8 @@ class Neo4jStoreV3:
         Traverses: Entity <- MENTIONS - TextChunk - SUMMARIZES -> RaptorNode
         """
         query = """
-        MATCH (e:Entity {id: $entity_id})<-[:MENTIONS]-(c:TextChunk)-[:SUMMARIZES]->(r:RaptorNode)
-        WHERE r.group_id = $group_id
+        MATCH (e:Entity {id: $entity_id, group_id: $group_id})<-[:MENTIONS]-(c:TextChunk)-[:SUMMARIZES]->(r:RaptorNode)
+        WHERE c.group_id = $group_id AND r.group_id = $group_id
         RETURN r
         ORDER BY r.level ASC
         LIMIT 1
@@ -1026,7 +1032,7 @@ class Neo4jStoreV3:
     def upsert_raptor_node(self, group_id: str, node: RaptorNode) -> str:
         """Insert or update a RAPTOR node using native vector storage."""
         query = """
-        MERGE (r:RaptorNode {id: $id})
+        MERGE (r:RaptorNode {id: $id, group_id: $group_id})
         SET r.text = $text,
             r.level = $level,
             r.group_id = $group_id,
@@ -1040,9 +1046,9 @@ class Neo4jStoreV3:
         
         WITH r
         UNWIND $child_ids AS child_id
-        OPTIONAL MATCH (tc:TextChunk {id: child_id})
+        OPTIONAL MATCH (tc:TextChunk {id: child_id, group_id: $group_id})
         FOREACH (_ IN CASE WHEN tc IS NOT NULL THEN [1] ELSE [] END | MERGE (tc)-[:SUMMARIZES]->(r))
-        OPTIONAL MATCH (rn:RaptorNode {id: child_id})
+        OPTIONAL MATCH (rn:RaptorNode {id: child_id, group_id: $group_id})
         FOREACH (_ IN CASE WHEN rn IS NOT NULL THEN [1] ELSE [] END | MERGE (rn)-[:SUMMARIZES]->(r))
         
         RETURN r.id AS id
@@ -1064,14 +1070,15 @@ class Neo4jStoreV3:
             # Link to parent if exists (legacy support)
             if node.parent_id:
                 link_query = """
-                MATCH (child:RaptorNode {id: $child_id})
-                MATCH (parent:RaptorNode {id: $parent_id})
+                MATCH (child:RaptorNode {id: $child_id, group_id: $group_id})
+                MATCH (parent:RaptorNode {id: $parent_id, group_id: $group_id})
                 MERGE (child)-[:SUMMARIZES]->(parent)
                 """
                 session.run(
                     link_query,
                     child_id=node.id,
                     parent_id=node.parent_id,
+                    group_id=group_id,
                 )
             
             return cast(str, record["id"]) if record else node.id
@@ -1080,7 +1087,7 @@ class Neo4jStoreV3:
         """Batch insert/update RAPTOR nodes with native vector support."""
         query = """
         UNWIND $nodes AS n
-        MERGE (r:RaptorNode {id: n.id})
+        MERGE (r:RaptorNode {id: n.id, group_id: $group_id})
         SET r.text = n.text,
             r.level = n.level,
             r.group_id = $group_id,
@@ -1369,7 +1376,7 @@ class Neo4jStoreV3:
     def upsert_document(self, group_id: str, document: Document) -> str:
         """Insert or update a document."""
         query = """
-        MERGE (d:Document {id: $id})
+        MERGE (d:Document {id: $id, group_id: $group_id})
         SET d.title = $title,
             d.source = $source,
             d.group_id = $group_id,

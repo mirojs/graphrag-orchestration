@@ -376,6 +376,7 @@ class CommunityMatcher:
                     WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                 }
+                WITH c, e
                 WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
                 WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta

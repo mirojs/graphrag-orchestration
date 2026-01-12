@@ -198,14 +198,14 @@ class AsyncNeo4jService:
                 CALL {
                         WITH name
                         MATCH (e:`__Entity__`)
-                        WHERE e.group_id = $group_id
-                            AND toLower(e.name) = toLower(name)
+                                                WHERE e.group_id = $group_id
+                                                    AND toLower(e.name) = toLower(name)
                         RETURN e
                         UNION
                         WITH name
                         MATCH (e:Entity)
-                        WHERE e.group_id = $group_id
-                            AND toLower(e.name) = toLower(name)
+                                                WHERE e.group_id = $group_id
+                                                    AND toLower(e.name) = toLower(name)
                         RETURN e
                 }
                 RETURN DISTINCT

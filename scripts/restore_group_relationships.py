@@ -196,7 +196,7 @@ def main():
         if not args.dry_run:
             rel_count_query = """
             MATCH (n {group_id: $group_id})-[r]-(m)
-            WHERE m.group_id = $group_id OR m.group_id IS NULL
+            WHERE m.group_id = $group_id
             RETURN count(DISTINCT r) AS rel_count
             """
             result = session.run(rel_count_query, group_id=group_id)

@@ -413,11 +413,12 @@ class Neo4jHybridSearchService:
         Results are merged and deduplicated by entity_id.
         """
         results = []
+        fetch_k = min(max(int(top_k) * 10, int(top_k)), 500)
         
         # Search entity vector index
         try:
             entity_cypher = """
-            CALL db.index.vector.queryNodes($index_name, $top_k, $embedding)
+            CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
             RETURN node.id AS entity_id, node.name AS name, node.text AS text, score, 'entity' AS source_type
@@ -432,6 +433,7 @@ class Neo4jHybridSearchService:
                     "embedding": query_embedding,
                     "group_id": group_id,
                     "top_k": top_k,
+                    "fetch_k": fetch_k,
                 }
             )
             
@@ -450,7 +452,7 @@ class Neo4jHybridSearchService:
         # Search chunk vector index
         try:
             chunk_cypher = """
-            CALL db.index.vector.queryNodes($index_name, $top_k, $embedding)
+            CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
             RETURN node.id AS entity_id, node.text AS text, score, 'chunk' AS source_type
@@ -465,6 +467,7 @@ class Neo4jHybridSearchService:
                     "embedding": query_embedding,
                     "group_id": group_id,
                     "top_k": top_k,
+                    "fetch_k": fetch_k,
                 }
             )
             

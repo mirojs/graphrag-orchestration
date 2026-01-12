@@ -180,12 +180,12 @@ class Neo4jGraphRAGService:
                 driver=self.driver,
                 index_name="chunk_vector",  # Search chunks which have text content
                 embedder=self.embedder,
-                retrieval_query=f"""
+                retrieval_query="""
                     WITH node, score
-                    WHERE node.group_id = '{group_id}'
+                    WHERE node.group_id = $group_id
                     // Return chunk text and related entities
                     OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
-                    WHERE entity.group_id = '{group_id}'
+                    WHERE entity.group_id = $group_id
                     WITH node, score, collect(DISTINCT entity.name) AS related_entities
                     RETURN node.text AS text,
                            node.id AS chunk_id,
@@ -202,11 +202,11 @@ class Neo4jGraphRAGService:
                 vector_index_name="chunk_vector",  # Search chunks for text content
                 fulltext_index_name="chunk_fulltext",  # Need fulltext on chunks
                 embedder=self.embedder,
-                retrieval_query=f"""
+                retrieval_query="""
                     WITH node, score
-                    WHERE node.group_id = '{group_id}'
+                    WHERE node.group_id = $group_id
                     OPTIONAL MATCH (entity)-[:MENTIONED_IN|PART_OF_CHUNK|FROM_CHUNK]->(node)
-                    WHERE entity.group_id = '{group_id}'
+                    WHERE entity.group_id = $group_id
                     WITH node, score, collect(DISTINCT entity.name) AS related_entities
                     RETURN node.text AS text,
                            node.id AS chunk_id,
@@ -273,7 +273,12 @@ class Neo4jGraphRAGService:
             # Execute search with return_context to get sources
             response = rag.search(
                 query_text=query, 
-                retriever_config={"top_k": top_k},
+                retriever_config={
+                    "top_k": top_k,
+                    "effective_search_ratio": 10,
+                    "query_params": {"group_id": group_id},
+                    "filters": {"group_id": group_id},
+                },
                 return_context=True,
             )
             
@@ -417,7 +422,11 @@ class Neo4jGraphRAGService:
             
             response = rag.search(
                 query_text=sanitized_query, 
-                retriever_config={"top_k": top_k},
+                retriever_config={
+                    "top_k": top_k,
+                    "effective_search_ratio": 10,
+                    "query_params": {"group_id": group_id},
+                },
                 return_context=True,
             )
             
@@ -822,50 +831,24 @@ Output ONLY the JSON object, no explanations or markdown:"""
         - RAPTOR provides rich hierarchical context for better retrieval quality
         - Neo4j provides entity/relationship traversal for graph-based queries
         """
-        logger.info(f"Indexing text for group {group_id}: {len(text)} chars, raptor={use_raptor}")
+        logger.info(f"Indexing text for group {group_id}: {len(text)} chars")
         
         raptor_stats = {}
+        before_node_id = 0
+        before_rel_id = 0
         
         try:
-            # Step 1: RAPTOR indexing → Azure AI Search (for semantic quality)
-            if use_raptor:
-                try:
-                    from llama_index.core import Document
-                    from app.services.raptor_service import RaptorService
-                    
-                    raptor_service = RaptorService()
-                    
-                    # Create LlamaIndex document for RAPTOR processing
-                    doc = Document(
-                        text=text,
-                        metadata={
-                            "group_id": group_id,
-                            "document_name": document_name or "unknown",
-                            "source": "v2_index_text",
-                        }
-                    )
-                    
-                    # Process with RAPTOR to create hierarchical summaries
-                    raptor_result = await raptor_service.process_documents([doc], group_id)
-                    raptor_nodes = raptor_result.get("all_nodes", [])
-                    
-                    # Index RAPTOR nodes to Azure AI Search
-                    if raptor_nodes:
-                        raptor_index_result = await raptor_service.index_raptor_nodes(raptor_nodes, group_id)
-                        raptor_stats = {
-                            "raptor_nodes": len(raptor_nodes),
-                            "raptor_levels": raptor_result.get("level_stats", {}),
-                            "azure_search_indexed": raptor_index_result.get("indexed", 0) if raptor_index_result else 0,
-                        }
-                        logger.info(f"RAPTOR → Azure AI Search: {raptor_stats}")
-                    else:
-                        logger.warning(f"RAPTOR produced no nodes for group {group_id}")
-                        
-                except Exception as raptor_error:
-                    logger.warning(f"RAPTOR indexing failed (continuing with Neo4j only): {raptor_error}")
-                    raptor_stats = {"error": str(raptor_error)}
-            
-            # Step 2: SimpleKGPipeline → Neo4j (for entity/relationship graph)
+            # Capture max internal IDs before indexing so post-processing only
+            # affects entities/relationships created in this run.
+            # This is critical for strict multi-tenant isolation.
+            try:
+                with self.driver.session() as session:
+                    before_node_id = session.run("MATCH (n) RETURN max(id(n)) as max_id").single()["max_id"] or 0
+                    before_rel_id = session.run("MATCH ()-[r]->() RETURN max(id(r)) as max_id").single()["max_id"] or 0
+            except Exception as id_error:
+                logger.warning(f"Failed to capture pre-index max IDs; post-processing may be less precise: {id_error}")
+
+            # SimpleKGPipeline → Neo4j (for entity/relationship graph)
             # Use entities/relations parameters for neo4j-graphrag 1.7.0
             entities = entity_types or ["Person", "Organization", "Document", "Concept"]
             relations = relation_types or ["MENTIONS", "WORKS_FOR", "RELATED_TO"]
@@ -894,33 +877,32 @@ Output ONLY the JSON object, no explanations or markdown:"""
             chunk_labels_added = 0
             try:
                 with self.driver.session() as session:
-                    # Update ALL nodes with NULL group_id - safer than ID-based filtering
-                    # This catches any nodes that might have been missed
+                    # Update ONLY nodes created after this indexing started.
                     node_result = session.run("""
                         MATCH (n)
-                        WHERE n.group_id IS NULL
+                        WHERE id(n) > $before_id AND n.group_id IS NULL
                         SET n.group_id = $group_id
                         RETURN count(n) as updated_nodes
-                    """, group_id=group_id).single()
+                    """, before_id=before_node_id, group_id=group_id).single()
                     updated_nodes = node_result['updated_nodes'] if node_result else 0
                     
                     # CRITICAL: Add __Node__ label to ALL Chunk nodes without it for vector index compatibility
                     # The vector index is on __Node__ label, but SimpleKGPipeline creates Chunk nodes
                     label_result = session.run("""
                         MATCH (n:Chunk)
-                        WHERE NOT n:__Node__
+                        WHERE id(n) > $before_id AND NOT n:__Node__
                         SET n:__Node__
                         RETURN count(n) as updated_chunks
-                    """).single()
+                    """, before_id=before_node_id).single()
                     chunk_labels_added = label_result['updated_chunks'] if label_result else 0
                     
-                    # Update ALL relationships with NULL group_id
+                    # Update ONLY relationships created after this indexing started.
                     rel_result = session.run("""
                         MATCH ()-[r]->()
-                        WHERE r.group_id IS NULL
+                        WHERE id(r) > $before_id AND r.group_id IS NULL
                         SET r.group_id = $group_id
                         RETURN count(r) as updated_rels
-                    """, group_id=group_id).single()
+                    """, before_id=before_rel_id, group_id=group_id).single()
                     updated_rels = rel_result['updated_rels'] if rel_result else 0
                     
                 logger.info(f"Post-processed: {updated_nodes} nodes, {updated_rels} rels, {chunk_labels_added} chunks with __Node__ label for group_id={group_id}")

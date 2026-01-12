@@ -99,7 +99,7 @@ def main():
         MATCH (n)
         WHERE n.group_id = $group_id
         OPTIONAL MATCH (n)-[r]-(m)
-        WHERE (m.group_id = $group_id OR m.group_id IS NULL)
+        WHERE m.group_id = $group_id
         RETURN collect(distinct n) as nodes, collect(distinct r) as rels
         """
         with gs.driver.session() as session:

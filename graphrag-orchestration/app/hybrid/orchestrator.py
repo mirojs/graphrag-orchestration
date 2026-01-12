@@ -169,7 +169,8 @@ class HybridPipeline:
         # Route 3: Hub extraction (for seeding HippoRAG)
         self.hub_extractor = HubExtractor(
             graph_store=graph_store,
-            neo4j_driver=neo4j_driver
+            neo4j_driver=neo4j_driver,
+            group_id=group_id,
         )
         
         # Route 3: Enhanced graph retriever (for citations via MENTIONS & relationships)

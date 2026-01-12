@@ -385,7 +385,7 @@ class IndexingPipelineV3:
         reindex: bool = False,
         ingestion: str = "none",
         run_community_detection: bool = True,
-        run_raptor: bool = True,
+        run_raptor: bool = False,
     ) -> Dict[str, Any]:
         """
         Index a batch of documents.

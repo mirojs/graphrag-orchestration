@@ -154,16 +154,20 @@ class DualIndexService:
         if not self.driver:
             return []
         
-        query = """
-        MATCH (s:Entity)-[r]->(o:Entity)
-        WHERE s.group_id = $group_id
-        RETURN
-            s.name as subject,
-            type(r) as predicate,
-            o.name as object,
-            r.description as rel_description,
-            r.weight as weight
-        """
+                query = """
+                MATCH (s)-[r]->(o)
+                WHERE (s:Entity OR s:__Entity__)
+                    AND (o:Entity OR o:__Entity__)
+                    AND s.group_id = $group_id
+                    AND o.group_id = $group_id
+                    AND r.group_id = $group_id
+                RETURN
+                        s.name as subject,
+                        type(r) as predicate,
+                        o.name as object,
+                        r.description as rel_description,
+                        r.weight as weight
+                """
         
         triples = []
         with self.driver.session() as session:
@@ -220,11 +224,15 @@ class DualIndexService:
             return {}
         
         # Schema note: chunks often point to entities via (:TextChunk)-[:MENTIONS]->(:Entity)
-        query = """
-        MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-        WHERE c.group_id = $group_id
-        RETURN e.name as entity, collect(c.text) as texts
-        """
+                query = """
+                MATCH (c)-[m:MENTIONS]-(e)
+                WHERE (c:TextChunk OR c:Chunk OR c:__Node__)
+                    AND (e:Entity OR e:__Entity__)
+                    AND c.group_id = $group_id
+                    AND e.group_id = $group_id
+                    AND m.group_id = $group_id
+                RETURN e.name as entity, collect(c.text) as texts
+                """
         
         entity_text_map = {}
         with self.driver.session() as session:

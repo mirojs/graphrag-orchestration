@@ -218,7 +218,7 @@ class StandaloneNeo4jStore:
                 self.structured_query(
                     """
                     UNWIND $data AS row
-                    MERGE (c:`__Node__` {id: row.id})
+                    MERGE (c:`__Node__` {id: row.id, group_id: $group_id})
                     SET c.text = row.text, c:Chunk
                     SET c += row.properties
                     SET c.embedding = row.embedding
@@ -237,14 +237,14 @@ class StandaloneNeo4jStore:
                 self.structured_query(
                     """
                     UNWIND $data AS row
-                    MERGE (e:`__Entity__` {id: row.id})
+                    MERGE (e:`__Entity__` {id: row.id, group_id: $group_id})
                     SET e.name = row.name
                     SET e += row.properties
                     SET e.embedding = row.embedding
                     SET e.group_id = $group_id
                     WITH e, row
                     WHERE row.properties.triplet_source_id IS NOT NULL
-                    MERGE (c:Chunk {id: row.properties.triplet_source_id})
+                    MERGE (c:Chunk {id: row.properties.triplet_source_id, group_id: $group_id})
                     MERGE (e)-[:MENTIONS]->(c)
                     """,
                     param_map={"data": chunked_params},
@@ -349,27 +349,31 @@ class StandaloneNeo4jStore:
         # Convert embedding for native Vector support
         query_embedding = self._convert_to_vector(embedding)
         
-        # Cypher 25 vector query with group_id filter
+        # Cypher 25 vector query with group_id filter.
+        # NOTE: Neo4j vector indexes don't support WHERE filtering inside the index.
+        # We oversample, then filter by group_id, then take top_k.
         query = """
-        CALL db.index.vector.queryNodes($index_name, $top_k, $embedding)
+        CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
         YIELD node, score
         WHERE node.group_id = $group_id
         RETURN node, score
         ORDER BY score DESC
+        LIMIT $top_k
         """
         
         results = self.structured_query(
             query,
             param_map={
                 "index_name": index_name,
-                "top_k": top_k * 2,  # Fetch extra to account for filtering
+                "fetch_k": min(max(top_k * 10, top_k), 500),
+                "top_k": top_k,
                 "embedding": query_embedding,
             }
         )
         
         nodes = []
         scores = []
-        for record in results[:top_k]:
+        for record in (results or [])[:top_k]:
             n = record.get("node", {})
             if hasattr(n, 'items'):
                 props = dict(n.items())
@@ -398,7 +402,11 @@ class StandaloneNeo4jStore:
         """
         Retrieve triplets (source, relation, target) from the graph.
         """
-        where_clauses = ["source.group_id = $group_id"]
+        where_clauses = [
+            "source.group_id = $group_id",
+            "target.group_id = $group_id",
+            "r.group_id = $group_id",
+        ]
         param_map: Dict[str, Any] = {}
         
         if entity_names:
@@ -421,7 +429,7 @@ class StandaloneNeo4jStore:
         results = self.structured_query(query, param_map=param_map)
         
         triplets = []
-        for record in results:
+        for record in (results or []):
             source_props = dict(record.get("source", {}).items()) if record.get("source") else {}
             target_props = dict(record.get("target", {}).items()) if record.get("target") else {}
             rel = record.get("r", {})

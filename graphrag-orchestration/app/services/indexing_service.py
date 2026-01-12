@@ -37,7 +37,6 @@ from app.services.schema_aware_extractor import SchemaAwareExtractor, TableAware
 from app.services.llm_service import LLMService
 from app.services.schema_converter import SchemaConverter
 from app.services.schema_service import SchemaService
-from app.services.raptor_service import RaptorService
 from app.core.config import settings
 import json
 
@@ -127,7 +126,6 @@ class IndexingService:
         self.graph_service = GraphService()
         self.llm_service = LLMService()
         self.schema_service = SchemaService()
-        self.raptor_service = RaptorService()
 
     async def index_documents(
         self,
@@ -235,46 +233,20 @@ class IndexingService:
                 allowed_relation_types=relation_types,
             )
         
-        # Run RAPTOR to get hierarchical nodes (leaves + summaries)
-        # This implements the "Deep Semantic Quality" requirement
-        raptor_result = await self.raptor_service.process_documents(documents, group_id)
-        raptor_nodes = raptor_result.get("all_nodes", []) if raptor_result else []
-        
-        # Index RAPTOR nodes to Azure AI Search for semantic ranking accuracy enhancement
-        # This is separate from Neo4j entity indexing - Azure AI Search provides
-        # semantic re-ranking that dramatically improves retrieval quality
-        # Note: index_raptor_nodes() strips large metadata (tables, section_path) 
-        # before sending to Azure AI Search since RAPTOR is for text summaries only
-        if raptor_nodes:
-            raptor_index_result = await self.raptor_service.index_raptor_nodes(raptor_nodes, group_id)
-            logger.info(f"RAPTOR → Azure AI Search: {raptor_index_result}")
-        
         # Create PropertyGraphIndex for Neo4j entity/relationship extraction
         # Note: LlamaIndex's from_documents is synchronous, so we run it in executor
-        # RAPTOR nodes are text chunks/summaries - they don't have tables metadata
-        # (tables metadata is on original documents, used by SchemaAwareExtractor)
         import asyncio
         loop = asyncio.get_event_loop()
         
         def create_index():
-            if raptor_nodes and len(raptor_nodes) > 0:
-                logger.info(f"Indexing {len(raptor_nodes)} RAPTOR nodes to Neo4j (entities + relationships)")
-                return PropertyGraphIndex(
-                    nodes=raptor_nodes,
-                    kg_extractors=[extractor],
-                    property_graph_store=graph_store,
-                    embed_model=self.llm_service.embed_model,
-                    show_progress=True,
-                )
-            else:
-                logger.info("Indexing documents directly (RAPTOR skipped or failed)")
-                return PropertyGraphIndex.from_documents(
-                    documents,
-                    kg_extractors=[extractor],
-                    property_graph_store=graph_store,
-                    embed_model=self.llm_service.embed_model,
-                    show_progress=True,
-                )
+            logger.info("Indexing documents directly")
+            return PropertyGraphIndex.from_documents(
+                documents,
+                kg_extractors=[extractor],
+                property_graph_store=graph_store,
+                embed_model=self.llm_service.embed_model,
+                show_progress=True,
+            )
 
         index = await loop.run_in_executor(None, create_index)
         
@@ -392,23 +364,26 @@ class IndexingService:
                     props["id"] = node.id
                     
                     session.run(
-                        f"MERGE (n:{labels} {{id: $id}}) SET n += $props",
+                        f"MERGE (n:{labels} {{id: $id, group_id: $group_id}}) SET n += $props",
                         id=node.id,
                         props=props,
+                        group_id=group_id,
                     )
                 
                 # Write relationships
                 for rel in graph.relationships:
                     session.run(
                         f"""
-                        MATCH (a {{id: $start_id}})
-                        MATCH (b {{id: $end_id}})
+                        MATCH (a {{id: $start_id, group_id: $group_id}})
+                        MATCH (b {{id: $end_id, group_id: $group_id}})
                         MERGE (a)-[r:{rel.type}]->(b)
                         SET r += $props
+                        SET r.group_id = $group_id
                         """,
                         start_id=rel.start_node_id,
                         end_id=rel.end_node_id,
                         props=rel.properties or {},
+                        group_id=group_id,
                     )
                 
                 logger.info(f"Native extraction wrote {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")

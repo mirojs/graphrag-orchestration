@@ -153,7 +153,7 @@ class MultiTenantNeo4jStore(StandaloneNeo4jStore):
                 self.structured_query(
                     """
                     UNWIND $data AS row
-                    MERGE (c:`__Node__` {id: row.id})
+                    MERGE (c:`__Node__` {id: row.id, group_id: row.properties.group_id})
                     SET c.text = row.text, c:Chunk
                     SET c += row.properties
                     SET c.embedding = row.embedding
@@ -169,7 +169,7 @@ class MultiTenantNeo4jStore(StandaloneNeo4jStore):
                 self.structured_query(
                     """
                     UNWIND $data AS row
-                    MERGE (e:`__Entity__` {id: row.id})
+                    MERGE (e:`__Entity__` {id: row.id, group_id: row.properties.group_id})
                     SET e.name = row.name, e:`__Entity__`
                     SET e += row.properties
                     SET e.embedding = row.embedding
@@ -177,7 +177,7 @@ class MultiTenantNeo4jStore(StandaloneNeo4jStore):
                     CALL apoc.create.addLabels(e, [row.label])
                     YIELD node
                     WITH e, row WHERE row.properties.triplet_source_id IS NOT NULL
-                    MERGE (c:Chunk {id: row.properties.triplet_source_id})
+                    MERGE (c:Chunk {id: row.properties.triplet_source_id, group_id: row.properties.group_id})
                     MERGE (e)-[:MENTIONS]->(c)
                     """,
                     param_map={"data": chunked_params},

@@ -353,7 +353,7 @@ class AsyncNeo4jService:
                         AND type(r1) <> 'MENTIONS'
                     WITH n1
                     ORDER BY coalesce(n1.degree, 0) DESC
-                    LIMIT per_seed_limit
+                                    LIMIT $per_seed_limit
                     RETURN collect(n1) AS hop1
                 }
 
@@ -369,7 +369,7 @@ class AsyncNeo4jService:
                         AND type(r2) <> 'MENTIONS'
                     WITH n2
                     ORDER BY coalesce(n2.degree, 0) DESC
-                    LIMIT per_neighbor_limit
+                    LIMIT $per_neighbor_limit
                     RETURN collect(n2) AS hop2
                 }
 

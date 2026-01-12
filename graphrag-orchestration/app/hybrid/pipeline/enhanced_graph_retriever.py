@@ -229,47 +229,70 @@ class EnhancedGraphRetriever:
         max_per_entity: int = 3,
     ) -> List[SourceChunk]:
         """
-        Get source TextChunks that MENTION these entities.
-        
-        Uses the MENTIONS edge: (TextChunk)-[:MENTIONS]->(Entity)
+        Get source chunks that MENTION these entities.
+
+        Supports common schema variants:
+        - Chunk labels: `TextChunk` and `Chunk`
+        - Edge direction: (chunk)-[:MENTIONS]->(Entity) and (Entity)-[:MENTIONS]->(chunk)
         Also fetches section_id via IN_SECTION edge for diversification.
         This provides the source text for citations.
         """
         if not entity_names or not self.driver:
             return []
-        
         query = """
         UNWIND $entity_names AS entity_name
-        MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
-        WHERE toLower(e.name) = toLower(entity_name)
-          AND t.group_id = $group_id
-        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
-        WITH entity_name, t, e, s, d
-        ORDER BY t.chunk_index
-        WITH entity_name, collect({
-            chunk_id: t.id,
-            text: t.text,
-            metadata: t.metadata,
-            chunk_index: t.chunk_index,
-            section_id: s.id,
-            section_path_key: s.path_key,
-            doc_id: d.id,
-            doc_title: d.title,
-            doc_source: d.source
-        })[0..$max_per_entity] as chunks
-        UNWIND chunks as chunk
-        RETURN 
-            entity_name,
-            chunk.chunk_id as chunk_id,
-            chunk.text as text,
-            chunk.metadata as metadata,
-            chunk.section_id as section_id,
-            chunk.section_path_key as section_path_key,
-            chunk.doc_id as doc_id,
-            chunk.doc_title as doc_title,
-            chunk.doc_source as doc_source
-        """
+        CALL {
+            WITH entity_name
+            MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
+            WHERE toLower(e.name) = toLower(entity_name)
+              AND t.group_id = $group_id
+            RETURN t
+            UNION
+                        WITH entity_name
+                        MATCH (e:Entity)-[:MENTIONS]->(t:TextChunk)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                        RETURN t
+                        UNION
+                        WITH entity_name
+                        MATCH (t:Chunk)-[:MENTIONS]->(e:Entity)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                        RETURN t
+                        UNION
+                        WITH entity_name
+                        MATCH (e:Entity)-[:MENTIONS]->(t:Chunk)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                        RETURN t
+                }
+                OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+                OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+                WITH entity_name, t, s, d
+                ORDER BY coalesce(t.chunk_index, 0)
+                WITH entity_name, collect({
+                        chunk_id: t.id,
+                        text: t.text,
+                        metadata: t.metadata,
+                        chunk_index: coalesce(t.chunk_index, 0),
+                        section_id: s.id,
+                        section_path_key: s.path_key,
+                        doc_id: d.id,
+                        doc_title: d.title,
+                        doc_source: d.source
+                })[0..$max_per_entity] as chunks
+                UNWIND chunks as chunk
+                RETURN
+                        entity_name,
+                        chunk.chunk_id as chunk_id,
+                        chunk.text as text,
+                        chunk.metadata as metadata,
+                        chunk.section_id as section_id,
+                        chunk.section_path_key as section_path_key,
+                        chunk.doc_id as doc_id,
+                        chunk.doc_title as doc_title,
+                        chunk.doc_source as doc_source
+                """
         
         try:
             loop = asyncio.get_event_loop()
@@ -1089,29 +1112,63 @@ class EnhancedGraphRetriever:
         entity_names: List[str],
         max_relationships: int = 30,
     ) -> List[EntityRelationship]:
-        """
-        Get co-mentioned entity relationships via shared TextChunks.
-        
+        """Get co-mentioned entity relationships via shared TextChunks.
+
         Finds entities that appear together in the same chunks (via MENTIONS edges).
         """
         if not entity_names or not self.driver:
             return []
-        
-        # Note: Hybrid pipeline creates Entity-[:MENTIONS]->TextChunk relationships
-        # This query finds entities that co-occur in the same chunks
+
+        # Co-mention relationships depend on chunks being linked to entities.
+        # Support common schema variants:
+        # - chunk labels: TextChunk/Chunk
+        # - edge direction: chunk->entity or entity->chunk
         query = """
-        MATCH (e1:Entity)-[:MENTIONS]->(c:TextChunk)<-[:MENTIONS]-(e2:Entity)
+        UNWIND $entity_names_lower AS seed
+        MATCH (e1:Entity)
         WHERE e1.group_id = $group_id
-          AND e2.group_id = $group_id
-          AND c.group_id = $group_id
-          AND e1 <> e2
-          AND (toLower(e1.name) IN $entity_names_lower OR toLower(e2.name) IN $entity_names_lower)
-        WITH e1, e2, count(DISTINCT c) as shared_chunks, collect(DISTINCT c.id)[0..2] as chunk_ids
-        RETURN 
-            e1.name as source,
-            e2.name as target,
-            'Co-occur in ' + toString(shared_chunks) + ' chunk(s)' as description,
-            'CO_MENTIONED' as rel_type
+          AND toLower(e1.name) = seed
+
+        CALL {
+            WITH e1
+            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e1)
+            RETURN c
+            UNION
+            WITH e1
+            MATCH (e1)-[:MENTIONS]->(c:TextChunk {group_id: $group_id})
+            RETURN c
+            UNION
+            WITH e1
+            MATCH (c:Chunk {group_id: $group_id})-[:MENTIONS]->(e1)
+            RETURN c
+            UNION
+            WITH e1
+            MATCH (e1)-[:MENTIONS]->(c:Chunk {group_id: $group_id})
+            RETURN c
+        }
+
+        CALL {
+            WITH c
+            MATCH (c)-[:MENTIONS]->(e2:Entity)
+            WHERE e2.group_id = $group_id
+            RETURN e2
+            UNION
+            WITH c
+            MATCH (e2:Entity)-[:MENTIONS]->(c)
+            WHERE e2.group_id = $group_id
+            RETURN e2
+        }
+
+        WHERE e2 <> e1
+        WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
+        WHERE shared_chunks > 0
+        WITH e1, e2, shared_chunks, chunk_ids
+        WHERE id(e1) < id(e2)
+        RETURN
+            e1.name AS source,
+            e2.name AS target,
+            'Co-occur in ' + toString(shared_chunks) + ' chunk(s)' AS description,
+            'CO_MENTIONED' AS rel_type
         ORDER BY shared_chunks DESC
         LIMIT $max_rels
         """

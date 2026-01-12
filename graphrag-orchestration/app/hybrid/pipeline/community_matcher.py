@@ -276,10 +276,25 @@ class CommunityMatcher:
                 if query_embedding:
                     # Vector similarity search with cross-document diversity
                     embedding_query = """
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                    CALL {
+                        MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        RETURN c, e
+                        UNION
+                        MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
+                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        RETURN c, e
+                        UNION
+                        MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        RETURN c, e
+                        UNION
+                        MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
+                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        RETURN c, e
+                    }
                     WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta,
-                         vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
+                        vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
                     WHERE similarity > 0.35
                     WITH meta.url AS doc_url, e.name AS name, similarity
                     ORDER BY similarity DESC
@@ -312,12 +327,27 @@ class CommunityMatcher:
             try:
                 # Search entities by keyword, diversify across documents
                 search_query = """
-                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                WHERE c.group_id = $group_id
-                  AND (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
+                CALL {
+                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                }
+                WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
                 WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
-                WITH meta.url AS doc_url, e.name AS name, e.description AS description
+                WITH meta.url AS doc_url, e.name AS name
                 // Get first matching entity from each document, round-robin
                 WITH doc_url, collect(DISTINCT name)[..3] AS entities_per_doc
                 UNWIND entities_per_doc AS name
@@ -346,8 +376,23 @@ class CommunityMatcher:
             try:
                 # Get top entities from EACH document to ensure coverage
                 multi_doc_query = """
-                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                WHERE c.group_id = $group_id
+                CALL {
+                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                }
                 WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
                 WITH meta.url AS doc_url, e.name AS name, coalesce(e.degree, 0) AS deg
                 ORDER BY doc_url, deg DESC
@@ -437,8 +482,23 @@ class CommunityMatcher:
                 # Get top entities from EACH document to ensure cross-document coverage
                 # This prevents the largest document from dominating results
                 multi_doc_query = """
-                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                WHERE c.group_id = $group_id
+                CALL {
+                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                    UNION
+                    MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
+                    WHERE c.group_id = $group_id
+                    RETURN c, e
+                }
                 WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
                 WITH meta.url AS doc_url, e, coalesce(e.degree, 0) AS deg
                 ORDER BY deg DESC

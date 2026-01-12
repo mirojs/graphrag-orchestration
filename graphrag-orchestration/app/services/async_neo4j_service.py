@@ -335,14 +335,16 @@ class AsyncNeo4jService:
         # approximation.
         query = cypher25_query("""
                 UNWIND $seed_ids AS seed_id
-                MATCH (seed:`__Entity__` {id: seed_id})
+                MATCH (seed {id: seed_id})
                 WHERE seed.group_id = $group_id
+                  AND (seed:Entity OR seed:`__Entity__`)
 
                 // Always include the seed itself
-                WITH seed, seed_id, group_id, per_seed_limit, per_neighbor_limit, damping, top_k
+                WITH seed, seed_id, $group_id AS group_id, per_seed_limit, per_neighbor_limit, damping, top_k
                 CALL (seed, group_id, per_seed_limit) {
-                    MATCH (seed)-[r1]-(n1:`__Entity__`)
+                    MATCH (seed)-[r1]-(n1)
                     WHERE n1.group_id = group_id
+                        AND (n1:Entity OR n1:`__Entity__`)
                         AND type(r1) <> 'MENTIONS'
                     WITH n1
                     ORDER BY coalesce(n1.degree, 0) DESC
@@ -356,8 +358,9 @@ class AsyncNeo4jService:
 
                 // Optional 2-hop expansion capped per hop1_node
                 CALL (seed, hop1_node, group_id, per_neighbor_limit) {
-                    MATCH (hop1_node)-[r2]-(n2:`__Entity__`)
+                    MATCH (hop1_node)-[r2]-(n2)
                     WHERE n2.group_id = group_id
+                        AND (n2:Entity OR n2:`__Entity__`)
                         AND type(r2) <> 'MENTIONS'
                     WITH n2
                     ORDER BY coalesce(n2.degree, 0) DESC
@@ -399,13 +402,13 @@ class AsyncNeo4jService:
             records = await result.data()
         dt_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
-            "async_neo4j_ppr_native_complete",
-            group_id=group_id,
-            seeds=len(seed_entity_ids),
-            top_k=top_k,
-            duration_ms=dt_ms,
-            per_seed_limit=per_seed_limit,
-            per_neighbor_limit=per_neighbor_limit,
+            "async_neo4j_ppr_native_complete group_id=%s seeds=%s top_k=%s duration_ms=%s per_seed_limit=%s per_neighbor_limit=%s",
+            group_id,
+            len(seed_entity_ids),
+            top_k,
+            dt_ms,
+            per_seed_limit,
+            per_neighbor_limit,
         )
 
         # Return as (name, score) tuples for compatibility

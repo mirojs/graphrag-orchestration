@@ -340,8 +340,13 @@ class AsyncNeo4jService:
                   AND (seed:Entity OR seed:`__Entity__`)
 
                 // Always include the seed itself
-                WITH seed, seed_id, $group_id AS group_id, per_seed_limit, per_neighbor_limit, damping, top_k
-                CALL (seed, group_id, per_seed_limit) {
+                                WITH seed,
+                                         seed_id,
+                                         $group_id AS group_id,
+                                         $per_seed_limit AS per_seed_limit,
+                                         $per_neighbor_limit AS per_neighbor_limit,
+                                         $damping AS damping
+                                CALL (seed, group_id, per_seed_limit) {
                     MATCH (seed)-[r1]-(n1)
                     WHERE n1.group_id = group_id
                         AND (n1:Entity OR n1:`__Entity__`)
@@ -352,9 +357,9 @@ class AsyncNeo4jService:
                     RETURN collect(n1) AS hop1
                 }
 
-                WITH seed, hop1, group_id, per_neighbor_limit, damping, top_k
+                                WITH seed, hop1, group_id, per_neighbor_limit, damping
                 UNWIND (hop1 + [seed]) AS hop1_node
-                WITH seed, hop1_node, group_id, per_neighbor_limit, damping, top_k
+                                WITH seed, hop1_node, group_id, per_neighbor_limit, damping
 
                 // Optional 2-hop expansion capped per hop1_node
                 CALL (seed, hop1_node, group_id, per_neighbor_limit) {
@@ -368,7 +373,7 @@ class AsyncNeo4jService:
                     RETURN collect(n2) AS hop2
                 }
 
-                WITH seed, hop1_node, hop2, damping, top_k
+                WITH seed, hop1_node, hop2, damping
                 UNWIND (hop2 + [hop1_node]) AS entity
                 WITH entity, seed, hop1_node, damping,
                          sum(

@@ -1208,6 +1208,7 @@ class EnhancedGraphRetriever:
             RETURN e2
         }
 
+        WITH e1, e2, c
         WHERE e2 <> e1
         WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
         WHERE shared_chunks > 0

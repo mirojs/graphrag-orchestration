@@ -63,45 +63,54 @@ async def cleanup_old_group(group_id: str):
 
 
 async def validate_indexed_data(group_id: str):
-    """Validate that indexing created all expected properties."""
+    """Validate that indexing created all expected properties using async Neo4j driver."""
     logger.info(f"Validating indexed data for group: {group_id}")
     
-    graph_service = GraphService()
-    # GraphService initializes synchronously in __new__, no async_init needed
+    from neo4j import AsyncGraphDatabase
+    from app.core.config import settings
     
-    if not graph_service.driver:
-        logger.error("Neo4j driver not initialized")
+    if not settings.NEO4J_URI or not settings.NEO4J_USERNAME or not settings.NEO4J_PASSWORD:
+        logger.error("Neo4j credentials not configured")
         return
     
-    with graph_service.driver.session() as session:
-        # Check TextChunk properties
-        query = """
-        MATCH (c:TextChunk {group_id: $group_id})
-        RETURN count(c) AS chunk_count,
-               count(c.document_title) AS chunks_with_title,
-               count(c.document_source) AS chunks_with_source,
-               count(c.embedding) AS chunks_with_embedding
-        """
-        result = session.run(query, group_id=group_id)
-        record = result.single()
-        
-        if record:
-            logger.info(f"✅ Chunks indexed: {record['chunk_count']}")
-            logger.info(f"   - With document_title: {record['chunks_with_title']}")
-            logger.info(f"   - With document_source: {record['chunks_with_source']}")
-            logger.info(f"   - With embeddings: {record['chunks_with_embedding']}")
-        
-        # Check Entity properties
-        query2 = """
-        MATCH (e)
-        WHERE (e:Entity OR e:__Entity__) AND e.group_id = $group_id
-        RETURN count(e) AS entity_count
-        """
-        result = session.run(query2, group_id=group_id)
-        record = result.single()
-        
-        if record:
-            logger.info(f"✅ Entities indexed: {record['entity_count']}")
+    # Create async driver for validation
+    async_driver = AsyncGraphDatabase.driver(
+        settings.NEO4J_URI,
+        auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
+    )
+    
+    try:
+        async with async_driver.session() as session:
+            # Check TextChunk properties
+            query = """
+            MATCH (c:TextChunk {group_id: $group_id})
+            RETURN count(c) AS chunk_count,
+                   count(c.document_title) AS chunks_with_title,
+                   count(c.document_source) AS chunks_with_source,
+                   count(c.embedding) AS chunks_with_embedding
+            """
+            result = await session.run(query, group_id=group_id)
+            record = await result.single()
+            
+            if record:
+                logger.info(f"✅ Chunks indexed: {record['chunk_count']}")
+                logger.info(f"   - With document_title: {record['chunks_with_title']}")
+                logger.info(f"   - With document_source: {record['chunks_with_source']}")
+                logger.info(f"   - With embeddings: {record['chunks_with_embedding']}")
+            
+            # Check Entity properties
+            query2 = """
+            MATCH (e)
+            WHERE (e:Entity OR e:__Entity__) AND e.group_id = $group_id
+            RETURN count(e) AS entity_count
+            """
+            result = await session.run(query2, group_id=group_id)
+            record = await result.single()
+            
+            if record:
+                logger.info(f"✅ Entities indexed: {record['entity_count']}")
+    finally:
+        await async_driver.close()
 
 
 def _read_sas_urls(path: str) -> list[str]:

@@ -67,9 +67,13 @@ async def validate_indexed_data(group_id: str):
     logger.info(f"Validating indexed data for group: {group_id}")
     
     graph_service = GraphService()
-    await graph_service.async_init()
+    # GraphService initializes synchronously in __new__, no async_init needed
     
-    async with graph_service.async_driver.session() as session:
+    if not graph_service.driver:
+        logger.error("Neo4j driver not initialized")
+        return
+    
+    with graph_service.driver.session() as session:
         # Check TextChunk properties
         query = """
         MATCH (c:TextChunk {group_id: $group_id})
@@ -78,8 +82,8 @@ async def validate_indexed_data(group_id: str):
                count(c.document_source) AS chunks_with_source,
                count(c.embedding) AS chunks_with_embedding
         """
-        result = await session.run(query, group_id=group_id)
-        record = await result.single()
+        result = session.run(query, group_id=group_id)
+        record = result.single()
         
         if record:
             logger.info(f"✅ Chunks indexed: {record['chunk_count']}")
@@ -93,13 +97,11 @@ async def validate_indexed_data(group_id: str):
         WHERE (e:Entity OR e:__Entity__) AND e.group_id = $group_id
         RETURN count(e) AS entity_count
         """
-        result = await session.run(query2, group_id=group_id)
-        record = await result.single()
+        result = session.run(query2, group_id=group_id)
+        record = result.single()
         
         if record:
             logger.info(f"✅ Entities indexed: {record['entity_count']}")
-    
-    await graph_service.close()
 
 
 def _read_sas_urls(path: str) -> list[str]:

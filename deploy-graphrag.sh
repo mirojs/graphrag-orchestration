@@ -53,6 +53,13 @@ CONTAINER_APP_ENVIRONMENT=$(get_env_value_or_default "CONTAINER_APP_ENVIRONMENT"
 AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "latest")
 CONTAINER_APP_USER_IDENTITY_ID=$(get_env_value_or_default "CONTAINER_APP_USER_IDENTITY_ID" "")
 
+# Azure Document Intelligence configuration (required for DI-based ingestion)
+# Prefer DI-specific vars; allow CU vars as a backwards-compatible alias.
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=$(get_env_value_or_default "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" "")
+AZURE_DOCUMENT_INTELLIGENCE_KEY=$(get_env_value_or_default "AZURE_DOCUMENT_INTELLIGENCE_KEY" "")
+AZURE_CONTENT_UNDERSTANDING_ENDPOINT=$(get_env_value_or_default "AZURE_CONTENT_UNDERSTANDING_ENDPOINT" "")
+AZURE_CONTENT_UNDERSTANDING_API_KEY=$(get_env_value_or_default "AZURE_CONTENT_UNDERSTANDING_API_KEY" "")
+
 # Neo4j Configuration
 NEO4J_CONTAINER_NAME="neo4j-graphrag"
 STORAGE_ACCOUNT=$(get_env_value_or_default "STORAGE_ACCOUNT_NAME" "neo4jstorage21224" false)
@@ -69,9 +76,17 @@ echo "Location:             $AZURE_LOCATION"
 echo "Container Registry:   $CONTAINER_REGISTRY_NAME"
 echo "Container App:        $CONTAINER_APP_NAME"
 echo "Image Tag:            $AZURE_ENV_IMAGETAG"
+echo "DI Endpoint:          ${AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT:-${AZURE_CONTENT_UNDERSTANDING_ENDPOINT:-<unset>}}"
 echo "Docker Cleanup:       $DOCKER_CLEANUP_ENABLED"
 echo "=================================================="
 echo ""
+
+if [ -z "$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" ] && [ -z "$AZURE_CONTENT_UNDERSTANDING_ENDPOINT" ]; then
+    >&2 echo "❌ Missing Document Intelligence endpoint configuration."
+    >&2 echo "   Set AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT (preferred) or AZURE_CONTENT_UNDERSTANDING_ENDPOINT (alias)."
+    >&2 echo "   Example: azd env set AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT https://<resource>.cognitiveservices.azure.com/"
+    exit 1
+fi
 
 # Ensure Azure login
 echo "🔐 Checking Azure login status..."
@@ -229,6 +244,10 @@ az containerapp update \
     --image "$IMAGE_URI" \
         --set-env-vars \
             REFRESH_TIMESTAMP="$REFRESH_TIMESTAMP" \
+            AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT="$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" \
+            AZURE_DOCUMENT_INTELLIGENCE_KEY="$AZURE_DOCUMENT_INTELLIGENCE_KEY" \
+            AZURE_CONTENT_UNDERSTANDING_ENDPOINT="$AZURE_CONTENT_UNDERSTANDING_ENDPOINT" \
+            AZURE_CONTENT_UNDERSTANDING_API_KEY="$AZURE_CONTENT_UNDERSTANDING_API_KEY" \
             V3_GLOBAL_DYNAMIC_SELECTION="$V3_GLOBAL_DYNAMIC_SELECTION" \
             V3_GLOBAL_DYNAMIC_MAX_DEPTH="$V3_GLOBAL_DYNAMIC_MAX_DEPTH" \
             V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET="$V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET" \

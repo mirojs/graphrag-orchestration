@@ -264,8 +264,47 @@ class HubExtractor:
                 with self.neo4j_driver.session() as session:
                     result = session.run("""
                         UNWIND $entity_names AS entity_name
-                        MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        CALL {
+                            WITH entity_name
+                            MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                            UNION
+                            WITH entity_name
+                            MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
+                            WHERE toLower(e.name) = toLower(entity_name)
+                            RETURN c
+                        }
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
                         RETURN entity_name, meta.url AS doc_url
                         LIMIT 100
@@ -337,11 +376,16 @@ class HubExtractor:
         
         try:
             query = """
-            MATCH (e:Entity)-[r]-()
-            WITH e, count(r) as degree
+            CALL {
+                MATCH (e:Entity)-[r]-()
+                RETURN e.name as name, e.id as id, count(r) as degree
+                UNION
+                MATCH (e:`__Entity__`)-[r]-()
+                RETURN e.name as name, e.id as id, count(r) as degree
+            }
+            RETURN name, id, degree
             ORDER BY degree DESC
             LIMIT $top_k
-            RETURN e.name as name, e.id as id, degree
             """
             
             async with self.neo4j_driver.session() as session:

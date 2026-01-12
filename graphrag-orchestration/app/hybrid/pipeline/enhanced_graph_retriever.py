@@ -233,7 +233,8 @@ class EnhancedGraphRetriever:
 
         Supports common schema variants:
         - Chunk labels: `TextChunk` and `Chunk`
-        - Edge direction: (chunk)-[:MENTIONS]->(Entity) and (Entity)-[:MENTIONS]->(chunk)
+        - Entity labels: `Entity` and `__Entity__`
+        - Edge direction: (chunk)-[:MENTIONS]->(entity) and (entity)-[:MENTIONS]->(chunk)
         Also fetches section_id via IN_SECTION edge for diversification.
         This provides the source text for citations.
         """
@@ -249,9 +250,23 @@ class EnhancedGraphRetriever:
             RETURN t
             UNION
                         WITH entity_name
+                        MATCH (t:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                            AND e.group_id = $group_id
+                        RETURN t
+                        UNION
+                        WITH entity_name
                         MATCH (e:Entity)-[:MENTIONS]->(t:TextChunk)
                         WHERE toLower(e.name) = toLower(entity_name)
                             AND t.group_id = $group_id
+                        RETURN t
+                        UNION
+                        WITH entity_name
+                        MATCH (e:`__Entity__`)-[:MENTIONS]->(t:TextChunk)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                            AND e.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
@@ -261,9 +276,23 @@ class EnhancedGraphRetriever:
                         RETURN t
                         UNION
                         WITH entity_name
+                        MATCH (t:Chunk)-[:MENTIONS]->(e:`__Entity__`)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                            AND e.group_id = $group_id
+                        RETURN t
+                        UNION
+                        WITH entity_name
                         MATCH (e:Entity)-[:MENTIONS]->(t:Chunk)
                         WHERE toLower(e.name) = toLower(entity_name)
                             AND t.group_id = $group_id
+                        RETURN t
+                        UNION
+                        WITH entity_name
+                        MATCH (e:`__Entity__`)-[:MENTIONS]->(t:Chunk)
+                        WHERE toLower(e.name) = toLower(entity_name)
+                            AND t.group_id = $group_id
+                            AND e.group_id = $group_id
                         RETURN t
                 }
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
@@ -1125,9 +1154,19 @@ class EnhancedGraphRetriever:
         # - edge direction: chunk->entity or entity->chunk
         query = """
         UNWIND $entity_names_lower AS seed
-        MATCH (e1:Entity)
-        WHERE e1.group_id = $group_id
-          AND toLower(e1.name) = seed
+                CALL {
+                        WITH seed
+                        MATCH (e1:Entity)
+                        WHERE e1.group_id = $group_id
+                            AND toLower(e1.name) = seed
+                        RETURN e1
+                        UNION
+                        WITH seed
+                        MATCH (e1:`__Entity__`)
+                        WHERE e1.group_id = $group_id
+                            AND toLower(e1.name) = seed
+                        RETURN e1
+                }
 
         CALL {
             WITH e1
@@ -1154,7 +1193,17 @@ class EnhancedGraphRetriever:
             RETURN e2
             UNION
             WITH c
+            MATCH (c)-[:MENTIONS]->(e2:`__Entity__`)
+            WHERE e2.group_id = $group_id
+            RETURN e2
+            UNION
+            WITH c
             MATCH (e2:Entity)-[:MENTIONS]->(c)
+            WHERE e2.group_id = $group_id
+            RETURN e2
+            UNION
+            WITH c
+            MATCH (e2:`__Entity__`)-[:MENTIONS]->(c)
             WHERE e2.group_id = $group_id
             RETURN e2
         }

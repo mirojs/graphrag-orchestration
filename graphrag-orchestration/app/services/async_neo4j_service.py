@@ -195,14 +195,25 @@ class AsyncNeo4jService:
         """
         query = cypher25_query("""
         UNWIND $names AS name
-        MATCH (e:`__Entity__`)
-        WHERE e.group_id = $group_id 
-          AND toLower(e.name) = toLower(name)
-        RETURN e.id AS id,
-               e.name AS name,
-               e.degree AS degree,
-               e.chunk_count AS chunk_count,
-               coalesce(e.degree, 0) AS importance_score
+                CALL {
+                        WITH name
+                        MATCH (e:`__Entity__`)
+                        WHERE e.group_id = $group_id
+                            AND toLower(e.name) = toLower(name)
+                        RETURN e
+                        UNION
+                        WITH name
+                        MATCH (e:Entity)
+                        WHERE e.group_id = $group_id
+                            AND toLower(e.name) = toLower(name)
+                        RETURN e
+                }
+                RETURN DISTINCT
+                             e.id AS id,
+                             e.name AS name,
+                             e.degree AS degree,
+                             e.chunk_count AS chunk_count,
+                             coalesce(e.degree, 0) AS importance_score
         """)
         
         async with self._get_session() as session:

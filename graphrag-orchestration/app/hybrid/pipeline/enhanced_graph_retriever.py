@@ -1265,14 +1265,14 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return {}
         
-                query = """
-                UNWIND $entity_names AS name
-                MATCH (e)
-                WHERE (e:Entity OR e:`__Entity__`)
-                    AND e.group_id = $group_id
-                    AND (toLower(e.name) = toLower(name) OR e.id = name)
-                RETURN e.name as name, e.description as description
-                """
+        query = """
+        UNWIND $entity_names AS name
+        MATCH (e)
+        WHERE (e:Entity OR e:`__Entity__`)
+          AND e.group_id = $group_id
+          AND (toLower(e.name) = toLower(name) OR e.id = name)
+        RETURN e.name as name, e.description as description
+        """
         
         try:
             loop = asyncio.get_event_loop()

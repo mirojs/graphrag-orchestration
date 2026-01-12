@@ -194,7 +194,7 @@ async def test_cypher25_queries(group_id: str):
     
     async with AsyncNeo4jService.from_settings() as service:
         # Test entity retrieval
-        entities = await service.get_entities_by_importance(group_id, top_k=10)
+        entities = await service.get_entities_by_importance(group_id, top_k=10, min_importance=0.0)
         logger.info(f"✅ Retrieved {len(entities)} entities")
         
         if entities:

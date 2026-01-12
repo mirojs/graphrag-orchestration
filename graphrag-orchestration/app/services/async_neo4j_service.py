@@ -155,25 +155,23 @@ class AsyncNeo4jService:
         top_k: int = 50,
         min_importance: float = 0.0,
     ) -> List[Dict[str, Any]]:
-        """
-        Get top entities by importance score (native async).
-        
-        Uses pre-computed importance_score from entity importance scoring.
-        """
+        """Get top entities by importance score (native async)."""
         query = cypher25_query("""
-        MATCH (e:`__Entity__`)
-        WHERE e.group_id = $group_id 
-          AND coalesce(e.importance_score, 0) >= $min_importance
-        RETURN e.id AS id, 
-               e.name AS name, 
+        MATCH (e)
+        WHERE e.group_id = $group_id
+          AND (e:Entity OR e:`__Entity__`)
+        WITH e, coalesce(e.importance_score, e.degree, 0) AS score
+        WHERE score >= $min_importance
+        RETURN e.id AS id,
+               e.name AS name,
                e.degree AS degree,
                e.chunk_count AS chunk_count,
-               e.importance_score AS importance_score,
+               score AS importance_score,
                labels(e) AS labels
-        ORDER BY e.importance_score DESC
+        ORDER BY score DESC
         LIMIT $top_k
         """)
-        
+
         async with self._get_session() as session:
             result = await session.run(
                 query,
@@ -493,13 +491,12 @@ class AsyncNeo4jService:
             
             # Debug logging
             logger.info(
-                "negative_detection_query_result",
-                group_id=group_id,
-                doc_url=doc_url,
-                keywords=field_keywords,
-                found=record is not None,
-                matched_keywords=record.get("matched_keywords") if record else None,
-                preview=record.get("preview") if record else None,
+                "negative_detection_query_result group_id=%s doc_url=%s found=%s matched_keywords=%s preview=%s",
+                group_id,
+                doc_url,
+                record is not None,
+                record.get("matched_keywords") if record else None,
+                record.get("preview") if record else None,
             )
             
             if record:

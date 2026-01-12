@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Generated HippoRAG artifacts (local)
+graphrag-orchestration/hipporag_index_5pdfs_local/
 *.so
 .Python
 build/

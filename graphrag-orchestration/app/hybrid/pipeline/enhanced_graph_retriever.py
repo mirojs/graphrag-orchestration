@@ -245,52 +245,52 @@ class EnhancedGraphRetriever:
         CALL {
             WITH entity_name
             MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
-            WHERE toLower(e.name) = toLower(entity_name)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
               AND t.group_id = $group_id
             RETURN t
             UNION
                         WITH entity_name
                         MATCH (t:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                             AND e.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
                         MATCH (e:Entity)-[:MENTIONS]->(t:TextChunk)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
                         MATCH (e:`__Entity__`)-[:MENTIONS]->(t:TextChunk)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                             AND e.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
                         MATCH (t:Chunk)-[:MENTIONS]->(e:Entity)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
                         MATCH (t:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                             AND e.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
                         MATCH (e:Entity)-[:MENTIONS]->(t:Chunk)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                         RETURN t
                         UNION
                         WITH entity_name
                         MATCH (e:`__Entity__`)-[:MENTIONS]->(t:Chunk)
-                        WHERE toLower(e.name) = toLower(entity_name)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
                             AND t.group_id = $group_id
                             AND e.group_id = $group_id
                         RETURN t
@@ -1158,13 +1158,13 @@ class EnhancedGraphRetriever:
                         WITH seed
                         MATCH (e1:Entity)
                         WHERE e1.group_id = $group_id
-                            AND toLower(e1.name) = seed
+                            AND (toLower(e1.name) = seed OR toLower(coalesce(e1.id, '')) = seed)
                         RETURN e1
                         UNION
                         WITH seed
                         MATCH (e1:`__Entity__`)
                         WHERE e1.group_id = $group_id
-                            AND toLower(e1.name) = seed
+                            AND (toLower(e1.name) = seed OR toLower(coalesce(e1.id, '')) = seed)
                         RETURN e1
                 }
 
@@ -1265,19 +1265,21 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return {}
         
-        query = """
-        UNWIND $entity_names AS name
-        MATCH (e:Entity)
-        WHERE toLower(e.name) = toLower(name)
-        RETURN e.name as name, e.description as description
-        """
+                query = """
+                UNWIND $entity_names AS name
+                MATCH (e)
+                WHERE (e:Entity OR e:`__Entity__`)
+                    AND e.group_id = $group_id
+                    AND (toLower(e.name) = toLower(name) OR e.id = name)
+                RETURN e.name as name, e.description as description
+                """
         
         try:
             loop = asyncio.get_event_loop()
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(query, entity_names=entity_names)
+                    result = session.run(query, entity_names=entity_names, group_id=self.group_id)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)

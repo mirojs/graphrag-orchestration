@@ -66,14 +66,25 @@ class DocumentIntelligenceService:
     DEFAULT_CONCURRENCY = 5
 
     def __init__(self, max_concurrency: int = DEFAULT_CONCURRENCY) -> None:
-        self.endpoint: str = settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT or ""
-        self.api_key = settings.AZURE_DOCUMENT_INTELLIGENCE_KEY
+        # Backwards-compatible aliasing:
+        # Some deployments historically set Azure Content Understanding env vars
+        # while using the Document Intelligence SDK. Prefer DI-specific vars, but
+        # fall back to CU vars to avoid production breakage.
+        self.endpoint: str = (
+            settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+            or settings.AZURE_CONTENT_UNDERSTANDING_ENDPOINT
+            or ""
+        )
+        self.api_key = settings.AZURE_DOCUMENT_INTELLIGENCE_KEY or settings.AZURE_CONTENT_UNDERSTANDING_API_KEY
         self.api_version = settings.AZURE_DOC_INTELLIGENCE_API_VERSION
         self.max_concurrency = max_concurrency
         self._semaphore: Optional[asyncio.Semaphore] = None
 
         if not self.endpoint:
-            raise RuntimeError("AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT not configured")
+            raise RuntimeError(
+                "Document Intelligence endpoint not configured (set AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT "
+                "or AZURE_CONTENT_UNDERSTANDING_ENDPOINT)"
+            )
 
         # Token authentication (Managed Identity / DefaultAzureCredential) requires the
         # resource-specific custom subdomain endpoint. If the endpoint is the generic

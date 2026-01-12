@@ -567,12 +567,27 @@ class LazyGraphRAGIndexingPipeline:
         logger.info(f"Using native LLMEntityRelationExtractor for {len(chunks)} chunks")
         
         # Create neo4j-graphrag LLM (separate from LlamaIndex LLM)
-        native_llm = AzureOpenAILLM(
-            model_name=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
-            azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_key=settings.AZURE_OPENAI_API_KEY,
-            api_version=settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
-        )
+        # Support managed identity when no API key is present
+        llm_kwargs = {
+            "model_name": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+            "api_version": settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
+        }
+        
+        if settings.AZURE_OPENAI_API_KEY:
+            llm_kwargs["api_key"] = settings.AZURE_OPENAI_API_KEY
+        else:
+            # Use managed identity via DefaultAzureCredential
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            logger.info("Using DefaultAzureCredential for neo4j-graphrag LLM")
+            credential = DefaultAzureCredential()
+            token_provider = get_bearer_token_provider(
+                credential,
+                "https://cognitiveservices.azure.com/.default"
+            )
+            llm_kwargs["azure_ad_token_provider"] = token_provider
+        
+        native_llm = AzureOpenAILLM(**llm_kwargs)
         
         # Create native extractor
         extractor = LLMEntityRelationExtractor(

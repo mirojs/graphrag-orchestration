@@ -13,7 +13,7 @@ pydantic-settings>=2.1.0
 # GraphRAG (pinned to stable version)
 graphrag==2.7.0
 
-# LlamaIndex core + integrations (0.12.x series - compatible with raptor)
+# LlamaIndex core + integrations
 llama-index-core==0.14.12  # upgrade candidate - requires testing
 llama-index-llms-azure-openai==0.4.2  # upgraded to match llama-index-core 0.14.x
 llama-index-llms-openai==0.6.12  # upgrade candidate - requires testing
@@ -21,7 +21,6 @@ llama-index-embeddings-azure-openai==0.4.1  # upgrade to match llama-index-core 
 llama-index-vector-stores-azureaisearch==0.4.4
 # llama-index-graph-stores-neo4j removed - replaced by app/services/neo4j_standalone_store.py
 # This enables neo4j driver v6.0+ compatibility for native Vector type support
-llama-index-packs-raptor==0.4.1
 scikit-learn>=1.4.0
 
 # Community Detection (GraphRAG Global Search)

@@ -21,7 +21,7 @@ llama-index-embeddings-azure-openai==0.4.1  # upgrade to match llama-index-core 
 llama-index-vector-stores-azureaisearch==0.4.4
 # llama-index-graph-stores-neo4j removed - replaced by app/services/neo4j_standalone_store.py
 # This enables neo4j driver v6.0+ compatibility for native Vector type support
-llama-index-packs-raptor==0.3.5
+llama-index-packs-raptor==0.4.1
 scikit-learn>=1.4.0
 
 # Community Detection (GraphRAG Global Search)

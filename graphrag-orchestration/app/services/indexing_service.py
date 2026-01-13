@@ -29,7 +29,12 @@ from llama_index.core.schema import TextNode
 # neo4j-graphrag native extractor (Phase 2 migration)
 from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
 from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
-from neo4j_graphrag.experimental.components.schema import GraphSchema, NodeType, RelationshipType
+from neo4j_graphrag.experimental.components.schema import (
+    SchemaBuilder,
+    SchemaEntity,
+    SchemaRelation,
+    SchemaConfig,
+)
 from neo4j_graphrag.llm import AzureOpenAILLM
 
 from app.services.graph_service import GraphService, MultiTenantNeo4jStore
@@ -304,22 +309,23 @@ class IndexingService:
             api_version=settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
         )
         
-        # Build GraphSchema from entity/relation types
-        # The extractor accepts an optional schema to guide extraction
-        node_types_list = [
-            NodeType(label=et, description=f"A {et} entity")
-            for et in entity_types
-        ] if entity_types else []
-        
-        relationship_types_list = [
-            RelationshipType(label=rt, description=f"A {rt} relationship")
-            for rt in relation_types
-        ] if relation_types else []
-        
-        schema = GraphSchema(
-            node_types=node_types_list,
-            relationship_types=relationship_types_list
-        ) if (node_types_list or relationship_types_list) else None
+        # Build SchemaConfig from entity/relation types.
+        # The extractor accepts an optional schema to guide extraction.
+        schema: Optional[SchemaConfig] = None
+        if entity_types or relation_types:
+            entities = [
+                SchemaEntity(label=et, description=f"A {et} entity")
+                for et in (entity_types or [])
+            ]
+            relations = [
+                SchemaRelation(label=rt, description=f"A {rt} relationship")
+                for rt in (relation_types or [])
+            ]
+            schema = SchemaBuilder.create_schema_model(
+                entities=entities,
+                relations=relations,
+                potential_schema=None,
+            )
         
         # Create native extractor
         extractor = LLMEntityRelationExtractor(

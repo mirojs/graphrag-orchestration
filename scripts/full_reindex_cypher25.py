@@ -100,44 +100,64 @@ async def validate_indexing(group_id: str):
     from app.services.graph_service import GraphService
     
     graph_service = GraphService()
-    await graph_service.async_init()
-    
-    async with graph_service.async_driver.session() as session:
+
+    if not graph_service.driver:
+        logger.error("GraphService driver not initialized")
+        return
+
+    with graph_service.driver.session(database=settings.NEO4J_DATABASE) as session:
         # Check chunks
-        result = await session.run(
+        record = session.run(
             "MATCH (c:TextChunk {group_id: $group_id}) RETURN count(c) AS count",
-            group_id=group_id
-        )
-        record = await result.single()
-        chunk_count = record['count'] if record else 0
-        
+            group_id=group_id,
+        ).single()
+        chunk_count = record["count"] if record else 0
+
         # Check entities
-        result = await session.run(
-            "MATCH (e:__Entity__ {group_id: $group_id}) RETURN count(e) AS count",
-            group_id=group_id
-        )
-        record = await result.single()
-        entity_count = record['count'] if record else 0
-        
-        # Check relationships
-        result = await session.run(
+        record = session.run(
             """
-            MATCH (e1:__Entity__ {group_id: $group_id})-[r]-(e2:__Entity__ {group_id: $group_id})
-            RETURN count(r) AS count
+            MATCH (e)
+            WHERE e.group_id = $group_id AND (e:Entity OR e:__Entity__)
+            RETURN count(e) AS count
             """,
-            group_id=group_id
-        )
-        record = await result.single()
-        rel_count = record['count'] if record else 0
-        
+            group_id=group_id,
+        ).single()
+        entity_count = record["count"] if record else 0
+
+        # Check entity relationships
+                record = session.run(
+                        """
+                        MATCH (e1)-[r]-(e2)
+                        WHERE e1.group_id = $group_id AND e2.group_id = $group_id
+                            AND (e1:Entity OR e1:__Entity__)
+                            AND (e2:Entity OR e2:__Entity__)
+                            AND type(r) <> 'MENTIONS'
+                        RETURN count(r) AS count
+                        """,
+                        group_id=group_id,
+                ).single()
+        rel_count = record["count"] if record else 0
+
+        # Check mentions
+        record = session.run(
+            """
+            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]-(e)
+            WHERE e.group_id = $group_id AND (e:Entity OR e:__Entity__)
+            RETURN count(*) AS count
+            """,
+            group_id=group_id,
+        ).single()
+        mentions_count = record["count"] if record else 0
+
         logger.info("=" * 70)
         logger.info("Validation Results:")
         logger.info("=" * 70)
         logger.info(f"  ✅ Chunks indexed: {chunk_count}")
         logger.info(f"  ✅ Entities indexed: {entity_count}")
         logger.info(f"  ✅ Entity relationships: {rel_count}")
-    
-    await graph_service.close()
+        logger.info(f"  ✅ MENTIONS edges: {mentions_count}")
+
+    graph_service.close()
 
 
 async def test_cypher25_queries(group_id: str):
@@ -206,8 +226,8 @@ async def main():
     llm_service = LLMService()
     
     try:
-        llm = llm_service.get_llm_model()
-        embedder = llm_service.get_embedding_model()
+        llm = llm_service.llm
+        embedder = llm_service.embed_model
     except Exception as e:
         logger.warning(f"Failed to initialize LLM/embedder: {e}")
         logger.warning("Continuing without entity extraction...")

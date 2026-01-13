@@ -29,7 +29,7 @@ from llama_index.core.schema import TextNode
 # neo4j-graphrag native extractor (Phase 2 migration)
 from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
 from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
-from neo4j_graphrag.experimental.components.schema import GraphSchema, NodeType, RelationshipType
+from neo4j_graphrag.experimental.components.schema import SchemaConfig
 from neo4j_graphrag.llm import AzureOpenAILLM
 
 from app.services.graph_service import GraphService, MultiTenantNeo4jStore
@@ -305,15 +305,13 @@ class IndexingService:
         )
         
         # Build GraphSchema from entity/relation types
-        node_types = [
-            NodeType(label=et, description=f"A {et} entity", properties=[], additional_properties=True)
-            for et in entity_types
-        ]
-        relationship_types = [
-            RelationshipType(label=rt, description=f"A {rt} relationship", properties=[], additional_properties=True)
-            for rt in relation_types
-        ]
-        schema = GraphSchema(node_types=node_types, relationship_types=relationship_types)
+        # NOTE: neo4j-graphrag's current experimental extractor expects a SchemaConfig.
+        # We provide a light schema to guide extraction, but keep it permissive.
+        schema = SchemaConfig(
+            entities={et: {"description": f"A {et} entity"} for et in entity_types},
+            relations={rt: {"description": f"A {rt} relationship"} for rt in relation_types},
+            potential_schema=[],
+        )
         
         # Create native extractor
         extractor = LLMEntityRelationExtractor(

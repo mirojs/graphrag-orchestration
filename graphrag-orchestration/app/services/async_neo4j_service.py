@@ -434,15 +434,28 @@ class AsyncNeo4jService:
         """
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
-        MATCH (e:`__Entity__` {id: eid})-[:MENTIONS]->(c)
+        MATCH (e {id: eid})
         WHERE e.group_id = $group_id
-          AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+            AND (e:Entity OR e:`__Entity__`)
+        CALL {
+            WITH e
+            MATCH (e)-[:MENTIONS]->(c)
+            WHERE c.group_id = $group_id
+                AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+            RETURN c
+            UNION
+            WITH e
+            MATCH (c)-[:MENTIONS]->(e)
+            WHERE c.group_id = $group_id
+                AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
+            RETURN c
+        }
         WITH DISTINCT c
         RETURN c.id AS chunk_id,
-               c.text AS text,
-               c.url AS url,
-               c.page_number AS page,
-               c.section_path AS section_path
+                     c.text AS text,
+                     c.url AS url,
+                     c.page_number AS page,
+                     c.section_path AS section_path
         LIMIT $limit
         """)
         

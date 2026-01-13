@@ -592,7 +592,10 @@ class LazyGraphRAGIndexingPipeline:
         # Create native extractor
         extractor = LLMEntityRelationExtractor(
             llm=native_llm,
-            create_lexical_graph=False,  # We already have chunks, don't create duplicate
+            # IMPORTANT: enable lexical graph so we can recover chunk↔entity mention links.
+            # We do NOT persist chunk nodes from the extractor; we only use the returned
+            # relationships to populate Entity.text_unit_ids for downstream MENTIONS edges.
+            create_lexical_graph=True,
             max_concurrency=1,
         )
         
@@ -612,44 +615,94 @@ class LazyGraphRAGIndexingPipeline:
         
         logger.info(f"Native extractor produced {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")
         
-        # Convert to our Entity/Relationship format
-        entities: List[Entity] = []
-        entity_id_map: Dict[str, str] = {}  # Map native node ID to our entity ID
-        
+        # Convert to our Entity/Relationship format.
+        # Also recover chunk↔entity mention links and store them into Entity.text_unit_ids.
+        chunk_ids: set[str] = {str(c.id) for c in chunks if c.id}
+        entity_id_map: Dict[str, str] = {}  # native_node_id -> stable entity id
+        entities_by_id: Dict[str, Entity] = {}
+
+        def _normalize_labels(n: Any) -> List[str]:
+            labels = getattr(n, "labels", None)
+            if labels:
+                return [str(x) for x in labels if x]
+            label = getattr(n, "label", None)
+            return [str(label)] if label else []
+
         for node in graph.nodes:
-            # neo4j-graphrag may expose either `.labels` (list) or `.label` (single)
-            node_labels = getattr(node, "labels", None) or ([] if getattr(node, "label", None) is None else [getattr(node, "label")])
-            if not node_labels or "Chunk" in node_labels:
-                continue  # Skip chunk nodes
+            node_labels = _normalize_labels(node)
+            # Skip chunk/text-chunk nodes; we already persist our own TextChunk nodes.
+            if not node_labels or any(l in ("Chunk", "TextChunk") for l in node_labels):
+                continue
 
             props = getattr(node, "properties", None) or {}
-            name = props.get("name", "") if isinstance(props, dict) else (getattr(node, "name", "") or "")
+            if not isinstance(props, dict):
+                props = {}
+
+            name = (props.get("name") or getattr(node, "name", "") or "").strip()
+            native_id = str(getattr(node, "id", None) or getattr(node, "node_id", None) or "").strip()
             if not name:
-                name = getattr(node, "id", None) or getattr(node, "node_id", None) or ""
+                # Fall back to native id if name missing.
+                name = native_id
+            if not name:
+                continue
 
             key = self._canonical_entity_key(name)
             if not key:
                 continue
 
             ent_id = self._stable_entity_id(group_id, key)
-            node_id_key = getattr(node, "id", None) or getattr(node, "node_id", None) or name
-            entity_id_map[node_id_key] = ent_id
+            if native_id:
+                entity_id_map[native_id] = ent_id
 
-            entities.append(Entity(
-                id=ent_id,
-                name=name,
-                type=node_labels[0] if node_labels else "CONCEPT",
-                description=props.get("description", "") if isinstance(props, dict) else "",
-                embedding=None,
-                metadata=props or {},
-                text_unit_ids=[],
-            ))
+            if ent_id not in entities_by_id:
+                entities_by_id[ent_id] = Entity(
+                    id=ent_id,
+                    name=name,
+                    type=node_labels[0] if node_labels else "CONCEPT",
+                    description=str(props.get("description", "") or ""),
+                    embedding=None,
+                    metadata=props,
+                    text_unit_ids=[],
+                )
+
+        # Recover mentions from lexical graph relationships: (chunk) -[...]→ (entity)
+        # We do not assume a specific relationship type name; we just detect chunk↔entity endpoints.
+        mentions_total = 0
+        for rel in graph.relationships:
+            start_id = str(getattr(rel, "start_node_id", "") or "")
+            end_id = str(getattr(rel, "end_node_id", "") or "")
+            if not start_id or not end_id:
+                continue
+
+            # chunk -> entity
+            if start_id in chunk_ids and end_id in entity_id_map:
+                ent_id = entity_id_map[end_id]
+                ent = entities_by_id.get(ent_id)
+                if ent is not None and start_id not in ent.text_unit_ids:
+                    ent.text_unit_ids.append(start_id)
+                    mentions_total += 1
+                continue
+
+            # entity -> chunk
+            if end_id in chunk_ids and start_id in entity_id_map:
+                ent_id = entity_id_map[start_id]
+                ent = entities_by_id.get(ent_id)
+                if ent is not None and end_id not in ent.text_unit_ids:
+                    ent.text_unit_ids.append(end_id)
+                    mentions_total += 1
+
+        entities = list(entities_by_id.values())
+        if mentions_total == 0:
+            logger.warning(
+                "native_extractor_no_mentions_recovered",
+                extra={"group_id": group_id, "chunks": len(chunks), "entities": len(entities)},
+            )
         
-        # Convert relationships
+        # Convert relationships (entity↔entity only; chunk endpoints are ignored).
         relationships: List[Relationship] = []
         for rel in graph.relationships:
-            source_id = entity_id_map.get(rel.start_node_id)
-            target_id = entity_id_map.get(rel.end_node_id)
+            source_id = entity_id_map.get(str(getattr(rel, "start_node_id", "") or ""))
+            target_id = entity_id_map.get(str(getattr(rel, "end_node_id", "") or ""))
             
             if not source_id or not target_id:
                 continue

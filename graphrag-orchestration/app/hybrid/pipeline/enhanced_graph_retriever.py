@@ -101,6 +101,24 @@ class EnhancedGraphRetriever:
         self.group_id = group_id
 
     @staticmethod
+    def _sanitize_query_for_fulltext(query: str) -> str:
+        """Sanitize input for Neo4j Lucene fulltext index.
+
+        Mirrors the basic approach in the hybrid orchestrator: keep alphanumerics
+        and whitespace only, replacing other characters with spaces.
+        """
+
+        if not query:
+            return ""
+        out: List[str] = []
+        for ch in query:
+            if ch.isalnum() or ch.isspace():
+                out.append(ch)
+            else:
+                out.append(" ")
+        return " ".join("".join(out).split())
+
+    @staticmethod
     def _doc_key(chunk: SourceChunk) -> str:
         """Stable key for per-document diversification.
 
@@ -241,14 +259,14 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return []
         query = """
-        UNWIND $entity_names AS entity_name
-        CALL (entity_name) {
-            WITH entity_name
-            MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
-            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-              AND t.group_id = $group_id
-            RETURN t
-            UNION
+                UNWIND $entity_names AS entity_name
+                CALL (entity_name) {
+                        WITH entity_name
+                        MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
+                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
+                            AND t.group_id = $group_id
+                        RETURN t
+                        UNION
                         WITH entity_name
                         MATCH (t:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
                         WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
@@ -309,18 +327,39 @@ class EnhancedGraphRetriever:
                         doc_id: d.id,
                         doc_title: d.title,
                         doc_source: d.source
-                })[0..$max_per_entity] as chunks
-                UNWIND chunks as chunk
+                })[0..$max_per_entity] AS chunks
+                UNWIND chunks AS chunk
                 RETURN
                         entity_name,
-                        chunk.chunk_id as chunk_id,
-                        chunk.text as text,
-                        chunk.metadata as metadata,
-                        chunk.section_id as section_id,
-                        chunk.section_path_key as section_path_key,
-                        chunk.doc_id as doc_id,
-                        chunk.doc_title as doc_title,
-                        chunk.doc_source as doc_source
+                        chunk.chunk_id AS chunk_id,
+                        chunk.text AS text,
+                        chunk.metadata AS metadata,
+                        chunk.section_id AS section_id,
+                        chunk.section_path_key AS section_path_key,
+                        chunk.doc_id AS doc_id,
+                        chunk.doc_title AS doc_title,
+                        chunk.doc_source AS doc_source
+                """
+
+        fallback_query = """
+                UNWIND $entity_names AS entity_name
+                WITH entity_name, $group_id AS group_id, $max_per_entity AS max_per_entity
+                CALL db.index.fulltext.queryNodes('textchunk_fulltext', entity_name, {limit: max_per_entity})
+                    YIELD node AS t, score
+                WHERE t:TextChunk AND t.group_id = group_id
+                OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+                OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+                RETURN
+                    entity_name,
+                    t.id AS chunk_id,
+                    t.text AS text,
+                    t.metadata AS metadata,
+                    s.id AS section_id,
+                    s.path_key AS section_path_key,
+                    d.id AS doc_id,
+                    d.title AS doc_title,
+                    d.source AS doc_source,
+                    score AS score
                 """
         
         try:
@@ -337,35 +376,91 @@ class EnhancedGraphRetriever:
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
-            
-            chunks = []
+
+            chunks: List[SourceChunk] = []
             for record in records:
-                metadata = {}
-                if record["metadata"]:
+                metadata: Dict[str, Any] = {}
+                if record.get("metadata"):
                     try:
-                        metadata = json.loads(record["metadata"]) if isinstance(record["metadata"], str) else record["metadata"]
-                    except:
-                        pass
-                
-                # Use section_path from graph if available, else from metadata
+                        metadata = (
+                            json.loads(record["metadata"]) if isinstance(record["metadata"], str) else record["metadata"]
+                        )
+                    except Exception:
+                        metadata = {}
+
                 section_path = metadata.get("section_path", [])
                 if record.get("section_path_key"):
-                    section_path = record["section_path_key"].split(" > ")
-                
-                chunks.append(SourceChunk(
-                    chunk_id=record["chunk_id"],
-                    text=record["text"] or "",
-                    entity_name=record["entity_name"],
-                    section_path=section_path,
-                    section_id=record.get("section_id") or "",
-                    document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
-                    document_title=record.get("doc_title") or metadata.get("document_title", ""),
-                    document_source=record.get("doc_source") or metadata.get("url", ""),
-                ))
-            
-            logger.info("mentions_retrieval_complete",
-                       num_entities=len(entity_names),
-                       num_chunks=len(chunks))
+                    section_path = (record["section_path_key"] or "").split(" > ")
+
+                chunks.append(
+                    SourceChunk(
+                        chunk_id=record.get("chunk_id") or "",
+                        text=record.get("text") or "",
+                        entity_name=record.get("entity_name") or "",
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
+                        document_title=record.get("doc_title") or metadata.get("document_title", ""),
+                        document_source=record.get("doc_source") or metadata.get("url", ""),
+                        relevance_score=float(record.get("score") or 0.0),
+                    )
+                )
+
+            # Fallback: if the graph has no MENTIONS links, try fulltext retrieval for entity strings.
+            fallback_used = False
+            if not chunks:
+                sanitized = [self._sanitize_query_for_fulltext(n) for n in entity_names]
+                sanitized = [n for n in sanitized if n]
+                if sanitized:
+                    fallback_used = True
+
+                    def _run_fallback():
+                        with self.driver.session() as session:
+                            result = session.run(
+                                fallback_query,
+                                entity_names=sanitized,
+                                group_id=self.group_id,
+                                max_per_entity=max_per_entity,
+                            )
+                            return list(result)
+
+                    records = await loop.run_in_executor(None, _run_fallback)
+                    for record in records:
+                        metadata: Dict[str, Any] = {}
+                        if record.get("metadata"):
+                            try:
+                                metadata = (
+                                    json.loads(record["metadata"])
+                                    if isinstance(record["metadata"], str)
+                                    else record["metadata"]
+                                )
+                            except Exception:
+                                metadata = {}
+
+                        section_path = metadata.get("section_path", [])
+                        if record.get("section_path_key"):
+                            section_path = (record["section_path_key"] or "").split(" > ")
+
+                        chunks.append(
+                            SourceChunk(
+                                chunk_id=record.get("chunk_id") or "",
+                                text=record.get("text") or "",
+                                entity_name=record.get("entity_name") or "",
+                                section_path=section_path,
+                                section_id=record.get("section_id") or "",
+                                document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
+                                document_title=record.get("doc_title") or metadata.get("document_title", ""),
+                                document_source=record.get("doc_source") or metadata.get("url", ""),
+                                relevance_score=float(record.get("score") or 0.0),
+                            )
+                        )
+
+            logger.info(
+                "mentions_retrieval_complete",
+                num_entities=len(entity_names),
+                num_chunks=len(chunks),
+                used_fulltext_fallback=fallback_used,
+            )
             return chunks
             
         except Exception as e:
@@ -1222,6 +1317,31 @@ class EnhancedGraphRetriever:
         ORDER BY shared_chunks DESC
         LIMIT $max_rels
         """
+
+        fallback_query = """
+                UNWIND $entity_inputs AS seed
+                CALL (seed) {
+                    WITH seed
+                    MATCH (e1:Entity {group_id:$group_id})
+                    WHERE (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed)
+                    RETURN e1
+                    UNION
+                    WITH seed
+                    MATCH (e1:`__Entity__` {group_id:$group_id})
+                    WHERE (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed)
+                    RETURN e1
+                }
+                MATCH (e1)-[r:RELATED_TO]-(e2)
+                WHERE (e2:Entity OR e2:`__Entity__`) AND e2.group_id = $group_id AND e2 <> e1
+                WITH e1, e2, r
+                WHERE elementId(e1) < elementId(e2)
+                RETURN
+                    e1.name AS source,
+                    e2.name AS target,
+                    coalesce(r.description, 'RELATED_TO') AS description,
+                    'RELATED_TO' AS rel_type
+                LIMIT $max_rels
+                """
         
         try:
             loop = asyncio.get_event_loop()
@@ -1237,6 +1357,19 @@ class EnhancedGraphRetriever:
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
+
+            if not records:
+                def _run_fallback():
+                    with self.driver.session() as session:
+                        result = session.run(
+                            fallback_query,
+                            entity_inputs=entity_names,
+                            group_id=self.group_id,
+                            max_rels=max_relationships,
+                        )
+                        return list(result)
+
+                records = await loop.run_in_executor(None, _run_fallback)
             
             relationships = []
             for record in records:

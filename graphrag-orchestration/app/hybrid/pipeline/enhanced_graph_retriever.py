@@ -351,12 +351,13 @@ class EnhancedGraphRetriever:
                 OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
                 WITH
                     entity_name,
+                    max_per_entity,
                     t,
                     score,
                     s,
                     d
                 ORDER BY score DESC
-                WITH entity_name, collect({
+                WITH entity_name, max_per_entity, collect({
                     chunk_id: t.id,
                     text: t.text,
                     metadata: t.metadata,

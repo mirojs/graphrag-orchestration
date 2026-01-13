@@ -267,7 +267,7 @@ class HubExtractor:
                 with self.neo4j_driver.session() as session:
                     result = session.run("""
                         UNWIND $entity_names AS entity_name
-                        CALL {
+                        CALL (entity_name) {
                             WITH entity_name
                             MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                                                         WHERE c.group_id = $group_id AND e.group_id = $group_id
@@ -387,7 +387,7 @@ class HubExtractor:
         
         try:
             query = """
-            CALL {
+            CALL () {
                 MATCH (e:Entity)-[r]-()
                 RETURN e.name as name, e.id as id, count(r) as degree
                 UNION

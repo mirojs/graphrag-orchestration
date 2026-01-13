@@ -242,7 +242,7 @@ class EnhancedGraphRetriever:
             return []
         query = """
         UNWIND $entity_names AS entity_name
-        CALL {
+        CALL (entity_name) {
             WITH entity_name
             MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
@@ -1154,7 +1154,7 @@ class EnhancedGraphRetriever:
         # - edge direction: chunk->entity or entity->chunk
         query = """
         UNWIND $entity_names_lower AS seed
-                CALL {
+                CALL (seed) {
                         WITH seed
                         MATCH (e1:Entity)
                         WHERE e1.group_id = $group_id
@@ -1168,7 +1168,7 @@ class EnhancedGraphRetriever:
                         RETURN e1
                 }
 
-        CALL {
+        CALL (e1) {
             WITH e1
             MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e1)
             RETURN c
@@ -1186,7 +1186,7 @@ class EnhancedGraphRetriever:
             RETURN c
         }
 
-        CALL {
+        CALL (c) {
             WITH c
             MATCH (c)-[:MENTIONS]->(e2:Entity)
             WHERE e2.group_id = $group_id
@@ -1213,7 +1213,7 @@ class EnhancedGraphRetriever:
         WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
         WHERE shared_chunks > 0
         WITH e1, e2, shared_chunks, chunk_ids
-        WHERE id(e1) < id(e2)
+        WHERE elementId(e1) < elementId(e2)
         RETURN
             e1.name AS source,
             e2.name AS target,

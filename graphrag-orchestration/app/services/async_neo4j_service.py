@@ -193,7 +193,7 @@ class AsyncNeo4jService:
         """
         query = cypher25_query("""
         UNWIND $names AS name
-                CALL {
+            CALL (name) {
                         WITH name
                         MATCH (e:`__Entity__`)
                                                 WHERE e.group_id = $group_id
@@ -437,7 +437,7 @@ class AsyncNeo4jService:
         MATCH (e {id: eid})
         WHERE e.group_id = $group_id
             AND (e:Entity OR e:`__Entity__`)
-        CALL {
+        CALL (e) {
             WITH e
             MATCH (e)-[:MENTIONS]->(c)
             WHERE c.group_id = $group_id

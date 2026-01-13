@@ -41,7 +41,7 @@ def cleanup_neo4j(group_id: str):
             result = session.run(
                 """
                 MATCH (n {group_id: $group_id})
-                CALL { WITH n DETACH DELETE n } IN TRANSACTIONS OF 100 ROWS
+                CALL (n) { WITH n DETACH DELETE n } IN TRANSACTIONS OF 100 ROWS
                 RETURN count(*) as deleted
                 """,
                 group_id=group_id

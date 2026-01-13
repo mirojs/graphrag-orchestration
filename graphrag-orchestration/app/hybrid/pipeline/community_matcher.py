@@ -276,7 +276,7 @@ class CommunityMatcher:
                 if query_embedding:
                     # Vector similarity search with cross-document diversity
                     embedding_query = """
-                    CALL {
+                    CALL () {
                         MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                         WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN c, e
@@ -343,7 +343,7 @@ class CommunityMatcher:
             try:
                 # Search entities by keyword, diversify across documents
                 search_query = """
-                CALL {
+                CALL () {
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                     WHERE c.group_id = $group_id
                     RETURN c, e
@@ -409,7 +409,7 @@ class CommunityMatcher:
             try:
                 # Get top entities from EACH document to ensure coverage
                 multi_doc_query = """
-                CALL {
+                CALL () {
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                     WHERE c.group_id = $group_id
                     RETURN c, e
@@ -495,7 +495,7 @@ class CommunityMatcher:
                     # Use vector similarity search to find relevant entities
                     # This is more semantic than keyword matching
                     embedding_query = """
-                    CALL {
+                    CALL () {
                         MATCH (e:Entity)
                         WHERE e.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN e
@@ -538,7 +538,7 @@ class CommunityMatcher:
                 # Get top entities from EACH document to ensure cross-document coverage
                 # This prevents the largest document from dominating results
                 multi_doc_query = """
-                CALL {
+                CALL () {
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
                     WHERE c.group_id = $group_id
                     RETURN c, e
@@ -604,7 +604,7 @@ class CommunityMatcher:
                            service_connected=self.neo4j_service._driver is not None)
                 # Get most important entities as fallback
                 fallback_query = """
-                CALL {
+                CALL () {
                     MATCH (e:Entity)
                     WHERE e.group_id = $group_id
                     RETURN e

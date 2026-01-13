@@ -77,12 +77,16 @@ async def load_test_documents():
                 )
             
             if text.strip():
+                # Note: source and title should be at top level, not in metadata
+                # This matches what LazyGraphRAG pipeline expects
                 documents.append({
                     "text": text,
+                    "source": pdf.name,  # Use filename as source
+                    "title": pdf.stem,
+                    "content": text,  # LazyGraphRAG expects 'content' or 'text'
                     "metadata": {
                         "file_name": pdf.name,
-                        "source": str(pdf),
-                        "title": pdf.stem
+                        "file_path": str(pdf),
                     }
                 })
                 logger.info(f"  ✅ Loaded: {pdf.name} ({len(text)} chars)")

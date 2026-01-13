@@ -366,7 +366,7 @@ class Neo4jStoreV3:
     def upsert_entity(self, group_id: str, entity: Entity) -> str:
         """Insert or update an entity using native vector storage."""
         query = """
-        MERGE (e:Entity {id: $id, group_id: $group_id})
+        MERGE (e:`__Entity__` {id: $id, group_id: $group_id})
         SET e.name = $name,
             e.type = $type,
             e.description = $description,
@@ -403,7 +403,7 @@ class Neo4jStoreV3:
         
         query = """
         UNWIND $entities AS e
-        MERGE (entity:Entity {id: e.id, group_id: $group_id})
+        MERGE (entity:`__Entity__` {id: e.id, group_id: $group_id})
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,

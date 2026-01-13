@@ -600,12 +600,26 @@ class LazyGraphRAGIndexingPipeline:
         )
         
         # Convert to neo4j-graphrag TextChunks
+        # Include document context in metadata to help extractor understand provenance
         native_chunks = []
         for c in chunks:
+            chunk_meta = {
+                "chunk_id": c.id,
+                "document_id": c.document_id,
+            }
+            # Add document-level context if available in chunk metadata
+            if c.metadata:
+                if "source" in c.metadata:
+                    chunk_meta["document_source"] = c.metadata["source"]
+                if "title" in c.metadata:
+                    chunk_meta["document_title"] = c.metadata["title"]
+                if "section_path" in c.metadata:
+                    chunk_meta["section_path"] = c.metadata["section_path"]
+            
             native_chunks.append(NativeTextChunk(
                 text=c.text,
                 index=c.chunk_index,
-                metadata={"chunk_id": c.id, "document_id": c.document_id},
+                metadata=chunk_meta,
                 uid=c.id,
             ))
         text_chunks = TextChunks(chunks=native_chunks)

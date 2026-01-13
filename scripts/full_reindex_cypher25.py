@@ -125,17 +125,17 @@ async def validate_indexing(group_id: str):
         entity_count = record["count"] if record else 0
 
         # Check entity relationships
-                record = session.run(
-                        """
-                        MATCH (e1)-[r]-(e2)
-                        WHERE e1.group_id = $group_id AND e2.group_id = $group_id
-                            AND (e1:Entity OR e1:__Entity__)
-                            AND (e2:Entity OR e2:__Entity__)
-                            AND type(r) <> 'MENTIONS'
-                        RETURN count(r) AS count
-                        """,
-                        group_id=group_id,
-                ).single()
+        record = session.run(
+            """
+            MATCH (e1)-[r]-(e2)
+            WHERE e1.group_id = $group_id AND e2.group_id = $group_id
+              AND (e1:Entity OR e1:__Entity__)
+              AND (e2:Entity OR e2:__Entity__)
+              AND type(r) <> 'MENTIONS'
+            RETURN count(r) AS count
+            """,
+            group_id=group_id,
+        ).single()
         rel_count = record["count"] if record else 0
 
         # Check mentions

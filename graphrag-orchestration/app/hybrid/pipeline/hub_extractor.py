@@ -10,6 +10,8 @@ Used in: Route 3 (Global Search Equivalent)
 from typing import List, Dict, Any, Optional, Tuple
 import structlog
 
+from .enhanced_graph_retriever import EnhancedGraphRetriever
+
 logger = structlog.get_logger(__name__)
 
 
@@ -77,6 +79,9 @@ class HubExtractor:
             if hub not in seen:
                 seen.add(hub)
                 unique_hubs.append(hub)
+        
+        # Filter out chunk-ID shaped entities (artifacts from ingestion)
+        unique_hubs = EnhancedGraphRetriever.filter_chunk_id_entities(unique_hubs)
         
         logger.info("hub_extraction_complete",
                    num_communities=len(communities),

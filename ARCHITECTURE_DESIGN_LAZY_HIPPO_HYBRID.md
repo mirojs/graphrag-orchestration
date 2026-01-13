@@ -156,6 +156,7 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Engine:** Graph topology analysis
 *   **What:** Extract hub entities (most connected nodes) from matched communities
 *   **Why:** Hub entities are the best "landing pads" for HippoRAG PPR
+*   **Chunk-ID Filter (added 2026-01-12):** After extraction, hub entities matching chunk-ID patterns (`doc_[a-f0-9]{20,}_chunk_xxx`) are filtered out. These are ingestion artifacts that should not influence entity-based retrieval.
 *   **Output:** `["Entity: Compliance_Policy_2024", "Entity: Risk_Assessment_Q3"]`
 
 #### Stage 3.2.5: Deterministic Negative Handling (STRICT “NOT FOUND”)
@@ -185,8 +186,24 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
     - `max_per_section`: Caps chunks from any single section (default: 3)
     - `max_per_document`: Caps chunks from any single document (default: 6)
     - Controlled via `SECTION_GRAPH_ENABLED` env var (default: enabled)
+*   **Chunk-ID Entity Filter (added 2026-01-12):**
+    - Filters out junk hub entities that match chunk-ID patterns (e.g., `doc_xxx_chunk_xxx`)
+    - Pattern: `doc_[a-f0-9]{20,}_chunk_\d+`
+    - Prevents ingestion artifacts from polluting entity-based retrieval
 *   **Benchmark Results (2026-01-06):** 6/10 questions at 100% theme coverage, avg 85%
 *   **Output:** Diversified source chunks with section metadata
+
+#### Stage 3.3.1: Coverage Intent Detection (DEFERRED)
+*   **Engine:** Regex-based intent detection
+*   **What:** Detect queries that require cross-document coverage (e.g., "summarize each document")
+*   **Coverage Intent Detection (regex patterns):**
+    - `each document`, `every document`, `all documents`
+    - `each agreement`, `every agreement`, `all agreements`
+    - `each contract`, `every contract`, `all contracts`
+    - `summarize all`, `compare all`, `list all`
+    - `across all`, `in each`, `in every`
+*   **Why Deferred:** Coverage retrieval is deferred to Stage 3.4.1 (after PPR) to avoid adding noise before relevance-based retrieval. Only documents that couldn't be found via BM25/Vector/PPR need coverage chunks.
+*   **Output:** Boolean `coverage_mode` flag passed to Stage 3.4.1
 
 #### Stage 3.3.5: Cypher 25 Hybrid BM25 + Vector RRF Fusion (Jan 2025 Update)
 *   **Engine:** Neo4j Cypher 25 native fulltext (BM25/Lucene) + native vector search with RRF fusion
@@ -207,6 +224,26 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **What:** Mathematical graph traversal from hub entities
 *   **Why:** Finds ALL structurally connected nodes (even "boring" ones LLM might skip)
 *   **Output:** Ranked evidence nodes with PPR scores
+
+#### Stage 3.4.1: Coverage Gap Fill (FINAL DOC COVERAGE)
+*   **Engine:** Document Graph enumeration + gap detection
+*   **What:** After ALL relevance-based retrieval is complete, identify which documents are still missing from the context and add ONE representative chunk per missing document.
+*   **Why (minimal noise):** By running AFTER BM25/Vector/PPR, this only adds chunks for documents that couldn't be found via any relevance signal. For a typical 5-doc corpus where BM25 found 3 docs, this adds just 2 chunks. For a 100-doc corpus where BM25 already hit most docs, this adds only truly orphaned documents.
+*   **Document Graph Traversal:**
+    - Query: `MATCH (d:Document)<-[:PART_OF]-(t:TextChunk) WHERE d.group_id = $gid`
+    - Ordered by `t.chunk_index ASC` (early chunks tend to be document introductions)
+    - Default: 1 chunk per missing document (minimal noise)
+    - Hard cap: 20 chunks total to prevent context explosion in large document sets
+*   **Gap Detection:**
+    - Collect all `document_id` values from existing `graph_context.source_chunks`
+    - Compare against documents returned by coverage query
+    - Only add chunks for documents NOT already present
+*   **Metadata Tracking:**
+    - `coverage_metadata.docs_added`: How many new documents were added
+    - `coverage_metadata.chunks_added`: Total chunks injected
+    - `coverage_metadata.total_docs_in_group`: Total documents available
+    - `coverage_metadata.docs_from_relevance`: Documents found via normal retrieval
+*   **Output:** Guaranteed document coverage with minimal context dilution
 
 #### Stage 3.5: Raw Text Chunk Fetching
 *   **Engine:** Storage backend (Neo4j / Parquet)
@@ -761,6 +798,304 @@ Azure DI extracts structural metadata from documents using the `prebuilt-layout`
 **Why This Matters for Audit:**
 *   Citations point to specific sections, not just documents
 *   Auditors can navigate directly to the relevant section in the original PDF
+
+### 6.5. Section-Aware Chunking & Embedding (Trial Module - January 2026)
+
+#### 6.5.1. Problem Statement
+
+The current fixed-size chunking strategy (512 tokens with 64-token overlap) creates a **semantic misalignment** between document structure and embedding units:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PROBLEM: Fixed-Size Chunks Don't Respect Semantic Boundaries   │
+└─────────────────────────────────────────────────────────────────┘
+
+Document Structure (what Azure DI sees):
+├── Section: "Purpose" (200 words)
+├── Section: "Payment Terms" (100 words)
+├── Section: "Termination Clause" (150 words)
+└── Section: "Signatures" (50 words)
+
+Fixed Chunking (what embeddings see):
+├── Chunk 0: [Purpose...] + [start of Payment Terms...]  ← MIXED!
+├── Chunk 1: [...Payment Terms] + [Termination...]       ← MIXED!
+└── Chunk 2: [...Termination] + [Signatures]             ← MIXED!
+```
+
+**Consequences:**
+1. **Incoherent embeddings** — Each embedding represents a mix of unrelated topics
+2. **Retrieval imprecision** — Query for "payment" retrieves chunk with 50% payment, 50% termination
+3. **Coverage retrieval failure** — "First chunk" may be legal boilerplate, not document summary
+4. **Lost structure** — Azure DI's rich section metadata is ignored during chunking
+
+#### 6.5.2. Solution: Section-Aware Chunking
+
+Align chunk boundaries with Azure DI section boundaries:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ SOLUTION: Section Boundaries = Chunk Boundaries                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Document Structure:
+├── Section: "Purpose" (200 words)
+│       ↓
+│   Chunk 0: [Complete Purpose section]      ← COHERENT!
+│
+├── Section: "Payment Terms" (100 words)
+│       ↓
+│   Chunk 1: [Complete Payment section]      ← COHERENT!
+│
+├── Section: "Terms and Conditions" (2000 words)  ← TOO LARGE
+│       ↓
+│   Chunk 2: [Terms... paragraph break]      ← Split at paragraph
+│   Chunk 3: [...continued Terms]            ← With overlap
+│
+└── Section: "Signatures" (50 words)         ← TOO SMALL
+        ↓
+    Merged with Chunk 3                      ← Merge with sibling
+```
+
+**Benefits:**
+1. **Coherent embeddings** — Each embedding = one complete semantic unit
+2. **Natural coverage** — "Purpose" section = document summary (ideal for coverage retrieval)
+3. **Structure preservation** — Section path metadata enables structural queries
+4. **Improved retrieval** — Query "payment" retrieves exactly the Payment section
+
+#### 6.5.3. Prior Art & References
+
+| Source | Key Insight | How We Apply It |
+|--------|-------------|-----------------|
+| **LlamaIndex HierarchicalNodeParser** | Parent-child chunk relationships for context expansion | Keep `parent_section_id` links; retrieval of child can expand to full section |
+| **LangChain MarkdownHeaderTextSplitter** | Preserve header hierarchy in chunk metadata | Store `section_path`, `section_level` in chunk metadata |
+| **Unstructured.io chunk_by_title** | Element-based boundaries with size constraints | Use Azure DI sections as boundaries; apply min/max token rules |
+| **Greg Kamradt Semantic Chunking** | Detect natural breaks via embedding similarity drops | Azure DI sections ARE the natural breaks (pre-computed by DI) |
+| **RAPTOR** | Hierarchical summarization at multiple granularities | Section = natural summary unit; "Purpose" section = document abstract |
+
+#### 6.5.4. Design: Splitting Rules
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Section-Aware Chunking Rules                                    │
+└─────────────────────────────────────────────────────────────────┘
+
+                    ┌─────────────────┐
+                    │  Azure DI       │
+                    │  Section        │
+                    │  (N tokens)     │
+                    └────────┬────────┘
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              ▼
+       N < 100 tokens   100 ≤ N ≤ 1500   N > 1500 tokens
+              │              │              │
+              ▼              ▼              ▼
+       ┌──────────┐   ┌──────────┐   ┌──────────────────┐
+       │ MERGE    │   │ KEEP AS  │   │ SPLIT at         │
+       │ with     │   │ SINGLE   │   │ subsections      │
+       │ sibling  │   │ CHUNK    │   │ OR paragraphs    │
+       │ or parent│   │          │   │ (with overlap)   │
+       └──────────┘   └──────────┘   └──────────────────┘
+```
+
+| Rule | Threshold | Action | Rationale |
+|------|-----------|--------|-----------|
+| **Min size** | < 100 tokens | Merge with parent/sibling | Avoid micro-chunks (signatures, page numbers) |
+| **Max size** | > 1500 tokens | Split at subsection or paragraph | Respect embedding model context limits |
+| **Overlap** | 50 tokens | Add to split chunks | Preserve context across boundaries |
+| **Summary detection** | Title matches patterns | Mark `is_summary_section=True` | Enable smart coverage retrieval |
+
+**Summary Section Patterns** (auto-detected):
+- Purpose, Summary, Executive Summary
+- Introduction, Overview, Scope
+- Background, Abstract, Objectives
+- Recitals, Whereas (legal documents)
+
+#### 6.5.5. Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         SECTION-AWARE CHUNKING PIPELINE                          │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌───────────────┐      ┌───────────────┐      ┌───────────────────────────────────┐
+│   PDF/DOCX    │      │  Azure DI     │      │  Section Extraction               │
+│   Document    │─────▶│  prebuilt-    │─────▶│  - H1, H2, H3 headings           │
+│               │      │  layout       │      │  - Paragraph boundaries           │
+└───────────────┘      └───────────────┘      │  - Table locations                │
+                                              └───────────────┬───────────────────┘
+                                                              │
+                                                              ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           SectionAwareChunker                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  Step 1: Extract SectionNodes from DI metadata                          │    │
+│  │    - Parse section_path, di_section_path                                │    │
+│  │    - Build parent-child hierarchy                                       │    │
+│  │    - Count tokens per section                                           │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                      │                                          │
+│                                      ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  Step 2: Merge tiny sections (< 100 tokens)                             │    │
+│  │    - Merge with previous sibling if exists                              │    │
+│  │    - Else merge with next section                                       │    │
+│  │    - Update combined token count                                        │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                      │                                          │
+│                                      ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  Step 3: Split large sections (> 1500 tokens)                           │    │
+│  │    - Prefer subsection boundaries if available                          │    │
+│  │    - Else split at paragraph boundaries (\n\n)                          │    │
+│  │    - Add 50-token overlap between chunks                                │    │
+│  │    - Track section_chunk_index for position                             │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                      │                                          │
+│                                      ▼                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │  Step 4: Detect summary sections                                        │    │
+│  │    - Check title against SUMMARY_SECTION_PATTERNS                       │    │
+│  │    - Mark is_summary_section=True                                       │    │
+│  │    - Mark is_section_start=True for first chunk of each section         │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              SectionChunk Output                                 │
+│                                                                                  │
+│  {                                                                               │
+│    "id": "doc_001_chunk_3",                                                      │
+│    "text": "The purpose of this Agreement is to...",                             │
+│    "tokens": 245,                                                                │
+│    "section_id": "sec_a1b2c3d4e5f6",                                            │
+│    "section_title": "Purpose and Scope",                                        │
+│    "section_level": 1,                                                          │
+│    "section_path": ["Purpose and Scope"],                                       │
+│    "section_chunk_index": 0,      // First chunk of this section                │
+│    "section_chunk_total": 1,      // Section fits in one chunk                  │
+│    "is_summary_section": true,    // "Purpose" matches pattern                  │
+│    "is_section_start": true                                                     │
+│  }                                                                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌───────────────┐      ┌───────────────┐      ┌───────────────────────────────────┐
+│  Embedding    │      │   Neo4j       │      │  Retrieval Benefits               │
+│  Generation   │─────▶│  :TextChunk   │─────▶│  - Coverage: Use is_summary_section│
+│  (coherent!)  │      │   node        │      │  - Structure: Query by section_path│
+└───────────────┘      └───────────────┘      │  - Precision: Whole sections       │
+                                              └───────────────────────────────────┘
+```
+
+#### 6.5.6. Coverage Retrieval Integration
+
+With section-aware chunking, the coverage retrieval problem (Route 3 "summarize each document") becomes trivial:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ BEFORE: Fixed Chunking Coverage                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Query: "Summarize the main purpose of each document"
+         │
+         ▼
+  BM25/Vector retrieval finds 3 relevant chunks
+         │
+         ▼
+  But chunks are from only 2 of 5 documents!
+         │
+         ▼
+  Coverage gap → Missing documents in response
+
+┌─────────────────────────────────────────────────────────────────┐
+│ AFTER: Section-Aware Coverage                                   │
+└─────────────────────────────────────────────────────────────────┘
+
+Query: "Summarize the main purpose of each document"
+         │
+         ▼
+  Cypher: MATCH (c:TextChunk)
+          WHERE c.group_id = $gid
+            AND c.metadata.is_summary_section = true
+          RETURN c
+         │
+         ▼
+  Get ONE "Purpose" section from EACH document
+         │
+         ▼
+  Guaranteed coverage with semantically appropriate chunks!
+```
+
+#### 6.5.7. Implementation Status
+
+| Component | Status | Location |
+|-----------|--------|----------|
+| `SectionNode` model | ✅ Complete | `app/hybrid/indexing/section_chunking/models.py` |
+| `SectionChunk` model | ✅ Complete | `app/hybrid/indexing/section_chunking/models.py` |
+| `SectionAwareChunker` | ✅ Complete | `app/hybrid/indexing/section_chunking/chunker.py` |
+| Integration helpers | ✅ Complete | `app/hybrid/indexing/section_chunking/integration.py` |
+| Unit tests | ✅ Complete | `app/hybrid/indexing/section_chunking/test_chunker.py` |
+| Pipeline integration | 🔄 Pending | Feature flag: `USE_SECTION_CHUNKING=1` |
+| Re-ingestion script | 🔄 Pending | Requires document re-processing |
+| Benchmark validation | 🔄 Pending | Compare against fixed chunking baseline |
+
+#### 6.5.8. Migration Path
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Phase 1: Parallel Testing (Current)                             │
+│   - Section chunking module isolated in section_chunking/       │
+│   - Feature flag controls activation                            │
+│   - Existing fixed chunking continues as default                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Phase 2: Test Corpus Re-Ingestion                               │
+│   - Re-ingest 5-PDF test corpus with section chunking           │
+│   - Compare embedding quality (coherence metrics)               │
+│   - Run Route 3 benchmark (coverage + thematic scores)          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Phase 3: Production Rollout                                     │
+│   - If benchmarks improve: Enable by default                    │
+│   - Update enhanced_graph_retriever.py for coverage queries     │
+│   - Deprecate fixed chunking path                               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.5.9. Configuration
+
+```python
+from app.hybrid.indexing.section_chunking import SectionChunkConfig
+
+config = SectionChunkConfig(
+    min_tokens=100,              # Merge sections below this threshold
+    max_tokens=1500,             # Split sections above this threshold
+    overlap_tokens=50,           # Overlap between split chunks
+    merge_tiny_sections=True,    # Enable tiny section merging
+    preserve_hierarchy=True,     # Keep parent-child section links
+    prefer_paragraph_splits=True,# Split at paragraphs, not sentences
+    fallback_to_fixed_chunking=True,  # Fall back if no DI sections
+)
+```
+
+#### 6.5.10. Expected Outcomes
+
+| Metric | Fixed Chunking | Section-Aware (Expected) |
+|--------|----------------|--------------------------|
+| **Coverage retrieval accuracy** | ~60% (arbitrary first chunks) | ~95% (Purpose sections) |
+| **Embedding coherence** | Mixed topics per chunk | One topic per chunk |
+| **Route 3 thematic score** | 85% avg | 95%+ avg |
+| **X-2 "each document" citations** | 2/5 docs | 5/5 docs |
+| **Retrieval precision** | Partial matches | Full section matches |
+
+
 *   Section hierarchy provides context for understanding where information came from
 
 #### Azure DI Model Selection & Key-Value Pairs (Jan 2026 Analysis)

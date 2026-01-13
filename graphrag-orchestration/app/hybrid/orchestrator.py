@@ -2088,11 +2088,17 @@ Instructions:
         timings_ms: Dict[str, int] = {}
 
         t_route0 = time.perf_counter()
+        
+        # Detect coverage intent: Does this query require cross-document coverage?
+        from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+        coverage_mode = EnhancedGraphRetriever.detect_coverage_intent(query)
+        
         logger.info(
             "route_3_global_search_start",
             query=query[:50],
             response_type=response_type,
             timings_enabled=enable_timings,
+            coverage_mode=coverage_mode,
         )
         
         # Stage 3.1: Community Matching (LazyGraphRAG: on-the-fly generation if needed)
@@ -2104,6 +2110,7 @@ Instructions:
         logger.info("stage_3.1_complete", num_communities=len(community_data))
         
         # Stage 3.2: Hub Entity Extraction (may query Neo4j directly for dynamic communities)
+        # Note: Chunk-ID shaped entities are now filtered out in hub_extractor
         logger.info("stage_3.2_hub_extraction")
         t0 = time.perf_counter()
         hub_entities = await self.hub_extractor.extract_hub_entities(
@@ -2129,6 +2136,24 @@ Instructions:
                    num_source_chunks=len(graph_context.source_chunks),
                    num_relationships=len(graph_context.relationships),
                    num_related_entities=len(graph_context.related_entities))
+        
+        # ==================================================================
+        # Stage 3.3.1: Coverage Intent Detection (DEFERRED)
+        # ==================================================================
+        # When coverage intent is detected (e.g., "summarize each document"),
+        # we defer the actual coverage retrieval to AFTER all relevance-based
+        # retrieval stages complete. This avoids adding noise before BM25/Vector
+        # and only fills gaps for documents that are truly missing.
+        #
+        # Coverage retrieval runs after: Stage 3.3.5, Section Boost, PPR, etc.
+        # ==================================================================
+        coverage_metadata: Dict[str, Any] = {
+            "enabled": coverage_mode,
+            "applied": False,
+            "docs_added": 0,
+            "chunks_added": 0,
+        }
+        # Actual coverage retrieval deferred to after Stage 3.4 (PPR)
 
         # ==================================================================
         # Stage 3.3.5: Cypher 25 Hybrid BM25 + Vector with RRF Fusion
@@ -3001,6 +3026,75 @@ Instructions:
             "top_ppr_entities": all_seed_entities[:5],
         }
         
+        # ==================================================================
+        # Stage 3.4.1: Coverage Retrieval (FINAL GAP FILL)
+        # ==================================================================
+        # Now that ALL relevance-based retrieval is complete (Stage 3.3, 3.3.5,
+        # Section Boost, PPR), check which documents are still missing and add
+        # ONE representative chunk per missing document.
+        #
+        # Key insight: Only adds noise for documents that couldn't be retrieved
+        # via any relevance signal. For a 5-doc corpus with 2 missing, this adds
+        # 2 chunks. For a 100-doc corpus where BM25 already hit most docs, this
+        # adds only truly orphaned documents.
+        # ==================================================================
+        if coverage_mode:
+            logger.info("stage_3.4.1_coverage_gap_fill_start")
+            t0_cov = time.perf_counter()
+            try:
+                from .pipeline.enhanced_graph_retriever import SourceChunk
+                
+                # Get representative chunks from ALL documents (1 per doc to minimize noise)
+                coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                    max_per_document=1,  # Minimal: just 1 chunk per missing doc
+                    max_total=20,        # Hard cap for very large document sets
+                )
+                
+                # Identify which documents we already have coverage for
+                existing_docs = set()
+                for chunk in graph_context.source_chunks:
+                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
+                    if doc_key:
+                        existing_docs.add(doc_key)
+                
+                # Count total unique docs from coverage chunks
+                all_docs = set()
+                for chunk in coverage_chunks:
+                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
+                    if doc_key:
+                        all_docs.add(doc_key)
+                
+                # Only add chunks for documents we're MISSING
+                existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                added_count = 0
+                new_docs = set()
+                
+                for chunk in coverage_chunks:
+                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
+                    if doc_key and doc_key not in existing_docs and chunk.chunk_id not in existing_ids:
+                        graph_context.source_chunks.append(chunk)
+                        existing_ids.add(chunk.chunk_id)
+                        new_docs.add(doc_key)
+                        existing_docs.add(doc_key)  # Track to avoid duplicates within coverage
+                        added_count += 1
+                
+                coverage_metadata["applied"] = added_count > 0
+                coverage_metadata["docs_added"] = len(new_docs)
+                coverage_metadata["chunks_added"] = added_count
+                coverage_metadata["total_docs_in_group"] = len(all_docs)
+                coverage_metadata["docs_from_relevance"] = len(existing_docs) - len(new_docs)
+                
+                timings_ms["stage_3.4.1_coverage_ms"] = int((time.perf_counter() - t0_cov) * 1000)
+                logger.info(
+                    "stage_3.4.1_coverage_gap_fill_complete",
+                    chunks_added=added_count,
+                    new_docs=len(new_docs),
+                    total_docs_now=len(existing_docs),
+                    total_docs_in_group=len(all_docs),
+                )
+            except Exception as cov_err:
+                logger.warning("stage_3.4.1_coverage_gap_fill_failed", error=str(cov_err))
+
         # Stage 3.5: Enhanced Synthesis with Graph-Based Citations
         logger.info("stage_3.5_enhanced_synthesis")
         t0 = time.perf_counter()
@@ -3217,6 +3311,7 @@ Instructions:
                 "bm25_phrase": bm25_phrase_metadata,
                 "section_boost": section_boost_metadata,
                 "ppr_detail_recovery": ppr_metadata,
+                **({"coverage_retrieval": coverage_metadata} if coverage_metadata else {}),
                 **({"timings_ms": {**timings_ms, "route_3_total_ms": int((time.perf_counter() - t_route0) * 1000)}} if enable_timings else {}),
             }
         }

@@ -20,6 +20,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = structlog.get_logger(__name__)
 
+# Regex pattern to detect internal chunk-ID shaped entity names
+# These are artifacts from ingestion and should not be used as hub entities
+_CHUNK_ID_PATTERN = re.compile(r"^doc_[a-f0-9]{20,}_chunk_\d+", re.IGNORECASE)
+
+# Regex patterns for detecting coverage-intent queries
+_COVERAGE_INTENT_PATTERNS = [
+    re.compile(r"\beach\s+(document|file|agreement|contract)\b", re.IGNORECASE),
+    re.compile(r"\bevery\s+(document|file|agreement|contract)\b", re.IGNORECASE),
+    re.compile(r"\ball\s+(the\s+)?(document|file|agreement|contract)s?\b", re.IGNORECASE),
+    re.compile(r"\bsummarize\s+(each|every|all)\b", re.IGNORECASE),
+    re.compile(r"\bfor\s+each\s+(document|file)\b", re.IGNORECASE),
+    re.compile(r"\bacross\s+(all|the)\s+(document|file|agreement)s?\b", re.IGNORECASE),
+]
+
 
 @dataclass
 class SourceChunk:
@@ -126,6 +140,50 @@ class EnhancedGraphRetriever:
         """
 
         return (chunk.document_id or chunk.document_source or chunk.document_title or "unknown").strip().lower()
+
+    @staticmethod
+    def is_chunk_id_entity(name: str) -> bool:
+        """Check if an entity name looks like an internal chunk ID.
+        
+        These are artifacts from ingestion (e.g., 'doc_6dee3910d6ae4a68b24788dc718d30c4_chunk_37')
+        and should be filtered out from hub entity selection as they don't represent
+        meaningful concepts and pollute graph expansion.
+        """
+        if not name:
+            return False
+        return bool(_CHUNK_ID_PATTERN.match(name.strip()))
+    
+    @staticmethod
+    def filter_chunk_id_entities(entities: List[str]) -> List[str]:
+        """Filter out chunk-ID shaped entities from a list.
+        
+        Returns only entities that represent meaningful concepts.
+        """
+        filtered = [e for e in entities if not EnhancedGraphRetriever.is_chunk_id_entity(e)]
+        if len(filtered) < len(entities):
+            logger.info(
+                "chunk_id_entities_filtered",
+                original_count=len(entities),
+                filtered_count=len(filtered),
+                removed_count=len(entities) - len(filtered),
+            )
+        return filtered
+    
+    @staticmethod
+    def detect_coverage_intent(query: str) -> bool:
+        """Detect if a query requires cross-document coverage.
+        
+        Returns True for queries like:
+        - "Summarize each document"
+        - "What is in every agreement?"
+        - "Compare across all contracts"
+        """
+        if not query:
+            return False
+        for pattern in _COVERAGE_INTENT_PATTERNS:
+            if pattern.search(query):
+                return True
+        return False
 
     @staticmethod
     def _keyword_to_regex(keyword: str) -> str:
@@ -1525,6 +1583,189 @@ class EnhancedGraphRetriever:
             logger.error("embedding_search_failed", error=str(e))
             return []
     
+    async def get_all_documents(
+        self,
+        max_docs: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Get all documents in the group.
+        
+        Used for coverage-guaranteed queries that need to touch every document.
+        
+        Returns:
+            List of document metadata dicts with id, title, source.
+        """
+        if not self.driver:
+            return []
+        
+        query = """
+        MATCH (d:Document)
+        WHERE d.group_id = $group_id
+        RETURN 
+            d.id AS doc_id,
+            d.title AS doc_title,
+            d.source AS doc_source
+        ORDER BY d.title ASC
+        LIMIT $max_docs
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        max_docs=max_docs,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            docs = [
+                {
+                    "doc_id": r["doc_id"] or "",
+                    "doc_title": r["doc_title"] or "",
+                    "doc_source": r["doc_source"] or "",
+                }
+                for r in records
+            ]
+            
+            logger.info(
+                "all_documents_retrieved",
+                num_docs=len(docs),
+                group_id=self.group_id,
+            )
+            return docs
+            
+        except Exception as e:
+            logger.error("all_documents_retrieval_failed", error=str(e))
+            return []
+    
+    async def get_coverage_chunks(
+        self,
+        max_per_document: int = 2,
+        max_total: int = 20,
+        prefer_early_chunks: bool = True,
+    ) -> List[SourceChunk]:
+        """Get representative chunks from EVERY document for coverage-guaranteed queries.
+        
+        This is the key method for solving the "summarize each document" problem.
+        Instead of relying on BM25/vector relevance (which biases toward some docs),
+        this explicitly enumerates all documents and gets chunks from each.
+        
+        Strategy:
+        1. Get all Document nodes in the group
+        2. For each document, get 1-2 representative chunks (preferring early chunks)
+        3. Return diversified set that guarantees every document is represented
+        
+        Args:
+            max_per_document: Max chunks to take per document (default: 2)
+            max_total: Total cap on returned chunks (default: 20)
+            prefer_early_chunks: If True, prefer chunks with low chunk_index (introductions)
+            
+        Returns:
+            List of SourceChunks with guaranteed document coverage
+        """
+        if not self.driver:
+            return []
+        
+        # Query gets the first N chunks per document (ordered by chunk_index)
+        query = """
+        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        WHERE d.group_id = $group_id
+          AND t.group_id = $group_id
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        WITH d, t, s
+        ORDER BY d.id, t.chunk_index ASC
+        WITH d, collect({
+            chunk_id: t.id,
+            text: t.text,
+            metadata: t.metadata,
+            chunk_index: t.chunk_index,
+            section_id: s.id,
+            section_path_key: s.path_key,
+            doc_id: d.id,
+            doc_title: d.title,
+            doc_source: d.source
+        })[0..$max_per_document] AS chunks
+        UNWIND chunks AS chunk
+        RETURN
+            chunk.chunk_id AS chunk_id,
+            chunk.text AS text,
+            chunk.metadata AS metadata,
+            chunk.chunk_index AS chunk_index,
+            chunk.section_id AS section_id,
+            chunk.section_path_key AS section_path_key,
+            chunk.doc_id AS doc_id,
+            chunk.doc_title AS doc_title,
+            chunk.doc_source AS doc_source
+        LIMIT $max_total
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        max_per_document=max_per_document,
+                        max_total=max_total,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            chunks: List[SourceChunk] = []
+            docs_seen: set[str] = set()
+            
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+                
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+                
+                doc_id = (record.get("doc_id") or "").strip()
+                docs_seen.add(doc_id)
+                
+                chunks.append(
+                    SourceChunk(
+                        chunk_id=record.get("chunk_id") or "",
+                        text=record.get("text") or "",
+                        entity_name="coverage_retrieval",  # Mark source for traceability
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=doc_id,
+                        document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                        document_source=record.get("doc_source") or metadata.get("url", "") or "",
+                        relevance_score=1.0,  # All coverage chunks are equally "relevant"
+                    )
+                )
+            
+            logger.info(
+                "coverage_chunks_retrieved",
+                num_chunks=len(chunks),
+                num_unique_docs=len(docs_seen),
+                max_per_document=max_per_document,
+                max_total=max_total,
+            )
+            
+            return chunks
+            
+        except Exception as e:
+            logger.error("coverage_chunks_retrieval_failed", error=str(e))
+            return []
+
     async def get_chunks_by_section(
         self,
         section_keywords: List[str],

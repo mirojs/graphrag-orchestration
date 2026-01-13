@@ -343,23 +343,42 @@ class EnhancedGraphRetriever:
 
         fallback_query = """
                 UNWIND $entity_names AS entity_name
-                WITH entity_name, $group_id AS group_id, $max_per_entity AS max_per_entity
-                CALL db.index.fulltext.queryNodes('textchunk_fulltext', entity_name, {limit: max_per_entity})
+                WITH entity_name, $group_id AS group_id, $max_per_entity AS max_per_entity, $probe_limit AS probe_limit
+                CALL db.index.fulltext.queryNodes('textchunk_fulltext', entity_name, {limit: probe_limit})
                     YIELD node AS t, score
-                WHERE t:TextChunk AND t.group_id = group_id
+                WHERE t.group_id = group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+                WITH
+                    entity_name,
+                    t,
+                    score,
+                    s,
+                    d
+                ORDER BY score DESC
+                WITH entity_name, collect({
+                    chunk_id: t.id,
+                    text: t.text,
+                    metadata: t.metadata,
+                    section_id: s.id,
+                    section_path_key: s.path_key,
+                    doc_id: d.id,
+                    doc_title: d.title,
+                    doc_source: d.source,
+                    score: score
+                })[0..max_per_entity] AS chunks
+                UNWIND chunks AS chunk
                 RETURN
                     entity_name,
-                    t.id AS chunk_id,
-                    t.text AS text,
-                    t.metadata AS metadata,
-                    s.id AS section_id,
-                    s.path_key AS section_path_key,
-                    d.id AS doc_id,
-                    d.title AS doc_title,
-                    d.source AS doc_source,
-                    score AS score
+                    chunk.chunk_id AS chunk_id,
+                    chunk.text AS text,
+                    chunk.metadata AS metadata,
+                    chunk.section_id AS section_id,
+                    chunk.section_path_key AS section_path_key,
+                    chunk.doc_id AS doc_id,
+                    chunk.doc_title AS doc_title,
+                    chunk.doc_source AS doc_source,
+                    chunk.score AS score
                 """
         
         try:
@@ -413,6 +432,7 @@ class EnhancedGraphRetriever:
                 sanitized = [n for n in sanitized if n]
                 if sanitized:
                     fallback_used = True
+                    probe_limit = min(max_per_entity * 50, 500)
 
                     def _run_fallback():
                         with self.driver.session() as session:
@@ -421,6 +441,7 @@ class EnhancedGraphRetriever:
                                 entity_names=sanitized,
                                 group_id=self.group_id,
                                 max_per_entity=max_per_entity,
+                                probe_limit=probe_limit,
                             )
                             return list(result)
 

@@ -29,7 +29,7 @@ from typing import Dict, Any, List, Tuple, Literal, Optional
 from dataclasses import dataclass
 
 from llama_index.core.llms import ChatMessage, MessageRole
-from app.v3.services.neo4j_store import Neo4jStoreV3, Entity, RaptorNode
+from app.archive.v3.services.neo4j_store import Neo4jStoreV3, Entity, RaptorNode
 from app.services.llm_service import LLMService
 
 logger = logging.getLogger(__name__)

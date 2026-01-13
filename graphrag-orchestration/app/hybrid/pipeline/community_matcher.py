@@ -278,7 +278,7 @@ class CommunityMatcher:
                     embedding_query = """
                     CALL () {
                         MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN c, e
                         UNION
                         MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -286,7 +286,7 @@ class CommunityMatcher:
                         RETURN c, e
                         UNION
                         MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN c, e
                         UNION
                         MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
@@ -294,11 +294,11 @@ class CommunityMatcher:
                         RETURN c, e
                         UNION
                         MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN c, e
                         UNION
                         MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                        WHERE c.group_id = $group_id AND e.embedding IS NOT NULL
+                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN c, e
                         UNION
                         MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -309,10 +309,11 @@ class CommunityMatcher:
                         WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
                         RETURN c, e
                     }
-                    WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta,
+                    OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                    WITH c, e, d,
                         vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
                     WHERE similarity > 0.35
-                    WITH meta.url AS doc_url, e.name AS name, similarity
+                    WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e.name AS name, similarity
                     ORDER BY similarity DESC
                     // Get top entities per document for diversity
                     WITH doc_url, collect({name: name, sim: similarity})[..4] AS entities_per_doc
@@ -345,7 +346,7 @@ class CommunityMatcher:
                 search_query = """
                 CALL () {
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -353,7 +354,7 @@ class CommunityMatcher:
                     RETURN c, e
                     UNION
                     MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
@@ -361,11 +362,11 @@ class CommunityMatcher:
                     RETURN c, e
                     UNION
                     MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -379,8 +380,8 @@ class CommunityMatcher:
                 WITH c, e
                 WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
-                WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
-                WITH meta.url AS doc_url, e.name AS name
+                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e.name AS name
                 // Get first matching entity from each document, round-robin
                 WITH doc_url, collect(DISTINCT name)[..3] AS entities_per_doc
                 UNWIND entities_per_doc AS name
@@ -411,7 +412,7 @@ class CommunityMatcher:
                 multi_doc_query = """
                 CALL () {
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -419,7 +420,7 @@ class CommunityMatcher:
                     RETURN c, e
                     UNION
                     MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
@@ -427,11 +428,11 @@ class CommunityMatcher:
                     RETURN c, e
                     UNION
                     MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -442,8 +443,10 @@ class CommunityMatcher:
                     WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                 }
-                WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
-                WITH meta.url AS doc_url, e.name AS name, coalesce(e.degree, 0) AS deg
+                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url,
+                     e.name AS name,
+                     coalesce(e.degree, 0) AS deg
                 ORDER BY doc_url, deg DESC
                 WITH doc_url, collect({name: name, degree: deg})[..2] AS top_entities
                 UNWIND top_entities AS entity
@@ -540,7 +543,7 @@ class CommunityMatcher:
                 multi_doc_query = """
                 CALL () {
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -548,7 +551,7 @@ class CommunityMatcher:
                     RETURN c, e
                     UNION
                     MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
@@ -556,11 +559,11 @@ class CommunityMatcher:
                     RETURN c, e
                     UNION
                     MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                     UNION
                     MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
@@ -571,8 +574,8 @@ class CommunityMatcher:
                     WHERE c.group_id = $group_id AND e.group_id = $group_id
                     RETURN c, e
                 }
-                WITH c, e, apoc.convert.fromJsonMap(c.metadata) AS meta
-                WITH meta.url AS doc_url, e, coalesce(e.degree, 0) AS deg
+                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e, coalesce(e.degree, 0) AS deg
                 ORDER BY deg DESC
                 WITH doc_url, collect({name: e.name, description: e.description, degree: deg})[..3] AS top_entities
                 UNWIND top_entities AS entity

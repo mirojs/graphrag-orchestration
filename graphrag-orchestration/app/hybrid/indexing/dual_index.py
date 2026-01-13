@@ -192,7 +192,7 @@ class DualIndexService:
         query = """
         MATCH (c:TextChunk)
         WHERE c.group_id = $group_id
-        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document)
+        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
         RETURN
             elementId(c) as id,
             c.text as text,

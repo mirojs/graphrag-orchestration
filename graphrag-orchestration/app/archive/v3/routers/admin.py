@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import structlog
 import os
-from app.v3.services.neo4j_store import Neo4jStoreV3
+from app.archive.v3.services.neo4j_store import Neo4jStoreV3
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

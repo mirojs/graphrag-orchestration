@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
 from typing import Optional
 
-from app.v3.services.neo4j_store import Neo4jStoreV3
-from app.v3.services.document_manager import DocumentManager, DocumentDeletionResult
+from app.archive.v3.services.neo4j_store import Neo4jStoreV3
+from app.archive.v3.services.document_manager import DocumentManager, DocumentDeletionResult
 from app.core.config import settings
 
 import logging

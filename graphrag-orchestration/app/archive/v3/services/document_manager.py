@@ -15,7 +15,7 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 
 from neo4j import GraphDatabase, Query
-from app.v3.services.neo4j_store import Neo4jStoreV3, Document, TextChunk, Entity
+from app.archive.v3.services.neo4j_store import Neo4jStoreV3, Document, TextChunk, Entity
 
 logger = logging.getLogger(__name__)
 

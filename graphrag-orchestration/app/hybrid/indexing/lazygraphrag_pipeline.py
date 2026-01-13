@@ -10,7 +10,7 @@ Phase 2 Migration: Added optional neo4j-graphrag LLMEntityRelationExtractor supp
 Set use_native_extractor=True in config to use the native extractor.
 
 Design goals:
-- No imports from `app.v3.routers.*`
+- No imports from `app.archive.v3.routers.*` (archived)
 - Minimal surface area: one async `index_documents` method
 - Best-effort behavior when LLM/embeddings are not configured (skip that stage)
 """

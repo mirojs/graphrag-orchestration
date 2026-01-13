@@ -605,7 +605,7 @@ class Neo4jStoreV3:
         
         // Step 4: Quality/RAPTOR Boost
         // Boost entities that belong to high-ranking communities (RAPTOR/Leiden)
-        OPTIONAL MATCH (node)-[:BELONGS_TO]->(c:Community)
+        OPTIONAL MATCH (node)-[:BELONGS_TO]->(c:Community {group_id: $group_id})
         WITH node, rrfScore, coalesce(max(c.rank), 0.0) AS communityRank
         
         // Apply boost: 5% boost per rank unit to avoid over-weighting community membership

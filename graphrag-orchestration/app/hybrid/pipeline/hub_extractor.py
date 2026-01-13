@@ -161,7 +161,7 @@ class HubExtractor:
         try:
             # Query for most connected entities in the community
             query = """
-            MATCH (e:Entity)-[r]-()
+            MATCH (e:Entity {group_id: $group_id})-[r]-()
             WHERE e.community = $community_id OR e.community_id = $community_id
             WITH e, count(r) as degree
             ORDER BY degree DESC
@@ -173,7 +173,8 @@ class HubExtractor:
                 result = await session.run(
                     query,
                     community_id=community_id,
-                    top_k=top_k
+                    top_k=top_k,
+                    group_id=self.group_id,
                 )
                 records = await result.data()
             
@@ -206,15 +207,14 @@ class HubExtractor:
             return []
             
         try:
-            # Build keyword filter (match entity names containing any keyword)
-            keyword_conditions = " OR ".join([
-                f"toLower(e.name) CONTAINS toLower('{kw}')" for kw in keywords[:5]
-            ])
-            
-            query = f"""
+            keyword_list = [kw.strip().lower() for kw in (keywords or []) if kw and kw.strip()]
+            keyword_list = keyword_list[:5]
+
+            query = """
             MATCH (e)
             WHERE (e:`__Entity__` OR e:Entity)
-              AND ({keyword_conditions})
+              AND e.group_id = $group_id
+              AND any(kw IN $keywords WHERE toLower(e.name) CONTAINS kw)
             WITH e
             MATCH (e)-[r]-()
             WITH e, count(r) as degree
@@ -229,7 +229,12 @@ class HubExtractor:
             
             def _sync_query():
                 with self.neo4j_driver.session() as session:
-                    result = session.run(query, top_k=top_k)
+                    result = session.run(
+                        query,
+                        top_k=top_k,
+                        group_id=self.group_id,
+                        keywords=keyword_list,
+                    )
                     return [r["name"] for r in result if r.get("name")]
             
             hubs = await loop.run_in_executor(None, _sync_query)
@@ -389,9 +394,11 @@ class HubExtractor:
             query = """
             CALL () {
                 MATCH (e:Entity)-[r]-()
+                WHERE e.group_id = $group_id
                 RETURN e.name as name, e.id as id, count(r) as degree
                 UNION
                 MATCH (e:`__Entity__`)-[r]-()
+                WHERE e.group_id = $group_id
                 RETURN e.name as name, e.id as id, count(r) as degree
             }
             RETURN name, id, degree
@@ -400,7 +407,7 @@ class HubExtractor:
             """
             
             async with self.neo4j_driver.session() as session:
-                result = await session.run(query, top_k=top_k)
+                result = await session.run(query, top_k=top_k, group_id=self.group_id)
                 records = await result.data()
             
             hubs = [

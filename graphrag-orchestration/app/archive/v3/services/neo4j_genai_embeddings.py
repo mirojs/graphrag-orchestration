@@ -235,7 +235,7 @@ MIGRATION GUIDE: Switch from LlamaIndex to Neo4j GenAI Embeddings
        embeddings = await self.embedder.aget_text_embedding_batch(entity_texts)
    
    # NEW CODE (Neo4j GenAI):
-   from app.v3.services.neo4j_genai_embeddings import Neo4jGenAIEmbedder, is_genai_plugin_available
+   from app.archive.v3.services.neo4j_genai_embeddings import Neo4jGenAIEmbedder, is_genai_plugin_available
    
    if is_genai_plugin_available(self.store.driver):
        neo4j_embedder = Neo4jGenAIEmbedder(
@@ -259,7 +259,7 @@ MIGRATION GUIDE: Switch from LlamaIndex to Neo4j GenAI Embeddings
    Run test to ensure embeddings are generated correctly:
    
    python3 -c "
-   from app.v3.services.neo4j_genai_embeddings import is_genai_plugin_available
+   from app.archive.v3.services.neo4j_genai_embeddings import is_genai_plugin_available
    from neo4j import GraphDatabase
    import os
    

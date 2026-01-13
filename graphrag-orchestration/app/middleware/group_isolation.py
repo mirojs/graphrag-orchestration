@@ -31,5 +31,12 @@ class GroupIsolationMiddleware(BaseHTTPMiddleware):
         # Add context to structured logging
         structlog.contextvars.bind_contextvars(group_id=group_id)
         
-        response = await call_next(request)
-        return response
+        try:
+            response = await call_next(request)
+            return response
+        finally:
+            # Ensure per-request context does not leak across requests.
+            try:
+                structlog.contextvars.clear_contextvars()
+            except Exception:
+                pass

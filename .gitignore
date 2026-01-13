@@ -71,6 +71,8 @@ build/
 *.swo
 *~
 .DS_Store
+.bench_route3_cypher_fix_validation_*.txt
+bench_route3_cypher_fix_validation_*.txt
 
 # Test Results & Temporary Folders
 multi_input_results_*/

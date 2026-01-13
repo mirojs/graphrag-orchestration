@@ -598,7 +598,7 @@ def get_neo4j_store():
     """Get or create Neo4j store instance."""
     global _neo4j_store
     if _neo4j_store is None:
-        from app.v3.services.neo4j_store import Neo4jStoreV3
+        from app.archive.v3.services.neo4j_store import Neo4jStoreV3
         _neo4j_store = Neo4jStoreV3(
             uri=settings.NEO4J_URI or "",
             username=settings.NEO4J_USERNAME or "",
@@ -611,7 +611,7 @@ def get_drift_adapter():
     """Get or create DRIFT adapter instance."""
     global _drift_adapter
     if _drift_adapter is None:
-        from app.v3.services.drift_adapter import DRIFTAdapter
+        from app.archive.v3.services.drift_adapter import DRIFTAdapter
         from app.services.llm_service import LLMService
         
         store = get_neo4j_store()
@@ -631,7 +631,7 @@ def get_indexing_pipeline():
     """Get or create indexing pipeline instance."""
     global _indexing_pipeline
     if _indexing_pipeline is None:
-        from app.v3.services.indexing_pipeline import IndexingPipelineV3, IndexingConfig
+        from app.archive.v3.services.indexing_pipeline import IndexingPipelineV3, IndexingConfig
         from app.services.llm_service import LLMService
         
         store = get_neo4j_store()
@@ -666,7 +666,7 @@ def get_triple_engine_retriever():
     """Get or create Triple-Engine Retriever instance."""
     global _triple_engine_retriever
     if _triple_engine_retriever is None:
-        from app.v3.services.triple_engine_retriever import TripleEngineRetriever
+        from app.archive.v3.services.triple_engine_retriever import TripleEngineRetriever
         from app.services.llm_service import LLMService
         
         store = get_neo4j_store()
@@ -1903,7 +1903,7 @@ async def query_global_audit(request: Request, payload: V3QueryRequest):
             }
 
         # Extract sentences using PyTextRank
-        from app.v3.services.extraction_service import ExtractionService
+        from app.archive.v3.services.extraction_service import ExtractionService
         extraction = ExtractionService(llm=None)  # No LLM for audit mode
         
         result = extraction.audit_summary(
@@ -2029,7 +2029,7 @@ async def query_global_client(request: Request, payload: V3QueryRequest):
             }
 
         # Extract and rephrase
-        from app.v3.services.extraction_service import ExtractionService
+        from app.archive.v3.services.extraction_service import ExtractionService
         llm_service = get_drift_adapter().llm if payload.synthesize else None
         extraction = ExtractionService(llm=llm_service)
         
@@ -2110,7 +2110,7 @@ async def query_drift(request: Request, payload: V3DriftRequest):
         except Exception as e:
             # If the DRIFT adapter cannot run due to missing prerequisite data,
             # return a clear 422 rather than a generic 500.
-            from app.v3.services.drift_adapter import DriftPrerequisitesError
+            from app.archive.v3.services.drift_adapter import DriftPrerequisitesError
 
             if isinstance(e, DriftPrerequisitesError):
                 raise HTTPException(status_code=422, detail=str(e))

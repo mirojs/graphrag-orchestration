@@ -61,12 +61,12 @@ from llama_index.core.graph_stores import SimplePropertyGraphStore
 from llama_index.core import PropertyGraphIndex
 from llama_index.core.llms import ChatMessage, MessageRole
 from llama_index.core.indices.property_graph import SchemaLLMPathExtractor, SimpleLLMPathExtractor
-from app.v3.services.validated_extraction_strategy import ValidatedEntityExtractor
+from app.archive.v3.services.validated_extraction_strategy import ValidatedEntityExtractor
 
 from app.core.config import settings
 from app.services.vector_service import AzureAISearchProvider
 from app.services.document_intelligence_service import DocumentIntelligenceService
-from app.v3.services.neo4j_store import (
+from app.archive.v3.services.neo4j_store import (
     Neo4jStoreV3,
     Entity,
     Relationship,
@@ -75,7 +75,7 @@ from app.v3.services.neo4j_store import (
     TextChunk,
     Document,
 )
-from app.v3.services.entity_deduplication import (
+from app.archive.v3.services.entity_deduplication import (
     EntityDeduplicationService,
     apply_merge_map,
     EntityMergeResult,

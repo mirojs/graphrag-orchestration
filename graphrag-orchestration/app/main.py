@@ -6,7 +6,6 @@ from app.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from app.middleware.group_isolation import GroupIsolationMiddleware
 from app.routers import health, graphrag, orchestration, hybrid
-from app.v3.routers import graphrag_v3, admin  # V3 endpoints (separate from V1/V2)
 
 # NOTE: GraphService and LLMService are core services used by V3
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
@@ -95,18 +94,12 @@ app = FastAPI(
     title=settings.PROJECT_NAME,
     description="""
     GraphRAG Orchestration API
-    
-    **V3 Endpoints (Recommended):**
-    - `/graphrag/v3/index` - Index documents using Neo4j + RAPTOR
-    - `/graphrag/v3/query/local` - Local search (entity-focused)
-    - `/graphrag/v3/query/global` - Global search (community summaries)
-    - `/graphrag/v3/query/drift` - DRIFT multi-step reasoning
-    - `/graphrag/v3/stats/{group_id}` - Get indexing statistics
-    
-    **V1/V2 Endpoints (Deprecated):**
-    - Legacy endpoints under `/graphrag/` without `/v3/` prefix are deprecated
-    - Will be removed in a future release
-    - Use V3 endpoints for new development
+
+    **Hybrid Endpoints (Primary):**
+    - `/hybrid/query` - 4-way routing (Route 1-4)
+
+    **Deprecated / Archived:**
+    - The legacy GraphRAG V3 implementation has been archived under `app/archive/v3` and is not mounted.
     """,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
@@ -144,13 +137,4 @@ app.include_router(hybrid.router, prefix="/hybrid", tags=["hybrid-pipeline"])
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation
 # ============================================================================
-# V3 Router - Separate from V1/V2
-# Uses Neo4j ONLY at query time, MS GraphRAG DRIFT for reasoning
-app.include_router(graphrag_v3.router, prefix="/graphrag", tags=["graphrag-v3"])
-
-# V3 Document Management - Individual document lifecycle operations
-from app.v3.api import document_management
-app.include_router(document_management.router, tags=["document-management"])
-
-# Admin endpoints for maintenance
-app.include_router(admin.router, prefix="/admin", tags=["admin"])
+# Deprecated V3 endpoints are intentionally not included.

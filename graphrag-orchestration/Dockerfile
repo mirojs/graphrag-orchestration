@@ -28,6 +28,9 @@ COPY --from=builder /root/.local /root/.local
 RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache
 
 # Copy application code
+# Build arg cache bust: ensures COPY layer is invalidated per deployment.
+ARG CACHE_BUST=""
+RUN echo "CACHE_BUST=${CACHE_BUST}" > /dev/null
 # Cache bust: 2026-01-13-cypher-fixes - Force rebuild with fixed queries
 COPY . .
 

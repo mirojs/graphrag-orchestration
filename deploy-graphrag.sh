@@ -50,7 +50,14 @@ AZURE_LOCATION=$(get_env_value_or_default "AZURE_LOCATION" "swedencentral")
 CONTAINER_REGISTRY_NAME=$(get_env_value_or_default "CONTAINER_REGISTRY_NAME" "" true)
 CONTAINER_APP_NAME=$(get_env_value_or_default "CONTAINER_APP_NAME" "graphrag-orchestration")
 CONTAINER_APP_ENVIRONMENT=$(get_env_value_or_default "CONTAINER_APP_ENVIRONMENT" "graphrag-env")
-AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "latest")
+AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "")
+
+# Prefer immutable image tags by default (avoids confusion with mutable :latest).
+# Can be overridden via env var or `azd env set AZURE_ENV_IMAGETAG <tag>`.
+if [ -z "$AZURE_ENV_IMAGETAG" ]; then
+    GIT_SHA=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "manual")
+    AZURE_ENV_IMAGETAG="main-${GIT_SHA}-$(date -u +"%Y%m%d%H%M%S")"
+fi
 CONTAINER_APP_USER_IDENTITY_ID=$(get_env_value_or_default "CONTAINER_APP_USER_IDENTITY_ID" "")
 
 # Azure Document Intelligence configuration (required for DI-based ingestion)
@@ -136,6 +143,7 @@ az acr build \
     --image "$IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --build-arg VERSION="$AZURE_ENV_IMAGETAG" \
+    --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
     "$APP_DIR"
 
 echo "✅ Image built and pushed: $IMAGE_URI"

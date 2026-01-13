@@ -3,9 +3,13 @@
 
 This is a standalone diagnostic script intended to be run locally against a
 Neo4j instance (Aura/VM/etc) for a given `group_id`.
+
+Usage:
+    python inspect_neo4j_mentions.py [group_id]
 """
 
 import asyncio
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -30,7 +34,6 @@ class Config(BaseSettings):
     )
 
 settings = Config()
-GROUP_ID = "test-5pdfs-cypher25-1768222317"
 
 
 async def execute_query(driver, query, params):
@@ -41,6 +44,11 @@ async def execute_query(driver, query, params):
 
 
 async def main():
+    # Get group_id from command line or use default
+    group_id = sys.argv[1] if len(sys.argv) > 1 else "test-5pdfs-cypher25-1768222317"
+    
+    print(f"Inspecting group_id: {group_id}\n")
+    
     if not settings.NEO4J_URI:
         print("ERROR: NEO4J_URI not set. Please set environment variables.")
         return
@@ -67,7 +75,7 @@ async def main():
                 collect(DISTINCT labels(e))[0..5] as entity_labels
             LIMIT 1
         """
-        result = await execute_query(driver, query1, {"group_id": GROUP_ID})
+        result = await execute_query(driver, query1, {"group_id": group_id})
         if result:
             print(f"Total MENTIONS edges: {result[0].get('total_mentions', 0)}")
             print(f"Chunk labels (sample): {result[0].get('chunk_labels', [])}")
@@ -80,7 +88,7 @@ async def main():
             RETURN e.id as entity_id, e.name as entity_name, labels(e) as entity_labels
             LIMIT 20
         """
-        result = await execute_query(driver, query2, {"group_id": GROUP_ID})
+        result = await execute_query(driver, query2, {"group_id": group_id})
         for rec in result[:20]:
             print(f"  ID: {rec.get('entity_id')}, Name: {rec.get('entity_name')}, Labels: {rec.get('entity_labels')}")
         
@@ -90,7 +98,7 @@ async def main():
             WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
             RETURN count(*) as total_entities
         """
-        result = await execute_query(driver, query3, {"group_id": GROUP_ID})
+        result = await execute_query(driver, query3, {"group_id": group_id})
         if result:
             print(f"Total entities: {result[0].get('total_entities', 0)}")
         
@@ -112,7 +120,7 @@ async def main():
                        collect(e.name)[0] as matched_name,
                        collect(e.id)[0] as matched_id
             """
-            result = await execute_query(driver, query4, {"group_id": GROUP_ID, "entity_name": entity_name})
+            result = await execute_query(driver, query4, {"group_id": group_id, "entity_name": entity_name})
             if result:
                 match_count = result[0].get('match_count', 0)
                 print(f"  Entity '{entity_name}': {match_count} matches")
@@ -126,7 +134,7 @@ async def main():
               AND (e.name = 'Documents' OR e.name = 'Building Arbitration Rules')
             RETURN e.name as entity_name, count(c) as chunk_count
         """
-        result = await execute_query(driver, query5, {"group_id": GROUP_ID})
+        result = await execute_query(driver, query5, {"group_id": group_id})
         for rec in result:
             print(f"  Entity '{rec.get('entity_name')}': {rec.get('chunk_count')} chunks")
         
@@ -140,7 +148,7 @@ async def main():
                    collect(e.name)[0..5] as sample_names,
                    collect(e.id)[0..5] as sample_ids
         """
-        result = await execute_query(driver, query6, {"group_id": GROUP_ID})
+        result = await execute_query(driver, query6, {"group_id": group_id})
         if result:
             print(f"Entities with synthetic doc_ IDs: {result[0].get('synthetic_count', 0)}")
             print(f"Sample names: {result[0].get('sample_names', [])}")

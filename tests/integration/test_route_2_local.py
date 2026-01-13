@@ -85,7 +85,7 @@ def mock_ppr_results():
 def mock_route_2_endpoint():
     """Mock the Route 2 endpoint response."""
     return {
-        "answer": "Contoso Ltd has the following obligations in the property management agreement: 1) Monthly fee payments of $5,000 [1], 2) Maintaining insurance coverage [2]...",
+        "response": "Contoso Ltd has the following obligations in the property management agreement: 1) Monthly fee payments of $5,000 [1], 2) Maintaining insurance coverage [2]...",
         "route_used": "route_2_local_search",
         "latency_ms": 3500,
         "seed_entities": ["Contoso", "property management agreement"],
@@ -161,8 +161,8 @@ class TestRoute2Response:
     
     def test_response_has_answer(self, mock_route_2_endpoint):
         """Test that response contains answer field."""
-        assert "answer" in mock_route_2_endpoint
-        assert len(mock_route_2_endpoint["answer"]) > 0
+        assert "response" in mock_route_2_endpoint
+        assert len(mock_route_2_endpoint["response"]) > 0
     
     def test_response_indicates_route(self, mock_route_2_endpoint):
         """Test that response indicates Route 2 was used."""
@@ -278,7 +278,7 @@ class TestRoute2Citations:
     
     def test_response_has_citations(self, mock_route_2_endpoint):
         """Test that response includes citations."""
-        answer = mock_route_2_endpoint["answer"]
+        answer = mock_route_2_endpoint["response"]
         
         # Should have citation markers [1], [2], etc.
         assert "[1]" in answer or "[" in answer

@@ -18,6 +18,21 @@ from app.services.llm_service import LLMService
 from app.hybrid.orchestrator import HybridPipeline
 
 
+def _default_group_id() -> str:
+    env = os.environ.get("TEST_GROUP_ID") or os.environ.get("GROUP_ID")
+    if env:
+        return env
+    try:
+        p = root / "last_test_group_id.txt"
+        if p.exists():
+            s = p.read_text(encoding="utf-8").strip()
+            if s:
+                return s
+    except Exception:
+        pass
+    return "test-5pdfs-latest"
+
+
 @pytest.mark.integration
 def test_cypher25_hybrid_rrf_basic():
     """Integration test: ensure Cypher25 BM25+Vector RRF returns results."""
@@ -29,7 +44,7 @@ def test_cypher25_hybrid_rrf_basic():
     if llm_service.embed_model is None:
         pytest.skip("Embedding model not configured")
 
-    group_id = os.environ.get("TEST_GROUP_ID", "test-cypher25-final-1768129960")
+    group_id = _default_group_id()
 
     pipeline = HybridPipeline(
         neo4j_driver=graph_service.driver,

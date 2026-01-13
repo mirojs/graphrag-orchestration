@@ -103,7 +103,7 @@ def mock_raptor_summaries():
 def mock_route_3_endpoint():
     """Mock the Route 3 endpoint response."""
     return {
-        "answer": "The main themes across all vendor agreements include: 1) Payment Terms - Most agreements specify Net 30 payment terms with early payment discounts [C1]. 2) Liability Caps - Liability is typically capped at the annual contract value [C2]. 3) Termination Rights - Standard 30-day notice periods with cure rights [C3].",
+        "response": "The main themes across all vendor agreements include: 1) Payment Terms - Most agreements specify Net 30 payment terms with early payment discounts [C1]. 2) Liability Caps - Liability is typically capped at the annual contract value [C2]. 3) Termination Rights - Standard 30-day notice periods with cure rights [C3].",
         "route_used": "route_3_global_search",
         "latency_ms": 7500,
         "communities_analyzed": 3,
@@ -195,8 +195,8 @@ class TestRoute3Response:
     
     def test_response_has_answer(self, mock_route_3_endpoint):
         """Test that response contains answer."""
-        assert "answer" in mock_route_3_endpoint
-        assert len(mock_route_3_endpoint["answer"]) > 50  # Should be substantial
+        assert "response" in mock_route_3_endpoint
+        assert len(mock_route_3_endpoint["response"]) > 50  # Should be substantial
     
     def test_response_indicates_route(self, mock_route_3_endpoint):
         """Test that response indicates Route 3."""
@@ -205,7 +205,7 @@ class TestRoute3Response:
     
     def test_response_has_community_references(self, mock_route_3_endpoint):
         """Test that response references communities."""
-        answer = mock_route_3_endpoint["answer"]
+        answer = mock_route_3_endpoint["response"]
         
         # Should have community citations [C1], [C2], etc.
         assert "[C" in answer
@@ -309,7 +309,7 @@ class TestRoute3Errors:
         """Test handling of map-reduce timeout."""
         # Should return partial results if timeout
         partial_result = {
-            "answer": "Partial synthesis due to timeout...",
+            "response": "Partial synthesis due to timeout...",
             "partial": True,
         }
         

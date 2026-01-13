@@ -71,10 +71,10 @@ def mock_vector_store():
 def mock_route_1_endpoint():
     """Mock the Route 1 endpoint response."""
     return {
-        "answer": "The invoice total is $50,000.",
+        "response": "The invoice total is $50,000.",
         "route_used": "route_1_vector_rag",
         "latency_ms": 450,
-        "sources": [{"source": "invoice.pdf", "chunk_id": "chunk_1"}],
+        "citations": [{"source": "invoice.pdf", "chunk_id": "chunk_1"}],
     }
 
 
@@ -87,8 +87,8 @@ class TestRoute1Availability:
     
     def test_route_1_endpoint_exists(self):
         """Test that Route 1 endpoint path is defined."""
-        endpoint = "/graphrag/v3/query/local"  # Route 1 uses local endpoint
-        assert endpoint.startswith("/graphrag/v3/query")
+        endpoint = "/hybrid/query/fast"  # Route 1 fast-lane endpoint
+        assert endpoint.startswith("/hybrid/query")
     
     def test_route_1_enabled_in_general_profile(self):
         """Test that Route 1 is enabled in General Enterprise profile."""
@@ -148,8 +148,8 @@ class TestRoute1Response:
     
     def test_response_has_answer(self, mock_route_1_endpoint):
         """Test that response contains answer field."""
-        assert "answer" in mock_route_1_endpoint
-        assert len(mock_route_1_endpoint["answer"]) > 0
+        assert "response" in mock_route_1_endpoint
+        assert len(mock_route_1_endpoint["response"]) > 0
     
     def test_response_indicates_route(self, mock_route_1_endpoint):
         """Test that response indicates Route 1 was used."""
@@ -158,8 +158,8 @@ class TestRoute1Response:
     
     def test_response_includes_sources(self, mock_route_1_endpoint):
         """Test that response includes source references."""
-        assert "sources" in mock_route_1_endpoint
-        assert len(mock_route_1_endpoint["sources"]) > 0
+        assert "citations" in mock_route_1_endpoint
+        assert len(mock_route_1_endpoint["citations"]) > 0
 
 
 # ============================================================================
@@ -192,7 +192,7 @@ class TestRoute1Fallback:
     def test_fallback_when_no_vector_index(self):
         """Test fallback to Route 2 when vector index unavailable."""
         fallback_response = {
-            "answer": "Based on the documents...",
+            "response": "Based on the documents...",
             "route_used": "route_2_local_search",
             "fallback_from": "route_1_vector_rag",
             "fallback_reason": "vector_index_unavailable",

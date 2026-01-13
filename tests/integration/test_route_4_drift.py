@@ -101,8 +101,8 @@ def mock_reasoning_chain():
 def mock_route_4_endpoint():
     """Mock the Route 4 endpoint response."""
     return {
-        "answer": "The relationship chain is: Contoso (Organization) → issued_to → Invoice #12345 (Document) → has_terms → Payment Terms (30 days net). The invoice references the master service agreement dated 2024-01-01 [1][2].",
-        "route_used": "route_4_drift",
+        "response": "The relationship chain is: Contoso (Organization) → issued_to → Invoice #12345 (Document) → has_terms → Payment Terms (30 days net). The invoice references the master service agreement dated 2024-01-01 [1][2].",
+        "route_used": "route_4_drift_multi_hop",
         "latency_ms": 9500,
         "hops_traversed": 3,
         "paths_explored": 5,
@@ -233,8 +233,8 @@ class TestRoute4Response:
     
     def test_response_has_answer(self, mock_route_4_endpoint):
         """Test that response contains answer."""
-        assert "answer" in mock_route_4_endpoint
-        assert len(mock_route_4_endpoint["answer"]) > 0
+        assert "response" in mock_route_4_endpoint
+        assert len(mock_route_4_endpoint["response"]) > 0
     
     def test_response_indicates_route(self, mock_route_4_endpoint):
         """Test that response indicates Route 4."""
@@ -396,7 +396,7 @@ class TestRoute4Citations:
     
     def test_response_has_citations(self, mock_route_4_endpoint):
         """Test that response includes citations."""
-        answer = mock_route_4_endpoint["answer"]
+        answer = mock_route_4_endpoint["response"]
         
         # Should have citation markers
         assert "[1]" in answer or "[" in answer

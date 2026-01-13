@@ -29,7 +29,7 @@ from llama_index.core.schema import TextNode
 # neo4j-graphrag native extractor (Phase 2 migration)
 from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
 from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
-from neo4j_graphrag.experimental.components.schema import SchemaConfig
+from neo4j_graphrag.experimental.components.schema import GraphSchema, NodeType, RelationshipType
 from neo4j_graphrag.llm import AzureOpenAILLM
 
 from app.services.graph_service import GraphService, MultiTenantNeo4jStore
@@ -305,13 +305,21 @@ class IndexingService:
         )
         
         # Build GraphSchema from entity/relation types
-        # NOTE: neo4j-graphrag's current experimental extractor expects a SchemaConfig.
-        # We provide a light schema to guide extraction, but keep it permissive.
-        schema = SchemaConfig(
-            entities={et: {"description": f"A {et} entity"} for et in entity_types},
-            relations={rt: {"description": f"A {rt} relationship"} for rt in relation_types},
-            potential_schema=[],
-        )
+        # The extractor accepts an optional schema to guide extraction
+        node_types_list = [
+            NodeType(label=et, description=f"A {et} entity")
+            for et in entity_types
+        ] if entity_types else []
+        
+        relationship_types_list = [
+            RelationshipType(label=rt, description=f"A {rt} relationship")
+            for rt in relation_types
+        ] if relation_types else []
+        
+        schema = GraphSchema(
+            node_types=node_types_list,
+            relationship_types=relationship_types_list
+        ) if (node_types_list or relationship_types_list) else None
         
         # Create native extractor
         extractor = LLMEntityRelationExtractor(

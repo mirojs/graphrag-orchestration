@@ -28,7 +28,7 @@ COPY --from=builder /root/.local /root/.local
 RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache
 
 # Copy application code
-# Cache bust: 2025-12-16-optimization - Multi-stage build for smaller image
+# Cache bust: 2026-01-13-cypher-fixes - Force rebuild with fixed queries
 COPY . .
 
 # Set PATH to use pip-installed packages from /root/.local

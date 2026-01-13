@@ -206,9 +206,28 @@ class LazyGraphRAGIndexingPipeline:
         url_inputs: List[str] = []
 
         for doc in documents:
+            meta = doc.get("metadata") or {}
+            meta = meta if isinstance(meta, dict) else {}
+
             content = doc.get("content") or doc.get("text") or ""
-            source = doc.get("source") or doc.get("url") or ""
-            title = doc.get("title") or (source.split("/")[-1] if source else "Untitled")
+            source = (
+                doc.get("source")
+                or doc.get("url")
+                or meta.get("source")
+                or meta.get("url")
+                or meta.get("file_name")
+                or meta.get("file_path")
+                or ""
+            )
+            title = (
+                doc.get("title")
+                or meta.get("title")
+                or meta.get("file_name")
+                or (source.split("/")[-1] if source else "")
+                or "Untitled"
+            )
+            if isinstance(title, str) and title.lower().endswith(".pdf"):
+                title = title[:-4]
 
             # If content is itself a URL, treat it as source.
             if isinstance(content, str) and content.strip().startswith(("http://", "https://")):
@@ -222,7 +241,7 @@ class LazyGraphRAGIndexingPipeline:
                     "title": title,
                     "source": source,
                     "content": content,
-                    "metadata": doc.get("metadata", {}) or {},
+                    "metadata": meta,
                 }
             )
 
@@ -267,11 +286,13 @@ class LazyGraphRAGIndexingPipeline:
         if di_units:
             return await self._chunk_di_units(di_units=di_units, doc_id=doc_id)
 
-        content = (document.get("content") or "").strip()
+        content = (document.get("content") or document.get("text") or "").strip()
         if not content:
             return []
 
-        llama_doc = LlamaDocument(text=content, id_=doc_id, metadata={"source": document.get("source", "")})
+        src = document.get("source", "")
+        title = document.get("title", "Untitled")
+        llama_doc = LlamaDocument(text=content, id_=doc_id, metadata={"source": src, "title": title})
         nodes = self._splitter.get_nodes_from_documents([llama_doc])
         chunks: List[TextChunk] = []
         for idx, node in enumerate(nodes):
@@ -286,7 +307,7 @@ class LazyGraphRAGIndexingPipeline:
                     document_id=doc_id,
                     embedding=None,
                     tokens=len(text.split()),
-                    metadata={"source": document.get("source", "")},
+                    metadata={"source": src, "title": title},
                 )
             )
         return chunks
@@ -899,6 +920,10 @@ class LazyGraphRAGIndexingPipeline:
         if relationships:
             self.neo4j_store.upsert_relationships_batch(group_id, relationships)
             details["relationships_committed"] = len(relationships)
+
+        # Best-effort: compute ranking fields so query-time Cypher can use them
+        # without property-key warnings (importance_score/degree/chunk_count).
+        self.neo4j_store.compute_entity_importance(group_id)
         return {"passed": True, "details": details, "stats": {"entities": len(entities), "relationships": len(relationships)}}
 
     def _merge_entity_relationships(self, ents_a: List[Entity], rels_a: List[Relationship], ents_b: List[Entity], rels_b: List[Relationship]) -> Tuple[List[Entity], List[Relationship]]:

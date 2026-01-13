@@ -447,6 +447,35 @@ class Neo4jStoreV3:
             logger.info(f"Created {count} entities with {mentions_count} MENTIONS relationships")
             
             return count
+
+    def compute_entity_importance(self, group_id: str) -> None:
+        """Compute and persist entity importance fields for a group.
+
+        This creates/updates the following properties on entity nodes:
+        - `degree`: number of relationships
+        - `chunk_count`: number of TextChunks that mention the entity
+        - `importance_score`: weighted score used for ranking
+
+        Note: This is best-effort and should not fail indexing.
+        """
+
+        query = """
+        MATCH (e)
+        WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+        WITH e, COUNT { (e)-[]-() } AS degree
+        SET e.degree = degree
+        WITH e
+        WITH e, COUNT { (:TextChunk {group_id: $group_id})-[:MENTIONS]->(e) } AS chunk_count
+        SET e.chunk_count = chunk_count
+        SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
+        RETURN count(e) AS updated
+        """
+
+        try:
+            with self.driver.session(database=self.database) as session:
+                session.run(query, group_id=group_id).consume()
+        except Exception as e:
+            logger.warning(f"Failed to compute entity importance (continuing): {e}")
     
     async def aupsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
         """Async batch insert/update entities with native vector support."""

@@ -488,11 +488,10 @@ class Neo4jStoreV3:
         
         query = """
         UNWIND $entities AS e
-        MERGE (entity:Entity {id: e.id})
+        MERGE (entity:Entity {id: e.id, group_id: $group_id})
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
-            entity.group_id = $group_id,
             entity.updated_at = datetime()
         
         WITH entity, e
@@ -504,7 +503,8 @@ class Neo4jStoreV3:
         WITH entity, e
         UNWIND e.text_unit_ids AS chunk_id
         MATCH (chunk:TextChunk {id: chunk_id, group_id: $group_id})
-        MERGE (chunk)-[:MENTIONS]->(entity)
+        MERGE (chunk)-[m:MENTIONS]->(entity)
+        SET m.group_id = $group_id
         
         RETURN count(DISTINCT entity) AS count
         """

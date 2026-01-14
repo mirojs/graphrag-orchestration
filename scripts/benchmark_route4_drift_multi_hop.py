@@ -281,7 +281,7 @@ def benchmark_scenario(
     print(f"{'=' * 70}\n")
 
     url = f"{api_base_url.rstrip('/')}/hybrid/query"
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
 
     results: List[Dict[str, Any]] = []
 
@@ -309,7 +309,7 @@ def benchmark_scenario(
                 print(f"  [{rep}/{repeats}] HTTP {status} - {err or resp.get('error', 'unknown')}")
                 continue
 
-            answer = resp.get("answer", "")
+            answer = resp.get("response", "") or resp.get("answer", "")
             text_norm = _normalize_text(answer)
             citations_sig = _extract_citation_ids(resp)
             evidence_path_sig = _extract_evidence_path(resp)
@@ -549,9 +549,6 @@ def main():
         out_md=out_md,
         timestamp=timestamp,
         api_base_url=args.url,
-        group_id=args.group_id,
-        scenario_results=[result],
-    )
         group_id=args.group_id,
         scenario_results=[result],
     )

@@ -348,7 +348,23 @@ Response:"""
             return []
         
         chunks = []
-        entity_names = [name for name, _ in evidence_nodes]
+        def _clean_entity_name(name: str) -> str:
+            cleaned = (name or "").strip()
+            while len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ('"', "'", "`"):
+                cleaned = cleaned[1:-1].strip()
+            return cleaned
+
+        # Normalize + de-dupe (preserve order)
+        seen: set[str] = set()
+        entity_names: List[str] = []
+        for name, _score in evidence_nodes:
+            cleaned = _clean_entity_name(name)
+            if not cleaned:
+                continue
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+            entity_names.append(cleaned)
         
         # Apply relevance budget (limit entities processed)
         budget_limit = int(len(entity_names) * self.relevance_budget) + 1
@@ -370,6 +386,14 @@ Response:"""
                        num_chunks=len(chunks),
                        num_entities=len(selected_entities),
                        batched=hasattr(self.text_store, 'get_chunks_for_entities'))
+
+            if len(chunks) == 0 and len(selected_entities) > 0:
+                logger.warning(
+                    "text_chunks_retrieved_zero",
+                    num_entities=len(selected_entities),
+                    sample_entities=selected_entities[:5],
+                    hint="Likely entity/chunk label or MENTIONS direction mismatch, or chunks not linked to entities for this group_id",
+                )
             return chunks
             
         except Exception as e:

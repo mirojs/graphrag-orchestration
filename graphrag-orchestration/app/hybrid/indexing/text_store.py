@@ -78,8 +78,16 @@ class Neo4jTextUnitStore:
         if not entity_names:
             return {}
         
-        # Filter out empty names
-        names = [n.strip() for n in entity_names if (n or "").strip()]
+        def _clean_entity_name(name: str) -> str:
+            cleaned = (name or "").strip()
+            # Remove wrapping quotes/backticks (common when entities are serialized from logs/prompts)
+            while len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ('"', "'", "`"):
+                cleaned = cleaned[1:-1].strip()
+            return cleaned
+
+        # Filter out empty names and normalize
+        names = [_clean_entity_name(n) for n in entity_names if (n or "").strip()]
+        names = [n for n in names if n]
         if not names:
             return {}
         
@@ -90,13 +98,57 @@ class Neo4jTextUnitStore:
         """Batch query to fetch chunks for multiple entities in a single round-trip."""
         query = """
         UNWIND $entity_names AS entity_name
-        MATCH (e:Entity {group_id: $group_id})
-        WHERE toLower(e.name) = toLower(entity_name)
-        MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
-        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-        WITH entity_name, c, d
+        WITH entity_name
+        CALL {
+            WITH entity_name
+            OPTIONAL MATCH (e:Entity {group_id: $group_id})
+            WHERE toLower(e.name) = toLower(entity_name)
+            RETURN e
+            UNION
+            WITH entity_name
+            OPTIONAL MATCH (e:`__Entity__` {group_id: $group_id})
+            WHERE toLower(e.name) = toLower(entity_name)
+            RETURN e
+        }
+        WITH entity_name, [x IN collect(e) WHERE x IS NOT NULL][0] AS e
+        CALL {
+            WITH e
+            OPTIONAL MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN c AS c, d AS d
+            UNION
+            WITH e
+            OPTIONAL MATCH (e)-[:MENTIONS]->(c:TextChunk {group_id: $group_id})
+            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN c AS c, d AS d
+            UNION
+            WITH e
+            OPTIONAL MATCH (c:Chunk {group_id: $group_id})-[:MENTIONS]->(e)
+            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN c AS c, d AS d
+            UNION
+            WITH e
+            OPTIONAL MATCH (e)-[:MENTIONS]->(c:Chunk {group_id: $group_id})
+            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN c AS c, d AS d
+            UNION
+            WITH e
+            OPTIONAL MATCH (c:`__Node__` {group_id: $group_id})-[:MENTIONS]->(e)
+            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN c AS c, d AS d
+            UNION
+            WITH e
+            OPTIONAL MATCH (e)-[:MENTIONS]->(c:`__Node__` {group_id: $group_id})
+            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+            RETURN c AS c, d AS d
+        }
+        WITH entity_name, collect({chunk: c, doc: d}) AS items
+        WITH entity_name, [i IN items WHERE i.chunk IS NOT NULL] AS items
+        UNWIND items AS item
+        WITH entity_name, item.chunk AS c, item.doc AS d
         ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
-        RETURN entity_name, collect(c)[0..$limit] AS chunks, collect(d)[0..$limit] AS docs
+        WITH entity_name, collect({chunk: c, doc: d})[0..$limit] AS items
+        RETURN entity_name, items
         """
         
         results: Dict[str, List[Dict[str, Any]]] = {name: [] for name in entity_names}
@@ -111,17 +163,24 @@ class Neo4jTextUnitStore:
             
             for record in result:
                 entity_name = record.get("entity_name")
-                chunks = record.get("chunks") or []
-                docs = record.get("docs") or []
+                items = record.get("items") or []
                 
                 if not entity_name:
                     continue
                 
                 rows: List[Dict[str, Any]] = []
-                for i, c in enumerate(chunks):
-                    d = docs[i] if i < len(docs) else None
+                seen_chunk_ids: set[str] = set()
+                for item in items:
+                    c = (item or {}).get("chunk")
+                    d = (item or {}).get("doc")
                     if not c:
                         continue
+
+                    chunk_id = str(c.get("id") or "")
+                    if chunk_id and chunk_id in seen_chunk_ids:
+                        continue
+                    if chunk_id:
+                        seen_chunk_ids.add(chunk_id)
                     
                     raw_meta = c.get("metadata")
                     meta: Dict[str, Any] = {}
@@ -133,6 +192,16 @@ class Neo4jTextUnitStore:
                                 meta = {}
                         elif isinstance(raw_meta, dict):
                             meta = dict(raw_meta)
+
+                    # Some chunk types store common fields as top-level props.
+                    for prop_key in ("page_number", "section_path", "di_section_path", "document_id", "url"):
+                        if prop_key not in meta:
+                            try:
+                                v = c.get(prop_key)
+                            except Exception:
+                                v = None
+                            if v is not None and v != "":
+                                meta[prop_key] = v
                     
                     # Prefer Document attribution when available.
                     doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
@@ -153,7 +222,7 @@ class Neo4jTextUnitStore:
                     
                     rows.append(
                         {
-                            "id": c.get("id") or "",
+                            "id": chunk_id,
                             "source": str(source_label),
                             "text": str(c.get("text") or ""),
                             "entity": entity_name,

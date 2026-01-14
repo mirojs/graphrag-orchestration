@@ -2965,7 +2965,13 @@ Instructions:
         # Weak graph signal + no term matches = likely false match, reject
         has_strong_graph_signal = len(hub_entities) >= 3 or len(graph_context.relationships) >= 10
         
-        if total_matches == 0 and not has_strong_graph_signal and len(query_terms) >= 2:
+        if (
+            total_matches == 0
+            and not has_strong_graph_signal
+            and len(query_terms) >= 2
+            and not coverage_mode
+            and not (graph_context.source_chunks or [])
+        ):
             # Weak graph signal AND no query terms match entities
             # This is likely noise, not genuine topic presence
             logger.info(

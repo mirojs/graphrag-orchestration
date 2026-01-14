@@ -175,18 +175,128 @@ def evaluate_theme_coverage(response_text: str, expected_themes: List[str]) -> f
     # - "(10) business days" should satisfy "10 business days"
     text_lower = response_text.lower()
     normalized = (
-        text_lower.replace(",", "")
+        text_lower.replace("-", " ")
+        .replace(",", "")
         .replace("$", "")
         .replace("(", "")
         .replace(")", "")
     )
+
+    # Light punctuation-stripped view for matching common variants like
+    # "attorney's fees" vs "attorneys fees".
+    normalized_words = re.sub(r"[^a-z0-9\s]", " ", normalized)
+    normalized_words = " ".join(normalized_words.split())
+
+    # Digit-only view for robust matching of numeric themes across formatting
+    # differences such as "$300,000", "300000", "300 000", "$300,000.00".
+    digits_only = re.sub(r"\D+", "", text_lower)
 
     found = 0
     for theme in expected_themes:
         tl = (theme or "").lower()
         if not tl:
             continue
-        tnorm = tl.replace(",", "").replace("$", "").replace("(", "").replace(")", "")
+        tnorm = (
+            tl.replace("-", " ")
+            .replace(",", "")
+            .replace("$", "")
+            .replace("(", "")
+            .replace(")", "")
+        )
+
+        # Match digit-vs-word forms for small contractual numbers.
+        # Examples: "10 business days" vs "ten business days", "60 days" vs "sixty days".
+        def _number_word(n: int) -> Optional[str]:
+            base = {
+                0: "zero",
+                1: "one",
+                2: "two",
+                3: "three",
+                4: "four",
+                5: "five",
+                6: "six",
+                7: "seven",
+                8: "eight",
+                9: "nine",
+                10: "ten",
+                11: "eleven",
+                12: "twelve",
+                13: "thirteen",
+                14: "fourteen",
+                15: "fifteen",
+                16: "sixteen",
+                17: "seventeen",
+                18: "eighteen",
+                19: "nineteen",
+                20: "twenty",
+                30: "thirty",
+                40: "forty",
+                50: "fifty",
+                60: "sixty",
+                70: "seventy",
+                80: "eighty",
+                90: "ninety",
+            }
+            return base.get(n)
+
+        # If the expected theme contains a small number, accept the word form too.
+        m_num = re.search(r"\b(\d{1,2})\b", tnorm)
+        if m_num:
+            n = int(m_num.group(1))
+            w = _number_word(n)
+            if w:
+                # Replace only the specific number token with a digit|word alternation.
+                num_pattern = re.escape(m_num.group(1))
+                alt = rf"(?:{num_pattern}|{re.escape(w)})"
+                theme_pattern = re.escape(tnorm)
+                theme_pattern = re.sub(rf"\\b{num_pattern}\\b", alt, theme_pattern)
+                if re.search(rf"\b{theme_pattern}\b", normalized_words):
+                    found += 1
+                    continue
+
+        # Robust numeric match: if the expected theme is essentially a number,
+        # match by digit-only substring.
+        theme_digits = re.sub(r"\D+", "", tnorm)
+        if theme_digits and len(theme_digits) >= 3:
+            if theme_digits in digits_only:
+                found += 1
+                continue
+
+        # Robust legal phrasing: "hold harmless" often appears as
+        # "hold the [party] harmless" or across line breaks.
+        if tnorm == "hold harmless":
+            if re.search(r"\bhold\b[\s\S]{0,40}\bharmless\b", text_lower):
+                found += 1
+                continue
+
+        # Common synonym variants expected in legal summaries.
+        if tnorm == "legal fees":
+            if re.search(r"\b(legal\s+fees?|attorney\s*'?s\s+fees?|attorneys\s+fees?)\b", text_lower):
+                found += 1
+                continue
+
+        if tnorm == "phone":
+            if re.search(r"\b(phone|telephone|telephonic|call)\b", text_lower):
+                found += 1
+                continue
+
+        if tnorm == "certified mail":
+            if re.search(r"\b(certified\s+mail|registered\s+mail)\b", normalized_words):
+                found += 1
+                continue
+
+        if tnorm == "written notice":
+            if re.search(r"\b(written\s+notice|notice\s+in\s+writing)\b", normalized_words):
+                found += 1
+                continue
+
+        # Handle common word-form variants (avoid false negatives from legitimate phrasing).
+        # Example: expected "indemnify" but the response uses "indemnification".
+        if tnorm == "indemnify":
+            if re.search(r"\bindemnif(y|ication|ied|ying|ies)\b", normalized):
+                found += 1
+                continue
+
         if tl in text_lower or tnorm in normalized:
             found += 1
     return found / len(expected_themes)

@@ -3065,6 +3065,16 @@ Instructions:
                 from .pipeline.enhanced_graph_retriever import SourceChunk
                 import os
 
+                # Identify which documents we already have coverage for (from relevance-based retrieval).
+                existing_docs = set()
+                existing_ids = set()
+                for chunk in graph_context.source_chunks:
+                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
+                    if doc_key:
+                        existing_docs.add(doc_key)
+                    if getattr(chunk, "chunk_id", None):
+                        existing_ids.add(chunk.chunk_id)
+
                 # Count documents up-front for accurate metadata and to size coverage retrieval.
                 all_documents = await self.enhanced_retriever.get_all_documents()
                 total_docs_in_group = len(all_documents)
@@ -3073,56 +3083,67 @@ Instructions:
                 
                 use_section_retrieval = os.getenv("USE_SECTION_RETRIEVAL", "1").strip().lower() in {"1", "true", "yes"}
 
-                # Prefer section-aware summary chunks if enabled; fall back to position-based.
-                coverage_chunks = []
-                if use_section_retrieval:
-                    coverage_chunks = await self.enhanced_retriever.get_summary_chunks_by_section(
-                        max_per_document=1,
-                        max_total=coverage_max_total,
-                    )
+                # If we already cover every document, skip coverage retrieval entirely.
+                if total_docs_in_group > 0 and len(existing_docs) >= total_docs_in_group:
+                    coverage_metadata["applied"] = False
+                    coverage_metadata["docs_added"] = 0
+                    coverage_metadata["chunks_added"] = 0
+                    coverage_metadata["total_docs_in_group"] = total_docs_in_group
+                    coverage_metadata["docs_from_relevance"] = len(existing_docs)
 
-                if not coverage_chunks:
-                    # Get representative chunks from ALL documents (1 per doc to minimize noise)
-                    coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
-                        max_per_document=1,  # Minimal: just 1 chunk per missing doc
-                        max_total=coverage_max_total,
+                    timings_ms["stage_3.4.1_coverage_ms"] = int((time.perf_counter() - t0_cov) * 1000)
+                    logger.info(
+                        "stage_3.4.1_coverage_gap_fill_complete",
+                        chunks_added=0,
+                        new_docs=0,
+                        total_docs_now=len(existing_docs),
+                        total_docs_in_group=total_docs_in_group,
+                        skipped=True,
+                        reason="already_full_coverage",
                     )
-                
-                # Identify which documents we already have coverage for
-                existing_docs = set()
-                for chunk in graph_context.source_chunks:
-                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
-                    if doc_key:
-                        existing_docs.add(doc_key)
-                
-                # Only add chunks for documents we're MISSING
-                existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-                added_count = 0
-                new_docs = set()
-                
-                for chunk in coverage_chunks:
-                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
-                    if doc_key and doc_key not in existing_docs and chunk.chunk_id not in existing_ids:
-                        graph_context.source_chunks.append(chunk)
-                        existing_ids.add(chunk.chunk_id)
-                        new_docs.add(doc_key)
-                        existing_docs.add(doc_key)  # Track to avoid duplicates within coverage
-                        added_count += 1
-                
-                coverage_metadata["applied"] = added_count > 0
-                coverage_metadata["docs_added"] = len(new_docs)
-                coverage_metadata["chunks_added"] = added_count
-                coverage_metadata["total_docs_in_group"] = total_docs_in_group
-                coverage_metadata["docs_from_relevance"] = len(existing_docs) - len(new_docs)
-                
-                timings_ms["stage_3.4.1_coverage_ms"] = int((time.perf_counter() - t0_cov) * 1000)
-                logger.info(
-                    "stage_3.4.1_coverage_gap_fill_complete",
-                    chunks_added=added_count,
-                    new_docs=len(new_docs),
-                    total_docs_now=len(existing_docs),
-                    total_docs_in_group=total_docs_in_group,
-                )
+                else:
+                    # Prefer section-aware summary chunks if enabled; fall back to position-based.
+                    coverage_chunks = []
+                    if use_section_retrieval:
+                        coverage_chunks = await self.enhanced_retriever.get_summary_chunks_by_section(
+                            max_per_document=1,
+                            max_total=coverage_max_total,
+                        )
+
+                    if not coverage_chunks:
+                        # Get representative chunks from ALL documents (1 per doc to minimize noise)
+                        coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                            max_per_document=1,  # Minimal: just 1 chunk per missing doc
+                            max_total=coverage_max_total,
+                        )
+
+                    # Only add chunks for documents we're MISSING
+                    added_count = 0
+                    new_docs = set()
+
+                    for chunk in coverage_chunks:
+                        doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
+                        if doc_key and doc_key not in existing_docs and chunk.chunk_id not in existing_ids:
+                            graph_context.source_chunks.append(chunk)
+                            existing_ids.add(chunk.chunk_id)
+                            new_docs.add(doc_key)
+                            existing_docs.add(doc_key)  # Track to avoid duplicates within coverage
+                            added_count += 1
+
+                    coverage_metadata["applied"] = added_count > 0
+                    coverage_metadata["docs_added"] = len(new_docs)
+                    coverage_metadata["chunks_added"] = added_count
+                    coverage_metadata["total_docs_in_group"] = total_docs_in_group
+                    coverage_metadata["docs_from_relevance"] = len(existing_docs) - len(new_docs)
+
+                    timings_ms["stage_3.4.1_coverage_ms"] = int((time.perf_counter() - t0_cov) * 1000)
+                    logger.info(
+                        "stage_3.4.1_coverage_gap_fill_complete",
+                        chunks_added=added_count,
+                        new_docs=len(new_docs),
+                        total_docs_now=len(existing_docs),
+                        total_docs_in_group=total_docs_in_group,
+                    )
             except Exception as cov_err:
                 logger.warning("stage_3.4.1_coverage_gap_fill_failed", error=str(cov_err))
 

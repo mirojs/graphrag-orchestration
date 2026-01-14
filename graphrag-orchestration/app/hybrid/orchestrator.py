@@ -130,6 +130,12 @@ class HybridPipeline:
         self.group_id = group_id
         self.neo4j_driver = neo4j_driver
 
+        # Route 1 (Vector RAG) is a capability flag, not a standalone component.
+        # It is disabled in High Assurance and requires Neo4j.
+        self.vector_rag: bool = (
+            self.profile != DeploymentProfile.HIGH_ASSURANCE and self.neo4j_driver is not None
+        )
+
         # Cached one-time checks for Neo4j indexes used by Route 1
         self._textchunk_fulltext_index_checked = False
         
@@ -3569,7 +3575,7 @@ Sub-questions:"""
             "vector_rag": "ok" if self.vector_rag else "not_configured",
             "profile": self.profile.value,
             "routes_available": {
-                "route_1_vector_rag": self.vector_rag is not None,
+                "route_1_vector_rag": bool(self.vector_rag),
                 "route_2_local_search": True,
                 "route_3_global_search": True,
                 "route_4_drift": self.llm is not None

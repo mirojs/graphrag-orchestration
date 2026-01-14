@@ -23,6 +23,25 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
     lines = content.splitlines()
     
     ground_truth: Dict[str, GroundTruth] = {}
+
+    def _expected_looks_negative(expected: str) -> bool:
+        e = (expected or "").strip().lower()
+        if not e:
+            return True
+        negative_markers = [
+            "not specified",
+            "not provided",
+            "not mentioned",
+            "not available",
+            "cannot be determined",
+            "no information",
+            "information is not",
+            "none",
+            "blank",
+            "n/a",
+            "unknown",
+        ]
+        return any(m in e for m in negative_markers)
     
     i = 0
     while i < len(lines):
@@ -33,9 +52,6 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
         if m:
             qid = m.group(1).strip()
             question = m.group(2).strip()
-            
-            # Check if this is a negative test
-            is_negative = qid.startswith("Q-N")
             
             # Look for Expected: in subsequent lines
             expected_parts = []
@@ -77,6 +93,11 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
             
             if found_expected:
                 expected = " ".join(expected_parts)
+
+                # Determine whether this is a negative test.
+                # Prefer the expected-answer content (so Q-N* can become positive if the
+                # corpus actually contains the requested value).
+                is_negative = qid.startswith("Q-N") and _expected_looks_negative(expected)
                 ground_truth[qid] = GroundTruth(
                     qid=qid,
                     question=question,
@@ -112,7 +133,10 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
         not_found_phrases = [
             "not found", "not specified", "not mentioned", "not provided",
             "does not specify", "doesn't specify", "no information",
-            "not available", "cannot be determined", "information is not"
+            "not available", "cannot be determined", "information is not",
+            "not explicitly include", "not explicitly mention", "not explicitly provide",
+            "not explicitly state", "no documents explicitly state", "does not explicitly",
+            "not explicitly detailed", "no explicit mention"
         ]
         negative_test_pass = any(phrase in actual_lower for phrase in not_found_phrases)
         return {

@@ -290,7 +290,7 @@ These should return **“not found / not specified in the provided documents”*
    - **Expected:** Not specified.
 
 4. **Q-N4:** What is the invoice’s **payment portal URL** (web link to pay online)?
-   - **Expected:** Not specified.
+   - **Expected:** https://ww.contosolifts.com/portal/pay
 
 5. **Q-N5:** What is the invoice’s **bank account number** for ACH/wire payments?
    - **Expected:** Not specified.

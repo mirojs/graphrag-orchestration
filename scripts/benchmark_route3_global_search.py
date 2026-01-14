@@ -68,6 +68,11 @@ EXPECTED_TERMS: Dict[str, List[str]] = {
     "Q-G10": ["warranty", "arbitration", "servicing", "management", "invoice", "scope of work", "payment"],
 }
 
+NEGATIVE_QUERY_SUFFIX = (
+    "\n\nImportant: If the answer is not explicitly stated in the provided evidence (or the field is blank), "
+    "reply with exactly: Not specified. Do not guess or infer."
+)
+
 
 def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> Dict[str, Any]:
     """Calculate theme/keyword coverage for a response.
@@ -490,8 +495,12 @@ def main() -> int:
     for qi, q in enumerate(questions, 1):
         runs: List[Dict[str, Any]] = []
         for ri in range(int(args.repeats)):
+            gt = ground_truth.get(q.qid)
+            effective_query = (
+                (q.query + NEGATIVE_QUERY_SUFFIX) if (gt and gt.is_negative) else q.query
+            )
             payload = {
-                "query": q.query,
+                "query": effective_query,
                 "force_route": "global_search",
                 "response_type": response_type,
             }

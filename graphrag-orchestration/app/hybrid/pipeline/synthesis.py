@@ -274,6 +274,16 @@ class EvidenceSynthesizer:
     - For each bullet, cite at least one source chunk that explicitly states it.
     - If the evidence uses specific wording (e.g., periodic statements, income/expenses, volumes/pumper/county), quote those phrases verbatim and cite them.
     """
+
+        termination_hint = ""
+        if any(k in ql for k in ["termination", "terminate", "cancel", "cancellation"]):
+            termination_hint = """
+
+        Additional requirements for termination/cancellation questions:
+        - Explicitly list each distinct notice period and cancellation window using digits (e.g., "3 business days", "60 days", "10 business days") when present.
+        - State the refund/forfeiture outcome for each cancellation window (e.g., full refund vs deposit forfeited).
+        - If a document has no termination/cancellation mechanism, state that explicitly.
+        """
         
         prompt = f"""You are an expert analyst generating a response using knowledge graph evidence.
 
@@ -288,6 +298,8 @@ Evidence Context (organized by entity relationships and document sections):
 {context}
 
 {reporting_hint}
+
+{termination_hint}
 
 Generate a comprehensive {response_type.replace('_', ' ')} that:
 1. Directly answers the query

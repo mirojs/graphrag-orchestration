@@ -166,9 +166,29 @@ def evaluate_theme_coverage(response_text: str, expected_themes: List[str]) -> f
     """Check what percentage of expected themes are mentioned in response."""
     if not response_text or not expected_themes:
         return 0.0
-    
+
+    # Normalize common formatting differences so we measure content coverage,
+    # not punctuation/currency/parentheses rendering.
+    # Examples handled:
+    # - "$29,900.00" should satisfy expected theme "29900"
+    # - "three (3) business days" should satisfy "3 business days"
+    # - "(10) business days" should satisfy "10 business days"
     text_lower = response_text.lower()
-    found = sum(1 for theme in expected_themes if theme.lower() in text_lower)
+    normalized = (
+        text_lower.replace(",", "")
+        .replace("$", "")
+        .replace("(", "")
+        .replace(")", "")
+    )
+
+    found = 0
+    for theme in expected_themes:
+        tl = (theme or "").lower()
+        if not tl:
+            continue
+        tnorm = tl.replace(",", "").replace("$", "").replace("(", "").replace(")", "")
+        if tl in text_lower or tnorm in normalized:
+            found += 1
     return found / len(expected_themes)
 
 

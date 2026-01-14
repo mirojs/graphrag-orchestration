@@ -207,45 +207,37 @@ class Neo4jTextUnitStore:
         query = """
         UNWIND $entity_names AS entity_name
         WITH entity_name
-        CALL {
-            WITH entity_name
+        CALL (entity_name) {
             OPTIONAL MATCH (e:Entity {group_id: $group_id})
             WHERE toLower(e.name) = toLower(entity_name)
             RETURN e
             UNION
-            WITH entity_name
             OPTIONAL MATCH (e:`__Entity__` {group_id: $group_id})
             WHERE toLower(e.name) = toLower(entity_name)
             RETURN e
         }
         WITH entity_name, [x IN collect(e) WHERE x IS NOT NULL][0] AS e
-        CALL {
-            WITH e
+        CALL (e) {
             OPTIONAL MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
             OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
             RETURN c AS c, d AS d
             UNION
-            WITH e
             OPTIONAL MATCH (e)-[:MENTIONS]->(c:TextChunk {group_id: $group_id})
             OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
             RETURN c AS c, d AS d
             UNION
-            WITH e
             OPTIONAL MATCH (c:Chunk {group_id: $group_id})-[:MENTIONS]->(e)
             OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
             RETURN c AS c, d AS d
             UNION
-            WITH e
             OPTIONAL MATCH (e)-[:MENTIONS]->(c:Chunk {group_id: $group_id})
             OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
             RETURN c AS c, d AS d
             UNION
-            WITH e
             OPTIONAL MATCH (c:`__Node__` {group_id: $group_id})-[:MENTIONS]->(e)
             OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
             RETURN c AS c, d AS d
             UNION
-            WITH e
             OPTIONAL MATCH (e)-[:MENTIONS]->(c:`__Node__` {group_id: $group_id})
             OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
             RETURN c AS c, d AS d

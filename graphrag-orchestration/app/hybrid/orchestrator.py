@@ -3334,7 +3334,20 @@ Instructions:
                 "related_entities": graph_context.related_entities[:5],
                 "num_relationships_found": len(graph_context.relationships),
                 "num_source_chunks": len(graph_context.source_chunks),
-                "num_evidence_nodes": len(evidence_nodes),
+                # Evidence nodes are normally graph/PPR-derived. However, for some
+                # cross-document summary queries, we may have excellent citation-backed
+                # evidence even when hub_entities (and thus PPR seeds) are empty.
+                # Expose a stable evidence count for evaluation/monitoring.
+                "num_evidence_nodes": max(
+                    len(evidence_nodes),
+                    len(
+                        {
+                            c.get("chunk_id")
+                            for c in (synthesis_result.get("citations") or [])
+                            if isinstance(c, dict) and c.get("chunk_id")
+                        }
+                    ),
+                ),
                 "text_chunks_used": synthesis_result["text_chunks_used"],
                 "latency_estimate": "thorough",
                 "precision_level": "high",

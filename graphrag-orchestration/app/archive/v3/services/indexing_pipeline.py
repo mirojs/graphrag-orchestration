@@ -1151,7 +1151,7 @@ class IndexingPipelineV3:
             # Extraction cache keying (stable across runs)
             # --------------------
             def _stable_chunk_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
-                """Remove run-specific identifiers so cache keys can be reused across group_ids/runs."""
+                """Remove run-specific identifiers so cache keys are stable within a group across runs."""
                 raw = dict(meta or {})
 
                 # document_id contains a UUID generated per run; exclude it.
@@ -1179,6 +1179,7 @@ class IndexingPipelineV3:
                     text = getattr(node, "text", "") or ""
 
                 params_obj = {
+                    "group_id": group_id,
                     "cache_version": cache_version,
                     "model": model_id,
                     "model_version": getattr(settings, "AZURE_OPENAI_MODEL_VERSION", ""),

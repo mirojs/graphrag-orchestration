@@ -3567,15 +3567,16 @@ Sub-questions:"""
     
     async def health_check(self) -> Dict[str, Any]:
         """Check the health of all pipeline components."""
+        vector_rag_enabled = bool(getattr(self, "vector_rag", False))
         return {
             "router": "ok",
             "disambiguator": "ok" if self.llm else "no_llm",
             "tracer": "ok" if self.tracer._use_hipporag else "fallback_mode",
             "synthesizer": "ok" if self.llm else "no_llm",
-            "vector_rag": "ok" if self.vector_rag else "not_configured",
+            "vector_rag": "ok" if vector_rag_enabled else "not_configured",
             "profile": self.profile.value,
             "routes_available": {
-                "route_1_vector_rag": bool(self.vector_rag),
+                "route_1_vector_rag": vector_rag_enabled,
                 "route_2_local_search": True,
                 "route_3_global_search": True,
                 "route_4_drift": self.llm is not None

@@ -257,6 +257,20 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Output:** Detailed report with full audit trail
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, uses position-based sentence ranking (no LLM) for byte-identical repeatability across identical inputs
 
+#### Future Optimization: Route 3 Fast Mode (Planned)
+
+**Status:** Planned (see `ROUTE3_FAST_MODE_PLAN_2026-01-14.md`)
+
+With section-aware embeddings (added 2026-01-14), many Route 3 stages may be redundant:
+- **Section embeddings** now encode document structure directly in the embedding space
+- **BM25 + Vector RRF** (Stage 3.3.5) can find thematic content without community → hub → PPR indirection
+- **Potential simplification:** 4 stages (Hybrid Retrieval → Coverage Fill → Synthesis → Validation) vs current 12 stages
+- **Expected speedup:** 50-60% faster (7-14s vs 20-30s per query)
+
+**Implementation approach:** Add `ROUTE3_FAST_MODE=1` env var to skip community matching, hub extraction, section boost, keyword boost, and PPR stages. Keep full pipeline as fallback.
+
+**Decision:** Deferred until Route 4 (DRIFT) is fully implemented. Route 3 is currently achieving 100% benchmark scores, so speed optimization is lower priority than completing the full system.
+
 ### Route 4: DRIFT Equivalent (Multi-Hop Iterative Reasoning)
 
 This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to ambiguity.

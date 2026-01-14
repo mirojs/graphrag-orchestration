@@ -136,6 +136,11 @@ class DeterministicTracer:
         if not self.group_id:
             logger.warning("async_neo4j_no_group_id")
             return await self._trace_with_fallback(query, seed_entities, top_k)
+
+        # If we have no seeds at all, don't log this as a warning.
+        # Route 4 is allowed to proceed via query-based retrieval.
+        if not seed_entities:
+            return []
         
         try:
             import os
@@ -159,8 +164,16 @@ class DeterministicTracer:
             seed_ids = [r["id"] for r in seed_records]
             
             if not seed_ids:
-                logger.warning("no_seed_entities_found", seeds=seed_entities)
-                return [(entity, 1.0) for entity in seed_entities]
+                # These seeds were discovered by the LLM but do not correspond
+                # to entities present in the graph for this group_id. Route 4 can
+                # proceed via query-based retrieval, so treat this as a normal
+                # non-graph case rather than as evidence.
+                logger.info(
+                    "seed_entities_not_resolved",
+                    seeds=seed_entities,
+                    group_id=self.group_id,
+                )
+                return []
             
             # Use native PPR approximation (distance-based decay)
             ranked_nodes = await self.async_neo4j.personalized_pagerank_native(

@@ -381,6 +381,11 @@ Response:"""
         # Apply relevance budget (limit entities processed)
         budget_limit = int(len(entity_names) * self.relevance_budget) + 1
         selected_entities = entity_names[:budget_limit]
+
+        # Common Route 4 case: no entity seeds. Don't emit a misleading "0 chunks" log here;
+        # the caller may fall back to query-based retrieval.
+        if len(selected_entities) == 0:
+            return []
         
         try:
             # Batch query: fetch all entities in one round-trip (major performance gain)

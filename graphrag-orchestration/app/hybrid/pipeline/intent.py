@@ -12,7 +12,49 @@ Model Selection:
 from typing import List, Optional, Any
 import structlog
 
+import re
+
 logger = structlog.get_logger(__name__)
+
+
+_GENERIC_SEED_PHRASES = {
+    # Common finance/payment abbreviations that are rarely graph entities in this corpus.
+    "ach",
+    "wire",
+    "wire transfer",
+    "swift",
+    "swift code",
+    "swift codes",
+    "iban",
+    "bic",
+    "vat",
+    "tax id",
+    "tax id number",
+    "routing number",
+    "routing numbers",
+    "bank routing number",
+    "bank routing numbers",
+    "bank account number",
+}
+
+
+def _normalize_seed_phrase(s: str) -> str:
+    s = (s or "").strip().casefold()
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _is_generic_non_entity_seed(s: str) -> bool:
+    ns = _normalize_seed_phrase(s)
+    if not ns:
+        return True
+    if ns in _GENERIC_SEED_PHRASES:
+        return True
+    # Catch patterns like "SWIFT codes", "ACH payments", etc.
+    if any(phrase in ns for phrase in ("swift", "iban", "bic", "ach")) and len(ns) <= 20:
+        return True
+    return False
 
 
 class IntentDisambiguator:
@@ -92,6 +134,8 @@ Do not include any explanation, just the JSON array.
 
                 filtered: List[str] = []
                 for x in cleaned:
+                    if _is_generic_non_entity_seed(x):
+                        continue
                     has_upper = any(ch.isupper() for ch in x)
                     has_digit = any(ch.isdigit() for ch in x)
                     # Keep if it looks like a proper noun/document title.

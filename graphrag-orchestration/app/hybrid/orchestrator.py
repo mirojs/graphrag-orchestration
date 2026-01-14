@@ -3517,7 +3517,24 @@ Sub-questions:"""
                     content = line.split('.', 1)[-1].strip()
                     content = content.split(')', 1)[-1].strip()
                     if content:
-                        sub_questions.append(content)
+                        # Filter obvious garbage outputs (occasionally the model emits placeholders like "?")
+                        normalized = content.strip().strip('"').strip("'").strip()
+                        if normalized in {"?", "-", "—"}:
+                            continue
+                        if len(normalized) < 8:
+                            continue
+                        sub_questions.append(normalized)
+
+            # De-dupe while preserving order
+            deduped: List[str] = []
+            seen: set[str] = set()
+            for q in sub_questions:
+                k = q.lower()
+                if k in seen:
+                    continue
+                seen.add(k)
+                deduped.append(q)
+            sub_questions = deduped
             
             return sub_questions if sub_questions else [query]
             

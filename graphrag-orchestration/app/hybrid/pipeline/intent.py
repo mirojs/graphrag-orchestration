@@ -64,7 +64,12 @@ User Query: "{query}"
 Available Communities/Entities:
 {community_context}
 
-Return ONLY a JSON array of entity names. Example: ["Entity_A", "Entity_B", "Entity_C"]
+Important:
+- Return specific entity-like strings (proper nouns, organizations, document titles, named clauses) likely to exist in the graph.
+- Do NOT return generic keywords (e.g., "licensed", "state", "jurisdiction", "payment", "instructions").
+- If you are unsure, return an empty JSON array: []
+
+Return ONLY a JSON array of entity names. Example: ["Contoso Ltd.", "Purchase Contract", "Warranty Agreement"]
 Do not include any explanation, just the JSON array.
 """
         
@@ -75,10 +80,32 @@ Do not include any explanation, just the JSON array.
             entities = json.loads(response.text.strip())
             
             if isinstance(entities, list):
-                logger.info("intent_disambiguation_success", 
-                           query=query, 
-                           seed_entities=entities[:top_k])
-                return entities[:top_k]
+                def _clean(name: str) -> str:
+                    cleaned = (name or "").strip()
+                    while len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ('"', "'", "`"):
+                        cleaned = cleaned[1:-1].strip()
+                    return cleaned
+
+                # Heuristic filter: keep entity-like strings (usually contain uppercase letters/digits)
+                cleaned = [_clean(x) for x in entities if isinstance(x, str)]
+                cleaned = [x for x in cleaned if x]
+
+                filtered: List[str] = []
+                for x in cleaned:
+                    has_upper = any(ch.isupper() for ch in x)
+                    has_digit = any(ch.isdigit() for ch in x)
+                    # Keep if it looks like a proper noun/document title.
+                    if has_upper or has_digit:
+                        filtered.append(x)
+                
+                selected = (filtered or [])[:top_k]
+                logger.info(
+                    "intent_disambiguation_success",
+                    query=query,
+                    seed_entities=selected,
+                    dropped_count=max(0, len(cleaned) - len(filtered)),
+                )
+                return selected
             else:
                 logger.warning("intent_disambiguation_invalid_format", 
                               response=response.text)

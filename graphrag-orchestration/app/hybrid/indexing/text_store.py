@@ -72,6 +72,114 @@ class Neo4jTextUnitStore:
         """Get chunks for a single entity (backward compatibility wrapper)."""
         results = await self.get_chunks_for_entities([entity_name])
         return results.get(entity_name, [])
+
+    async def get_chunks_for_query(self, query: str, *, limit: int = 24) -> List[Dict[str, Any]]:
+        """Fallback: retrieve chunks by keyword overlap with the user query.
+
+        This is used when Route 4 produces evidence strings that don't resolve to
+        real graph entities (e.g., generic terms), so entity-based chunk lookup yields 0.
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        # Lightweight keyword extraction (mirrors benchmark stopwording philosophy).
+        import re
+
+        stopwords = {
+            "the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "was", "were", "be", "been", "being",
+            "have", "has", "had", "do", "does", "did", "will", "would", "should", "could", "may", "might", "must",
+            "can", "what", "which", "who", "when", "where", "why", "how", "this", "that", "these", "those", "all",
+            "any", "our", "your", "their", "on", "for", "with", "by", "as", "at", "from",
+        }
+
+        tokens = [t.lower() for t in re.findall(r"[A-Za-z0-9]+", q) if len(t) >= 3]
+        keywords = [t for t in tokens if t not in stopwords]
+        if not keywords:
+            return []
+
+        # Neo4j python driver is sync; run in a thread to avoid blocking the event loop.
+        return await asyncio.to_thread(self._get_chunks_for_query_sync, keywords, int(limit))
+
+    def _get_chunks_for_query_sync(self, keywords: List[str], limit: int) -> List[Dict[str, Any]]:
+        query = """
+        MATCH (c)
+        WHERE c.group_id = $group_id AND (c:TextChunk OR c:Chunk OR c:`__Node__`)
+        WITH c, [kw IN $keywords WHERE toLower(coalesce(c.text, '')) CONTAINS kw] AS matched
+        WITH c, size(matched) AS score
+        WHERE score > 0
+        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+        WITH c, d, score
+        ORDER BY score DESC, coalesce(c.chunk_index, 0) ASC
+        RETURN c AS chunk, d AS doc, score
+        LIMIT $limit
+        """
+
+        rows: List[Dict[str, Any]] = []
+        with self._driver.session() as session:
+            result = session.run(
+                query,
+                group_id=self._group_id,
+                keywords=keywords,
+                limit=int(limit),
+            )
+            for record in result:
+                c = record.get("chunk")
+                d = record.get("doc")
+                if not c:
+                    continue
+
+                raw_meta = c.get("metadata")
+                meta: Dict[str, Any] = {}
+                if raw_meta:
+                    if isinstance(raw_meta, str):
+                        try:
+                            meta = json.loads(raw_meta)
+                        except Exception:
+                            meta = {}
+                    elif isinstance(raw_meta, dict):
+                        meta = dict(raw_meta)
+
+                for prop_key in ("page_number", "section_path", "di_section_path", "document_id", "url"):
+                    if prop_key not in meta:
+                        try:
+                            v = c.get(prop_key)
+                        except Exception:
+                            v = None
+                        if v is not None and v != "":
+                            meta[prop_key] = v
+
+                doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
+                doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
+                url = meta.get("url") or doc_source or ""
+
+                section_path = meta.get("section_path")
+                section_label = ""
+                if isinstance(section_path, list) and section_path:
+                    section_label = " > ".join(str(x) for x in section_path if x)
+                elif isinstance(section_path, str) and section_path:
+                    section_label = section_path
+
+                source_label = doc_title or doc_source or url or "neo4j"
+                if section_label:
+                    source_label = f"{source_label} — {section_label}"
+
+                rows.append(
+                    {
+                        "id": str(c.get("id") or ""),
+                        "source": str(source_label),
+                        "text": str(c.get("text") or ""),
+                        "entity": "__query__",
+                        "metadata": {
+                            **meta,
+                            "document_title": str(doc_title),
+                            "document_source": str(doc_source),
+                            "keyword_score": int(record.get("score") or 0),
+                        },
+                    }
+                )
+
+        return rows
     
     async def get_chunks_for_entities(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         """Get chunks for multiple entities in a single batched query (performance optimization)."""

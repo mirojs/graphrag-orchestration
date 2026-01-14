@@ -76,6 +76,18 @@ class EvidenceSynthesizer:
         """
         # Step 1: Retrieve raw text chunks for evidence nodes
         text_chunks = await self._retrieve_text_chunks(evidence_nodes)
+
+        # Route 4 often produces generic "evidence" strings when seed entities don't resolve.
+        # If entity-based retrieval returns nothing, fall back to query-based chunk retrieval.
+        if not text_chunks and self.text_store and hasattr(self.text_store, "get_chunks_for_query"):
+            try:
+                text_chunks = await self.text_store.get_chunks_for_query(query)
+                logger.info(
+                    "text_chunks_query_fallback",
+                    num_chunks=len(text_chunks),
+                )
+            except Exception as e:
+                logger.warning("text_chunks_query_fallback_failed", error=str(e))
         
         # nlp_audit mode: deterministic extraction only, no LLM synthesis
         if response_type == "nlp_audit":

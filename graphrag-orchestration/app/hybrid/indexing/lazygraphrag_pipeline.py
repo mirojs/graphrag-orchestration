@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import re
 import time
 import uuid
@@ -44,6 +45,9 @@ from app.hybrid.services.entity_deduplication import EntityDeduplicationService
 from app.hybrid.services.neo4j_store import Document, Entity, Neo4jStoreV3, Relationship, TextChunk
 
 logger = logging.getLogger(__name__)
+
+
+USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "0").strip().lower() in {"1", "true", "yes"}
 
 
 @dataclass
@@ -313,6 +317,9 @@ class LazyGraphRAGIndexingPipeline:
         return chunks
 
     async def _chunk_di_units(self, *, di_units: Sequence[LlamaDocument], doc_id: str) -> List[TextChunk]:
+        if USE_SECTION_CHUNKING:
+            return await self._chunk_di_units_section_aware(di_units=di_units, doc_id=doc_id)
+
         chunks: List[TextChunk] = []
         chunk_index = 0
         for unit_i, unit in enumerate(di_units):
@@ -373,6 +380,23 @@ class LazyGraphRAGIndexingPipeline:
                 )
                 chunk_index += 1
         return chunks
+
+    async def _chunk_di_units_section_aware(self, *, di_units: Sequence[LlamaDocument], doc_id: str) -> List[TextChunk]:
+        from app.hybrid.indexing.section_chunking.integration import chunk_di_units_section_aware
+
+        doc_source = ""
+        doc_title = ""
+        if di_units:
+            first_meta = getattr(di_units[0], "metadata", None) or {}
+            doc_source = first_meta.get("url", "") or first_meta.get("source", "") or ""
+            doc_title = first_meta.get("title", "") or ""
+
+        return await chunk_di_units_section_aware(
+            di_units=di_units,
+            doc_id=doc_id,
+            doc_source=doc_source,
+            doc_title=doc_title,
+        )
 
     async def _embed_chunks_best_effort(self, chunks: List[TextChunk]) -> None:
         if self.embedder is None:

@@ -1648,7 +1648,7 @@ class EnhancedGraphRetriever:
         max_total: int = 20,
         prefer_early_chunks: bool = True,
     ) -> List[SourceChunk]:
-        """Get representative chunks from EVERY document for coverage-guaranteed queries.
+        """Get representative chunks from (ideally) every document for coverage-style queries.
         
         This is the key method for solving the "summarize each document" problem.
         Instead of relying on BM25/vector relevance (which biases toward some docs),
@@ -1657,7 +1657,11 @@ class EnhancedGraphRetriever:
         Strategy:
         1. Get all Document nodes in the group
         2. For each document, get 1-2 representative chunks (preferring early chunks)
-        3. Return diversified set that guarantees every document is represented
+        3. Return a diversified set intended to cover every document.
+
+        Note: if `max_total` is smaller than the number of documents in the group,
+        full coverage is impossible; in that case this method returns a best-effort
+        subset that maximizes unique-document coverage.
         
         Args:
             max_per_document: Max chunks to take per document (default: 2)
@@ -1670,14 +1674,20 @@ class EnhancedGraphRetriever:
         if not self.driver:
             return []
         
-        # Query gets the first N chunks per document (ordered by chunk_index)
+                # Query gets the first N chunks per document (ordered by chunk_index).
+                # IMPORTANT: Do not apply a global LIMIT here; it can truncate later
+                # documents and break the intended “every document” coverage behavior.
         query = """
         MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         WITH d, t, s
-        ORDER BY d.id, t.chunk_index ASC
+                ORDER BY d.id,
+                                 CASE
+                                     WHEN $prefer_early_chunks THEN t.chunk_index
+                                     ELSE -t.chunk_index
+                                 END ASC
         WITH d, collect({
             chunk_id: t.id,
             text: t.text,
@@ -1700,7 +1710,6 @@ class EnhancedGraphRetriever:
             chunk.doc_id AS doc_id,
             chunk.doc_title AS doc_title,
             chunk.doc_source AS doc_source
-        LIMIT $max_total
         """
         
         try:
@@ -1712,14 +1721,13 @@ class EnhancedGraphRetriever:
                         query,
                         group_id=self.group_id,
                         max_per_document=max_per_document,
-                        max_total=max_total,
+                        prefer_early_chunks=prefer_early_chunks,
                     )
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
             
-            chunks: List[SourceChunk] = []
-            docs_seen: set[str] = set()
+            per_doc: Dict[str, List[SourceChunk]] = {}
             
             for record in records:
                 metadata: Dict[str, Any] = {}
@@ -1736,9 +1744,13 @@ class EnhancedGraphRetriever:
                     section_path = section_path_key.split(" > ")
                 
                 doc_id = (record.get("doc_id") or "").strip()
-                docs_seen.add(doc_id)
-                
-                chunks.append(
+
+                doc_key = (doc_id or record.get("doc_source") or record.get("doc_title") or "").strip()
+                if not doc_key:
+                    continue
+                doc_key_norm = doc_key.lower()
+
+                per_doc.setdefault(doc_key_norm, []).append(
                     SourceChunk(
                         chunk_id=record.get("chunk_id") or "",
                         text=record.get("text") or "",
@@ -1751,19 +1763,173 @@ class EnhancedGraphRetriever:
                         relevance_score=1.0,  # All coverage chunks are equally "relevant"
                     )
                 )
+
+            # Deterministic selection: sort docs, then add chunks in a round-robin
+            # across documents to maximize unique-document coverage under `max_total`.
+            doc_keys_sorted = sorted(per_doc.keys())
+            chunks: List[SourceChunk] = []
+            max_per_document = max(0, max_per_document)
+
+            for i in range(max_per_document):
+                for k in doc_keys_sorted:
+                    doc_chunks = per_doc.get(k) or []
+                    if i < len(doc_chunks):
+                        chunks.append(doc_chunks[i])
+                        if max_total > 0 and len(chunks) >= max_total:
+                            break
+                if max_total > 0 and len(chunks) >= max_total:
+                    break
+
+            truncated = max_total > 0 and len(chunks) >= max_total and sum(
+                min(len(per_doc.get(k) or []), max_per_document) for k in doc_keys_sorted
+            ) > max_total
             
             logger.info(
                 "coverage_chunks_retrieved",
                 num_chunks=len(chunks),
-                num_unique_docs=len(docs_seen),
+                num_unique_docs=len(doc_keys_sorted),
                 max_per_document=max_per_document,
                 max_total=max_total,
+                prefer_early_chunks=prefer_early_chunks,
+                group_id=self.group_id,
+                truncated=truncated,
             )
             
             return chunks
             
         except Exception as e:
             logger.error("coverage_chunks_retrieval_failed", error=str(e))
+            return []
+
+    async def get_summary_chunks_by_section(
+        self,
+        max_per_document: int = 1,
+        max_total: int = 200,
+    ) -> List[SourceChunk]:
+        """Get one (or a few) summary-like chunks per document using section metadata.
+
+        This is intended for coverage-style queries ("summarize each document").
+        It prefers chunks marked as summary sections by the section-aware chunker,
+        falling back to chunk_index=0 if summary markers are absent.
+
+        Requires APOC (uses apoc.convert.fromJsonMap on TextChunk.metadata).
+        """
+
+        if not self.driver:
+            return []
+
+        max_per_document = max(0, max_per_document)
+
+        query = """
+        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        WHERE d.group_id = $group_id
+          AND t.group_id = $group_id
+          AND t.metadata IS NOT NULL
+        WITH d, t, apoc.convert.fromJsonMap(t.metadata) AS meta
+        WHERE coalesce(meta.is_summary_section, false) = true OR t.chunk_index = 0
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        WITH d, t, meta, s
+        ORDER BY d.id,
+                 CASE WHEN coalesce(meta.is_summary_section, false) = true THEN 0 ELSE 1 END ASC,
+                 t.chunk_index ASC
+        WITH d, collect({
+            chunk_id: t.id,
+            text: t.text,
+            metadata: t.metadata,
+            chunk_index: t.chunk_index,
+            section_id: s.id,
+            section_path_key: s.path_key,
+            doc_id: d.id,
+            doc_title: d.title,
+            doc_source: d.source
+        })[0..$max_per_document] AS chunks
+        UNWIND chunks AS chunk
+        RETURN
+            chunk.chunk_id AS chunk_id,
+            chunk.text AS text,
+            chunk.metadata AS metadata,
+            chunk.chunk_index AS chunk_index,
+            chunk.section_id AS section_id,
+            chunk.section_path_key AS section_path_key,
+            chunk.doc_id AS doc_id,
+            chunk.doc_title AS doc_title,
+            chunk.doc_source AS doc_source
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        max_per_document=max_per_document,
+                    )
+                    return list(result)
+
+            records = await loop.run_in_executor(None, _run_query)
+
+            per_doc: Dict[str, List[SourceChunk]] = {}
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+
+                doc_id = (record.get("doc_id") or "").strip()
+                doc_key = (doc_id or record.get("doc_source") or record.get("doc_title") or "").strip()
+                if not doc_key:
+                    continue
+                doc_key_norm = doc_key.lower()
+
+                per_doc.setdefault(doc_key_norm, []).append(
+                    SourceChunk(
+                        chunk_id=record.get("chunk_id") or "",
+                        text=record.get("text") or "",
+                        entity_name="summary_section_retrieval",
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=doc_id,
+                        document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                        document_source=record.get("doc_source") or metadata.get("url", "") or "",
+                        relevance_score=1.0,
+                    )
+                )
+
+            # Deterministic selection: round-robin across docs (same as coverage chunks).
+            doc_keys_sorted = sorted(per_doc.keys())
+            chunks: List[SourceChunk] = []
+            for i in range(max_per_document):
+                for k in doc_keys_sorted:
+                    doc_chunks = per_doc.get(k) or []
+                    if i < len(doc_chunks):
+                        chunks.append(doc_chunks[i])
+                        if max_total > 0 and len(chunks) >= max_total:
+                            break
+                if max_total > 0 and len(chunks) >= max_total:
+                    break
+
+            logger.info(
+                "summary_section_chunks_retrieved",
+                num_chunks=len(chunks),
+                num_unique_docs=len(doc_keys_sorted),
+                max_per_document=max_per_document,
+                max_total=max_total,
+                group_id=self.group_id,
+            )
+            return chunks
+
+        except Exception as e:
+            logger.warning("summary_section_retrieval_failed", error=str(e))
             return []
 
     async def get_chunks_by_section(

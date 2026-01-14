@@ -3043,12 +3043,30 @@ Instructions:
             t0_cov = time.perf_counter()
             try:
                 from .pipeline.enhanced_graph_retriever import SourceChunk
+                import os
+
+                # Count documents up-front for accurate metadata and to size coverage retrieval.
+                all_documents = await self.enhanced_retriever.get_all_documents()
+                total_docs_in_group = len(all_documents)
+                # Cover every document for small/medium groups; cap for very large groups.
+                coverage_max_total = min(max(total_docs_in_group, 0), 200)
                 
-                # Get representative chunks from ALL documents (1 per doc to minimize noise)
-                coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
-                    max_per_document=1,  # Minimal: just 1 chunk per missing doc
-                    max_total=20,        # Hard cap for very large document sets
-                )
+                use_section_retrieval = os.getenv("USE_SECTION_RETRIEVAL", "1").strip().lower() in {"1", "true", "yes"}
+
+                # Prefer section-aware summary chunks if enabled; fall back to position-based.
+                coverage_chunks = []
+                if use_section_retrieval:
+                    coverage_chunks = await self.enhanced_retriever.get_summary_chunks_by_section(
+                        max_per_document=1,
+                        max_total=coverage_max_total,
+                    )
+
+                if not coverage_chunks:
+                    # Get representative chunks from ALL documents (1 per doc to minimize noise)
+                    coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                        max_per_document=1,  # Minimal: just 1 chunk per missing doc
+                        max_total=coverage_max_total,
+                    )
                 
                 # Identify which documents we already have coverage for
                 existing_docs = set()
@@ -3056,13 +3074,6 @@ Instructions:
                     doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
                     if doc_key:
                         existing_docs.add(doc_key)
-                
-                # Count total unique docs from coverage chunks
-                all_docs = set()
-                for chunk in coverage_chunks:
-                    doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
-                    if doc_key:
-                        all_docs.add(doc_key)
                 
                 # Only add chunks for documents we're MISSING
                 existing_ids = {c.chunk_id for c in graph_context.source_chunks}
@@ -3081,7 +3092,7 @@ Instructions:
                 coverage_metadata["applied"] = added_count > 0
                 coverage_metadata["docs_added"] = len(new_docs)
                 coverage_metadata["chunks_added"] = added_count
-                coverage_metadata["total_docs_in_group"] = len(all_docs)
+                coverage_metadata["total_docs_in_group"] = total_docs_in_group
                 coverage_metadata["docs_from_relevance"] = len(existing_docs) - len(new_docs)
                 
                 timings_ms["stage_3.4.1_coverage_ms"] = int((time.perf_counter() - t0_cov) * 1000)
@@ -3090,7 +3101,7 @@ Instructions:
                     chunks_added=added_count,
                     new_docs=len(new_docs),
                     total_docs_now=len(existing_docs),
-                    total_docs_in_group=len(all_docs),
+                    total_docs_in_group=total_docs_in_group,
                 )
             except Exception as cov_err:
                 logger.warning("stage_3.4.1_coverage_gap_fill_failed", error=str(cov_err))

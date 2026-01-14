@@ -231,13 +231,13 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Why (minimal noise):** By running AFTER BM25/Vector/PPR, this only adds chunks for documents that couldn't be found via any relevance signal. For a typical 5-doc corpus where BM25 found 3 docs, this adds just 2 chunks. For a 100-doc corpus where BM25 already hit most docs, this adds only truly orphaned documents.
 *   **Document Graph Traversal:**
     - Query: `MATCH (d:Document)<-[:PART_OF]-(t:TextChunk) WHERE d.group_id = $gid`
-    - Ordered by `t.chunk_index ASC` (early chunks tend to be document introductions)
-    - Default: 1 chunk per missing document (minimal noise)
+    - **Preferred (section-aware):** If `USE_SECTION_RETRIEVAL=1`, prefer one summary/representative chunk per document based on section metadata (e.g., "Purpose" / summary sections) when available.
+    - **Fallback (position-based):** Otherwise, order by `t.chunk_index ASC` (early chunks tend to be document introductions) and take 1 chunk per missing document.
     - Hard cap: 20 chunks total to prevent context explosion in large document sets
 *   **Gap Detection:**
-    - Collect all `document_id` values from existing `graph_context.source_chunks`
-    - Compare against documents returned by coverage query
-    - Only add chunks for documents NOT already present
+    - Compute a stable per-document key from existing context (prefer `document_id`, else `document_source`, else `document_title`)
+    - If relevance-based retrieval already covers all documents in the group, skip coverage retrieval entirely
+    - Otherwise, only add chunks for documents NOT already present (dedupe by `chunk_id`)
 *   **Metadata Tracking:**
     - `coverage_metadata.docs_added`: How many new documents were added
     - `coverage_metadata.chunks_added`: Total chunks injected

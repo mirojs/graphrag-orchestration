@@ -2866,7 +2866,13 @@ Instructions:
 
         # Graph-signal summary (used by generic negative detection downstream).
         # Define this early so it is always available even if later stages short-circuit.
-        has_graph_signal = bool(hub_entities) or bool(graph_context.related_entities) or bool(graph_context.relationships or [])
+        # IMPORTANT: TextChunk evidence (from BM25/vector/coverage retrieval) counts as signal.
+        has_graph_signal = (
+            bool(hub_entities)
+            or bool(graph_context.related_entities)
+            or bool(graph_context.relationships or [])
+            or bool(graph_context.source_chunks or [])
+        )
 
         # ================================================================
         # GRAPH-BASED NEGATIVE DETECTION (using LazyGraphRAG + HippoRAG2 signals)
@@ -2878,7 +2884,9 @@ Instructions:
         # captures conceptual relationships, not just word overlap.
         # ================================================================
         
-        if not has_graph_signal:
+        # Never short-circuit coverage-intent queries; they rely on Stage 3.4.1 to
+        # fill missing documents even when the entity/relationship graph is sparse.
+        if not has_graph_signal and not coverage_mode:
             # Graph traversal found nothing - topic doesn't exist
             logger.info(
                 "route_3_negative_detection_no_graph_signal",

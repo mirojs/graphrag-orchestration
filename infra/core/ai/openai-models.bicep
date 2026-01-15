@@ -25,19 +25,19 @@ resource gpt41Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   }
 }
 
-// GPT-4o - Hybrid NER, Intermediate Processing & Synthesis (Standard SKU in Sweden Central)
-resource gpt4oDeployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
+// GPT-5.1 - Hybrid NER, Intermediate Processing & Synthesis (Data Zone Standard in Sweden Central)
+resource gpt51Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
   parent: openAiAccount
-  name: 'gpt-4o'
+  name: 'gpt-5.1'
   sku: {
-    name: 'Standard'
+    name: 'DataZoneStandard'
     capacity: 100
   }
   properties: {
     model: {
       format: 'OpenAI'
-      name: 'gpt-4o'
-      version: '2024-11-20'
+      name: 'gpt-5.1'
+      version: '2025-11-13'
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }
@@ -60,7 +60,7 @@ resource gpt4oMiniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
     }
     raiPolicyName: 'Microsoft.DefaultV2'
   }
-  dependsOn: [gpt4oDeployment]
+  dependsOn: [gpt51Deployment]
 }
 
 // NOTE: text-embedding-3-small is deprecated and should NOT be deployed
@@ -68,5 +68,5 @@ resource gpt4oMiniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
 // Only deploying the 3 essential LLM models: gpt-4.1, gpt-4o, gpt-4o-mini
 
 output gpt41DeploymentName string = gpt41Deployment.name
-output gpt4oDeploymentName string = gpt4oDeployment.name
+output gpt51DeploymentName string = gpt51Deployment.name
 output gpt4oMiniDeploymentName string = gpt4oMiniDeployment.name

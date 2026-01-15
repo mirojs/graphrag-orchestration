@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None
     AZURE_OPENAI_BEARER_TOKEN: Optional[str] = None  # For local dev
-    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-4o"  # Primary model for synthesis
+    AZURE_OPENAI_DEPLOYMENT_NAME: str = "gpt-5.1"  # Primary model for synthesis
     AZURE_OPENAI_REASONING_EFFORT: str = "medium"  # Reasoning effort for synthesis
     # Optional override only for DRIFT to allow faster model like gpt-4o-mini
-    AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = "gpt-4o"
+    AZURE_OPENAI_DRIFT_DEPLOYMENT_NAME: Optional[str] = "gpt-5.1"
     # Indexing operations (entity/relationship extraction, RAPTOR clustering)
     AZURE_OPENAI_INDEXING_DEPLOYMENT: Optional[str] = "gpt-4.1"
     # Query routing (intent classification: Vector vs Graph vs RAPTOR)
@@ -28,14 +28,14 @@ class Settings(BaseSettings):
     # Router: Query classification (simple vs complex vs ambiguous)
     HYBRID_ROUTER_MODEL: str = "gpt-4o-mini"  # Fast, low cost, sufficient for classification
     # Route 2: Entity extraction (NER) - needs high precision
-    HYBRID_NER_MODEL: str = "gpt-4o"  # High precision for seed entity identification
+    HYBRID_NER_MODEL: str = "gpt-5.1"  # High precision for seed entity identification
     # Route 2/3: Final answer synthesis - best available model
-    HYBRID_SYNTHESIS_MODEL: str = "gpt-4o"  # High quality synthesis
+    HYBRID_SYNTHESIS_MODEL: str = "gpt-5.1"  # High quality synthesis
     # Route 3: Query decomposition - needs strong reasoning
     HYBRID_DECOMPOSITION_MODEL: str = "gpt-4.1"  # Strong reasoning for breaking down ambiguity
     # Route 3: Sub-question intermediate synthesis
-    HYBRID_INTERMEDIATE_MODEL: str = "gpt-4o"  # Good balance of speed/quality
-    AZURE_OPENAI_MODEL_VERSION: str = "2024-11-20"  # gpt-4o (2024-11-20)
+    HYBRID_INTERMEDIATE_MODEL: str = "gpt-5.1"  # Good balance of speed/quality
+    AZURE_OPENAI_MODEL_VERSION: str = "2025-11-13"  # gpt-5.1 (2025-11-13)
     
     # Embeddings (Switzerland North - Separate resource)
     AZURE_OPENAI_EMBEDDING_ENDPOINT: Optional[str] = None  # Switzerland North endpoint

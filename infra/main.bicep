@@ -88,7 +88,7 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
-        value: 'gpt-4o'
+        value: 'gpt-5.1'
       }
       {
         name: 'AZURE_OPENAI_ROUTING_DEPLOYMENT'

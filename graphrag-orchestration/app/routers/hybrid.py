@@ -1766,9 +1766,14 @@ async def debug_section_similarity_distribution(request: Request):
     
     try:
         from app.hybrid.services.neo4j_store import Neo4jStoreV3
+        from app.core.config import settings as app_settings
         import numpy as np
         
-        neo4j_store = Neo4jStoreV3()
+        neo4j_store = Neo4jStoreV3(
+            uri=app_settings.NEO4J_URI,
+            username=app_settings.NEO4J_USERNAME,
+            password=app_settings.NEO4J_PASSWORD,
+        )
         
         # Fetch all sections with embeddings
         with neo4j_store.driver.session(database=neo4j_store.database) as session:

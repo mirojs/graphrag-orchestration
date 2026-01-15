@@ -158,6 +158,14 @@ class LazyGraphRAGIndexingPipeline:
         section_stats = await self._build_section_graph(group_id, all_chunks, chunk_to_doc_id)
         stats["sections"] = section_stats.get("sections_created", 0)
         stats["section_edges"] = section_stats.get("in_section_edges", 0)
+        
+        # 4.6) Embed Section nodes (required for semantic similarity edges).
+        section_embed_stats = await self._embed_section_nodes(group_id)
+        stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
+        
+        # 4.7) Build SEMANTICALLY_SIMILAR edges between Sections (HippoRAG 2 improvement).
+        similarity_stats = await self._build_section_similarity_edges(group_id)
+        stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
 
         # 5) Entity/relationship extraction (best-effort, but recommended).
         entities: List[Entity] = []
@@ -1281,3 +1289,204 @@ class LazyGraphRAGIndexingPipeline:
             "sections_created": sections_created,
             "in_section_edges": in_section_count,
         }
+
+    async def _embed_section_nodes(self, group_id: str) -> Dict[str, Any]:
+        """Embed Section nodes for semantic similarity computation.
+        
+        Creates embeddings for Section nodes by concatenating:
+        - Section title
+        - Aggregated text from linked TextChunks (first 500 chars each, max 3 chunks)
+        
+        This enables SEMANTICALLY_SIMILAR edge creation for "soft" thematic hops.
+        
+        Args:
+            group_id: Tenant identifier
+            
+        Returns:
+            Stats dict with sections_embedded count
+        """
+        if self.embedder is None:
+            logger.warning("section_embedding_skipped_no_embedder")
+            return {"sections_embedded": 0, "skipped": "no_embedder"}
+        
+        # Fetch sections with their linked chunk texts
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (s:Section {group_id: $group_id})
+                WHERE s.embedding IS NULL
+                OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
+                WITH s, collect(t.text)[0..3] AS chunk_texts
+                RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key, chunk_texts
+                """,
+                group_id=group_id,
+            )
+            sections_to_embed = [
+                {
+                    "id": record["section_id"],
+                    "title": record["title"] or "",
+                    "path_key": record["path_key"] or "",
+                    "chunk_texts": record["chunk_texts"] or [],
+                }
+                for record in result
+            ]
+        
+        if not sections_to_embed:
+            return {"sections_embedded": 0}
+        
+        # Build embedding texts
+        texts_to_embed = []
+        for sec in sections_to_embed:
+            # Combine section title + path + sample chunk content
+            parts = [sec["title"], sec["path_key"]]
+            for chunk_text in sec["chunk_texts"]:
+                if chunk_text:
+                    parts.append(chunk_text[:500])  # First 500 chars of each chunk
+            combined = " | ".join(p for p in parts if p)
+            texts_to_embed.append(combined[:2000])  # Cap total length
+        
+        # Generate embeddings
+        try:
+            embeddings = await self.embedder.aget_text_embedding_batch(texts_to_embed)
+        except Exception as e:
+            logger.warning("section_embedding_failed", extra={"error": str(e)})
+            return {"sections_embedded": 0, "error": str(e)}
+        
+        # Update Section nodes with embeddings
+        updates = [
+            {"id": sec["id"], "embedding": emb}
+            for sec, emb in zip(sections_to_embed, embeddings)
+            if emb is not None
+        ]
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            session.run(
+                """
+                UNWIND $updates AS u
+                MATCH (s:Section {id: u.id})
+                SET s.embedding = u.embedding
+                """,
+                updates=updates,
+            )
+        
+        logger.info(
+            "section_nodes_embedded",
+            extra={"group_id": group_id, "sections_embedded": len(updates)},
+        )
+        
+        return {"sections_embedded": len(updates)}
+
+    async def _build_section_similarity_edges(
+        self,
+        group_id: str,
+        similarity_threshold: float = 0.80,
+        max_edges_per_section: int = 5,
+    ) -> Dict[str, Any]:
+        """Create SEMANTICALLY_SIMILAR edges between Section nodes.
+        
+        This enables "soft" thematic hops in PPR traversal, solving HippoRAG 2's
+        "Latent Transition" weakness where two sections are conceptually related
+        but share no explicit entities.
+        
+        Only creates cross-document edges (same-document sections are already
+        connected via SUBSECTION_OF hierarchy).
+        
+        Args:
+            group_id: Tenant identifier
+            similarity_threshold: Minimum cosine similarity to create edge (default 0.80)
+            max_edges_per_section: Cap edges per section to avoid graph bloat
+            
+        Returns:
+            Stats dict with edges_created count
+        """
+        # Fetch all sections with embeddings
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (s:Section {group_id: $group_id})
+                WHERE s.embedding IS NOT NULL
+                RETURN s.id AS id, s.doc_id AS doc_id, s.embedding AS embedding
+                """,
+                group_id=group_id,
+            )
+            sections = [
+                {"id": record["id"], "doc_id": record["doc_id"], "embedding": record["embedding"]}
+                for record in result
+            ]
+        
+        if len(sections) < 2:
+            return {"edges_created": 0, "reason": "insufficient_sections"}
+        
+        # Compute pairwise similarities for cross-document sections
+        import numpy as np
+        
+        edges_to_create = []
+        edge_count_per_section: Dict[str, int] = {}
+        
+        for i, s1 in enumerate(sections):
+            if s1["embedding"] is None:
+                continue
+            emb1 = np.array(s1["embedding"])
+            norm1 = np.linalg.norm(emb1)
+            if norm1 == 0:
+                continue
+            
+            for j, s2 in enumerate(sections):
+                if j <= i:  # Avoid duplicates and self-comparison
+                    continue
+                if s1["doc_id"] == s2["doc_id"]:  # Only cross-document
+                    continue
+                if s2["embedding"] is None:
+                    continue
+                
+                # Check edge count limits
+                if edge_count_per_section.get(s1["id"], 0) >= max_edges_per_section:
+                    continue
+                if edge_count_per_section.get(s2["id"], 0) >= max_edges_per_section:
+                    continue
+                
+                emb2 = np.array(s2["embedding"])
+                norm2 = np.linalg.norm(emb2)
+                if norm2 == 0:
+                    continue
+                
+                # Cosine similarity
+                similarity = float(np.dot(emb1, emb2) / (norm1 * norm2))
+                
+                if similarity >= similarity_threshold:
+                    edges_to_create.append({
+                        "source_id": s1["id"],
+                        "target_id": s2["id"],
+                        "similarity": round(similarity, 4),
+                    })
+                    edge_count_per_section[s1["id"]] = edge_count_per_section.get(s1["id"], 0) + 1
+                    edge_count_per_section[s2["id"]] = edge_count_per_section.get(s2["id"], 0) + 1
+        
+        if not edges_to_create:
+            return {"edges_created": 0}
+        
+        # Create SEMANTICALLY_SIMILAR edges in Neo4j
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(
+                """
+                UNWIND $edges AS e
+                MATCH (s1:Section {id: e.source_id})
+                MATCH (s2:Section {id: e.target_id})
+                MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
+                SET r.similarity = e.similarity, r.created_at = datetime()
+                RETURN count(r) AS count
+                """,
+                edges=edges_to_create,
+            )
+            edges_created = result.single()["count"]
+        
+        logger.info(
+            "section_similarity_edges_created",
+            extra={
+                "group_id": group_id,
+                "edges_created": edges_created,
+                "threshold": similarity_threshold,
+            },
+        )
+        
+        return {"edges_created": edges_created}

@@ -3383,6 +3383,7 @@ Instructions:
     
     # =========================================================================
     # Route 4: DRIFT Equivalent (Multi-Hop Iterative Reasoning)
+    # With Agentic Confidence Loop for deep reasoning (Jan 2026 upgrade)
     # =========================================================================
     
     async def _execute_route_4_drift(
@@ -3398,7 +3399,11 @@ Instructions:
         Stage 4.1: Query decomposition (DRIFT-style)
         Stage 4.2: Iterative entity discovery
         Stage 4.3: Consolidated HippoRAG tracing
+        Stage 4.3.5: Confidence Check + Optional Re-decomposition (NEW)
         Stage 4.4: Multi-source synthesis
+        
+        The Confidence Loop (Stage 4.3.5) addresses HippoRAG 2's "Iterative Limits"
+        weakness by detecting sparse subgraphs and triggering re-decomposition.
         """
         logger.info("route_4_drift_start", 
                    query=query[:50],
@@ -3409,38 +3414,14 @@ Instructions:
         sub_questions = await self._drift_decompose(query)
         logger.info("stage_4.1_complete", num_sub_questions=len(sub_questions))
         
-        # Stage 4.2: Iterative Entity Discovery
+        # Stage 4.2: Iterative Entity Discovery (First Pass)
         logger.info("stage_4.2_iterative_discovery")
-        all_seeds: List[str] = []
-        intermediate_results: List[Dict[str, Any]] = []
-        
-        for i, sub_q in enumerate(sub_questions):
-            logger.info(f"processing_sub_question_{i+1}", question=sub_q[:50])
-            
-            # Get entities for this sub-question
-            sub_entities = await self.disambiguator.disambiguate(sub_q)
-            all_seeds.extend(sub_entities)
-            
-            # Optional: Run partial search for context building
-            if len(sub_entities) > 0:
-                partial_evidence = await self.tracer.trace(
-                    query=sub_q,
-                    seed_entities=sub_entities,
-                    top_k=5  # Smaller for sub-questions
-                )
-                intermediate_results.append({
-                    "question": sub_q,
-                    "entities": sub_entities,
-                    "evidence_count": len(partial_evidence)
-                })
-        
-        # Deduplicate seeds
-        all_seeds = list(set(all_seeds))
+        all_seeds, intermediate_results = await self._drift_execute_discovery_pass(sub_questions)
         logger.info("stage_4.2_complete", 
                    total_unique_seeds=len(all_seeds),
                    sub_question_results=len(intermediate_results))
         
-        # Stage 4.3: Consolidated Tracing
+        # Stage 4.3: Consolidated Tracing (First Pass)
         logger.info("stage_4.3_consolidated_tracing")
         complete_evidence = await self.tracer.trace(
             query=query,
@@ -3449,13 +3430,68 @@ Instructions:
         )
         logger.info("stage_4.3_complete", num_evidence=len(complete_evidence))
         
+        # Stage 4.3.5: Confidence Check + Optional Re-decomposition
+        # This is the "Agentic Confidence Loop" that addresses HippoRAG 2's iterative limits
+        confidence = self._compute_subgraph_confidence(sub_questions, intermediate_results)
+        confidence_loop_triggered = False
+        refined_sub_questions: List[str] = []
+        
+        if confidence < 0.5 and len(sub_questions) > 1:
+            # Identify "thin" sub-questions (found < 2 evidence chunks)
+            thin_questions = [
+                r["question"] for r in intermediate_results 
+                if r.get("evidence_count", 0) < 2
+            ]
+            if thin_questions:
+                logger.info("stage_4.3.5_confidence_loop_triggered", 
+                           confidence=confidence, 
+                           thin_questions=len(thin_questions))
+                confidence_loop_triggered = True
+                
+                # Re-decompose only the thin questions with additional context
+                context_summary = "; ".join([
+                    f"{r['question']}: found {r.get('evidence_count', 0)} evidence"
+                    for r in intermediate_results if r.get("evidence_count", 0) >= 2
+                ][:3])  # Top 3 successful sub-questions as context
+                
+                refined_sub_questions = await self._drift_decompose(
+                    f"Based on what we found ({context_summary}), please clarify these unknowns: {'; '.join(thin_questions)}"
+                )
+                
+                # Second pass: Discovery + Tracing for refined questions
+                if refined_sub_questions:
+                    additional_seeds, additional_results = await self._drift_execute_discovery_pass(refined_sub_questions)
+                    
+                    # Merge seeds and results
+                    all_seeds = list(set(all_seeds + additional_seeds))
+                    intermediate_results.extend(additional_results)
+                    
+                    # Re-run consolidated tracing with expanded seeds
+                    if additional_seeds:
+                        additional_evidence = await self.tracer.trace(
+                            query=query,
+                            seed_entities=additional_seeds,
+                            top_k=15  # Smaller for refinement pass
+                        )
+                        # Deduplicate evidence by chunk ID
+                        existing_ids = {e.get("chunk_id") or e.get("id") for e in complete_evidence}
+                        for ev in additional_evidence:
+                            ev_id = ev.get("chunk_id") or ev.get("id")
+                            if ev_id not in existing_ids:
+                                complete_evidence.append(ev)
+                                existing_ids.add(ev_id)
+                    
+                    logger.info("stage_4.3.5_complete", 
+                               additional_seeds=len(additional_seeds),
+                               total_evidence=len(complete_evidence))
+        
         # Stage 4.4: Multi-Source Synthesis
         logger.info("stage_4.4_synthesis")
         synthesis_result = await self.synthesizer.synthesize(
             query=query,
             evidence_nodes=complete_evidence,
             response_type=response_type,
-            sub_questions=sub_questions,
+            sub_questions=sub_questions + refined_sub_questions,
             intermediate_context=intermediate_results
         )
         logger.info("stage_4.4_complete")
@@ -3467,15 +3503,92 @@ Instructions:
             "evidence_path": synthesis_result["evidence_path"],
             "metadata": {
                 "sub_questions": sub_questions,
+                "refined_sub_questions": refined_sub_questions if confidence_loop_triggered else [],
+                "confidence_score": confidence,
+                "confidence_loop_triggered": confidence_loop_triggered,
                 "all_seeds_discovered": all_seeds,
                 "intermediate_results": intermediate_results,
                 "num_evidence_nodes": len(complete_evidence),
                 "text_chunks_used": synthesis_result["text_chunks_used"],
                 "latency_estimate": "thorough",
                 "precision_level": "maximum",
-                "route_description": "DRIFT-style iterative multi-hop reasoning with HippoRAG PPR"
+                "route_description": "DRIFT-style iterative multi-hop reasoning with HippoRAG PPR + Confidence Loop"
             }
         }
+    
+    async def _drift_execute_discovery_pass(
+        self, 
+        sub_questions: List[str]
+    ) -> Tuple[List[str], List[Dict[str, Any]]]:
+        """
+        Execute entity discovery for a list of sub-questions.
+        
+        Args:
+            sub_questions: List of decomposed sub-questions
+            
+        Returns:
+            Tuple of (all_seeds, intermediate_results)
+        """
+        all_seeds: List[str] = []
+        intermediate_results: List[Dict[str, Any]] = []
+        
+        for i, sub_q in enumerate(sub_questions):
+            logger.info(f"processing_sub_question_{i+1}", question=sub_q[:50])
+            
+            # Get entities for this sub-question
+            sub_entities = await self.disambiguator.disambiguate(sub_q)
+            all_seeds.extend(sub_entities)
+            
+            # Run partial search for context building
+            evidence_count = 0
+            if len(sub_entities) > 0:
+                partial_evidence = await self.tracer.trace(
+                    query=sub_q,
+                    seed_entities=sub_entities,
+                    top_k=5  # Smaller for sub-questions
+                )
+                evidence_count = len(partial_evidence)
+            
+            intermediate_results.append({
+                "question": sub_q,
+                "entities": sub_entities,
+                "evidence_count": evidence_count
+            })
+        
+        # Deduplicate seeds
+        all_seeds = list(set(all_seeds))
+        return all_seeds, intermediate_results
+    
+    def _compute_subgraph_confidence(
+        self, 
+        sub_questions: List[str], 
+        intermediate_results: List[Dict[str, Any]]
+    ) -> float:
+        """
+        Compute confidence score for retrieved subgraph.
+        
+        This metric determines whether the Confidence Loop should trigger.
+        A low score indicates sparse evidence coverage.
+        
+        Score = (sub-questions with >= 2 evidence) / (total sub-questions)
+        
+        Args:
+            sub_questions: List of decomposed sub-questions
+            intermediate_results: Results from discovery pass
+            
+        Returns:
+            0.0-1.0 confidence score
+        """
+        if not sub_questions:
+            return 1.0
+        
+        # Count sub-questions with sufficient evidence
+        satisfied = sum(
+            1 for r in intermediate_results 
+            if r.get("evidence_count", 0) >= 2
+        )
+        
+        return satisfied / len(sub_questions)
     
     async def _drift_decompose(self, query: str) -> List[str]:
         """

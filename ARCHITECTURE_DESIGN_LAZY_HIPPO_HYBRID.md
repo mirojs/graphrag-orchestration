@@ -308,6 +308,19 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 *   **Output:** Executive summary + detailed evidence trail
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, final answer uses deterministic sentence extraction (discovery pipeline still uses LLM for decomposition/disambiguation, but final composition is 100% repeatable)
 
+### Route 4: Deep Reasoning & Benchmark Criteria (Updated Jan 2026)
+
+To validate the multi-hop capabilities of Route 4 (DRIFT), the benchmark suite has been expanded beyond simple retrieval.
+
+| Test Category | Purpose | Example Query Strategy |
+|:--------------|:--------|:-----------------------|
+| **Implicit Discovery** | Test ability to find entities not named in the query | *"Find the vendor for X. Does their invoice match contract Y?"* (Must discover vendor name first) |
+| **Logic Inference** | Test application of abstract rules to concrete facts | *"Was the notification valid given the emergency status?"* (Must infer 'Emergency' -> 'Phone Only' rule) |
+| **Ambiguity Resolution** | Test decomposition of vague terms | *"Compare financial penalties"* (Must define 'penalties' for potentially different contract types) |
+| **Conflict Resolution** | Test synthesis of contradictory sources | *"Do the Invoice and Contract payment terms match?"* (Must explicitly identify discrepancies) |
+
+These tests ensure Route 4 performs true **inference**, not just multi-step lookup.
+
 ---
 
 ## 3.5. Negative Detection Strategies (Hallucination Prevention)
@@ -1711,22 +1724,24 @@ Adding `llama-index-retrievers-hipporag` aligns with the stack.
 
 ## 9. Azure OpenAI Model Selection
 
-Based on the available models (`gpt-4o`, `gpt-4.1`, `gpt-4o-mini`, `gpt-5.2`), we recommend:
+Based on the available models (`gpt-5.1`, `gpt-4.1`, `gpt-4o-mini`), we recommend:
 
 | Component | Task | Recommended Model | Reasoning |
 |:----------|:-----|:------------------|:----------|
 | **Router** | Query Classification | **gpt-4o-mini** | Fast, low cost, sufficient for classification |
 | **Route 1** | Vector Embeddings | **text-embedding-3-large** | Standard for high-quality retrieval |
-| **Route 2** | Entity Extraction | **NER model or gpt-4o-mini** | Deterministic preferred; LLM fallback |
-| **Route 2** | Iterative Deepening | **gpt-4o** | Good reasoning for relevance decisions |
-| **Route 2** | Synthesis | **gpt-4o** | Balanced speed/quality |
+| **Route 2** | Entity Extraction | **gpt-5.1** | High precision for seed discovery (upgraded from NER) |
+| **Route 2** | Iterative Deepening | **gpt-5.1** | Excellent reasoning for relevance decisions |
+| **Route 2** | Synthesis | **gpt-5.1** | Best synthesis quality |
 | **Route 3** | Community Matching | **Embedding similarity** | Deterministic |
 | **Route 3** | HippoRAG PPR | *N/A (Algorithm)* | Mathematical, no LLM |
-| **Route 3** | Synthesis | **gpt-5.2** | Best for comprehensive reports |
+| **Route 3** | Synthesis | **gpt-5.1** | Best for comprehensive reports |
 | **Route 4** | Query Decomposition | **gpt-4.1** | Strong reasoning for ambiguity |
-| **Route 4** | Entity Resolution | **gpt-4o** | Good balance |
+| **Route 4** | Entity Resolution | **gpt-5.1** | High precision |
 | **Route 4** | HippoRAG PPR | *N/A (Algorithm)* | Mathematical, no LLM |
-| **Route 4** | Final Synthesis | **gpt-5.2** | Maximum coherence for complex answers |
+| **Route 4** | Final Synthesis | **gpt-5.1** | Maximum coherence for complex answers |
+
+*Note: `gpt-4o` and `gpt-5.2` references replaced by standardized `gpt-5.1` (DataZoneStandard) for all intelligent tasks.*
 
 ---
 
@@ -2963,7 +2978,169 @@ When to use which extractor:
 
 **Your Case (5 PDFs):** Use native, no fallback needed. If issues occur, just re-index.
 
-### 17.5. Code Organization
+---
+
+## 18. Strategic Roadmap: Addressing HippoRAG 2 Limitations (2026+)
+
+While HippoRAG 2 is state-of-the-art, standard implementations suffer from four critical weaknesses (NER Gap, Latent Transitions, Graph Bloat, Iterative Limits). This architecture addresses them through **Hybrid Structural Design**:
+
+### 18.1. Checkpoint 1: Visualizing the Improvements
+
+| Weakness | Standard HippoRAG 2 Failure | Our Solution (LazyGraphRAG Hybrid) | Status |
+|:---------|:----------------------------|:-----------------------------------|:-------|
+| **1. The NER Gap** | If LLM misses extract, info is lost forever. | **Dual-Graph Safety Net:** If Entity Graph misses, **Section Graph** catches the chunk via `[:IN_SECTION]`. | ✅ Implemented |
+| **2. Latent Transitions** | Can't link thematic passages without shared keywords. | **Soft Edge Traversals:** We add `(:Section)-[:SEMANTICALLY_SIMILAR]->(:Section)` edges based on embedding similarity, allowing PPR to jump semantic gaps. | 🛠️ Planned (Q1) |
+| **3. Graph Bloat** | Low-value nodes dilute PPR signal at scale. | **Hierarchical Pruning:** We prune "Leaf Sections" (too granular) but preserve "Parent Sections" (context) to maintain signal. | 🛠️ Planned (Q2) |
+| **4. Iterative Limits** | Single-shot PPR misses conditional dependencies. | **Agentic Confidence Loop:** Route 4 checks subgraph density; if low, triggers 2nd decomposition pass (Self-Correction). | 🛠️ Planned (Q2) |
+
+### 18.2. Implementation Details
+
+#### 1. Solving "Latent Transitions" with Section Embeddings
+*   **Concept:** Standard edges are binary (Connected/Not). We introduce "Soft Edges" derived from section vector similarity.
+*   **Mechanism:**
+    1.  Compute cosine similarity between all `SectionNode` embeddings.
+    2.  For pairs with similarity > 0.85 (but no existing edge), create a `[:SEMANTICALLY_SIMILAR]` relationship.
+    3.  HippoRAG 2 PPR algorithm naturally flows probability across these edges ("Thematic Hops").
+
+#### 2. Solving "Iterative Limits" with the Route 4 Confidence Loop
+*   **current Route 4:** Decomposition → Discovery → PPR → Synthesis.
+*   **Agentic Upgrade:**
+    1.  **Decomposition:** Break query into Q1, Q2, Q3.
+    2.  **Execution:** Run Discovery + PPR.
+    3.  **Confidence Check:**
+        *   *Metric:* Did we find > 1 evidence chunk per sub-question?
+        *   *Metric:* Is the PageRank mass concentrated or diffuse?
+    4.  **Loop:** If Confidence < Threshold, synthesize "What we know" and re-decompose the "Unknowns" for a second pass.
+
+This transforms Route 4 from a linear pipeline into a **reasoning engine**.
+
+### 18.3. Implementation Plan (Q1 2026)
+
+| Phase | Task | File(s) | Priority | Status |
+|:------|:-----|:--------|:---------|:-------|
+| **Phase A** | Add SEMANTICALLY_SIMILAR edges during indexing | `lazygraphrag_pipeline.py` | HIGH | 🛠️ Implementing |
+| **Phase B** | Add Confidence Loop to Route 4 | `orchestrator.py` | HIGH | 🛠️ Implementing |
+| **Phase C** | Update PPR to traverse SEMANTICALLY_SIMILAR | `tracing.py` | MEDIUM | Planned |
+| **Phase D** | Add hierarchical pruning (future) | `lazygraphrag_pipeline.py` | LOW | Deferred |
+
+#### Phase A: SEMANTICALLY_SIMILAR Edges
+
+**Location:** `app/hybrid/indexing/lazygraphrag_pipeline.py`
+
+**New Method:** `_build_section_similarity_edges()`
+
+```python
+async def _build_section_similarity_edges(
+    self,
+    group_id: str,
+    similarity_threshold: float = 0.85,
+    max_edges_per_section: int = 5,
+) -> Dict[str, Any]:
+    """
+    Create SEMANTICALLY_SIMILAR edges between Section nodes based on embedding similarity.
+    
+    This enables "soft" thematic hops in PPR traversal, solving HippoRAG 2's
+    "Latent Transition" weakness where two sections are conceptually related
+    but share no explicit entities.
+    
+    Args:
+        group_id: Tenant identifier
+        similarity_threshold: Minimum cosine similarity to create edge (0.85 = high confidence)
+        max_edges_per_section: Cap edges per section to avoid graph bloat
+    
+    Returns:
+        Stats dict with edges_created count
+    """
+```
+
+**Cypher Pattern:**
+```cypher
+// Find section pairs with high embedding similarity
+MATCH (s1:Section {group_id: $group_id})
+MATCH (s2:Section {group_id: $group_id})
+WHERE s1.id < s2.id  // Avoid duplicates
+  AND s1.doc_id <> s2.doc_id  // Cross-document only
+  AND s1.embedding IS NOT NULL
+  AND s2.embedding IS NOT NULL
+WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim
+WHERE sim > $threshold
+MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
+SET r.similarity = sim, r.created_at = datetime()
+```
+
+#### Phase B: Route 4 Confidence Loop
+
+**Location:** `app/hybrid/orchestrator.py`
+
+**Modified Method:** `_execute_route_4_drift()`
+
+```python
+async def _execute_route_4_drift(self, query: str, response_type: str) -> Dict[str, Any]:
+    """
+    Route 4 with Agentic Confidence Loop.
+    
+    NEW: After Stage 4.3 (Consolidated PPR), compute confidence score.
+    If confidence < 0.5, trigger a second decomposition pass on "unknowns".
+    """
+    # Stage 4.1: Query Decomposition
+    sub_questions = await self._drift_decompose(query)
+    
+    # Stage 4.2-4.3: Discovery + PPR (first pass)
+    evidence, intermediate_results = await self._drift_execute_pass(sub_questions)
+    
+    # NEW: Stage 4.3.5: Confidence Check
+    confidence = self._compute_subgraph_confidence(sub_questions, intermediate_results)
+    
+    if confidence < 0.5 and len(sub_questions) > 1:
+        # Identify "thin" sub-questions (found < 2 evidence chunks)
+        thin_questions = [
+            r["question"] for r in intermediate_results 
+            if r["evidence_count"] < 2
+        ]
+        if thin_questions:
+            logger.info("route_4_confidence_loop_triggered", 
+                       confidence=confidence, 
+                       thin_questions=len(thin_questions))
+            
+            # Re-decompose only the thin questions
+            refined_sub_questions = await self._drift_decompose(
+                f"Given what we know, clarify: {'; '.join(thin_questions)}"
+            )
+            
+            # Second pass
+            additional_evidence, _ = await self._drift_execute_pass(refined_sub_questions)
+            evidence.extend(additional_evidence)
+    
+    # Stage 4.4: Synthesis
+    return await self._drift_synthesize(query, evidence, sub_questions, intermediate_results)
+```
+
+**Confidence Metric:**
+```python
+def _compute_subgraph_confidence(
+    self, 
+    sub_questions: List[str], 
+    intermediate_results: List[Dict]
+) -> float:
+    """
+    Compute confidence score for retrieved subgraph.
+    
+    Score = (sub-questions with >= 2 evidence) / (total sub-questions)
+    
+    Returns:
+        0.0-1.0 confidence score
+    """
+    if not sub_questions:
+        return 1.0
+    
+    satisfied = sum(
+        1 for r in intermediate_results 
+        if r.get("evidence_count", 0) >= 2
+    )
+    return satisfied / len(sub_questions)
+```
+
+---
 
 ```
 app/services/retrieval_service.py

@@ -1746,3 +1746,158 @@ async def debug_test_vector_search(request: Request, body: HybridQueryRequest):
     except Exception as e:
         logger.error("debug_test_vector_search_failed", group_id=group_id, error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/debug/section_similarity_distribution")
+async def debug_section_similarity_distribution(request: Request):
+    """
+    Debug endpoint to compute cross-document section embedding similarity distribution.
+    
+    Returns:
+    - Number of sections with embeddings
+    - Number of cross-document pairs
+    - Similarity distribution (min, p50, p90, p95, p99, max)
+    - Suggested threshold to create edges
+    
+    Use this to understand why semantic_similarity_edges = 0.
+    """
+    group_id = request.state.group_id
+    logger.info("debug_section_similarity_distribution", group_id=group_id)
+    
+    try:
+        from app.hybrid.services.neo4j_store import Neo4jStore
+        import numpy as np
+        
+        neo4j_store = Neo4jStore()
+        
+        # Fetch all sections with embeddings
+        with neo4j_store.driver.session(database=neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (s:Section {group_id: $group_id})
+                WHERE s.embedding IS NOT NULL
+                RETURN s.id AS id, s.doc_id AS doc_id, s.embedding AS embedding
+                """,
+                group_id=group_id,
+            )
+            sections = [
+                {"id": record["id"], "doc_id": record["doc_id"], "embedding": record["embedding"]}
+                for record in result
+            ]
+        
+        if len(sections) < 2:
+            return {
+                "group_id": group_id,
+                "sections_with_embeddings": len(sections),
+                "message": "Insufficient sections (need at least 2)"
+            }
+        
+        # Compute pairwise cross-document similarities
+        similarities = []
+        pair_details = []
+        
+        for i, s1 in enumerate(sections):
+            if s1["embedding"] is None:
+                continue
+            emb1 = np.array(s1["embedding"])
+            norm1 = np.linalg.norm(emb1)
+            if norm1 == 0:
+                continue
+            
+            for j, s2 in enumerate(sections):
+                if j <= i:  # Avoid duplicates and self-comparison
+                    continue
+                if s1["doc_id"] == s2["doc_id"]:  # Only cross-document
+                    continue
+                if s2["embedding"] is None:
+                    continue
+                
+                emb2 = np.array(s2["embedding"])
+                norm2 = np.linalg.norm(emb2)
+                if norm2 == 0:
+                    continue
+                
+                # Cosine similarity
+                similarity = float(np.dot(emb1, emb2) / (norm1 * norm2))
+                similarities.append(similarity)
+                
+                # Keep top pairs for inspection
+                if len(pair_details) < 10 or similarity > min(p["similarity"] for p in pair_details):
+                    pair_details.append({
+                        "s1_id": s1["id"],
+                        "s1_doc": s1["doc_id"],
+                        "s2_id": s2["id"],
+                        "s2_doc": s2["doc_id"],
+                        "similarity": round(similarity, 4),
+                    })
+                    pair_details.sort(key=lambda x: x["similarity"], reverse=True)
+                    pair_details = pair_details[:10]  # Keep top 10
+        
+        if not similarities:
+            return {
+                "group_id": group_id,
+                "sections_with_embeddings": len(sections),
+                "cross_document_pairs": 0,
+                "message": "No cross-document pairs found"
+            }
+        
+        # Compute distribution
+        similarities_sorted = sorted(similarities)
+        
+        def percentile(p):
+            idx = int(round(p * (len(similarities_sorted) - 1)))
+            return similarities_sorted[idx]
+        
+        distribution = {
+            "min": round(similarities_sorted[0], 4),
+            "p25": round(percentile(0.25), 4),
+            "p50": round(percentile(0.50), 4),
+            "p75": round(percentile(0.75), 4),
+            "p90": round(percentile(0.90), 4),
+            "p95": round(percentile(0.95), 4),
+            "p99": round(percentile(0.99), 4),
+            "max": round(similarities_sorted[-1], 4),
+        }
+        
+        # Suggest threshold
+        # Target: Create edges for top 5-10% of pairs
+        suggested_threshold_conservative = round(percentile(0.90), 2)
+        suggested_threshold_moderate = round(percentile(0.75), 2)
+        
+        # Count how many edges would be created at different thresholds
+        thresholds_analysis = {}
+        for threshold in [0.50, 0.60, 0.70, 0.75, 0.80, 0.85, 0.90]:
+            count = sum(1 for s in similarities if s >= threshold)
+            thresholds_analysis[f"threshold_{threshold}"] = {
+                "edges_created": count,
+                "percentage": round(100 * count / len(similarities), 2)
+            }
+        
+        return {
+            "group_id": group_id,
+            "sections_with_embeddings": len(sections),
+            "cross_document_pairs": len(similarities),
+            "distribution": distribution,
+            "thresholds_analysis": thresholds_analysis,
+            "suggestions": {
+                "conservative": {
+                    "threshold": suggested_threshold_conservative,
+                    "description": "Top 10% of pairs (conservative)"
+                },
+                "moderate": {
+                    "threshold": suggested_threshold_moderate,
+                    "description": "Top 25% of pairs (moderate)"
+                }
+            },
+            "top_10_pairs": pair_details,
+        }
+        
+    except Exception as e:
+        logger.error("debug_section_similarity_distribution_failed", group_id=group_id, error=str(e))
+        import traceback
+        return {
+            "status": "error",
+            "group_id": group_id,
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }

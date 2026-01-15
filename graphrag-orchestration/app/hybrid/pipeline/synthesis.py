@@ -11,6 +11,7 @@ Model Selection:
 """
 
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
+import re
 import structlog
 
 from app.hybrid.services.extraction_service import ExtractionService
@@ -49,6 +50,93 @@ class EvidenceSynthesizer:
         self.llm = llm_client
         self.text_store = text_unit_store
         self.relevance_budget = relevance_budget
+
+    _REFUSAL_MESSAGE = "The requested information was not found in the available documents."
+
+    def _detect_missing_field_refusal(
+        self,
+        query: str,
+        text_chunks: List[Dict[str, Any]],
+        response_type: str,
+    ) -> Optional[str]:
+        if response_type not in {"summary", "detailed_report"}:
+            return None
+        q = (query or "").casefold()
+        if not q:
+            return None
+
+        evidence_text = " ".join(
+            chunk.get("text", "")
+            for chunk in text_chunks
+            if isinstance(chunk, dict)
+        )
+        ev = evidence_text.casefold()
+
+        def _has_any(terms: Tuple[str, ...]) -> bool:
+            return any(t in ev for t in terms)
+
+        if "california" in q and ("governed" in q or "law" in q or "laws" in q):
+            if not self._has_governing_law_jurisdiction(evidence_text, "california"):
+                return "california_law_missing"
+
+        if "routing number" in q and "routing number" not in ev:
+            return "routing_number_missing"
+
+        if any(t in q for t in ("swift", "iban", "bic")) and not _has_any(("swift", "iban", "bic")):
+            return "swift_iban_bic_missing"
+
+        if "vat" in q and "vat" not in ev:
+            return "vat_missing"
+
+        if "tax id" in q and "tax id" not in ev:
+            return "tax_id_missing"
+
+        if "bank account number" in q and not _has_any(("bank account number", "account number")):
+            return "bank_account_missing"
+
+        if "shipped via" in q or "shipping method" in q:
+            if not self._has_shipped_via_value(evidence_text):
+                return "shipped_via_missing"
+
+        return None
+
+    def _has_shipped_via_value(self, evidence_text: str) -> bool:
+        if not evidence_text:
+            return False
+        header_tokens = (
+            "salesperson",
+            "p.o.",
+            "po",
+            "p.o",
+            "number",
+            "requisitioner",
+            "due date",
+            "terms",
+        )
+        for match in re.finditer(r"shipped\s+via\s*[:\-]?\s*([^\n\r]+)", evidence_text, re.IGNORECASE):
+            value = (match.group(1) or "").strip()
+            if not value:
+                continue
+            value_norm = value.casefold()
+            if any(tok in value_norm for tok in header_tokens):
+                continue
+            if re.fullmatch(r"[\W_]+", value):
+                continue
+            return True
+        return False
+
+    def _has_governing_law_jurisdiction(self, evidence_text: str, jurisdiction: str) -> bool:
+        if not evidence_text or not jurisdiction:
+            return False
+        j = re.escape(jurisdiction.strip())
+        patterns = (
+            rf"governed\s+by\s+(the\s+)?(laws?|law)\s+of\s+(the\s+state\s+of\s+)?{j}",
+            rf"governing\s+law[^\n\r]{0,80}{j}",
+        )
+        for pattern in patterns:
+            if re.search(pattern, evidence_text, re.IGNORECASE):
+                return True
+        return False
     
     async def synthesize(
         self,
@@ -88,6 +176,22 @@ class EvidenceSynthesizer:
                 )
             except Exception as e:
                 logger.warning("text_chunks_query_fallback_failed", error=str(e))
+
+        refusal_reason = self._detect_missing_field_refusal(query, text_chunks, response_type)
+        if refusal_reason:
+            logger.info(
+                "synthesis_refusal_missing_field",
+                query=query,
+                reason=refusal_reason,
+                response_type=response_type,
+            )
+            return {
+                "response": self._REFUSAL_MESSAGE,
+                "citations": [],
+                "evidence_path": [node for node, _ in evidence_nodes],
+                "text_chunks_used": len(text_chunks),
+                "sub_questions_addressed": sub_questions or [],
+            }
         
         # nlp_audit mode: deterministic extraction only, no LLM synthesis
         if response_type == "nlp_audit":

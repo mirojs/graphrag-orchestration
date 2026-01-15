@@ -1765,10 +1765,10 @@ async def debug_section_similarity_distribution(request: Request):
     logger.info("debug_section_similarity_distribution", group_id=group_id)
     
     try:
-        from app.hybrid.services.neo4j_store import Neo4jStore
+        from app.hybrid.services.neo4j_store import Neo4jStoreV3
         import numpy as np
         
-        neo4j_store = Neo4jStore()
+        neo4j_store = Neo4jStoreV3()
         
         # Fetch all sections with embeddings
         with neo4j_store.driver.session(database=neo4j_store.database) as session:

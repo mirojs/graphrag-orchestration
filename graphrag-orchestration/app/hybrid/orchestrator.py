@@ -3564,13 +3564,37 @@ Instructions:
                     logger.info("stage_4.3.6_skipped_full_coverage",
                                covered=len(covered_docs), total=total_docs)
                 else:
-                    # 4. Fetch coverage chunks (1 per document, prefer early chunks)
+                    # 4. Fetch coverage chunks using SEMANTIC similarity to the query
+                    # This ensures we get the most relevant chunk per document, not just
+                    # the first chunk (which may miss important info like dates/insurance).
                     coverage_max = min(max(total_docs, 0), 200)  # Cap for large corpuses
-                    coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
-                        max_per_document=1,
-                        max_total=coverage_max,
-                        prefer_early_chunks=True,
-                    )
+                    
+                    # Try to get query embedding for semantic coverage
+                    query_embedding = None
+                    try:
+                        from app.services.llm_service import LLMService
+                        llm_service = LLMService()
+                        if llm_service.embed_model:
+                            query_embedding = llm_service.embed_model.get_text_embedding(query)
+                    except Exception as emb_err:
+                        logger.warning("coverage_embedding_failed", error=str(emb_err))
+                    
+                    if query_embedding:
+                        # Use semantic coverage: find most relevant chunk per document
+                        coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks_semantic(
+                            query_embedding=query_embedding,
+                            max_per_document=1,
+                            max_total=coverage_max,
+                        )
+                        coverage_metadata["strategy"] = "semantic"
+                    else:
+                        # Fallback to early-chunk coverage if embedding fails
+                        coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                            max_per_document=1,
+                            max_total=coverage_max,
+                            prefer_early_chunks=True,
+                        )
+                        coverage_metadata["strategy"] = "early_chunks_fallback"
                     
                     # 5. Add chunks only for documents NOT already covered
                     added_count = 0

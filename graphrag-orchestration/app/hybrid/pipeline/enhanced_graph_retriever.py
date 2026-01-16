@@ -1801,6 +1801,153 @@ class EnhancedGraphRetriever:
             logger.error("coverage_chunks_retrieval_failed", error=str(e))
             return []
 
+    async def get_coverage_chunks_semantic(
+        self,
+        query_embedding: List[float],
+        max_per_document: int = 1,
+        max_total: int = 20,
+    ) -> List[SourceChunk]:
+        """Get the most query-relevant chunk from each document for coverage-style queries.
+        
+        Unlike get_coverage_chunks() which prefers early chunks (chunk_index=0),
+        this method uses vector similarity to find the chunk within each document
+        that is most relevant to the query. This solves the problem where important
+        information (like insurance clauses or dates) appears later in documents.
+        
+        Strategy:
+        1. For each document, find all chunks with embeddings
+        2. Compute vector similarity between query and each chunk
+        3. Return the top-scoring chunk per document
+        
+        Args:
+            query_embedding: The query embedding vector
+            max_per_document: Max chunks per document (default: 1)
+            max_total: Total cap on returned chunks (default: 20)
+            
+        Returns:
+            List of SourceChunks - one (most relevant) per document
+        """
+        if not self.driver or not query_embedding:
+            return []
+        
+        # Use native vector similarity to find the best chunk per document
+        query = """
+        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        WHERE d.group_id = $group_id
+          AND t.group_id = $group_id
+          AND t.embedding IS NOT NULL
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        WITH d, t, s, vector.similarity.cosine(t.embedding, $query_embedding) AS score
+        ORDER BY d.id, score DESC
+        WITH d, collect({
+            chunk_id: t.id,
+            text: t.text,
+            metadata: t.metadata,
+            chunk_index: t.chunk_index,
+            section_id: s.id,
+            section_path_key: s.path_key,
+            doc_id: d.id,
+            doc_title: d.title,
+            doc_source: d.source,
+            similarity_score: score
+        })[0..$max_per_document] AS chunks
+        UNWIND chunks AS chunk
+        RETURN
+            chunk.chunk_id AS chunk_id,
+            chunk.text AS text,
+            chunk.metadata AS metadata,
+            chunk.chunk_index AS chunk_index,
+            chunk.section_id AS section_id,
+            chunk.section_path_key AS section_path_key,
+            chunk.doc_id AS doc_id,
+            chunk.doc_title AS doc_title,
+            chunk.doc_source AS doc_source,
+            chunk.similarity_score AS similarity_score
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        query_embedding=query_embedding,
+                        max_per_document=max_per_document,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            per_doc: Dict[str, List[SourceChunk]] = {}
+            
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+                
+                section_path = metadata.get("section_path", []) or []
+                section_path_key = (record.get("section_path_key") or "").strip()
+                if section_path_key:
+                    section_path = section_path_key.split(" > ")
+                
+                doc_id = (record.get("doc_id") or "").strip()
+                doc_key = (doc_id or record.get("doc_source") or record.get("doc_title") or "").strip()
+                if not doc_key:
+                    continue
+                doc_key_norm = doc_key.lower()
+                
+                similarity_score = record.get("similarity_score") or 0.0
+
+                per_doc.setdefault(doc_key_norm, []).append(
+                    SourceChunk(
+                        chunk_id=record.get("chunk_id") or "",
+                        text=record.get("text") or "",
+                        entity_name="semantic_coverage",  # Mark source for traceability
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=doc_id,
+                        document_title=record.get("doc_title") or metadata.get("document_title", "") or "",
+                        document_source=record.get("doc_source") or metadata.get("url", "") or "",
+                        relevance_score=similarity_score,  # Use actual similarity score
+                    )
+                )
+
+            # Build final list: round-robin across documents for fairness
+            doc_keys_sorted = sorted(per_doc.keys())
+            chunks: List[SourceChunk] = []
+            max_per_document = max(0, max_per_document)
+
+            for i in range(max_per_document):
+                for k in doc_keys_sorted:
+                    doc_chunks = per_doc.get(k) or []
+                    if i < len(doc_chunks):
+                        chunks.append(doc_chunks[i])
+                        if max_total > 0 and len(chunks) >= max_total:
+                            break
+                if max_total > 0 and len(chunks) >= max_total:
+                    break
+            
+            logger.info(
+                "semantic_coverage_chunks_retrieved",
+                num_chunks=len(chunks),
+                num_unique_docs=len(doc_keys_sorted),
+                max_per_document=max_per_document,
+                max_total=max_total,
+                group_id=self.group_id,
+            )
+            
+            return chunks
+            
+        except Exception as e:
+            logger.error("semantic_coverage_chunks_retrieval_failed", error=str(e))
+            return []
+
     async def get_summary_chunks_by_section(
         self,
         max_per_document: int = 1,

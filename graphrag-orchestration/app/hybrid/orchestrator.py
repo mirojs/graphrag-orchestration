@@ -3586,7 +3586,7 @@ Instructions:
                             max_per_document=1,
                             max_total=coverage_max,
                         )
-                        coverage_metadata["strategy"] = "semantic"
+                        coverage_strategy = "semantic"
                     else:
                         # Fallback to early-chunk coverage if embedding fails
                         coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
@@ -3594,7 +3594,7 @@ Instructions:
                             max_total=coverage_max,
                             prefer_early_chunks=True,
                         )
-                        coverage_metadata["strategy"] = "early_chunks_fallback"
+                        coverage_strategy = "early_chunks_fallback"
                     
                     # 5. Add chunks only for documents NOT already covered
                     added_count = 0
@@ -3631,6 +3631,7 @@ Instructions:
                     
                     coverage_metadata = {
                         "applied": added_count > 0,
+                        "strategy": coverage_strategy,
                         "chunks_added": added_count,
                         "docs_added": len(new_docs),
                         "docs_from_entity_retrieval": len(covered_docs) - len(new_docs),

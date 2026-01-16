@@ -3414,9 +3414,11 @@ Instructions:
         # ==================================================================
         # For queries like "Which document has the latest date?", we can
         # answer directly from graph Document.date property without LLM reasoning.
+        logger.info("stage_4.0_checking_date_metadata_query", query=query[:100])
         if self.enhanced_retriever:
             from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
             date_query_type = EnhancedGraphRetriever.detect_date_metadata_query(query)
+            logger.info("stage_4.0_date_query_type_result", date_query_type=date_query_type)
             
             if date_query_type:
                 logger.info("stage_4.0_date_metadata_query_detected", query_type=date_query_type)

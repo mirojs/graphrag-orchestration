@@ -1769,6 +1769,9 @@ async def debug_section_similarity_distribution(request: Request):
         from app.core.config import settings as app_settings
         import numpy as np
         
+        if not app_settings.NEO4J_URI or not app_settings.NEO4J_USERNAME or not app_settings.NEO4J_PASSWORD:
+            raise HTTPException(status_code=503, detail="Neo4j not configured")
+        
         neo4j_store = Neo4jStoreV3(
             uri=app_settings.NEO4J_URI,
             username=app_settings.NEO4J_USERNAME,
@@ -1924,6 +1927,9 @@ async def debug_rebuild_similarity_edges(request: Request):
         from app.core.config import settings as app_settings
         from app.hybrid.indexing.lazygraphrag_pipeline import LazyGraphRAGIndexingPipeline
         
+        if not app_settings.NEO4J_URI or not app_settings.NEO4J_USERNAME or not app_settings.NEO4J_PASSWORD:
+            raise HTTPException(status_code=503, detail="Neo4j not configured")
+        
         neo4j_store = Neo4jStoreV3(
             uri=app_settings.NEO4J_URI,
             username=app_settings.NEO4J_USERNAME,
@@ -1948,8 +1954,7 @@ async def debug_rebuild_similarity_edges(request: Request):
         pipeline = LazyGraphRAGIndexingPipeline(
             neo4j_store=neo4j_store,
             llm=None,
-            embedding_llm=None,
-            graph_store=None
+            embedder=None
         )
         
         result = await pipeline._build_section_similarity_edges(group_id)

@@ -277,7 +277,7 @@ Use for `mode=raptor` (or queries intended to route to hierarchical summaries).
 
 ---
 
-## F) Negative Tests (10)
+## F) Negative Tests (9)
 These should return **“not found / not specified in the provided documents”** (or equivalent).
 
 1. **Q-N1:** What is the invoice’s **bank routing number** for payment?
@@ -289,23 +289,20 @@ These should return **“not found / not specified in the provided documents”*
 3. **Q-N3:** What is the vendor’s **VAT / Tax ID number** on the invoice?
    - **Expected:** Not specified.
 
-4. **Q-N4:** What is the invoice’s **payment portal URL** (web link to pay online)?
-   - **Expected:** https://ww.contosolifts.com/portal/pay
-
-5. **Q-N5:** What is the invoice’s **bank account number** for ACH/wire payments?
+4. **Q-N5:** What is the invoice’s **bank account number** for ACH/wire payments?
    - **Expected:** Not specified.
 
-6. **Q-N6:** Which documents are governed by the laws of **California**?
+5. **Q-N6:** Which documents are governed by the laws of **California**?
    - **Expected:** None (California not referenced).
 
-7. **Q-N7:** What is the property management Agent’s **license number**?
+6. **Q-N7:** What is the property management Agent’s **license number**?
    - **Expected:** Not specified.
 
-8. **Q-N8:** What is the purchase contract’s required **wire transfer / ACH instructions**?
+7. **Q-N8:** What is the purchase contract’s required **wire transfer / ACH instructions**?
    - **Expected:** Not specified.
 
-9. **Q-N9:** What is the exact clause about **mold damage** coverage in the warranty?
+8. **Q-N9:** What is the exact clause about **mold damage** coverage in the warranty?
    - **Expected:** Not specified.
 
-10. **Q-N10:** What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+9. **Q-N10:** What is the invoice **shipping method** (value in “SHIPPED VIA”)?
    - **Expected:** Not specified / blank.

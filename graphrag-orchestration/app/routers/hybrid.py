@@ -1906,3 +1906,71 @@ async def debug_section_similarity_distribution(request: Request):
             "error": str(e),
             "trace": traceback.format_exc()
         }
+
+
+@router.post("/debug/rebuild_similarity_edges")
+async def debug_rebuild_similarity_edges(request: Request):
+    """
+    Rebuild SEMANTICALLY_SIMILAR edges for a group.
+    
+    Deletes existing edges and creates new ones using current threshold (0.43).
+    Use this after changing the similarity threshold without full re-indexing.
+    """
+    group_id = request.state.group_id
+    logger.info("debug_rebuild_similarity_edges_start", group_id=group_id)
+    
+    try:
+        from app.hybrid.services.neo4j_store import Neo4jStoreV3
+        from app.core.config import settings as app_settings
+        from app.hybrid.indexing.lazygraphrag_pipeline import LazyGraphRAGIndexingPipeline
+        
+        neo4j_store = Neo4jStoreV3(
+            uri=app_settings.NEO4J_URI,
+            username=app_settings.NEO4J_USERNAME,
+            password=app_settings.NEO4J_PASSWORD,
+        )
+        
+        # Step 1: Delete existing edges
+        with neo4j_store.driver.session(database=neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (s1:Section {group_id: $group_id})-[r:SEMANTICALLY_SIMILAR]->(s2:Section)
+                DELETE r
+                RETURN count(r) as deleted_count
+                """,
+                group_id=group_id
+            )
+            deleted_count = result.single()["deleted_count"]
+        
+        logger.info("deleted_existing_edges", group_id=group_id, count=deleted_count)
+        
+        # Step 2: Rebuild edges
+        pipeline = LazyGraphRAGIndexingPipeline(
+            neo4j_store=neo4j_store,
+            llm=None,
+            embedding_llm=None,
+            graph_store=None
+        )
+        
+        result = await pipeline._build_section_similarity_edges(group_id)
+        
+        neo4j_store.driver.close()
+        
+        return {
+            "status": "success",
+            "group_id": group_id,
+            "deleted_edges": deleted_count,
+            "created_edges": result.get("edges_created", 0),
+            "cross_document_pairs": result.get("cross_document_pairs", 0),
+            "threshold_used": 0.43
+        }
+        
+    except Exception as e:
+        logger.error("debug_rebuild_similarity_edges_failed", group_id=group_id, error=str(e))
+        import traceback
+        return {
+            "status": "error",
+            "group_id": group_id,
+            "error": str(e),
+            "trace": traceback.format_exc()
+        }

@@ -370,10 +370,9 @@ class Neo4jTextUnitStore:
             d.summary AS summary,
             d.source AS source,
             d.url AS url,
-            d.create_date AS create_date,
             d.date AS date,
             chunk_count
-        ORDER BY coalesce(d.create_date, d.date, '') DESC
+        ORDER BY coalesce(d.date, '') DESC
         LIMIT $limit
         """
         

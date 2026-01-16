@@ -96,6 +96,7 @@ class Document:
     title: str
     source: str
     metadata: Dict[str, Any] = field(default_factory=dict)
+    document_date: Optional[str] = None  # ISO date (YYYY-MM-DD) extracted from content
 
 
 class Neo4jStoreV3:
@@ -1416,6 +1417,7 @@ class Neo4jStoreV3:
             d.source = $source,
             d.group_id = $group_id,
             d.metadata = $metadata,
+            d.date = $document_date,
             d.updated_at = datetime()
         RETURN d.id AS id
         """
@@ -1431,6 +1433,7 @@ class Neo4jStoreV3:
                 source=document.source,
                 group_id=group_id,
                 metadata=metadata_json,
+                document_date=document.document_date,
             )
             record = result.single()
             return cast(str, record["id"]) if record else document.id

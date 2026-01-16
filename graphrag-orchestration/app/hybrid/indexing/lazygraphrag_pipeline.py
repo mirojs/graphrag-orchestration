@@ -50,6 +50,72 @@ logger = logging.getLogger(__name__)
 USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "0").strip().lower() in {"1", "true", "yes"}
 
 
+def extract_document_date(content: str) -> Optional[str]:
+    """Extract the most prominent date from document content.
+    
+    Scans for common date formats and returns the latest (most recent) date found.
+    This enables corpus-level date queries like "Which document has the latest date?"
+    
+    Returns: ISO date string (YYYY-MM-DD) or None if no dates found.
+    """
+    from datetime import datetime
+    
+    dates_found: List[datetime] = []
+    
+    # Pattern 1: MM/DD/YYYY or M/D/YYYY (US format - common in contracts)
+    for match in re.finditer(r'\b(\d{1,2})/(\d{1,2})/(\d{4})\b', content):
+        try:
+            month, day, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            if 1 <= month <= 12 and 1 <= day <= 31 and 1900 <= year <= 2100:
+                dates_found.append(datetime(year, month, day))
+        except (ValueError, OverflowError):
+            continue
+    
+    # Pattern 2: YYYY-MM-DD (ISO format)
+    for match in re.finditer(r'\b(\d{4})-(\d{2})-(\d{2})\b', content):
+        try:
+            year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            if 1 <= month <= 12 and 1 <= day <= 31 and 1900 <= year <= 2100:
+                dates_found.append(datetime(year, month, day))
+        except (ValueError, OverflowError):
+            continue
+    
+    # Pattern 3: Month DD, YYYY (e.g., "June 15, 2024")
+    months = {
+        'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
+        'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12
+    }
+    for match in re.finditer(r'\b([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\b', content):
+        try:
+            month_name = match.group(1).lower()
+            if month_name in months:
+                month = months[month_name]
+                day, year = int(match.group(2)), int(match.group(3))
+                if 1 <= day <= 31 and 1900 <= year <= 2100:
+                    dates_found.append(datetime(year, month, day))
+        except (ValueError, OverflowError):
+            continue
+    
+    # Pattern 4: DD Month YYYY (e.g., "15 June 2024")
+    for match in re.finditer(r'\b(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b', content):
+        try:
+            month_name = match.group(2).lower()
+            if month_name in months:
+                month = months[month_name]
+                day, year = int(match.group(1)), int(match.group(3))
+                if 1 <= day <= 31 and 1900 <= year <= 2100:
+                    dates_found.append(datetime(year, month, day))
+        except (ValueError, OverflowError):
+            continue
+    
+    if not dates_found:
+        return None
+    
+    # Return the latest (most recent) date - this represents the document's effective date
+    latest = max(dates_found)
+    return latest.strftime("%Y-%m-%d")
+
+
 @dataclass
 class LazyGraphRAGIndexingConfig:
     chunk_size: int = 512
@@ -129,6 +195,23 @@ class LazyGraphRAGIndexingPipeline:
             doc_id = doc["id"]
             doc_title = doc.get("title", "Untitled")
             logger.info(f"Upserting document: id={doc_id}, title='{doc_title}', has_di={bool(doc.get('di_extracted_docs'))}")
+            
+            # Extract document date from content (for corpus-level date queries)
+            # Collect all text content for date extraction
+            doc_content_for_date = ""
+            di_docs = doc.get("di_extracted_docs") or []
+            if di_docs:
+                # DI-extracted content: concatenate all DI unit texts
+                doc_content_for_date = " ".join(str(d.text) for d in di_docs if hasattr(d, 'text'))
+            else:
+                # Direct content
+                doc_content_for_date = doc.get("content") or doc.get("text") or ""
+            
+            # Extract the latest date from document content
+            document_date = extract_document_date(doc_content_for_date) if doc_content_for_date else None
+            if document_date:
+                logger.info(f"Extracted document date: doc_id={doc_id}, date={document_date}")
+            
             self.neo4j_store.upsert_document(
                 group_id,
                 Document(
@@ -136,6 +219,7 @@ class LazyGraphRAGIndexingPipeline:
                     title=doc_title,
                     source=doc.get("source", ""),
                     metadata=doc.get("metadata", {}) or {},
+                    document_date=document_date,
                 ),
             )
 

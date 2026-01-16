@@ -3585,22 +3585,10 @@ Instructions:
                         
                         # Skip if this document is already covered or chunk already exists
                         if doc_key and doc_key not in covered_docs and chunk.chunk_id not in existing_chunk_ids:
-                            # Convert SourceChunk to dict format for synthesizer
-                            coverage_evidence = {
-                                "id": chunk.chunk_id,
-                                "text": chunk.text,
-                                "source": chunk.document_source or chunk.document_title or "coverage",
-                                "score": 0.3,  # Lower score than relevance-retrieved chunks
-                                "entity": "__coverage__",
-                                "metadata": {
-                                    "document_id": chunk.document_id,
-                                    "document_title": chunk.document_title,
-                                    "document_source": chunk.document_source,
-                                    "is_coverage_chunk": True,
-                                    "section_path": chunk.section_path,
-                                },
-                            }
-                            complete_evidence.append(coverage_evidence)
+                            # CRITICAL: complete_evidence is List[Tuple[str, float]] from tracer.trace()
+                            # Must append tuples (entity_name, score), not dicts
+                            # Use chunk_id as entity_name for traceability
+                            complete_evidence.append((chunk.chunk_id, 0.3))
                             covered_docs.add(doc_key)
                             existing_chunk_ids.add(chunk.chunk_id)
                             new_docs.add(doc_key)

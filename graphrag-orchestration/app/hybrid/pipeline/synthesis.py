@@ -205,8 +205,21 @@ class EvidenceSynthesizer:
         if response_type == "nlp_connected":
             return await self._nlp_connected_extract(query, text_chunks, evidence_nodes)
         
-        # Step 2: Build context with citations
+        # Step 2: Build context with citations (now groups by document for better reasoning)
         context, citation_map = self._build_cited_context(text_chunks)
+        
+        # Step 2.5: Inject global document overview when retrieval is sparse.
+        # This fixes Q-D7 (dates) and Q-D8 (comparisons) where PPR returns few/no entities.
+        sparse_retrieval = len(text_chunks) < 3 or len(evidence_nodes) == 0
+        if sparse_retrieval and self.text_store and hasattr(self.text_store, "get_workspace_document_overviews"):
+            try:
+                doc_overviews = await self.text_store.get_workspace_document_overviews(limit=20)
+                if doc_overviews:
+                    overview_section = self._format_document_overview(doc_overviews)
+                    context = overview_section + "\n\n" + context
+                    logger.info("injected_global_document_overview", num_docs=len(doc_overviews))
+            except Exception as e:
+                logger.warning("global_document_overview_injection_failed", error=str(e))
         
         # Step 3: For Route 3, add sub-question context
         if sub_questions and intermediate_context:
@@ -453,6 +466,42 @@ Response:"""
             drift_section += f"- Evidence points: {result.get('evidence_count', 0)}\n"
         
         return base_context + drift_section
+
+    def _format_document_overview(self, doc_overviews: List[Dict[str, Any]]) -> str:
+        """Format global document overview for corpus-level reasoning.
+        
+        This enables the LLM to answer questions like:
+        - "What is the latest date across all documents?"
+        - "Which document contains more X?"
+        - "Compare document A and document B"
+        
+        Args:
+            doc_overviews: List of document metadata dicts.
+            
+        Returns:
+            Formatted overview string to prepend to context.
+        """
+        lines = ["## Available Documents in Corpus:\n"]
+        for i, doc in enumerate(doc_overviews, 1):
+            title = doc.get("title", "Untitled")
+            date = doc.get("date", "")
+            summary = doc.get("summary", "")
+            chunk_count = doc.get("chunk_count", 0)
+            
+            # Build a concise entry
+            entry = f"{i}. **{title}**"
+            if date:
+                entry += f" (Date: {date})"
+            if chunk_count:
+                entry += f" [{chunk_count} sections]"
+            if summary:
+                # Truncate long summaries
+                summary_preview = summary[:200] + "..." if len(summary) > 200 else summary
+                entry += f"\n   Summary: {summary_preview}"
+            lines.append(entry)
+        
+        lines.append("\n---\n")
+        return "\n".join(lines)
     
     async def _retrieve_text_chunks(
         self, 
@@ -530,26 +579,65 @@ Response:"""
         text_chunks: List[Dict[str, Any]]
     ) -> Tuple[str, Dict[str, Dict[str, str]]]:
         """
-        Build a context string with citation markers.
+        Build a context string with citation markers, grouped by document.
+        
+        Grouping by document enables the LLM to reason about:
+        - Which document a fact comes from
+        - Comparisons between documents
+        - Document-level properties (dates, totals)
         
         Returns:
             Tuple of (context_string, citation_map)
         """
         citation_map: Dict[str, Dict[str, str]] = {}
-        context_parts = []
+        
+        # Group chunks by document for clearer context boundaries
+        from collections import defaultdict
+        doc_groups: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
         
         for i, chunk in enumerate(text_chunks):
-            citation_id = f"[{i+1}]"
-            source = chunk.get("source", "Unknown")
-            text = chunk.get("text", "")
+            # Extract document identity from metadata or source
+            meta = chunk.get("metadata", {})
+            doc_key = (
+                meta.get("document_id") 
+                or meta.get("document_title") 
+                or chunk.get("source", "Unknown")
+            )
+            doc_groups[doc_key].append((i, chunk))
+        
+        context_parts = []
+        
+        # Build context with document headers
+        for doc_key, chunks_with_idx in doc_groups.items():
+            # Extract document metadata from first chunk
+            first_chunk = chunks_with_idx[0][1]
+            meta = first_chunk.get("metadata", {})
+            doc_title = meta.get("document_title") or doc_key
+            doc_date = meta.get("document_date", "")
             
-            citation_map[citation_id] = {
-                "source": source,
-                "chunk_id": chunk.get("id", f"chunk_{i}"),
-                "text_preview": text[:100] + "..." if len(text) > 100 else text
-            }
+            # Add document header
+            header = f"=== DOCUMENT: {doc_title}"
+            if doc_date:
+                header += f" (Date: {doc_date})"
+            header += " ==="
+            context_parts.append(header)
             
-            context_parts.append(f"{citation_id} {text}")
+            # Add chunks under this document
+            for original_idx, chunk in chunks_with_idx:
+                citation_id = f"[{original_idx + 1}]"
+                source = chunk.get("source", "Unknown")
+                text = chunk.get("text", "")
+                
+                citation_map[citation_id] = {
+                    "source": source,
+                    "chunk_id": chunk.get("id", f"chunk_{original_idx}"),
+                    "document": doc_title,
+                    "text_preview": text[:100] + "..." if len(text) > 100 else text
+                }
+                
+                context_parts.append(f"{citation_id} {text}")
+            
+            context_parts.append("")  # Blank line between documents
         
         return "\n\n".join(context_parts), citation_map
     

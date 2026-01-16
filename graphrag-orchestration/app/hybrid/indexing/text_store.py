@@ -102,6 +102,7 @@ class Neo4jTextUnitStore:
         return await asyncio.to_thread(self._get_chunks_for_query_sync, keywords, int(limit))
 
     def _get_chunks_for_query_sync(self, keywords: List[str], limit: int) -> List[Dict[str, Any]]:
+        # Enhanced query: also fetch document-level date for corpus-level reasoning
         query = """
         MATCH (c)
         WHERE c.group_id = $group_id AND (c:TextChunk OR c:Chunk OR c:`__Node__`)
@@ -111,7 +112,9 @@ class Neo4jTextUnitStore:
         OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
         WITH c, d, score
         ORDER BY score DESC, coalesce(c.chunk_index, 0) ASC
-        RETURN c AS chunk, d AS doc, score
+        RETURN c AS chunk, d AS doc, score,
+               coalesce(d.create_date, d.date, '') AS doc_date,
+               coalesce(d.id, '') AS doc_id
         LIMIT $limit
         """
 
@@ -174,6 +177,8 @@ class Neo4jTextUnitStore:
                             **meta,
                             "document_title": str(doc_title),
                             "document_source": str(doc_source),
+                            "document_id": str(record.get("doc_id") or ""),
+                            "document_date": str(record.get("doc_date") or ""),
                             "keyword_score": int(record.get("score") or 0),
                         },
                     }
@@ -340,3 +345,54 @@ class Neo4jTextUnitStore:
                     logger.debug("neo4j_text_store_no_chunks", entity=entity_name)
         
         return results
+
+    async def get_workspace_document_overviews(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieve high-level overview of all documents in the workspace.
+        
+        This addresses corpus-level questions (e.g., 'latest date', 'compare documents')
+        where entity-based PPR traversal fails because the query is too abstract.
+        
+        Returns:
+            List of dicts with document metadata: id, title, date, summary, source.
+        """
+        return await asyncio.to_thread(self._get_workspace_document_overviews_sync, int(limit))
+
+    def _get_workspace_document_overviews_sync(self, limit: int) -> List[Dict[str, Any]]:
+        """Sync implementation of document overview retrieval."""
+        query = """
+        MATCH (d:Document)
+        WHERE d.group_id = $group_id
+        OPTIONAL MATCH (d)<-[:PART_OF]-(c)
+        WITH d, count(c) AS chunk_count
+        RETURN 
+            d.id AS id,
+            coalesce(d.title, d.name, d.source, 'Untitled') AS title,
+            d.summary AS summary,
+            d.source AS source,
+            d.url AS url,
+            d.create_date AS create_date,
+            d.date AS date,
+            chunk_count
+        ORDER BY coalesce(d.create_date, d.date, '') DESC
+        LIMIT $limit
+        """
+        
+        docs: List[Dict[str, Any]] = []
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, group_id=self._group_id, limit=limit)
+                for record in result:
+                    doc = {
+                        "id": record.get("id") or "",
+                        "title": record.get("title") or "Untitled",
+                        "summary": record.get("summary") or "",
+                        "source": record.get("source") or "",
+                        "url": record.get("url") or "",
+                        "date": record.get("create_date") or record.get("date") or "",
+                        "chunk_count": record.get("chunk_count") or 0,
+                    }
+                    docs.append(doc)
+        except Exception as e:
+            logger.error("get_workspace_document_overviews_failed", error=str(e))
+        
+        return docs

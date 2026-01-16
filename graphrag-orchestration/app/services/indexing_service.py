@@ -31,9 +31,9 @@ from neo4j_graphrag.experimental.components.entity_relation_extractor import LLM
 from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
 from neo4j_graphrag.experimental.components.schema import (
     SchemaBuilder,
-    GraphSchema,
-    NodeType,
-    RelationshipType,
+    SchemaEntity,
+    SchemaRelation,
+    SchemaConfig,
 )
 from neo4j_graphrag.llm import AzureOpenAILLM
 
@@ -311,27 +311,24 @@ class IndexingService:
         
         # Build SchemaConfig from entity/relation types.
         # The extractor accepts an optional schema to guide extraction.
-        schema: Optional[GraphSchema] = None
+        schema: Optional[SchemaConfig] = None
         if entity_types or relation_types:
             entities = [
-                NodeType(
+                SchemaEntity(
                     label=et,
                     description=f"A {et} entity",
                     properties=[],
-                    additional_properties=True,
                 )
                 for et in (entity_types or [])
             ]
             relations = [
-                RelationshipType(
+                SchemaRelation(
                     label=rt,
                     description=f"A {rt} relationship",
-                    properties=[],
-                    additional_properties=True,
                 )
                 for rt in (relation_types or [])
             ]
-            schema = SchemaBuilder.create_schema_model(node_types=entities, relationship_types=relations)
+            schema = SchemaConfig(entities=entities, relations=relations)
         
         # Create native extractor
         extractor = LLMEntityRelationExtractor(

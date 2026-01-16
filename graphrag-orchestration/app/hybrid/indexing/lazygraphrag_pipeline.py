@@ -492,7 +492,7 @@ class LazyGraphRAGIndexingPipeline:
             possible_entities=None,
             possible_relations=None,
             strict=False,
-            num_workers=1,
+            num_workers=4,  # Parallel processing: 4 workers (was 1)
             max_triplets_per_chunk=12,
         )
 
@@ -649,7 +649,7 @@ class LazyGraphRAGIndexingPipeline:
             # We do NOT persist chunk nodes from the extractor; we only use the returned
             # relationships to populate Entity.text_unit_ids for downstream MENTIONS edges.
             create_lexical_graph=True,
-            max_concurrency=1,
+            max_concurrency=4,  # Parallel processing: 4 chunks at a time (was 1)
         )
         
         # Convert to neo4j-graphrag TextChunks

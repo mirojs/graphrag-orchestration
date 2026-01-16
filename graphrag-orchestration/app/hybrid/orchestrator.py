@@ -3474,10 +3474,19 @@ Instructions:
                             top_k=15  # Smaller for refinement pass
                         )
                         # Deduplicate evidence by chunk ID
-                        existing_ids = {e.get("chunk_id") or e.get("id") for e in complete_evidence}
+                        def _evidence_key(ev: Any) -> Optional[str]:
+                            if isinstance(ev, tuple):
+                                return ev[0] if ev else None
+                            if isinstance(ev, dict):
+                                return ev.get("chunk_id") or ev.get("id") or ev.get("name")
+                            return None
+
+                        existing_ids = {
+                            key for key in (_evidence_key(e) for e in complete_evidence) if key
+                        }
                         for ev in additional_evidence:
-                            ev_id = ev.get("chunk_id") or ev.get("id")
-                            if ev_id not in existing_ids:
+                            ev_id = _evidence_key(ev)
+                            if ev_id and ev_id not in existing_ids:
                                 complete_evidence.append(ev)
                                 existing_ids.add(ev_id)
                     

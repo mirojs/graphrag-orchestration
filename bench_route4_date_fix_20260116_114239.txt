@@ -1,0 +1,131 @@
+Loaded 19 questions from QUESTION_BANK_5PDFS_2025-12-24.md
+  Positive tests (Q-D): 10
+  Negative tests (Q-N): 9
+Loaded 59 ground truth answers
+
+======================================================================
+Scenario: hybrid_route4_summary (response_type=summary)
+Questions: 19, Repeats: 3
+======================================================================
+
+[Q-D1] If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?
+  [1/3] 31649ms - 6795 chars
+  [2/3] 21510ms - 6710 chars
+  [3/3] 41728ms - 7475 chars
+  Accuracy: containment=0.93, f1=0.08
+  Summary: exact=0.33, min_sim=0.01, latency_p50=31649ms
+[Q-D2] In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?
+  [1/3] 19746ms - 6439 chars
+  [2/3] 21388ms - 7129 chars
+  [3/3] 18995ms - 6396 chars
+  Accuracy: containment=1.00, f1=0.04
+  Summary: exact=0.33, min_sim=0.04, latency_p50=19746ms
+[Q-D3] Compare “time windows” across the set: list all explicit day-based timeframes.
+  [1/3] 13886ms - 4893 chars
+  [2/3] 28470ms - 12124 chars
+  [3/3] 40332ms - 20187 chars
+  Accuracy: containment=0.57, f1=0.15
+  Summary: exact=0.33, min_sim=0.03, latency_p50=28470ms
+[Q-D4] Which documents mention **insurance** and what limits are specified?
+  [1/3] 9338ms - 2865 chars
+  [2/3] 6609ms - 2168 chars
+  [3/3] 9285ms - 2375 chars
+  Accuracy: containment=0.44, f1=0.08
+  Summary: exact=0.33, min_sim=0.03, latency_p50=9285ms
+[Q-D5] In the warranty, explain how the “coverage start” is defined and what must happen before coverage ends.
+  [1/3] 8649ms - 3373 chars
+  [2/3] 25514ms - 7031 chars
+  [3/3] 25840ms - 5897 chars
+  Accuracy: containment=0.86, f1=0.18
+  Summary: exact=0.33, min_sim=0.04, latency_p50=25514ms
+[Q-D6] Do the purchase contract total price and the invoice total match? If so, what is that amount?
+  [1/3] 13792ms - 2814 chars
+  [2/3] 16556ms - 2855 chars
+  [3/3] 22522ms - 2533 chars
+  Accuracy: containment=0.78, f1=0.10
+  Summary: exact=0.33, min_sim=0.40, latency_p50=16556ms
+[Q-D7] Which document has the latest explicit date, and what is it?
+  [1/3] 16202ms - 4331 chars
+  [2/3] 15997ms - 4364 chars
+  [3/3] 18328ms - 4276 chars
+  Accuracy: containment=0.56, f1=0.05
+  Summary: exact=0.33, min_sim=0.10, latency_p50=16202ms
+[Q-D8] Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
+  [1/3] 17561ms - 4779 chars
+  [2/3] 18520ms - 5018 chars
+  [3/3] 18583ms - 4890 chars
+  Accuracy: containment=0.94, f1=0.16
+  Summary: exact=0.33, min_sim=0.19, latency_p50=18520ms
+[Q-D9] Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
+  [1/3] 9418ms - 2730 chars
+  [2/3] 8745ms - 2902 chars
+  [3/3] 8567ms - 2402 chars
+  Accuracy: containment=0.50, f1=0.06
+  Summary: exact=0.33, min_sim=0.17, latency_p50=8745ms
+[Q-D10] List the three different “risk allocation” statements across the set (risk of loss, liability limitations, non-transferability).
+  [1/3] 38689ms - 12101 chars
+  [2/3] 36455ms - 13999 chars
+  [3/3] 36171ms - 11310 chars
+  Accuracy: containment=0.67, f1=0.06
+  Summary: exact=0.33, min_sim=0.06, latency_p50=36455ms
+[Q-N1] What is the invoice’s **bank routing number** for payment?
+  [1/3] 3052ms - 67 chars
+  [2/3] 5914ms - 67 chars
+  [3/3] 6352ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=5914ms
+[Q-N2] What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+  [1/3] 8365ms - 67 chars
+  [2/3] 6693ms - 67 chars
+  [3/3] 10842ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=8365ms
+[Q-N3] What is the vendor’s **VAT / Tax ID number** on the invoice?
+  [1/3] 13740ms - 2709 chars
+  [2/3] 15539ms - 2584 chars
+  [3/3] 15448ms - 2656 chars
+  Accuracy: NEGATIVE_TEST FAIL
+  Summary: exact=0.33, min_sim=0.24, latency_p50=15448ms
+[Q-N5] What is the invoice’s **bank account number** for ACH/wire payments?
+  [1/3] 5945ms - 67 chars
+  [2/3] 6304ms - 67 chars
+  [3/3] 8197ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=6304ms
+[Q-N6] Which documents are governed by the laws of **California**?
+  [1/3] 12287ms - 67 chars
+  [2/3] 8762ms - 67 chars
+  [3/3] 9068ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=9068ms
+[Q-N7] What is the property management Agent’s **license number**?
+  [1/3] 14429ms - 3559 chars
+  [2/3] 21463ms - 5648 chars
+  [3/3] 19400ms - 5235 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=0.33, min_sim=0.04, latency_p50=19400ms
+[Q-N8] What is the purchase contract’s required **wire transfer / ACH instructions**?
+  [1/3] 17688ms - 5007 chars
+  [2/3] 15852ms - 3323 chars
+  [3/3] 24330ms - 5092 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=0.33, min_sim=0.08, latency_p50=17688ms
+[Q-N9] What is the exact clause about **mold damage** coverage in the warranty?
+  [1/3] 8664ms - 67 chars
+  [2/3] 9222ms - 67 chars
+  [3/3] 9050ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=9050ms
+[Q-N10] What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+  [1/3] 9638ms - 67 chars
+  [2/3] 2336ms - 67 chars
+  [3/3] 2235ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2336ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route4_drift_multi_hop_20260116T114240Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route4_drift_multi_hop_20260116T114240Z.md
+======================================================================
+

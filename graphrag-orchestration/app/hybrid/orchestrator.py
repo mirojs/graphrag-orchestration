@@ -3505,6 +3505,7 @@ Instructions:
         # the corpus before synthesis, so the LLM can answer corpus-level questions.
         # ==================================================================
         coverage_metadata: Dict[str, Any] = {"applied": False}
+        coverage_chunks_for_synthesis: List[Dict[str, Any]] = []  # Store actual chunk dicts
         
         if self.enhanced_retriever:
             try:
@@ -3565,7 +3566,7 @@ Instructions:
                 else:
                     # 4. Fetch coverage chunks (1 per document, prefer early chunks)
                     coverage_max = min(max(total_docs, 0), 200)  # Cap for large corpuses
-                    coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                    coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
                         max_per_document=1,
                         max_total=coverage_max,
                         prefer_early_chunks=True,
@@ -3575,7 +3576,7 @@ Instructions:
                     added_count = 0
                     new_docs: set = set()
                     
-                    for chunk in coverage_chunks:
+                    for chunk in coverage_source_chunks:
                         doc_key = (
                             chunk.document_id or
                             chunk.document_source or
@@ -3585,10 +3586,20 @@ Instructions:
                         
                         # Skip if this document is already covered or chunk already exists
                         if doc_key and doc_key not in covered_docs and chunk.chunk_id not in existing_chunk_ids:
-                            # CRITICAL: complete_evidence is List[Tuple[str, float]] from tracer.trace()
-                            # Must append tuples (entity_name, score), not dicts
-                            # Use chunk_id as entity_name for traceability
-                            complete_evidence.append((chunk.chunk_id, 0.3))
+                            # Convert SourceChunk to dict format expected by synthesizer
+                            coverage_chunk_dict = {
+                                "id": chunk.chunk_id,
+                                "text": chunk.text,
+                                "source": chunk.document_source or chunk.document_title or "coverage",
+                                "metadata": {
+                                    "document_id": chunk.document_id,
+                                    "document_title": chunk.document_title,
+                                    "document_source": chunk.document_source,
+                                    "is_coverage_chunk": True,
+                                    "section_path": chunk.section_path,
+                                },
+                            }
+                            coverage_chunks_for_synthesis.append(coverage_chunk_dict)
                             covered_docs.add(doc_key)
                             existing_chunk_ids.add(chunk.chunk_id)
                             new_docs.add(doc_key)
@@ -3618,7 +3629,8 @@ Instructions:
             evidence_nodes=complete_evidence,
             response_type=response_type,
             sub_questions=sub_questions + refined_sub_questions,
-            intermediate_context=intermediate_results
+            intermediate_context=intermediate_results,
+            coverage_chunks=coverage_chunks_for_synthesis if coverage_chunks_for_synthesis else None
         )
         logger.info("stage_4.4_complete")
         

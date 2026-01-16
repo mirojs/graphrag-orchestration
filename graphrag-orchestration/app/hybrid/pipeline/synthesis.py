@@ -148,7 +148,8 @@ class EvidenceSynthesizer:
         evidence_nodes: List[Tuple[str, float]],
         response_type: str = "detailed_report",
         sub_questions: Optional[List[str]] = None,
-        intermediate_context: Optional[List[Dict[str, Any]]] = None
+        intermediate_context: Optional[List[Dict[str, Any]]] = None,
+        coverage_chunks: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -159,6 +160,7 @@ class EvidenceSynthesizer:
             response_type: "detailed_report" | "summary" | "audit_trail" | "nlp_audit" | "nlp_connected"
             sub_questions: Optional list of sub-questions (Route 3 DRIFT).
             intermediate_context: Optional intermediate results from sub-questions.
+            coverage_chunks: Optional list of pre-retrieved chunks (e.g., from coverage retrieval).
             
         Returns:
             Dictionary containing:
@@ -168,6 +170,10 @@ class EvidenceSynthesizer:
         """
         # Step 1: Retrieve raw text chunks for evidence nodes
         text_chunks = await self._retrieve_text_chunks(evidence_nodes)
+        
+        # Step 1.5: Merge coverage chunks if provided
+        if coverage_chunks:
+            text_chunks.extend(coverage_chunks)
 
         # Route 4 often produces generic "evidence" strings when seed entities don't resolve.
         # If entity-based retrieval returns nothing, fall back to query-based chunk retrieval.

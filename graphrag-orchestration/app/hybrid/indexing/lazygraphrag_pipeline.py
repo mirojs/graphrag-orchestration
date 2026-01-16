@@ -1379,7 +1379,7 @@ class LazyGraphRAGIndexingPipeline:
     async def _build_section_similarity_edges(
         self,
         group_id: str,
-        similarity_threshold: float = 0.80,
+        similarity_threshold: float = 0.43,
         max_edges_per_section: int = 5,
     ) -> Dict[str, Any]:
         """Create SEMANTICALLY_SIMILAR edges between Section nodes.

@@ -127,11 +127,13 @@ class LazyGraphRAGIndexingPipeline:
         chunk_to_doc_id: Dict[str, str] = {}
         for doc in expanded_docs:
             doc_id = doc["id"]
+            doc_title = doc.get("title", "Untitled")
+            logger.info(f"Upserting document: id={doc_id}, title='{doc_title}', has_di={bool(doc.get('di_extracted_docs'))}")
             self.neo4j_store.upsert_document(
                 group_id,
                 Document(
                     id=doc_id,
-                    title=doc.get("title", "Untitled"),
+                    title=doc_title,
                     source=doc.get("source", ""),
                     metadata=doc.get("metadata", {}) or {},
                 ),
@@ -247,6 +249,9 @@ class LazyGraphRAGIndexingPipeline:
                 content = ""
 
             doc_id = doc.get("id") or f"doc_{uuid.uuid4().hex}"
+            
+            logger.info(f"Document normalization: id={doc_id}, title='{title}', source={source[:50] if source else 'None'}")
+            
             normalized.append(
                 {
                     "id": doc_id,

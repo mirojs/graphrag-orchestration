@@ -881,7 +881,7 @@ async def hybrid_index_documents(
                 docs_for_pipeline.append(
                     {
                         "content": "",
-                        "title": doc.split("/")[-1] if "/" in doc else "Untitled",
+                        "title": "",  # Empty, let pipeline extract from source
                         "source": doc,
                         "metadata": {},
                     }
@@ -894,7 +894,7 @@ async def hybrid_index_documents(
             docs_for_pipeline.append(
                 {
                     "content": doc.get("text", doc.get("content", "")),
-                    "title": doc.get("title", "Untitled"),
+                    "title": doc.get("title", ""),  # Empty string, let pipeline extract from source
                     "source": doc.get("source", doc.get("url", "")),
                     "metadata": doc.get("metadata", {}),
                 }

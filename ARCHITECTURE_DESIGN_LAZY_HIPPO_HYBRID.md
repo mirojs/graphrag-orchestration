@@ -302,6 +302,15 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 *   **Engine:** Storage backend
 *   **What:** Fetch raw text for all evidence nodes
 
+#### Stage 4.4.1: Sparse-Retrieval Recovery & Document Context (added 2026-01-16)
+*   **Trigger:** Low evidence density (e.g., 0 entities or <3 chunks returned)
+*   **Goal:** Prevent abstract queries (dates, comparisons) from failing due to missing entity seeds
+*   **Mechanisms:**
+    - **Keyword-based chunk fallback** when entity-based retrieval returns nothing
+    - **Global document overview injection** (titles, dates, summaries, chunk counts) to provide corpus-level context
+    - **Document-grouped context** for synthesis (chunks are grouped under document headers with date/title)
+*   **Outcome:** Enables LLM to answer “latest date” and “compare documents” queries even when PPR seeds are empty
+
 #### Stage 4.5: Multi-Source Synthesis
 *   **Engine:** LLM with DRIFT-style aggregation (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Synthesize findings from all sub-questions into coherent report

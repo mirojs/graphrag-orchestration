@@ -3409,6 +3409,61 @@ Instructions:
                    query=query[:50],
                    response_type=response_type)
         
+        # ==================================================================
+        # Stage 4.0: Check for deterministic document metadata queries
+        # ==================================================================
+        # For queries like "Which document has the latest date?", we can
+        # answer directly from graph Document.date property without LLM reasoning.
+        if self.enhanced_retriever:
+            from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+            date_query_type = EnhancedGraphRetriever.detect_date_metadata_query(query)
+            
+            if date_query_type:
+                logger.info("stage_4.0_date_metadata_query_detected", query_type=date_query_type)
+                
+                order = "desc" if date_query_type == "latest" else "asc"
+                docs_by_date = await self.enhanced_retriever.get_documents_by_date(order=order, limit=5)
+                
+                if docs_by_date and docs_by_date[0].get("doc_date"):
+                    top_doc = docs_by_date[0]
+                    doc_name = top_doc["doc_title"] or top_doc["doc_source"].split("/")[-1] or "Untitled"
+                    doc_date = top_doc["doc_date"]
+                    
+                    # Build deterministic response
+                    if date_query_type == "latest":
+                        response_text = f"The document with the latest explicit date is **{doc_name}**, dated **{doc_date}**."
+                    else:
+                        response_text = f"The document with the oldest/earliest date is **{doc_name}**, dated **{doc_date}**."
+                    
+                    # Add context about other documents
+                    if len(docs_by_date) > 1:
+                        other_docs = [f"{d['doc_title'] or d['doc_source'].split('/')[-1]} ({d['doc_date']})" 
+                                      for d in docs_by_date[1:] if d.get('doc_date')]
+                        if other_docs:
+                            response_text += f"\n\nOther documents by date ({order}ending): " + ", ".join(other_docs)
+                    
+                    logger.info("stage_4.0_date_metadata_query_answered",
+                               doc_name=doc_name, doc_date=doc_date, num_docs=len(docs_by_date))
+                    
+                    return {
+                        "response": response_text,
+                        "route_used": "route_4_drift_multi_hop",
+                        "citations": [{
+                            "citation": "[1]",
+                            "source": top_doc["doc_source"],
+                            "chunk_id": f"{top_doc['doc_id']}_metadata",
+                            "document": doc_name,
+                            "text_preview": f"Document date: {doc_date}",
+                        }],
+                        "evidence_path": [{"type": "document_metadata", "doc_id": top_doc["doc_id"], "date": doc_date}],
+                        "metadata": {
+                            "deterministic_answer": True,
+                            "query_type": f"date_metadata_{date_query_type}",
+                            "all_docs_by_date": docs_by_date,
+                            "route_description": "Deterministic document metadata query (date)",
+                        }
+                    }
+        
         # Stage 4.1: Query Decomposition
         logger.info("stage_4.1_query_decomposition")
         sub_questions = await self._drift_decompose(query)

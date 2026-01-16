@@ -34,6 +34,17 @@ _COVERAGE_INTENT_PATTERNS = [
     re.compile(r"\bacross\s+(all|the)\s+(document|file|agreement)s?\b", re.IGNORECASE),
 ]
 
+# Regex patterns for detecting date metadata queries (deterministic answer from graph)
+_DATE_METADATA_PATTERNS = [
+    # Latest/newest/most recent date
+    re.compile(r"\b(latest|newest|most\s+recent)\s+(explicit\s+)?(date|dated)\b", re.IGNORECASE),
+    re.compile(r"\bwhich\s+(document|file|contract|agreement).*(latest|newest|most\s+recent)\s+(date|dated)\b", re.IGNORECASE),
+    re.compile(r"\b(document|file|contract|agreement)\s+.*(latest|newest|most\s+recent)\s+(date|dated)\b", re.IGNORECASE),
+    # Oldest/earliest date
+    re.compile(r"\b(oldest|earliest|first)\s+(explicit\s+)?(date|dated)\b", re.IGNORECASE),
+    re.compile(r"\bwhich\s+(document|file|contract|agreement).*(oldest|earliest)\s+(date|dated)\b", re.IGNORECASE),
+]
+
 
 @dataclass
 class SourceChunk:
@@ -184,6 +195,43 @@ class EnhancedGraphRetriever:
             if pattern.search(query):
                 return True
         return False
+
+    @staticmethod
+    def detect_date_metadata_query(query: str) -> Optional[str]:
+        """Detect if a query is asking about document dates (deterministic answer).
+        
+        Returns:
+            "latest" if asking for latest/newest/most recent date
+            "oldest" if asking for oldest/earliest date
+            None if not a date metadata query
+            
+        Examples:
+        - "Which document has the latest date?" -> "latest"
+        - "What is the oldest dated document?" -> "oldest"
+        - "Tell me about insurance" -> None
+        """
+        if not query:
+            return None
+        query_lower = query.lower()
+        
+        # Check for latest/newest patterns
+        if any(word in query_lower for word in ["latest", "newest", "most recent"]):
+            if any(word in query_lower for word in ["date", "dated"]):
+                return "latest"
+        
+        # Check for oldest/earliest patterns
+        if any(word in query_lower for word in ["oldest", "earliest", "first"]):
+            if any(word in query_lower for word in ["date", "dated"]):
+                return "oldest"
+        
+        # Double-check with regex patterns for more complex phrasing
+        for pattern in _DATE_METADATA_PATTERNS:
+            if pattern.search(query):
+                if any(word in query_lower for word in ["oldest", "earliest"]):
+                    return "oldest"
+                return "latest"
+        
+        return None
 
     @staticmethod
     def _keyword_to_regex(keyword: str) -> str:
@@ -1640,6 +1688,77 @@ class EnhancedGraphRetriever:
             
         except Exception as e:
             logger.error("all_documents_retrieval_failed", error=str(e))
+            return []
+    
+    async def get_documents_by_date(
+        self,
+        order: str = "desc",
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Get documents ordered by their date property.
+        
+        This provides deterministic answers for date-related metadata queries
+        like "Which document has the latest date?" without relying on LLM
+        date parsing from chunk text.
+        
+        Args:
+            order: "desc" for latest first, "asc" for oldest first
+            limit: Maximum documents to return
+            
+        Returns:
+            List of document dicts with id, title, source, date
+        """
+        if not self.driver:
+            return []
+        
+        order_clause = "DESC" if order.lower() == "desc" else "ASC"
+        
+        query = f"""
+        MATCH (d:Document)
+        WHERE d.group_id = $group_id AND d.date IS NOT NULL
+        RETURN 
+            d.id AS doc_id,
+            d.title AS doc_title,
+            d.source AS doc_source,
+            d.date AS doc_date
+        ORDER BY d.date {order_clause}
+        LIMIT $limit
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        limit=limit,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            docs = [
+                {
+                    "doc_id": r["doc_id"] or "",
+                    "doc_title": r["doc_title"] or "Untitled",
+                    "doc_source": r["doc_source"] or "",
+                    "doc_date": r["doc_date"] or "",
+                }
+                for r in records
+            ]
+            
+            logger.info(
+                "documents_by_date_retrieved",
+                num_docs=len(docs),
+                order=order,
+                group_id=self.group_id,
+            )
+            return docs
+            
+        except Exception as e:
+            logger.error("documents_by_date_retrieval_failed", error=str(e))
             return []
     
     async def get_coverage_chunks(

@@ -3494,6 +3494,135 @@ Instructions:
                                additional_seeds=len(additional_seeds),
                                total_evidence=len(complete_evidence))
         
+        # ==================================================================
+        # Stage 4.3.6: Coverage Gap Fill for Corpus-Level Queries
+        # ==================================================================
+        # For queries like "What is the latest date across all documents?" or
+        # "Compare the terms in all contracts", entity-based retrieval may miss
+        # documents that don't have strong entity mentions (e.g., simple contracts).
+        #
+        # This stage ensures we have at least ONE chunk from every document in
+        # the corpus before synthesis, so the LLM can answer corpus-level questions.
+        # ==================================================================
+        coverage_metadata: Dict[str, Any] = {"applied": False}
+        
+        if self.enhanced_retriever:
+            try:
+                logger.info("stage_4.3.6_coverage_gap_fill_start")
+                
+                # 1. Build set of documents already covered by evidence
+                covered_docs: set = set()
+                existing_chunk_ids: set = set()
+                
+                def _extract_doc_key(ev: Any) -> Optional[str]:
+                    """Extract document identifier from evidence node."""
+                    if isinstance(ev, dict):
+                        # Dict format (HippoRAG / enhanced retriever)
+                        meta = ev.get("metadata", {})
+                        doc = (
+                            meta.get("document_id") or
+                            meta.get("document_title") or
+                            ev.get("source") or
+                            ""
+                        )
+                        return str(doc).strip().lower() if doc else None
+                    elif isinstance(ev, tuple) and len(ev) >= 1:
+                        # Tuple format: (entity_name, score) - can't easily get doc
+                        # These are entity-level, not chunk-level, so skip
+                        return None
+                    return None
+                
+                def _extract_chunk_id(ev: Any) -> Optional[str]:
+                    """Extract chunk ID from evidence node."""
+                    if isinstance(ev, dict):
+                        return ev.get("id") or ev.get("chunk_id")
+                    elif isinstance(ev, tuple) and len(ev) >= 1:
+                        return ev[0] if ev else None
+                    return None
+                
+                for ev in complete_evidence:
+                    doc_key = _extract_doc_key(ev)
+                    if doc_key:
+                        covered_docs.add(doc_key)
+                    chunk_id = _extract_chunk_id(ev)
+                    if chunk_id:
+                        existing_chunk_ids.add(chunk_id)
+                
+                # 2. Get all documents in the corpus
+                all_documents = await self.enhanced_retriever.get_all_documents()
+                total_docs = len(all_documents)
+                
+                # 3. If we already have full coverage, skip
+                if total_docs > 0 and len(covered_docs) >= total_docs:
+                    coverage_metadata = {
+                        "applied": False,
+                        "reason": "already_full_coverage",
+                        "docs_from_entity_retrieval": len(covered_docs),
+                        "total_docs_in_corpus": total_docs,
+                    }
+                    logger.info("stage_4.3.6_skipped_full_coverage",
+                               covered=len(covered_docs), total=total_docs)
+                else:
+                    # 4. Fetch coverage chunks (1 per document, prefer early chunks)
+                    coverage_max = min(max(total_docs, 0), 200)  # Cap for large corpuses
+                    coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                        max_per_document=1,
+                        max_total=coverage_max,
+                        prefer_early_chunks=True,
+                    )
+                    
+                    # 5. Add chunks only for documents NOT already covered
+                    added_count = 0
+                    new_docs: set = set()
+                    
+                    for chunk in coverage_chunks:
+                        doc_key = (
+                            chunk.document_id or
+                            chunk.document_source or
+                            chunk.document_title or
+                            ""
+                        ).strip().lower()
+                        
+                        # Skip if this document is already covered or chunk already exists
+                        if doc_key and doc_key not in covered_docs and chunk.chunk_id not in existing_chunk_ids:
+                            # Convert SourceChunk to dict format for synthesizer
+                            coverage_evidence = {
+                                "id": chunk.chunk_id,
+                                "text": chunk.text,
+                                "source": chunk.document_source or chunk.document_title or "coverage",
+                                "score": 0.3,  # Lower score than relevance-retrieved chunks
+                                "entity": "__coverage__",
+                                "metadata": {
+                                    "document_id": chunk.document_id,
+                                    "document_title": chunk.document_title,
+                                    "document_source": chunk.document_source,
+                                    "is_coverage_chunk": True,
+                                    "section_path": chunk.section_path,
+                                },
+                            }
+                            complete_evidence.append(coverage_evidence)
+                            covered_docs.add(doc_key)
+                            existing_chunk_ids.add(chunk.chunk_id)
+                            new_docs.add(doc_key)
+                            added_count += 1
+                    
+                    coverage_metadata = {
+                        "applied": added_count > 0,
+                        "chunks_added": added_count,
+                        "docs_added": len(new_docs),
+                        "docs_from_entity_retrieval": len(covered_docs) - len(new_docs),
+                        "total_docs_in_corpus": total_docs,
+                    }
+                    
+                    logger.info("stage_4.3.6_coverage_gap_fill_complete",
+                               chunks_added=added_count,
+                               new_docs=len(new_docs),
+                               total_evidence=len(complete_evidence))
+                               
+            except Exception as cov_err:
+                logger.warning("stage_4.3.6_coverage_gap_fill_failed", error=str(cov_err))
+                coverage_metadata = {"applied": False, "error": str(cov_err)}
+        
         # Stage 4.4: Multi-Source Synthesis
         logger.info("stage_4.4_synthesis")
         synthesis_result = await self.synthesizer.synthesize(
@@ -3521,7 +3650,8 @@ Instructions:
                 "text_chunks_used": synthesis_result["text_chunks_used"],
                 "latency_estimate": "thorough",
                 "precision_level": "maximum",
-                "route_description": "DRIFT-style iterative multi-hop reasoning with HippoRAG PPR + Confidence Loop"
+                "route_description": "DRIFT-style iterative multi-hop reasoning with HippoRAG PPR + Confidence Loop",
+                **({"coverage_retrieval": coverage_metadata} if coverage_metadata else {}),
             }
         }
     

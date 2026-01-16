@@ -98,6 +98,10 @@ class EvidenceSynthesizer:
             if not self._has_shipped_via_value(evidence_text):
                 return "shipped_via_missing"
 
+        if ("mold" in q or "mildew" in q) and ("clause" in q or "coverage" in q):
+            if not _has_any(("mold", "mildew")):
+                return "mold_clause_missing"
+
         return None
 
     def _has_shipped_via_value(self, evidence_text: str) -> bool:

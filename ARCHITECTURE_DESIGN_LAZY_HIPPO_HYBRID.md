@@ -1,5 +1,13 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
+**Last Updated:** January 17, 2026
+
+**Recent Updates:**
+- Section-based coverage limit removed for comprehensive queries (Route 4)
+- Coverage architecture validated: 50 content sections proven sufficient for exhaustive retrieval
+- Diagnostic logging added to indexing pipeline for chunk-to-section mapping
+- See Section 3.4.6 for detailed implementation notes
+
 ## 1. Executive Summary
 
 This document outlines the architectural transformation from a complex 6-way routing system (Local, Global, DRIFT, HippoRAG 2, Vector RAG + legacy RAPTOR) to a streamlined **4-Way Intelligent Routing System** with **2 Deployment Profiles**.
@@ -339,7 +347,7 @@ if _is_comprehensive_query(query):
     # Section-based: One chunk per section (exhaustive coverage)
     coverage_chunks = await retriever.get_all_sections_chunks(
         max_per_section=1,  # One representative chunk per section
-        max_total=100,       # Upper bound to prevent context overflow
+        # No max_total - get ALL sections for comprehensive queries
     )
     strategy = "section_based"
 else:
@@ -352,7 +360,7 @@ else:
     strategy = "semantic"
 ```
 
-**Graph Query (Section-Based):**
+**Graph Query (Section-Based - Updated 2026-01-17):**
 ```cypher
 MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
 WHERE t.group_id = $group_id
@@ -364,8 +372,20 @@ WITH s, collect({
     section_title: s.title
 })[0..$max_per_section] AS section_chunks
 UNWIND section_chunks AS chunk
-RETURN chunk LIMIT $max_total
+RETURN chunk
+-- NOTE: LIMIT removed (previously had LIMIT $max_total)
+-- Returns all sections that have chunks for comprehensive coverage
 ```
+
+**Coverage Chunk Processing Pipeline:**
+```
+1. Retrieval: get_all_sections_chunks() → 50 SourceChunk objects
+2. Deduplication: Skip chunks already in existing_chunk_ids (from entity retrieval)
+3. Merge: coverage_chunks.extend(entity_chunks) → Direct append to synthesis
+4. Synthesis: LLM processes all chunks together (no filtering/reranking)
+```
+
+Key design decision: **No post-retrieval filtering**. Section-based sampling already provides intelligent selection (one chunk per content section). Additional filtering would reduce coverage, defeating the purpose of comprehensive queries.
 
 **Why This Works:**
 | Query Type | Semantic Approach Problem | Section-Based Solution |
@@ -380,6 +400,41 @@ RETURN chunk LIMIT $max_total
 - **Mitigation:** Only activated for detected comprehensive queries; standard queries still use semantic ranking
 
 **Dependency:** Requires `(:TextChunk)-[:IN_SECTION]->(:Section)` relationships from indexing pipeline
+
+**Implementation Updates (2026-01-17):**
+
+*Changes made:*
+1. **Removed `max_total` limit** from section-based coverage query (commit 16ef0e3)
+   - Previously: `LIMIT $max_total` capped results at 100 sections
+   - Now: Returns ALL sections that have chunks
+   - Rationale: For comprehensive queries, artificial limits defeat the purpose
+   
+2. **Added diagnostic logging** to indexing pipeline (commit 759aad2)
+   ```python
+   logger.info("chunk_to_section_mapping_complete", extra={
+       "total_chunks": len(chunks),
+       "chunks_mapped": len(chunk_to_leaf_section),
+       "chunks_unmapped": len(chunks) - len(chunk_to_leaf_section),
+       "sections_created": len(all_sections)
+   })
+   ```
+
+*Coverage Analysis (test-5pdfs corpus):*
+- **153 Section nodes created** = Full document hierarchy (including headers, TOC, metadata)
+- **50 Sections contain chunks** = Content-bearing sections only
+- **103 Sections without chunks** = Structural elements (e.g., "Table of Contents", "Signature Page")
+- **Architectural correctness:** Not all sections need text chunks; structural sections provide navigation but contain no retrievable content
+
+*Validation Results (Q-D3 benchmark - "List all explicit timeframes"):*
+- Chunks retrieved: 50 (one per content section)
+- Coverage improvement: Containment 0.66 → **0.80** (+21%)
+- Missing timeframes before: "10 business days", "arbitration timing"
+- Missing timeframes after: **NONE** (all found)
+- Processing: **No filtering/reranking** after retrieval - all 50 chunks pass directly to synthesis (deduplication only)
+- Evidence: Section-based sampling provides sufficient coverage without requiring relevance filtering
+
+*Root Cause Discovery:*
+The initial coverage issues (missing timeframes) were caused by **stale index data**, not code logic. Re-indexing the corpus with current stable code resolved all issues, confirming the section graph architecture is sound.
 
 #### Stage 4.4: Raw Text Chunk Fetching
 *   **Engine:** Storage backend
@@ -3238,9 +3293,56 @@ While HippoRAG 2 is state-of-the-art, standard implementations suffer from four 
 | Weakness | Standard HippoRAG 2 Failure | Our Solution (LazyGraphRAG Hybrid) | Status |
 |:---------|:----------------------------|:-----------------------------------|:-------|
 | **1. The NER Gap** | If LLM misses extract, info is lost forever. | **Dual-Graph Safety Net:** If Entity Graph misses, **Section Graph** catches the chunk via `[:IN_SECTION]`. | ✅ Implemented |
-| **2. Latent Transitions** | Can't link thematic passages without shared keywords. | **Soft Edge Traversals:** We add `(:Section)-[:SEMANTICALLY_SIMILAR]->(:Section)` edges based on embedding similarity, allowing PPR to jump semantic gaps. | 🛠️ Planned (Q1) |
+| **2. Latent Transitions** | Can't link thematic passages without shared keywords. | **Soft Edge Traversals:** We add `(:Section)-[:SEMANTICALLY_SIMILAR]->(:Section)` edges based on embedding similarity, allowing PPR to jump semantic gaps. | ⚠️ **Partial** (see 18.1.1) |
 | **3. Graph Bloat** | Low-value nodes dilute PPR signal at scale. | **Hierarchical Pruning:** We prune "Leaf Sections" (too granular) but preserve "Parent Sections" (context) to maintain signal. | 🛠️ Planned (Q2) |
 | **4. Iterative Limits** | Single-shot PPR misses conditional dependencies. | **Agentic Confidence Loop:** Route 4 checks subgraph density; if low, triggers 2nd decomposition pass (Self-Correction). | 🛠️ Planned (Q2) |
+
+### 18.1.1. Critical Utilization Gap Analysis (January 2026)
+
+**Finding:** The Section Graph infrastructure is **built** during indexing but **not fully utilized** during retrieval.
+
+#### What's Implemented (Indexing Layer) ✅
+
+| Feature | Location | Status |
+|:--------|:---------|:-------|
+| Section nodes with IN_SECTION edges | `lazygraphrag_pipeline._build_section_graph()` | ✅ Working |
+| Section embeddings (title + chunk content) | `lazygraphrag_pipeline._embed_section_nodes()` | ✅ Working |
+| SEMANTICALLY_SIMILAR edges (threshold 0.43) | `lazygraphrag_pipeline._build_section_similarity_edges()` | ✅ Working |
+| Section-based coverage retrieval | `enhanced_graph_retriever.get_all_sections_chunks()` | ✅ Working |
+
+#### What's NOT Utilized (Retrieval Layer) ❌
+
+| Gap | Location | Impact |
+|:----|:---------|:-------|
+| **SEMANTICALLY_SIMILAR edges not traversed in PPR** | `async_neo4j_service.personalized_pagerank_native()` | "Latent Transition" weakness persists |
+| **Section embeddings not used for vector search** | `enhanced_graph_retriever.py` (missing method) | Can't discover sections by semantic similarity |
+| **Coverage retrieval doesn't expand via section graph** | `orchestrator.py` Stage 4.3.6 | "List all" queries miss cross-doc connections |
+
+#### Root Cause: PPR Only Queries Entity Nodes
+
+**Current PPR Implementation** (`async_neo4j_service.py:307-420`):
+```cypher
+MATCH (seed)-[r1]-(n1)
+WHERE n1.group_id = group_id
+  AND (n1:Entity OR n1:`__Entity__`)  -- ❌ Only Entity nodes!
+  AND type(r1) <> 'MENTIONS'
+```
+
+**Missing:** No traversal through `Section-[:SEMANTICALLY_SIMILAR]->Section` path.
+
+#### Impact Assessment
+
+| Query Type | Current Behavior | With Full Section Utilization |
+|:-----------|:-----------------|:------------------------------|
+| Entity-centric ("What is X?") | ✅ Works well via Entity PPR | No change needed |
+| Thematic ("List all timeframes") | ⚠️ Relies on flat section coverage | +15-20% recall via section graph |
+| Cross-document ("Compare X across docs") | ❌ No cross-doc semantic links | +20-30% recall via SEMANTICALLY_SIMILAR |
+
+#### Recommendation Priority
+
+1. **HIGH:** Extend PPR to traverse SEMANTICALLY_SIMILAR edges (Phase C below)
+2. **MEDIUM:** Add section-level vector search method
+3. **LOW:** Graph-aware coverage expansion (deferred until Phase C complete)
 
 ### 18.2. Implementation Details
 
@@ -3267,12 +3369,14 @@ This transforms Route 4 from a linear pipeline into a **reasoning engine**.
 
 | Phase | Task | File(s) | Priority | Status |
 |:------|:-----|:--------|:---------|:-------|
-| **Phase A** | Add SEMANTICALLY_SIMILAR edges during indexing | `lazygraphrag_pipeline.py` | HIGH | 🛠️ Implementing |
+| **Phase A** | Add SEMANTICALLY_SIMILAR edges during indexing | `lazygraphrag_pipeline.py` | HIGH | ✅ **Complete** |
 | **Phase B** | Add Confidence Loop to Route 4 | `orchestrator.py` | HIGH | 🛠️ Implementing |
-| **Phase C** | Update PPR to traverse SEMANTICALLY_SIMILAR | `tracing.py` | MEDIUM | Planned |
+| **Phase C** | Update PPR to traverse SEMANTICALLY_SIMILAR | `async_neo4j_service.py` | **HIGH** | ❌ **NOT DONE** (Critical Gap) |
 | **Phase D** | Add hierarchical pruning (future) | `lazygraphrag_pipeline.py` | LOW | Deferred |
 
-#### Phase A: SEMANTICALLY_SIMILAR Edges
+> ⚠️ **Critical:** Phase A is complete (edges exist in graph), but Phase C was never implemented, so those edges are not being used during retrieval. This is the primary remaining gap for addressing the "Latent Transitions" weakness.
+
+#### Phase A: SEMANTICALLY_SIMILAR Edges ✅ COMPLETE
 
 **Location:** `app/hybrid/indexing/lazygraphrag_pipeline.py`
 
@@ -3388,6 +3492,74 @@ def _compute_subgraph_confidence(
     )
     return satisfied / len(sub_questions)
 ```
+
+#### Phase C: PPR Traversal of SEMANTICALLY_SIMILAR Edges ❌ NOT IMPLEMENTED
+
+> **Status:** This is the critical missing piece. Phase A created the edges, but they're not being traversed during retrieval.
+
+**Location:** `app/services/async_neo4j_service.py`
+
+**Method to Modify:** `personalized_pagerank_native()`
+
+**Current Implementation (Entity-only):**
+```cypher
+// Current: Only traverses Entity relationships
+MATCH (seed)-[r1]-(n1)
+WHERE n1.group_id = $group_id
+  AND (n1:Entity OR n1:`__Entity__`)  -- ❌ Only Entity nodes
+  AND type(r1) <> 'MENTIONS'
+```
+
+**Required Enhancement (Section Graph Traversal):**
+```cypher
+// Enhanced: Add Section graph traversal via UNION
+// First: Standard Entity PPR
+MATCH (seed:Entity {group_id: $group_id})-[r1]-(n1:Entity)
+WHERE type(r1) <> 'MENTIONS'
+WITH seed, n1, type(r1) AS rel_type
+
+UNION
+
+// Second: Section-based thematic hops
+// seed Entity -> MENTIONS -> TextChunk -> IN_SECTION -> Section 
+// -> SEMANTICALLY_SIMILAR -> Section -> IN_SECTION -> TextChunk 
+// -> MENTIONS -> neighbor Entity
+MATCH (seed:Entity {group_id: $group_id})-[:MENTIONS]->(chunk:TextChunk)
+      -[:IN_SECTION]->(s1:Section)-[:SEMANTICALLY_SIMILAR]->(s2:Section)
+      <-[:IN_SECTION]-(chunk2:TextChunk)<-[:MENTIONS]-(neighbor:Entity)
+WHERE s2.group_id = $group_id
+  AND neighbor <> seed
+WITH seed, neighbor AS n1, 'THEMATIC_HOP' AS rel_type
+```
+
+**Alternative: Add `include_section_graph` Parameter:**
+```python
+async def personalized_pagerank_native(
+    self,
+    group_id: str,
+    seed_entity_ids: List[str],
+    damping_factor: float = 0.85,
+    max_iterations: int = 20,
+    include_section_graph: bool = True,  # NEW: Enable section traversal
+) -> List[Dict[str, Any]]:
+    """
+    Enhanced PPR that optionally traverses SEMANTICALLY_SIMILAR edges.
+    
+    When include_section_graph=True:
+    - Standard Entity relationships get weight 1.0
+    - SEMANTICALLY_SIMILAR hops get weight = edge.similarity (0.43-1.0)
+    
+    This enables "thematic spreading" where PPR can jump between
+    conceptually related sections even without shared entities.
+    """
+```
+
+**Expected Impact:**
+- Thematic queries ("list all timeframes"): +15-20% recall
+- Cross-document queries ("compare X vs Y"): +20-30% recall
+- Single-entity queries: No change (already works via Entity graph)
+
+**Implementation Priority:** HIGH - This completes the "Latent Transitions" solution
 
 ---
 

@@ -1277,7 +1277,25 @@ class LazyGraphRAGIndexingPipeline:
             leaf_key = (doc_id, leaf_path_key)
             if leaf_key in all_sections:
                 chunk_to_leaf_section[chunk.id] = all_sections[leaf_key]["id"]
+            else:
+                # This should never happen if hierarchy loop works correctly
+                # Log to investigate why some chunks aren't mapped
+                logger.warning(
+                    "chunk_leaf_section_not_found",
+                    chunk_id=chunk.id,
+                    doc_id=doc_id,
+                    leaf_path_key=leaf_path_key,
+                    section_path=section_path,
+                    all_sections_count=len(all_sections)
+                )
         
+        logger.info(
+            "chunk_to_section_mapping_complete",
+            total_chunks=len(chunks),
+            chunks_mapped=len(chunk_to_leaf_section),
+            chunks_unmapped=len(chunks) - len(chunk_to_leaf_section),
+            sections_created=len(all_sections)
+        )
         if not all_sections:
             return {"sections_created": 0, "in_section_edges": 0}
         

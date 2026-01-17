@@ -3560,13 +3560,36 @@ Instructions:
         #
         # This stage ensures we have at least ONE chunk from every document in
         # the corpus before synthesis, so the LLM can answer corpus-level questions.
+        #
+        # Jan 2026 Enhancement: For "list all" / "enumerate" / "compare" queries,
+        # we increase max_per_document to ensure comprehensive coverage.
         # ==================================================================
         coverage_metadata: Dict[str, Any] = {"applied": False}
         coverage_chunks_for_synthesis: List[Dict[str, Any]] = []  # Store actual chunk dicts
         
+        # Detect comprehensive enumeration queries that need more chunks per document
+        def _is_comprehensive_query(q: str) -> bool:
+            """Detect queries asking for exhaustive lists or comparisons."""
+            q_lower = q.lower()
+            # Patterns that indicate comprehensive enumeration
+            comprehensive_patterns = [
+                "list all", "list every", "enumerate", "compare all",
+                "compare the", "all explicit", "all the", "every ",
+                "what are all", "find all", "identify all", "show all",
+                "across all", "across the set", "in all documents",
+                "each document", "every document", "comprehensive",
+            ]
+            return any(pattern in q_lower for pattern in comprehensive_patterns)
+        
+        is_comprehensive = _is_comprehensive_query(query)
+        # For comprehensive queries, get more chunks per document
+        chunks_per_doc = 3 if is_comprehensive else 1
+        
         if self.enhanced_retriever:
             try:
-                logger.info("stage_4.3.6_coverage_gap_fill_start")
+                logger.info("stage_4.3.6_coverage_gap_fill_start",
+                           is_comprehensive=is_comprehensive,
+                           chunks_per_doc=chunks_per_doc)
                 
                 # 1. Build set of documents already covered by evidence
                 covered_docs: set = set()
@@ -3624,7 +3647,7 @@ Instructions:
                     # 4. Fetch coverage chunks using SEMANTIC similarity to the query
                     # This ensures we get the most relevant chunk per document, not just
                     # the first chunk (which may miss important info like dates/insurance).
-                    coverage_max = min(max(total_docs, 0), 200)  # Cap for large corpuses
+                    coverage_max = min(max(total_docs * chunks_per_doc, 0), 200)  # Cap for large corpuses
                     
                     # Try to get query embedding for semantic coverage
                     query_embedding = None
@@ -3637,21 +3660,22 @@ Instructions:
                         logger.warning("coverage_embedding_failed", error=str(emb_err))
                     
                     if query_embedding:
-                        # Use semantic coverage: find most relevant chunk per document
+                        # Use semantic coverage: find most relevant chunks per document
+                        # For comprehensive queries, get multiple chunks per doc
                         coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks_semantic(
                             query_embedding=query_embedding,
-                            max_per_document=1,
+                            max_per_document=chunks_per_doc,
                             max_total=coverage_max,
                         )
-                        coverage_strategy = "semantic"
+                        coverage_strategy = f"semantic_x{chunks_per_doc}" if is_comprehensive else "semantic"
                     else:
                         # Fallback to early-chunk coverage if embedding fails
                         coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
-                            max_per_document=1,
+                            max_per_document=chunks_per_doc,
                             max_total=coverage_max,
                             prefer_early_chunks=True,
                         )
-                        coverage_strategy = "early_chunks_fallback"
+                        coverage_strategy = f"early_chunks_x{chunks_per_doc}_fallback" if is_comprehensive else "early_chunks_fallback"
                     
                     # 5. Add chunks only for documents NOT already covered
                     added_count = 0
@@ -3689,6 +3713,8 @@ Instructions:
                     coverage_metadata = {
                         "applied": added_count > 0,
                         "strategy": coverage_strategy,
+                        "is_comprehensive_query": is_comprehensive,
+                        "chunks_per_doc": chunks_per_doc,
                         "chunks_added": added_count,
                         "docs_added": len(new_docs),
                         "docs_from_entity_retrieval": len(covered_docs) - len(new_docs),

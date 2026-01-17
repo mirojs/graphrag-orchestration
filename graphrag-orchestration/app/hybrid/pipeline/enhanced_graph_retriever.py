@@ -2147,6 +2147,12 @@ class EnhancedGraphRetriever:
             
             records = await loop.run_in_executor(None, _run_query)
             
+            logger.info("section_chunks_query_executed",
+                       group_id=self.group_id,
+                       records_returned=len(records),
+                       max_per_section=max_per_section,
+                       max_total=max_total)
+            
             chunks = []
             for record in records:
                 metadata: Dict[str, Any] = {}
@@ -2179,7 +2185,10 @@ class EnhancedGraphRetriever:
             return chunks
             
         except Exception as e:
-            logger.error("all_sections_chunks_retrieval_failed", error=str(e))
+            logger.error("all_sections_chunks_retrieval_failed", 
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        group_id=self.group_id)
             return []
 
     async def get_summary_chunks_by_section(

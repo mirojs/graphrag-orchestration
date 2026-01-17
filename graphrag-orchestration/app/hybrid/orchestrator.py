@@ -3748,8 +3748,21 @@ Instructions:
                             ""
                         ).strip().lower()
                         
-                        # Skip if this document is already covered or chunk already exists
-                        if doc_key and doc_key not in covered_docs and chunk.chunk_id not in existing_chunk_ids:
+                        # For section-based coverage, allow multiple chunks per document
+                        # (one per section). For semantic coverage, only one chunk per doc.
+                        skip_chunk = False
+                        if coverage_strategy == "section_based":
+                            # Section-based: Skip only if chunk already exists
+                            skip_chunk = chunk.chunk_id in existing_chunk_ids
+                        else:
+                            # Semantic/early-chunk: Skip if document already covered
+                            skip_chunk = doc_key and doc_key in covered_docs
+                        
+                        # Skip if chunk already exists
+                        if chunk.chunk_id in existing_chunk_ids:
+                            skip_chunk = True
+                        
+                        if not skip_chunk:
                             # Convert SourceChunk to dict format expected by synthesizer
                             coverage_chunk_dict = {
                                 "id": chunk.chunk_id,
@@ -3764,9 +3777,10 @@ Instructions:
                                 },
                             }
                             coverage_chunks_for_synthesis.append(coverage_chunk_dict)
-                            covered_docs.add(doc_key)
+                            if doc_key:
+                                covered_docs.add(doc_key)
+                                new_docs.add(doc_key)
                             existing_chunk_ids.add(chunk.chunk_id)
-                            new_docs.add(doc_key)
                             added_count += 1
                     
                     coverage_metadata = {

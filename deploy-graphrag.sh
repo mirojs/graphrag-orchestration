@@ -21,10 +21,15 @@ get_env_value_or_default() {
         value="${!key}"
     # Try azd if env var is empty and azd is available
     elif command -v azd &>/dev/null; then
-        # azd outputs errors to stdout, so check for ERROR prefix
-        local azd_output=$(azd env get-value "$key" 2>&1)
-        if ! echo "$azd_output" | grep -q "^ERROR:"; then
+        # Call azd but suppress noisy stderr (sometimes shows HTTP errors like 'Bad Request')
+        # Use '|| true' to prevent 'set -e' from exiting on azd failures.
+        local azd_output
+        azd_output=$(azd env get-value "$key" 2>/dev/null) || true
+        # If azd returned an explicit ERROR: prefix, treat as not found and emit a concise warning
+        if [ -n "$azd_output" ] && ! echo "$azd_output" | grep -q "^ERROR:"; then
             value="$azd_output"
+        else
+            >&2 echo "⚠️  azd env get-value $key failed or not set; continuing with default"
         fi
     fi
     

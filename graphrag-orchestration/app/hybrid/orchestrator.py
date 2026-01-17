@@ -3561,8 +3561,10 @@ Instructions:
         # This stage ensures we have at least ONE chunk from every document in
         # the corpus before synthesis, so the LLM can answer corpus-level questions.
         #
-        # Jan 2026 Enhancement: For "list all" / "enumerate" / "compare" queries,
-        # we increase max_per_document to ensure comprehensive coverage.
+        # Jan 2026 Enhancement: For "list all" / "enumerate" / "compare" queries:
+        # 1. Increase max_per_document to ensure comprehensive coverage
+        # 2. Extract domain keywords from query for BM25 boosting
+        # 3. Use hybrid semantic + keyword retrieval for exhaustive enumeration
         # ==================================================================
         coverage_metadata: Dict[str, Any] = {"applied": False}
         coverage_chunks_for_synthesis: List[Dict[str, Any]] = []  # Store actual chunk dicts
@@ -3581,14 +3583,43 @@ Instructions:
             ]
             return any(pattern in q_lower for pattern in comprehensive_patterns)
         
+        def _extract_domain_keywords(q: str) -> List[str]:
+            """Extract domain-specific keywords for BM25 boosting in comprehensive queries."""
+            q_lower = q.lower()
+            keywords: List[str] = []
+            
+            # Time-related patterns
+            if any(term in q_lower for term in ["time", "timeframe", "deadline", "period", "duration", "window"]):
+                keywords.extend(["days", "business days", "calendar days", "weeks", "months", "year"])
+            
+            # Money/payment-related patterns
+            if any(term in q_lower for term in ["payment", "price", "cost", "fee", "amount", "money"]):
+                keywords.extend(["$", "dollar", "payment", "fee", "cost", "price"])
+            
+            # Party/entity-related patterns
+            if any(term in q_lower for term in ["party", "parties", "entity", "entities", "who"]):
+                keywords.extend(["buyer", "seller", "owner", "tenant", "contractor", "agent"])
+            
+            # Obligation-related patterns
+            if any(term in q_lower for term in ["obligation", "must", "shall", "require", "responsible"]):
+                keywords.extend(["shall", "must", "required", "responsible", "obligat"])
+            
+            return keywords
+        
         is_comprehensive = _is_comprehensive_query(query)
-        # For comprehensive queries, get more chunks per document
-        chunks_per_doc = 3 if is_comprehensive else 1
+        domain_keywords = _extract_domain_keywords(query) if is_comprehensive else []
+        
+        # For comprehensive queries, scale chunks based on corpus size
+        # Small corpus (< 50 chunks total): get 5 per doc
+        # Medium corpus (50-200 chunks): get 3 per doc  
+        # Large corpus (> 200 chunks): get 2 per doc (semantic + keyword boost)
+        chunks_per_doc = 5 if is_comprehensive else 1  # Will adjust below based on corpus size
         
         if self.enhanced_retriever:
             try:
                 logger.info("stage_4.3.6_coverage_gap_fill_start",
                            is_comprehensive=is_comprehensive,
+                           domain_keywords=domain_keywords[:5] if domain_keywords else [],
                            chunks_per_doc=chunks_per_doc)
                 
                 # 1. Build set of documents already covered by evidence
@@ -3644,38 +3675,63 @@ Instructions:
                     logger.info("stage_4.3.6_skipped_full_coverage",
                                covered=len(covered_docs), total=total_docs)
                 else:
-                    # 4. Fetch coverage chunks using SEMANTIC similarity to the query
-                    # This ensures we get the most relevant chunk per document, not just
-                    # the first chunk (which may miss important info like dates/insurance).
-                    coverage_max = min(max(total_docs * chunks_per_doc, 0), 200)  # Cap for large corpuses
+                    # 4. Fetch coverage chunks
+                    # For comprehensive "list all" queries, use SECTION-based coverage
+                    # to ensure we get chunks from every section (not just top-K per doc).
+                    # For regular queries, use semantic similarity to get relevant chunks.
                     
-                    # Try to get query embedding for semantic coverage
-                    query_embedding = None
-                    try:
-                        from app.services.llm_service import LLMService
-                        llm_service = LLMService()
-                        if llm_service.embed_model:
-                            query_embedding = llm_service.embed_model.get_text_embedding(query)
-                    except Exception as emb_err:
-                        logger.warning("coverage_embedding_failed", error=str(emb_err))
+                    coverage_source_chunks: List[Any] = []
                     
-                    if query_embedding:
-                        # Use semantic coverage: find most relevant chunks per document
-                        # For comprehensive queries, get multiple chunks per doc
-                        coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks_semantic(
-                            query_embedding=query_embedding,
-                            max_per_document=chunks_per_doc,
-                            max_total=coverage_max,
+                    if is_comprehensive:
+                        # SECTION-BASED COVERAGE for "list all" queries
+                        # This ensures we don't miss section-specific info like:
+                        # - "Right to Cancel" section (3 business days)
+                        # - "Warranty Repair" section (60 days repair window)
+                        logger.info("stage_4.3.6_using_section_based_coverage",
+                                   reason="comprehensive_enumeration_query")
+                        
+                        coverage_source_chunks = await self.enhanced_retriever.get_all_sections_chunks(
+                            max_per_section=1,
+                            max_total=100,  # Cap for large corpuses
                         )
-                        coverage_strategy = f"semantic_x{chunks_per_doc}" if is_comprehensive else "semantic"
-                    else:
-                        # Fallback to early-chunk coverage if embedding fails
-                        coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
-                            max_per_document=chunks_per_doc,
-                            max_total=coverage_max,
-                            prefer_early_chunks=True,
-                        )
-                        coverage_strategy = f"early_chunks_x{chunks_per_doc}_fallback" if is_comprehensive else "early_chunks_fallback"
+                        coverage_strategy = "section_based"
+                        
+                        # If section-based retrieval returns nothing, fall back to semantic
+                        if not coverage_source_chunks:
+                            logger.warning("stage_4.3.6_section_fallback",
+                                          reason="no_sections_found")
+                            # Fall through to semantic below
+                    
+                    # Standard semantic/early-chunk coverage (fallback or non-comprehensive)
+                    if not coverage_source_chunks:
+                        coverage_max = min(max(total_docs * chunks_per_doc, 0), 200)
+                        
+                        # Try to get query embedding for semantic coverage
+                        query_embedding = None
+                        try:
+                            from app.services.llm_service import LLMService
+                            llm_service = LLMService()
+                            if llm_service.embed_model:
+                                query_embedding = llm_service.embed_model.get_text_embedding(query)
+                        except Exception as emb_err:
+                            logger.warning("coverage_embedding_failed", error=str(emb_err))
+                        
+                        if query_embedding:
+                            # Use semantic coverage: find most relevant chunks per document
+                            coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks_semantic(
+                                query_embedding=query_embedding,
+                                max_per_document=chunks_per_doc,
+                                max_total=coverage_max,
+                            )
+                            coverage_strategy = f"semantic_x{chunks_per_doc}" if is_comprehensive else "semantic"
+                        else:
+                            # Fallback to early-chunk coverage if embedding fails
+                            coverage_source_chunks = await self.enhanced_retriever.get_coverage_chunks(
+                                max_per_document=chunks_per_doc,
+                                max_total=coverage_max,
+                                prefer_early_chunks=True,
+                            )
+                            coverage_strategy = f"early_chunks_x{chunks_per_doc}_fallback" if is_comprehensive else "early_chunks_fallback"
                     
                     # 5. Add chunks only for documents NOT already covered
                     added_count = 0

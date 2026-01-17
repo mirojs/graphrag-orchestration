@@ -2067,6 +2067,121 @@ class EnhancedGraphRetriever:
             logger.error("semantic_coverage_chunks_retrieval_failed", error=str(e))
             return []
 
+    async def get_all_sections_chunks(
+        self,
+        max_per_section: int = 1,
+        max_total: int = 100,
+    ) -> List[SourceChunk]:
+        """Get one chunk per unique section across all documents.
+        
+        This is ideal for "list ALL X" queries where comprehensive section 
+        coverage is needed. Unlike get_coverage_chunks_semantic which returns
+        one chunk per document, this returns one chunk per section.
+        
+        For a document with sections like:
+        - "1. Introduction" 
+        - "2. Warranty Terms"
+        - "3. Right to Cancel"
+        - "4. Payment Terms"
+        
+        This will return one chunk from EACH section, ensuring comprehensive
+        enumeration queries don't miss section-specific information.
+        
+        Args:
+            max_per_section: Max chunks per unique section (default: 1)
+            max_total: Total cap on returned chunks (default: 100)
+            
+        Returns:
+            List of SourceChunks - one per unique section
+        """
+        if not self.driver:
+            return []
+        
+        # Query to get one chunk per section, ordered by chunk_index within section
+        query = """
+        MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
+        WHERE t.group_id = $group_id
+          AND s.group_id = $group_id
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        WITH s, t, d
+        ORDER BY s.path_key, t.chunk_index ASC
+        WITH s, collect({
+            chunk_id: t.id,
+            text: t.text,
+            metadata: t.metadata,
+            chunk_index: t.chunk_index,
+            section_id: s.id,
+            section_path_key: s.path_key,
+            section_title: s.title,
+            doc_id: coalesce(d.id, ''),
+            doc_title: coalesce(d.title, ''),
+            doc_source: coalesce(d.source, '')
+        })[0..$max_per_section] AS section_chunks
+        UNWIND section_chunks AS chunk
+        RETURN
+            chunk.chunk_id AS chunk_id,
+            chunk.text AS text,
+            chunk.metadata AS metadata,
+            chunk.chunk_index AS chunk_index,
+            chunk.section_id AS section_id,
+            chunk.section_path_key AS section_path_key,
+            chunk.section_title AS section_title,
+            chunk.doc_id AS doc_id,
+            chunk.doc_title AS doc_title,
+            chunk.doc_source AS doc_source
+        LIMIT $max_total
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        max_per_section=max_per_section,
+                        max_total=max_total,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            chunks = []
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                raw_meta = record.get("metadata")
+                if raw_meta:
+                    try:
+                        metadata = json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+                    except Exception:
+                        metadata = {}
+                
+                section_path_key = (record.get("section_path_key") or "").strip()
+                section_path = section_path_key.split(" > ") if section_path_key else []
+                
+                chunks.append(SourceChunk(
+                    chunk_id=record["chunk_id"],
+                    text=record["text"] or "",
+                    entity_name="",  # Section-based retrieval
+                    section_path=section_path,
+                    section_id=record.get("section_id") or "",
+                    document_id=record.get("doc_id") or "",
+                    document_title=record.get("doc_title") or "",
+                    document_source=record.get("doc_source") or "",
+                ))
+            
+            logger.info("all_sections_chunks_retrieved",
+                       group_id=self.group_id,
+                       num_sections=len(chunks),
+                       max_total=max_total)
+            
+            return chunks
+            
+        except Exception as e:
+            logger.error("all_sections_chunks_retrieval_failed", error=str(e))
+            return []
+
     async def get_summary_chunks_by_section(
         self,
         max_per_document: int = 1,

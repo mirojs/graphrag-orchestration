@@ -454,7 +454,6 @@ class AsyncNeo4jService:
         Addresses HippoRAG 2's "Latent Transitions" weakness.
         
         IMPORTANT: Section-path entities are now INCLUDED in results (not just used for boosting).
-        This is the key fix for Phase C - previously only entity-path entities were returned.
         """
         return cypher25_query("""
             UNWIND $seed_ids AS seed_id
@@ -522,17 +521,17 @@ class AsyncNeo4jService:
             }
 
             // =====================================================================
-            // Combine BOTH paths: entity-path + section-path entities
+            // Process entity-path with 2-hop expansion
             // =====================================================================
             WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping
 
-            // Extract section-path entities as a list
+            // Extract entity IDs from section path for later lookup
             WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping,
-                 [item IN section_hop1 | item.node] AS section_entities
+                 [item IN section_hop1 | item.node.id] AS section_entity_ids
 
             // Process entity-path neighbors (standard decay)
             UNWIND (entity_hop1 + [seed]) AS hop1_node
-            WITH seed, hop1_node, section_hop1, section_entities, group_id, per_neighbor_limit, damping
+            WITH seed, hop1_node, entity_hop1, section_hop1, section_entity_ids, group_id, per_neighbor_limit, damping
 
             // 2-hop expansion from entity path
             CALL (seed, hop1_node, group_id, per_neighbor_limit) {
@@ -546,19 +545,26 @@ class AsyncNeo4jService:
                 RETURN collect(n2) AS hop2
             }
 
-            // Combine entity-path entities (hop2 + hop1_node)
-            WITH seed, hop1_node, hop2, section_hop1, section_entities, damping
-            
+            // Collect all entity IDs from entity-path for scoring
+            WITH seed, hop1_node, hop2, entity_hop1, section_hop1, section_entity_ids, damping,
+                 [e IN entity_hop1 | e.id] AS hop1_ids,
+                 [e IN hop2 | e.id] AS hop2_ids
+
+            // Extract section entities as nodes for inclusion
+            WITH seed, hop1_node, hop2, section_hop1, section_entity_ids, damping, hop1_ids, hop2_ids,
+                 [item IN section_hop1 | item.node] AS section_entities
+
             // UNION both paths: entity-path entities AND section-path entities
             UNWIND (hop2 + [hop1_node] + section_entities) AS entity
             
-            // Calculate combined scores
-            WITH DISTINCT entity, seed, hop1_node, section_hop1, damping,
-                 // Entity-path contribution
+            // Calculate combined scores using ID lookups (not list membership on nodes)
+            WITH DISTINCT entity, seed, hop1_node, section_hop1, damping, hop1_ids, hop2_ids,
+                 // Entity-path contribution based on ID lookup
                  CASE
                      WHEN entity.id = seed.id THEN 1.0
                      WHEN entity.id = hop1_node.id THEN damping
-                     WHEN entity IN [hop1_node] + hop2 THEN damping * damping
+                     WHEN entity.id IN hop1_ids THEN damping
+                     WHEN entity.id IN hop2_ids THEN damping * damping
                      ELSE 0.0  // Section-only entity (no entity-path contribution)
                  END AS entity_path_score,
                  // Section-path contribution

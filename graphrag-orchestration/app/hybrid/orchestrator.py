@@ -3697,9 +3697,12 @@ Instructions:
                         coverage_strategy = "section_based"
                         
                         # If section-based retrieval returns nothing, fall back to semantic
+                        # but with MUCH higher chunks_per_doc (15-20) to simulate section coverage
                         if not coverage_source_chunks:
                             logger.warning("stage_4.3.6_section_fallback",
-                                          reason="no_sections_found")
+                                          reason="no_sections_found",
+                                          fallback_chunks_per_doc=15)
+                            chunks_per_doc = 15  # Aggressive coverage when sections unavailable
                             # Fall through to semantic below
                     
                     # Standard semantic/early-chunk coverage (fallback or non-comprehensive)

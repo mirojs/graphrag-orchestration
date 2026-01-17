@@ -304,13 +304,82 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 *   **What:** Run PPR with all discovered entities as seeds
 *   **Output:** Complete evidence subgraph spanning all relevant connections
 
-#### Stage 4.3.6: Semantic Coverage Retrieval (added 2026-01-16)
+#### Stage 4.3.6: Adaptive Coverage Retrieval (updated 2026-01-17)
 *   **Trigger:** Coverage intent or sparse PPR evidence on corpus-level questions
-*   **Engine:** `EnhancedGraphRetriever.get_coverage_chunks_semantic()` (query-embedding search per document)
-*   **What:** Select the most relevant chunk per document using query embedding; fallback to early-chunk coverage if embedding fails
+*   **Strategy Selection:** Query-type-dependent coverage approach
+    - **Comprehensive Enumeration Queries** → Section-based coverage
+    - **Standard Retrieval** → Semantic/early-chunk coverage
+*   **Detection:** Pattern matching for "list all", "enumerate", "compare all", "across the set", "each document"
+*   **Engines:**
+    - `EnhancedGraphRetriever.get_all_sections_chunks()` for section-based coverage
+    - `EnhancedGraphRetriever.get_coverage_chunks_semantic()` for semantic coverage
 *   **Scoring:** Coverage chunks added with lower scores to avoid overpowering relevance-based evidence
-*   **Metadata:** Preserves `coverage_metadata.strategy` (`semantic` vs `fallback`) for observability
+*   **Metadata:** Preserves `coverage_metadata.strategy` (`section_based` | `semantic` | `early_chunks_fallback`) and `is_comprehensive_query` flag
 *   **Synthesis:** Coverage chunks are passed directly to the synthesizer (not via evidence list) to avoid tuple/ID mismatch
+
+##### Section-Based Coverage for Comprehensive Queries
+**Problem:** When queries ask to "list ALL X" or "enumerate every Y", semantic search fails to provide exhaustive results. Example: *"List all explicit timeframes"* returns chunks ranked by semantic similarity to "timeframes" keyword, missing sections where timeframes appear but are not the primary topic.
+
+**Solution:** Retrieve **one chunk per unique section** across all documents instead of one chunk per document.
+
+**Implementation:**
+```python
+# Detection function
+def _is_comprehensive_query(query: str) -> bool:
+    """Detect queries asking for exhaustive lists or comparisons."""
+    comprehensive_patterns = [
+        "list all", "list every", "enumerate", "compare all",
+        "all explicit", "across the set", "each document", 
+        "all instances", "every occurrence", "complete list"
+    ]
+    return any(pattern in query.lower() for pattern in comprehensive_patterns)
+
+# Coverage strategy selection
+if _is_comprehensive_query(query):
+    # Section-based: One chunk per section (exhaustive coverage)
+    coverage_chunks = await retriever.get_all_sections_chunks(
+        max_per_section=1,  # One representative chunk per section
+        max_total=100,       # Upper bound to prevent context overflow
+    )
+    strategy = "section_based"
+else:
+    # Semantic: One chunk per document (relevance-based)
+    coverage_chunks = await retriever.get_coverage_chunks_semantic(
+        query_embedding=query_embed,
+        max_per_document=1,
+        max_total=50,
+    )
+    strategy = "semantic"
+```
+
+**Graph Query (Section-Based):**
+```cypher
+MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
+WHERE t.group_id = $group_id
+ORDER BY s.path_key, t.chunk_index ASC
+WITH s, collect({
+    chunk_id: t.chunk_id,
+    doc_url: t.doc_url,
+    text: t.text,
+    section_title: s.title
+})[0..$max_per_section] AS section_chunks
+UNWIND section_chunks AS chunk
+RETURN chunk LIMIT $max_total
+```
+
+**Why This Works:**
+| Query Type | Semantic Approach Problem | Section-Based Solution |
+|:-----------|:--------------------------|:-----------------------|
+| "List all timeframes" | Ranks "Warranty Terms" section high (contains "60 days warranty"), ranks "Right to Cancel" section LOW (about cancellation, not timeframes) | Retrieves chunks from BOTH sections: "Warranty Terms" → "60 days", "Right to Cancel" → "3 business days" |
+| "Enumerate payment options" | May retrieve 3 chunks from "Payment Methods" doc, 0 from "Invoice Terms" doc | Retrieves 1 chunk from "Payment Methods" section, 1 from "Invoice Terms" section, 1 from "Billing Procedures" section |
+| "Compare all subsidiaries" | Semantic similarity to "compare" may favor analytical sections over entity listings | Each subsidiary section gets one chunk (exhaustive entity coverage) |
+
+**Trade-offs:**
+- **Pros:** Exhaustive coverage for "list ALL" queries, no semantic bias
+- **Cons:** May retrieve 50-100 chunks vs 10-20 for semantic (longer context, slower synthesis)
+- **Mitigation:** Only activated for detected comprehensive queries; standard queries still use semantic ranking
+
+**Dependency:** Requires `(:TextChunk)-[:IN_SECTION]->(:Section)` relationships from indexing pipeline
 
 #### Stage 4.4: Raw Text Chunk Fetching
 *   **Engine:** Storage backend

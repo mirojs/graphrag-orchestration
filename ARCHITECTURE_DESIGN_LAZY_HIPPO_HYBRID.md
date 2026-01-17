@@ -1359,7 +1359,156 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 }
 ```
 
-**Python Example** (from `test_5pdfs_simple.py`):
+**Recommended Indexing Script:**
+
+For standard 5-PDF test indexing, use `scripts/index_5pdfs.py`:
+
+```bash
+# Fresh indexing (creates new group ID)
+python3 scripts/index_5pdfs.py
+
+# Re-index existing group (cleans old data first)
+export GROUP_ID=test-5pdfs-1768557493369886422
+python3 scripts/index_5pdfs.py
+```
+
+**Architecture Overview:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ CLIENT SIDE: scripts/index_5pdfs.py (~260 lines)            │
+│ • Simple wrapper that calls HTTP APIs                        │
+│ • Polls for job completion                                   │
+│ • Saves group ID to file                                     │
+└───────────────┬─────────────────────────────────────────────┘
+                │ HTTP POST
+                ▼
+┌─────────────────────────────────────────────────────────────┐
+│ SERVER SIDE: Indexing Pipeline (runs in Azure Container)    │
+│                                                               │
+│ API Endpoint:                                                │
+│   app/routers/hybrid.py                                      │
+│   POST /hybrid/index/documents                               │
+│   POST /hybrid/index/sync                                    │
+│                                                               │
+│ Core Pipeline Engine:                                        │
+│   app/hybrid/indexing/lazygraphrag_pipeline.py (~1600 lines)│
+│   • LazyGraphRAGIndexingPipeline class                       │
+│   • extract_document_date() - Line 53                        │
+│   • _build_section_similarity_edges() - Line 1468           │
+│                                                               │
+│ What the Pipeline Does:                                      │
+│   1. Download PDFs from Azure Blob Storage                   │
+│   2. Extract text via Document Intelligence API              │
+│   3. Extract dates from document content                     │
+│   4. Build Neo4j graph (docs, chunks, entities, sections)   │
+│   5. Generate embeddings (OpenAI text-embedding-3-large)     │
+│   6. Create SEMANTICALLY_SIMILAR edges (threshold=0.43)      │
+│   7. Sync to HippoRAG on-disk format                         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**What the Client Script Does:**
+
+1. **Data Cleaning (Re-index Mode)** - Script sets `reindex=True`, Pipeline deletes data
+   - When `GROUP_ID` environment variable is set, enables `reindex=True`
+   - Pipeline calls `neo4j_store.delete_group_data()` - deletes ALL existing data
+   - Ensures fresh indexing with latest pipeline features
+
+2. **Document Indexing** - Pipeline processes PDFs (`POST /hybrid/index/documents`)
+   - Downloads PDFs from Azure Blob Storage (immutable source)
+   - Extracts text via Azure Document Intelligence (preserves section structure, page numbers)
+   - **Extracts dates** using `extract_document_date()` function (line 53, `lazygraphrag_pipeline.py`)
+     - Scans for date patterns: MM/DD/YYYY, YYYY-MM-DD, Month DD YYYY
+     - Returns **latest date found in document text** (e.g., signature dates)
+     - Stores as `Document.date` property in Neo4j
+   - Creates Document nodes with metadata (title, source, **date**)
+   - Chunks text into TextChunk nodes with embeddings
+   - Links chunks to documents via `PART_OF` relationships
+
+3. **Entity & Relationship Extraction** - Pipeline uses LLM
+   - Extracts entities from chunks using LLM
+   - Creates Entity nodes with embeddings
+   - Creates directed relationships between entities
+   - Links entities to chunks via `MENTIONS` edges
+
+4. **Section Hierarchy** (HippoRAG 2 Enhancement) - Pipeline builds semantic graph
+   - Builds Section nodes from Azure DI structure (preserves document outline)
+   - Creates `IN_SECTION` edges linking chunks to sections
+   - Embeds sections (title + path + chunk samples)
+   - Calls `_build_section_similarity_edges()` (line 1468, `lazygraphrag_pipeline.py`)
+     - Computes cosine similarity between section embeddings
+     - Creates **SEMANTICALLY_SIMILAR edges** for cross-document sections above threshold (0.43)
+     - Example result: 219 edges for 5-PDF test group
+
+5. **HippoRAG Sync** - Pipeline exports to disk (`POST /hybrid/index/sync`)
+   - Exports Neo4j graph to HippoRAG on-disk format
+   - Creates triples for Personalized PageRank
+   - Initializes HippoRAG retriever in memory
+
+6. **Output Artifacts** - Script receives and saves results
+   - Saves group ID to `last_test_group_id.txt` for reference
+   - Returns indexing statistics (documents, chunks, entities, relationships, edges)
+
+**Index Completeness (5-PDF Test Group):**
+
+✅ **Created During Indexing:**
+- 5 Documents (all with extracted dates via `Document.date`)
+- 74 TextChunks (all with 3072-dim embeddings)
+- 363 Entities
+- 627 Entity Relationships
+- 779 MENTIONS edges
+- 102 Section nodes (hierarchical structure)
+- 219 SEMANTICALLY_SIMILAR edges (cross-document semantic connections)
+
+⏳ **Created On-Demand (LazyGraphRAG Pattern):**
+- Communities: Generated during Route 3 (Global Search) queries, not pre-computed
+- RAPTOR nodes: Optional, disabled by default (`run_raptor=False`)
+
+**What's Missing After Fresh Indexing:**
+- Nothing required for the 4-route hybrid system is missing
+- Communities appear "missing" but are intentionally lazy (created when needed)
+
+**Verification Queries:**
+
+```python
+# Check document dates
+MATCH (d:Document {group_id: $g})
+RETURN d.title, d.date
+ORDER BY d.date DESC
+
+# Check section similarity edges
+MATCH (s1:Section {group_id: $g})-[r:SEMANTICALLY_SIMILAR]->(s2:Section)
+RETURN count(r) AS edge_count
+
+# Check chunk embeddings
+MATCH (c:TextChunk {group_id: $g})
+RETURN count(c) AS total, count(c.embedding) AS with_embedding
+```
+
+**Date Extraction Algorithm (Verified Jan 2026):**
+
+The `extract_document_date()` function in `lazygraphrag_pipeline.py` scans document text for date patterns and returns the **latest date found**. This correctly extracts signing/effective dates from:
+
+| Document | Extracted | Source in Document |
+|----------|-----------|-------------------|
+| purchase_contract | 2025-04-30 | "Signed this **04/30/2025**" ✅ |
+| HOLDING TANK SERVICING CONTRACT | 2024-06-15 | "Contract Date: **2024-06-15**" ✅ |
+| contoso_lifts_invoice | 2015-12-17 | "DATE: **12/17/2015**" ✅ |
+| PROPERTY MANAGEMENT AGREEMENT | 2010-06-15 | "Date: **2010-06-15**" ✅ |
+| BUILDERS LIMITED WARRANTY | 2010-06-15 | "Date **2010-06-15**" ✅ |
+
+**Note:** The "old" dates (2010, 2015) are **not extraction errors** - they are the actual dates written in the test documents (sample/mock contracts). The algorithm correctly extracts signing dates from signature sections.
+
+Supported date formats:
+- `MM/DD/YYYY` (US format, e.g., "04/30/2025")
+- `YYYY-MM-DD` (ISO format, e.g., "2024-06-15")
+- `Month DD, YYYY` (e.g., "June 15, 2024")
+- `DD Month YYYY` (e.g., "15 June 2024")
+
+For testing queries after indexing, use dedicated test scripts like `scripts/benchmark_route4_drift_multi_hop.py`.
+
+**Python Example** (manual API integration):
 
 ```python
 import requests

@@ -1,0 +1,5 @@
+WARNING: Using resource group 'rg-graphrag-feature'
+WARNING: Creating ContainerAppEnvironment 'salmonhill-df6033f3' in resource group rg-graphrag-feature
+WARNING: No Log Analytics workspace provided.
+WARNING: Generating a Log Analytics workspace with name "workspace-rggraphragfeature77AN"
+/ Running ..

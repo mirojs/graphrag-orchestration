@@ -17,7 +17,7 @@ curl -fsSL https://aka.ms/install-azd.sh | bash
 If the install script was run with custom parameters, ensure that the same parameters are used for the upgrade. For advanced install instructions, see: https://aka.ms/azd/upgrade/linux
 Container Registry:   graphragacr12153
 Container App:        graphrag-orchestration
-Image Tag:            main-d3fa77b-20260117033526
+Image Tag:            main-d3fa77b-20260117032447
 DI Endpoint:          https://doc-intel-graphrag.cognitiveservices.azure.com/
 WARNING: your version of azd is out of date, you have 1.22.5 and the latest version is 1.23.0
 

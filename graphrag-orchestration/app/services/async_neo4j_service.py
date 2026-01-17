@@ -313,12 +313,25 @@ class AsyncNeo4jService:
         top_k: int = 20,
         per_seed_limit: int = 25,
         per_neighbor_limit: int = 10,
+        include_section_graph: bool = True,
     ) -> List[Tuple[str, float]]:
         """
         Native Cypher approximation of Personalized PageRank.
         
         This uses iterative neighbor expansion with decay - not true PPR,
         but provides similar "spread from seeds" behavior without GDS.
+        
+        Phase C Enhancement (January 2026):
+        When include_section_graph=True, also traverse SEMANTICALLY_SIMILAR
+        edges between Section nodes. This addresses HippoRAG 2's "Latent
+        Transitions" weakness by allowing PPR to jump between thematically
+        related sections even when they share no explicit entities.
+        
+        Traversal paths when include_section_graph=True:
+        1. Standard: seed Entity -> Entity relationships -> neighbor Entity
+        2. Section:  seed Entity -> MENTIONS -> Chunk -> IN_SECTION -> Section
+                     -> SEMANTICALLY_SIMILAR -> Section -> IN_SECTION -> Chunk
+                     -> MENTIONS -> neighbor Entity
         
         For true PPR, consider:
         1. Install GDS Community (free for self-managed Neo4j)
@@ -333,63 +346,12 @@ class AsyncNeo4jService:
         #
         # max_iterations is kept for API compatibility but is not used by this
         # approximation.
-        query = cypher25_query("""
-                UNWIND $seed_ids AS seed_id
-                MATCH (seed {id: seed_id})
-                WHERE seed.group_id = $group_id
-                  AND (seed:Entity OR seed:`__Entity__`)
-
-                // Always include the seed itself
-                                WITH seed,
-                                         seed_id,
-                                         $group_id AS group_id,
-                                         $per_seed_limit AS per_seed_limit,
-                                         $per_neighbor_limit AS per_neighbor_limit,
-                                         $damping AS damping
-                                CALL (seed, group_id, per_seed_limit) {
-                    MATCH (seed)-[r1]-(n1)
-                    WHERE n1.group_id = group_id
-                        AND (n1:Entity OR n1:`__Entity__`)
-                        AND type(r1) <> 'MENTIONS'
-                    WITH n1
-                    ORDER BY coalesce(n1.degree, 0) DESC
-                                    LIMIT $per_seed_limit
-                    RETURN collect(n1) AS hop1
-                }
-
-                                WITH seed, hop1, group_id, per_neighbor_limit, damping
-                UNWIND (hop1 + [seed]) AS hop1_node
-                                WITH seed, hop1_node, group_id, per_neighbor_limit, damping
-
-                // Optional 2-hop expansion capped per hop1_node
-                CALL (seed, hop1_node, group_id, per_neighbor_limit) {
-                    MATCH (hop1_node)-[r2]-(n2)
-                    WHERE n2.group_id = group_id
-                        AND (n2:Entity OR n2:`__Entity__`)
-                        AND type(r2) <> 'MENTIONS'
-                    WITH n2
-                    ORDER BY coalesce(n2.degree, 0) DESC
-                    LIMIT $per_neighbor_limit
-                    RETURN collect(n2) AS hop2
-                }
-
-                WITH seed, hop1_node, hop2, damping
-                UNWIND (hop2 + [hop1_node]) AS entity
-                WITH entity, seed, hop1_node, damping,
-                         sum(
-                             CASE
-                                 WHEN entity.id = seed.id THEN 1.0
-                                 WHEN entity.id = hop1_node.id THEN damping
-                                 ELSE damping * damping
-                             END
-                         ) AS score
-                RETURN entity.id AS id,
-                             entity.name AS name,
-                             score AS score,
-                             coalesce(entity.degree, 0) AS importance
-                ORDER BY score DESC
-                LIMIT $top_k
-                """)
+        
+        # Build the query based on whether section graph traversal is enabled
+        if include_section_graph:
+            query = self._build_ppr_query_with_section_graph()
+        else:
+            query = self._build_ppr_query_entity_only()
         
         import time
 
@@ -407,17 +369,213 @@ class AsyncNeo4jService:
             records = await result.data()
         dt_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
-            "async_neo4j_ppr_native_complete group_id=%s seeds=%s top_k=%s duration_ms=%s per_seed_limit=%s per_neighbor_limit=%s",
+            "async_neo4j_ppr_native_complete group_id=%s seeds=%s top_k=%s duration_ms=%s per_seed_limit=%s per_neighbor_limit=%s include_section_graph=%s",
             group_id,
             len(seed_entity_ids),
             top_k,
             dt_ms,
             per_seed_limit,
             per_neighbor_limit,
+            include_section_graph,
         )
 
         # Return as (name, score) tuples for compatibility
         return [(r["name"], r["score"]) for r in records]
+    
+    def _build_ppr_query_entity_only(self) -> str:
+        """Build the original Entity-only PPR query."""
+        return cypher25_query("""
+            UNWIND $seed_ids AS seed_id
+            MATCH (seed {id: seed_id})
+            WHERE seed.group_id = $group_id
+              AND (seed:Entity OR seed:`__Entity__`)
+
+            // Always include the seed itself
+            WITH seed,
+                 seed_id,
+                 $group_id AS group_id,
+                 $per_seed_limit AS per_seed_limit,
+                 $per_neighbor_limit AS per_neighbor_limit,
+                 $damping AS damping
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[r1]-(n1)
+                WHERE n1.group_id = group_id
+                    AND (n1:Entity OR n1:`__Entity__`)
+                    AND type(r1) <> 'MENTIONS'
+                WITH n1
+                ORDER BY coalesce(n1.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect(n1) AS hop1
+            }
+
+            WITH seed, hop1, group_id, per_neighbor_limit, damping
+            UNWIND (hop1 + [seed]) AS hop1_node
+            WITH seed, hop1_node, group_id, per_neighbor_limit, damping
+
+            // Optional 2-hop expansion capped per hop1_node
+            CALL (seed, hop1_node, group_id, per_neighbor_limit) {
+                MATCH (hop1_node)-[r2]-(n2)
+                WHERE n2.group_id = group_id
+                    AND (n2:Entity OR n2:`__Entity__`)
+                    AND type(r2) <> 'MENTIONS'
+                WITH n2
+                ORDER BY coalesce(n2.degree, 0) DESC
+                LIMIT $per_neighbor_limit
+                RETURN collect(n2) AS hop2
+            }
+
+            WITH seed, hop1_node, hop2, damping
+            UNWIND (hop2 + [hop1_node]) AS entity
+            WITH entity, seed, hop1_node, damping,
+                 sum(
+                     CASE
+                         WHEN entity.id = seed.id THEN 1.0
+                         WHEN entity.id = hop1_node.id THEN damping
+                         ELSE damping * damping
+                     END
+                 ) AS score
+            RETURN entity.id AS id,
+                   entity.name AS name,
+                   score AS score,
+                   coalesce(entity.degree, 0) AS importance
+            ORDER BY score DESC
+            LIMIT $top_k
+        """)
+    
+    def _build_ppr_query_with_section_graph(self) -> str:
+        """
+        Build PPR query that traverses both Entity graph AND Section graph.
+        
+        This enables "thematic hops" via SEMANTICALLY_SIMILAR edges:
+        - Entities discovered via standard Entity relationships get standard decay
+        - Entities discovered via Section graph get decay weighted by edge similarity
+        
+        Addresses HippoRAG 2's "Latent Transitions" weakness.
+        """
+        return cypher25_query("""
+            UNWIND $seed_ids AS seed_id
+            MATCH (seed {id: seed_id})
+            WHERE seed.group_id = $group_id
+              AND (seed:Entity OR seed:`__Entity__`)
+
+            WITH seed,
+                 seed_id,
+                 $group_id AS group_id,
+                 $per_seed_limit AS per_seed_limit,
+                 $per_neighbor_limit AS per_neighbor_limit,
+                 $damping AS damping
+
+            // =====================================================================
+            // Path 1: Standard Entity-to-Entity relationships (original behavior)
+            // =====================================================================
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[r1]-(n1)
+                WHERE n1.group_id = group_id
+                    AND (n1:Entity OR n1:`__Entity__`)
+                    AND type(r1) <> 'MENTIONS'
+                WITH n1
+                ORDER BY coalesce(n1.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect(n1) AS entity_hop1
+            }
+
+            // =====================================================================
+            // Path 2: Section-based thematic hops via SEMANTICALLY_SIMILAR edges
+            // seed -> MENTIONS -> Chunk -> IN_SECTION -> Section
+            //      -> SEMANTICALLY_SIMILAR -> Section -> IN_SECTION -> Chunk
+            //      -> MENTIONS -> neighbor Entity
+            // =====================================================================
+            CALL (seed, group_id, per_seed_limit) {
+                // Find chunks the seed entity mentions
+                MATCH (seed)-[:MENTIONS]->(chunk)
+                WHERE chunk.group_id = group_id
+                    AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
+                
+                // Navigate to section
+                MATCH (chunk)-[:IN_SECTION]->(s1:Section)
+                WHERE s1.group_id = group_id
+                
+                // Traverse SEMANTICALLY_SIMILAR to related sections
+                MATCH (s1)-[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
+                WHERE s2.group_id = group_id
+                
+                // Get chunks in the related section
+                MATCH (chunk2)-[:IN_SECTION]->(s2)
+                WHERE chunk2.group_id = group_id
+                    AND (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`)
+                
+                // Find entities mentioned in those chunks
+                MATCH (neighbor)-[:MENTIONS]->(chunk2)
+                WHERE neighbor.group_id = group_id
+                    AND (neighbor:Entity OR neighbor:`__Entity__`)
+                    AND neighbor.id <> seed.id
+                
+                // Weight by similarity score (higher similarity = more weight)
+                WITH neighbor, max(coalesce(sim.similarity, 0.5)) AS sim_weight
+                ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: neighbor, weight: sim_weight}) AS section_hop1
+            }
+
+            // Combine both paths
+            WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping
+
+            // Process entity-path neighbors (standard decay)
+            UNWIND (entity_hop1 + [seed]) AS hop1_node
+            WITH seed, hop1_node, section_hop1, group_id, per_neighbor_limit, damping, 
+                 damping AS hop1_weight
+
+            // 2-hop expansion from entity path
+            CALL (seed, hop1_node, group_id, per_neighbor_limit) {
+                MATCH (hop1_node)-[r2]-(n2)
+                WHERE n2.group_id = group_id
+                    AND (n2:Entity OR n2:`__Entity__`)
+                    AND type(r2) <> 'MENTIONS'
+                WITH n2
+                ORDER BY coalesce(n2.degree, 0) DESC
+                LIMIT $per_neighbor_limit
+                RETURN collect(n2) AS hop2
+            }
+
+            // Collect all discovered entities with their scores
+            WITH seed, hop1_node, hop2, section_hop1, damping, hop1_weight
+            UNWIND (hop2 + [hop1_node]) AS entity
+            
+            // Calculate scores: entity path contributes standard decay
+            WITH entity, seed, hop1_node, section_hop1, damping,
+                 sum(
+                     CASE
+                         WHEN entity.id = seed.id THEN 1.0
+                         WHEN entity.id = hop1_node.id THEN damping
+                         ELSE damping * damping
+                     END
+                 ) AS entity_score
+
+            // Add section-path contributions
+            WITH entity, seed, section_hop1, damping, entity_score
+            
+            // Check if this entity was also found via section path (boost if so)
+            WITH entity, seed, damping, entity_score,
+                 [item IN section_hop1 WHERE item.node.id = entity.id] AS section_matches
+            
+            WITH entity, seed, damping, entity_score,
+                 CASE 
+                     WHEN size(section_matches) > 0 
+                     THEN section_matches[0].weight * damping  // Section path boost
+                     ELSE 0.0 
+                 END AS section_score
+
+            // Combine scores (additive: found via both paths = higher score)
+            WITH entity.id AS id,
+                 entity.name AS name,
+                 entity_score + section_score AS score,
+                 coalesce(entity.degree, 0) AS importance
+            
+            // Deduplicate and return top results
+            RETURN id, name, max(score) AS score, importance
+            ORDER BY score DESC
+            LIMIT $top_k
+        """)
     
     # =========================================================================
     # Chunk Retrieval (Route 2/3)

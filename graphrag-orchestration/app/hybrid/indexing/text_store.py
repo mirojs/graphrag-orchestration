@@ -113,7 +113,7 @@ class Neo4jTextUnitStore:
         WITH c, d, score
         ORDER BY score DESC, coalesce(c.chunk_index, 0) ASC
         RETURN c AS chunk, d AS doc, score,
-               coalesce(d.create_date, d.date, '') AS doc_date,
+               coalesce(d.date, '') AS doc_date,
                coalesce(d.id, '') AS doc_id
         LIMIT $limit
         """
@@ -387,7 +387,7 @@ class Neo4jTextUnitStore:
                         "summary": record.get("summary") or "",
                         "source": record.get("source") or "",
                         "url": record.get("url") or "",
-                        "date": record.get("create_date") or record.get("date") or "",
+                        "date": record.get("date") or "",
                         "chunk_count": record.get("chunk_count") or 0,
                     }
                     docs.append(doc)

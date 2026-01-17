@@ -3692,7 +3692,7 @@ Instructions:
                         
                         coverage_source_chunks = await self.enhanced_retriever.get_all_sections_chunks(
                             max_per_section=1,
-                            max_total=100,  # Cap for large corpuses
+                            # No max_total - for comprehensive queries, get ALL sections
                         )
                         coverage_strategy = "section_based"
                         

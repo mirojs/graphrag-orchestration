@@ -2070,7 +2070,6 @@ class EnhancedGraphRetriever:
     async def get_all_sections_chunks(
         self,
         max_per_section: int = 1,
-        max_total: int = 100,
     ) -> List[SourceChunk]:
         """Get one chunk per unique section across all documents.
         
@@ -2087,17 +2086,19 @@ class EnhancedGraphRetriever:
         This will return one chunk from EACH section, ensuring comprehensive
         enumeration queries don't miss section-specific information.
         
+        No total limit is applied - for comprehensive coverage, we want ALL sections.
+        
         Args:
             max_per_section: Max chunks per unique section (default: 1)
-            max_total: Total cap on returned chunks (default: 100)
             
         Returns:
-            List of SourceChunks - one per unique section
+            List of SourceChunks - one per unique section (all sections in corpus)
         """
         if not self.driver:
             return []
         
         # Query to get one chunk per section, ordered by chunk_index within section
+        # No LIMIT - for comprehensive coverage, we want ALL sections
         query = """
         MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
         WHERE t.group_id = $group_id
@@ -2129,7 +2130,6 @@ class EnhancedGraphRetriever:
             chunk.doc_id AS doc_id,
             chunk.doc_title AS doc_title,
             chunk.doc_source AS doc_source
-        LIMIT $max_total
         """
         
         try:
@@ -2141,7 +2141,6 @@ class EnhancedGraphRetriever:
                         query,
                         group_id=self.group_id,
                         max_per_section=max_per_section,
-                        max_total=max_total,
                     )
                     return list(result)
             
@@ -2150,8 +2149,7 @@ class EnhancedGraphRetriever:
             logger.info("section_chunks_query_executed",
                        group_id=self.group_id,
                        records_returned=len(records),
-                       max_per_section=max_per_section,
-                       max_total=max_total)
+                       max_per_section=max_per_section)
             
             chunks = []
             for record in records:
@@ -2179,8 +2177,7 @@ class EnhancedGraphRetriever:
             
             logger.info("all_sections_chunks_retrieved",
                        group_id=self.group_id,
-                       num_sections=len(chunks),
-                       max_total=max_total)
+                       num_sections=len(chunks))
             
             return chunks
             

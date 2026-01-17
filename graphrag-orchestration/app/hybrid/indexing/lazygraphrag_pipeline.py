@@ -1023,7 +1023,7 @@ class LazyGraphRAGIndexingPipeline:
         dry_run: bool = False,
     ) -> Dict[str, Any]:
         """Validate entity graph and commit if thresholds are met. In dry-run mode, only return diagnostics."""
-        details = {
+        details: Dict[str, Any] = {
             "entities_found": len(entities),
             "relationships_found": len(relationships),
         }
@@ -1282,19 +1282,23 @@ class LazyGraphRAGIndexingPipeline:
                 # Log to investigate why some chunks aren't mapped
                 logger.warning(
                     "chunk_leaf_section_not_found",
-                    chunk_id=chunk.id,
-                    doc_id=doc_id,
-                    leaf_path_key=leaf_path_key,
-                    section_path=section_path,
-                    all_sections_count=len(all_sections)
+                    extra={
+                        "chunk_id": chunk.id,
+                        "doc_id": doc_id,
+                        "leaf_path_key": leaf_path_key,
+                        "section_path": section_path,
+                        "all_sections_count": len(all_sections)
+                    }
                 )
         
         logger.info(
             "chunk_to_section_mapping_complete",
-            total_chunks=len(chunks),
-            chunks_mapped=len(chunk_to_leaf_section),
-            chunks_unmapped=len(chunks) - len(chunk_to_leaf_section),
-            sections_created=len(all_sections)
+            extra={
+                "total_chunks": len(chunks),
+                "chunks_mapped": len(chunk_to_leaf_section),
+                "chunks_unmapped": len(chunks) - len(chunk_to_leaf_section),
+                "sections_created": len(all_sections)
+            }
         )
         if not all_sections:
             return {"sections_created": 0, "in_section_edges": 0}

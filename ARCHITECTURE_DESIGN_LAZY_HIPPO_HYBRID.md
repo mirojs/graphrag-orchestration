@@ -1157,9 +1157,10 @@ Query: "Summarize the main purpose of each document"
 | `SectionAwareChunker` | ✅ Complete | `app/hybrid/indexing/section_chunking/chunker.py` |
 | Integration helpers | ✅ Complete | `app/hybrid/indexing/section_chunking/integration.py` |
 | Unit tests | ✅ Complete | `app/hybrid/indexing/section_chunking/test_chunker.py` |
-| Pipeline integration | 🔄 Pending | Feature flag: `USE_SECTION_CHUNKING=1` |
-| Re-ingestion script | 🔄 Pending | Requires document re-processing |
-| Benchmark validation | 🔄 Pending | Compare against fixed chunking baseline |
+| Pipeline integration | ✅ Complete | `lazygraphrag_pipeline._build_section_graph()` (auto-enabled) |
+| Section graph building | ✅ Complete | Steps 4.5-4.7 in indexing pipeline |
+| Re-ingestion script | ✅ Complete | `scripts/backfill_section_graph.py` for existing corpora |
+| Benchmark validation | 🔄 In Progress | Re-index test corpus to validate |
 
 #### 6.5.8. Migration Path
 

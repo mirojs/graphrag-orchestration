@@ -275,6 +275,12 @@ With section-aware embeddings (added 2026-01-14), many Route 3 stages may be red
 
 This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to ambiguity.
 
+#### Stage 4.0: Deterministic Document-Date Queries (added 2026-01-16)
+*   **Trigger:** Corpus-level date metadata questions (e.g., "latest/oldest date", "which document has the latest date")
+*   **Engine:** Graph metadata query `get_documents_by_date()` over `Document.date` (`d.date`)
+*   **Behavior:** Short-circuits DRIFT when a date-metadata intent is detected; returns deterministic answers without LLM date parsing
+*   **Dependency:** Indexing-time document date extraction + optional backfill (`migrate_document_dates.py`) for existing corpora
+
 #### Stage 4.1: Query Decomposition (DRIFT-Style)
 *   **Engine:** LLM with DRIFT prompting strategy
 *   **What:** Break ambiguous query into concrete sub-questions
@@ -297,6 +303,14 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 *   **Engine:** HippoRAG 2 with accumulated seeds
 *   **What:** Run PPR with all discovered entities as seeds
 *   **Output:** Complete evidence subgraph spanning all relevant connections
+
+#### Stage 4.3.6: Semantic Coverage Retrieval (added 2026-01-16)
+*   **Trigger:** Coverage intent or sparse PPR evidence on corpus-level questions
+*   **Engine:** `EnhancedGraphRetriever.get_coverage_chunks_semantic()` (query-embedding search per document)
+*   **What:** Select the most relevant chunk per document using query embedding; fallback to early-chunk coverage if embedding fails
+*   **Scoring:** Coverage chunks added with lower scores to avoid overpowering relevance-based evidence
+*   **Metadata:** Preserves `coverage_metadata.strategy` (`semantic` vs `fallback`) for observability
+*   **Synthesis:** Coverage chunks are passed directly to the synthesizer (not via evidence list) to avoid tuple/ID mismatch
 
 #### Stage 4.4: Raw Text Chunk Fetching
 *   **Engine:** Storage backend
@@ -1455,10 +1469,17 @@ The indexing pipeline is designed to support the **4-route hybrid runtime** (Laz
 At a high level:
 1. **Extract** document content with Azure DI (preserving section/page metadata for citations)
 2. **Chunk** into `TextChunk` nodes with stable identifiers + full DI metadata (section_path, page_number, etc.)
-3. **Embed** chunks (and/or entities) for vector retrieval signals (Route 1) and entity matching
-4. **Build graph primitives** (entities/relationships/triples) in Neo4j for LazyGraphRAG + HippoRAG traversal
-5. **Entity Deduplication** (NLP-based, deterministic) — merge duplicate entities before storage
-6. **(Optional) Community detection** for Route 3 community matching
+3. **Extract document dates** from content and store `Document.date` (`d.date`) for deterministic date metadata queries
+4. **Embed** chunks (and/or entities) for vector retrieval signals (Route 1) and entity matching
+5. **Build graph primitives** (entities/relationships/triples) in Neo4j for LazyGraphRAG + HippoRAG traversal
+6. **Entity Deduplication** (NLP-based, deterministic) — merge duplicate entities before storage
+7. **(Optional) Community detection** for Route 3 community matching
+
+#### Document Date Extraction (added 2026-01-16)
+*   **What:** Scan document content for date patterns and store the most recent date as `Document.date` (`d.date`)
+*   **Why:** Enables deterministic corpus-level date queries without LLM date parsing (Route 4 Stage 4.0)
+*   **Patterns:** Supports `MM/DD/YYYY`, `YYYY-MM-DD`, `Month DD, YYYY`, `DD Month YYYY`
+*   **Backfill:** One-time script `migrate_document_dates.py` for existing indexed corpora
 
 #### Entity Deduplication (Step 2b in Indexing Pipeline)
 

@@ -634,10 +634,20 @@ Response:"""
                 source = chunk.get("source", "Unknown")
                 text = chunk.get("text", "")
                 
+                # Extract section information from metadata
+                meta = chunk.get("metadata", {})
+                section_path = meta.get("section_path") or meta.get("di_section_path")
+                section_str = "General"
+                if isinstance(section_path, list) and section_path:
+                    section_str = " > ".join(str(x) for x in section_path if x)
+                elif isinstance(section_path, str) and section_path:
+                    section_str = section_path
+                
                 citation_map[citation_id] = {
                     "source": source,
                     "chunk_id": chunk.get("id", f"chunk_{original_idx}"),
                     "document": doc_title,
+                    "section": section_str,
                     "text_preview": text[:100] + "..." if len(text) > 100 else text
                 }
                 

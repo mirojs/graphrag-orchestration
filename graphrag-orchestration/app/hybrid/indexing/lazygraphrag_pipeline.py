@@ -1504,7 +1504,10 @@ class LazyGraphRAGIndexingPipeline:
         
         Args:
             group_id: Tenant identifier
-            similarity_threshold: Minimum cosine similarity to create edge (default 0.80)
+            similarity_threshold: Minimum cosine similarity to create edge.
+                                  Default 0.43 was empirically determined - 0.80 was too high
+                                  and produced zero edges on heterogeneous corpora.
+                                  PPR applies additional 0.50 filter at query time.
             max_edges_per_section: Cap edges per section to avoid graph bloat
             
         Returns:

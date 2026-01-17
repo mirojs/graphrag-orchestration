@@ -448,9 +448,13 @@ class AsyncNeo4jService:
         
         This enables "thematic hops" via SEMANTICALLY_SIMILAR edges:
         - Entities discovered via standard Entity relationships get standard decay
-        - Entities discovered via Section graph get decay weighted by edge similarity
+        - Entities discovered ONLY via Section graph get lower weight (similarity * damping²)
+        - Entities found via both paths get boosted scores
         
         Addresses HippoRAG 2's "Latent Transitions" weakness.
+        
+        IMPORTANT: Section-path entities are now INCLUDED in results (not just used for boosting).
+        This is the key fix for Phase C - previously only entity-path entities were returned.
         """
         return cypher25_query("""
             UNWIND $seed_ids AS seed_id
@@ -481,9 +485,7 @@ class AsyncNeo4jService:
 
             // =====================================================================
             // Path 2: Section-based thematic hops via SEMANTICALLY_SIMILAR edges
-            // seed -> MENTIONS -> Chunk -> IN_SECTION -> Section
-            //      -> SEMANTICALLY_SIMILAR -> Section -> IN_SECTION -> Chunk
-            //      -> MENTIONS -> neighbor Entity
+            // Only consider high-confidence edges (similarity >= 0.5) to reduce noise
             // =====================================================================
             CALL (seed, group_id, per_seed_limit) {
                 // Find chunks the seed entity mentions
@@ -496,8 +498,10 @@ class AsyncNeo4jService:
                 WHERE s1.group_id = group_id
                 
                 // Traverse SEMANTICALLY_SIMILAR to related sections
+                // Filter to higher confidence edges to reduce noise
                 MATCH (s1)-[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
                 WHERE s2.group_id = group_id
+                  AND coalesce(sim.similarity, 0.5) >= 0.5  // Noise filter
                 
                 // Get chunks in the related section
                 MATCH (chunk2)-[:IN_SECTION]->(s2)
@@ -510,20 +514,25 @@ class AsyncNeo4jService:
                     AND (neighbor:Entity OR neighbor:`__Entity__`)
                     AND neighbor.id <> seed.id
                 
-                // Weight by similarity score (higher similarity = more weight)
+                // Weight by similarity score
                 WITH neighbor, max(coalesce(sim.similarity, 0.5)) AS sim_weight
                 ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
                 LIMIT $per_seed_limit
                 RETURN collect({node: neighbor, weight: sim_weight}) AS section_hop1
             }
 
-            // Combine both paths
+            // =====================================================================
+            // Combine BOTH paths: entity-path + section-path entities
+            // =====================================================================
             WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping
+
+            // Extract section-path entities as a list
+            WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping,
+                 [item IN section_hop1 | item.node] AS section_entities
 
             // Process entity-path neighbors (standard decay)
             UNWIND (entity_hop1 + [seed]) AS hop1_node
-            WITH seed, hop1_node, section_hop1, group_id, per_neighbor_limit, damping, 
-                 damping AS hop1_weight
+            WITH seed, hop1_node, section_hop1, section_entities, group_id, per_neighbor_limit, damping
 
             // 2-hop expansion from entity path
             CALL (seed, hop1_node, group_id, per_neighbor_limit) {
@@ -537,39 +546,37 @@ class AsyncNeo4jService:
                 RETURN collect(n2) AS hop2
             }
 
-            // Collect all discovered entities with their scores
-            WITH seed, hop1_node, hop2, section_hop1, damping, hop1_weight
-            UNWIND (hop2 + [hop1_node]) AS entity
+            // Combine entity-path entities (hop2 + hop1_node)
+            WITH seed, hop1_node, hop2, section_hop1, section_entities, damping
             
-            // Calculate scores: entity path contributes standard decay
-            WITH entity, seed, hop1_node, section_hop1, damping,
-                 sum(
-                     CASE
-                         WHEN entity.id = seed.id THEN 1.0
-                         WHEN entity.id = hop1_node.id THEN damping
-                         ELSE damping * damping
-                     END
-                 ) AS entity_score
-
-            // Add section-path contributions
-            WITH entity, seed, section_hop1, damping, entity_score
+            // UNION both paths: entity-path entities AND section-path entities
+            UNWIND (hop2 + [hop1_node] + section_entities) AS entity
             
-            // Check if this entity was also found via section path (boost if so)
-            WITH entity, seed, damping, entity_score,
+            // Calculate combined scores
+            WITH DISTINCT entity, seed, hop1_node, section_hop1, damping,
+                 // Entity-path contribution
+                 CASE
+                     WHEN entity.id = seed.id THEN 1.0
+                     WHEN entity.id = hop1_node.id THEN damping
+                     WHEN entity IN [hop1_node] + hop2 THEN damping * damping
+                     ELSE 0.0  // Section-only entity (no entity-path contribution)
+                 END AS entity_path_score,
+                 // Section-path contribution
                  [item IN section_hop1 WHERE item.node.id = entity.id] AS section_matches
-            
-            WITH entity, seed, damping, entity_score,
+
+            WITH entity, seed, damping, entity_path_score,
                  CASE 
                      WHEN size(section_matches) > 0 
-                     THEN section_matches[0].weight * damping  // Section path boost
+                     THEN section_matches[0].weight * damping * damping  // Section path: similarity * damping²
                      ELSE 0.0 
-                 END AS section_score
+                 END AS section_path_score
 
-            // Combine scores (additive: found via both paths = higher score)
+            // Final score: entity_path + section_path (section-only entities get section_path_score only)
             WITH entity.id AS id,
                  entity.name AS name,
-                 entity_score + section_score AS score,
+                 entity_path_score + section_path_score AS score,
                  coalesce(entity.degree, 0) AS importance
+            WHERE score > 0  // Filter out zeros
             
             // Deduplicate and return top results
             RETURN id, name, max(score) AS score, importance

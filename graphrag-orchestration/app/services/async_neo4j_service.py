@@ -313,7 +313,7 @@ class AsyncNeo4jService:
         top_k: int = 20,
         per_seed_limit: int = 25,
         per_neighbor_limit: int = 10,
-        include_section_graph: bool = False,  # Temporarily disabled for A/B test
+        include_section_graph: bool = True,  # Re-enabled after bug fix
     ) -> List[Tuple[str, float]]:
         """
         Native Cypher approximation of Personalized PageRank.

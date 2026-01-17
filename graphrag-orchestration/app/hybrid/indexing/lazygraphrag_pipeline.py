@@ -1584,13 +1584,14 @@ class LazyGraphRAGIndexingPipeline:
             result = session.run(
                 """
                 UNWIND $edges AS e
-                MATCH (s1:Section {id: e.source_id})
-                MATCH (s2:Section {id: e.target_id})
+                MATCH (s1:Section {id: e.source_id, group_id: $group_id})
+                MATCH (s2:Section {id: e.target_id, group_id: $group_id})
                 MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
                 SET r.similarity = e.similarity, r.created_at = datetime()
                 RETURN count(r) AS count
                 """,
                 edges=edges_to_create,
+                group_id=group_id,
             )
             edges_created = result.single()["count"]
         

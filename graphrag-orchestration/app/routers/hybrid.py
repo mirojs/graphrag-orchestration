@@ -1940,7 +1940,7 @@ async def debug_rebuild_similarity_edges(request: Request):
         with neo4j_store.driver.session(database=neo4j_store.database) as session:
             result = session.run(
                 """
-                MATCH (s1:Section {group_id: $group_id})-[r:SEMANTICALLY_SIMILAR]->(s2:Section)
+                MATCH (s1:Section {group_id: $group_id})-[r:SEMANTICALLY_SIMILAR]-(s2:Section {group_id: $group_id})
                 DELETE r
                 RETURN count(r) as deleted_count
                 """,

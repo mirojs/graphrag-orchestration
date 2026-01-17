@@ -570,7 +570,7 @@ class AsyncNeo4jService:
                  // Section-path contribution
                  [item IN section_hop1 WHERE item.node.id = entity.id] AS section_matches
 
-            WITH entity, seed, damping, entity_path_score,
+            WITH entity, seed, damping, entity_path_score, section_matches,
                  CASE 
                      WHEN size(section_matches) > 0 
                      THEN section_matches[0].weight * damping * damping  // Section path: similarity * damping²

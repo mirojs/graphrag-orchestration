@@ -486,6 +486,12 @@ def main():
         default=DEFAULT_QUESTION_BANK,
         help="Path to question bank MD file (default: QUESTION_BANK_5PDFS_2025-12-24.md)",
     )
+    parser.add_argument(
+        "--filter-qid",
+        type=str,
+        default=None,
+        help="Run only a specific question ID (e.g., Q-D3)",
+    )
 
     args = parser.parse_args()
 
@@ -495,7 +501,16 @@ def main():
 
     # Read questions (positive Q-D + negative Q-N)
     questions = _read_question_bank(qbank_path, positive_prefix="Q-D", negative_prefix="Q-N")
-    print(f"Loaded {len(questions)} questions from {qbank_path.name}")
+    
+    # Apply filter if specified
+    if args.filter_qid:
+        questions = [q for q in questions if q.qid == args.filter_qid]
+        if not questions:
+            print(f"No question found with ID: {args.filter_qid}")
+            return
+        print(f"Filtered to single question: {args.filter_qid}")
+    else:
+        print(f"Loaded {len(questions)} questions from {qbank_path.name}")
     
     positive_count = sum(1 for q in questions if q.qid.startswith("Q-D"))
     negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))

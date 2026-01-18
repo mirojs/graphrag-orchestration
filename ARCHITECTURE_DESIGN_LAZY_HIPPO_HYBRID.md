@@ -3392,10 +3392,19 @@ While HippoRAG 2 is state-of-the-art, standard implementations suffer from four 
 
 #### Remaining Opportunities (Future Enhancements)
 
-| Enhancement | Location | Priority |
-|:------------|:---------|:---------|
-| Section embeddings for direct vector search | `enhanced_graph_retriever.py` (new method) | LOW |
-| Graph-aware coverage expansion | `orchestrator.py` Stage 4.3.6 | LOW |
+| Enhancement | Location | Priority | Status |
+|:------------|:---------|:---------|:-------|
+| Section embeddings for direct vector search | `enhanced_graph_retriever.py` | LOW | ✅ **Implemented** (2026-01-18, commit 3187eb5) |
+| Graph-aware coverage expansion | `orchestrator.py` Stage 4.3.6 | LOW | Not started |
+
+**Section Vector Search Implementation (2026-01-18):**
+- **Method:** `EnhancedGraphRetriever.search_sections_by_vector(query_embedding, top_k, score_threshold)`
+- **Mode:** Manual utility - available but not automatically triggered in query routes
+- **Uses:** Existing `Section.embedding` vectors (no new embeddings required)
+- **Returns:** Section metadata (id, title, path_key, document_id, document_title, score)
+- **Use cases:** Structural queries ("show methodology sections"), coarse-to-fine retrieval, hierarchical navigation
+- **Integration:** Available for explicit use; not wired into Routes 1-4 automatic flow
+- **Rationale:** Marked LOW priority - current retrieval strategies (entity PPR + coverage) achieve 94.7% benchmark accuracy; section-level search is optimization for future UX features
 
 These are optional enhancements - the core "Latent Transitions" solution is now complete.
 

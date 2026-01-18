@@ -3883,82 +3883,41 @@ Instructions:
         """
         Execute entity discovery for a list of sub-questions.
         
-        PARALLELIZED (Jan 2026): Sub-questions are processed concurrently using
-        asyncio.gather() since they are independent of each other. This reduces
-        discovery pass latency from O(n * avg_time) to O(avg_time) for n sub-questions.
-        
         Args:
             sub_questions: List of decomposed sub-questions
             
         Returns:
             Tuple of (all_seeds, intermediate_results)
         """
-        if not sub_questions:
-            return [], []
-        
-        async def _process_single_sub_question(idx: int, sub_q: str) -> Dict[str, Any]:
-            """Process a single sub-question: disambiguate + trace."""
-            logger.info(f"processing_sub_question_{idx+1}", question=sub_q[:50])
-            
-            try:
-                # Get entities for this sub-question
-                sub_entities = await self.disambiguator.disambiguate(sub_q)
-                
-                # Run partial search for context building
-                evidence_count = 0
-                if sub_entities:
-                    partial_evidence = await self.tracer.trace(
-                        query=sub_q,
-                        seed_entities=sub_entities,
-                        top_k=5  # Smaller for sub-questions
-                    )
-                    evidence_count = len(partial_evidence)
-                
-                return {
-                    "question": sub_q,
-                    "entities": sub_entities,
-                    "evidence_count": evidence_count,
-                    "error": None
-                }
-            except Exception as e:
-                logger.warning(f"sub_question_processing_failed_{idx+1}", 
-                              question=sub_q[:50], error=str(e))
-                return {
-                    "question": sub_q,
-                    "entities": [],
-                    "evidence_count": 0,
-                    "error": str(e)
-                }
-        
-        # Process all sub-questions in parallel
-        logger.info("discovery_pass_parallel_start", num_sub_questions=len(sub_questions))
-        
-        tasks = [
-            _process_single_sub_question(i, sub_q) 
-            for i, sub_q in enumerate(sub_questions)
-        ]
-        intermediate_results = await asyncio.gather(*tasks)
-        
-        # Convert to list and collect all seeds
-        intermediate_results = list(intermediate_results)
         all_seeds: List[str] = []
-        for result in intermediate_results:
-            all_seeds.extend(result.get("entities", []))
+        intermediate_results: List[Dict[str, Any]] = []
         
-        # Deduplicate seeds while preserving order (first occurrence wins)
-        seen: set = set()
-        unique_seeds: List[str] = []
-        for seed in all_seeds:
-            if seed not in seen:
-                seen.add(seed)
-                unique_seeds.append(seed)
+        for i, sub_q in enumerate(sub_questions):
+            logger.info(f"processing_sub_question_{i+1}", question=sub_q[:50])
+            
+            # Get entities for this sub-question
+            sub_entities = await self.disambiguator.disambiguate(sub_q)
+            all_seeds.extend(sub_entities)
+            
+            # Run partial search for context building
+            evidence_count = 0
+            if len(sub_entities) > 0:
+                partial_evidence = await self.tracer.trace(
+                    query=sub_q,
+                    seed_entities=sub_entities,
+                    top_k=5  # Smaller for sub-questions
+                )
+                evidence_count = len(partial_evidence)
+            
+            intermediate_results.append({
+                "question": sub_q,
+                "entities": sub_entities,
+                "evidence_count": evidence_count
+            })
         
-        logger.info("discovery_pass_parallel_complete", 
-                   num_sub_questions=len(sub_questions),
-                   total_unique_seeds=len(unique_seeds),
-                   successful=sum(1 for r in intermediate_results if not r.get("error")))
-        
-        return unique_seeds, intermediate_results
+        # Deduplicate seeds
+        all_seeds = list(set(all_seeds))
+        return all_seeds, intermediate_results
     
     def _compute_subgraph_confidence(
         self, 

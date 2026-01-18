@@ -219,8 +219,8 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
    - **Source:** purchase_contract.pdf (chunk 1)
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
-   - **Expected:** `Fabrikam Inc.` appears in more documents (warranty, holding tank, purchase contract, property management) than `Contoso Ltd.` (property management, holding tank). Note: Fabrikam Inc. signs the property management agreement as the Agent's Principal Broker.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same 4 documents (warranty, holding tank, purchase contract including Exhibit A, property management), making it a tie. Note: Fabrikam Inc. signs the property management agreement as the Agent's Principal Broker; Contoso Ltd. is the Buyer/Owner in the warranty and signs Exhibit A of the purchase contract.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0 and Exhibit A); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
    - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20k/$7k/$2.9k).

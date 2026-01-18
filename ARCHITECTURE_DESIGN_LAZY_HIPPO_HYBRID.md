@@ -493,7 +493,7 @@ The initial coverage issues (missing timeframes) were caused by **stale index da
   - All 10 positive tests: Pass (9 scored 3/3, Q-D3 scored 2/3 due to scope interpretation*)
   - All 9 negative tests: Pass (all scored 3/3)
   - *Q-D3 full-run 2/3: Judge noted answer was "too comprehensive" (listed all timeframes instead of subset in ground truth)
-  - *Q-D8 scored 1/3: Judge noted "over-partitioning" (treated Exhibit A as separate document vs. part of purchase contract)
+  - *Q-D8 scored 1/3 initially: Judge noted "over-partitioning" (treated Exhibit A as separate document vs. part of purchase contract). **Ground truth was incorrect** - both entities actually appear in 4 documents (verified via Neo4j). System answer (tie) is correct; ground truth updated 2026-01-18.
 - **Built-in accuracy metric false positive:** Q-N3 flagged as FAIL due to verbose explanation; LLM judge correctly scored 3/3
 
 **Impact:**

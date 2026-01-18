@@ -331,7 +331,13 @@ This handles queries that would confuse both LazyGraphRAG and HippoRAG 2 due to 
 ##### Section-Based Coverage for Comprehensive Queries
 **Problem:** When queries ask to "list ALL X" or "enumerate every Y", semantic search fails to provide exhaustive results. Example: *"List all explicit timeframes"* returns chunks ranked by semantic similarity to "timeframes" keyword, missing sections where timeframes appear but are not the primary topic.
 
-**Solution:** Retrieve **one chunk per unique section** across all documents instead of one chunk per document.
+**Solution:** Retrieve **ALL chunks from each section** across all documents for comprehensive queries (not just one representative chunk per section).
+
+**Bug Fix (2026-01-18):** Previous implementation used `max_per_section=1` which returned only the first chunk (by `chunk_index`) per section. This missed critical content in later chunks. For example, HOLDING TANK document:
+- Chunk 0: Contract header, parties, metadata
+- Chunk 1: Contract terms including **"within ten (10) business days"** ← MISSED
+
+The fix retrieves ALL chunks per section for comprehensive queries, since the goal is exhaustive coverage.
 
 **Implementation:**
 ```python
@@ -347,10 +353,11 @@ def _is_comprehensive_query(query: str) -> bool:
 
 # Coverage strategy selection
 if _is_comprehensive_query(query):
-    # Section-based: One chunk per section (exhaustive coverage)
+    # Section-based: ALL chunks per section (exhaustive coverage)
+    # max_per_section=None means no limit - get all chunks in each section
     coverage_chunks = await retriever.get_all_sections_chunks(
-        max_per_section=1,  # One representative chunk per section
-        # No max_total - get ALL sections for comprehensive queries
+        max_per_section=None,  # ← FIXED: All chunks per section, not just first
+        # No max_total - get ALL section chunks for comprehensive queries
     )
     strategy = "section_based"
 else:
@@ -363,39 +370,39 @@ else:
     strategy = "semantic"
 ```
 
-**Graph Query (Section-Based - Updated 2026-01-17):**
+**Graph Query (Section-Based - FIXED 2026-01-18):**
 ```cypher
 MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
 WHERE t.group_id = $group_id
 ORDER BY s.path_key, t.chunk_index ASC
+-- When max_per_section is NULL, return ALL chunks per section
 WITH s, collect({
     chunk_id: t.chunk_id,
     doc_url: t.doc_url,
     text: t.text,
     section_title: s.title
-})[0..$max_per_section] AS section_chunks
+}) AS section_chunks  -- No [0..N] slice for comprehensive queries
 UNWIND section_chunks AS chunk
 RETURN chunk
--- NOTE: LIMIT removed (previously had LIMIT $max_total)
--- Returns all sections that have chunks for comprehensive coverage
+-- Returns ALL chunks from ALL sections for comprehensive coverage
 ```
 
 **Coverage Chunk Processing Pipeline:**
 ```
-1. Retrieval: get_all_sections_chunks() → 50 SourceChunk objects
+1. Retrieval: get_all_sections_chunks(max_per_section=None) → All section chunks
 2. Deduplication: Skip chunks already in existing_chunk_ids (from entity retrieval)
 3. Merge: coverage_chunks.extend(entity_chunks) → Direct append to synthesis
 4. Synthesis: LLM processes all chunks together (no filtering/reranking)
 ```
 
-Key design decision: **No post-retrieval filtering**. Section-based sampling already provides intelligent selection (one chunk per content section). Additional filtering would reduce coverage, defeating the purpose of comprehensive queries.
+Key design decision: **No post-retrieval filtering**. For comprehensive queries like "list all timeframes", we want every chunk from every section to ensure nothing is missed. The synthesis LLM handles summarization/deduplication.
 
 **Why This Works:**
-| Query Type | Semantic Approach Problem | Section-Based Solution |
-|:-----------|:--------------------------|:-----------------------|
-| "List all timeframes" | Ranks "Warranty Terms" section high (contains "60 days warranty"), ranks "Right to Cancel" section LOW (about cancellation, not timeframes) | Retrieves chunks from BOTH sections: "Warranty Terms" → "60 days", "Right to Cancel" → "3 business days" |
-| "Enumerate payment options" | May retrieve 3 chunks from "Payment Methods" doc, 0 from "Invoice Terms" doc | Retrieves 1 chunk from "Payment Methods" section, 1 from "Invoice Terms" section, 1 from "Billing Procedures" section |
-| "Compare all subsidiaries" | Semantic similarity to "compare" may favor analytical sections over entity listings | Each subsidiary section gets one chunk (exhaustive entity coverage) |
+| Query Type | Previous Bug | Fixed Behavior |
+|:-----------|:-------------|:---------------|
+| "List all timeframes" | Takes first chunk from each section (chunk 0), missing content in chunk 1+ like "10 business days" | Retrieves ALL chunks from each section, capturing all timeframes |
+| "Enumerate payment options" | First chunk may be section header/overview, not detailed content | Gets all chunks, including detailed payment term chunks |
+| "Compare all subsidiaries" | Each section's first chunk may not contain the entity listing | All chunks retrieved, ensuring entity listings are found |
 
 **Trade-offs:**
 - **Pros:** Exhaustive coverage for "list ALL" queries, no semantic bias

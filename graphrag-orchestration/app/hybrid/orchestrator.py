@@ -3687,14 +3687,18 @@ Instructions:
                         # This ensures we don't miss section-specific info like:
                         # - "Right to Cancel" section (3 business days)
                         # - "Warranty Repair" section (60 days repair window)
+                        #
+                        # BUG FIX: Use max_per_section=None to get ALL chunks per section
+                        # Previously, max_per_section=1 only returned first chunk per section,
+                        # missing critical content in later chunks (e.g., timeframes in chunk 1
+                        # when chunk 0 was header-only content).
                         logger.info("stage_4.3.6_using_section_based_coverage",
                                    reason="comprehensive_enumeration_query")
                         
                         coverage_source_chunks = await self.enhanced_retriever.get_all_sections_chunks(
-                            max_per_section=1,
-                            # No max_total - for comprehensive queries, get ALL sections
+                            max_per_section=None,  # Get ALL chunks per section for comprehensive coverage
                         )
-                        coverage_strategy = "section_based"
+                        coverage_strategy = "section_based_exhaustive"
                         
                         # If section-based retrieval returns nothing, fall back to semantic
                         # but with MUCH higher chunks_per_doc (15-20) to simulate section coverage

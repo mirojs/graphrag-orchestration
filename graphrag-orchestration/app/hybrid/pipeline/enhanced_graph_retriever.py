@@ -2069,13 +2069,13 @@ class EnhancedGraphRetriever:
 
     async def get_all_sections_chunks(
         self,
-        max_per_section: int = 1,
+        max_per_section: Optional[int] = None,
     ) -> List[SourceChunk]:
-        """Get one chunk per unique section across all documents.
+        """Get chunks from all sections across all documents.
         
         This is ideal for "list ALL X" queries where comprehensive section 
         coverage is needed. Unlike get_coverage_chunks_semantic which returns
-        one chunk per document, this returns one chunk per section.
+        one chunk per document, this returns chunks from all sections.
         
         For a document with sections like:
         - "1. Introduction" 
@@ -2083,65 +2083,89 @@ class EnhancedGraphRetriever:
         - "3. Right to Cancel"
         - "4. Payment Terms"
         
-        This will return one chunk from EACH section, ensuring comprehensive
-        enumeration queries don't miss section-specific information.
-        
-        No total limit is applied - for comprehensive coverage, we want ALL sections.
+        With max_per_section=None: Returns ALL chunks from ALL sections (exhaustive)
+        With max_per_section=1: Returns first chunk from each section (sampling)
         
         Args:
-            max_per_section: Max chunks per unique section (default: 1)
+            max_per_section: Max chunks per unique section. 
+                            None = ALL chunks per section (recommended for comprehensive queries)
+                            1 = First chunk only (may miss content in later chunks)
             
         Returns:
-            List of SourceChunks - one per unique section (all sections in corpus)
+            List of SourceChunks from all sections in corpus
         """
         if not self.driver:
             return []
         
-        # Query to get one chunk per section, ordered by chunk_index within section
-        # No LIMIT - for comprehensive coverage, we want ALL sections
-        query = """
-        MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
-        WHERE t.group_id = $group_id
-          AND s.group_id = $group_id
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
-        WITH s, t, d
-        ORDER BY s.path_key, t.chunk_index ASC
-        WITH s, collect({
-            chunk_id: t.id,
-            text: t.text,
-            metadata: t.metadata,
-            chunk_index: t.chunk_index,
-            section_id: s.id,
-            section_path_key: s.path_key,
-            section_title: s.title,
-            doc_id: coalesce(d.id, ''),
-            doc_title: coalesce(d.title, ''),
-            doc_source: coalesce(d.source, '')
-        })[0..$max_per_section] AS section_chunks
-        UNWIND section_chunks AS chunk
-        RETURN
-            chunk.chunk_id AS chunk_id,
-            chunk.text AS text,
-            chunk.metadata AS metadata,
-            chunk.chunk_index AS chunk_index,
-            chunk.section_id AS section_id,
-            chunk.section_path_key AS section_path_key,
-            chunk.section_title AS section_title,
-            chunk.doc_id AS doc_id,
-            chunk.doc_title AS doc_title,
-            chunk.doc_source AS doc_source
-        """
+        # Different queries based on whether we want all chunks or sampling
+        if max_per_section is None:
+            # COMPREHENSIVE: Return ALL chunks from all sections
+            # No slicing - just collect and unwind all chunks per section
+            query = """
+            MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
+            WHERE t.group_id = $group_id
+              AND s.group_id = $group_id
+            OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+            WITH s, t, d
+            ORDER BY s.path_key, t.chunk_index ASC
+            RETURN
+                t.id AS chunk_id,
+                t.text AS text,
+                t.metadata AS metadata,
+                t.chunk_index AS chunk_index,
+                s.id AS section_id,
+                s.path_key AS section_path_key,
+                s.title AS section_title,
+                coalesce(d.id, '') AS doc_id,
+                coalesce(d.title, '') AS doc_title,
+                coalesce(d.source, '') AS doc_source
+            """
+        else:
+            # SAMPLING: Return max_per_section chunks from each section
+            query = """
+            MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
+            WHERE t.group_id = $group_id
+              AND s.group_id = $group_id
+            OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+            WITH s, t, d
+            ORDER BY s.path_key, t.chunk_index ASC
+            WITH s, collect({
+                chunk_id: t.id,
+                text: t.text,
+                metadata: t.metadata,
+                chunk_index: t.chunk_index,
+                section_id: s.id,
+                section_path_key: s.path_key,
+                section_title: s.title,
+                doc_id: coalesce(d.id, ''),
+                doc_title: coalesce(d.title, ''),
+                doc_source: coalesce(d.source, '')
+            })[0..$max_per_section] AS section_chunks
+            UNWIND section_chunks AS chunk
+            RETURN
+                chunk.chunk_id AS chunk_id,
+                chunk.text AS text,
+                chunk.metadata AS metadata,
+                chunk.chunk_index AS chunk_index,
+                chunk.section_id AS section_id,
+                chunk.section_path_key AS section_path_key,
+                chunk.section_title AS section_title,
+                chunk.doc_id AS doc_id,
+                chunk.doc_title AS doc_title,
+                chunk.doc_source AS doc_source
+            """
         
         try:
             loop = asyncio.get_event_loop()
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        max_per_section=max_per_section,
-                    )
+                    # Only pass max_per_section when using sampling mode
+                    params = {"group_id": self.group_id}
+                    if max_per_section is not None:
+                        params["max_per_section"] = max_per_section
+                    
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)

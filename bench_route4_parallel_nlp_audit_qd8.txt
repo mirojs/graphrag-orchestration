@@ -1,0 +1,23 @@
+Filtered to single question: Q-D8
+  Positive tests (Q-D): 1
+  Negative tests (Q-N): 0
+Loaded 59 ground truth answers
+
+======================================================================
+Scenario: hybrid_route4_nlp_audit (response_type=nlp_audit)
+Questions: 1, Repeats: 3
+======================================================================
+
+[Q-D8] Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
+  [1/3] 8929ms - 233528 chars
+  [2/3] 8046ms - 233528 chars
+  [3/3] 7770ms - 233528 chars
+  Accuracy: containment=0.86, f1=0.04
+  Summary: exact=1.00, min_sim=1.00, latency_p50=8046ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route4_drift_multi_hop_20260118T134800Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route4_drift_multi_hop_20260118T134800Z.md
+======================================================================
+

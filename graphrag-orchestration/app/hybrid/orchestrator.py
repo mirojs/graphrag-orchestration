@@ -980,6 +980,85 @@ Instructions:
         # Collapse repeated whitespace
         return " ".join("".join(out).split())
 
+    def _normalize_document_name(self, doc_name: str) -> str:
+        """
+        Normalize document names to prevent over-partitioning (Q-D8 fix).
+        
+        Problem: Documents like "Contract - Exhibit A" and "Contract" may be
+        counted as separate documents when they're actually parts of the same
+        legal document. This causes queries like "In how many documents does
+        Fabrikam appear?" to over-count.
+        
+        Solution: Strip common suffix patterns that indicate document parts/sections.
+        
+        Examples:
+            "Master Agreement - Exhibit A" → "Master Agreement"
+            "Contract_Appendix_1" → "Contract"
+            "NDA (Schedule B)" → "NDA"
+            "Invoice.pdf - Page 2" → "Invoice.pdf"
+        
+        Args:
+            doc_name: Original document name/title
+            
+        Returns:
+            Normalized document name (parent document)
+        """
+        import re
+        
+        if not doc_name:
+            return ""
+        
+        normalized = doc_name.strip()
+        
+        # Patterns that indicate document sub-parts (case-insensitive)
+        SUFFIX_PATTERNS = [
+            # Exhibit patterns
+            r'\s*[-–—]\s*Exhibit\s+[A-Z0-9]+\s*$',
+            r'\s*\(\s*Exhibit\s+[A-Z0-9]+\s*\)\s*$',
+            r'\s*Exhibit\s+[A-Z0-9]+\s*$',
+            # Appendix patterns
+            r'\s*[-–—]\s*Appendix\s+[A-Z0-9]+\s*$',
+            r'\s*[_]\s*Appendix[_]?\s*[A-Z0-9]*\s*$',
+            r'\s*\(\s*Appendix\s+[A-Z0-9]+\s*\)\s*$',
+            # Schedule patterns
+            r'\s*[-–—]\s*Schedule\s+[A-Z0-9]+\s*$',
+            r'\s*\(\s*Schedule\s+[A-Z0-9]+\s*\)\s*$',
+            # Attachment patterns
+            r'\s*[-–—]\s*Attachment\s+[A-Z0-9]+\s*$',
+            r'\s*\(\s*Attachment\s+[A-Z0-9]+\s*\)\s*$',
+            # Annex patterns
+            r'\s*[-–—]\s*Annex\s+[A-Z0-9]+\s*$',
+            r'\s*\(\s*Annex\s+[A-Z0-9]+\s*\)\s*$',
+            # Page patterns
+            r'\s*[-–—]\s*Page\s+\d+\s*$',
+            r'\s*\(\s*Page\s+\d+\s*\)\s*$',
+            # Section patterns (only at end, not middle of name)
+            r'\s*[-–—]\s*Section\s+[A-Z0-9.]+\s*$',
+            r'\s*\(\s*Section\s+[A-Z0-9.]+\s*\)\s*$',
+            # Part patterns
+            r'\s*[-–—]\s*Part\s+[A-Z0-9]+\s*$',
+            r'\s*\(\s*Part\s+[A-Z0-9]+\s*\)\s*$',
+            # Amendment patterns
+            r'\s*[-–—]\s*Amendment\s+\d+\s*$',
+            r'\s*\(\s*Amendment\s+\d+\s*\)\s*$',
+            # Addendum patterns
+            r'\s*[-–—]\s*Addendum\s+[A-Z0-9]*\s*$',
+            r'\s*\(\s*Addendum\s+[A-Z0-9]*\s*\)\s*$',
+        ]
+        
+        # Apply patterns iteratively (in case of nested patterns)
+        changed = True
+        while changed:
+            changed = False
+            for pattern in SUFFIX_PATTERNS:
+                new_normalized = re.sub(pattern, '', normalized, flags=re.IGNORECASE)
+                if new_normalized != normalized:
+                    normalized = new_normalized.strip()
+                    changed = True
+                    break  # Restart from first pattern after a change
+        
+        return normalized if normalized else doc_name
+
     def _build_phrase_aware_fulltext_query(self, query: str) -> str:
         """Build a Lucene query that prioritizes exact phrase matches.
         
@@ -3489,31 +3568,66 @@ Instructions:
         
         # Stage 4.3.5: Confidence Check + Optional Re-decomposition
         # This is the "Agentic Confidence Loop" that addresses HippoRAG 2's iterative limits
-        confidence = self._compute_subgraph_confidence(sub_questions, intermediate_results)
+        # Enhanced (Jan 2026) with entity diversity and concentration detection
+        confidence_metrics = self._compute_subgraph_confidence(
+            sub_questions, intermediate_results, complete_evidence
+        )
+        confidence = confidence_metrics["score"]
         confidence_loop_triggered = False
         refined_sub_questions: List[str] = []
         
-        if confidence < 0.5 and len(sub_questions) > 1:
-            # Identify "thin" sub-questions (found < 2 evidence chunks)
-            thin_questions = [
-                r["question"] for r in intermediate_results 
-                if r.get("evidence_count", 0) < 2
-            ]
-            if thin_questions:
+        logger.info("stage_4.3.5_confidence_check",
+                   confidence_score=confidence,
+                   satisfied_ratio=confidence_metrics["satisfied_ratio"],
+                   entity_diversity=confidence_metrics["entity_diversity"],
+                   thin_questions_count=len(confidence_metrics["thin_questions"]),
+                   concentrated_entities=confidence_metrics["concentrated_entities"][:3])  # Log top 3
+        
+        # Trigger confidence loop if:
+        # 1. Overall confidence < 0.5 (original threshold)
+        # 2. OR entity diversity < 0.3 (same entities repeated across questions)
+        # 3. OR concentrated entities detected (potential over-partitioning like Q-D8)
+        should_trigger = (
+            (confidence < 0.5 and len(sub_questions) > 1) or
+            (confidence_metrics["entity_diversity"] < 0.3 and len(sub_questions) > 2) or
+            (len(confidence_metrics["concentrated_entities"]) > 0 and confidence < 0.7)
+        )
+        
+        if should_trigger:
+            thin_questions = confidence_metrics["thin_questions"]
+            concentrated = confidence_metrics["concentrated_entities"]
+            
+            if thin_questions or concentrated:
                 logger.info("stage_4.3.5_confidence_loop_triggered", 
                            confidence=confidence, 
-                           thin_questions=len(thin_questions))
+                           thin_questions_count=len(thin_questions),
+                           concentrated_entities=concentrated[:3],
+                           trigger_reason="thin_questions" if thin_questions else "entity_concentration")
                 confidence_loop_triggered = True
                 
-                # Re-decompose only the thin questions with additional context
+                # Build context from successful sub-questions
                 context_summary = "; ".join([
                     f"{r['question']}: found {r.get('evidence_count', 0)} evidence"
                     for r in intermediate_results if r.get("evidence_count", 0) >= 2
                 ][:3])  # Top 3 successful sub-questions as context
                 
-                refined_sub_questions = await self._drift_decompose(
-                    f"Based on what we found ({context_summary}), please clarify these unknowns: {'; '.join(thin_questions)}"
-                )
+                # Different re-decomposition strategies based on trigger reason
+                if concentrated and not thin_questions:
+                    # Entity concentration detected (Q-D8 style over-partitioning)
+                    # Ask LLM to consolidate/unify the entity mentions
+                    refinement_prompt = (
+                        f"The entity '{concentrated[0]}' appears across many parts of the query. "
+                        f"Context found: {context_summary}. "
+                        f"Please generate 2-3 focused questions that consolidate information about "
+                        f"'{concentrated[0]}' without counting separate document sections as distinct occurrences. "
+                        f"Focus on: What distinct roles/appearances does this entity have across the corpus?"
+                    )
+                    refined_sub_questions = await self._drift_decompose(refinement_prompt)
+                elif thin_questions:
+                    # Sparse evidence - original re-decomposition logic
+                    refined_sub_questions = await self._drift_decompose(
+                        f"Based on what we found ({context_summary}), please clarify these unknowns: {'; '.join(thin_questions)}"
+                    )
                 
                 # Second pass: Discovery + Tracing for refined questions
                 if refined_sub_questions:
@@ -3887,33 +4001,90 @@ Instructions:
     def _compute_subgraph_confidence(
         self, 
         sub_questions: List[str], 
-        intermediate_results: List[Dict[str, Any]]
-    ) -> float:
+        intermediate_results: List[Dict[str, Any]],
+        complete_evidence: Optional[List[Tuple[str, float]]] = None
+    ) -> Dict[str, Any]:
         """
-        Compute confidence score for retrieved subgraph.
+        Compute comprehensive confidence metrics for retrieved subgraph.
         
         This metric determines whether the Confidence Loop should trigger.
-        A low score indicates sparse evidence coverage.
+        Returns detailed metrics to enable targeted refinement.
         
-        Score = (sub-questions with >= 2 evidence) / (total sub-questions)
+        Enhanced (Jan 2026) to detect:
+        1. Evidence sparsity (original metric)
+        2. Entity concentration (all entities from same few documents)
+        3. Document over-partitioning (e.g., "Exhibit A" counted separately from parent doc)
         
         Args:
             sub_questions: List of decomposed sub-questions
             intermediate_results: Results from discovery pass
+            complete_evidence: Optional list of (entity_name, score) from PPR tracing
             
         Returns:
-            0.0-1.0 confidence score
+            Dict with:
+                - score: 0.0-1.0 overall confidence
+                - satisfied_ratio: fraction of sub-questions with >=2 evidence
+                - entity_diversity: unique entities / total mentions
+                - thin_questions: list of questions with sparse evidence
+                - concentrated_entities: entities appearing in many sub-questions (potential over-counting risk)
         """
         if not sub_questions:
-            return 1.0
+            return {"score": 1.0, "satisfied_ratio": 1.0, "entity_diversity": 1.0, 
+                    "thin_questions": [], "concentrated_entities": []}
         
-        # Count sub-questions with sufficient evidence
+        # Metric 1: Evidence satisfaction ratio (original)
         satisfied = sum(
             1 for r in intermediate_results 
             if r.get("evidence_count", 0) >= 2
         )
+        satisfied_ratio = satisfied / len(sub_questions)
         
-        return satisfied / len(sub_questions)
+        # Metric 2: Entity diversity (detect over-counting same entity)
+        all_entities: List[str] = []
+        entity_to_questions: Dict[str, List[str]] = {}
+        
+        for r in intermediate_results:
+            entities = r.get("entities", [])
+            question = r.get("question", "")
+            all_entities.extend(entities)
+            for ent in entities:
+                ent_lower = ent.lower().strip()
+                if ent_lower not in entity_to_questions:
+                    entity_to_questions[ent_lower] = []
+                entity_to_questions[ent_lower].append(question)
+        
+        unique_entities = len(set(e.lower().strip() for e in all_entities)) if all_entities else 1
+        entity_diversity = unique_entities / max(len(all_entities), 1)
+        
+        # Identify concentrated entities (appear in >50% of sub-questions)
+        concentrated_entities = [
+            ent for ent, questions in entity_to_questions.items()
+            if len(questions) > len(sub_questions) * 0.5
+        ]
+        
+        # Metric 3: Thin questions (for targeted re-decomposition)
+        thin_questions = [
+            r["question"] for r in intermediate_results 
+            if r.get("evidence_count", 0) < 2
+        ]
+        
+        # Compute overall score (weighted combination)
+        # - 60% evidence satisfaction
+        # - 40% entity diversity (penalize over-counting)
+        overall_score = (0.6 * satisfied_ratio) + (0.4 * entity_diversity)
+        
+        # Penalty for high concentration (e.g., same entity in all questions)
+        if concentrated_entities:
+            concentration_penalty = min(0.2, len(concentrated_entities) * 0.05)
+            overall_score = max(0.0, overall_score - concentration_penalty)
+        
+        return {
+            "score": overall_score,
+            "satisfied_ratio": satisfied_ratio,
+            "entity_diversity": entity_diversity,
+            "thin_questions": thin_questions,
+            "concentrated_entities": concentrated_entities
+        }
     
     async def _drift_decompose(self, query: str) -> List[str]:
         """

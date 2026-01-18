@@ -698,6 +698,27 @@ Response:"""
         """Prompt for DRIFT-style multi-question synthesis."""
         sub_q_list = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(sub_questions))
         
+        # Detect document counting queries (Q-D8 style)
+        q_lower = query.lower()
+        is_document_counting = any(pattern in q_lower for pattern in [
+            "how many document", "in how many", "number of document",
+            "which document", "what document", "count of document",
+            "appears in", "mentioned in", "found in"
+        ])
+        
+        # Add special guidance for document counting queries
+        counting_guidance = ""
+        if is_document_counting:
+            counting_guidance = """
+IMPORTANT for Document Counting:
+- When counting documents an entity appears in, count PARENT DOCUMENTS only.
+- DO NOT count document sub-parts (Exhibits, Appendices, Schedules, Attachments, Annexes) 
+  as separate documents from their parent.
+- Example: If "Fabrikam Inc." appears in "Master Agreement" and "Master Agreement - Exhibit A",
+  count this as ONE document (the Master Agreement), not two.
+- Focus on distinct, independent documents (Contracts, Invoices, NDAs, etc.).
+"""
+        
         return f"""You are analyzing a complex query that was decomposed into multiple sub-questions.
 
 Original Query: {query}
@@ -714,7 +735,7 @@ Instructions:
 3. EVERY factual claim must include a citation [n] to the evidence
 4. Structure your response to follow the logical flow of the sub-questions
 5. Include a final synthesis section that ties everything together
-
+{counting_guidance}
 Format:
 ## Analysis
 

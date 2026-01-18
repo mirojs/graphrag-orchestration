@@ -492,6 +492,13 @@ def main():
         default=None,
         help="Run only a specific question ID (e.g., Q-D3)",
     )
+    parser.add_argument(
+        "--response-type",
+        type=str,
+        default="summary",
+        choices=["summary", "detailed_report", "nlp_audit", "nlp_connected"],
+        help="Response type for synthesis (default: summary)",
+    )
 
     args = parser.parse_args()
 
@@ -521,9 +528,9 @@ def main():
     ground_truth = extract_ground_truth(qbank_path)
     print(f"Loaded {len(ground_truth)} ground truth answers")
 
-    # Single scenario: summary mode
-    scenario_name = "hybrid_route4_summary"
-    response_type = "summary"
+    # Scenario configuration
+    response_type = args.response_type
+    scenario_name = f"hybrid_route4_{response_type}"
 
     timestamp = _now_utc_stamp()
 

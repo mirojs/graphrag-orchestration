@@ -855,19 +855,13 @@ Audit Trail:"""
         """
         Deterministic NLP extraction (no LLM) for 100% repeatability.
         
-        Uses simple regex-based sentence extraction from text chunks.
-        Same algorithm as V3 ExtractionService but on LazyGraphRAG context.
+        Returns all retrieved chunk content with citations, preserving
+        the full context that the LLM synthesis would have access to.
+        This enables fair comparison between LLM and deterministic modes.
         """
         import re
         
-        # Combine all text chunks
-        combined_text = " ".join([
-            chunk.get("text", "")
-            for chunk in text_chunks
-            if isinstance(chunk.get("text"), str)
-        ])
-        
-        if not combined_text.strip():
+        if not text_chunks:
             return {
                 "response": "Not specified in the provided documents.",
                 "citations": [],
@@ -876,55 +870,59 @@ Audit Trail:"""
                 "processing_deterministic": True,
             }
         
-        # Extract top sentences deterministically
-        raw_sentences = re.split(r'(?<=[.!?])\s+', combined_text.strip())
+        # Build response with all chunks, each with citation marker
+        response_parts = []
+        citations = []
         
-        sentences = []
-        for i, sent in enumerate(raw_sentences):
-            sent = sent.strip()
-            if len(sent) < 10:  # min length
+        for i, chunk in enumerate(text_chunks, 1):
+            text = chunk.get("text", "")
+            if not text or not isinstance(text, str):
                 continue
             
-            # Deterministic scoring: position + length
-            position_score = 1.0 / (i + 1)
-            length_penalty = min(1.0, len(sent) / 100.0)
-            rank = position_score * length_penalty
+            # Get metadata
+            source = chunk.get("source", chunk.get("document_source", "unknown"))
+            section = chunk.get("section", "")
+            if not section:
+                section_path = chunk.get("section_path", [])
+                if section_path:
+                    section = " > ".join(str(s) for s in section_path if s)
             
-            sentences.append({
-                "text": sent,
-                "rank_score": float(rank),
-                "sentence_idx": i,
-            })
-        
-        # Sort and take top 5
-        sentences.sort(key=lambda x: (-x["rank_score"], x["sentence_idx"]))
-        top_sentences = sentences[:5]
-        
-        audit_summary = " ".join([s["text"] for s in top_sentences])
-        
-        # Build citations from text chunks
-        citations = []
-        for i, chunk in enumerate(text_chunks[:10], 1):
+            # Extract document title from source URL or use section
+            doc_title = "Unknown"
+            if source and "/" in source:
+                doc_title = source.split("/")[-1].replace(".pdf", "").replace("_", " ")
+            
+            citation_id = f"[{i}]"
+            
+            # Add to response with citation marker
+            response_parts.append(f"{citation_id} {text.strip()}")
+            
+            # Build citation entry with full metadata
             citations.append({
-                "citation": f"[{i}]",
-                "source": chunk.get("source", "unknown"),
-                "text_preview": (chunk.get("text", "") or "")[:200],
+                "citation": citation_id,
+                "source": source,
+                "document": doc_title,
+                "section": section,
+                "chunk_id": chunk.get("id", chunk.get("chunk_id", f"chunk_{i}")),
+                "text_preview": text[:200] + "..." if len(text) > 200 else text,
             })
+        
+        # Join all chunks with double newline for readability
+        audit_response = "\n\n".join(response_parts)
         
         logger.info(
             "nlp_audit_extraction_complete",
             query=query[:50],
-            sentences_extracted=len(top_sentences),
+            chunks_returned=len(citations),
             processing_deterministic=True,
         )
         
         return {
-            "response": audit_summary,
+            "response": audit_response,
             "citations": citations,
             "evidence_path": [node[0] for node in evidence_nodes],
             "text_chunks_used": len(text_chunks),
             "processing_deterministic": True,
-            "extracted_sentences": top_sentences,
         }
 
     def _extract_citations(

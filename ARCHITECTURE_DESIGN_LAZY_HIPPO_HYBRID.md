@@ -3700,3 +3700,142 @@ config = LazyGraphRAGIndexingConfig(
 
 > Deployment scripts are documented in the repository's deployment guide and the canonical `deploy-graphrag.sh` helper in the repo root. Use `deploy-graphrag.sh` for full build/push/update flows and `az containerapp` commands for lightweight operations.
 
+---
+
+## 18. Latency Optimization and Future Work
+
+### 18.1. Current Performance Baseline (January 2026)
+
+**Route 4 DRIFT Multi-Hop Performance:**
+- **Average latency:** 7.8s per query
+- **Latency range:** 0.2s (deterministic date queries) to 26s (complex outliers)
+- **Accuracy:** 94.7% (54/57 on benchmark suite)
+- **Test corpus:** 5 PDFs, 153 sections, 74 chunks, 379 entities
+
+**Latency Breakdown:**
+```
+Stage                        Time        % of Total
+─────────────────────────────────────────────────────
+Decomposition (LLM)          ~1s         13%
+Discovery Pass (Sequential)  ~1-2s       13-25%
+PPR Tracing (Neo4j)         ~1s         13%
+Coverage Retrieval          ~0.5-1s     6-13%
+Synthesis (LLM)             5-10s       60-70% ← PRIMARY BOTTLENECK
+─────────────────────────────────────────────────────
+Total                       7.8s avg
+```
+
+**Key Insight:** LLM synthesis dominates latency (60-70%). Neo4j retrieval and graph operations are well-optimized (<2s combined).
+
+### 18.2. Parallelization Analysis (January 2026)
+
+**Attempted Optimization:** Parallel sub-question processing in discovery pass
+
+**Results:**
+- Q-D1: 9.1s → 9.5s (5% slower)
+- Q-D3: 6.9s → 7.5s (9% slower)
+- Q-D8: 7.3s → 8.0s (10% slower)
+
+**Why It Failed:**
+1. **Wrong bottleneck** - Discovery pass is only 20-25% of total time; LLM synthesis (60-70%) cannot be parallelized
+2. **Small decomposition** - Most queries generate 2-3 sub-questions (not 5+)
+3. **Overhead cost** - `asyncio.gather()` adds 50-200ms, negating theoretical 0.8s gain
+4. **Resource contention** - Parallel queries compete for Neo4j connection pool slots
+5. **Statistical noise** - LLM variance (200-500ms) masks any marginal improvement
+
+**Verdict:** Reverted to sequential processing (simpler, proven, no performance loss)
+
+**Already Optimized:** Graph context retrieval uses `asyncio.gather()` for relationships, chunks, and descriptions (appropriate parallelism where operations are independent and I/O-bound).
+
+### 18.3. Future Optimization Opportunities
+
+#### Priority 1: LLM Token Reduction (High Impact)
+**Target:** Reduce synthesis time from 5-10s to 3-5s
+
+**Approaches:**
+1. **Smarter context pruning** - Only include chunks with direct relevance scores >0.7
+2. **Hierarchical summarization** - Pre-summarize sections before synthesis
+3. **Adaptive context window** - Simple queries get fewer chunks (20), complex queries get full context (100)
+4. **Citation-aware truncation** - Keep first/last N sentences per chunk for better citation quality
+
+**Expected Gain:** 30-40% latency reduction (2-4s per query)
+
+#### Priority 2: Query-Level Parallelization (Medium Impact)
+**Target:** Handle multiple user queries concurrently
+
+**Approaches:**
+1. **Batch API endpoints** - `/v1/query/batch` accepts array of queries
+2. **Async task queue** - Use Celery/RQ for background processing
+3. **Connection pooling** - Scale Neo4j connection pool based on concurrent query load
+
+**Expected Gain:** 5-10x throughput (not per-query latency)
+
+#### Priority 3: Streaming Responses (UX Improvement)
+**Target:** Return partial results as they're generated
+
+**Approaches:**
+1. **Server-sent events (SSE)** - Stream synthesis tokens as LLM generates
+2. **Progressive citations** - Show retrieved chunks before synthesis completes
+3. **Stage-by-stage updates** - Return intermediate results (decomposition, entities, evidence) before final answer
+
+**Expected Gain:** Perceived latency improvement (user sees progress), no actual speedup
+
+#### Priority 4: Intelligent Caching (Medium Impact)
+**Target:** Eliminate redundant computation for repeated queries
+
+**Approaches:**
+1. **Decomposition cache** - Similar queries reuse sub-question breakdown
+2. **Entity resolution cache** - Cache NER results for known entities
+3. **PPR trace cache** - Store seed→evidence mappings (invalidate on graph updates)
+4. **Embedding cache** - Reuse query embeddings for similar queries (cosine similarity >0.95)
+
+**Expected Gain:** 50-70% latency reduction for cached queries (first-time queries unchanged)
+
+#### Priority 5: Model Selection Optimization (Low Impact)
+**Target:** Use faster models for non-critical stages
+
+**Approaches:**
+1. **NER downgrade** - Use gpt-4o-mini for entity extraction (already fast)
+2. **Decomposition downgrade** - Test gpt-4o for query decomposition (vs gpt-4.1)
+3. **Synthesis upgrade** - Keep gpt-5.2 for final synthesis (quality matters most)
+
+**Expected Gain:** 10-20% latency reduction, may impact quality
+
+### 18.4. What NOT to Optimize
+
+**Anti-patterns (proven ineffective):**
+1. ❌ **Sub-question parallelization** - Overhead exceeds benefit (tested Jan 2026)
+2. ❌ **Coverage retrieval parallelization** - Only helps 20% of queries, minimal gain
+3. ❌ **Synthesis text chunk retrieval parallelization** - Already fast (<200ms), LLM-bound regardless
+
+**Philosophical Note:**
+> At 94.7% accuracy and 7.8s average latency, the system is **well-optimized** for complex multi-hop reasoning. Further improvements should target the actual bottleneck (LLM synthesis) rather than premature optimization of fast components (<2s).
+
+### 18.5. Recommended Next Steps (Q1-Q2 2026)
+
+**Phase 1: Measurement (1 week)**
+1. Add per-stage timing instrumentation to production
+2. Collect latency distributions across 1000+ real queries
+3. Identify queries with >15s latency (outliers)
+4. Measure token counts per synthesis call
+
+**Phase 2: Low-Hanging Fruit (2 weeks)**
+1. Implement adaptive context window (simple queries = fewer chunks)
+2. Add embedding cache for repeated queries
+3. Enable streaming responses for UX improvement
+
+**Phase 3: Deep Optimization (4 weeks)**
+1. Experiment with hierarchical summarization
+2. Test gpt-4o for decomposition (vs gpt-4.1)
+3. Implement intelligent chunk pruning based on relevance scores
+4. A/B test with production traffic
+
+**Success Criteria:**
+- Average latency: 7.8s → **5-6s** (20-30% reduction)
+- P95 latency: <15s (currently ~20s)
+- Accuracy: Maintain ≥94% on benchmark suite
+- Cost: No more than 10% increase in LLM token usage
+
+**Timeline:** Q1 2026 for measurement, Q2 2026 for implementation
+
+---

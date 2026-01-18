@@ -3839,3 +3839,333 @@ Total                       7.8s avg
 **Timeline:** Q1 2026 for measurement, Q2 2026 for implementation
 
 ---
+## 19. Graph Schema Enhancement Roadmap
+
+### 19.1. Current Graph Schema (January 2026)
+
+**Node Types:**
+```
+Node Type       Count    Has Embedding?    Status
+─────────────────────────────────────────────────────
+Entity           379     ✅ Yes (379)      Core - well connected
+Section          204     ✅ Yes (204)      Structure - 158 orphans
+TextChunk         74     ✅ Yes (74)       Content - fully linked
+Document           5     ❌ No             Metadata only
+```
+
+**Relationship Types:**
+```
+Relationship              Count    Connects                    Status
+──────────────────────────────────────────────────────────────────────
+MENTIONS                   831     TextChunk → Entity          ✅ Core
+RELATED_TO                 711     Entity ↔ Entity             ✅ Core
+SEMANTICALLY_SIMILAR       465     Section ↔ Section           ✅ Implemented Jan 2026
+SUBSECTION_OF              120     Section → Section           ✅ Hierarchy
+PART_OF                     74     TextChunk → Document        ✅ Core
+IN_SECTION                  74     TextChunk → Section         ✅ Core
+HAS_SECTION                 21     Document → Section          ✅ Core
+```
+
+**Cross-System Connectivity Analysis:**
+```
+Connection Path                              Hops    Direct Link?
+────────────────────────────────────────────────────────────────
+Entity → Section                              2      ❌ MISSING
+Entity → Document                             3      ❌ MISSING
+Section ↔ Section (shared entities)           4      ❌ MISSING
+Orphan Sections → Any retrieval path          ∞      ❌ DISCONNECTED
+```
+
+### 19.2. Identified Gaps (Priority Order)
+
+#### 🔴 CRITICAL: Structural Gaps
+
+| Gap | Impact | Current Workaround |
+|:----|:-------|:-------------------|
+| **Entity → Section direct link** | 2-hop traversal required for section-level entity queries | Traverse via TextChunk (slow) |
+| **Entity → Document direct link** | 3-hop traversal for cross-doc entity counts | Aggregate at query time (expensive) |
+| **158 orphan sections** (no entities) | 77% of sections unreachable via entity-based retrieval | Rely on coverage retrieval fallback |
+
+#### 🟡 IMPORTANT: Missing Cross-System Bridges
+
+| Gap | Impact | Opportunity |
+|:----|:-------|:------------|
+| **Section ↔ Section (shared entities)** | Cross-doc sections discussing same entity not linked | Enable "related sections" traversal |
+| **Entity ↔ Entity (semantic similarity)** | Only explicit RELATED_TO, no fuzzy matching | Enable "similar entities" for disambiguation |
+| **Topic/Keyword layer** | No abstract concepts, only named entities | Enable thematic retrieval for orphan sections |
+
+#### 🟢 OPTIONAL: Performance Optimizations
+
+| Enhancement | Impact | Trade-off |
+|:------------|:-------|:----------|
+| **Materialized aggregates** (entity doc counts) | O(1) lookups vs O(n) traversal | Storage cost, staleness |
+| **Precomputed paths** (Entity → best chunks) | Skip intermediate hops | Maintenance complexity |
+
+### 19.3. Recommended Implementation Order
+
+```
+Phase 1: Foundation (Week 1-2)
+├── 1.1 APPEARS_IN_SECTION edges (Entity → Section)
+├── 1.2 APPEARS_IN_DOCUMENT edges (Entity → Document)  
+└── 1.3 Update indexing pipeline to create edges automatically
+
+Phase 2: Connectivity (Week 3-4)
+├── 2.1 SHARES_ENTITY edges (Section ↔ Section)
+├── 2.2 Keyword extraction for orphan sections
+└── 2.3 DISCUSSES edges (Section → Topic/Keyword)
+
+Phase 3: Semantic Enhancement (Week 5-6)
+├── 3.1 SIMILAR_TO edges (Entity ↔ Entity via embeddings)
+├── 3.2 Update PPR to traverse new edge types
+└── 3.3 Benchmark accuracy/latency impact
+
+Phase 4: Validation & Tuning (Week 7-8)
+├── 4.1 Run full benchmark suite
+├── 4.2 Tune similarity thresholds
+└── 4.3 Document query patterns that benefit
+```
+
+### 19.4. Phase 1: Foundation Edges
+
+#### 1.1 APPEARS_IN_SECTION (Entity → Section)
+
+**Purpose:** Direct link from entities to sections where they're mentioned.
+
+**Schema:**
+```cypher
+(e:Entity)-[:APPEARS_IN_SECTION {mention_count: INT}]->(s:Section)
+```
+
+**Creation Query:**
+```cypher
+MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_SECTION]->(s:Section)
+WHERE e.group_id = $group_id
+WITH e, s, count(c) AS mention_count
+MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
+SET r.mention_count = mention_count,
+    r.group_id = $group_id,
+    r.created_at = datetime()
+```
+
+**Expected Results:**
+- Edges created: ~800-1000 (entities × sections with mentions)
+- Query speedup: 2-3x for "entities in section X" queries
+- Enables: Section-level entity density scoring
+
+#### 1.2 APPEARS_IN_DOCUMENT (Entity → Document)
+
+**Purpose:** Direct link from entities to documents, with cross-doc aggregation.
+
+**Schema:**
+```cypher
+(e:Entity)-[:APPEARS_IN_DOCUMENT {
+  mention_count: INT,
+  section_count: INT,
+  chunk_count: INT
+}]->(d:Document)
+```
+
+**Creation Query:**
+```cypher
+MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:PART_OF]->(d:Document)
+WHERE e.group_id = $group_id
+OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
+WITH e, d, count(DISTINCT c) AS chunk_count, count(DISTINCT s) AS section_count
+MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
+SET r.mention_count = chunk_count,
+    r.section_count = section_count,
+    r.chunk_count = chunk_count,
+    r.group_id = $group_id
+```
+
+**Expected Results:**
+- Edges created: ~400-500 (most entities in 1-2 docs, few in 4+)
+- Query speedup: 5-10x for "which docs mention entity X" queries
+- Enables: O(1) cross-doc entity counts (vs current O(n) aggregation)
+
+### 19.5. Phase 2: Connectivity Edges
+
+#### 2.1 SHARES_ENTITY (Section ↔ Section)
+
+**Purpose:** Connect sections that discuss the same entities across documents.
+
+**Schema:**
+```cypher
+(s1:Section)-[:SHARES_ENTITY {
+  shared_entities: [STRING],
+  shared_count: INT,
+  similarity_boost: FLOAT
+}]->(s2:Section)
+```
+
+**Creation Query:**
+```cypher
+MATCH (s1:Section)<-[:IN_SECTION]-(c1:TextChunk)-[:MENTIONS]->(e:Entity)
+      <-[:MENTIONS]-(c2:TextChunk)-[:IN_SECTION]->(s2:Section)
+WHERE s1.group_id = $group_id 
+  AND s1 <> s2
+  AND NOT (s1)-[:SUBSECTION_OF*]-(s2)  // Exclude hierarchy
+WITH s1, s2, collect(DISTINCT e.name) AS shared, count(DISTINCT e) AS cnt
+WHERE cnt >= 2  // Threshold: at least 2 shared entities
+MERGE (s1)-[r:SHARES_ENTITY]->(s2)
+SET r.shared_entities = shared[0..10],  // Cap at 10 for storage
+    r.shared_count = cnt,
+    r.similarity_boost = cnt * 0.1,
+    r.group_id = $group_id
+```
+
+**Expected Results:**
+- Edges created: ~100-300 (cross-document section pairs)
+- Enables: "Find related sections across docs" traversal
+- PPR benefit: Probability flows across document boundaries
+
+#### 2.2 Topic/Keyword Extraction for Orphan Sections
+
+**Purpose:** Extract keywords from the 158 sections with no entity mentions.
+
+**Approach:**
+1. For each orphan section, get all TextChunks via IN_SECTION
+2. Run keyword extraction (TF-IDF or LLM-based) on combined text
+3. Create Topic nodes and DISCUSSES edges
+
+**Schema:**
+```cypher
+(:Topic {name: STRING, group_id: STRING})
+(s:Section)-[:DISCUSSES {relevance: FLOAT}]->(t:Topic)
+```
+
+**Implementation Notes:**
+- Use existing embeddings for clustering similar keywords
+- Deduplicate topics across sections (e.g., "warranty" appears in many)
+- Consider using LLM for high-quality extraction (batch 10 sections at a time)
+
+### 19.6. Phase 3: Semantic Enhancement
+
+#### 3.1 SIMILAR_TO (Entity ↔ Entity via Embeddings)
+
+**Purpose:** Connect semantically similar entities that aren't explicitly RELATED_TO.
+
+**Schema:**
+```cypher
+(e1:Entity)-[:SIMILAR_TO {score: FLOAT}]->(e2:Entity)
+```
+
+**Creation Query:**
+```cypher
+MATCH (e1:Entity), (e2:Entity)
+WHERE e1.group_id = $group_id
+  AND e2.group_id = $group_id
+  AND e1 <> e2
+  AND e1.embedding IS NOT NULL
+  AND e2.embedding IS NOT NULL
+  AND NOT (e1)-[:RELATED_TO]-(e2)  // Skip explicit relationships
+WITH e1, e2, vector.similarity.cosine(e1.embedding, e2.embedding) AS score
+WHERE score > 0.85  // High threshold for semantic similarity
+MERGE (e1)-[r:SIMILAR_TO]->(e2)
+SET r.score = score,
+    r.group_id = $group_id
+```
+
+**Expected Results:**
+- Edges created: ~200-500 (depends on threshold)
+- Enables: Fuzzy entity matching ("warranty period" ↔ "coverage duration")
+- PPR benefit: Alternative paths for entity disambiguation
+
+### 19.7. Expected Impact on System Performance
+
+#### Before vs After Comparison
+
+| Metric | Before | After Phase 1 | After Phase 3 |
+|:-------|:-------|:--------------|:--------------|
+| Entity → Section hops | 2 | **1** | 1 |
+| Entity → Document hops | 3 | **1** | 1 |
+| Orphan sections | 158 (77%) | 158 | **<20 (<10%)** |
+| Cross-doc entity paths | Via MENTIONS only | +SHARES_ENTITY | +SIMILAR_TO |
+| PPR traversal options | 3 edge types | **5 edge types** | **7 edge types** |
+
+#### Query Pattern Improvements
+
+| Query Type | Current Path | Improved Path | Speedup |
+|:-----------|:-------------|:--------------|:--------|
+| "Entities in Section X" | Section←IN_SECTION←TextChunk→MENTIONS→Entity | Section←APPEARS_IN_SECTION←Entity | **2-3x** |
+| "Documents mentioning Entity Y" | Entity←MENTIONS←TextChunk→PART_OF→Document | Entity→APPEARS_IN_DOCUMENT→Document | **5-10x** |
+| "Sections related to Section Z" | Only SEMANTICALLY_SIMILAR | +SHARES_ENTITY | **+30% recall** |
+| "Thematic query on orphan content" | Coverage fallback only | Section→DISCUSSES→Topic | **New capability** |
+
+### 19.8. Implementation Checklist
+
+```
+□ Phase 1: Foundation (Target: Week 1-2)
+  □ 1.1 Create APPEARS_IN_SECTION edges
+    □ Write creation script
+    □ Add to indexing pipeline
+    □ Verify edge count matches expected
+  □ 1.2 Create APPEARS_IN_DOCUMENT edges
+    □ Write creation script  
+    □ Add to indexing pipeline
+    □ Add aggregate properties (mention_count, section_count)
+  □ 1.3 Update EnhancedGraphRetriever to use new edges
+    □ Add get_sections_for_entity() method
+    □ Add get_documents_for_entity() method
+    □ Benchmark latency improvement
+
+□ Phase 2: Connectivity (Target: Week 3-4)
+  □ 2.1 Create SHARES_ENTITY edges
+    □ Write creation script with threshold tuning
+    □ Test cross-document traversal
+  □ 2.2 Implement keyword extraction
+    □ Identify orphan sections
+    □ Extract keywords (TF-IDF or LLM)
+    □ Deduplicate and create Topic nodes
+  □ 2.3 Create DISCUSSES edges
+    □ Link sections to topics
+    □ Verify orphan section connectivity
+
+□ Phase 3: Semantic Enhancement (Target: Week 5-6)
+  □ 3.1 Create SIMILAR_TO edges
+    □ Tune similarity threshold (start 0.85)
+    □ Exclude existing RELATED_TO pairs
+    □ Validate semantic quality manually
+  □ 3.2 Update PPR to traverse new edges
+    □ Add edge types to traversal query
+    □ Tune edge weights for new types
+  □ 3.3 Full benchmark validation
+    □ Run 57-question benchmark
+    □ Compare accuracy before/after
+    □ Measure latency impact
+
+□ Phase 4: Validation (Target: Week 7-8)
+  □ 4.1 Production deployment
+  □ 4.2 Monitor query patterns
+  □ 4.3 Document best practices
+```
+
+### 19.9. Risk Assessment
+
+| Risk | Likelihood | Impact | Mitigation |
+|:-----|:-----------|:-------|:-----------|
+| Edge explosion (too many SHARES_ENTITY) | Medium | Storage/query slowdown | Tune threshold, cap per-node degree |
+| Accuracy regression from new paths | Low | Wrong results | A/B test, keep old paths as fallback |
+| Indexing time increase | Medium | Slower ingestion | Batch edge creation, async processing |
+| Topic extraction quality | Medium | Poor orphan connectivity | Use LLM extraction, manual review |
+
+### 19.10. Success Criteria
+
+**Phase 1 Complete When:**
+- [ ] APPEARS_IN_SECTION edges created for all Entity-Section pairs
+- [ ] APPEARS_IN_DOCUMENT edges created with aggregate properties
+- [ ] Latency for entity-to-section queries reduced by 2x+
+- [ ] No accuracy regression on benchmark
+
+**Phase 2 Complete When:**
+- [ ] Orphan sections reduced from 158 to <50
+- [ ] SHARES_ENTITY enables cross-doc section discovery
+- [ ] New Topic nodes created for abstract concepts
+
+**Phase 3 Complete When:**
+- [ ] SIMILAR_TO edges enable fuzzy entity matching
+- [ ] PPR traverses all 7 edge types
+- [ ] Benchmark accuracy ≥94% maintained
+- [ ] Documented query patterns that benefit from new edges
+
+---

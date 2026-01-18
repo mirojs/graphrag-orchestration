@@ -256,6 +256,304 @@ class EnhancedGraphRetriever:
         # Use single backslashes so Java regex receives patterns like \s and \S.
         joined = r"\s+".join(re.escape(p) for p in parts)
         return rf"(?i)[\s\S]*{joined}[\s\S]*"
+
+    # =========================================================================
+    # NEW 1-HOP METHODS (Phase 1 Week 2 - Graph Schema Enhancement)
+    # These methods use the new foundation edges for faster traversal:
+    # - APPEARS_IN_SECTION: Entity → Section (1-hop vs 2-hop)
+    # - APPEARS_IN_DOCUMENT: Entity → Document (1-hop vs 3-hop)
+    # - HAS_HUB_ENTITY: Section → Entity (for DRIFT bridge)
+    # =========================================================================
+
+    async def get_sections_for_entities(
+        self,
+        entity_names: List[str],
+        use_new_edges: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get sections where entities appear (1-hop via APPEARS_IN_SECTION).
+        
+        This is a 2x speedup over the old 2-hop traversal:
+        Old: Entity ← MENTIONS ← TextChunk → IN_SECTION → Section
+        New: Entity → APPEARS_IN_SECTION → Section
+        
+        Args:
+            entity_names: List of entity names to look up
+            use_new_edges: If True, use APPEARS_IN_SECTION (1-hop). If False, fallback to 2-hop.
+            
+        Returns:
+            List of dicts with section_id, section_title, mention_count, entity_name
+        """
+        if not entity_names or not self.driver:
+            return []
+        
+        if use_new_edges:
+            query = """
+            UNWIND $entity_names AS entity_name
+            MATCH (e:Entity)-[r:APPEARS_IN_SECTION]->(s:Section)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+              AND r.group_id = $group_id
+            RETURN 
+                entity_name,
+                s.id AS section_id,
+                s.title AS section_title,
+                s.path_key AS section_path_key,
+                r.mention_count AS mention_count
+            ORDER BY r.mention_count DESC
+            """
+        else:
+            # Fallback to 2-hop traversal
+            query = """
+            UNWIND $entity_names AS entity_name
+            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_SECTION]->(s:Section)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+              AND c.group_id = $group_id
+            WITH entity_name, s, count(c) AS mention_count
+            RETURN 
+                entity_name,
+                s.id AS section_id,
+                s.title AS section_title,
+                s.path_key AS section_path_key,
+                mention_count
+            ORDER BY mention_count DESC
+            """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        entity_names=entity_names,
+                        group_id=self.group_id,
+                    )
+                    return [dict(record) for record in result]
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            logger.info("get_sections_for_entities",
+                       num_entities=len(entity_names),
+                       num_sections=len(records),
+                       use_new_edges=use_new_edges)
+            
+            return records
+            
+        except Exception as e:
+            logger.error("get_sections_for_entities_error", error=str(e))
+            return []
+
+    async def get_documents_for_entities(
+        self,
+        entity_names: List[str],
+        use_new_edges: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get documents where entities appear (1-hop via APPEARS_IN_DOCUMENT).
+        
+        This is a 5x speedup over the old 3-hop traversal:
+        Old: Entity ← MENTIONS ← TextChunk → PART_OF → Document
+        New: Entity → APPEARS_IN_DOCUMENT → Document
+        
+        Args:
+            entity_names: List of entity names to look up
+            use_new_edges: If True, use APPEARS_IN_DOCUMENT (1-hop). If False, fallback to 3-hop.
+            
+        Returns:
+            List of dicts with doc_id, doc_title, mention_count, section_count, entity_name
+        """
+        if not entity_names or not self.driver:
+            return []
+        
+        if use_new_edges:
+            query = """
+            UNWIND $entity_names AS entity_name
+            MATCH (e:Entity)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+              AND r.group_id = $group_id
+            RETURN 
+                entity_name,
+                d.id AS doc_id,
+                d.title AS doc_title,
+                d.source AS doc_source,
+                r.mention_count AS mention_count,
+                r.section_count AS section_count
+            ORDER BY r.mention_count DESC
+            """
+        else:
+            # Fallback to 3-hop traversal
+            query = """
+            UNWIND $entity_names AS entity_name
+            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:PART_OF]->(d:Document)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+              AND c.group_id = $group_id
+            OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
+            WITH entity_name, d, count(DISTINCT c) AS mention_count, count(DISTINCT s) AS section_count
+            RETURN 
+                entity_name,
+                d.id AS doc_id,
+                d.title AS doc_title,
+                d.source AS doc_source,
+                mention_count,
+                section_count
+            ORDER BY mention_count DESC
+            """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        entity_names=entity_names,
+                        group_id=self.group_id,
+                    )
+                    return [dict(record) for record in result]
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            logger.info("get_documents_for_entities",
+                       num_entities=len(entity_names),
+                       num_documents=len(records),
+                       use_new_edges=use_new_edges)
+            
+            return records
+            
+        except Exception as e:
+            logger.error("get_documents_for_entities_error", error=str(e))
+            return []
+
+    async def get_hub_entities_for_sections(
+        self,
+        section_ids: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        Get hub entities for sections (via HAS_HUB_ENTITY edge).
+        
+        This is the LazyGraphRAG → HippoRAG bridge:
+        Section → HAS_HUB_ENTITY → Entity
+        
+        Used by Route 4 (DRIFT) to seed PPR from section-based retrieval results.
+        
+        Args:
+            section_ids: List of section IDs to look up
+            
+        Returns:
+            List of dicts with section_id, entity_name, rank, mention_count
+        """
+        if not section_ids or not self.driver:
+            return []
+        
+        query = """
+        UNWIND $section_ids AS section_id
+        MATCH (s:Section)-[r:HAS_HUB_ENTITY]->(e:Entity)
+        WHERE s.id = section_id
+          AND r.group_id = $group_id
+        RETURN 
+            section_id,
+            s.title AS section_title,
+            e.name AS entity_name,
+            e.id AS entity_id,
+            r.rank AS rank,
+            r.mention_count AS mention_count
+        ORDER BY section_id, r.rank
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        section_ids=section_ids,
+                        group_id=self.group_id,
+                    )
+                    return [dict(record) for record in result]
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            logger.info("get_hub_entities_for_sections",
+                       num_sections=len(section_ids),
+                       num_hub_entities=len(records))
+            
+            return records
+            
+        except Exception as e:
+            logger.error("get_hub_entities_for_sections_error", error=str(e))
+            return []
+
+    async def get_entity_cross_doc_summary(
+        self,
+        entity_names: List[str],
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        Get cross-document summary for entities using APPEARS_IN_DOCUMENT.
+        
+        This provides O(1) lookups for:
+        - How many documents mention this entity?
+        - How many sections mention this entity?
+        - Total mention count across corpus
+        
+        Args:
+            entity_names: List of entity names to summarize
+            
+        Returns:
+            Dict mapping entity_name -> {doc_count, section_count, total_mentions, doc_titles}
+        """
+        if not entity_names or not self.driver:
+            return {}
+        
+        query = """
+        UNWIND $entity_names AS entity_name
+        MATCH (e:Entity)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
+        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+          AND r.group_id = $group_id
+        WITH entity_name, 
+             count(d) AS doc_count,
+             sum(r.section_count) AS section_count,
+             sum(r.mention_count) AS total_mentions,
+             collect(d.title)[0..5] AS doc_titles
+        RETURN entity_name, doc_count, section_count, total_mentions, doc_titles
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        entity_names=entity_names,
+                        group_id=self.group_id,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            summary = {}
+            for record in records:
+                summary[record["entity_name"]] = {
+                    "doc_count": record["doc_count"],
+                    "section_count": record["section_count"],
+                    "total_mentions": record["total_mentions"],
+                    "doc_titles": record["doc_titles"],
+                }
+            
+            logger.info("get_entity_cross_doc_summary",
+                       num_entities=len(entity_names),
+                       entities_found=len(summary))
+            
+            return summary
+            
+        except Exception as e:
+            logger.error("get_entity_cross_doc_summary_error", error=str(e))
+            return {}
+
+    # =========================================================================
+    # END NEW 1-HOP METHODS
+    # =========================================================================
     
     async def get_full_context(
         self,

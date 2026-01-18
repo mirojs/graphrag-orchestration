@@ -4305,3 +4305,97 @@ SET r.score = score,
 - [ ] Documented query patterns that benefit from new edges
 
 ---
+
+### 19.11. Complete Proposal Inventory & Critical Commentary
+
+This section catalogs ALL proposed improvements from the graph connection discussion, including items that were considered but not prioritized, along with critical assessment.
+
+#### ✅ HIGH-VALUE PROPOSALS (Recommended)
+
+| Proposal | Description | Commentary |
+|:---------|:------------|:-----------|
+| **APPEARS_IN_SECTION** | Entity → Section direct link | **CRITICAL.** Currently requires 2-hop traversal. This is the most impactful single improvement. No concerns. |
+| **APPEARS_IN_DOCUMENT** | Entity → Document direct link | **CRITICAL.** Currently requires 3-hop traversal. Essential for cross-doc queries. No concerns. |
+| **HAS_HUB_ENTITY** | Section → Entity (top-3 per section) | **HIGH VALUE.** Bridges LazyGraphRAG→HippoRAG. Enables section-aware PPR seeding. Concern: Must tune "top-3" vs "top-5" based on section entity density. |
+| **SHARES_ENTITY** | Section ↔ Section via shared entities | **HIGH VALUE.** Enables cross-doc section discovery. Concern: May create edge explosion if threshold too low. Recommend starting with ≥3 shared entities. |
+
+#### ⚠️ MEDIUM-VALUE PROPOSALS (Implement with Caution)
+
+| Proposal | Description | Commentary |
+|:---------|:------------|:-----------|
+| **SIMILAR_TO** (Entity ↔ Entity) | Semantic similarity via embeddings | **MODERATE VALUE.** Useful for disambiguation but has risks. **⚠️ CONCERN:** High threshold (0.85) may miss legitimate matches; low threshold creates noise. Requires careful manual validation. May introduce false connections that confuse PPR. Recommend: Run pilot on 50 entity pairs first. |
+| **DISCUSSES** (Section → Topic) | Topic/keyword layer for orphan sections | **HIGH VALUE for orphan recovery.** But **⚠️ CONCERN:** Topic quality depends heavily on extraction method. TF-IDF produces noisy results; LLM extraction is expensive. Risk: Poorly extracted topics create false retrieval paths. Recommend: Start with LLM extraction on small batch, validate quality before scaling. |
+| **Unified PPR Traversal** | PPR traverses all 7 edge types | **IMPORTANT for coherence.** But **⚠️ CONCERN:** Adding too many edge types to PPR may diffuse probability mass, causing it to "spread too thin." The original HippoRAG paper only used RELATED_TO for good reason. Recommend: A/B test each new edge type individually before combining all 7. |
+
+#### 🟡 DISCUSSED BUT NOT PRIORITIZED
+
+| Proposal | Description | Why Not Prioritized | Commentary |
+|:---------|:------------|:--------------------|:-----------|
+| **Materialized Aggregates** | Precompute entity doc counts | Maintenance complexity | **AGREE:** The benefit (O(1) vs O(n)) doesn't justify staleness risk and sync overhead. Keep as "optional optimization." |
+| **Precomputed Paths** | Cache Entity → best chunks | Storage explosion | **AGREE:** Would require invalidation logic. Current 2-hop is acceptable latency. |
+| **Entity Type Taxonomy** | Hierarchical entity classification | Not discussed in depth | **POTENTIALLY VALUABLE:** Could help with "find all warranty-related entities" queries. But requires upfront schema design. Consider for Phase 4+. |
+| **Temporal Edges** | Time-based relationships | Not applicable to current corpus | **AGREE:** Our PDFs don't have strong temporal structure. Skip for now. |
+
+#### 🔴 PROPOSALS WITH SIGNIFICANT CONCERNS
+
+| Proposal | Concern | Recommendation |
+|:---------|:--------|:---------------|
+| **SIMILAR_TO with 0.85 threshold** | May be too aggressive, creating false entity connections | **Raise threshold to 0.90** initially, lower if recall is too poor. Manually validate first 100 edges. |
+| **PPR with 7 edge types** | Probability diffusion may hurt precision | **Implement incrementally.** Add one edge type at a time to PPR, benchmark each. Don't enable all 7 at once. |
+| **Keyword extraction for orphan sections** | TF-IDF quality concerns | **Use LLM extraction only.** The cost is worth the quality improvement. TF-IDF creates too much noise. |
+| **SHARES_ENTITY with ≥2 threshold** | May create too many edges (1000+) | **Raise threshold to ≥3** shared entities to ensure meaningful connections. |
+
+#### 📋 COMPLETE PROPOSAL CHECKLIST
+
+```
+ORIGINAL DISCUSSION PROPOSALS:
+✅ APPEARS_IN_SECTION (Entity → Section)         → Section 19.5.1
+✅ APPEARS_IN_DOCUMENT (Entity → Document)       → Section 19.5.2
+✅ HAS_HUB_ENTITY (Section → Entity, top-3)      → Section 19.3
+✅ SHARES_ENTITY (Section ↔ Section)             → Section 19.5 Phase 2
+✅ SIMILAR_TO (Entity ↔ Entity via embeddings)   → Section 19.6.1
+✅ DISCUSSES (Section → Topic/Keyword)           → Section 19.5 Phase 2.3
+✅ LazyGraphRAG ↔ HippoRAG bridge               → Section 19.3
+✅ PPR edge weight configuration                 → Section 19.3
+
+IMPLICIT PROPOSALS (from gap analysis):
+✅ Fix 158 orphan sections                       → DISCUSSES edges
+✅ Reduce Entity→Section hop count               → APPEARS_IN_SECTION
+✅ Reduce Entity→Document hop count              → APPEARS_IN_DOCUMENT
+✅ Enable cross-doc section discovery            → SHARES_ENTITY
+
+EDGE CASES DISCUSSED:
+✅ Materialized aggregates                       → Listed as optional (§19.2)
+✅ Precomputed paths                            → Listed as optional (§19.2)
+✅ Edge explosion mitigation                     → Threshold tuning (§19.9)
+
+ITEMS NOT EXPLICITLY PROPOSED BUT IMPLIED:
+⬜ Reverse bridge: Entity → Section (for PPR return path)  → Covered by APPEARS_IN_SECTION
+⬜ Bidirectional SHARES_ENTITY                  → Current query creates both directions
+⬜ Index updates for new edges                  → Mentioned in Phase 1 checklist
+```
+
+#### 🎯 REVISED IMPLEMENTATION PRIORITIES (with commentary)
+
+Based on critical assessment, the recommended priority order is:
+
+```
+WEEK 1-2: Foundation (ZERO RISK)
+  1. APPEARS_IN_SECTION - No downside, pure improvement
+  2. APPEARS_IN_DOCUMENT - No downside, pure improvement
+  3. HAS_HUB_ENTITY (top-3) - Low risk, enables section→entity bridge
+  
+WEEK 3-4: Connectivity (LOW RISK)
+  4. SHARES_ENTITY (threshold ≥3) - Higher threshold = fewer false positives
+  
+WEEK 5-6: Semantic (MEDIUM RISK - CAREFUL VALIDATION)
+  5. DISCUSSES via LLM extraction - Only LLM, no TF-IDF
+  6. SIMILAR_TO (threshold 0.90) - Higher threshold, manual validation
+  
+WEEK 7-8: Integration (HIGH RISK - A/B TEST)
+  7. Unified PPR - Add edges ONE AT A TIME with benchmarks
+```
+
+**Final Assessment:** All proposed improvements are valuable, but implementation order and thresholds matter significantly. The Phase 1 foundation edges are "no-brainer" improvements with zero risk. Phase 2-3 items require careful tuning to avoid introducing noise into the retrieval system.
+
+---

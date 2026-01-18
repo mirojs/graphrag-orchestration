@@ -4319,6 +4319,28 @@ This section catalogs ALL proposed improvements from the graph connection discus
 | **HAS_HUB_ENTITY** | Section → Entity (top-3 per section) | **HIGH VALUE.** Bridges LazyGraphRAG→HippoRAG. Enables section-aware PPR seeding. Concern: Must tune "top-3" vs "top-5" based on section entity density. |
 | **SHARES_ENTITY** | Section ↔ Section via shared entities | **HIGH VALUE.** Enables cross-doc section discovery. Concern: May create edge explosion if threshold too low. Recommend starting with ≥3 shared entities. |
 
+##### Route Benefit Assessment for High-Value Proposals
+
+| Improvement | Route 1 (Local) | Route 2 (Global) | Route 3 (DRIFT) | Route 4 (Exhaustive) |
+|:------------|:----------------|:-----------------|:----------------|:---------------------|
+| **APPEARS_IN_SECTION** | ⭐⭐⭐ **HIGH** | ⭐ Low | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium |
+| | Entity→Section in 1 hop enables faster section-level context retrieval | Global doesn't use entity→section paths | Discovery pass can quickly find which sections contain seed entities | Section vector search already works; this speeds up entity-based filtering |
+| **APPEARS_IN_DOCUMENT** | ⭐⭐ Medium | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium | ⭐ Low |
+| | Useful for single-doc queries | Cross-doc entity counts become O(1); enables "which docs mention X" | Helps determine entity spread across corpus | Exhaustive already retrieves all sections regardless of doc |
+| **HAS_HUB_ENTITY** | ⭐⭐ Medium | ⭐ Low | ⭐⭐⭐ **HIGH** | ⭐⭐⭐ **HIGH** |
+| | Can seed PPR from section's hub entities | Global summarization doesn't need entity anchors | **KEY BRIDGE:** Section retrieval → Entity PPR seeding; enables structural→semantic flow | Coverage retrieval can prioritize sections with high-connectivity hub entities |
+| **SHARES_ENTITY** | ⭐⭐ Medium | ⭐⭐⭐ **HIGH** | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium |
+| | Cross-doc traversal for related sections | Enables "related sections across docs" for broader summarization | Follow-up queries can traverse to related sections discussing same entities | Useful for expanding coverage to semantically related sections |
+
+**Summary by Route:**
+
+| Route | Primary Beneficiary Improvements | Expected Impact |
+|:------|:---------------------------------|:----------------|
+| **Route 1 (Local)** | APPEARS_IN_SECTION | Faster entity-to-section retrieval, ~2x speedup |
+| **Route 2 (Global)** | APPEARS_IN_DOCUMENT, SHARES_ENTITY | O(1) cross-doc counts, broader section discovery |
+| **Route 3 (DRIFT)** | HAS_HUB_ENTITY, SHARES_ENTITY, APPEARS_IN_SECTION | **Biggest winner:** Unified LazyGraphRAG→HippoRAG traversal |
+| **Route 4 (Exhaustive)** | HAS_HUB_ENTITY | Better section prioritization via hub entity connectivity |
+
 #### ⚠️ MEDIUM-VALUE PROPOSALS (Implement with Caution)
 
 | Proposal | Description | Commentary |
@@ -4336,14 +4358,28 @@ This section catalogs ALL proposed improvements from the graph connection discus
 | **Entity Type Taxonomy** | Hierarchical entity classification | Not discussed in depth | **POTENTIALLY VALUABLE:** Could help with "find all warranty-related entities" queries. But requires upfront schema design. Consider for Phase 4+. |
 | **Temporal Edges** | Time-based relationships | Not applicable to current corpus | **AGREE:** Our PDFs don't have strong temporal structure. Skip for now. |
 
-#### 🔴 PROPOSALS WITH SIGNIFICANT CONCERNS
+#### 🔴 QUESTIONABLE POSSIBILITIES (Revisit When Encountering Difficulties)
 
-| Proposal | Concern | Recommendation |
-|:---------|:--------|:---------------|
-| **SIMILAR_TO with 0.85 threshold** | May be too aggressive, creating false entity connections | **Raise threshold to 0.90** initially, lower if recall is too poor. Manually validate first 100 edges. |
-| **PPR with 7 edge types** | Probability diffusion may hurt precision | **Implement incrementally.** Add one edge type at a time to PPR, benchmark each. Don't enable all 7 at once. |
-| **Keyword extraction for orphan sections** | TF-IDF quality concerns | **Use LLM extraction only.** The cost is worth the quality improvement. TF-IDF creates too much noise. |
-| **SHARES_ENTITY with ≥2 threshold** | May create too many edges (1000+) | **Raise threshold to ≥3** shared entities to ensure meaningful connections. |
+> **NOTE:** The items below are labeled as "questionable" because they carry implementation risks
+> or may not provide the expected value. We proceed with the conservative recommendations for now,
+> but **revisit these alternatives if we encounter specific problems** such as:
+> - Low recall on entity matching → Try lowering SIMILAR_TO threshold
+> - Orphan sections still unreachable → Try TF-IDF as supplement to LLM
+> - PPR results too narrow → Enable more edge types in traversal
+> - Cross-doc discovery too sparse → Lower SHARES_ENTITY threshold
+
+| ID | Questionable Item | Current Decision | Revisit If... |
+|:---|:------------------|:-----------------|:--------------|
+| **Q1** | **SIMILAR_TO with 0.85 threshold** | Use 0.90 (conservative) | Recall is too low, missing legitimate entity matches |
+| **Q2** | **PPR with all 7 edge types at once** | Add ONE edge type at a time | Need broader coverage, current paths too restrictive |
+| **Q3** | **TF-IDF for orphan section keywords** | Use LLM extraction only | LLM cost too high, or need faster batch processing |
+| **Q4** | **SHARES_ENTITY with ≥2 threshold** | Use ≥3 (conservative) | Cross-doc section discovery is too sparse |
+
+**How to use this table:**
+1. Start with the conservative recommendation
+2. If a specific difficulty arises, check if a "Questionable Possibility" addresses it
+3. Pilot the alternative on a small subset before full rollout
+4. Document the outcome for future reference
 
 #### 📋 COMPLETE PROPOSAL CHECKLIST
 
@@ -4397,5 +4433,129 @@ WEEK 7-8: Integration (HIGH RISK - A/B TEST)
 ```
 
 **Final Assessment:** All proposed improvements are valuable, but implementation order and thresholds matter significantly. The Phase 1 foundation edges are "no-brainer" improvements with zero risk. Phase 2-3 items require careful tuning to avoid introducing noise into the retrieval system.
+
+### 19.12. Route-by-Route Benefit Assessment
+
+This section analyzes how each proposed improvement benefits the four retrieval routes.
+
+#### Route Summary (Quick Reference)
+
+| Route | Name | Strategy | Current Performance |
+|:------|:-----|:---------|:--------------------|
+| **Route 1** | PPR-Expansion | Entity graph + PPR traversal | ~95% accuracy, 3-5s |
+| **Route 2** | Direct Entity | Direct entity lookup | Fast, narrow scope |
+| **Route 3** | Global Search | BM25 + vector search | ~85% accuracy, 2-3s |
+| **Route 4** | DRIFT | Section vectors + exhaustive | ~95% accuracy, 7-8s |
+
+#### Benefit Matrix: Proposals × Routes
+
+| Proposal | Route 1 (PPR) | Route 2 (Direct) | Route 3 (Global) | Route 4 (DRIFT) |
+|:---------|:--------------|:-----------------|:-----------------|:----------------|
+| **APPEARS_IN_SECTION** | ⭐⭐⭐ PPR can jump to sections | ⭐⭐ Direct section lookup | ⭐ Minimal | ⭐⭐ Section→Entity context |
+| **APPEARS_IN_DOCUMENT** | ⭐⭐ Cross-doc aggregation | ⭐⭐⭐ Direct doc lookup | ⭐⭐ Doc-level scoring | ⭐ Minimal |
+| **HAS_HUB_ENTITY** | ⭐⭐⭐ Section-aware PPR seeding | ⭐ Minimal | ⭐⭐ Entity-boosted sections | ⭐⭐⭐ Coverage→Entity bridge |
+| **SHARES_ENTITY** | ⭐⭐⭐ Cross-doc PPR flow | ⭐ Minimal | ⭐⭐ Related sections | ⭐⭐⭐ Expand section coverage |
+| **SIMILAR_TO** | ⭐⭐⭐ Fuzzy entity expansion | ⭐⭐ Disambiguation | ⭐ Minimal | ⭐ Minimal |
+| **DISCUSSES** | ⭐⭐ Topic→Entity path | ⭐ Minimal | ⭐⭐⭐ Orphan section access | ⭐⭐⭐ Thematic retrieval |
+| **Unified PPR (7 edges)** | ⭐⭐⭐ Core enhancement | ⭐ N/A | ⭐ N/A | ⭐⭐ PPR-guided section ranking |
+
+Legend: ⭐⭐⭐ = Major benefit, ⭐⭐ = Moderate benefit, ⭐ = Minimal/Indirect benefit
+
+#### Detailed Route Analysis
+
+##### Route 1: PPR-Expansion (Entity Graph Traversal)
+
+**Current Limitation:** PPR only traverses RELATED_TO edges between entities, missing section-level structure.
+
+| Improvement | Benefit | Impact |
+|:------------|:--------|:-------|
+| **APPEARS_IN_SECTION** | PPR can now flow: Entity → Section → other chunks | +10-15% recall for section-spanning queries |
+| **SHARES_ENTITY** | PPR probability flows across document boundaries | +20% cross-doc discovery |
+| **SIMILAR_TO** | Alternative paths when exact entity match fails | Improved disambiguation |
+| **Unified PPR** | 7 edge types vs 3 = richer traversal | **HIGH PRIORITY** for Route 1 |
+
+**Most Beneficial Proposals:** SIMILAR_TO, SHARES_ENTITY, Unified PPR
+
+##### Route 2: Direct Entity Lookup
+
+**Current Limitation:** Fast but narrow; only finds chunks explicitly mentioning the entity.
+
+| Improvement | Benefit | Impact |
+|:------------|:--------|:-------|
+| **APPEARS_IN_DOCUMENT** | O(1) "which docs mention X?" | 5-10x speedup for doc-level queries |
+| **APPEARS_IN_SECTION** | O(1) "which sections mention X?" | 2-3x speedup for section-level queries |
+| **SIMILAR_TO** | Find related entities for expansion | Broader recall |
+
+**Most Beneficial Proposals:** APPEARS_IN_DOCUMENT, APPEARS_IN_SECTION
+
+##### Route 3: Global Search (BM25 + Vector)
+
+**Current Limitation:** Good for keyword/semantic match, but 77% of sections are orphaned (no entity links).
+
+| Improvement | Benefit | Impact |
+|:------------|:--------|:-------|
+| **DISCUSSES** | Orphan sections become reachable via Topic nodes | **CRITICAL** - fixes 158 orphan sections |
+| **HAS_HUB_ENTITY** | Boost sections with high-connectivity entities | Better section ranking |
+| **SHARES_ENTITY** | "Related sections" for result expansion | +15% recall |
+
+**Most Beneficial Proposals:** DISCUSSES (critical), HAS_HUB_ENTITY
+
+##### Route 4: DRIFT (Section Vector Search)
+
+**Current Limitation:** Good accuracy but relies on exhaustive section retrieval; no entity-based filtering.
+
+| Improvement | Benefit | Impact |
+|:------------|:--------|:-------|
+| **HAS_HUB_ENTITY** | Bridge from coverage sections → entity context | Section→Entity verification |
+| **SHARES_ENTITY** | Expand initial sections to related sections | Cross-doc section discovery |
+| **DISCUSSES** | Thematic queries hit orphan sections | **CRITICAL** - 77% orphan coverage |
+| **APPEARS_IN_SECTION** | After section retrieval, get entity context | Entity-enriched responses |
+
+**Most Beneficial Proposals:** DISCUSSES (critical), HAS_HUB_ENTITY, SHARES_ENTITY
+
+#### Priority Matrix by Route
+
+Based on the above analysis, here's the recommended priority per route:
+
+| Priority | Route 1 (PPR) | Route 2 (Direct) | Route 3 (Global) | Route 4 (DRIFT) |
+|:---------|:--------------|:-----------------|:-----------------|:----------------|
+| **#1** | SIMILAR_TO | APPEARS_IN_DOCUMENT | DISCUSSES | DISCUSSES |
+| **#2** | Unified PPR | APPEARS_IN_SECTION | HAS_HUB_ENTITY | HAS_HUB_ENTITY |
+| **#3** | SHARES_ENTITY | SIMILAR_TO | SHARES_ENTITY | SHARES_ENTITY |
+
+#### Cross-Route Synergies
+
+Some improvements benefit multiple routes when combined:
+
+```
+DISCUSSES + HAS_HUB_ENTITY:
+  Route 3: Orphan section → Topic → Section → Hub Entity → PPR expansion
+  Route 4: Section retrieval → Hub Entity → Entity context for answer
+  
+  Synergy: Orphan sections become fully connected to entity graph
+
+SHARES_ENTITY + APPEARS_IN_SECTION:
+  Route 1: Entity → Section → SHARES_ENTITY → Section → Entity (cross-doc)
+  Route 4: Section → SHARES_ENTITY → related sections (broader coverage)
+  
+  Synergy: Cross-document discovery works for both entity and section queries
+
+SIMILAR_TO + Unified PPR:
+  Route 1: Seed entity → SIMILAR_TO → related entity → RELATED_TO → target
+  
+  Synergy: Handles typos, synonyms, and entity aliases gracefully
+```
+
+#### Impact Summary
+
+| Improvement | Routes Benefited | Overall Priority |
+|:------------|:-----------------|:-----------------|
+| **DISCUSSES** | Route 3 ⭐⭐⭐, Route 4 ⭐⭐⭐ | **CRITICAL** - fixes orphan gap |
+| **HAS_HUB_ENTITY** | Route 1 ⭐⭐⭐, Route 4 ⭐⭐⭐ | **HIGH** - bridges systems |
+| **SHARES_ENTITY** | Route 1 ⭐⭐⭐, Route 4 ⭐⭐⭐ | **HIGH** - cross-doc discovery |
+| **SIMILAR_TO** | Route 1 ⭐⭐⭐, Route 2 ⭐⭐ | **MEDIUM** - disambiguation |
+| **APPEARS_IN_SECTION** | Route 1 ⭐⭐⭐, Route 2 ⭐⭐ | **HIGH** - hop reduction |
+| **APPEARS_IN_DOCUMENT** | Route 2 ⭐⭐⭐ | **MEDIUM** - Route 2 specific |
+| **Unified PPR** | Route 1 ⭐⭐⭐ | **HIGH** - Route 1 specific |
 
 ---

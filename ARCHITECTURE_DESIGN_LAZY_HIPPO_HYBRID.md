@@ -4434,7 +4434,220 @@ WEEK 7-8: Integration (HIGH RISK - A/B TEST)
 
 **Final Assessment:** All proposed improvements are valuable, but implementation order and thresholds matter significantly. The Phase 1 foundation edges are "no-brainer" improvements with zero risk. Phase 2-3 items require careful tuning to avoid introducing noise into the retrieval system.
 
-### 19.12. Route-by-Route Benefit Assessment
+---
+
+### 19.12. Unified Implementation Pipeline (Graph + Routes)
+
+This section provides a **consolidated implementation roadmap** that combines graph schema improvements with route-specific enhancements, showing dependencies and validation checkpoints.
+
+#### Pipeline Overview
+
+```
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                    UNIFIED IMPLEMENTATION PIPELINE                              │
+├────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                │
+│  PHASE 1: Foundation Edges (Week 1-2)                                         │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  Graph: APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY         │  │
+│  │  Routes: Update Route 2 (Local) + Route 4 (DRIFT) retrievers            │  │
+│  │  Validation: Benchmark all routes, expect no regression                  │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                           │
+│                                    ▼                                           │
+│  PHASE 2: Cross-Doc Connectivity (Week 3-4)                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  Graph: SHARES_ENTITY (Section ↔ Section, threshold ≥3)                 │  │
+│  │  Routes: Update Route 3 (Global) + Route 4 (DRIFT) section discovery    │  │
+│  │  Validation: Cross-doc queries should find related sections             │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                           │
+│                                    ▼                                           │
+│  PHASE 3: Route 4 DRIFT Bridge (Week 5-6)                                     │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  Integration: Connect HAS_HUB_ENTITY to DRIFT discovery pass            │  │
+│  │  PPR Enhancement: Add APPEARS_IN_SECTION to Route 2 PPR traversal       │  │
+│  │  Validation: Route 4 should use section→entity bridge, Route 2 faster   │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                           │
+│                                    ▼                                           │
+│  PHASE 4: Full Validation & Tuning (Week 7-8)                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────┐  │
+│  │  Benchmark: Run full 57-question suite on all routes                    │  │
+│  │  Tune: Edge weights for optimal accuracy/latency balance                │  │
+│  │  Document: Query patterns that benefit most from new graph structure    │  │
+│  └─────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                │
+└────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Detailed Week-by-Week Plan
+
+##### Week 1: Foundation Graph Edges
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Day 1-2** | Create APPEARS_IN_SECTION edges | Cypher script, ~800-1000 edges created |
+| **Day 3** | Create APPEARS_IN_DOCUMENT edges | Cypher script, ~400-500 edges created |
+| **Day 4-5** | Create HAS_HUB_ENTITY edges (top-3 per section) | Cypher script, ~600 edges (204 sections × 3) |
+
+**Validation Checkpoint:**
+```bash
+# Verify edge counts
+MATCH ()-[r:APPEARS_IN_SECTION]->() RETURN count(r)  # Expected: 800-1000
+MATCH ()-[r:APPEARS_IN_DOCUMENT]->() RETURN count(r)  # Expected: 400-500
+MATCH ()-[r:HAS_HUB_ENTITY]->() RETURN count(r)       # Expected: ~600
+```
+
+##### Week 2: Route 2 (Local) Enhancement
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Day 1-2** | Update `EnhancedGraphRetriever.get_sections_for_entity()` | Use 1-hop APPEARS_IN_SECTION |
+| **Day 3** | Update `get_documents_for_entity()` | Use 1-hop APPEARS_IN_DOCUMENT |
+| **Day 4-5** | Benchmark Route 2 | Expect 2x speedup on entity→section queries |
+
+**Code Change Location:** `src/retrieval/enhanced_graph_retriever.py`
+
+**Before (2-hop):**
+```cypher
+MATCH (e:Entity {name: $entity_name})<-[:MENTIONS]-(c:TextChunk)-[:IN_SECTION]->(s:Section)
+RETURN s
+```
+
+**After (1-hop):**
+```cypher
+MATCH (e:Entity {name: $entity_name})-[:APPEARS_IN_SECTION]->(s:Section)
+RETURN s
+```
+
+##### Week 3: SHARES_ENTITY Edges
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Day 1-2** | Create SHARES_ENTITY edges (threshold ≥3 shared entities) | Cypher script, ~100-200 edges |
+| **Day 3** | Add index on SHARES_ENTITY for fast traversal | Neo4j index creation |
+| **Day 4-5** | Test cross-doc section discovery | Manual validation of edge quality |
+
+**Validation Checkpoint:**
+```bash
+# Check edge distribution
+MATCH (s1:Section)-[r:SHARES_ENTITY]->(s2:Section)
+WHERE s1.doc_id <> s2.doc_id  # Cross-doc only
+RETURN count(r)  # Expected: 50-100 cross-doc edges
+```
+
+##### Week 4: Route 3 (Global) Enhancement
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Day 1-2** | Update `GlobalSearchRetriever` to use SHARES_ENTITY | Find related sections across docs |
+| **Day 3** | Update `get_cross_doc_entity_summary()` | Use APPEARS_IN_DOCUMENT for O(1) counts |
+| **Day 4-5** | Benchmark Route 3 | Expect improved cross-doc thematic retrieval |
+
+**Code Change Location:** `src/retrieval/global_search_retriever.py`
+
+##### Week 5: Route 4 (DRIFT) Bridge Integration
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Day 1-2** | Update `_drift_execute_discovery_pass()` to use HAS_HUB_ENTITY | Section→Entity seeding |
+| **Day 3-4** | Update PPR to traverse APPEARS_IN_SECTION | Enable entity→section→entity paths |
+| **Day 5** | Benchmark Route 4 | Expect better section-entity coherence |
+
+**Code Change Location:** `src/orchestrator/orchestrator.py`
+
+**New Discovery Flow:**
+```
+1. Section vector search → top sections
+2. For each section: get HAS_HUB_ENTITY → seed entities
+3. Run PPR from seed entities with APPEARS_IN_SECTION traversal
+4. Merge section + entity results for synthesis
+```
+
+##### Week 6: Route 2 (Local) PPR Enhancement
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Day 1-2** | Add APPEARS_IN_SECTION to PPR edge types | PPR can flow through sections |
+| **Day 3** | Add SHARES_ENTITY to PPR edge types | PPR can jump across docs via sections |
+| **Day 4-5** | Tune edge weights | A/B test weight configurations |
+
+**PPR Edge Weight Configuration:**
+```python
+PPR_EDGE_WEIGHTS = {
+    "RELATED_TO": 1.0,           # Primary (unchanged)
+    "APPEARS_IN_SECTION": 0.6,   # NEW: Entity → Section
+    "HAS_HUB_ENTITY": 0.7,       # NEW: Section → Entity
+    "SHARES_ENTITY": 0.5,        # NEW: Section → Section (lower weight, indirect)
+}
+```
+
+##### Week 7-8: Full Validation & Tuning
+
+| Day | Task | Deliverable |
+|:----|:-----|:------------|
+| **Week 7 Day 1-3** | Run full 57-question benchmark on all routes | Benchmark results file |
+| **Week 7 Day 4-5** | Analyze which queries improved, which regressed | Analysis document |
+| **Week 8 Day 1-3** | Tune thresholds and weights based on analysis | Updated configuration |
+| **Week 8 Day 4-5** | Final validation, document learnings | Updated architecture doc |
+
+**Success Criteria:**
+- [ ] Route 2: ≥95% accuracy maintained, 2x faster entity→section queries
+- [ ] Route 3: Improved cross-doc coverage (measure via recall on global queries)
+- [ ] Route 4: ≥94% accuracy maintained, section→entity bridge working
+- [ ] No route should regress by more than 2% accuracy
+
+#### Dependency Graph
+
+```
+                    GRAPH EDGES                           ROUTE UPDATES
+                    ───────────                           ─────────────
+                    
+Week 1:     APPEARS_IN_SECTION ─────────────────────────► Route 2 (Local)
+                    │                                           │
+                    │                                           │
+            APPEARS_IN_DOCUMENT ────────────────────────► Route 3 (Global)
+                    │                                           │
+                    │                                           │
+            HAS_HUB_ENTITY ─────────────────────────────► Route 4 (DRIFT)
+                    │                                           │
+                    ▼                                           ▼
+Week 3:     SHARES_ENTITY ──────────────────────────────► Route 3 + Route 4
+                    │                                           │
+                    ▼                                           ▼
+Week 5:     [Integration] ◄─────────────────────────────► Route 4 Bridge
+                    │                                           │
+                    ▼                                           ▼
+Week 6:     [PPR Enhancement] ◄─────────────────────────► Route 2 PPR
+                    │                                           │
+                    ▼                                           ▼
+Week 7-8:   [Validation] ◄──────────────────────────────► All Routes
+```
+
+#### Quick Reference: What Changes Where
+
+| Component | File(s) | Changes |
+|:----------|:--------|:--------|
+| **Graph Schema** | Neo4j (via Cypher scripts) | New edge types: APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY, SHARES_ENTITY |
+| **Indexing Pipeline** | `src/indexing/graph_indexer.py` | Create new edges during document ingestion |
+| **Route 2 (Local)** | `src/retrieval/enhanced_graph_retriever.py` | Use 1-hop queries, update PPR edge types |
+| **Route 3 (Global)** | `src/retrieval/global_search_retriever.py` | Use SHARES_ENTITY for cross-doc discovery |
+| **Route 4 (DRIFT)** | `src/orchestrator/orchestrator.py` | Use HAS_HUB_ENTITY in discovery pass |
+| **PPR Config** | `src/retrieval/ppr_config.py` (or constants) | Edge weight configuration |
+
+#### Risk Mitigation Checkpoints
+
+| Checkpoint | Trigger | Action |
+|:-----------|:--------|:-------|
+| **After Week 2** | Route 2 accuracy drops >2% | Revert to 2-hop queries, investigate |
+| **After Week 4** | SHARES_ENTITY causes noise | Raise threshold from ≥3 to ≥4 |
+| **After Week 6** | PPR "spreads too thin" | Reduce edge types in PPR, keep core only |
+| **After Week 8** | Any route below 90% accuracy | Rollback to pre-improvement state, analyze |
+
+---
+
+### 19.13. Route-by-Route Benefit Assessment
 
 This section analyzes how each proposed improvement benefits the four retrieval routes.
 

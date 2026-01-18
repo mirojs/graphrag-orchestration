@@ -3755,7 +3755,8 @@ Instructions:
                         # For section-based coverage, allow multiple chunks per document
                         # (one per section). For semantic coverage, only one chunk per doc.
                         skip_chunk = False
-                        if coverage_strategy == "section_based":
+                        # Support both 'section_based' and 'section_based_exhaustive' naming
+                        if coverage_strategy.startswith("section_based"):
                             # Section-based: Skip only if chunk already exists
                             skip_chunk = chunk.chunk_id in existing_chunk_ids
                         else:

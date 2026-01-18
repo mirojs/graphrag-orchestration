@@ -910,66 +910,6 @@ Audit Trail:"""
         # Join all chunks with double newline for readability
         audit_response = "\n\n".join(response_parts)
         
-        # Lightweight deterministic answer detector for specific-value queries
-        def _query_needs_explicit_value(q: str) -> bool:
-            ql = (q or "").lower()
-            value_keywords = [
-                "routing", "iban", "swift", "bank account", "bank", "account number",
-                "vat", "tax id", "tax number", "mold", "routing number", "iban / swift",
-                "iban/swift", "iban swift", "iban", "bic",
-            ]
-            return any(k in ql for k in value_keywords)
-        
-        def _contains_explicit_value(q: str, text: str) -> bool:
-            t = (text or "").lower()
-            # routing number: 9 digits
-            if "routing" in q.lower():
-                if re.search(r"\b\d{9}\b", text):
-                    return True
-                if "routing" in t or "aba" in t:
-                    return True
-            # IBAN / SWIFT
-            if "iban" in q.lower() or "swift" in q.lower() or "bic" in q.lower():
-                if re.search(r"\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4,}\b", text, re.I):
-                    return True
-                if re.search(r"\b[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?\b", text):
-                    return True
-            # VAT / Tax ID
-            if "vat" in q.lower() or "tax id" in q.lower() or "tax number" in q.lower():
-                if re.search(r"\b\d{8,15}\b", text) or "vat" in t or "tax" in t:
-                    return True
-            # Bank account
-            if "bank account" in q.lower() or "account number" in q.lower():
-                if re.search(r"\b\d{6,20}\b", text):
-                    return True
-                if "account" in t and re.search(r"\d{4}", text):
-                    return True
-            # Mold damage clause and other clause checks
-            if "mold" in q.lower():
-                if "mold" in t:
-                    return True
-            return False
-        
-        # If query likely asks for a specific identifier/phrase but we couldn't find a match,
-        # return the standard "not specified" deterministic response to avoid false positives.
-        try:
-            if _query_needs_explicit_value(query) and not _contains_explicit_value(query, audit_response):
-                logger.info(
-                    "nlp_audit_no_explicit_value_found",
-                    query=query[:50],
-                    chunks_returned=len(citations),
-                )
-                return {
-                    "response": "Not specified in the provided documents.",
-                    "citations": [],
-                    "evidence_path": [node[0] for node in evidence_nodes],
-                    "text_chunks_used": len(text_chunks),
-                    "processing_deterministic": True,
-                }
-        except Exception:
-            # Be safe: on unexpected failure, fall back to returning the audit_response
-            pass
-        
         logger.info(
             "nlp_audit_extraction_complete",
             query=query[:50],

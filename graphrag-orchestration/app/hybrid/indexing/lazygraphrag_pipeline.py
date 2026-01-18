@@ -290,6 +290,7 @@ class LazyGraphRAGIndexingPipeline:
 
         stats["entities"] = len(entities)
         stats["relationships"] = len(relationships)
+        stats["foundation_edges"] = commit_result.get("details", {}).get("foundation_edges", {})
         stats["elapsed_s"] = round(time.time() - start_time, 2)
         return stats
 
@@ -1045,6 +1046,12 @@ class LazyGraphRAGIndexingPipeline:
         # Best-effort: compute ranking fields so query-time Cypher can use them
         # without property-key warnings (importance_score/degree/chunk_count).
         self.neo4j_store.compute_entity_importance(group_id)
+        
+        # Create foundation edges for graph schema enhancement (Phase 1 Week 1-2)
+        # These edges enable O(1) retrieval and provide LazyGraphRAG→HippoRAG bridge
+        foundation_stats = await self._create_foundation_edges(group_id)
+        details["foundation_edges"] = foundation_stats
+        
         return {"passed": True, "details": details, "stats": {"entities": len(entities), "relationships": len(relationships)}}
 
     def _merge_entity_relationships(self, ents_a: List[Entity], rels_a: List[Relationship], ents_b: List[Entity], rels_b: List[Relationship]) -> Tuple[List[Entity], List[Relationship]]:
@@ -1605,3 +1612,89 @@ class LazyGraphRAGIndexingPipeline:
         )
         
         return {"edges_created": edges_created}
+
+    async def _create_foundation_edges(self, group_id: str) -> Dict[str, int]:
+        """Create foundation edges for graph schema enhancement.
+        
+        Creates three types of pre-computed edges:
+        1. APPEARS_IN_SECTION: Entity → Section (replaces 2-hop Entity-Chunk-Section)
+        2. APPEARS_IN_DOCUMENT: Entity → Document (replaces 3-hop Entity-Chunk-Section-Doc)
+        3. HAS_HUB_ENTITY: Section → Entity (top-3 most connected entities per section)
+        
+        These edges enable O(1) retrieval for Route 2 (Local Search) and provide
+        the LazyGraphRAG→HippoRAG bridge for Route 4 (DRIFT).
+        
+        Args:
+            group_id: Group identifier for multi-tenancy
+            
+        Returns:
+            Dictionary with edge counts: {"appears_in_section": N, "appears_in_document": M, "has_hub_entity": K}
+        """
+        logger.info("creating_foundation_edges", extra={"group_id": group_id})
+        
+        stats = {
+            "appears_in_section": 0,
+            "appears_in_document": 0,
+            "has_hub_entity": 0,
+        }
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
+            result = session.run(
+                """
+                MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)-[:IN_SECTION]->(s:Section)
+                WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
+                WITH e, s
+                MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
+                SET r.group_id = $group_id
+                RETURN count(DISTINCT r) AS count
+                """,
+                group_id=group_id,
+            )
+            stats["appears_in_section"] = result.single()["count"]
+            
+            # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
+            result = session.run(
+                """
+                MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)-[:IN_SECTION]->(s:Section)
+                WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
+                WITH e, s.doc_id AS doc_id
+                MATCH (d:Document {id: doc_id, group_id: $group_id})
+                WITH e, d
+                MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
+                SET r.group_id = $group_id
+                RETURN count(DISTINCT r) AS count
+                """,
+                group_id=group_id,
+            )
+            stats["appears_in_document"] = result.single()["count"]
+            
+            # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
+            result = session.run(
+                """
+                MATCH (s:Section)<-[:IN_SECTION]-(c:TextChunk)<-[:MENTIONS]-(e:Entity)
+                WHERE s.group_id = $group_id AND c.group_id = $group_id AND e.group_id = $group_id
+                WITH s, e, count(DISTINCT c) AS mention_count
+                ORDER BY s.id, mention_count DESC
+                WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
+                UNWIND top_entities AS te
+                WITH s, te.entity AS e, te.count AS mention_count
+                MERGE (s)-[r:HAS_HUB_ENTITY]->(e)
+                SET r.group_id = $group_id, r.mention_count = mention_count
+                RETURN count(r) AS count
+                """,
+                group_id=group_id,
+            )
+            stats["has_hub_entity"] = result.single()["count"]
+        
+        logger.info(
+            "foundation_edges_created",
+            extra={
+                "group_id": group_id,
+                "appears_in_section": stats["appears_in_section"],
+                "appears_in_document": stats["appears_in_document"],
+                "has_hub_entity": stats["has_hub_entity"],
+            },
+        )
+        
+        return stats

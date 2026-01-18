@@ -653,6 +653,135 @@ class EnhancedGraphRetriever:
             entity_descriptions=entity_descriptions,
         )
     
+    async def _get_source_chunks_via_new_edges(
+        self,
+        entity_names: List[str],
+        max_per_entity: int = 3,
+    ) -> List[SourceChunk]:
+        """
+        Get source chunks for entities using 1-hop APPEARS_IN_SECTION edges.
+        
+        This is the optimized path that uses pre-computed foundation edges:
+        - Entity → APPEARS_IN_SECTION → Section
+        - Then fetch chunks from those sections via IN_SECTION edges
+        
+        Much faster than 2-hop Entity → MENTIONS → Chunk → IN_SECTION → Section
+        because we skip the intermediate chunk traversal.
+        
+        Args:
+            entity_names: List of entity names to retrieve chunks for
+            max_per_entity: Maximum chunks to return per entity
+            
+        Returns:
+            List of SourceChunk objects with section and document metadata
+        """
+        if not entity_names:
+            return []
+        
+        # Query: Use new 1-hop edges to get sections, then fetch chunks from those sections
+        query = """
+                UNWIND $entity_names AS entity_name
+                MATCH (e:Entity)
+                WHERE (toLower(e.name) = toLower(entity_name)) AND e.group_id = $group_id
+                // Use 1-hop APPEARS_IN_SECTION edge
+                MATCH (e)-[:APPEARS_IN_SECTION]->(s:Section)
+                WHERE s.group_id = $group_id
+                // Get chunks from this section
+                MATCH (c:TextChunk)-[:IN_SECTION]->(s)
+                WHERE c.group_id = $group_id
+                // Get document info
+                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document)
+                WITH entity_name, c, s, d, 
+                     // Prioritize chunks that mention the entity (if MENTIONS edge exists)
+                     CASE WHEN exists((e)-[:MENTIONS]->(c)) THEN 1.0 ELSE 0.5 END AS score
+                ORDER BY score DESC, coalesce(c.chunk_index, 0)
+                WITH entity_name, collect({
+                    chunk_id: c.id,
+                    text: c.text,
+                    metadata: c.metadata,
+                    chunk_index: coalesce(c.chunk_index, 0),
+                    section_id: s.id,
+                    section_path_key: s.path_key,
+                    doc_id: d.id,
+                    doc_title: d.title,
+                    doc_source: d.source,
+                    score: score
+                })[0..$max_per_entity] AS chunks
+                UNWIND chunks AS chunk
+                RETURN
+                    entity_name,
+                    chunk.chunk_id AS chunk_id,
+                    chunk.text AS text,
+                    chunk.metadata AS metadata,
+                    chunk.section_id AS section_id,
+                    chunk.section_path_key AS section_path_key,
+                    chunk.doc_id AS doc_id,
+                    chunk.doc_title AS doc_title,
+                    chunk.doc_source AS doc_source,
+                    chunk.score AS score
+                """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        entity_names=entity_names,
+                        group_id=self.group_id,
+                        max_per_entity=max_per_entity,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+
+            chunks: List[SourceChunk] = []
+            for record in records:
+                metadata: Dict[str, Any] = {}
+                if record.get("metadata"):
+                    try:
+                        metadata = (
+                            json.loads(record["metadata"]) if isinstance(record["metadata"], str) else record["metadata"]
+                        )
+                    except Exception:
+                        metadata = {}
+
+                section_path = metadata.get("section_path", [])
+                if record.get("section_path_key"):
+                    section_path = (record["section_path_key"] or "").split(" > ")
+
+                chunks.append(
+                    SourceChunk(
+                        chunk_id=record.get("chunk_id") or "",
+                        text=record.get("text") or "",
+                        entity_name=record.get("entity_name") or "",
+                        section_path=section_path,
+                        section_id=record.get("section_id") or "",
+                        document_id=record.get("doc_id") or metadata.get("document_id", "") or "",
+                        document_title=record.get("doc_title") or metadata.get("document_title", ""),
+                        document_source=record.get("doc_source") or metadata.get("url", ""),
+                        relevance_score=float(record.get("score") or 0.0),
+                    )
+                )
+            
+            logger.info(
+                "chunks_via_new_edges_retrieved",
+                num_entities=len(entity_names),
+                chunks_found=len(chunks),
+                top_entities=entity_names[:5],
+            )
+            
+            return chunks
+        
+        except Exception as e:
+            logger.error(
+                "chunks_via_new_edges_error",
+                error=str(e),
+                num_entities=len(entity_names),
+            )
+            return []
+    
     async def _get_source_chunks_via_mentions(
         self,
         entity_names: List[str],
@@ -908,6 +1037,7 @@ class EnhancedGraphRetriever:
         max_per_section: int = 3,
         max_per_document: int = 5,
         max_total: int = 25,
+        use_new_edges: bool = True,
     ) -> List[SourceChunk]:
         """
         Fetch text chunks for HippoRAG PPR evidence nodes (DETAIL RECOVERY).
@@ -937,11 +1067,17 @@ class EnhancedGraphRetriever:
         sorted_nodes = sorted(evidence_nodes, key=lambda x: x[1], reverse=True)
         entity_names = [name for name, _ in sorted_nodes]
         
-        # Fetch chunks via MENTIONS edges
-        all_chunks = await self._get_source_chunks_via_mentions(
-            entity_names=entity_names,
-            max_per_entity=max_per_entity,
-        )
+        # Fetch chunks: use new 1-hop edges if available, otherwise fall back to 2-hop
+        if use_new_edges:
+            all_chunks = await self._get_source_chunks_via_new_edges(
+                entity_names=entity_names,
+                max_per_entity=max_per_entity,
+            )
+        else:
+            all_chunks = await self._get_source_chunks_via_mentions(
+                entity_names=entity_names,
+                max_per_entity=max_per_entity,
+            )
         
         if not all_chunks:
             logger.warning("ppr_evidence_no_chunks_found",

@@ -1,12 +1,15 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 17, 2026
+**Last Updated:** January 18, 2026
 
-**Recent Updates:**
+**Recent Updates (January 17, 2026):**
+- ✅ **Phase C Complete:** PPR now traverses SEMANTICALLY_SIMILAR edges (section graph fully utilized)
+- ✅ **Security Hardening:** Group isolation strengthened in edge operations (defense-in-depth)
+- ✅ **Route 4 Citation Fix:** Section field added to citation_map for granular attribution
 - Section-based coverage limit removed for comprehensive queries (Route 4)
 - Coverage architecture validated: 50 content sections proven sufficient for exhaustive retrieval
 - Diagnostic logging added to indexing pipeline for chunk-to-section mapping
-- See Section 3.4.6 for detailed implementation notes
+- See Section 3.4.6 for detailed implementation notes and Section 18.1.1 for Phase C details
 
 ## 1. Executive Summary
 
@@ -453,6 +456,11 @@ The initial coverage issues (missing timeframes) were caused by **stale index da
 *   **Engine:** LLM with DRIFT-style aggregation (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Synthesize findings from all sub-questions into coherent report
 *   **Output:** Executive summary + detailed evidence trail
+*   **Citation Format (Fixed January 17, 2026):**
+    - **Issue:** Route 4 citations were missing `section` field, causing document-level attribution instead of section-level
+    - **Impact:** Benchmark containment metrics dropped from 0.80 to 0.60-0.66 (20 unique doc-section pairs collapsed to 5 URLs)
+    - **Fix:** `synthesis.py:631-645` now extracts `section_path` from chunk metadata and adds to `citation_map`
+    - **Result:** Citations now include section info like Route 3: `{"source": "doc.pdf — Section Title", "section": "1.2 > Subsection"}`
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, final answer uses deterministic sentence extraction (discovery pipeline still uses LLM for decomposition/disambiguation, but final composition is 100% repeatable)
 
 ### Route 4: Deep Reasoning & Benchmark Criteria (Updated Jan 2026)
@@ -3364,6 +3372,12 @@ This transforms Route 4 from a linear pipeline into a **reasoning engine**.
 
 **Location:** `app/hybrid/indexing/lazygraphrag_pipeline.py`
 
+**Security Hardening (January 17, 2026):**
+- ✅ Group isolation enforced at edge **creation** time (both source and target nodes)
+- ✅ Group isolation enforced at edge **deletion** time (both sides of relationship)
+- Defense-in-depth: 8 total group_id checkpoints across PPR query + edge mutations
+- Prevents cross-tenant edge contamination if Section IDs collide
+
 **New Method:** `_build_section_similarity_edges()`
 
 ```python
@@ -3390,9 +3404,10 @@ async def _build_section_similarity_edges(
     """
 ```
 
-**Cypher Pattern:**
+**Cypher Pattern (Updated January 17, 2026):**
 ```cypher
 // Find section pairs with high embedding similarity
+// Security: BOTH nodes filtered by group_id at MATCH time
 MATCH (s1:Section {group_id: $group_id})
 MATCH (s2:Section {group_id: $group_id})
 WHERE s1.id < s2.id  // Avoid duplicates
@@ -3403,6 +3418,13 @@ WITH s1, s2, gds.similarity.cosine(s1.embedding, s2.embedding) AS sim
 WHERE sim > $threshold
 MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
 SET r.similarity = sim, r.created_at = datetime()
+```
+
+**Edge Deletion (group isolation added January 17):**
+```cypher
+// Security: BOTH sides filtered by group_id before deletion
+MATCH (s1:Section {group_id: $group_id})-[r:SEMANTICALLY_SIMILAR]-(s2:Section {group_id: $group_id})
+DELETE r
 ```
 
 #### Phase B: Route 4 Confidence Loop

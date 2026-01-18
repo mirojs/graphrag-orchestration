@@ -290,9 +290,13 @@ class EnhancedGraphRetriever:
         if use_new_edges:
             query = """
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)-[r:APPEARS_IN_SECTION]->(s:Section)
+            // Find entity first (uses entity_name index)
+            MATCH (e:Entity)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
-              AND r.group_id = $group_id
+              AND e.group_id = $group_id
+            // Then traverse to sections via APPEARS_IN_SECTION
+            MATCH (e)-[r:APPEARS_IN_SECTION]->(s:Section)
+            WHERE r.group_id = $group_id
             RETURN 
                 entity_name,
                 s.id AS section_id,
@@ -368,9 +372,13 @@ class EnhancedGraphRetriever:
         if use_new_edges:
             query = """
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
+            // Find entity first (uses entity_name index)
+            MATCH (e:Entity)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
-              AND r.group_id = $group_id
+              AND e.group_id = $group_id
+            // Then traverse to documents via APPEARS_IN_DOCUMENT
+            MATCH (e)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
+            WHERE r.group_id = $group_id
             RETURN 
                 entity_name,
                 d.id AS doc_id,

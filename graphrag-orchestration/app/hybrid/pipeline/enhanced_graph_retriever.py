@@ -2212,6 +2212,107 @@ class EnhancedGraphRetriever:
                         group_id=self.group_id)
             return []
 
+    async def search_sections_by_vector(
+        self,
+        query_embedding: List[float],
+        top_k: int = 10,
+        score_threshold: float = 0.7,
+    ) -> List[Dict[str, Any]]:
+        """Vector search against Section embeddings for direct section-level retrieval.
+        
+        This method searches the existing Section.embedding vectors (created during indexing)
+        to find sections semantically related to the query. It returns section metadata
+        without fetching chunks, allowing for hierarchical retrieval patterns:
+        
+        1. Find relevant sections via vector search
+        2. Fetch chunks from those sections
+        3. Optionally traverse SEMANTICALLY_SIMILAR edges for expansion
+        
+        Use cases:
+        - Structural queries: "Show me all methodology sections"
+        - Coarse-to-fine retrieval: Fast section filter → chunk refinement
+        - Hierarchical navigation: Browse by section, drill into chunks
+        
+        Args:
+            query_embedding: Query vector (3072-dim for text-embedding-3-large)
+            top_k: Maximum number of sections to return
+            score_threshold: Minimum cosine similarity (0-1). Default 0.7 for high precision.
+            
+        Returns:
+            List of section dicts with:
+                - section_id: Section node ID
+                - title: Section title
+                - path_key: Hierarchical path (e.g., "1. Introduction > 1.2 Scope")
+                - document_id: Parent document ID
+                - document_title: Parent document title
+                - score: Cosine similarity score (0-1)
+        """
+        if not self.driver:
+            logger.warning("search_sections_by_vector_no_driver")
+            return []
+        
+        query = """
+        MATCH (s:Section {group_id: $group_id})
+        WHERE s.embedding IS NOT NULL
+        OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:TextChunk)-[:PART_OF]->(d:Document)
+        WITH s, d, vector.similarity.cosine(s.embedding, $query_embedding) AS score
+        WHERE score >= $score_threshold
+        WITH s, d, score
+        ORDER BY score DESC
+        LIMIT $top_k
+        RETURN DISTINCT
+            s.id AS section_id,
+            s.title AS title,
+            s.path_key AS path_key,
+            s.depth AS depth,
+            coalesce(d.id, '') AS document_id,
+            coalesce(d.title, '') AS document_title,
+            score
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        group_id=self.group_id,
+                        query_embedding=query_embedding,
+                        top_k=top_k,
+                        score_threshold=score_threshold,
+                    )
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            sections = []
+            for record in records:
+                sections.append({
+                    "section_id": record["section_id"],
+                    "title": record.get("title") or "",
+                    "path_key": record.get("path_key") or "",
+                    "depth": record.get("depth", 0),
+                    "document_id": record.get("document_id") or "",
+                    "document_title": record.get("document_title") or "",
+                    "score": record["score"],
+                })
+            
+            logger.info("section_vector_search_complete",
+                       group_id=self.group_id,
+                       top_k=top_k,
+                       threshold=score_threshold,
+                       sections_found=len(sections))
+            
+            return sections
+            
+        except Exception as e:
+            logger.error("section_vector_search_failed",
+                        error=str(e),
+                        error_type=type(e).__name__,
+                        group_id=self.group_id)
+            return []
+
     async def get_summary_chunks_by_section(
         self,
         max_per_document: int = 1,

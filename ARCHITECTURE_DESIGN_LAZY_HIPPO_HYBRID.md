@@ -3631,3 +3631,56 @@ config = LazyGraphRAGIndexingConfig(
 )
 ```
 
+---
+
+## 19. Operations & Deployment Helpers 🔧
+
+To make deployments reproducible and discoverable, we provide a small set of canonical helper scripts and guidance. This avoids needing to search the repository for ad-hoc scripts or manual Azure commands.
+
+### Canonical deploy wrapper: `scripts/graphrag-deploy.sh` ✅
+
+- Path: `scripts/graphrag-deploy.sh`
+- Purpose: Thin convenience wrapper around the canonical `docs/docker-build.sh` build/push/update flow. Also provides a fast `restart` command to restart the API container revision without rebuilding images.
+
+Usage:
+- Full build+push+update (recommended for code changes):
+```
+./scripts/graphrag-deploy.sh build
+```
+- Fast restart (no build, picks up latest image already uploaded to ACR):
+```
+./scripts/graphrag-deploy.sh restart
+```
+
+Notes:
+- `docs/docker-build.sh` is the authoritative build-and-push script; it handles ACR login, Docker build, push, and `az containerapp update` to refresh apps.
+- The wrapper `scripts/graphrag-deploy.sh` is intended to be the single, documented entrypoint for on-call engineers and automated runbooks.
+- Ensure the `azd` environment or the required environment variables (`AZURE_RESOURCE_GROUP`, `CONTAINER_API_APP_NAME`, `CONTAINER_APP_NAME`, `ACR_NAME`, `AZURE_ENV_IMAGETAG`) are set before running `build`.
+
+### Quick commands (Operational checklist)
+- Check service health:
+```
+curl -fS "$GRAPHRAG_CLOUD_URL/health" || echo "service unhealthy"
+```
+- Full deploy (build ↦ push ↦ update):
+```
+./scripts/graphrag-deploy.sh build
+```
+- Fast restart (if you already pushed a new image tag to ACR):
+```
+./scripts/graphrag-deploy.sh restart
+```
+- If you prefer `azd`-driven deploy (end-to-end infra + apps):
+```
+azd deploy
+```
+
+### Where to look for logs
+- Azure Container Apps: `az containerapp show --name <name> --resource-group <rg>`
+- ACR repository tags: `az acr repository show-tags --name <acr>`
+- Deployment logs (script output): `deploy_log_*.txt` in repo root
+
+---
+
+*Added: January 18, 2026 — include `scripts/graphrag-deploy.sh` as canonical deploy helper and documented usage.*
+

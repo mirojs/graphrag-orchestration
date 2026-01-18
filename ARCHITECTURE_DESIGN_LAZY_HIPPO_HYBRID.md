@@ -3885,6 +3885,7 @@ Orphan Sections → Any retrieval path          ∞      ❌ DISCONNECTED
 | **Entity → Section direct link** | 2-hop traversal required for section-level entity queries | Traverse via TextChunk (slow) |
 | **Entity → Document direct link** | 3-hop traversal for cross-doc entity counts | Aggregate at query time (expensive) |
 | **158 orphan sections** (no entities) | 77% of sections unreachable via entity-based retrieval | Rely on coverage retrieval fallback |
+| **LazyGraphRAG ↔ HippoRAG bridge** | Section graph and Entity graph operate independently | PPR runs on entities only, ignores section structure |
 
 #### 🟡 IMPORTANT: Missing Cross-System Bridges
 
@@ -3893,6 +3894,7 @@ Orphan Sections → Any retrieval path          ∞      ❌ DISCONNECTED
 | **Section ↔ Section (shared entities)** | Cross-doc sections discussing same entity not linked | Enable "related sections" traversal |
 | **Entity ↔ Entity (semantic similarity)** | Only explicit RELATED_TO, no fuzzy matching | Enable "similar entities" for disambiguation |
 | **Topic/Keyword layer** | No abstract concepts, only named entities | Enable thematic retrieval for orphan sections |
+| **Section → Entity (hub entities)** | No "anchor entities" per section for PPR seeding | Enable section-based PPR traversal |
 
 #### 🟢 OPTIONAL: Performance Optimizations
 
@@ -3901,13 +3903,147 @@ Orphan Sections → Any retrieval path          ∞      ❌ DISCONNECTED
 | **Materialized aggregates** (entity doc counts) | O(1) lookups vs O(n) traversal | Storage cost, staleness |
 | **Precomputed paths** (Entity → best chunks) | Skip intermediate hops | Maintenance complexity |
 
-### 19.3. Recommended Implementation Order
+### 19.3. LazyGraphRAG ↔ HippoRAG 2 Integration Analysis
+
+#### Current Architecture (Disconnected Systems)
+
+```
+┌─────────────────────────────────────┐    ┌─────────────────────────────────────┐
+│        LazyGraphRAG Layer           │    │         HippoRAG 2 Layer            │
+│  (Document Structure & Themes)      │    │    (Entity Graph & PPR)             │
+├─────────────────────────────────────┤    ├─────────────────────────────────────┤
+│  Document                           │    │  Entity ←──RELATED_TO──→ Entity     │
+│     │                               │    │     ↑                               │
+│     └─HAS_SECTION→ Section          │    │     │ MENTIONS                      │
+│                      │              │    │     │                               │
+│                      └─SUBSECTION   │    │  TextChunk ───────────────────────→ │
+│                      │              │    │                                     │
+│     Section ←SEMANTICALLY_SIMILAR→  │    │  PPR traverses RELATED_TO only     │
+│                                     │    │  (misses section context)           │
+└─────────────────────────────────────┘    └─────────────────────────────────────┘
+                  ↑                                          ↑
+                  │                                          │
+                  └──── TextChunk links both ────────────────┘
+                        (only bridge currently)
+```
+
+**Problem:** The two systems are connected ONLY through TextChunk nodes. When HippoRAG PPR runs, it:
+1. Starts from seed entities
+2. Traverses RELATED_TO edges between entities
+3. Finds TextChunks via MENTIONS
+4. **Never touches Section nodes** (misses structural context)
+
+#### Target Architecture (Unified Graph)
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         Unified Knowledge Graph                               │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  Document ──HAS_SECTION──→ Section ←──APPEARS_IN_SECTION──┐                 │
+│                              │                             │                 │
+│                              ├─SUBSECTION_OF               │                 │
+│                              │                             │                 │
+│                              ├─SEMANTICALLY_SIMILAR────────┼─→ Section      │
+│                              │                             │                 │
+│                              ├─SHARES_ENTITY───────────────┼─→ Section      │
+│                              │                             │                 │
+│                              ├─HAS_HUB_ENTITY──────────────┼─→ Entity ◄─────┤
+│                              │                             │       │         │
+│                              └─IN_SECTION←── TextChunk ────┼──MENTIONS      │
+│                                                            │       │         │
+│                                                            │       ▼         │
+│  Entity ←────────────RELATED_TO────────────→ Entity ◄──────┘   Entity       │
+│     │                                           │                            │
+│     └────────────SIMILAR_TO─────────────────────┘                            │
+│                                                                              │
+│  PPR can now traverse: RELATED_TO, SIMILAR_TO, APPEARS_IN_SECTION,          │
+│                        SHARES_ENTITY, HAS_HUB_ENTITY                         │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### New Bridge Edges
+
+##### 1. HAS_HUB_ENTITY (Section → Entity)
+
+**Purpose:** Identify the most important entities per section for PPR seeding.
+
+**Schema:**
+```cypher
+(s:Section)-[:HAS_HUB_ENTITY {
+  rank: INT,           // 1 = most important
+  mention_count: INT,
+  tfidf_score: FLOAT   // Optional: importance within section
+}]->(e:Entity)
+```
+
+**Creation Query:**
+```cypher
+// Find top-3 entities per section by mention count
+MATCH (s:Section)<-[:IN_SECTION]-(c:TextChunk)-[:MENTIONS]->(e:Entity)
+WHERE s.group_id = $group_id
+  AND NOT e.name STARTS WITH 'doc_'  // Exclude synthetic IDs
+WITH s, e, count(c) AS mentions
+ORDER BY s.id, mentions DESC
+WITH s, collect({entity: e, mentions: mentions})[0..3] AS top_entities
+UNWIND range(0, size(top_entities)-1) AS idx
+WITH s, top_entities[idx].entity AS e, top_entities[idx].mentions AS mentions, idx+1 AS rank
+MERGE (s)-[r:HAS_HUB_ENTITY]->(e)
+SET r.rank = rank,
+    r.mention_count = mentions,
+    r.group_id = $group_id
+```
+
+**Benefit:** 
+- Route 3 can start PPR from section's hub entities (structural → entity bridge)
+- Coverage retrieval can prioritize sections with high-connectivity entities
+
+##### 2. SECTION_ENTITY_CONTEXT (Bidirectional Traversal Support)
+
+**Purpose:** Enable PPR to flow from Entity graph into Section graph and back.
+
+**Current PPR Path:**
+```
+Seed Entity → RELATED_TO → Entity → MENTIONS → TextChunk (stop)
+```
+
+**Enhanced PPR Path:**
+```
+Seed Entity → RELATED_TO → Entity → APPEARS_IN_SECTION → Section
+                                                           │
+           → SEMANTICALLY_SIMILAR → Section → HAS_HUB_ENTITY → Entity
+                                                           │
+           → SHARES_ENTITY → Section → IN_SECTION → TextChunk (with section context)
+```
+
+**Edge Weight Configuration:**
+```python
+PPR_EDGE_WEIGHTS = {
+    # Entity graph (HippoRAG core)
+    "RELATED_TO": 1.0,           # Primary entity relationships
+    "SIMILAR_TO": 0.7,           # Semantic similarity (new)
+    "MENTIONS": 0.5,             # Entity to chunk
+    
+    # Section graph (LazyGraphRAG)  
+    "SEMANTICALLY_SIMILAR": 0.6, # Thematic section similarity
+    "SHARES_ENTITY": 0.8,        # Strong: same entities = related content
+    "SUBSECTION_OF": 0.3,        # Weak: hierarchy traversal
+    
+    # Bridge edges (LazyGraphRAG ↔ HippoRAG)
+    "APPEARS_IN_SECTION": 0.6,   # Entity → Section
+    "HAS_HUB_ENTITY": 0.7,       # Section → Entity (curated)
+    "IN_SECTION": 0.4,           # TextChunk → Section
+}
+```
+
+### 19.4. Recommended Implementation Order
 
 ```
 Phase 1: Foundation (Week 1-2)
 ├── 1.1 APPEARS_IN_SECTION edges (Entity → Section)
 ├── 1.2 APPEARS_IN_DOCUMENT edges (Entity → Document)  
-└── 1.3 Update indexing pipeline to create edges automatically
+├── 1.3 HAS_HUB_ENTITY edges (Section → Entity) ← NEW: LazyGraphRAG→HippoRAG bridge
+└── 1.4 Update indexing pipeline to create edges automatically
 
 Phase 2: Connectivity (Week 3-4)
 ├── 2.1 SHARES_ENTITY edges (Section ↔ Section)
@@ -3916,16 +4052,16 @@ Phase 2: Connectivity (Week 3-4)
 
 Phase 3: Semantic Enhancement (Week 5-6)
 ├── 3.1 SIMILAR_TO edges (Entity ↔ Entity via embeddings)
-├── 3.2 Update PPR to traverse new edge types
+├── 3.2 Update PPR to traverse ALL edge types (unified traversal)
 └── 3.3 Benchmark accuracy/latency impact
 
 Phase 4: Validation & Tuning (Week 7-8)
 ├── 4.1 Run full benchmark suite
-├── 4.2 Tune similarity thresholds
+├── 4.2 Tune edge weights for unified PPR
 └── 4.3 Document query patterns that benefit
 ```
 
-### 19.4. Phase 1: Foundation Edges
+### 19.5. Phase 1: Foundation Edges
 
 #### 1.1 APPEARS_IN_SECTION (Entity → Section)
 

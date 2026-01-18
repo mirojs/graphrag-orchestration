@@ -4321,25 +4321,25 @@ This section catalogs ALL proposed improvements from the graph connection discus
 
 ##### Route Benefit Assessment for High-Value Proposals
 
-| Improvement | Route 1 (Local) | Route 2 (Global) | Route 3 (DRIFT) | Route 4 (Exhaustive) |
-|:------------|:----------------|:-----------------|:----------------|:---------------------|
-| **APPEARS_IN_SECTION** | ⭐⭐⭐ **HIGH** | ⭐ Low | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium |
-| | Entity→Section in 1 hop enables faster section-level context retrieval | Global doesn't use entity→section paths | Discovery pass can quickly find which sections contain seed entities | Section vector search already works; this speeds up entity-based filtering |
-| **APPEARS_IN_DOCUMENT** | ⭐⭐ Medium | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium | ⭐ Low |
-| | Useful for single-doc queries | Cross-doc entity counts become O(1); enables "which docs mention X" | Helps determine entity spread across corpus | Exhaustive already retrieves all sections regardless of doc |
-| **HAS_HUB_ENTITY** | ⭐⭐ Medium | ⭐ Low | ⭐⭐⭐ **HIGH** | ⭐⭐⭐ **HIGH** |
-| | Can seed PPR from section's hub entities | Global summarization doesn't need entity anchors | **KEY BRIDGE:** Section retrieval → Entity PPR seeding; enables structural→semantic flow | Coverage retrieval can prioritize sections with high-connectivity hub entities |
-| **SHARES_ENTITY** | ⭐⭐ Medium | ⭐⭐⭐ **HIGH** | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium |
-| | Cross-doc traversal for related sections | Enables "related sections across docs" for broader summarization | Follow-up queries can traverse to related sections discussing same entities | Useful for expanding coverage to semantically related sections |
+| Improvement | Route 1 (Direct) | Route 2 (Local) | Route 3 (Global) | Route 4 (DRIFT) |
+|:------------|:-----------------|:----------------|:-----------------|:----------------|
+| **APPEARS_IN_SECTION** | ⭐ Low | ⭐⭐⭐ **HIGH** | ⭐ Low | ⭐⭐⭐ **HIGH** |
+| | Direct queries don't traverse graph | Entity→Section in 1 hop enables faster section-level context retrieval | Global doesn't use entity→section paths | Discovery pass can quickly find which sections contain seed entities |
+| **APPEARS_IN_DOCUMENT** | ⭐ Low | ⭐⭐ Medium | ⭐⭐⭐ **HIGH** | ⭐⭐ Medium |
+| | Direct queries are single-doc focused | Useful for entity spread analysis | Cross-doc entity counts become O(1); enables "which docs mention X" | Helps determine entity spread across corpus |
+| **HAS_HUB_ENTITY** | ⭐ Low | ⭐⭐ Medium | ⭐ Low | ⭐⭐⭐ **HIGH** |
+| | No graph traversal needed | Can seed PPR from section's hub entities | Global summarization doesn't need entity anchors | **KEY BRIDGE:** Section retrieval → Entity PPR seeding; enables structural→semantic flow |
+| **SHARES_ENTITY** | ⭐ Low | ⭐⭐ Medium | ⭐⭐⭐ **HIGH** | ⭐⭐⭐ **HIGH** |
+| | Direct queries don't need cross-doc discovery | Cross-doc traversal for related sections | Enables "related sections across docs" for broader summarization | Follow-up queries can traverse to related sections discussing same entities |
 
 **Summary by Route:**
 
 | Route | Primary Beneficiary Improvements | Expected Impact |
 |:------|:---------------------------------|:----------------|
-| **Route 1 (Local)** | APPEARS_IN_SECTION | Faster entity-to-section retrieval, ~2x speedup |
-| **Route 2 (Global)** | APPEARS_IN_DOCUMENT, SHARES_ENTITY | O(1) cross-doc counts, broader section discovery |
-| **Route 3 (DRIFT)** | HAS_HUB_ENTITY, SHARES_ENTITY, APPEARS_IN_SECTION | **Biggest winner:** Unified LazyGraphRAG→HippoRAG traversal |
-| **Route 4 (Exhaustive)** | HAS_HUB_ENTITY | Better section prioritization via hub entity connectivity |
+| **Route 1 (Direct)** | None significant | Simple queries don't benefit from graph improvements |
+| **Route 2 (Local)** | APPEARS_IN_SECTION | Faster entity-to-section retrieval, ~2x speedup |
+| **Route 3 (Global)** | APPEARS_IN_DOCUMENT, SHARES_ENTITY | O(1) cross-doc counts, broader section discovery |
+| **Route 4 (DRIFT)** | HAS_HUB_ENTITY, SHARES_ENTITY, APPEARS_IN_SECTION | **Biggest winner:** Unified LazyGraphRAG→HippoRAG traversal |
 
 #### ⚠️ MEDIUM-VALUE PROPOSALS (Implement with Caution)
 

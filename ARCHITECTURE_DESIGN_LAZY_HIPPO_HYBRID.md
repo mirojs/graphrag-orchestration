@@ -3065,7 +3065,9 @@ Both use HippoRAG 2 PPR, but differ in how they obtain seed entities:
 
 ### 16.6. Real-World Test Results
 
-From production deployment (Jan 4, 2026):
+#### Phase 1 Baseline (Jan 4, 2026)
+
+From production deployment:
 
 **Route 3 Performance:**
 - Latency: ~2000ms average (vs Route 1: ~300ms)
@@ -3073,10 +3075,46 @@ From production deployment (Jan 4, 2026):
 - Citations: Full chunk IDs + document URLs
 - Evidence path: Graph traversal fully traced
 
-**Next Steps:**
-1. Run Route 3 benchmark with Q-G1-10 (positive tests)
-2. Run Route 3 negative tests with Q-N1-10
-3. Compare LLM synthesis vs `nlp_audit` determinism
+#### Phase 2 Implementation: Entity Sampling (Jan 11-14, 2026)
+
+**Implementation:** `community_matcher.py` lines 269-480
+
+**Key Changes:**
+1. **Embedding-based Entity Search** - Primary strategy using `vector.similarity.cosine()` with query embeddings to sample semantically relevant entities from Neo4j (similarity threshold: 0.35)
+2. **Keyword Fallback** - Secondary strategy for entities without embeddings
+3. **Multi-document Sampling** - Tertiary strategy ensuring cross-document diversity using degree centrality
+4. **Actual Entity Names** - Replaced generic NLP keyword extraction with real entity names from graph
+
+**Results from Jan 14, 2026 Benchmark** (`route3_global_search_20260114T112553Z.md`):
+
+| Metric | Before Phase 2 | After Phase 2 | Improvement |
+|--------|----------------|---------------|-------------|
+| **Theme Coverage** | 42% | **100%** | +58pp ✅ |
+| **Semantic Consistency** | N/A | **1.00 (100%)** | Perfect ✅ |
+| **Exact Match** | N/A | **1.00 (100%)** | Perfect ✅ |
+| **Avg Containment** | ~55% | **74%** | +19pp ✅ |
+| **Avg F1 Score** | ~0.10 | **0.14** | +40% ✅ |
+| **Median Latency** | ~15s | **~23s** | +8s ⚠️ |
+
+**All 10 Questions Achieved 100% Theme Coverage:**
+- Q-G1: 100% (7/7 themes), contain: 71%, f1: 0.21
+- Q-G2: 100% (6/6 themes), contain: 81%, f1: 0.13
+- Q-G3: 100% (8/8 themes), contain: 41%, f1: 0.13
+- Q-G4: 100% (6/6 themes), contain: 84%, f1: 0.13
+- Q-G5: 100% (6/6 themes), contain: 70%, f1: 0.08
+- Q-G6: 100% (8/8 themes), contain: 91%, f1: 0.16 ⭐
+- Q-G7: 100% (6/6 themes), contain: 88%, f1: 0.21 ⭐
+- Q-G8: 100% (6/6 themes), contain: 68%, f1: 0.09 (previously failing at 17%)
+- Q-G9: 100% (6/6 themes), contain: 87%, f1: 0.11
+- Q-G10: 100% (7/7 themes), contain: 62%, f1: 0.11
+
+**Key Success Factors:**
+1. **Deterministic Entity Discovery** - Vector similarity with fixed threshold eliminates LLM randomness
+2. **Cross-Document Coverage** - Multi-document sampling ensures no document is ignored
+3. **Semantic Relevance** - Embedding-based matching finds topically relevant entities, not just keyword matches
+4. **No More Generic Failures** - Queries like "What are the main themes?" now get actual entity names (e.g., "Microsoft", "Risk Assessment") instead of generic terms
+
+**Status:** ✅ Phase 2 complete and validated in production. Route 3 now achieving 100% theme coverage with perfect semantic reproducibility.
 
 ---
 

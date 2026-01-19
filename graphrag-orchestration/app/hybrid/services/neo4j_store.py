@@ -36,6 +36,7 @@ class Entity:
     embedding: Optional[List[float]] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     text_unit_ids: List[str] = field(default_factory=list)  # For DRIFT MENTIONS relationships
+    aliases: List[str] = field(default_factory=list)  # Alternative names/variations for entity lookup
 
 
 @dataclass
@@ -408,6 +409,7 @@ class Neo4jStoreV3:
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
+            entity.aliases = coalesce(e.aliases, []),
             entity.group_id = $group_id,
             entity.updated_at = datetime()
         
@@ -434,6 +436,7 @@ class Neo4jStoreV3:
                 "description": e.description,
                 "embedding": e.embedding,
                 "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
+                "aliases": e.aliases if hasattr(e, 'aliases') else [],
             }
             for e in entities
         ]
@@ -493,6 +496,7 @@ class Neo4jStoreV3:
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
+            entity.aliases = coalesce(e.aliases, []),
             entity.updated_at = datetime()
         
         WITH entity, e
@@ -518,6 +522,7 @@ class Neo4jStoreV3:
                 "description": e.description,
                 "embedding": e.embedding,
                 "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
+                "aliases": e.aliases if hasattr(e, 'aliases') else [],
             }
             for e in entities
         ]

@@ -35,6 +35,7 @@ from llama_index.core.schema import TextNode
 try:
     from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
     from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
+    from neo4j_graphrag.experimental.components.schema import NodeType, PropertyType, RelationshipType, GraphSchema
     from neo4j_graphrag.llm import AzureOpenAILLM
     NATIVE_EXTRACTOR_AVAILABLE = True
 except ImportError:
@@ -742,6 +743,10 @@ class LazyGraphRAGIndexingPipeline:
             max_concurrency=4,  # Parallel processing: 4 chunks at a time (was 1)
         )
         
+        # Define schema with aliases property for improved entity lookup
+        # This enables matching "Fabrikam Inc." to "Fabrikam Construction" via aliases
+        entity_schema = self._build_extraction_schema()
+        
         # Convert to neo4j-graphrag TextChunks
         # Include document context in metadata to help extractor understand provenance
         native_chunks = []
@@ -767,8 +772,8 @@ class LazyGraphRAGIndexingPipeline:
             ))
         text_chunks = TextChunks(chunks=native_chunks)
         
-        # Run extraction
-        graph = await extractor.run(chunks=text_chunks)
+        # Run extraction with schema that includes aliases
+        graph = await extractor.run(chunks=text_chunks, schema=entity_schema)
         
         logger.info(f"Native extractor produced {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")
         
@@ -812,6 +817,16 @@ class LazyGraphRAGIndexingPipeline:
                 entity_id_map[native_id] = ent_id
 
             if ent_id not in entities_by_id:
+                # Extract aliases from LLM extraction (may be list or string)
+                raw_aliases = props.get("aliases", [])
+                if isinstance(raw_aliases, str):
+                    # Handle comma-separated string format
+                    aliases_list = [a.strip() for a in raw_aliases.split(",") if a.strip()]
+                elif isinstance(raw_aliases, list):
+                    aliases_list = [str(a).strip() for a in raw_aliases if a]
+                else:
+                    aliases_list = []
+                
                 entities_by_id[ent_id] = Entity(
                     id=ent_id,
                     name=name,
@@ -820,6 +835,7 @@ class LazyGraphRAGIndexingPipeline:
                     embedding=None,
                     metadata=props,
                     text_unit_ids=[],
+                    aliases=aliases_list,
                 )
 
         # Recover mentions from lexical graph relationships: (chunk) -[...]→ (entity)
@@ -1186,6 +1202,72 @@ class LazyGraphRAGIndexingPipeline:
             "rule_merges": dedup_result.rule_merges,
         }
         return list(canonical_entities.values()), out_rels, dedup_stats
+
+    def _build_extraction_schema(self) -> "GraphSchema":
+        """
+        Build a schema that instructs the LLM to extract aliases alongside entities.
+        
+        This enables matching user queries like "Fabrikam Inc." to entities stored as
+        "Fabrikam Construction" by including common variations in the aliases property.
+        """
+        # Common entity types with aliases property
+        entity_types = [
+            NodeType(
+                label="ORGANIZATION",
+                description="A company, corporation, business entity, or legal organization",
+                properties=[
+                    PropertyType(name="name", type="STRING", description="Official/legal name as it appears in the document", required=True),
+                    PropertyType(name="aliases", type="LIST", description="Common alternative names, abbreviations, short forms, or variations users might use (e.g., 'Fabrikam' for 'Fabrikam Construction Inc.')", required=False),
+                    PropertyType(name="description", type="STRING", description="Brief description of the organization", required=False),
+                ],
+            ),
+            NodeType(
+                label="PERSON",
+                description="A named individual or person",
+                properties=[
+                    PropertyType(name="name", type="STRING", description="Full name as it appears in the document", required=True),
+                    PropertyType(name="aliases", type="LIST", description="Nicknames, maiden names, titles, or common variations", required=False),
+                    PropertyType(name="description", type="STRING", description="Role or brief description", required=False),
+                ],
+            ),
+            NodeType(
+                label="DOCUMENT",
+                description="A legal document, contract, agreement, or formal document",
+                properties=[
+                    PropertyType(name="name", type="STRING", description="Document title or name", required=True),
+                    PropertyType(name="aliases", type="LIST", description="Short names or common references (e.g., 'the contract' for 'Purchase Contract Agreement')", required=False),
+                    PropertyType(name="description", type="STRING", description="Brief description of document purpose", required=False),
+                ],
+            ),
+            NodeType(
+                label="LOCATION",
+                description="A geographic location, address, or place",
+                properties=[
+                    PropertyType(name="name", type="STRING", description="Location name or address", required=True),
+                    PropertyType(name="aliases", type="LIST", description="Abbreviated forms or common references", required=False),
+                ],
+            ),
+            NodeType(
+                label="CONCEPT",
+                description="An abstract concept, term, clause, or named section",
+                properties=[
+                    PropertyType(name="name", type="STRING", description="Concept or term name", required=True),
+                    PropertyType(name="aliases", type="LIST", description="Alternative phrasings or abbreviations", required=False),
+                    PropertyType(name="description", type="STRING", description="Brief explanation", required=False),
+                ],
+            ),
+        ]
+        
+        # Common relationship types
+        relationship_types = [
+            RelationshipType(label="RELATED_TO", description="General relationship between entities"),
+            RelationshipType(label="PARTY_TO", description="Entity is a party to a document/agreement"),
+            RelationshipType(label="LOCATED_IN", description="Entity is located in a place"),
+            RelationshipType(label="MENTIONS", description="Document mentions an entity"),
+            RelationshipType(label="DEFINES", description="Document defines a term or concept"),
+        ]
+        
+        return GraphSchema(node_types=entity_types, relationship_types=relationship_types)
 
     @staticmethod
     def _canonical_entity_key(name: str) -> str:

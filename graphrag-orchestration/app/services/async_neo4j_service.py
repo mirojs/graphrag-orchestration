@@ -189,7 +189,11 @@ class AsyncNeo4jService:
         entity_names: List[str],
     ) -> List[Dict[str, Any]]:
         """
-        Get specific entities by name (case-insensitive).
+        Get specific entities by name or alias (case-insensitive).
+        
+        Matches against both the canonical name and any aliases stored on the entity.
+        This enables flexible entity lookup when users refer to entities by common
+        variations (e.g., "Fabrikam Inc." matches "Fabrikam Construction").
         """
         query = cypher25_query("""
         UNWIND $names AS name
@@ -197,13 +201,19 @@ class AsyncNeo4jService:
                         WITH name
                         MATCH (e:`__Entity__`)
                                                 WHERE e.group_id = $group_id
-                                                    AND toLower(e.name) = toLower(name)
+                                                    AND (
+                                                        toLower(e.name) = toLower(name)
+                                                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
+                                                    )
                         RETURN e
                         UNION
                         WITH name
                         MATCH (e:Entity)
                                                 WHERE e.group_id = $group_id
-                                                    AND toLower(e.name) = toLower(name)
+                                                    AND (
+                                                        toLower(e.name) = toLower(name)
+                                                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
+                                                    )
                         RETURN e
                 }
                 RETURN DISTINCT

@@ -1037,7 +1037,7 @@ class EnhancedGraphRetriever:
         max_per_section: int = 3,
         max_per_document: int = 5,
         max_total: int = 25,
-        use_new_edges: bool = True,
+        use_new_edges: bool = False,  # MENTIONS path is faster for chunk retrieval
     ) -> List[SourceChunk]:
         """
         Fetch text chunks for HippoRAG PPR evidence nodes (DETAIL RECOVERY).

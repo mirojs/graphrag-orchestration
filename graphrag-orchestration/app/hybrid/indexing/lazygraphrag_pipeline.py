@@ -1659,7 +1659,8 @@ class LazyGraphRAGIndexingPipeline:
                 MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)-[:IN_SECTION]->(s:Section)
                 WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
                 WITH e, s.doc_id AS doc_id
-                MATCH (d:Document {id: doc_id, group_id: $group_id})
+                MATCH (d:Document {id: doc_id})
+                WHERE d.group_id = $group_id
                 WITH e, d
                 MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
                 SET r.group_id = $group_id

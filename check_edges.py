@@ -48,7 +48,19 @@ with driver.session(database='neo4j') as session:
         MATCH (s1:Section {group_id: $group_id})-[r:SHARES_ENTITY]->(s2:Section)
         RETURN count(r) as count
     ''', group_id=group_id)
-    print(f'SHARES_ENTITY: {result.single()["count"]}')
+    shares_entity = result.single()["count"]
+    print(f'SHARES_ENTITY: {shares_entity}')
+    
+    print("\n" + "="*70)
+    print("Phase 3: Semantic Enhancement Edges")
+    print("="*70)
+    
+    result = session.run('''
+        MATCH ()-[r:SIMILAR_TO {group_id: $group_id}]-()
+        RETURN count(r) as count
+    ''', group_id=group_id)
+    similar_to = result.single()["count"]
+    print(f'SIMILAR_TO: {similar_to}')
     
     print("\n" + "="*70)
     print("Graph Statistics")

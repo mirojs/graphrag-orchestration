@@ -772,8 +772,38 @@ class LazyGraphRAGIndexingPipeline:
             ))
         text_chunks = TextChunks(chunks=native_chunks)
         
-        # Run extraction with schema that includes aliases
-        graph = await extractor.run(chunks=text_chunks, schema=entity_schema)
+        # Few-shot examples demonstrating alias extraction
+        # This is critical: the LLM follows examples more than schema definitions
+        extraction_examples = '''
+Example 1:
+Text: "Fabrikam Construction Inc. signed a contract with Contoso Lifts LLC for elevator maintenance."
+Output:
+{"nodes": [
+  {"id": "0", "label": "ORGANIZATION", "properties": {"name": "Fabrikam Construction Inc.", "aliases": ["Fabrikam", "Fabrikam Inc.", "Fabrikam Construction"], "description": "Construction company"}},
+  {"id": "1", "label": "ORGANIZATION", "properties": {"name": "Contoso Lifts LLC", "aliases": ["Contoso", "Contoso Lifts", "Contoso Ltd."], "description": "Elevator maintenance company"}}
+], "relationships": [
+  {"type": "PARTY_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "contract for elevator maintenance"}}
+]}
+
+Example 2:
+Text: "The Property Management Agreement between ABC Realty Corp and 123 Main Street LLC covers maintenance services."
+Output:
+{"nodes": [
+  {"id": "0", "label": "DOCUMENT", "properties": {"name": "Property Management Agreement", "aliases": ["PMA", "the Agreement", "management agreement"], "description": "Agreement for property management services"}},
+  {"id": "1", "label": "ORGANIZATION", "properties": {"name": "ABC Realty Corp", "aliases": ["ABC Realty", "ABC"], "description": "Real estate company"}},
+  {"id": "2", "label": "ORGANIZATION", "properties": {"name": "123 Main Street LLC", "aliases": ["123 Main Street", "Main Street LLC"], "description": "Property owner"}}
+], "relationships": [
+  {"type": "PARTY_TO", "start_node_id": "1", "end_node_id": "0", "properties": {}},
+  {"type": "PARTY_TO", "start_node_id": "2", "end_node_id": "0", "properties": {}}
+]}
+'''
+        
+        # Run extraction with schema AND examples for alias extraction
+        graph = await extractor.run(
+            chunks=text_chunks, 
+            schema=entity_schema,
+            examples=extraction_examples,
+        )
         
         logger.info(f"Native extractor produced {len(graph.nodes)} nodes, {len(graph.relationships)} relationships")
         
@@ -826,10 +856,6 @@ class LazyGraphRAGIndexingPipeline:
                     aliases_list = [str(a).strip() for a in raw_aliases if a]
                 else:
                     aliases_list = []
-                
-                # Auto-generate common aliases if LLM didn't provide any
-                if not aliases_list:
-                    aliases_list = self._generate_aliases(name, node_labels[0] if node_labels else "CONCEPT")
                 
                 entities_by_id[ent_id] = Entity(
                     id=ent_id,
@@ -1206,62 +1232,6 @@ class LazyGraphRAGIndexingPipeline:
             "rule_merges": dedup_result.rule_merges,
         }
         return list(canonical_entities.values()), out_rels, dedup_stats
-
-    def _generate_aliases(self, name: str, entity_type: str) -> List[str]:
-        """
-        Auto-generate common aliases for an entity.
-        
-        This provides fallback aliases when the LLM doesn't generate them,
-        enabling flexible entity lookup for queries like:
-        - "Fabrikam Inc." → matches "Fabrikam Construction"
-        - "Contoso" → matches "Contoso Lifts LLC"
-        
-        Args:
-            name: Entity name
-            entity_type: Entity type (ORGANIZATION, PERSON, etc.)
-            
-        Returns:
-            List of generated alias variations
-        """
-        if not name or len(name.strip()) < 3:
-            return []
-        
-        aliases = []
-        name_clean = name.strip()
-        
-        # For organizations, generate common variations
-        if entity_type in ("ORGANIZATION", "ORG", "COMPANY"):
-            # Remove common suffixes
-            for suffix in [" Inc.", " Inc", " LLC", " Ltd.", " Ltd", " Corporation", " Corp.", " Corp", 
-                          " Limited", " L.L.C.", " Co.", " Company", " & Co."]:
-                if name_clean.endswith(suffix):
-                    short_name = name_clean[:-len(suffix)].strip()
-                    if short_name and short_name not in aliases:
-                        aliases.append(short_name)
-            
-            # Add version with common suffixes if not present
-            if not any(name_clean.endswith(s) for s in [" Inc.", " Inc", " LLC", " Ltd.", " Ltd"]):
-                if name_clean not in aliases:
-                    for suffix in [" Inc.", " LLC", " Ltd."]:
-                        alias = f"{name_clean}{suffix}"
-                        if alias != name_clean and alias not in aliases:
-                            aliases.append(alias)
-            
-            # Remove "The" prefix
-            if name_clean.startswith("The "):
-                short = name_clean[4:].strip()
-                if short and short not in aliases:
-                    aliases.append(short)
-        
-        # For all types: add acronym if multi-word (3+ words)
-        words = name_clean.split()
-        if len(words) >= 3:
-            # Only use capital letters for acronym
-            acronym = "".join([w[0].upper() for w in words if w and w[0].isupper()])
-            if len(acronym) >= 2 and acronym not in aliases:
-                aliases.append(acronym)
-        
-        return aliases[:5]  # Limit to 5 aliases to avoid bloat
 
     def _build_extraction_schema(self) -> "GraphSchema":
         """

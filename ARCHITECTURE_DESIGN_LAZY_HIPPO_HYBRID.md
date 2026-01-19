@@ -1566,6 +1566,72 @@ python3 scripts/index_5pdfs.py
 # Re-index existing group (cleans old data first)
 export GROUP_ID=test-5pdfs-1768557493369886422
 python3 scripts/index_5pdfs.py
+
+# Check indexing completeness (reads from last_test_group_id.txt)
+python3 check_edges.py
+
+# Check specific group
+python3 check_edges.py test-5pdfs-1768826935625588532
+```
+
+**Verification Script (`check_edges.py`):**
+
+After indexing completes, verify the graph structure and new alias feature:
+
+```bash
+# Check latest indexed group (reads from last_test_group_id.txt)
+python3 check_edges.py
+
+# Check specific group
+python3 check_edges.py test-5pdfs-1768557493369886422
+```
+
+**What the Check Script Verifies:**
+
+1. **Phase 1 Foundation Edges** - APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY
+2. **Phase 2 Connectivity Edges** - SHARES_ENTITY (cross-document section links)
+3. **Phase 3 Semantic Edges** - SIMILAR_TO (entity semantic similarity)
+4. **Entity Aliases** - NEW: Verifies aliases were extracted during indexing (enables flexible entity lookup)
+5. **Node Counts** - Documents, TextChunks, Sections, Entities
+
+**Example Output:**
+
+```
+Using group ID from last_test_group_id.txt: test-5pdfs-1768826935625588532
+
+======================================================================
+Phase 1: Foundation Edges
+======================================================================
+APPEARS_IN_SECTION: 119
+APPEARS_IN_DOCUMENT: 119
+HAS_HUB_ENTITY: 51
+
+======================================================================
+Phase 2: Connectivity Edges
+======================================================================
+SHARES_ENTITY: 34
+
+======================================================================
+Phase 3: Semantic Enhancement Edges
+======================================================================
+SIMILAR_TO: 68
+
+======================================================================
+Graph Statistics
+======================================================================
+TextChunks: 17
+Sections: 17
+Entities: 119
+
+======================================================================
+Entity Aliases (New Feature)
+======================================================================
+Entities with aliases: 64/119 (53%)
+
+Sample entities with aliases:
+  • Fabrikam Construction        → [Fabrikam, Fabrikam Inc.]
+  • Contoso Lifts LLC           → [Contoso, Contoso Ltd.]
+  • Property Management Agreement → [PMA, Agreement]
 ```
 
 **Architecture Overview:**

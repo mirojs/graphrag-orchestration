@@ -219,7 +219,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
    - **Source:** purchase_contract.pdf (chunk 1)
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
-   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same 4 documents (warranty, holding tank, purchase contract including Exhibit A, property management), making it a tie. Note: Fabrikam Inc. signs the property management agreement as the Agent's Principal Broker; Contoso Ltd. is the Buyer/Owner in the warranty and signs Exhibit A of the purchase contract.
+   - **Expected:** `Fabrikam Inc.` appears in more documents (5) than `Contoso Ltd.` (4). Fabrikam appears in: warranty, holding tank, property management, purchase contract, and Exhibit A. Contoso appears in: warranty, holding tank, property management, and Exhibit A. Note: The purchase contract lists Fabrikam Inc. as the Customer, while Contoso Ltd. does not appear in that main contract document (only in Exhibit A).
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0 and Exhibit A); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?

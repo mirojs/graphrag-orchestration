@@ -1177,6 +1177,7 @@ Output:
             key = self._canonical_entity_key(canon_name)
             canon_id = self._stable_entity_id(group_id, key)
             merged_text_units: set[str] = set()
+            merged_aliases: set[str] = set()  # Merge aliases from all members
             merged_desc = ""
             merged_type = "CONCEPT"
             merged_meta: Dict[str, Any] = {}
@@ -1185,6 +1186,9 @@ Output:
             for m in members:
                 id_remap[m.id] = canon_id
                 merged_text_units.update(m.text_unit_ids or [])
+                # Merge aliases from all members
+                if hasattr(m, 'aliases') and m.aliases:
+                    merged_aliases.update(m.aliases)
                 if not merged_desc and m.description:
                     merged_desc = m.description
                 merged_type = m.type or merged_type
@@ -1200,6 +1204,7 @@ Output:
                 embedding=merged_emb,
                 metadata=merged_meta,
                 text_unit_ids=sorted(merged_text_units),
+                aliases=sorted(merged_aliases),  # Include merged aliases
             )
 
         # Remap relationships.

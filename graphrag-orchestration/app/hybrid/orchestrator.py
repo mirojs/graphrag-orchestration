@@ -2597,12 +2597,92 @@ Instructions:
             except Exception as e:
                 logger.warning("route_3_section_boost_failed", error=str(e))
 
+        # ==================================================================
+        # SHARES_ENTITY Cross-Document Section Expansion (Phase 2)
+        # ==================================================================
+        # After Section Boost finds relevant sections, traverse SHARES_ENTITY edges
+        # to discover semantically-related sections in OTHER documents. This enables
+        # cross-document thematic discovery without relying solely on entity graphs.
+        #
+        # Key insight: If Section A in Doc1 shares entities (Fabrikam, Agreement, etc.)
+        # with Section B in Doc2, they likely discuss related topics. Adding Section B's
+        # chunks improves coverage for thematic queries.
+        # ==================================================================
+        import os
+        enable_shares_entity_boost = os.getenv("ROUTE3_SHARES_ENTITY_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        shares_entity_metadata: Dict[str, Any] = {
+            "enabled": enable_shares_entity_boost,
+            "applied": False,
+            "seed_sections": 0,
+            "cross_doc_relations": 0,
+            "chunks_added": 0,
+        }
+
+        if enable_shares_entity_boost and section_boost_metadata.get("applied"):
+            try:
+                # Use sections discovered by Section Boost as seeds
+                seed_section_ids = semantic_section_ids if 'semantic_section_ids' in dir() else []
+                
+                if seed_section_ids:
+                    shares_entity_metadata["seed_sections"] = len(seed_section_ids)
+                    
+                    # Find cross-document related sections via SHARES_ENTITY edges
+                    cross_doc_sections = await self.enhanced_retriever.get_related_sections_via_shared_entities(
+                        section_ids=seed_section_ids,
+                        cross_doc_only=True,  # Only discover sections in OTHER documents
+                        min_shared_count=2,    # Require at least 2 shared entities
+                        max_per_section=2,     # Up to 2 related sections per seed
+                    )
+                    
+                    shares_entity_metadata["cross_doc_relations"] = len(cross_doc_sections)
+                    
+                    if cross_doc_sections:
+                        # Extract unique cross-doc section IDs
+                        cross_doc_section_ids = list(set(
+                            r.get("related_section_id", "") for r in cross_doc_sections
+                            if r.get("related_section_id")
+                        ))
+                        
+                        # Fetch chunks from these cross-doc sections
+                        cross_doc_chunks = await self.enhanced_retriever.get_section_id_boost_chunks(
+                            section_ids=cross_doc_section_ids,
+                            max_per_section=2,
+                            max_per_document=3,
+                            max_total=15,
+                        )
+                        
+                        # Merge, deduplicating against existing chunks
+                        existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                        added = [c for c in cross_doc_chunks if c.chunk_id not in existing_ids]
+                        
+                        if added:
+                            for c in added:
+                                # Mark source for traceability
+                                c.entity_name = "shares_entity_cross_doc"
+                            graph_context.source_chunks.extend(added)
+                            shares_entity_metadata["applied"] = True
+                            shares_entity_metadata["chunks_added"] = len(added)
+                            
+                            logger.info(
+                                "route_3_shares_entity_boost_applied",
+                                seed_sections=len(seed_section_ids),
+                                cross_doc_sections=len(cross_doc_section_ids),
+                                chunks_added=len(added),
+                                total_source_chunks=len(graph_context.source_chunks),
+                            )
+                        else:
+                            logger.info(
+                                "route_3_shares_entity_boost_no_new_chunks",
+                                reason="All cross-doc chunks already in context",
+                            )
+            except Exception as e:
+                logger.warning("route_3_shares_entity_boost_failed", error=str(e))
+
         # Targeted evidence boost (EXPERIMENTAL): add a small set of keyword-matched chunks
         # (diversified per document) so synthesis sees important clauses that may not map
         # cleanly to hub entities (e.g., monthly statements, insurance limits, default/legal fees).
         #
         # Gated behind an env var to keep baseline behavior unchanged until validated.
-        import os
         # Default ON: this boost helps diverse clause-style questions (reporting, remedies,
         # insurance, termination) surface explicit obligations/numbers that may not map to hub
         # entities. Can be disabled in deployment via ROUTE3_KEYWORD_BOOST=0.
@@ -3375,6 +3455,7 @@ Instructions:
                 "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR",
                 "bm25_phrase": bm25_phrase_metadata,
                 "section_boost": section_boost_metadata,
+                "shares_entity_boost": shares_entity_metadata,
                 "ppr_detail_recovery": ppr_metadata,
                 **({"coverage_retrieval": coverage_metadata} if coverage_metadata else {}),
                 **({"timings_ms": {**timings_ms, "route_3_total_ms": int((time.perf_counter() - t_route0) * 1000)}} if enable_timings else {}),

@@ -182,6 +182,10 @@ module graphragApp './core/host/container-app.bicep' = {
         name: 'V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY'
         value: 'true'
       }
+      {
+        name: 'USE_SECTION_CHUNKING'
+        value: '1'
+      }
     ])
     secrets: [
       {

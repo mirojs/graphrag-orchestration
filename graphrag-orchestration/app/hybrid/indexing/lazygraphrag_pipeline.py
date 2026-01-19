@@ -1052,6 +1052,11 @@ class LazyGraphRAGIndexingPipeline:
         foundation_stats = await self._create_foundation_edges(group_id)
         details["foundation_edges"] = foundation_stats
         
+        # Create connectivity edges (Phase 2 Week 3-4)
+        # SHARES_ENTITY edges connect sections that discuss the same entities across documents
+        connectivity_stats = await self._create_connectivity_edges(group_id)
+        details["connectivity_edges"] = connectivity_stats
+        
         return {"passed": True, "details": details, "stats": {"entities": len(entities), "relationships": len(relationships)}}
 
     def _merge_entity_relationships(self, ents_a: List[Entity], rels_a: List[Relationship], ents_b: List[Entity], rels_b: List[Relationship]) -> Tuple[List[Entity], List[Relationship]]:
@@ -1642,7 +1647,7 @@ class LazyGraphRAGIndexingPipeline:
             # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
             result = session.run(
                 """
-                MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)-[:IN_SECTION]->(s:Section)
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity), (c)-[:IN_SECTION]->(s:Section)
                 WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
                 WITH e, s
                 MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
@@ -1656,7 +1661,7 @@ class LazyGraphRAGIndexingPipeline:
             # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
             result = session.run(
                 """
-                MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)-[:IN_SECTION]->(s:Section)
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity), (c)-[:IN_SECTION]->(s:Section)
                 WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
                 WITH e, s.doc_id AS doc_id
                 MATCH (d:Document {id: doc_id})
@@ -1673,8 +1678,8 @@ class LazyGraphRAGIndexingPipeline:
             # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
             result = session.run(
                 """
-                MATCH (s:Section)<-[:IN_SECTION]-(c:TextChunk)<-[:MENTIONS]-(e:Entity)
-                WHERE s.group_id = $group_id AND c.group_id = $group_id AND e.group_id = $group_id
+                MATCH (s:Section {group_id: $group_id})<-[:IN_SECTION]-(c:TextChunk)-[:MENTIONS]->(e:Entity)
+                WHERE c.group_id = $group_id
                 WITH s, e, count(DISTINCT c) AS mention_count
                 ORDER BY s.id, mention_count DESC
                 WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
@@ -1695,6 +1700,59 @@ class LazyGraphRAGIndexingPipeline:
                 "appears_in_section": stats["appears_in_section"],
                 "appears_in_document": stats["appears_in_document"],
                 "has_hub_entity": stats["has_hub_entity"],
+            },
+        )
+        
+        return stats
+
+    async def _create_connectivity_edges(self, group_id: str) -> Dict[str, int]:
+        """Create Phase 2 connectivity edges for cross-document section linking.
+        
+        Creates:
+        1. SHARES_ENTITY: Section ↔ Section (when sections share 2+ entities)
+        
+        These edges enable:
+        - Cross-document traversal ("Find related sections across docs")
+        - PPR probability flow across document boundaries
+        - Route 3/4 global search improvements
+        
+        Returns:
+            Dictionary with edge counts: {"shares_entity": N}
+        """
+        stats = {
+            "shares_entity": 0,
+        }
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # Create SHARES_ENTITY edges (Section ↔ Section)
+            # Connects sections that discuss the same entities across documents
+            # Threshold: at least 2 shared entities to reduce noise
+            result = session.run(
+                """
+                MATCH (s1:Section {group_id: $group_id})<-[:IN_SECTION]-(c1:TextChunk)
+                      -[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(c2:TextChunk)
+                      -[:IN_SECTION]->(s2:Section {group_id: $group_id})
+                WHERE s1 <> s2
+                  AND s1.doc_id <> s2.doc_id  // Cross-document only
+                WITH s1, s2, collect(DISTINCT e.name) AS shared_entities, count(DISTINCT e) AS shared_count
+                WHERE shared_count >= 2  // Threshold: at least 2 shared entities
+                MERGE (s1)-[r:SHARES_ENTITY]->(s2)
+                SET r.shared_entities = shared_entities[0..10],
+                    r.shared_count = shared_count,
+                    r.similarity_boost = shared_count * 0.1,
+                    r.group_id = $group_id,
+                    r.created_at = datetime()
+                RETURN count(r) AS count
+                """,
+                group_id=group_id,
+            )
+            stats["shares_entity"] = result.single()["count"]
+        
+        logger.info(
+            "connectivity_edges_created",
+            extra={
+                "group_id": group_id,
+                "shares_entity": stats["shares_entity"],
             },
         )
         

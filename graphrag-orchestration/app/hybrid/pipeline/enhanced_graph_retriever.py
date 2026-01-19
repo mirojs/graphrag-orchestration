@@ -559,6 +559,99 @@ class EnhancedGraphRetriever:
             logger.error("get_entity_cross_doc_summary_error", error=str(e))
             return {}
 
+    async def get_related_sections_via_shared_entities(
+        self,
+        section_ids: List[str],
+        cross_doc_only: bool = True,
+        min_shared_count: int = 2,
+        max_per_section: int = 3,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get related sections via SHARES_ENTITY edges (Phase 2 Week 3).
+        
+        This enables cross-document section discovery for Route 3 (Global Search):
+        - Section1 → SHARES_ENTITY → Section2 (when they share entities)
+        - Enables "find related sections discussing similar topics across documents"
+        
+        Args:
+            section_ids: List of seed section IDs
+            cross_doc_only: If True, only return sections from different documents
+            min_shared_count: Minimum shared entities required
+            max_per_section: Maximum related sections to return per seed section
+            
+        Returns:
+            List of dicts with source_section_id, related_section_id, shared_count, 
+            shared_entities, doc_id, doc_title, section_title
+        """
+        if not section_ids or not self.driver:
+            return []
+        
+        # Build filter for cross-doc vs any
+        cross_doc_filter = "AND s1.doc_id <> s2.doc_id" if cross_doc_only else ""
+        
+        query = f"""
+        UNWIND $section_ids AS source_section_id
+        MATCH (s1:Section {{id: source_section_id, group_id: $group_id}})
+        MATCH (s1)-[r:SHARES_ENTITY]->(s2:Section)
+        WHERE r.group_id = $group_id
+          AND r.shared_count >= $min_shared_count
+          {cross_doc_filter}
+        WITH source_section_id, s1, s2, r
+        ORDER BY r.shared_count DESC
+        WITH source_section_id, 
+             collect({{
+                 related_section_id: s2.id,
+                 related_section_title: s2.title,
+                 related_doc_id: s2.doc_id,
+                 shared_count: r.shared_count,
+                 shared_entities: r.shared_entities
+             }})[0..$max_per_section] AS related_sections
+        UNWIND related_sections AS rel
+        OPTIONAL MATCH (d:Document {{id: rel.related_doc_id, group_id: $group_id}})
+        RETURN 
+            source_section_id,
+            rel.related_section_id AS related_section_id,
+            rel.related_section_title AS related_section_title,
+            rel.related_doc_id AS related_doc_id,
+            d.title AS related_doc_title,
+            rel.shared_count AS shared_count,
+            rel.shared_entities AS shared_entities
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.driver.session() as session:
+                    result = session.run(
+                        query,
+                        section_ids=section_ids,
+                        group_id=self.group_id,
+                        min_shared_count=min_shared_count,
+                        max_per_section=max_per_section,
+                    )
+                    return [dict(record) for record in result]
+            
+            records = await loop.run_in_executor(None, _run_query)
+            
+            # Count unique source and related sections
+            unique_sources = len(set(r["source_section_id"] for r in records))
+            unique_related = len(set(r["related_section_id"] for r in records))
+            cross_doc_count = len(set(r["related_doc_id"] for r in records if r.get("related_doc_id")))
+            
+            logger.info("get_related_sections_via_shared_entities",
+                       num_seed_sections=len(section_ids),
+                       sections_with_relations=unique_sources,
+                       total_related_sections=unique_related,
+                       cross_doc_relations=cross_doc_count,
+                       cross_doc_only=cross_doc_only)
+            
+            return records
+            
+        except Exception as e:
+            logger.error("get_related_sections_via_shared_entities_error", error=str(e))
+            return []
+
     # =========================================================================
     # END NEW 1-HOP METHODS
     # =========================================================================

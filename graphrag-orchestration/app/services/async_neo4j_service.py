@@ -444,16 +444,28 @@ class AsyncNeo4jService:
     
     def _build_ppr_query_with_section_graph(self) -> str:
         """
-        Build PPR query that traverses both Entity graph AND Section graph.
+        Build PPR query that traverses Entity graph, Section graph, AND Phase 1-3 edges.
         
-        This enables "thematic hops" via SEMANTICALLY_SIMILAR edges:
-        - Entities discovered via standard Entity relationships get standard decay
-        - Entities discovered ONLY via Section graph get lower weight (similarity * damping²)
-        - Entities found via both paths get boosted scores
+        This enables multiple traversal paths for comprehensive evidence discovery:
         
-        Addresses HippoRAG 2's "Latent Transitions" weakness.
+        Path 1: Standard Entity-to-Entity relationships (original behavior)
+        Path 2: SEMANTICALLY_SIMILAR between Sections (thematic hops)
+        Path 3: SIMILAR_TO between Entities (Phase 3 semantic similarity)
+        Path 4: SHARES_ENTITY between Sections (Phase 2 cross-document links)
+        Path 5: APPEARS_IN_SECTION + HAS_HUB_ENTITY (Phase 1 foundation edges)
         
-        IMPORTANT: Section-path entities are now INCLUDED in results (not just used for boosting).
+        Scoring:
+        - Direct entity relationships: damping (0.85)
+        - 2-hop entity relationships: damping² (0.72)
+        - Section-path entities: similarity * damping²
+        - SIMILAR_TO entities: similarity * damping
+        - SHARES_ENTITY path: shared_entities * damping² (normalized)
+        - Hub entities: hub_score * damping
+        
+        Addresses HippoRAG 2's weaknesses:
+        - "Latent Transitions": SEMANTICALLY_SIMILAR + SIMILAR_TO
+        - "Cross-document reasoning": SHARES_ENTITY
+        - "Hub entity importance": HAS_HUB_ENTITY
         """
         return cypher25_query("""
             UNWIND $seed_ids AS seed_id
@@ -475,7 +487,7 @@ class AsyncNeo4jService:
                 MATCH (seed)-[r1]-(n1)
                 WHERE n1.group_id = group_id
                     AND (n1:Entity OR n1:`__Entity__`)
-                    AND type(r1) <> 'MENTIONS'
+                    AND type(r1) NOT IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION']
                 WITH n1
                 ORDER BY coalesce(n1.degree, 0) DESC
                 LIMIT $per_seed_limit
@@ -484,61 +496,118 @@ class AsyncNeo4jService:
 
             // =====================================================================
             // Path 2: Section-based thematic hops via SEMANTICALLY_SIMILAR edges
-            // Only consider high-confidence edges (similarity >= 0.5) to reduce noise
             // =====================================================================
             CALL (seed, group_id, per_seed_limit) {
-                // Find chunks the seed entity mentions
                 MATCH (seed)-[:MENTIONS]->(chunk)
                 WHERE chunk.group_id = group_id
                     AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
                 
-                // Navigate to section
                 MATCH (chunk)-[:IN_SECTION]->(s1:Section)
                 WHERE s1.group_id = group_id
                 
-                // Traverse SEMANTICALLY_SIMILAR to related sections
-                // Filter to higher confidence edges to reduce noise
                 MATCH (s1)-[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
                 WHERE s2.group_id = group_id
-                  AND coalesce(sim.similarity, 0.5) >= 0.5  // Noise filter
+                  AND coalesce(sim.similarity, 0.5) >= 0.5
                 
-                // Get chunks in the related section
                 MATCH (chunk2)-[:IN_SECTION]->(s2)
                 WHERE chunk2.group_id = group_id
                     AND (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`)
                 
-                // Find entities mentioned in those chunks
                 MATCH (neighbor)-[:MENTIONS]->(chunk2)
                 WHERE neighbor.group_id = group_id
                     AND (neighbor:Entity OR neighbor:`__Entity__`)
                     AND neighbor.id <> seed.id
                 
-                // Weight by similarity score
                 WITH neighbor, max(coalesce(sim.similarity, 0.5)) AS sim_weight
                 ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
                 LIMIT $per_seed_limit
-                RETURN collect({node: neighbor, weight: sim_weight}) AS section_hop1
+                RETURN collect({node: neighbor, weight: sim_weight, path: 'semantic_similar'}) AS section_hop1
+            }
+
+            // =====================================================================
+            // Path 3: SIMILAR_TO edges (Phase 3 - direct entity semantic similarity)
+            // =====================================================================
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[sim:SIMILAR_TO]-(neighbor)
+                WHERE neighbor.group_id = group_id
+                    AND (neighbor:Entity OR neighbor:`__Entity__`)
+                    AND coalesce(sim.similarity, 0.85) >= 0.8
+                WITH neighbor, max(coalesce(sim.similarity, 0.85)) AS sim_weight
+                ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: neighbor, weight: sim_weight, path: 'similar_to'}) AS similar_entities
+            }
+
+            // =====================================================================
+            // Path 4: SHARES_ENTITY edges (Phase 2 - cross-document section links)
+            // =====================================================================
+            CALL (seed, group_id, per_seed_limit) {
+                // Use APPEARS_IN_SECTION for faster 1-hop to sections
+                MATCH (seed)-[:APPEARS_IN_SECTION]->(s1:Section)
+                WHERE s1.group_id = group_id
+                
+                // Traverse SHARES_ENTITY to cross-document sections
+                MATCH (s1)-[se:SHARES_ENTITY]-(s2:Section)
+                WHERE s2.group_id = group_id
+                  AND coalesce(se.shared_entities, 1) >= 2
+                
+                // Get entities from the related section via HAS_HUB_ENTITY or chunk traversal
+                OPTIONAL MATCH (s2)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
+                WHERE hub_entity.group_id = group_id
+                
+                // Also get entities via chunks for sections without hub entities
+                OPTIONAL MATCH (chunk2)-[:IN_SECTION]->(s2)
+                WHERE chunk2.group_id = group_id
+                OPTIONAL MATCH (chunk_entity)-[:MENTIONS]->(chunk2)
+                WHERE chunk_entity.group_id = group_id
+                    AND (chunk_entity:Entity OR chunk_entity:`__Entity__`)
+                    AND chunk_entity.id <> seed.id
+                
+                WITH coalesce(hub_entity, chunk_entity) AS neighbor, 
+                     coalesce(se.shared_entities, 1) AS shared_count,
+                     CASE WHEN hub_entity IS NOT NULL THEN coalesce(hub.hub_score, 0.5) ELSE 0.3 END AS hub_weight
+                WHERE neighbor IS NOT NULL
+                
+                WITH neighbor, max(shared_count * hub_weight / 10.0) AS se_weight
+                ORDER BY se_weight * coalesce(neighbor.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: neighbor, weight: se_weight, path: 'shares_entity'}) AS shares_entity_hop
+            }
+
+            // =====================================================================
+            // Path 5: HAS_HUB_ENTITY direct traversal (Phase 1 hub entities)
+            // =====================================================================
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[:APPEARS_IN_SECTION]->(s:Section)
+                WHERE s.group_id = group_id
+                
+                MATCH (s)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
+                WHERE hub_entity.group_id = group_id
+                    AND hub_entity.id <> seed.id
+                
+                WITH hub_entity, max(coalesce(hub.hub_score, 0.5)) AS hub_weight
+                ORDER BY hub_weight * coalesce(hub_entity.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: hub_entity, weight: hub_weight, path: 'hub_entity'}) AS hub_entities
             }
 
             // =====================================================================
             // Process entity-path with 2-hop expansion
             // =====================================================================
-            WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping
-
-            // Extract entity IDs from section path for later lookup
-            WITH seed, entity_hop1, section_hop1, group_id, per_neighbor_limit, damping,
-                 [item IN section_hop1 | item.node.id] AS section_entity_ids
+            WITH seed, entity_hop1, section_hop1, similar_entities, shares_entity_hop, hub_entities,
+                 group_id, per_neighbor_limit, damping
 
             // Process entity-path neighbors (standard decay)
             UNWIND (entity_hop1 + [seed]) AS hop1_node
-            WITH seed, hop1_node, entity_hop1, section_hop1, section_entity_ids, group_id, per_neighbor_limit, damping
+            WITH seed, hop1_node, entity_hop1, section_hop1, similar_entities, shares_entity_hop, hub_entities,
+                 group_id, per_neighbor_limit, damping
 
             // 2-hop expansion from entity path
             CALL (seed, hop1_node, group_id, per_neighbor_limit) {
                 MATCH (hop1_node)-[r2]-(n2)
                 WHERE n2.group_id = group_id
                     AND (n2:Entity OR n2:`__Entity__`)
-                    AND type(r2) <> 'MENTIONS'
+                    AND type(r2) NOT IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION']
                 WITH n2
                 ORDER BY coalesce(n2.degree, 0) DESC
                 LIMIT $per_neighbor_limit
@@ -546,45 +615,69 @@ class AsyncNeo4jService:
             }
 
             // Collect all entity IDs from entity-path for scoring
-            WITH seed, hop1_node, hop2, entity_hop1, section_hop1, section_entity_ids, damping,
+            WITH seed, hop1_node, hop2, entity_hop1, section_hop1, similar_entities, 
+                 shares_entity_hop, hub_entities, damping,
                  [e IN entity_hop1 | e.id] AS hop1_ids,
                  [e IN hop2 | e.id] AS hop2_ids
 
-            // Extract section entities as nodes for inclusion
-            WITH seed, hop1_node, hop2, section_hop1, section_entity_ids, damping, hop1_ids, hop2_ids,
-                 [item IN section_hop1 | item.node] AS section_entities
+            // Extract all path entities as nodes for inclusion
+            WITH seed, hop1_node, hop2, section_hop1, similar_entities, shares_entity_hop, 
+                 hub_entities, damping, hop1_ids, hop2_ids,
+                 [item IN section_hop1 | item.node] AS section_nodes,
+                 [item IN similar_entities | item.node] AS similar_nodes,
+                 [item IN shares_entity_hop | item.node] AS shares_nodes,
+                 [item IN hub_entities | item.node] AS hub_nodes
 
-            // UNION both paths: entity-path entities AND section-path entities
-            UNWIND (hop2 + [hop1_node] + section_entities) AS entity
+            // UNION all paths
+            UNWIND (hop2 + [hop1_node] + section_nodes + similar_nodes + shares_nodes + hub_nodes) AS entity
             
-            // Calculate combined scores using ID lookups (not list membership on nodes)
-            WITH DISTINCT entity, seed, hop1_node, section_hop1, damping, hop1_ids, hop2_ids,
-                 // Entity-path contribution based on ID lookup
+            // Calculate combined scores
+            WITH DISTINCT entity, seed, hop1_node, section_hop1, similar_entities, 
+                 shares_entity_hop, hub_entities, damping, hop1_ids, hop2_ids,
+                 // Entity-path contribution
                  CASE
                      WHEN entity.id = seed.id THEN 1.0
                      WHEN entity.id = hop1_node.id THEN damping
                      WHEN entity.id IN hop1_ids THEN damping
                      WHEN entity.id IN hop2_ids THEN damping * damping
-                     ELSE 0.0  // Section-only entity (no entity-path contribution)
+                     ELSE 0.0
                  END AS entity_path_score,
-                 // Section-path contribution
-                 [item IN section_hop1 WHERE item.node.id = entity.id] AS section_matches
+                 // Section-path (SEMANTICALLY_SIMILAR)
+                 [item IN section_hop1 WHERE item.node.id = entity.id] AS section_matches,
+                 // SIMILAR_TO path
+                 [item IN similar_entities WHERE item.node.id = entity.id] AS similar_matches,
+                 // SHARES_ENTITY path
+                 [item IN shares_entity_hop WHERE item.node.id = entity.id] AS shares_matches,
+                 // HUB_ENTITY path
+                 [item IN hub_entities WHERE item.node.id = entity.id] AS hub_matches
 
-            WITH entity, seed, damping, entity_path_score, section_matches,
-                 CASE 
-                     WHEN size(section_matches) > 0 
-                     THEN section_matches[0].weight * damping * damping  // Section path: similarity * damping²
-                     ELSE 0.0 
-                 END AS section_path_score
+            WITH entity, seed, damping, entity_path_score, 
+                 section_matches, similar_matches, shares_matches, hub_matches,
+                 // Section path score
+                 CASE WHEN size(section_matches) > 0 
+                      THEN section_matches[0].weight * damping * damping
+                      ELSE 0.0 END AS section_path_score,
+                 // SIMILAR_TO score (higher weight - direct semantic similarity)
+                 CASE WHEN size(similar_matches) > 0 
+                      THEN similar_matches[0].weight * damping
+                      ELSE 0.0 END AS similar_to_score,
+                 // SHARES_ENTITY score
+                 CASE WHEN size(shares_matches) > 0 
+                      THEN shares_matches[0].weight * damping * damping
+                      ELSE 0.0 END AS shares_entity_score,
+                 // HUB_ENTITY score
+                 CASE WHEN size(hub_matches) > 0 
+                      THEN hub_matches[0].weight * damping
+                      ELSE 0.0 END AS hub_entity_score
 
-            // Final score: entity_path + section_path (section-only entities get section_path_score only)
+            // Final combined score from all paths
             WITH entity.id AS id,
                  entity.name AS name,
-                 entity_path_score + section_path_score AS score,
+                 entity_path_score + section_path_score + similar_to_score + 
+                 shares_entity_score + hub_entity_score AS score,
                  coalesce(entity.degree, 0) AS importance
-            WHERE score > 0  // Filter out zeros
-            
-            // Deduplicate and return top results
+            WHERE score > 0
+
             RETURN id, name, max(score) AS score, importance
             ORDER BY score DESC
             LIMIT $top_k

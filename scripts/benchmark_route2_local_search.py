@@ -554,11 +554,16 @@ def _write_analysis_md(
                         f.write(f"| Negative Test | {'✅ PASS' if passed else '❌ FAIL'} |\n")
                     else:
                         f.write(f"| Exact Match | {'✅' if accuracy.get('exact_match', False) else '❌'} |\n")
-                        f.write(f"| Fuzzy Score | {accuracy.get('fuzzy_score', 0):.2f} |\n")
-                        f.write(f"| Containment | {accuracy.get('containment', 0):.2f} |\n")
-                        f.write(f"| Precision | {accuracy.get('precision', 0):.2f} |\n")
-                        f.write(f"| Recall | {accuracy.get('recall', 0):.2f} |\n")
-                        f.write(f"| F1 Score | {accuracy.get('f1_score', 0):.2f} |\n")
+                        fuzzy = accuracy.get('fuzzy_score')
+                        f.write(f"| Fuzzy Score | {fuzzy if fuzzy is not None else 0.0:.2f} |\n")
+                        containment = accuracy.get('containment')
+                        f.write(f"| Containment | {containment if containment is not None else 0.0:.2f} |\n")
+                        precision = accuracy.get('precision')
+                        f.write(f"| Precision | {precision if precision is not None else 0.0:.2f} |\n")
+                        recall = accuracy.get('recall')
+                        f.write(f"| Recall | {recall if recall is not None else 0.0:.2f} |\n")
+                        f1 = accuracy.get('f1_score')
+                        f.write(f"| F1 Score | {f1 if f1 is not None else 0.0:.2f} |\n")
                     f.write("\n")
                 
                 # Repeatability Metrics

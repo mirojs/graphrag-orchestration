@@ -487,7 +487,7 @@ class AsyncNeo4jService:
                 MATCH (seed)-[r1]-(n1)
                 WHERE n1.group_id = group_id
                     AND (n1:Entity OR n1:`__Entity__`)
-                    AND type(r1) NOT IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION']
+                    AND NOT (type(r1) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
                 WITH n1
                 ORDER BY coalesce(n1.degree, 0) DESC
                 LIMIT $per_seed_limit
@@ -607,7 +607,7 @@ class AsyncNeo4jService:
                 MATCH (hop1_node)-[r2]-(n2)
                 WHERE n2.group_id = group_id
                     AND (n2:Entity OR n2:`__Entity__`)
-                    AND type(r2) NOT IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION']
+                    AND NOT (type(r2) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
                 WITH n2
                 ORDER BY coalesce(n2.degree, 0) DESC
                 LIMIT $per_neighbor_limit

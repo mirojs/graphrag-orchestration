@@ -215,6 +215,13 @@ class LLMService:
         """Get the specialized indexing LLM (GPT-4.1)."""
         deployment = settings.AZURE_OPENAI_INDEXING_DEPLOYMENT or "gpt-4.1"
         return self._create_llm_client(deployment)
+    
+    def get_synthesis_llm(self) -> Any:
+        """Get the specialized synthesis LLM for Route 2/3 final answers.
+        
+        Uses HYBRID_SYNTHESIS_MODEL (gpt-5.1) for maximum coherence in final synthesis.
+        """
+        return self._create_llm_client(settings.HYBRID_SYNTHESIS_MODEL)
 
     def _create_llm_client(self, deployment_name: str, reasoning_effort: Optional[str] = None) -> Any:
         """Helper to create LLM instance with correct auth and settings."""

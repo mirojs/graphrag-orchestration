@@ -194,7 +194,8 @@ async def _get_or_create_pipeline(
         from app.hybrid.indexing.text_store import HippoRAGTextUnitStore, Neo4jTextUnitStore
 
         llm_service = LLMService()
-        llm_client = llm_service.llm
+        # Use dedicated synthesis model for final answer generation (Route 2/3)
+        llm_client = llm_service.get_synthesis_llm()
 
         graph_store = None
         neo4j_driver = None

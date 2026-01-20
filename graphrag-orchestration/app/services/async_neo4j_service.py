@@ -196,10 +196,11 @@ class AsyncNeo4jService:
         variations (e.g., "Fabrikam Inc." matches "Fabrikam Construction").
         """
         query = cypher25_query("""
-        // Simplified: fresh data uses __Entity__ only
+        // Support both Entity and __Entity__ labels
         UNWIND $names AS name
-        MATCH (e:`__Entity__`)
-        WHERE e.group_id = $group_id
+        MATCH (e)
+        WHERE (e:Entity OR e:`__Entity__`)
+            AND e.group_id = $group_id
             AND (
                 toLower(e.name) = toLower(name)
                 OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
@@ -235,10 +236,13 @@ class AsyncNeo4jService:
         """
         query = cypher25_query(f"""
         UNWIND $entity_ids AS eid
-        MATCH (seed:`__Entity__` {{id: eid}})
-        WHERE seed.group_id = $group_id
-        MATCH path = (seed)-[r*1..{depth}]-(neighbor:`__Entity__`)
-        WHERE neighbor.group_id = $group_id
+        MATCH (seed)
+        WHERE (seed:Entity OR seed:`__Entity__`)
+          AND seed.id = eid
+          AND seed.group_id = $group_id
+        MATCH path = (seed)-[r*1..{depth}]-(neighbor)
+        WHERE (neighbor:Entity OR neighbor:`__Entity__`)
+          AND neighbor.group_id = $group_id
           AND neighbor.id <> seed.id
           AND ALL(rel IN relationships(path) WHERE type(rel) <> 'MENTIONS')
         WITH neighbor, 
@@ -278,8 +282,12 @@ class AsyncNeo4jService:
         Get all relationships for a specific entity.
         """
         query = cypher25_query("""
-        MATCH (e:`__Entity__` {id: $entity_id})-[r]-(other:`__Entity__`)
-        WHERE e.group_id = $group_id AND other.group_id = $group_id
+        MATCH (e)-[r]-(other)
+        WHERE (e:Entity OR e:`__Entity__`)
+          AND (other:Entity OR other:`__Entity__`)
+          AND e.id = $entity_id
+          AND e.group_id = $group_id 
+          AND other.group_id = $group_id
           AND type(r) <> 'MENTIONS'
         RETURN e.name AS source,
                type(r) AS relationship,
@@ -694,11 +702,13 @@ class AsyncNeo4jService:
         """
         Get text chunks that mention the given entities.
         """
-        # Simplified: fresh data uses TextChunk->__Entity__ direction only
+        # Support both Entity and __Entity__ labels
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
-        MATCH (e:`__Entity__` {id: eid})
-        WHERE e.group_id = $group_id
+        MATCH (e)
+        WHERE (e:Entity OR e:`__Entity__`)
+          AND e.id = eid
+          AND e.group_id = $group_id
         MATCH (c:TextChunk)-[:MENTIONS]->(e)
         WHERE c.group_id = $group_id
         WITH DISTINCT c
@@ -951,8 +961,11 @@ class AsyncNeo4jService:
         # Runs a single hop at a time; Python loop controls iteration.
         hop_query = cypher25_query("""
         UNWIND $current_ids AS eid
-        MATCH (src:`__Entity__` {id: eid})-[r]-(neighbor:`__Entity__`)
-        WHERE neighbor.group_id = $group_id
+        MATCH (src)-[r]-(neighbor)
+        WHERE (src:Entity OR src:`__Entity__`)
+          AND (neighbor:Entity OR neighbor:`__Entity__`)
+          AND src.id = eid
+          AND neighbor.group_id = $group_id
           AND type(r) <> 'MENTIONS'
           AND neighbor.embedding IS NOT NULL
         WITH DISTINCT neighbor,

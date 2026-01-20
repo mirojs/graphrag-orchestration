@@ -273,14 +273,15 @@ class HubExtractor:
             loop = asyncio.get_event_loop()
             
             # Query Neo4j to get document source for each entity
-            # Simplified for current hybrid pipeline schema: (TextChunk)-[:MENTIONS]->(__Entity__)
+            # Support both Entity and __Entity__ labels for compatibility
             # Includes alias support for flexible entity matching
             def _sync_query():
                 with self.neo4j_driver.session() as session:
                     result = session.run("""
                         UNWIND $entity_names AS entity_name
-                        MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                        MATCH (c:TextChunk)-[:MENTIONS]->(e)
+                        WHERE (e:Entity OR e:`__Entity__`)
+                          AND c.group_id = $group_id AND e.group_id = $group_id
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
@@ -353,10 +354,11 @@ class HubExtractor:
             return []
         
         try:
-            # Simplified: fresh data uses __Entity__ only
+            # Support both Entity and __Entity__ labels for compatibility
             query = """
-            MATCH (e:`__Entity__`)-[r]-()
-            WHERE e.group_id = $group_id
+            MATCH (e)-[r]-()
+            WHERE (e:Entity OR e:`__Entity__`)
+              AND e.group_id = $group_id
             RETURN e.name as name, e.id as id, count(r) as degree
             ORDER BY degree DESC
             LIMIT $top_k

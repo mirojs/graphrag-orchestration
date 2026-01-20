@@ -287,14 +287,16 @@ class DeterministicTracer:
             # Note: Includes alias support for flexible seed entity matching
             cypher_query = """
             UNWIND $seedNames AS seedName
-            MATCH (seed:`__Entity__`)
-            WHERE (toLower(seed.name) = toLower(seedName)
+            MATCH (seed)
+            WHERE (seed:Entity OR seed:`__Entity__`)
+              AND (toLower(seed.name) = toLower(seedName)
                    OR ANY(alias IN coalesce(seed.aliases, []) WHERE toLower(alias) = toLower(seedName)))
               AND seed.group_id = $group_id
             
             // Expand to neighbors with decay
-            OPTIONAL MATCH path = (seed)-[*1..3]-(neighbor:`__Entity__`)
-            WHERE neighbor.group_id = $group_id
+            OPTIONAL MATCH path = (seed)-[*1..3]-(neighbor)
+            WHERE (neighbor:Entity OR neighbor:`__Entity__`)
+              AND neighbor.group_id = $group_id
               AND ALL(r IN relationships(path) WHERE type(r) <> 'MENTIONS')
             
             WITH coalesce(neighbor, seed) AS entity,

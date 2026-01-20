@@ -275,15 +275,15 @@ class CommunityMatcher:
                 
                 if query_embedding:
                     # Vector similarity search with cross-document diversity
-                    # Simplified: fresh data uses TextChunk->__Entity__ only
+                    # Query entities directly by embedding, then join to chunks for doc diversity
                     embedding_query = """
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                    WITH c, e
-                    OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-                    WITH c, e, d,
-                        vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
+                    MATCH (e:`__Entity__`)
+                    WHERE e.group_id = $group_id AND e.embedding IS NOT NULL
+                    WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
                     WHERE similarity > 0.35
+                    OPTIONAL MATCH (c:TextChunk)-[:MENTIONS]->(e)
+                    WHERE c.group_id = $group_id
+                    OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
                     WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e.name AS name, similarity
                     ORDER BY similarity DESC
                     // Get top entities per document for diversity

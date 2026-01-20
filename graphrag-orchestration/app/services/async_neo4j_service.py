@@ -694,7 +694,7 @@ class AsyncNeo4jService:
         """
         Get text chunks that mention the given entities.
         """
-        // Simplified: fresh data uses TextChunk->__Entity__ direction only
+        # Simplified: fresh data uses TextChunk->__Entity__ direction only
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
         MATCH (e:`__Entity__` {id: eid})

@@ -425,7 +425,7 @@ def main() -> int:
     ap.add_argument("--url", default=DEFAULT_URL)
     ap.add_argument("--group-id", default=_default_group_id())
     ap.add_argument("--question-bank", default=str(DEFAULT_QUESTION_BANK))
-    ap.add_argument("--repeats", type=int, default=10)
+    ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--top-k", type=int, default=5)  # hybrid currently ignores; kept for compatibility
     ap.add_argument("--max-questions", type=int, default=0)

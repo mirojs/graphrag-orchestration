@@ -466,7 +466,7 @@ class AsyncNeo4jService:
         - Section-path entities: similarity * damping²
         - SIMILAR_TO entities: similarity * damping
         - SHARES_ENTITY path: shared_entities * damping² (normalized)
-        - Hub entities: hub_score * damping
+        - Hub entities: mention_count/10 * damping
         
         Addresses HippoRAG 2's weaknesses:
         - "Latent Transitions": SEMANTICALLY_SIMILAR + SIMILAR_TO
@@ -571,7 +571,7 @@ class AsyncNeo4jService:
                 
                 WITH coalesce(hub_entity, chunk_entity) AS neighbor, 
                      coalesce(se.shared_entities, 1) AS shared_count,
-                     CASE WHEN hub_entity IS NOT NULL THEN coalesce(hub.hub_score, 0.5) ELSE 0.3 END AS hub_weight
+                     CASE WHEN hub_entity IS NOT NULL THEN coalesce(hub.mention_count, 1) / 10.0 ELSE 0.3 END AS hub_weight
                 WHERE neighbor IS NOT NULL
                 
                 WITH neighbor, max(shared_count * hub_weight / 10.0) AS se_weight
@@ -591,7 +591,7 @@ class AsyncNeo4jService:
                 WHERE hub_entity.group_id = group_id
                     AND hub_entity.id <> seed.id
                 
-                WITH hub_entity, max(coalesce(hub.hub_score, 0.5)) AS hub_weight
+                WITH hub_entity, max(coalesce(hub.mention_count, 1) / 10.0) AS hub_weight
                 ORDER BY hub_weight * coalesce(hub_entity.degree, 0) DESC
                 LIMIT $per_seed_limit
                 RETURN collect({node: hub_entity, weight: hub_weight, path: 'hub_entity'}) AS hub_entities

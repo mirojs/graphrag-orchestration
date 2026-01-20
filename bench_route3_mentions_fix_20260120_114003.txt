@@ -1,0 +1,18 @@
+Loaded 19 questions: 10 positive (Q-G), 9 negative (Q-N)
+Loaded 59 ground truth answers
+=== Route 3: Global Search (LazyGraphRAG) ===
+url=https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+group_id=test-5pdfs-local-1768899320
+repeats=1 timeout=180.0s
+questions=19 question_bank=/afh/projects/graphrag-orchestration/docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md
+scenario=hybrid_global_summary response_type=summary
+out_json=/afh/projects/graphrag-orchestration/benchmarks/route3_global_search_20260120T114003Z.json
+out_md=/afh/projects/graphrag-orchestration/benchmarks/route3_global_search_20260120T114003Z.md
+==============================================
+[hybrid_global_summary] [1/19] Q-G1: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=45445ms | acc: contain=0.88 f1=0.11 | theme=86% (6/7)
+[hybrid_global_summary] [2/19] Q-G2: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=33561ms | acc: contain=0.76 f1=0.06 | theme=83% (5/6)
+[hybrid_global_summary] [3/19] Q-G3: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=26607ms | acc: contain=0.44 f1=0.06 | theme=50% (4/8)
+[hybrid_global_summary] [4/19] Q-G4: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=21672ms | acc: contain=0.60 f1=0.07 | theme=50% (3/6)
+[hybrid_global_summary] [5/19] Q-G5: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=31928ms | acc: contain=0.80 f1=0.04 | theme=100% (6/6)
+[hybrid_global_summary] [6/19] Q-G6: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=28354ms | acc: contain=0.68 f1=0.05 | theme=75% (6/8)
+[hybrid_global_summary] [7/19] Q-G7: exact=1.00 min_sim=1.00 cite_jacc_min=0.00 path_jacc_min=0.00 p50=25992ms | acc: contain=0.82 f1=0.10 | theme=67% (4/6)

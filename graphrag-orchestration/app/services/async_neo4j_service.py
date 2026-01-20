@@ -564,7 +564,7 @@ class AsyncNeo4jService:
                 // Also get entities via chunks for sections without hub entities
                 OPTIONAL MATCH (chunk2)-[:IN_SECTION]->(s2)
                 WHERE chunk2.group_id = group_id
-                OPTIONAL MATCH (chunk_entity)-[:MENTIONS]->(chunk2)
+                OPTIONAL MATCH (chunk2)-[:MENTIONS]->(chunk_entity)
                 WHERE chunk_entity.group_id = group_id
                     AND (chunk_entity:Entity OR chunk_entity:`__Entity__`)
                     AND chunk_entity.id <> seed.id

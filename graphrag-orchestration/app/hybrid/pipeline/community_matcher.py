@@ -275,40 +275,11 @@ class CommunityMatcher:
                 
                 if query_embedding:
                     # Vector similarity search with cross-document diversity
+                    # Simplified: fresh data uses TextChunk->__Entity__ only
                     embedding_query = """
-                    CALL () {
-                        MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                        UNION
-                        MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
-                        WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN c, e
-                    }
+                    MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                    WHERE c.group_id = $group_id AND e.group_id = $group_id AND e.embedding IS NOT NULL
+                    WITH c, e
                     OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
                     WITH c, e, d,
                         vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
@@ -343,40 +314,10 @@ class CommunityMatcher:
         if self.neo4j_service and query_keywords and len(embedding_matched_entities) < 5:
             try:
                 # Search entities by keyword, diversify across documents
+                # Simplified: fresh data uses TextChunk->__Entity__ only
                 search_query = """
-                CALL () {
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                }
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                WHERE c.group_id = $group_id AND e.group_id = $group_id
                 WITH c, e
                 WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
@@ -409,40 +350,10 @@ class CommunityMatcher:
         if self.neo4j_service:
             try:
                 # Get top entities from EACH document to ensure coverage
+                # Simplified: fresh data uses TextChunk->__Entity__ only
                 multi_doc_query = """
-                CALL () {
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                }
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                WHERE c.group_id = $group_id AND e.group_id = $group_id
                 OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url,
                      e.name AS name,
@@ -497,16 +408,10 @@ class CommunityMatcher:
                 if query_embedding:
                     # Use vector similarity search to find relevant entities
                     # This is more semantic than keyword matching
+                    # Simplified: fresh data uses __Entity__ only
                     embedding_query = """
-                    CALL () {
-                        MATCH (e:Entity)
-                        WHERE e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN e
-                        UNION
-                        MATCH (e:`__Entity__`)
-                        WHERE e.group_id = $group_id AND e.embedding IS NOT NULL
-                        RETURN e
-                    }
+                    MATCH (e:`__Entity__`)
+                    WHERE e.group_id = $group_id AND e.embedding IS NOT NULL
                     WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
                     WHERE similarity > 0.3
                     RETURN e.name AS name, e.description AS description, similarity
@@ -540,40 +445,10 @@ class CommunityMatcher:
                 
                 # Get top entities from EACH document to ensure cross-document coverage
                 # This prevents the largest document from dominating results
+                # Simplified: fresh data uses TextChunk->__Entity__ only
                 multi_doc_query = """
-                CALL () {
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                    UNION
-                    MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
-                    WHERE c.group_id = $group_id AND e.group_id = $group_id
-                    RETURN c, e
-                }
+                MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                WHERE c.group_id = $group_id AND e.group_id = $group_id
                 OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e, coalesce(e.degree, 0) AS deg
                 ORDER BY deg DESC
@@ -606,16 +481,10 @@ class CommunityMatcher:
                            group_id_used=self.group_id,
                            service_connected=self.neo4j_service._driver is not None)
                 # Get most important entities as fallback
+                # Simplified: fresh data uses __Entity__ only
                 fallback_query = """
-                CALL () {
-                    MATCH (e:Entity)
-                    WHERE e.group_id = $group_id
-                    RETURN e
-                    UNION
-                    MATCH (e:`__Entity__`)
-                    WHERE e.group_id = $group_id
-                    RETURN e
-                }
+                MATCH (e:`__Entity__`)
+                WHERE e.group_id = $group_id
                 RETURN e.name AS name, e.description AS description
                 ORDER BY coalesce(e.degree, 0) DESC
                 LIMIT 10

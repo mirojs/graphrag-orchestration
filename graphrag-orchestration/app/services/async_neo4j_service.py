@@ -196,32 +196,20 @@ class AsyncNeo4jService:
         variations (e.g., "Fabrikam Inc." matches "Fabrikam Construction").
         """
         query = cypher25_query("""
+        // Simplified: fresh data uses __Entity__ only
         UNWIND $names AS name
-            CALL (name) {
-                        WITH name
-                        MATCH (e:`__Entity__`)
-                                                WHERE e.group_id = $group_id
-                                                    AND (
-                                                        toLower(e.name) = toLower(name)
-                                                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
-                                                    )
-                        RETURN e
-                        UNION
-                        WITH name
-                        MATCH (e:Entity)
-                                                WHERE e.group_id = $group_id
-                                                    AND (
-                                                        toLower(e.name) = toLower(name)
-                                                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
-                                                    )
-                        RETURN e
-                }
-                RETURN DISTINCT
-                             e.id AS id,
-                             e.name AS name,
-                             e.degree AS degree,
-                             e.chunk_count AS chunk_count,
-                             coalesce(e.degree, 0) AS importance_score
+        MATCH (e:`__Entity__`)
+        WHERE e.group_id = $group_id
+            AND (
+                toLower(e.name) = toLower(name)
+                OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
+            )
+        RETURN DISTINCT
+            e.id AS id,
+            e.name AS name,
+            e.degree AS degree,
+            e.chunk_count AS chunk_count,
+            coalesce(e.degree, 0) AS importance_score
         """)
         
         async with self._get_session() as session:
@@ -706,30 +694,19 @@ class AsyncNeo4jService:
         """
         Get text chunks that mention the given entities.
         """
+        // Simplified: fresh data uses TextChunk->__Entity__ direction only
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
-        MATCH (e {id: eid})
+        MATCH (e:`__Entity__` {id: eid})
         WHERE e.group_id = $group_id
-            AND (e:Entity OR e:`__Entity__`)
-        CALL (e) {
-            WITH e
-            MATCH (e)-[:MENTIONS]->(c)
-            WHERE c.group_id = $group_id
-                AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
-            RETURN c
-            UNION
-            WITH e
-            MATCH (c)-[:MENTIONS]->(e)
-            WHERE c.group_id = $group_id
-                AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
-            RETURN c
-        }
+        MATCH (c:TextChunk)-[:MENTIONS]->(e)
+        WHERE c.group_id = $group_id
         WITH DISTINCT c
         RETURN c.id AS chunk_id,
-                     c.text AS text,
-                     c.url AS url,
-                     c.page_number AS page,
-                     c.section_path AS section_path
+               c.text AS text,
+               c.url AS url,
+               c.page_number AS page,
+               c.section_path AS section_path
         LIMIT $limit
         """)
         

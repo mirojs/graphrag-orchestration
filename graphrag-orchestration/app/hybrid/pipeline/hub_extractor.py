@@ -273,59 +273,16 @@ class HubExtractor:
             loop = asyncio.get_event_loop()
             
             # Query Neo4j to get document source for each entity
+            # Simplified for current hybrid pipeline schema: (TextChunk)-[:MENTIONS]->(__Entity__)
+            # Includes alias support for flexible entity matching
             def _sync_query():
                 with self.neo4j_driver.session() as session:
                     result = session.run("""
                         UNWIND $entity_names AS entity_name
-                        CALL (entity_name) {
-                            WITH entity_name
-                            MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (e:Entity)-[:MENTIONS]->(c:TextChunk)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (e:`__Entity__`)-[:MENTIONS]->(c:TextChunk)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (c:Chunk)-[:MENTIONS]->(e:Entity)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (c:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (e:Entity)-[:MENTIONS]->(c:Chunk)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                            UNION
-                            WITH entity_name
-                            MATCH (e:`__Entity__`)-[:MENTIONS]->(c:Chunk)
-                                                        WHERE c.group_id = $group_id AND e.group_id = $group_id
-                                                            AND toLower(e.name) = toLower(entity_name)
-                            RETURN c
-                        }
+                        MATCH (c:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                        WHERE c.group_id = $group_id AND e.group_id = $group_id
+                            AND (toLower(e.name) = toLower(entity_name)
+                                 OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
                         RETURN entity_name, meta.url AS doc_url
                         LIMIT 100
@@ -396,17 +353,11 @@ class HubExtractor:
             return []
         
         try:
+            # Simplified: fresh data uses __Entity__ only
             query = """
-            CALL () {
-                MATCH (e:Entity)-[r]-()
-                WHERE e.group_id = $group_id
-                RETURN e.name as name, e.id as id, count(r) as degree
-                UNION
-                MATCH (e:`__Entity__`)-[r]-()
-                WHERE e.group_id = $group_id
-                RETURN e.name as name, e.id as id, count(r) as degree
-            }
-            RETURN name, id, degree
+            MATCH (e:`__Entity__`)-[r]-()
+            WHERE e.group_id = $group_id
+            RETURN e.name as name, e.id as id, count(r) as degree
             ORDER BY degree DESC
             LIMIT $top_k
             """

@@ -209,48 +209,15 @@ class Neo4jTextUnitStore:
 
     def _get_chunks_for_entities_batch_sync(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         """Batch query to fetch chunks for multiple entities in a single round-trip."""
+        # Simplified: fresh data uses TextChunk->__Entity__ only
         query = """
         UNWIND $entity_names AS entity_name
-        WITH entity_name
-        CALL (entity_name) {
-            OPTIONAL MATCH (e:Entity {group_id: $group_id})
-            WHERE toLower(e.name) = toLower(entity_name)
-            RETURN e
-            UNION
-            OPTIONAL MATCH (e:`__Entity__` {group_id: $group_id})
-            WHERE toLower(e.name) = toLower(entity_name)
-            RETURN e
-        }
-        WITH entity_name, [x IN collect(e) WHERE x IS NOT NULL][0] AS e
-        CALL (e) {
-            OPTIONAL MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
-            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-            RETURN c AS c, d AS d
-            UNION
-            OPTIONAL MATCH (e)-[:MENTIONS]->(c:TextChunk {group_id: $group_id})
-            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-            RETURN c AS c, d AS d
-            UNION
-            OPTIONAL MATCH (c:Chunk {group_id: $group_id})-[:MENTIONS]->(e)
-            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-            RETURN c AS c, d AS d
-            UNION
-            OPTIONAL MATCH (e)-[:MENTIONS]->(c:Chunk {group_id: $group_id})
-            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-            RETURN c AS c, d AS d
-            UNION
-            OPTIONAL MATCH (c:`__Node__` {group_id: $group_id})-[:MENTIONS]->(e)
-            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-            RETURN c AS c, d AS d
-            UNION
-            OPTIONAL MATCH (e)-[:MENTIONS]->(c:`__Node__` {group_id: $group_id})
-            OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-            RETURN c AS c, d AS d
-        }
-        WITH entity_name, collect({chunk: c, doc: d}) AS items
-        WITH entity_name, [i IN items WHERE i.chunk IS NOT NULL] AS items
-        UNWIND items AS item
-        WITH entity_name, item.chunk AS c, item.doc AS d
+        MATCH (e:`__Entity__` {group_id: $group_id})
+        WHERE toLower(e.name) = toLower(entity_name)
+            OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name))
+        MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+        WITH entity_name, c, d
         ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
         WITH entity_name, collect({chunk: c, doc: d})[0..$limit] AS items
         RETURN entity_name, items

@@ -284,10 +284,12 @@ class DeterministicTracer:
         try:
             # Use simple neighbor expansion instead of GDS PPR
             # (GDS requires separate license)
+            # Note: Includes alias support for flexible seed entity matching
             cypher_query = """
             UNWIND $seedNames AS seedName
             MATCH (seed:`__Entity__`)
-            WHERE toLower(seed.name) = toLower(seedName)
+            WHERE (toLower(seed.name) = toLower(seedName)
+                   OR ANY(alias IN coalesce(seed.aliases, []) WHERE toLower(alias) = toLower(seedName)))
               AND seed.group_id = $group_id
             
             // Expand to neighbors with decay

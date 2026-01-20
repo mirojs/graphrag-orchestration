@@ -290,9 +290,10 @@ class EnhancedGraphRetriever:
         if use_new_edges:
             query = """
             UNWIND $entity_names AS entity_name
-            // Find entity first (uses entity_name index)
+            // Find entity first (uses entity_name index, with alias support)
             MATCH (e:Entity)
-            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
+                   OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND e.group_id = $group_id
             // Then traverse to sections via APPEARS_IN_SECTION
             MATCH (e)-[r:APPEARS_IN_SECTION]->(s:Section)
@@ -310,7 +311,8 @@ class EnhancedGraphRetriever:
             query = """
             UNWIND $entity_names AS entity_name
             MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_SECTION]->(s:Section)
-            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
+                   OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND c.group_id = $group_id
             WITH entity_name, s, count(c) AS mention_count
             RETURN 
@@ -372,9 +374,10 @@ class EnhancedGraphRetriever:
         if use_new_edges:
             query = """
             UNWIND $entity_names AS entity_name
-            // Find entity first (uses entity_name index)
+            // Find entity first (uses entity_name index, with alias support)
             MATCH (e:Entity)
-            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
+                   OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND e.group_id = $group_id
             // Then traverse to documents via APPEARS_IN_DOCUMENT
             MATCH (e)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
@@ -393,7 +396,8 @@ class EnhancedGraphRetriever:
             query = """
             UNWIND $entity_names AS entity_name
             MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:PART_OF]->(d:Document)
-            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+            WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
+                   OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND c.group_id = $group_id
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, d, count(DISTINCT c) AS mention_count, count(DISTINCT s) AS section_count
@@ -516,7 +520,8 @@ class EnhancedGraphRetriever:
         query = """
         UNWIND $entity_names AS entity_name
         MATCH (e:Entity)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
-        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name)
+        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
+               OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
           AND r.group_id = $group_id
         WITH entity_name, 
              count(d) AS doc_count,
@@ -775,7 +780,9 @@ class EnhancedGraphRetriever:
         query = """
                 UNWIND $entity_names AS entity_name
                 MATCH (e:Entity)
-                WHERE (toLower(e.name) = toLower(entity_name)) AND e.group_id = $group_id
+                WHERE (toLower(e.name) = toLower(entity_name)
+                       OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+                  AND e.group_id = $group_id
                 // Use 1-hop APPEARS_IN_SECTION edge
                 MATCH (e)-[:APPEARS_IN_SECTION]->(s:Section)
                 WHERE s.group_id = $group_id
@@ -883,70 +890,26 @@ class EnhancedGraphRetriever:
         """
         Get source chunks that MENTION these entities.
 
-        Supports common schema variants:
-        - Chunk labels: `TextChunk` and `Chunk`
-        - Entity labels: `Entity` and `__Entity__`
-        - Edge direction: (chunk)-[:MENTIONS]->(entity) and (entity)-[:MENTIONS]->(chunk)
+        Current hybrid pipeline schema (as of Jan 2026):
+        - Chunk label: `TextChunk`
+        - Entity label: `__Entity__`
+        - Edge direction: (TextChunk)-[:MENTIONS]->(__Entity__)
+        - Alias support: matches entity.name OR any alias in entity.aliases[]
+        
         Also fetches section_id via IN_SECTION edge for diversification.
         This provides the source text for citations.
         """
         if not entity_names or not self.driver:
             return []
+        # Simplified query for current hybrid pipeline schema
+        # Includes alias support for flexible entity matching
         query = """
                 UNWIND $entity_names AS entity_name
-                CALL (entity_name) {
-                        WITH entity_name
-                        MATCH (t:TextChunk)-[:MENTIONS]->(e:Entity)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (t:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                            AND e.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (e:Entity)-[:MENTIONS]->(t:TextChunk)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (e:`__Entity__`)-[:MENTIONS]->(t:TextChunk)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                            AND e.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (t:Chunk)-[:MENTIONS]->(e:Entity)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (t:Chunk)-[:MENTIONS]->(e:`__Entity__`)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                            AND e.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (e:Entity)-[:MENTIONS]->(t:Chunk)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                        RETURN t
-                        UNION
-                        WITH entity_name
-                        MATCH (e:`__Entity__`)-[:MENTIONS]->(t:Chunk)
-                        WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name OR elementId(e) = entity_name)
-                            AND t.group_id = $group_id
-                            AND e.group_id = $group_id
-                        RETURN t
-                }
+                MATCH (t:TextChunk)-[:MENTIONS]->(e:`__Entity__`)
+                WHERE (toLower(e.name) = toLower(entity_name)
+                       OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+                    AND t.group_id = $group_id
+                    AND e.group_id = $group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
                 WITH entity_name, t, s, d
@@ -1906,68 +1869,18 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return []
 
-        # Co-mention relationships depend on chunks being linked to entities.
-        # Support common schema variants:
-        # - chunk labels: TextChunk/Chunk
-        # - edge direction: chunk->entity or entity->chunk
+        # Simplified: fresh data uses TextChunk->__Entity__ only
         query = """
         UNWIND $entity_inputs AS seed
-                CALL (seed) {
-                        WITH seed
-                        MATCH (e1:Entity)
-                        WHERE e1.group_id = $group_id
-                            AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed)
-                        RETURN e1
-                        UNION
-                        WITH seed
-                        MATCH (e1:`__Entity__`)
-                        WHERE e1.group_id = $group_id
-                            AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed)
-                        RETURN e1
-                }
-
-        CALL (e1) {
-            WITH e1
-            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e1)
-            RETURN c
-            UNION
-            WITH e1
-            MATCH (e1)-[:MENTIONS]->(c:TextChunk {group_id: $group_id})
-            RETURN c
-            UNION
-            WITH e1
-            MATCH (c:Chunk {group_id: $group_id})-[:MENTIONS]->(e1)
-            RETURN c
-            UNION
-            WITH e1
-            MATCH (e1)-[:MENTIONS]->(c:Chunk {group_id: $group_id})
-            RETURN c
-        }
-
-        CALL (c) {
-            WITH c
-            MATCH (c)-[:MENTIONS]->(e2:Entity)
-            WHERE e2.group_id = $group_id
-            RETURN e2
-            UNION
-            WITH c
-            MATCH (c)-[:MENTIONS]->(e2:`__Entity__`)
-            WHERE e2.group_id = $group_id
-            RETURN e2
-            UNION
-            WITH c
-            MATCH (e2:Entity)-[:MENTIONS]->(c)
-            WHERE e2.group_id = $group_id
-            RETURN e2
-            UNION
-            WITH c
-            MATCH (e2:`__Entity__`)-[:MENTIONS]->(c)
-            WHERE e2.group_id = $group_id
-            RETURN e2
-        }
-
-        WITH e1, e2, c
-        WHERE e2 <> e1
+        MATCH (e1:`__Entity__`)
+        WHERE e1.group_id = $group_id
+            AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
+                 OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
+        
+        MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e1)
+        MATCH (c)-[:MENTIONS]->(e2:`__Entity__`)
+        WHERE e2.group_id = $group_id AND e2 <> e1
+        
         WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
         WHERE shared_chunks > 0
         WITH e1, e2, shared_chunks, chunk_ids
@@ -1981,28 +1894,21 @@ class EnhancedGraphRetriever:
         LIMIT $max_rels
         """
 
+        # Simplified fallback: fresh data uses __Entity__ only
         fallback_query = """
-                UNWIND $entity_inputs AS seed
-                CALL (seed) {
-                    WITH seed
-                    MATCH (e1:Entity {group_id:$group_id})
-                    WHERE (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed)
-                    RETURN e1
-                    UNION
-                    WITH seed
-                    MATCH (e1:`__Entity__` {group_id:$group_id})
-                    WHERE (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed)
-                    RETURN e1
-                }
-                MATCH (e1)-[r:RELATED_TO]-(e2)
-                WHERE (e2:Entity OR e2:`__Entity__`) AND e2.group_id = $group_id AND e2 <> e1
-                WITH e1, e2, r
-                WHERE elementId(e1) < elementId(e2)
-                RETURN
-                    e1.name AS source,
-                    e2.name AS target,
-                    coalesce(r.description, 'RELATED_TO') AS description,
-                    'RELATED_TO' AS rel_type
+        UNWIND $entity_inputs AS seed
+        MATCH (e1:`__Entity__` {group_id:$group_id})
+        WHERE (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
+               OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
+        MATCH (e1)-[r:RELATED_TO]-(e2:`__Entity__`)
+        WHERE e2.group_id = $group_id AND e2 <> e1
+        WITH e1, e2, r
+        WHERE elementId(e1) < elementId(e2)
+        RETURN
+            e1.name AS source,
+            e2.name AS target,
+            coalesce(r.description, 'RELATED_TO') AS description,
+            'RELATED_TO' AS rel_type
                 LIMIT $max_rels
                 """
         

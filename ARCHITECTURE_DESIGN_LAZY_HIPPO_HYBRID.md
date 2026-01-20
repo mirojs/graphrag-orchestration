@@ -1,8 +1,16 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 19, 2026
+**Last Updated:** January 20, 2026
 
-**Recent Updates (January 19, 2026):**
+**Recent Updates (January 20, 2026):**
+- ✅ **Entity Aliases Enabled for All Routes:** Alias-based entity lookup now works in Routes 2, 3, and 4
+  - Updated `enhanced_graph_retriever.py` - all entity lookup queries
+  - Updated `hub_extractor.py` - entity-to-document mapping queries  
+  - Updated `tracing.py` - PPR fallback seed matching
+  - Updated `async_neo4j_service.py` - already had alias support (verified)
+- Route 1 (Vector RAG) unchanged - pure vector search on TextChunk nodes (no entity lookups)
+
+**Previous Updates (January 19, 2026):**
 - ✅ **Entity Aliases Feature Complete:** Extraction, deduplication, and storage working perfectly (85% entities have aliases)
 - ✅ **Route 4 Validation:** 100% accuracy on positive questions, 100% on negative detection (19/19 perfect after ground truth correction)
 - ✅ **Question Bank Updated:** Q-D8 ground truth corrected based on empirical document analysis
@@ -108,12 +116,12 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 
 ### 2.3. Where HippoRAG 2 Is Used
 
-| Route | HippoRAG 2 Used? | Why |
-|:------|:-----------------|:----|
-| Route 1 | ❌ No | Vector search only (simple fact extraction) |
-| Route 2 | ✅ Yes | PPR from extracted entities for multi-hop traversal |
-| Route 3 | ✅ Yes | PPR from hub entities for thematic detail recovery |
-| Route 4 | ✅ Yes | PPR after query decomposition for complex reasoning |
+| Route | HippoRAG 2 Used? | Entity Aliases? | Why |
+|:------|:-----------------|:----------------|:----|
+| Route 1 | ❌ No | ❌ No | Vector search only (simple fact extraction, no entity lookups) |
+| Route 2 | ✅ Yes | ✅ Yes | PPR from extracted entities for multi-hop traversal |
+| Route 3 | ✅ Yes | ✅ Yes | PPR from hub entities for thematic detail recovery |
+| Route 4 | ✅ Yes | ✅ Yes | PPR after query decomposition for complex reasoning |
 
 ---
 
@@ -1568,14 +1576,14 @@ For standard 5-PDF test indexing, use `scripts/index_5pdfs.py`:
 python3 scripts/index_5pdfs.py
 
 # Re-index existing group (cleans old data first)
-export GROUP_ID=test-5pdfs-1768557493369886422
+export GROUP_ID=test-5pdfs-1768832399067050900
 python3 scripts/index_5pdfs.py
 
 # Check indexing completeness (reads from last_test_group_id.txt)
 python3 check_edges.py
 
-# Check specific group
-python3 check_edges.py test-5pdfs-1768826935625588532
+# Check specific group (current production group has entity aliases enabled)
+python3 check_edges.py test-5pdfs-1768832399067050900
 ```
 
 **Verification Script (`check_edges.py`):**
@@ -1586,8 +1594,8 @@ After indexing completes, verify the graph structure and new alias feature:
 # Check latest indexed group (reads from last_test_group_id.txt)
 python3 check_edges.py
 
-# Check specific group
-python3 check_edges.py test-5pdfs-1768557493369886422
+# Check specific group (current: test-5pdfs-1768832399067050900 with entity aliases)
+python3 check_edges.py test-5pdfs-1768832399067050900
 ```
 
 **What the Check Script Verifies:**

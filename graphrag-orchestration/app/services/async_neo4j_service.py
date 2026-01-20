@@ -504,7 +504,7 @@ class AsyncNeo4jService:
             // Path 2: Section-based thematic hops via SEMANTICALLY_SIMILAR edges
             // =====================================================================
             CALL (seed, group_id, per_seed_limit) {
-                MATCH (seed)-[:MENTIONS]->(chunk)
+                MATCH (chunk)-[:MENTIONS]->(seed)
                 WHERE chunk.group_id = group_id
                     AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
                 
@@ -519,7 +519,7 @@ class AsyncNeo4jService:
                 WHERE chunk2.group_id = group_id
                     AND (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`)
                 
-                MATCH (neighbor)-[:MENTIONS]->(chunk2)
+                MATCH (chunk2)-[:MENTIONS]->(neighbor)
                 WHERE neighbor.group_id = group_id
                     AND (neighbor:Entity OR neighbor:`__Entity__`)
                     AND neighbor.id <> seed.id

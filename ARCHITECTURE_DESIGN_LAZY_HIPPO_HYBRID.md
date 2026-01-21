@@ -1,14 +1,22 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 20, 2026
+**Last Updated:** January 21, 2026
 
-**Recent Updates (January 20, 2026):**
+**Recent Updates (January 21, 2026):**
+- ✅ **Document-Level Grouping Fix (Routes 2 & 3):** Chunks now properly grouped by Document node ID from graph
+  - **Problem:** LLM was treating sections (e.g., "Exhibit A") as separate documents, causing over-segmentation (8 summaries instead of 5)
+  - **Solution:** Both `text_store.py` and `synthesis.py` now extract `document_id` from Document nodes via PART_OF relationship
+  - **Impact:** Route 3 `synthesize_with_graph_context()` groups chunks by `document_id` and adds `=== DOCUMENT: {title} ===` headers
+  - **Result:** Q-G10 "Summarize each document" now returns exactly 5 summaries (matching 5 Document nodes in graph)
+  - Files modified: `text_store.py` (extract d.id), `synthesis.py` (both _build_cited_context and synthesize_with_graph_context)
+- Route 1 (Vector RAG) unchanged - pure vector search on TextChunk nodes (no entity lookups)
+
+**Previous Updates (January 20, 2026):**
 - ✅ **Entity Aliases Enabled for All Routes:** Alias-based entity lookup now works in Routes 2, 3, and 4
   - Updated `enhanced_graph_retriever.py` - all entity lookup queries
   - Updated `hub_extractor.py` - entity-to-document mapping queries  
   - Updated `tracing.py` - PPR fallback seed matching
   - Updated `async_neo4j_service.py` - already had alias support (verified)
-- Route 1 (Vector RAG) unchanged - pure vector search on TextChunk nodes (no entity lookups)
 
 **Previous Updates (January 19, 2026):**
 - ✅ **Entity Aliases Feature Complete:** Extraction, deduplication, and storage working perfectly (85% entities have aliases)

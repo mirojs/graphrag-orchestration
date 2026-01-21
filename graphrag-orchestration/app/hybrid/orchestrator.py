@@ -608,7 +608,7 @@ class HybridPipeline:
             
             records = await self._async_neo4j.execute_read(q, {
                 "chunk_ids": chunk_ids,
-                "group_id": self._group_id
+                "group_id": self.group_id
             })
             
             if not records:

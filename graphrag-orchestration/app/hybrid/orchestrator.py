@@ -358,22 +358,43 @@ class HybridPipeline:
                     }
                 }
             
-            # Build context from text chunks
+            # Build context from text chunks grouped by document (like Route 3)
+            # This helps LLM understand which document each fact comes from
+            from collections import defaultdict
+            doc_groups: Dict[str, List[Tuple[int, Dict[str, Any], float]]] = defaultdict(list)
+            
+            for i, (chunk, score) in enumerate(results[:8], 1):  # Use top 8 for context
+                # Group by document_id (authoritative), fallback to document_title
+                doc_key = chunk.get("document_id") or chunk.get("document_title") or "Unknown"
+                doc_groups[doc_key].append((i, chunk, score))
+            
             context_parts = []
             citations = []
             
-            for i, (chunk, score) in enumerate(results[:8], 1):  # Use top 8 for context
-                context_parts.append(f"[{i}] (Score: {score:.2f}) {chunk['text']}")
-                citations.append({
-                    "index": i,
-                    "chunk_id": chunk["id"],
-                    "document_id": chunk.get("document_id", ""),
-                    "document_title": chunk.get("document_title", ""),
-                    "score": float(score),
-                    "text_preview": chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"]
-                })
+            # Build context with document headers
+            for doc_key, chunks_with_idx in doc_groups.items():
+                # Extract document metadata from first chunk
+                first_chunk = chunks_with_idx[0][1]
+                doc_title = first_chunk.get("document_title") or doc_key
+                
+                # Add document header
+                context_parts.append(f"=== DOCUMENT: {doc_title} ===")
+                
+                # Add chunks under this document
+                for i, chunk, score in chunks_with_idx:
+                    context_parts.append(f"[{i}] (Score: {score:.2f}) {chunk['text']}")
+                    citations.append({
+                        "index": i,
+                        "chunk_id": chunk["id"],
+                        "document_id": chunk.get("document_id", ""),
+                        "document_title": chunk.get("document_title", ""),
+                        "score": float(score),
+                        "text_preview": chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"]
+                    })
+                
+                context_parts.append("")  # Blank line between documents
             
-            context = "\n\n".join(context_parts)
+            context = "\n".join(context_parts)
             
             # ================================================================
             # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)

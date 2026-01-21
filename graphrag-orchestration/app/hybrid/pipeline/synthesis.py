@@ -633,14 +633,21 @@ Response:"""
         for i, chunk in enumerate(text_chunks):
             # Extract document identity from metadata or source
             meta = chunk.get("metadata", {})
-            raw_doc_key = (
-                meta.get("document_id") 
-                or meta.get("document_title") 
-                or chunk.get("source", "Unknown")
-            )
-            # Normalize to merge sub-parts with parent
-            doc_key = _normalize_doc_key(raw_doc_key)
+            # Primary: use document_id from graph (authoritative, no normalization needed)
+            doc_key = meta.get("document_id")
+            if not doc_key:
+                # Fallback: normalize document_title or source to merge sub-parts
+                raw_doc_key = meta.get("document_title") or chunk.get("source", "Unknown")
+                doc_key = _normalize_doc_key(raw_doc_key)
             doc_groups[doc_key].append((i, chunk))
+        
+        # Log document grouping for debugging
+        logger.info(
+            "build_cited_context_grouping",
+            num_chunks=len(text_chunks),
+            num_doc_groups=len(doc_groups),
+            doc_keys=list(doc_groups.keys())[:10],  # Log first 10 doc keys
+        )
         
         context_parts = []
         

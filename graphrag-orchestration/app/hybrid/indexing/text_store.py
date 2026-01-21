@@ -276,6 +276,8 @@ class Neo4jTextUnitStore:
                                 meta[prop_key] = v
                     
                     # Prefer Document attribution when available.
+                    # document_id from the graph is the authoritative grouping key
+                    doc_id = (d.get("id") if d else "") or meta.get("document_id") or ""
                     doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
                     doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
                     url = meta.get("url") or doc_source or ""
@@ -300,6 +302,7 @@ class Neo4jTextUnitStore:
                             "entity": entity_name,
                             "metadata": {
                                 **meta,
+                                "document_id": str(doc_id),  # Graph node ID - authoritative grouping key
                                 "document_title": str(doc_title),
                                 "document_source": str(doc_source),
                             },

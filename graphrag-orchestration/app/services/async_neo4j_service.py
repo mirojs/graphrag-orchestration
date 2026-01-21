@@ -1066,3 +1066,26 @@ class AsyncNeo4jService:
                 raise
         
         return results
+
+    async def execute_read(
+        self,
+        query: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Execute a read-only Cypher query and return results as a list of dicts.
+        
+        This is a generic query method for ad-hoc reads that don't warrant
+        their own dedicated method.
+        
+        Args:
+            query: Cypher query string
+            params: Query parameters
+            
+        Returns:
+            List of record dicts
+        """
+        async with self._get_session() as session:
+            result = await session.run(query, **(params or {}))
+            records = await result.data()
+            return records

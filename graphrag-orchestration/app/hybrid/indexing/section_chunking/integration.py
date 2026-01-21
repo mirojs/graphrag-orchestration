@@ -23,7 +23,7 @@ Usage in lazygraphrag_pipeline.py:
         return section_chunks_to_text_chunks(section_chunks)
 
     # Option 2: Environment variable toggle
-    USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "0") == "1"
+    USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "1") == "1"
     
     async def _chunk_di_units(self, di_units, doc_id) -> List[TextChunk]:
         if USE_SECTION_CHUNKING:

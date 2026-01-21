@@ -48,7 +48,7 @@ from app.hybrid.services.neo4j_store import Document, Entity, Neo4jStoreV3, Rela
 logger = logging.getLogger(__name__)
 
 
-USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "0").strip().lower() in {"1", "true", "yes"}
+USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "1").strip().lower() in {"1", "true", "yes"}
 
 
 def extract_document_date(content: str) -> Optional[str]:

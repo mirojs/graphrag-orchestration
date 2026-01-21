@@ -148,6 +148,15 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
         - Fetches `section_id` via `(:TextChunk)-[:IN_SECTION]->(:Section)` edge
         - Applies greedy selection with `max_per_section=3` and `max_per_document=6` caps
         - Ensures cross-section coverage even for simple fact lookups
+    *   **Table Extraction (added 2026-01-21):**
+        - Queries `(:Table)-[:IN_CHUNK]->(:TextChunk)` nodes for structured data
+        - Extracts field name from query (regex patterns)
+        - Fuzzy matches field name to table headers
+        - Returns exact value from structured rows (avoids LLM confusion with adjacent columns)
+        - Falls back to LLM extraction if no table match
+    *   **Entity Graph Fallback (added 2026-01-21):**
+        - When hybrid search returns 0 chunks, searches `(:Entity)-[:MENTIONS]->(:TextChunk)`
+        - Enables retrieval via entity names/aliases when BM25 keyword matching fails
         - Controlled via `SECTION_GRAPH_ENABLED` env var (default: enabled)
     *   **Router Signal:** Single-entity query, no relationship keywords, simple question structure
 *   **Profile:** General Enterprise only (disabled in High Assurance)
@@ -1590,8 +1599,36 @@ python3 scripts/index_5pdfs.py
 # Check indexing completeness (reads from last_test_group_id.txt)
 python3 check_edges.py
 
-# Check specific group (current production group has entity aliases enabled)
-python3 check_edges.py test-5pdfs-1768832399067050900
+# Check specific group
+python3 check_edges.py test-5pdfs-1768988798244324597
+```
+
+**CRITICAL: Section-Aware Chunking Configuration**
+
+The indexing pipeline uses **section-aware chunking v2** by default (changed Jan 21, 2026). This is REQUIRED for comparable results:
+
+- **Default:** `USE_SECTION_CHUNKING="1"` (section-aware v2 enabled)
+- **Chunk Strategy:** `section_aware_v2` 
+- **Metadata:** `section_title`, `section_level`, `section_path`, `is_section_start`
+- **Impact:** Produces ~17 chunks per test corpus (vs ~74 chunks with legacy chunking)
+
+**Known Test Groups:**
+
+| Group ID | Date | Strategy | Table Nodes | Notes |
+|----------|------|----------|-------------|-------|
+| `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | ❌ No | Old baseline (table data stripped) |
+| `test-5pdfs-1768988798244324597` | Jan 21 | section_aware_v2 | ✅ Yes | Current with Table nodes |
+
+**Table Nodes Feature (Added Jan 21, 2026):**
+
+Structured table extraction from Azure Document Intelligence is now preserved as Table nodes:
+
+- **Storage:** Table nodes with `headers`, `rows`, `row_count`, `column_count` properties
+- **Relationships:** `(Table)-[:IN_CHUNK]->(TextChunk)`, `[:IN_SECTION]->(Section)`, `[:IN_DOCUMENT]->(Document)`
+- **Benefit:** Direct field extraction without LLM confusion (e.g., DUE DATE vs TERMS columns)
+- **Query:** Route 1 tries table extraction first, falls back to LLM
+- **Implementation:** `_extract_from_tables()` + `_create_table_nodes()` in neo4j_store
+
 ```
 
 **Verification Script (`check_edges.py`):**
@@ -1614,10 +1651,13 @@ python3 check_edges.py test-5pdfs-1768832399067050900
 4. **Entity Aliases** - ✅ COMPLETE: Verifies aliases extracted during indexing (enables flexible entity lookup)
 5. **Node Counts** - Documents, TextChunks, Sections, Entities
 
-**Status (January 19, 2026):** Entity aliases feature fully validated:
-- **85% of entities** have aliases (126/148 entities in test corpus)
+**Status (January 21, 2026):** Entity aliases and Table nodes features validated:
+- **85% of entities** have aliases (126/148 entities in old test corpus)
+- **78% of entities** have aliases (208/265 entities in new test corpus)
 - Alias extraction uses few-shot prompting via `neo4j-graphrag` LLMEntityRelationExtractor
 - Deduplication correctly preserves aliases when merging duplicate entities
+- **Table nodes:** 5 tables extracted from invoice/contract documents with structured headers/rows
+- **Table extraction:** Route 1 queries Table nodes before LLM fallback for precise field extraction
 - Storage layer properly handles aliases as array property in Neo4j
 - Verification: `python3 check_edges.py` confirms alias presence and coverage
 

@@ -14,7 +14,7 @@ STEP 1: lazygraphrag_pipeline.py - Add imports and feature flag
 
 STEP_1_IMPORTS = '''
 # Section-aware chunking feature flag (Trial - January 2026)
-USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "0").strip().lower() in {"1", "true", "yes"}
+USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "1").strip().lower() in {"1", "true", "yes"}
 '''
 
 """

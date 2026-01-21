@@ -29,6 +29,7 @@ class SectionNode:
     # Paragraph/table counts for diagnostics
     paragraph_count: int = 0
     table_count: int = 0
+    tables: List[Dict[str, Any]] = field(default_factory=list)
     
     # Token count (computed during processing)
     token_count: int = 0

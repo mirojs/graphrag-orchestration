@@ -160,6 +160,7 @@ class SectionAwareChunker:
                     parent_id=parent_id,
                     paragraph_count=meta.get("paragraph_count", 0),
                     table_count=meta.get("table_count", 0),
+                    tables=list(meta.get("tables", []) or []),
                 )
             )
         
@@ -197,10 +198,14 @@ class SectionAwareChunker:
                     pending_merge.token_count += section.token_count
                     pending_merge.paragraph_count += section.paragraph_count
                     pending_merge.table_count += section.table_count
+                    if section.tables:
+                        pending_merge.tables.extend(section.tables)
                 elif merged:
                     # Merge with last completed section
                     merged[-1].content += "\n\n" + section.content
                     merged[-1].token_count += section.token_count
+                    if section.tables:
+                        merged[-1].tables.extend(section.tables)
                 else:
                     # First section and it's tiny - keep as pending
                     pending_merge = section
@@ -210,6 +215,8 @@ class SectionAwareChunker:
                     # Prepend pending content to this section
                     section.content = pending_merge.content + "\n\n" + section.content
                     section.token_count += pending_merge.token_count
+                    if pending_merge.tables:
+                        section.tables = pending_merge.tables + section.tables
                     pending_merge = None
                 merged.append(section)
         
@@ -218,6 +225,8 @@ class SectionAwareChunker:
             if merged:
                 merged[-1].content += "\n\n" + pending_merge.content
                 merged[-1].token_count += pending_merge.token_count
+                if pending_merge.tables:
+                    merged[-1].tables.extend(pending_merge.tables)
             else:
                 merged.append(pending_merge)
         
@@ -260,6 +269,7 @@ class SectionAwareChunker:
                             "title": doc_title,
                             "paragraph_count": section.paragraph_count,
                             "table_count": section.table_count,
+                                "tables": section.tables,
                         },
                     )
                 )
@@ -324,6 +334,7 @@ class SectionAwareChunker:
         current_text = ""
         current_tokens = 0
         chunk_idx_in_section = 0
+        include_tables = True if section.tables else False
         
         for para in paragraphs:
             para = para.strip()
@@ -360,6 +371,8 @@ class SectionAwareChunker:
                             metadata={
                                 "source": doc_source,
                                 "title": doc_title,
+                                "table_count": section.table_count,
+                                "tables": section.tables if include_tables and chunk_idx_in_section == 0 else [],
                             },
                         )
                     )
@@ -396,6 +409,8 @@ class SectionAwareChunker:
                     metadata={
                         "source": doc_source,
                         "title": doc_title,
+                        "table_count": section.table_count,
+                        "tables": section.tables if include_tables and chunk_idx_in_section == 0 else [],
                     },
                 )
             )

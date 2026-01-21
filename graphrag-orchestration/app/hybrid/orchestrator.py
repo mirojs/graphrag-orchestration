@@ -409,87 +409,6 @@ class HybridPipeline:
             context = "\n".join(context_parts)
             
             # ================================================================
-            # GRAPH-BASED NEGATIVE DETECTION (Precision via Entity + Pattern)
-            # ================================================================
-            # For NEGATIVE questions (asking for fields that don't exist like VAT,
-            # routing numbers, etc.), use pattern matching on the graph.
-            # For POSITIVE questions, trust the hybrid retrieval + LLM extraction.
-            # ================================================================
-            import re
-            query_lower = query.lower()
-            
-            # ONLY apply strict negative detection for financial/sensitive field types
-            # These fields have specific patterns that MUST exist if the field is present
-            NEGATIVE_FIELD_PATTERNS = {
-                # VAT/Tax ID: Must have "VAT" or "Tax ID" followed by digits
-                "vat": (r"(?i).*(VAT|Tax ID|GST|TIN)[^\d]{0,20}\d{5,}.*", ["vat", "tax id", "gst", "tin number"]),
-                # URLs: Must contain actual http/https URL
-                "url": (r"(?i).*(https?://[\w\.-]+[\w/\.-]*).*", ["payment portal", "pay online", "web link", "portal url"]),
-                # Bank routing: Must have routing/account followed by digits
-                "bank_routing": (r"(?i).*(routing|ABA)[^\d]{0,15}\d{9}.*", ["routing number", "aba"]),
-                # Bank account: Must have account number pattern
-                "bank_account": (r"(?i).*(account\s*(number|no|#)?)[^\d]{0,15}\d{8,}.*", ["bank account number", "ach"]),
-                # SWIFT/BIC: Must have SWIFT/BIC followed by code pattern  
-                "swift": (r"(?i).*(SWIFT|BIC|IBAN)[^A-Z]{0,10}[A-Z]{4,11}.*", ["swift", "bic", "iban"]),
-                # License number (specific format)
-                "license": (r"(?i).*(license|licence)\s*(number|no|#)?[^\d]{0,10}[A-Z0-9]{5,}.*", ["license number", "agent's license"]),
-                # Mold clause
-                "mold": (r"(?i).*(mold|mould|fungus)\s*(damage|coverage|clause).*", ["mold damage", "mold coverage"]),
-                # Wire transfer instructions
-                "wire": (r"(?i).*(wire transfer|ach instruction).*\d{5,}.*", ["wire transfer", "ach instructions"]),
-            }
-            
-            top_doc_url = results[0][0].get("url") or results[0][0].get("source") or results[0][0].get("document_id") if results else None
-            detected_negative_field = None
-            
-            # Check if query is asking for a specific negative-detection field type
-            for field_type, (pattern, keywords) in NEGATIVE_FIELD_PATTERNS.items():
-                if any(kw in query_lower for kw in keywords):
-                    detected_negative_field = field_type
-                    # Only check pattern for negative-detection fields
-                    if self._async_neo4j and top_doc_url:
-                        pattern_exists = await self._async_neo4j.check_field_pattern_in_document(
-                            group_id=self.group_id,
-                            doc_url=top_doc_url,
-                            pattern=pattern,
-                        )
-                        if not pattern_exists:
-                            logger.info(
-                                "route_1_negative_field_not_found",
-                                field_type=field_type,
-                                doc_url=top_doc_url,
-                                reason="Specific field pattern not found in document",
-                            )
-                            return {
-                                "response": "Not found in the provided documents.",
-                                "route_used": "route_1_vector_rag",
-                                "citations": citations,
-                                "evidence_path": [],
-                                "metadata": {
-                                    "num_chunks": len(results),
-                                    "chunks_used": len(context_parts),
-                                    "latency_estimate": "fast",
-                                    "precision_level": "standard",
-                                    "route_description": "Vector search with pattern-based negative detection",
-                                    "negative_detection": True,
-                                    "detected_field_type": field_type,
-                                    "debug_top_chunk_id": results[0][0]["id"] if results else None,
-                                }
-                            }
-                    break
-            
-            # For NON-negative field queries (normal fact lookups), skip keyword check
-            # and trust the hybrid retrieval (BM25 + Vector) to find relevant chunks.
-            # The LLM extraction will handle value extraction from the retrieved context.
-            logger.info(
-                "route_1_proceeding_to_extraction",
-                query=query[:50],
-                detected_negative_field=detected_negative_field,
-                top_doc_url=top_doc_url,
-                num_results=len(results),
-            )
-            
-            # ================================================================
             # Route 1 Strategy: Try structured table extraction first, then LLM
             # ================================================================
             # For table-based queries, try extracting directly from Table nodes
@@ -577,10 +496,17 @@ class HybridPipeline:
         import re
         query_lower = query.lower()
         
-        # Common table field patterns
+        # Common table field patterns - extract the actual field being asked for
+        # Pattern 1: Extract field at the END of question (most reliable)
+        # "What is the invoice due date?" -> "due date"
+        # "What is the salesperson?" -> "salesperson"
         FIELD_PATTERNS = [
-            r"(?:what is|what's|find|get|show|tell me).*?(?:the\s+)?([a-z\s]+?)(?:\s+for|\s+in|\s+on|\s+of|\s+from|\?|$)",
-            r"(?:invoice|contract|warranty)\s+([a-z\s]+?)(?:\?|$)",
+            # Match field at end: "what is the [invoice] <field>?"
+            r"what(?:'s| is).*?(?:invoice|contract|warranty)?\s+([a-z]+(?:\s+[a-z]+)?)\s*\??$",
+            # Match "the <field> for/in/on" pattern
+            r"the\s+([a-z]+(?:\s+[a-z]+)?)\s+(?:for|in|on|of|from)",
+            # Fallback: last 2-3 words before ?
+            r"([a-z]+(?:\s+[a-z]+)?)\s*\?$",
         ]
         
         potential_field = None
@@ -588,7 +514,11 @@ class HybridPipeline:
             match = re.search(pattern, query_lower)
             if match:
                 potential_field = match.group(1).strip()
-                break
+                # Skip common noise words
+                if potential_field not in ["the", "a", "an", "this", "that", "it"]:
+                    break
+                else:
+                    potential_field = None
         
         if not potential_field:
             return None

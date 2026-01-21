@@ -312,25 +312,51 @@ class EvidenceSynthesizer:
             return result
 
         # Step 1: Build citation context from source chunks (MENTIONS-derived)
+        # Group chunks by document_id to ensure proper document attribution
+        from collections import defaultdict
+        doc_groups: Dict[str, List[Tuple[int, Any]]] = defaultdict(list)
+        
+        for i, chunk in enumerate(graph_context.source_chunks):
+            # Use document_id as primary grouping key (graph ground truth)
+            doc_key = chunk.document_id or chunk.document_source or chunk.document_title or "Unknown"
+            doc_groups[doc_key].append((i, chunk))
+        
+        logger.info(
+            "route3_document_grouping",
+            num_chunks=len(graph_context.source_chunks),
+            num_doc_groups=len(doc_groups),
+            doc_keys=list(doc_groups.keys())[:10],
+        )
+        
         context_parts = []
         citation_map: Dict[str, Dict[str, Any]] = {}
         
-        # Add source chunks as citations
-        for i, chunk in enumerate(graph_context.source_chunks):
-            citation_id = f"[{i+1}]"
-            section_str = " > ".join(chunk.section_path) if chunk.section_path else "General"
+        # Build context grouped by document
+        for doc_key, chunks_with_idx in doc_groups.items():
+            first_chunk = chunks_with_idx[0][1]
+            doc_title = first_chunk.document_title or first_chunk.document_source or doc_key
             
-            citation_map[citation_id] = {
-                "source": chunk.document_source or chunk.document_title,
-                "chunk_id": chunk.chunk_id,
-                "section": section_str,
-                "entity": chunk.entity_name,
-                "text_preview": chunk.text[:150] + "..." if len(chunk.text) > 150 else chunk.text
-            }
+            # Add document header for clearer LLM reasoning
+            context_parts.append(f"=== DOCUMENT: {doc_title} ===")
             
-            # Build context entry with section metadata
-            entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
-            context_parts.append(entry)
+            for original_idx, chunk in chunks_with_idx:
+                citation_id = f"[{original_idx + 1}]"
+                section_str = " > ".join(chunk.section_path) if chunk.section_path else "General"
+                
+                citation_map[citation_id] = {
+                    "source": chunk.document_source or chunk.document_title,
+                    "chunk_id": chunk.chunk_id,
+                    "document": doc_title,  # Add document for proper attribution
+                    "section": section_str,
+                    "entity": chunk.entity_name,
+                    "text_preview": chunk.text[:150] + "..." if len(chunk.text) > 150 else chunk.text
+                }
+                
+                # Build context entry with section metadata
+                entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
+                context_parts.append(entry)
+            
+            context_parts.append("")  # Blank line between documents
         
         # Step 2: Add relationship context
         relationship_context = graph_context.get_relationship_context()

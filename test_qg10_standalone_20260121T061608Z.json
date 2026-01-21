@@ -1,0 +1,263 @@
+{
+  "timestamp": "20260121T061608Z",
+  "query": "Summarize each document's main purpose in one sentence.",
+  "group_id": "test-5pdfs-1768557493369886422",
+  "answer": "1. Builder\u2019s Limited Warranty with Arbitration (incl. \u201c2. Term.\u201d excerpts) \u2013 Documents [1], [4], [7], [10], [14]  \nThis set of documents establishes a one\u2011year and sixty\u2011day limited home warranty from Fabrikam Inc. to Contoso Ltd., detailing covered structural and system defects, numerous exclusions, claim notification and repair procedures, non\u2011transferability, and a binding arbitration program under Idaho law as the exclusive dispute resolution mechanism.[1][4][7][10][14]\n\n2. Holding Tank Servicing Contract \u2013 Document [2]  \nThis contract sets out the ongoing obligations between Contoso Ltd. (holding tank owner) and Fabrikam Inc. (pumper) for servicing a holding tank at 123 Mockup Lane in Washburn County, WI, including owner access, maintenance of all\u2011weather access, payment terms, and the pumper\u2019s duty to file detailed service reports with the County until either party terminates the agreement.[2]\n\n3. Purchase Contract for Vertical Platform Lift \u2013 Documents [3], [6]  \nThis purchase contract between Contoso Lifts LLC (Contractor) and Fabrikam Inc. (Customer) defines the furnished and installed lift equipment (including 1 Vertical Platform Lift AscendPro VPX200 and related components), the total price of $29,900.00 with three payment milestones, delivery timeframe of 8\u201310 weeks after drawing approval, allocation of risk of loss, Florida governing law, assignment limits, a 90\u2011day labor warranty, permitting responsibilities, and a 3\u2011business\u2011day right to cancel with deposit forfeiture thereafter.[3][6]\n\n4. Exhibit A \u2013 Scope of Work (Bayfront Animal Clinic) \u2013 Documents [5], [13]  \nThis exhibit specifies the detailed scope of work for installing a Vertical Platform Lift system at Bayfront Animal Clinic in Tampa, FL, listing the exact equipment configuration (e.g., 1 AscendPro VPX200, 110 VAC 60 Hz up/12 VAC down power system, 42\" x 62\" custom cab, outdoor package, aluminum door with automatic opener, 2 flush\u2011mount hall call stations), site conditions (no ramp, 3\" pit depth, site prep by others), and signature lines for authorized representatives of Contoso Ltd. and Fabrikam Inc. dated 04/30/2025.[5][13]\n\n5. Property Management Agreement (Short Term and/or Vacation/Holiday Rentals) \u2013 Documents [8], [11], [12]  \nThis agreement appoints Walt Flood Realty as exclusive agent to manage short\u2011term and vacation rentals of Contoso Ltd.\u2019s property \u201cPacific View Retreat\u201d at 456 Palm Tree Avenue, Honolulu, HI 96815, for an initial 12\u2011month term starting 2010\u201106\u201115, and sets out agent and owner responsibilities, a detailed fee schedule (including 25% commission on short\u2011term rentals, 10% on long\u2011term leases, $75.00/month advertising, $50.00/month admin, 10% on repairs, $35/hour coordination, plus 4.712% Hawaii Gross Excise tax), a $250.00 non\u2011refundable start\u2011up fee, hold\u2011harmless and no\u2011guarantee clauses, and Hawaii governing law.[8][11][12]\n\n6. Contoso Lifts LLC Invoice \u2013 Document [9]  \nThis invoice from Contoso Lifts LLC to John Doe/Fabrikam Construction itemizes the sale of a Vertical Platform Lift system and related components totaling $29,900.00 (e.g., $11,200.00 for the lift, $3,000.00 for operation parts, $5,800.00 for a 42\" x 62\" cab, $2,000.00 outdoor fitting, $5,000.00 aluminum door assembly, $2,900.00 for two hall call stations), marked as \u201cInitial payment in accordance with contract,\u201d with payment due on contract signing.[9]\n\n7. Cross\u2011document connection (lifts scope/contract/invoice)  \nAcross the purchase contract, Exhibit A, and the invoice, the documents collectively define and evidence a consistent business relationship around vertical platform lift projects: the contract sets commercial terms and legal framework for a $29,900.00 lift installation between Contoso Lifts LLC and Fabrikam Inc.,[3][6] Exhibit A applies a similar AscendPro VPX200 configuration to a specific job for Contoso Ltd. and Fabrikam Inc.,[5][13] and the invoice shows Contoso Lifts LLC billing Fabrikam Construction for a comparably specified lift package totaling $29,900.00 as an initial contract payment.[3][5][6][9][13]",
+  "thematic_check": {
+    "expected": [
+      "warranty",
+      "arbitration",
+      "servicing",
+      "management",
+      "invoice",
+      "scope of work",
+      "payment"
+    ],
+    "found": [
+      "warranty",
+      "arbitration",
+      "servicing",
+      "management",
+      "invoice",
+      "scope of work",
+      "payment"
+    ],
+    "missing": [],
+    "coverage": 1.0
+  },
+  "document_count": 7,
+  "full_result": {
+    "response": "1. Builder\u2019s Limited Warranty with Arbitration (incl. \u201c2. Term.\u201d excerpts) \u2013 Documents [1], [4], [7], [10], [14]  \nThis set of documents establishes a one\u2011year and sixty\u2011day limited home warranty from Fabrikam Inc. to Contoso Ltd., detailing covered structural and system defects, numerous exclusions, claim notification and repair procedures, non\u2011transferability, and a binding arbitration program under Idaho law as the exclusive dispute resolution mechanism.[1][4][7][10][14]\n\n2. Holding Tank Servicing Contract \u2013 Document [2]  \nThis contract sets out the ongoing obligations between Contoso Ltd. (holding tank owner) and Fabrikam Inc. (pumper) for servicing a holding tank at 123 Mockup Lane in Washburn County, WI, including owner access, maintenance of all\u2011weather access, payment terms, and the pumper\u2019s duty to file detailed service reports with the County until either party terminates the agreement.[2]\n\n3. Purchase Contract for Vertical Platform Lift \u2013 Documents [3], [6]  \nThis purchase contract between Contoso Lifts LLC (Contractor) and Fabrikam Inc. (Customer) defines the furnished and installed lift equipment (including 1 Vertical Platform Lift AscendPro VPX200 and related components), the total price of $29,900.00 with three payment milestones, delivery timeframe of 8\u201310 weeks after drawing approval, allocation of risk of loss, Florida governing law, assignment limits, a 90\u2011day labor warranty, permitting responsibilities, and a 3\u2011business\u2011day right to cancel with deposit forfeiture thereafter.[3][6]\n\n4. Exhibit A \u2013 Scope of Work (Bayfront Animal Clinic) \u2013 Documents [5], [13]  \nThis exhibit specifies the detailed scope of work for installing a Vertical Platform Lift system at Bayfront Animal Clinic in Tampa, FL, listing the exact equipment configuration (e.g., 1 AscendPro VPX200, 110 VAC 60 Hz up/12 VAC down power system, 42\" x 62\" custom cab, outdoor package, aluminum door with automatic opener, 2 flush\u2011mount hall call stations), site conditions (no ramp, 3\" pit depth, site prep by others), and signature lines for authorized representatives of Contoso Ltd. and Fabrikam Inc. dated 04/30/2025.[5][13]\n\n5. Property Management Agreement (Short Term and/or Vacation/Holiday Rentals) \u2013 Documents [8], [11], [12]  \nThis agreement appoints Walt Flood Realty as exclusive agent to manage short\u2011term and vacation rentals of Contoso Ltd.\u2019s property \u201cPacific View Retreat\u201d at 456 Palm Tree Avenue, Honolulu, HI 96815, for an initial 12\u2011month term starting 2010\u201106\u201115, and sets out agent and owner responsibilities, a detailed fee schedule (including 25% commission on short\u2011term rentals, 10% on long\u2011term leases, $75.00/month advertising, $50.00/month admin, 10% on repairs, $35/hour coordination, plus 4.712% Hawaii Gross Excise tax), a $250.00 non\u2011refundable start\u2011up fee, hold\u2011harmless and no\u2011guarantee clauses, and Hawaii governing law.[8][11][12]\n\n6. Contoso Lifts LLC Invoice \u2013 Document [9]  \nThis invoice from Contoso Lifts LLC to John Doe/Fabrikam Construction itemizes the sale of a Vertical Platform Lift system and related components totaling $29,900.00 (e.g., $11,200.00 for the lift, $3,000.00 for operation parts, $5,800.00 for a 42\" x 62\" cab, $2,000.00 outdoor fitting, $5,000.00 aluminum door assembly, $2,900.00 for two hall call stations), marked as \u201cInitial payment in accordance with contract,\u201d with payment due on contract signing.[9]\n\n7. Cross\u2011document connection (lifts scope/contract/invoice)  \nAcross the purchase contract, Exhibit A, and the invoice, the documents collectively define and evidence a consistent business relationship around vertical platform lift projects: the contract sets commercial terms and legal framework for a $29,900.00 lift installation between Contoso Lifts LLC and Fabrikam Inc.,[3][6] Exhibit A applies a similar AscendPro VPX200 configuration to a specific job for Contoso Ltd. and Fabrikam Inc.,[5][13] and the invoice shows Contoso Lifts LLC billing Fabrikam Construction for a comparably specified lift package totaling $29,900.00 as an initial contract payment.[3][5][6][9][13]",
+    "route_used": "route_3_global_search",
+    "citations": [
+      {
+        "citation": "[1]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf",
+        "chunk_id": "doc_3901efd484a14f17974e7c99ff10ab29_chunk_6",
+        "section": "2. Term.",
+        "entity": "bm25_phrase",
+        "text_preview": "## 2. Term.\n\nA. The terms of the various coverages of this Builder's Limited Warranty begin on the date of final settlement or the date\nwhen the Buyer..."
+      },
+      {
+        "citation": "[2]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/HOLDING TANK SERVICING CONTRACT.pdf",
+        "chunk_id": "doc_03748434687245f18d7eb07122e40f1e_chunk_0",
+        "section": "HOLDING TANK SERVICING CONTRACT",
+        "entity": "bm25_phrase",
+        "text_preview": "# HOLDING TANK SERVICING CONTRACT\n\nContract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper.\n\n\n<figure>\n\nHolding..."
+      },
+      {
+        "citation": "[3]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf",
+        "chunk_id": "doc_14d9bdc534864d64b579caf13718958c_chunk_2",
+        "section": "PURCHASE CONTRACT",
+        "entity": "bm25_phrase",
+        "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-07..."
+      },
+      {
+        "citation": "[4]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf",
+        "chunk_id": "doc_3901efd484a14f17974e7c99ff10ab29_chunk_3",
+        "section": "BUILDERS LIMITED WARRANTY WITH ARBITRATION > 2. Term.",
+        "entity": "bm25_phrase",
+        "text_preview": "## 2. Term.\n\nA. The terms of the various coverages of this Builder's Limited Warranty begin on the date of final settlement or the date\nwhen the Buyer..."
+      },
+      {
+        "citation": "[5]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf",
+        "chunk_id": "doc_14d9bdc534864d64b579caf13718958c_chunk_1",
+        "section": "EXHIBIT A - SCOPE OF WORK",
+        "entity": "bm25_phrase",
+        "text_preview": "# EXHIBIT A - SCOPE OF WORK\n\nJob Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@fabrikam.com\n\nJob Loca..."
+      },
+      {
+        "citation": "[6]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf",
+        "chunk_id": "doc_14d9bdc534864d64b579caf13718958c_chunk_0",
+        "section": "PURCHASE CONTRACT",
+        "entity": "section_boost",
+        "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-07..."
+      },
+      {
+        "citation": "[7]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf",
+        "chunk_id": "doc_3901efd484a14f17974e7c99ff10ab29_chunk_0",
+        "section": "BUILDERS LIMITED WARRANTY WITH ARBITRATION",
+        "entity": "section_boost",
+        "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/O..."
+      },
+      {
+        "citation": "[8]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY MANAGEMENT AGREEMENT.pdf",
+        "chunk_id": "doc_8291c68ba6b04e3dbc404bc123a193c4_chunk_0",
+        "section": "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)",
+        "entity": "section_boost",
+        "text_preview": "# PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\"..."
+      },
+      {
+        "citation": "[9]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/contoso_lifts_invoice.pdf",
+        "chunk_id": "doc_6d23418ebf7d43498c518f27382248ef_chunk_0",
+        "section": "Section 0",
+        "entity": "section_boost",
+        "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33304-0708\nINVOICE # 1256003\nPhone: (561) 353..."
+      },
+      {
+        "citation": "[10]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf",
+        "chunk_id": "doc_3901efd484a14f17974e7c99ff10ab29_chunk_1",
+        "section": "BUILDERS LIMITED WARRANTY WITH ARBITRATION",
+        "entity": "section_boost",
+        "text_preview": "arbitration of any Dispute. THE PARTIES UNDERSTAND THAT BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR DISPUTES SHALL BE RESOLVED BY BINDING ARBITRATI..."
+      },
+      {
+        "citation": "[11]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY MANAGEMENT AGREEMENT.pdf",
+        "chunk_id": "doc_8291c68ba6b04e3dbc404bc123a193c4_chunk_1",
+        "section": "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals) > PROPERTY MANAGEMENT AGREEMENT:",
+        "entity": "section_boost",
+        "text_preview": "## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) ..."
+      },
+      {
+        "citation": "[12]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY MANAGEMENT AGREEMENT.pdf",
+        "chunk_id": "doc_8291c68ba6b04e3dbc404bc123a193c4_chunk_2",
+        "section": "PROPERTY MANAGEMENT AGREEMENT:",
+        "entity": "section_boost",
+        "text_preview": "## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) ..."
+      },
+      {
+        "citation": "[13]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf",
+        "chunk_id": "doc_14d9bdc534864d64b579caf13718958c_chunk_3",
+        "section": "EXHIBIT A - SCOPE OF WORK",
+        "entity": "section_boost",
+        "text_preview": "# EXHIBIT A - SCOPE OF WORK\n\nJob Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@fabrikam.com\n\nJob Loca..."
+      },
+      {
+        "citation": "[14]",
+        "source": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf",
+        "chunk_id": "doc_3901efd484a14f17974e7c99ff10ab29_chunk_4",
+        "section": "BUILDERS LIMITED WARRANTY WITH ARBITRATION > 2. Term.",
+        "entity": "section_boost",
+        "text_preview": "shall be governed by the provisions of the AAA or other rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in acco..."
+      }
+    ],
+    "evidence_path": [],
+    "metadata": {
+      "matched_communities": [
+        "Query-relevant entities: summarize each document"
+      ],
+      "hub_entities": [],
+      "related_entities": [],
+      "num_relationships_found": 0,
+      "num_source_chunks": 14,
+      "num_evidence_nodes": 14,
+      "text_chunks_used": 14,
+      "latency_estimate": "thorough",
+      "precision_level": "high",
+      "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR",
+      "bm25_phrase": {
+        "enabled": true,
+        "hybrid_rrf": true,
+        "applied": true,
+        "results": 9,
+        "added": 5,
+        "merge": {
+          "top_k": 20,
+          "max_per_doc": 2,
+          "min_docs": 3,
+          "selected": 5,
+          "unique_docs": 3
+        }
+      },
+      "section_boost": {
+        "enabled": true,
+        "applied": true,
+        "strategy": "semantic_section_discovery",
+        "semantic": {
+          "enabled": true,
+          "seed_candidates": 14,
+          "seed_mode": "hybrid_rrf",
+          "top_sections": [
+            {
+              "section_id": "section_bfc0bd5cd079",
+              "path_key": "2. Term.",
+              "score": 0.046544
+            },
+            {
+              "section_id": "section_764066667e06",
+              "path_key": "EXHIBIT A - SCOPE OF WORK",
+              "score": 0.03101
+            },
+            {
+              "section_id": "section_e94aae1eb475",
+              "path_key": "HOLDING TANK SERVICING CONTRACT",
+              "score": 0.030886
+            },
+            {
+              "section_id": "section_ba897a931891",
+              "path_key": "PURCHASE CONTRACT",
+              "score": 0.030798
+            },
+            {
+              "section_id": "section_ce91ff8adf9e",
+              "path_key": "BUILDERS LIMITED WARRANTY WITH ARBITRATION",
+              "score": 0.029857
+            },
+            {
+              "section_id": "section_fcbbdecc3af0",
+              "path_key": "BUILDERS LIMITED WARRANTY WITH ARBITRATION > 2. Term.",
+              "score": 0.016393
+            },
+            {
+              "section_id": "section_bedbcb2ce87f",
+              "path_key": "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)",
+              "score": 0.013889
+            },
+            {
+              "section_id": "section_35e6939e79ab",
+              "path_key": "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals) > PROPERTY MANAGEMENT AGREEMENT:",
+              "score": 0.013699
+            },
+            {
+              "section_id": "section_8fd91fc54408",
+              "path_key": "PROPERTY MANAGEMENT AGREEMENT:",
+              "score": 0.013514
+            },
+            {
+              "section_id": "section_14406804f2d0",
+              "path_key": "Section 0",
+              "score": 0.013333
+            }
+          ],
+          "seed_query_count": 1,
+          "seed_evidence_added": 0
+        },
+        "boost_candidates": 13,
+        "boost_added": 9
+      },
+      "shares_entity_boost": {
+        "enabled": true,
+        "applied": false,
+        "seed_sections": 10,
+        "cross_doc_relations": 17,
+        "chunks_added": 0
+      },
+      "ppr_detail_recovery": {
+        "enabled": true,
+        "ppr_entities": 0,
+        "ppr_evidence_nodes": 0,
+        "top_ppr_entities": []
+      },
+      "coverage_retrieval": {
+        "enabled": true,
+        "applied": false,
+        "docs_added": 0,
+        "chunks_added": 0,
+        "total_docs_in_group": 5,
+        "docs_from_relevance": 5
+      }
+    }
+  }
+}

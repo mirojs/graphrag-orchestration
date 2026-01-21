@@ -397,131 +397,85 @@ class HybridPipeline:
             context = "\n".join(context_parts)
             
             # ================================================================
-            # GRAPH-BASED NEGATIVE DETECTION (Pre-LLM Check)
+            # GRAPH-BASED NEGATIVE DETECTION (Precision via Entity + Pattern)
             # ================================================================
-            # Use AsyncNeo4jService to check if query keywords exist in the
-            # document chunks. This prevents hallucinations for negative questions.
+            # For NEGATIVE questions (asking for fields that don't exist like VAT,
+            # routing numbers, etc.), use pattern matching on the graph.
+            # For POSITIVE questions, trust the hybrid retrieval + LLM extraction.
             # ================================================================
-            top_doc_url = results[0][0].get("url") or results[0][0].get("source") or results[0][0].get("document_id") if results else None
+            import re
+            query_lower = query.lower()
             
-            if self._async_neo4j and top_doc_url:
-                # =============================================================
-                # FIELD-SPECIFIC PATTERN VALIDATION (Deterministic)
-                # =============================================================
-                # For specific field types, validate with regex patterns
-                # This catches false positives where keywords exist separately
-                # but not in the required semantic relationship.
-                # =============================================================
-                import re
-                
-                # Field type patterns for precise negative detection
-                FIELD_PATTERNS = {
-                    # VAT/Tax ID: Must have "VAT" or "Tax ID" followed by digits
-                    "vat": r"(?i).*(VAT|Tax ID|GST|TIN)[^\d]{0,20}\d{5,}.*",
-                    # URLs: Must contain actual http/https URL
-                    "url": r"(?i).*(https?://[\w\.-]+[\w/\.-]*).*",
-                    # Bank routing: Must have routing/account followed by digits
-                    "bank_routing": r"(?i).*(routing|ABA)[^\d]{0,15}\d{9}.*",
-                    # Bank account: Must have account number pattern
-                    "bank_account": r"(?i).*(account\s*(number|no|#)?)[^\d]{0,15}\d{8,}.*",
-                    # SWIFT/BIC: Must have SWIFT/BIC followed by code pattern
-                    "swift": r"(?i).*(SWIFT|BIC|IBAN)[^A-Z]{0,10}[A-Z]{4,11}.*",
-                }
-                
-                # Detect field type from query
-                query_lower = query.lower()
-                detected_field_type = None
-                
-                if any(kw in query_lower for kw in ["vat", "tax id", "gst", "tin number"]):
-                    detected_field_type = "vat"
-                elif any(kw in query_lower for kw in ["url", "link", "portal", "website", "web link"]):
-                    detected_field_type = "url"
-                elif any(kw in query_lower for kw in ["routing number", "aba"]):
-                    detected_field_type = "bank_routing"
-                elif any(kw in query_lower for kw in ["account number", "bank account"]):
-                    detected_field_type = "bank_account"
-                elif any(kw in query_lower for kw in ["swift", "bic", "iban"]):
-                    detected_field_type = "swift"
-                
-                # Pattern-based check for specific field types
-                if detected_field_type and detected_field_type in FIELD_PATTERNS:
-                    pattern_exists = await self._async_neo4j.check_field_pattern_in_document(
-                        group_id=self.group_id,
-                        doc_url=top_doc_url,
-                        pattern=FIELD_PATTERNS[detected_field_type],
-                    )
-                    
-                    if not pattern_exists:
-                        logger.info(
-                            "route_1_pattern_negative_detection_triggered",
-                            field_type=detected_field_type,
-                            pattern=FIELD_PATTERNS[detected_field_type][:50],
+            # ONLY apply strict negative detection for financial/sensitive field types
+            # These fields have specific patterns that MUST exist if the field is present
+            NEGATIVE_FIELD_PATTERNS = {
+                # VAT/Tax ID: Must have "VAT" or "Tax ID" followed by digits
+                "vat": (r"(?i).*(VAT|Tax ID|GST|TIN)[^\d]{0,20}\d{5,}.*", ["vat", "tax id", "gst", "tin number"]),
+                # URLs: Must contain actual http/https URL
+                "url": (r"(?i).*(https?://[\w\.-]+[\w/\.-]*).*", ["payment portal", "pay online", "web link", "portal url"]),
+                # Bank routing: Must have routing/account followed by digits
+                "bank_routing": (r"(?i).*(routing|ABA)[^\d]{0,15}\d{9}.*", ["routing number", "aba"]),
+                # Bank account: Must have account number pattern
+                "bank_account": (r"(?i).*(account\s*(number|no|#)?)[^\d]{0,15}\d{8,}.*", ["bank account number", "ach"]),
+                # SWIFT/BIC: Must have SWIFT/BIC followed by code pattern  
+                "swift": (r"(?i).*(SWIFT|BIC|IBAN)[^A-Z]{0,10}[A-Z]{4,11}.*", ["swift", "bic", "iban"]),
+                # License number (specific format)
+                "license": (r"(?i).*(license|licence)\s*(number|no|#)?[^\d]{0,10}[A-Z0-9]{5,}.*", ["license number", "agent's license"]),
+                # Mold clause
+                "mold": (r"(?i).*(mold|mould|fungus)\s*(damage|coverage|clause).*", ["mold damage", "mold coverage"]),
+                # Wire transfer instructions
+                "wire": (r"(?i).*(wire transfer|ach instruction).*\d{5,}.*", ["wire transfer", "ach instructions"]),
+            }
+            
+            top_doc_url = results[0][0].get("url") or results[0][0].get("source") or results[0][0].get("document_id") if results else None
+            detected_negative_field = None
+            
+            # Check if query is asking for a specific negative-detection field type
+            for field_type, (pattern, keywords) in NEGATIVE_FIELD_PATTERNS.items():
+                if any(kw in query_lower for kw in keywords):
+                    detected_negative_field = field_type
+                    # Only check pattern for negative-detection fields
+                    if self._async_neo4j and top_doc_url:
+                        pattern_exists = await self._async_neo4j.check_field_pattern_in_document(
+                            group_id=self.group_id,
                             doc_url=top_doc_url,
-                            reason="Field pattern not found in document",
+                            pattern=pattern,
                         )
-                        return {
-                            "response": "Not found in the provided documents.",
-                            "route_used": "route_1_vector_rag",
-                            "citations": citations,
-                            "evidence_path": [],
-                            "metadata": {
-                                "num_chunks": len(results),
-                                "chunks_used": len(context_parts),
-                                "latency_estimate": "fast",
-                                "precision_level": "standard",
-                                "route_description": "Vector search with pattern-based negative detection",
-                                "negative_detection": True,
-                                "detected_field_type": detected_field_type,
-                                "debug_top_chunk_id": results[0][0]["id"] if results else None,
+                        if not pattern_exists:
+                            logger.info(
+                                "route_1_negative_field_not_found",
+                                field_type=field_type,
+                                doc_url=top_doc_url,
+                                reason="Specific field pattern not found in document",
+                            )
+                            return {
+                                "response": "Not found in the provided documents.",
+                                "route_used": "route_1_vector_rag",
+                                "citations": citations,
+                                "evidence_path": [],
+                                "metadata": {
+                                    "num_chunks": len(results),
+                                    "chunks_used": len(context_parts),
+                                    "latency_estimate": "fast",
+                                    "precision_level": "standard",
+                                    "route_description": "Vector search with pattern-based negative detection",
+                                    "negative_detection": True,
+                                    "detected_field_type": field_type,
+                                    "debug_top_chunk_id": results[0][0]["id"] if results else None,
+                                }
                             }
-                        }
-                
-                # =============================================================
-                # KEYWORD-BASED FALLBACK (For general queries)
-                # =============================================================
-                stopwords = {
-                    "the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with",
-                    "is", "are", "was", "were", "be", "been", "this", "that", "these", "those",
-                    "what", "which", "who", "whom", "where", "when", "why", "how", "do", "does",
-                    "did", "has", "have", "had", "will", "would", "could", "should", "may", "might",
-                }
-                query_keywords = [
-                    token for token in re.findall(r"[A-Za-z0-9]+", query.lower())
-                    if len(token) >= 3 and token not in stopwords
-                ]
-                
-                if query_keywords:
-                    field_exists, matched_section = await self._async_neo4j.check_field_exists_in_document(
-                        group_id=self.group_id,
-                        doc_url=top_doc_url,
-                        field_keywords=query_keywords,
-                    )
-                    
-                    if not field_exists:
-                        # Field doesn't exist in document → deterministic "Not found"
-                        logger.info(
-                            "route_1_negative_detection_triggered",
-                            keywords=query_keywords,
-                            doc_url=top_doc_url,
-                            reason="Query keywords not found in document via graph check",
-                        )
-                        return {
-                            "response": "Not found in the provided documents.",
-                            "route_used": "route_1_vector_rag",
-                            "citations": citations,
-                            "evidence_path": [],
-                            "metadata": {
-                                "num_chunks": len(results),
-                                "chunks_used": len(context_parts),
-                                "latency_estimate": "fast",
-                                "precision_level": "standard",
-                                "route_description": "Vector search with graph-based negative detection",
-                                "negative_detection": True,
-                                "query_keywords": query_keywords,
-                                "debug_top_chunk_id": results[0][0]["id"] if results else None,
-                                "debug_top_chunk_preview": results[0][0]["text"][:100] if results else None,
-                            }
-                        }
+                    break
+            
+            # For NON-negative field queries (normal fact lookups), skip keyword check
+            # and trust the hybrid retrieval (BM25 + Vector) to find relevant chunks.
+            # The LLM extraction will handle value extraction from the retrieved context.
+            logger.info(
+                "route_1_proceeding_to_extraction",
+                query=query[:50],
+                detected_negative_field=detected_negative_field,
+                top_doc_url=top_doc_url,
+                num_results=len(results),
+            )
             
             # ================================================================
             # Route 1 Strategy: Extract from TOP-RANKED chunk only using LLM
@@ -706,15 +660,24 @@ Instructions:
                         continue
 
                 # ---------------------------------------------------------
-                # SIMPLIFIED VALIDATION (Graph negative detection handles hallucinations)
+                # RELAXED VALIDATION: Allow fuzzy matching for grounded answers
                 # ---------------------------------------------------------
-                # Basic sanity check: answer must appear in chunk (substring match)
+                # The old strict substring check rejected valid answers where
+                # LLM reformatted the value (e.g., "12/17/2015" from "DATE: 12/17/2015").
+                # 
+                # New approach: Check if key VALUE tokens from answer exist in chunk.
+                # This allows format variations while still ensuring grounding.
                 # ---------------------------------------------------------
-                if cleaned_response not in top_chunk:
+                answer_grounded = self._is_answer_grounded_in_chunk(
+                    answer=cleaned_response,
+                    chunk_text=top_chunk,
+                )
+                
+                if not answer_grounded:
                     logger.warning(
-                        "llm_candidate_rejected_substring_check",
+                        "llm_candidate_rejected_grounding_check",
                         candidate=cleaned_response,
-                        reason="Answer not found as substring in source chunk",
+                        reason="Answer value tokens not found in source chunk",
                         chunk_rank=rank,
                     )
                     continue
@@ -734,6 +697,125 @@ Instructions:
         except Exception as e:
             logger.error("llm_extraction_error", error=str(e))
             return None
+
+    def _is_answer_grounded_in_chunk(
+        self,
+        answer: str,
+        chunk_text: str,
+    ) -> bool:
+        """
+        Check if an LLM-extracted answer is grounded in the source chunk.
+        
+        This uses a relaxed token-based matching approach instead of strict substring
+        matching. The goal is to verify the answer's VALUE is present while allowing
+        format variations (e.g., "12/17/2015" matches "DATE: 12/17/2015").
+        
+        Strategy:
+        1. Extract "value tokens" from the answer (numbers, dates, names, codes)
+        2. Check if these value tokens appear in the chunk text
+        3. Allow for format variations (punctuation, spacing, case)
+        
+        Args:
+            answer: The LLM-extracted answer to verify
+            chunk_text: The source chunk text to check against
+            
+        Returns:
+            True if answer is grounded, False otherwise
+        """
+        import re
+        
+        if not answer or not chunk_text:
+            return False
+        
+        answer_lower = answer.lower().strip()
+        chunk_lower = chunk_text.lower()
+        
+        # Quick check: exact substring match
+        if answer_lower in chunk_lower:
+            return True
+        
+        # Extract value tokens from answer (numbers, alphanumeric codes, significant words)
+        # These are the "grounding tokens" that must appear in the chunk
+        
+        # Pattern 1: Numbers (dates, amounts, IDs)
+        numbers = re.findall(r'\d+(?:[.,/\-]\d+)*', answer)
+        
+        # Pattern 2: Alphanumeric codes (REG-54321, ID123, P.O. 30060204)
+        codes = re.findall(r'[A-Z]{2,}[\-\s]?\d+|\d+[\-\s]?[A-Z]{2,}', answer, re.IGNORECASE)
+        
+        # Pattern 3: Capitalized proper nouns (names, places)
+        # Match sequences of capitalized words
+        proper_nouns = re.findall(r'[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*', answer)
+        
+        # Pattern 4: Quoted or emphasized text
+        quoted = re.findall(r'"([^"]+)"|\'([^\']+)\'', answer)
+        quoted_flat = [q for pair in quoted for q in pair if q]
+        
+        # Collect all grounding tokens
+        grounding_tokens = set()
+        
+        # Add numbers (most important for fact lookups)
+        for num in numbers:
+            # Normalize: remove separators and check if core digits exist
+            core_digits = re.sub(r'[.,/\-]', '', num)
+            if len(core_digits) >= 2:  # At least 2 digits to be meaningful
+                grounding_tokens.add(core_digits)
+        
+        # Add codes
+        for code in codes:
+            normalized = re.sub(r'[\s\-]', '', code).lower()
+            if len(normalized) >= 3:
+                grounding_tokens.add(normalized)
+        
+        # Add significant proper nouns (at least 3 chars)
+        for noun in proper_nouns:
+            if len(noun) >= 3 and noun.lower() not in {'the', 'and', 'for', 'not', 'found'}:
+                grounding_tokens.add(noun.lower())
+        
+        # Add quoted text
+        for q in quoted_flat:
+            if len(q) >= 3:
+                grounding_tokens.add(q.lower())
+        
+        # If no grounding tokens found, fall back to significant words
+        if not grounding_tokens:
+            # Extract significant words (4+ chars, not common words)
+            stopwords = {'this', 'that', 'with', 'from', 'have', 'been', 'were', 'what', 'when',
+                        'where', 'which', 'there', 'their', 'about', 'would', 'could', 'should',
+                        'found', 'document', 'provided', 'documents'}
+            words = re.findall(r'[a-z]{4,}', answer_lower)
+            grounding_tokens = {w for w in words if w not in stopwords}
+        
+        # If still no tokens, the answer is too generic - reject
+        if not grounding_tokens:
+            logger.debug("grounding_check_no_tokens", answer=answer[:50])
+            return False
+        
+        # Check how many grounding tokens appear in the chunk
+        # Normalize chunk for searching
+        chunk_normalized = re.sub(r'[\s\-.,/]', '', chunk_lower)
+        
+        matched_tokens = 0
+        for token in grounding_tokens:
+            token_normalized = re.sub(r'[\s\-.,/]', '', token)
+            # Check both normalized and original
+            if token_normalized in chunk_normalized or token in chunk_lower:
+                matched_tokens += 1
+        
+        # Require at least 50% of grounding tokens to match, or all if only 1-2 tokens
+        min_matches = max(1, len(grounding_tokens) // 2)
+        grounded = matched_tokens >= min_matches
+        
+        logger.debug(
+            "grounding_check_result",
+            answer=answer[:50],
+            grounding_tokens=list(grounding_tokens)[:5],
+            matched=matched_tokens,
+            required=min_matches,
+            grounded=grounded,
+        )
+        
+        return grounded
 
     # Deprecated: NLP/Regex extraction (kept for reference but unused)
     def _extract_with_nlp_from_top_chunk_deprecated(

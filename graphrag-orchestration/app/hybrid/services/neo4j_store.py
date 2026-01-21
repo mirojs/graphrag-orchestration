@@ -1388,11 +1388,19 @@ class Neo4jStoreV3:
             if c.metadata and isinstance(c.metadata, dict):
                 metadata_to_store = dict(c.metadata)
 
-            # Prevent very large DI table payloads from being persisted in Neo4j.
-            # Keep a lightweight signal instead.
+            # Keep structured table data for querying specific fields
+            # Strip only unnecessary bulk data
             if "tables" in metadata_to_store:
-                tables_val = metadata_to_store.pop("tables")
+                tables_val = metadata_to_store["tables"]
                 if isinstance(tables_val, list) and tables_val:
+                    # Keep only essential fields: headers and rows
+                    metadata_to_store["tables"] = [
+                        {
+                            "headers": t.get("headers", []),
+                            "rows": t.get("rows", [])
+                        }
+                        for t in tables_val
+                    ]
                     metadata_to_store["table_count"] = len(tables_val)
 
             chunk_data.append(
@@ -1410,7 +1418,76 @@ class Neo4jStoreV3:
         with self.driver.session(database=self.database) as session:
             result = session.run(query, chunks=chunk_data, group_id=group_id)
             record = result.single()
-            return cast(int, record["count"]) if record else 0
+            count = cast(int, record["count"]) if record else 0
+            
+            # Create Table nodes for chunks with table data
+            self._create_table_nodes(group_id, chunks)
+            
+            return count
+    
+    def _create_table_nodes(self, group_id: str, chunks: List[TextChunk]) -> None:
+        """Create Table nodes from chunks with table metadata."""
+        tables_to_create = []
+        
+        for chunk in chunks:
+            if not chunk.metadata or not isinstance(chunk.metadata, dict):
+                continue
+            
+            tables = chunk.metadata.get("tables", [])
+            if not tables:
+                continue
+            
+            for table_idx, table_data in enumerate(tables):
+                headers = table_data.get("headers", [])
+                rows = table_data.get("rows", [])
+                
+                if not headers:
+                    continue
+                
+                # Create unique table ID
+                table_id = f"{chunk.id}_table_{table_idx}"
+                
+                tables_to_create.append({
+                    "id": table_id,
+                    "chunk_id": chunk.id,
+                    "headers": headers,
+                    "rows": json.dumps(rows),  # Store rows as JSON string
+                    "row_count": len(rows),
+                    "column_count": len(headers),
+                })
+        
+        if not tables_to_create:
+            return
+        
+        # Batch create Table nodes
+        query = """
+        UNWIND $tables AS t
+        MERGE (table:Table {id: t.id, group_id: $group_id})
+        SET table.headers = t.headers,
+            table.rows = t.rows,
+            table.row_count = t.row_count,
+            table.column_count = t.column_count,
+            table.updated_at = datetime()
+        
+        WITH table, t
+        MATCH (chunk:TextChunk {id: t.chunk_id, group_id: $group_id})
+        MERGE (table)-[:IN_CHUNK]->(chunk)
+        
+        WITH table, chunk
+        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+        FOREACH (_ IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (table)-[:IN_SECTION]->(s)
+        )
+        
+        WITH table, chunk
+        MATCH (chunk)-[:PART_OF]->(d:Document)
+        MERGE (table)-[:IN_DOCUMENT]->(d)
+        
+        RETURN count(table) AS count
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            session.run(query, tables=tables_to_create, group_id=group_id)
     
     # ==================== Document Operations ====================
     

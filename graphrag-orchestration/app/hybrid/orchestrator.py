@@ -490,24 +490,42 @@ class HybridPipeline:
             )
             
             # ================================================================
-            # Route 1 Strategy: Extract from TOP-RANKED chunk only using LLM
+            # Route 1 Strategy: Try structured table extraction first, then LLM
             # ================================================================
-            # This combines the precision of "Top Chunk" focus (avoiding cross-doc pollution)
-            # with the adaptability of LLM (handling synonyms, implied values, unstructured text).
+            # For table-based queries, try extracting directly from Table nodes
+            # This avoids LLM confusion with adjacent columns (e.g., DUE DATE vs TERMS)
             
-            # Extract from top chunk only (most relevant)
-            llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
+            # Try table-based extraction first
+            table_answer = await self._extract_from_tables(query, results)
             
-            if llm_answer:
-                logger.info("route_1_llm_extraction_success", 
-                           answer=llm_answer[:50],
-                           from_top_chunk=True)
-                answer = llm_answer
+            if table_answer:
+                logger.info("route_1_table_extraction_success", 
+                           answer=table_answer[:50],
+                           from_table=True)
+                answer = table_answer
             else:
-                # If LLM can't extract, return "not found"
-                logger.info("route_1_llm_extraction_failed",
-                           query=query[:100])
-                answer = "Not found in the provided documents."
+                # Fall back to LLM extraction from top chunk
+                llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
+            
+            if table_answer:
+                logger.info("route_1_table_extraction_success", 
+                           answer=table_answer[:50],
+                           from_table=True)
+                answer = table_answer
+            else:
+                # Fall back to LLM extraction from top chunk
+                llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
+            
+                if llm_answer:
+                    logger.info("route_1_llm_extraction_success", 
+                               answer=llm_answer[:50],
+                               from_top_chunk=True)
+                    answer = llm_answer
+                else:
+                    # If LLM can't extract, return "not found"
+                    logger.info("route_1_llm_extraction_failed",
+                               query=query[:100])
+                    answer = "Not found in the provided documents."
             
             return {
                 "response": answer,
@@ -535,6 +553,110 @@ class HybridPipeline:
             result["metadata"]["fallback_from"] = "route_1_vector_rag"
             result["metadata"]["fallback_reason"] = str(e)
             return result
+
+    async def _extract_from_tables(
+        self,
+        query: str,
+        chunks_with_scores: list
+    ) -> Optional[str]:
+        """
+        Extract answer from structured Table nodes when query asks for specific table field.
+        
+        This avoids LLM confusion with adjacent columns (e.g., asking for "due date" 
+        but LLM extracting from "terms" column).
+        
+        Returns None if:
+        - No table data found in chunks
+        - Query doesn't match a table header
+        - Value not found in matched column
+        """
+        if not chunks_with_scores or not self._async_neo4j:
+            return None
+        
+        # Extract field name from query (e.g., "due date", "salesperson", "total")
+        import re
+        query_lower = query.lower()
+        
+        # Common table field patterns
+        FIELD_PATTERNS = [
+            r"(?:what is|what's|find|get|show|tell me).*?(?:the\s+)?([a-z\s]+?)(?:\s+for|\s+in|\s+on|\s+of|\s+from|\?|$)",
+            r"(?:invoice|contract|warranty)\s+([a-z\s]+?)(?:\?|$)",
+        ]
+        
+        potential_field = None
+        for pattern in FIELD_PATTERNS:
+            match = re.search(pattern, query_lower)
+            if match:
+                potential_field = match.group(1).strip()
+                break
+        
+        if not potential_field:
+            return None
+        
+        # Get chunk IDs from top results
+        chunk_ids = [chunk["id"] for chunk, _ in chunks_with_scores[:3]]  # Check top 3 chunks
+        
+        try:
+            # Query Table nodes for these chunks
+            q = """
+            MATCH (t:Table)-[:IN_CHUNK]->(c:TextChunk)
+            WHERE c.id IN $chunk_ids
+              AND c.group_id = $group_id
+            RETURN t.headers AS headers, t.rows AS rows
+            LIMIT 5
+            """
+            
+            records = await self._async_neo4j.execute_read(q, {
+                "chunk_ids": chunk_ids,
+                "group_id": self._group_id
+            })
+            
+            if not records:
+                return None
+            
+            # Search for matching column and extract value
+            for record in records:
+                headers = record.get("headers", [])
+                rows_json = record.get("rows", "[]")
+                
+                if not headers:
+                    continue
+                
+                # Parse rows JSON
+                import json as json_lib
+                try:
+                    rows = json_lib.loads(rows_json) if isinstance(rows_json, str) else rows_json
+                except:
+                    continue
+                
+                # Find matching header (fuzzy match)
+                matched_header = None
+                for header in headers:
+                    header_lower = header.lower()
+                    # Match if query field is substring of header or vice versa
+                    if (potential_field in header_lower or 
+                        header_lower in potential_field or
+                        # Handle synonyms
+                        (potential_field in ["due date", "date due"] and "due" in header_lower and "date" in header_lower)):
+                        matched_header = header
+                        break
+                
+                if matched_header and rows:
+                    # Extract value from first matching row
+                    for row in rows:
+                        value = row.get(matched_header, "").strip()
+                        if value:
+                            logger.info("route_1_table_field_match",
+                                       query_field=potential_field,
+                                       table_header=matched_header,
+                                       value=value)
+                            return value
+            
+            return None
+            
+        except Exception as e:
+            logger.warning("route_1_table_extraction_failed", error=str(e))
+            return None
 
     async def _extract_with_llm_from_top_chunk(
         self,

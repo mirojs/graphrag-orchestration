@@ -345,18 +345,30 @@ class HybridPipeline:
             )
             
             if not results:
-                return {
-                    "response": "No relevant text found for this query.",
-                    "route_used": "route_1_vector_rag",
-                    "citations": [],
-                    "evidence_path": [],
-                    "metadata": {
-                        "num_chunks": 0,
-                        "latency_estimate": "fast",
-                        "precision_level": "standard",
-                        "route_description": "Vector search on text chunks"
+                # GRAPH-BASED FALLBACK: Use Entity + Section nodes when hybrid search fails
+                # This catches cases where BM25 keyword matching fails but entity graph has connections
+                logger.info("route_1_hybrid_empty_trying_entity_fallback", query=query[:80])
+                
+                entity_results = await self._search_via_entity_graph(query, top_k=8)
+                
+                if entity_results:
+                    logger.info("route_1_entity_fallback_success", 
+                               num_chunks=len(entity_results),
+                               query=query[:50])
+                    results = entity_results
+                else:
+                    return {
+                        "response": "No relevant text found for this query.",
+                        "route_used": "route_1_vector_rag",
+                        "citations": [],
+                        "evidence_path": [],
+                        "metadata": {
+                            "num_chunks": 0,
+                            "latency_estimate": "fast",
+                            "precision_level": "standard",
+                            "route_description": "Vector search on text chunks"
+                        }
                     }
-                }
             
             # Build context from text chunks grouped by document (like Route 3)
             # This helps LLM understand which document each fact comes from
@@ -1284,6 +1296,136 @@ Instructions:
                     rows.append((chunk, float(r.get("score") or 0.0)))
             return rows
 
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self._executor, _run_sync)
+
+    async def _search_via_entity_graph(
+        self,
+        query: str,
+        top_k: int = 8,
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """Graph-based retrieval via Entity nodes when hybrid search fails.
+        
+        This fallback uses the entity graph structure:
+        1. Extract key terms from query
+        2. Search Entity nodes by name/aliases
+        3. Follow MENTIONS edges to get TextChunks
+        4. Use IN_SECTION to get sibling chunks for context
+        
+        This catches cases where:
+        - BM25 keyword matching fails (terms not in fulltext index)
+        - Vector similarity is too low
+        - But entity extraction during indexing captured the concepts
+        
+        Args:
+            query: User query string
+            top_k: Maximum chunks to return
+            
+        Returns:
+            List of (chunk_dict, score) tuples
+        """
+        if not self.neo4j_driver:
+            return []
+        
+        import re
+        
+        # Extract meaningful terms from query (remove stopwords, keep nouns/adjectives)
+        STOPWORDS = {
+            'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had',
+            'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been', 'were', 'they',
+            'this', 'that', 'with', 'from', 'what', 'which', 'their', 'will', 'would',
+            'there', 'could', 'other', 'into', 'more', 'some', 'such', 'than', 'then',
+            'these', 'when', 'where', 'who', 'how', 'does', 'about', 'each', 'she',
+            'is', 'it', 'an', 'a', 'of', 'in', 'to', 'on', 'at', 'by', 'as', 'or',
+        }
+        
+        # Tokenize and filter
+        words = re.findall(r'\b[a-zA-Z]{3,}\b', query.lower())
+        search_terms = [w for w in words if w not in STOPWORDS]
+        
+        if not search_terms:
+            return []
+        
+        # Build regex pattern for entity name/alias matching
+        # Match any entity whose name or alias contains any of our search terms
+        term_pattern = '|'.join(re.escape(t) for t in search_terms)
+        
+        group_id = self.group_id
+        
+        def _run_sync():
+            # Cypher query to find entities matching query terms, then get their chunks
+            cypher = """
+            CYPHER 25
+            // Find entities matching query terms (by name or aliases)
+            MATCH (e:Entity {group_id: $group_id})
+            WHERE e.name =~ $pattern
+               OR any(a IN coalesce(e.aliases, []) WHERE a =~ $pattern)
+            
+            // Get chunks that mention these entities
+            MATCH (t:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+            
+            // Get document and section context
+            OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+            
+            // Score by number of matching entities mentioned in chunk
+            WITH t, d, s, count(DISTINCT e) AS entityMatches
+            
+            RETURN t.id AS id,
+                   t.text AS text,
+                   t.chunk_index AS chunk_index,
+                   d.id AS document_id,
+                   d.title AS document_title,
+                   d.source AS document_source,
+                   s.id AS section_id,
+                   s.path_key AS section_path_key,
+                   entityMatches AS score
+            ORDER BY entityMatches DESC, t.chunk_index ASC
+            LIMIT $top_k
+            """
+            
+            rows = []
+            try:
+                with self.neo4j_driver.session() as session:
+                    # Build case-insensitive regex pattern
+                    regex_pattern = f'(?i).*({term_pattern}).*'
+                    
+                    result = session.run(
+                        cypher,
+                        group_id=group_id,
+                        pattern=regex_pattern,
+                        top_k=top_k,
+                    )
+                    
+                    for r in result:
+                        chunk = {
+                            "id": r["id"],
+                            "text": r["text"],
+                            "chunk_index": r.get("chunk_index", 0),
+                            "document_id": r.get("document_id", ""),
+                            "document_title": r.get("document_title", ""),
+                            "document_source": r.get("document_source", ""),
+                            "section_id": r.get("section_id", ""),
+                            "section_path_key": r.get("section_path_key", ""),
+                        }
+                        # Normalize score to 0-1 range (entity matches / top_k)
+                        normalized_score = float(r.get("score", 0)) / top_k
+                        rows.append((chunk, normalized_score))
+                        
+                    logger.info("entity_graph_search_complete",
+                               query=query[:50],
+                               search_terms=search_terms[:5],
+                               regex_pattern=regex_pattern[:100],
+                               num_results=len(rows))
+                               
+            except Exception as e:
+                logger.error("entity_graph_search_failed",
+                            error=str(e),
+                            error_type=type(e).__name__,
+                            query=query[:50])
+            
+            return rows
+        
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _run_sync)
 

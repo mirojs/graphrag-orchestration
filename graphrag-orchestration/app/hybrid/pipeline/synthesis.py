@@ -597,6 +597,35 @@ Response:"""
         """
         citation_map: Dict[str, Dict[str, str]] = {}
         
+        def _normalize_doc_key(doc_key: str) -> str:
+            """
+            Normalize document keys to merge sub-parts with parent documents.
+            
+            Removes common sub-part prefixes/patterns:
+            - "Document Name - Exhibit A" -> "Document Name"
+            - "Document Name - Appendix B" -> "Document Name"
+            - "Document Name - Schedule 1" -> "Document Name"
+            - "Agreement (Section 3: Arbitration)" -> "Agreement"
+            """
+            if not doc_key or not isinstance(doc_key, str):
+                return doc_key
+            
+            import re
+            
+            # Pattern 1: Remove " - Exhibit/Appendix/Schedule/Attachment/Annex ..."
+            patterns = [
+                r'\s*[-–—]\s*(Exhibit|Appendix|Schedule|Attachment|Annex|Section)\s+[A-Z0-9].*$',
+                r'\s*[-–—]\s*(Exhibit|Appendix|Schedule|Attachment|Annex)$',
+                # Pattern 2: Remove parenthetical sections like "(Section 3: ...)"
+                r'\s*\(Section\s+\d+:?\s*[^)]*\)$',
+                r'\s*\([^)]*Arbitration[^)]*\)$',
+            ]
+            
+            for pattern in patterns:
+                doc_key = re.sub(pattern, '', doc_key, flags=re.IGNORECASE)
+            
+            return doc_key.strip()
+        
         # Group chunks by document for clearer context boundaries
         from collections import defaultdict
         doc_groups: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
@@ -604,11 +633,13 @@ Response:"""
         for i, chunk in enumerate(text_chunks):
             # Extract document identity from metadata or source
             meta = chunk.get("metadata", {})
-            doc_key = (
+            raw_doc_key = (
                 meta.get("document_id") 
                 or meta.get("document_title") 
                 or chunk.get("source", "Unknown")
             )
+            # Normalize to merge sub-parts with parent
+            doc_key = _normalize_doc_key(raw_doc_key)
             doc_groups[doc_key].append((i, chunk))
         
         context_parts = []
@@ -698,27 +729,6 @@ Response:"""
         """Prompt for DRIFT-style multi-question synthesis."""
         sub_q_list = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(sub_questions))
         
-        # Detect document counting queries (Q-D8 style)
-        q_lower = query.lower()
-        is_document_counting = any(pattern in q_lower for pattern in [
-            "how many document", "in how many", "number of document",
-            "which document", "what document", "count of document",
-            "appears in", "mentioned in", "found in"
-        ])
-        
-        # Add special guidance for document counting queries
-        counting_guidance = ""
-        if is_document_counting:
-            counting_guidance = """
-IMPORTANT for Document Counting:
-- When counting documents an entity appears in, count PARENT DOCUMENTS only.
-- DO NOT count document sub-parts (Exhibits, Appendices, Schedules, Attachments, Annexes) 
-  as separate documents from their parent.
-- Example: If "Fabrikam Inc." appears in "Master Agreement" and "Master Agreement - Exhibit A",
-  count this as ONE document (the Master Agreement), not two.
-- Focus on distinct, independent documents (Contracts, Invoices, NDAs, etc.).
-"""
-        
         return f"""You are analyzing a complex query that was decomposed into multiple sub-questions.
 
 Original Query: {query}
@@ -735,7 +745,7 @@ Instructions:
 3. EVERY factual claim must include a citation [n] to the evidence
 4. Structure your response to follow the logical flow of the sub-questions
 5. Include a final synthesis section that ties everything together
-{counting_guidance}
+
 Format:
 ## Analysis
 

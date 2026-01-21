@@ -550,20 +550,53 @@ class HybridPipeline:
             if not records:
                 return None
             
-            # Search for matching column and extract value
+            # Parse all tables first
+            import json as json_lib
+            parsed_tables = []
             for record in records:
                 headers = record.get("headers", [])
                 rows_json = record.get("rows", "[]")
-                
                 if not headers:
                     continue
-                
-                # Parse rows JSON
-                import json as json_lib
                 try:
                     rows = json_lib.loads(rows_json) if isinstance(rows_json, str) else rows_json
                 except:
                     continue
+                parsed_tables.append({"headers": headers, "rows": rows})
+            
+            # For TOTAL/AMOUNT queries, prioritize summary tables (SUBTOTAL header)
+            # These are invoice footer tables with structure like:
+            # Headers: ['SUBTOTAL', '29900.00']
+            # Rows: [{'SUBTOTAL': 'TOTAL', '29900.00': '29900.00'}]
+            if potential_field in ["total", "amount", "subtotal", "total amount", "amount due"]:
+                for table in parsed_tables:
+                    headers = table["headers"]
+                    rows = table["rows"]
+                    headers_lower = [h.lower() for h in headers]
+                    
+                    # Check if this looks like a summary table (has SUBTOTAL or TOTAL as first header)
+                    if headers_lower and ("subtotal" in headers_lower[0] or "total" in headers_lower[0]):
+                        # This is a summary table - look for the TOTAL row
+                        for row in rows:
+                            # Find the label column (usually first)
+                            label_key = headers[0] if headers else None
+                            label = row.get(label_key, "").lower().strip() if label_key else ""
+                            
+                            if "total" in label and "sub" not in label:  # Match "TOTAL" but not "SUBTOTAL"
+                                # Get the value from the numeric column (second header)
+                                if len(headers) > 1:
+                                    value = row.get(headers[1], "").strip()
+                                    if value:
+                                        logger.info("route_1_table_summary_match",
+                                                   query_field=potential_field,
+                                                   label=label,
+                                                   value=value)
+                                        return value
+            
+            # Standard matching: find header that matches query field
+            for table in parsed_tables:
+                headers = table["headers"]
+                rows = table["rows"]
                 
                 # Find matching header (fuzzy match)
                 matched_header = None

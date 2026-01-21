@@ -207,9 +207,24 @@ class Neo4jTextUnitStore:
         # Neo4j python driver is sync; run in a thread to avoid blocking the event loop.
         return await asyncio.to_thread(self._get_chunks_for_entities_batch_sync, names)
 
-    def _get_chunks_for_entities_batch_sync(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
-        """Batch query to fetch chunks for multiple entities in a single round-trip."""
-        # Simplified: fresh data uses TextChunk->__Entity__ only
+    def _get_chunks_for_entities_batch_sync(
+        self,
+        entity_names: List[str],
+        max_per_section: int = 3,
+        max_per_document: int = 6,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Batch query to fetch chunks for multiple entities in a single round-trip.
+        
+        Enhanced with section-aware diversification (Jan 2026):
+        - Fetches section_id via IN_SECTION edge
+        - Applies max_per_section and max_per_document caps for better coverage
+        """
+        import os
+        
+        # Check if section diversification is enabled
+        section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
+        
+        # Enhanced query: also fetch section info via IN_SECTION edge
         query = """
         UNWIND $entity_names AS entity_name
         MATCH (e:`__Entity__` {group_id: $group_id})
@@ -217,9 +232,10 @@ class Neo4jTextUnitStore:
             OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name))
         MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
         OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
-        WITH entity_name, c, d
+        OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
+        WITH entity_name, c, d, s
         ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
-        WITH entity_name, collect({chunk: c, doc: d})[0..$limit] AS items
+        WITH entity_name, collect({chunk: c, doc: d, section: s})[0..$limit] AS items
         RETURN entity_name, items
         """
         
@@ -240,11 +256,16 @@ class Neo4jTextUnitStore:
                 if not entity_name:
                     continue
                 
+                # Track per-section and per-document counts for diversification
+                per_section_counts: Dict[str, int] = {}
+                per_doc_counts: Dict[str, int] = {}
+                
                 rows: List[Dict[str, Any]] = []
                 seen_chunk_ids: set[str] = set()
                 for item in items:
                     c = (item or {}).get("chunk")
                     d = (item or {}).get("doc")
+                    s = (item or {}).get("section")
                     if not c:
                         continue
 
@@ -282,13 +303,49 @@ class Neo4jTextUnitStore:
                     doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
                     url = meta.get("url") or doc_source or ""
                     
+                    # Extract section info from IN_SECTION edge (preferred) or metadata
+                    section_id = (s.get("id") if s else "") or ""
+                    section_path_key = (s.get("path_key") if s else "") or ""
+                    
                     # Build a readable section label for citations.
                     section_path = meta.get("section_path")
                     section_label = ""
-                    if isinstance(section_path, list) and section_path:
+                    if section_path_key:
+                        section_label = section_path_key
+                    elif isinstance(section_path, list) and section_path:
                         section_label = " > ".join(str(x) for x in section_path if x)
                     elif isinstance(section_path, str) and section_path:
                         section_label = section_path
+                    
+                    # Apply section-aware diversification (if enabled)
+                    if section_graph_enabled:
+                        # Use section_id for diversification key (stable), fallback to path_key
+                        section_key = section_id or section_label or "[unknown]"
+                        doc_key = doc_id or doc_title or doc_source or "[unknown]"
+                        
+                        # Check section cap
+                        if per_section_counts.get(section_key, 0) >= max_per_section:
+                            logger.debug(
+                                "route2_section_cap_reached",
+                                entity=entity_name,
+                                section=section_key,
+                                count=per_section_counts.get(section_key, 0),
+                            )
+                            continue
+                        
+                        # Check document cap
+                        if per_doc_counts.get(doc_key, 0) >= max_per_document:
+                            logger.debug(
+                                "route2_document_cap_reached",
+                                entity=entity_name,
+                                document=doc_key,
+                                count=per_doc_counts.get(doc_key, 0),
+                            )
+                            continue
+                        
+                        # Update counts
+                        per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
+                        per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
                     
                     source_label = doc_title or doc_source or url or "neo4j"
                     if section_label:
@@ -305,6 +362,8 @@ class Neo4jTextUnitStore:
                                 "document_id": str(doc_id),  # Graph node ID - authoritative grouping key
                                 "document_title": str(doc_title),
                                 "document_source": str(doc_source),
+                                "section_id": str(section_id),  # Section node ID for diversification
+                                "section_path_key": str(section_path_key),
                             },
                         }
                     )
@@ -313,6 +372,27 @@ class Neo4jTextUnitStore:
                 
                 if not rows:
                     logger.debug("neo4j_text_store_no_chunks", entity=entity_name)
+                elif section_graph_enabled:
+                    logger.debug(
+                        "route2_section_diversification_applied",
+                        entity=entity_name,
+                        chunks_returned=len(rows),
+                        unique_sections=len(per_section_counts),
+                        unique_docs=len(per_doc_counts),
+                    )
+        
+        # Summary log for Route 2 chunk retrieval
+        total_chunks = sum(len(v) for v in results.values())
+        entities_with_chunks = sum(1 for v in results.values() if v)
+        logger.info(
+            "route2_chunks_retrieved",
+            num_entities=len(entity_names),
+            entities_with_chunks=entities_with_chunks,
+            total_chunks=total_chunks,
+            section_diversification=section_graph_enabled,
+            max_per_section=max_per_section if section_graph_enabled else None,
+            max_per_document=max_per_document if section_graph_enabled else None,
+        )
         
         return results
 

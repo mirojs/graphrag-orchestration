@@ -26,7 +26,7 @@ Note: Profile constraints always override base routing.
 Use for `mode=vector` (or queries intended to route to `vector`).
 
 1. **Q-V1:** What is the invoice **TOTAL** amount?
-   - **Expected:** `TOTAL 29900.00` (also shown as SUBTOTAL and AMOUNT DUE)
+   - **Expected:** `29900.00`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 2. **Q-V2:** What is the invoice **DUE DATE**?
@@ -34,7 +34,7 @@ Use for `mode=vector` (or queries intended to route to `vector`).
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 3. **Q-V3:** What are the invoice **TERMS**?
-   - **Expected:** `Due on contract`
+   - **Expected:** `Due on contract signing`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 4. **Q-V4:** In the purchase contract, list the **3 installment amounts** and their triggers.
@@ -42,7 +42,7 @@ Use for `mode=vector` (or queries intended to route to `vector`).
    - **Source:** purchase_contract.pdf (chunk 0)
 
 5. **Q-V5:** What is the **labor warranty** duration in the purchase contract?
-   - **Expected:** `Contractor warrants labor for 90 days.`
+   - **Expected:** `90 days`
    - **Source:** purchase_contract.pdf (chunk 0 or chunk 1)
 
 6. **Q-V6:** In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?

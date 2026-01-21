@@ -494,7 +494,10 @@ class HybridPipeline:
         
         # Extract field name from query (e.g., "due date", "salesperson", "total")
         import re
-        query_lower = query.lower()
+        
+        # Strip markdown formatting from query (e.g., **DUE DATE** -> DUE DATE)
+        query_clean = re.sub(r'\*\*([^*]+)\*\*', r'\1', query)
+        query_lower = query_clean.lower()
         
         # Common table field patterns - extract the actual field being asked for
         # Pattern 1: Extract field at the END of question (most reliable)

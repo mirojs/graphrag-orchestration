@@ -1,0 +1,93 @@
+Loaded 19 questions from QUESTION_BANK_5PDFS_2025-12-24.md
+  Positive tests (Q-V): 10
+  Negative tests (Q-N): 9
+Loaded 59 ground truth answers
+
+======================================================================
+Scenario: hybrid_route1_summary (response_type=summary)
+Questions: 19, Repeats: 1
+======================================================================
+
+[Q-V1] What is the invoice **TOTAL** amount?
+  [1/1] 3237ms - 8 chars
+  Accuracy: containment=0.11, f1=0.20
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3237ms
+[Q-V2] What is the invoice **DUE DATE**?
+  [1/1] 2157ms - 23 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2157ms
+[Q-V3] What are the invoice **TERMS**?
+  [1/1] 2158ms - 23 chars
+  Accuracy: containment=1.00, f1=0.86
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2158ms
+[Q-V4] In the purchase contract, list the **3 installment amounts** and their triggers.
+  [1/1] 2580ms - 77 chars
+  Accuracy: containment=1.00, f1=1.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2580ms
+[Q-V5] What is the **labor warranty** duration in the purchase contract?
+  [1/1] 2330ms - 7 chars
+  Accuracy: containment=0.17, f1=0.25
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2330ms
+[Q-V6] In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?
+  [1/1] 3771ms - 7 chars
+  Accuracy: containment=0.14, f1=0.25
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3771ms
+[Q-V7] In the holding tank contract, what is the pumper’s **registration number**?
+  [1/1] 3474ms - 36 chars
+  Accuracy: containment=0.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3474ms
+[Q-V8] What is the warranty’s builder address city/state/zip?
+  [1/1] 2672ms - 19 chars
+  Accuracy: containment=1.00, f1=1.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2672ms
+[Q-V9] Who is the invoice **SALESPERSON**?
+  [1/1] 1984ms - 11 chars
+  Accuracy: containment=1.00, f1=1.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1984ms
+[Q-V10] What is the invoice **P.O. NUMBER**?
+  [1/1] 3036ms - 8 chars
+  Accuracy: containment=1.00, f1=1.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3036ms
+[Q-N1] What is the invoice’s **bank routing number** for payment?
+  [1/1] 2264ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2264ms
+[Q-N2] What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+  [1/1] 2223ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2223ms
+[Q-N3] What is the vendor’s **VAT / Tax ID number** on the invoice?
+  [1/1] 2176ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2176ms
+[Q-N5] What is the invoice’s **bank account number** for ACH/wire payments?
+  [1/1] 2193ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2193ms
+[Q-N6] Which documents are governed by the laws of **California**?
+  [1/1] 1572ms - 38 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1572ms
+[Q-N7] What is the property management Agent’s **license number**?
+  [1/1] 5054ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=5054ms
+[Q-N8] What is the purchase contract’s required **wire transfer / ACH instructions**?
+  [1/1] 3305ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3305ms
+[Q-N9] What is the exact clause about **mold damage** coverage in the warranty?
+  [1/1] 4791ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4791ms
+[Q-N10] What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+  [1/1] 2887ms - 36 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2887ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route1_vector_rag_20260121T121117Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route1_vector_rag_20260121T121117Z.md
+======================================================================
+

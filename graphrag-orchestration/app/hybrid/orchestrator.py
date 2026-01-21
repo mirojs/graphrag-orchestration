@@ -529,17 +529,17 @@ class HybridPipeline:
         if not potential_field:
             return None
         
-        # Get chunk IDs from top results
-        chunk_ids = [chunk["id"] for chunk, _ in chunks_with_scores[:3]]  # Check top 3 chunks
+        # Get chunk IDs from top vector search results
+        chunk_ids = [chunk["id"] for chunk, _ in chunks_with_scores[:8]]  # Top 8 chunks
         
         try:
-            # Query Table nodes for these chunks
+            # Graph traversal: find Tables connected to top-ranked chunks
+            # This uses the [:IN_CHUNK] relationship (Table -> TextChunk)
+            # More efficient than searching all tables, maintains relevance
             q = """
             MATCH (t:Table)-[:IN_CHUNK]->(c:TextChunk)
-            WHERE c.id IN $chunk_ids
-              AND c.group_id = $group_id
+            WHERE c.id IN $chunk_ids AND c.group_id = $group_id
             RETURN t.headers AS headers, t.rows AS rows
-            LIMIT 5
             """
             
             records = await self._async_neo4j.execute_read(q, {
@@ -620,6 +620,31 @@ class HybridPipeline:
                                        table_header=matched_header,
                                        value=value)
                             return value
+            
+            # Cell-content search: find field label WITHIN cell values
+            # Handles merged cells like: "Pumper's Registration Number REG-54321"
+            # where "registration number" is part of the cell text, not a header
+            for table in parsed_tables:
+                rows = table["rows"]
+                for row in rows:
+                    for cell_key, cell_value in row.items():
+                        cell_text = str(cell_value).lower() if cell_value else ""
+                        # Check if query field appears as a label within cell text
+                        if potential_field in cell_text:
+                            # Extract the value after the label
+                            # Pattern: "Label Value" or "Label: Value" or "Label - Value"
+                            import re
+                            # Try to extract value after the field name
+                            pattern = rf"{re.escape(potential_field)}[:\s\-]*([A-Z0-9][\w\-]*)"
+                            match = re.search(pattern, cell_text, re.IGNORECASE)
+                            if match:
+                                extracted_value = match.group(1).strip()
+                                if extracted_value:
+                                    logger.info("route_1_table_cell_content_match",
+                                               query_field=potential_field,
+                                               cell_text=cell_text[:50],
+                                               value=extracted_value)
+                                    return extracted_value
             
             return None
             
@@ -737,9 +762,9 @@ User Query: {query}
 
 Instructions:
 1. Extract the EXACT answer from the context above.
-2. If the answer is a specific value (price, date, name, ID), return ONLY that value.
+2. If the answer is a specific value (price, date, name, ID), return ONLY that value WITH any qualifying phrases (e.g., "in excess of", "greater than", "at least", "up to", "maximum").
 3. If the query asks for a total/amount and multiple exist, look for "Total", "Amount Due", or "Balance".
-4. Do not generate conversational text. Just the value.
+4. Do not generate conversational text. Just the value with its qualifiers.
 5. Do not guess or hallucinate. Only extract if explicitly stated in the text.
 6. If the answer is not explicitly present in the provided context, you MUST return "Not found".
 """

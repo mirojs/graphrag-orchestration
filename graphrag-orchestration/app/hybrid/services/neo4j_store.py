@@ -1376,9 +1376,12 @@ class Neo4jStoreV3:
             SET t.embedding = c.embedding
         )
         
+        // Create IN_DOCUMENT edge to link chunk to its document
         WITH t, c
-        MATCH (d:Document {id: c.document_id, group_id: $group_id})
-        MERGE (t)-[:PART_OF]->(d)
+        OPTIONAL MATCH (d:Document {id: c.document_id, group_id: $group_id})
+        FOREACH (_ IN CASE WHEN d IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (t)-[:IN_DOCUMENT]->(d)
+        )
         RETURN count(t) AS count
         """
         

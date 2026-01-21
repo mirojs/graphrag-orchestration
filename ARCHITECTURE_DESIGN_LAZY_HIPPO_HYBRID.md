@@ -148,10 +148,13 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
         - Fetches `section_id` via `(:TextChunk)-[:IN_SECTION]->(:Section)` edge
         - Applies greedy selection with `max_per_section=3` and `max_per_document=6` caps
         - Ensures cross-section coverage even for simple fact lookups
-    *   **Table Extraction (added 2026-01-21):**
-        - Queries `(:Table)-[:IN_CHUNK]->(:TextChunk)` nodes for structured data
+    *   **Table Extraction (added 2026-01-21, updated 2026-01-21):**
+        - Graph traversal: `(:Table)-[:IN_CHUNK]->(:TextChunk)` from top N vector results
+        - Uses top 8 chunks from vector search, traverses to connected Table nodes
         - Extracts field name from query (regex patterns)
         - Fuzzy matches field name to table headers
+        - Cell-content search: finds field labels within cell values (e.g., "Registration Number REG-54321")
+        - Summary table priority: for TOTAL/AMOUNT queries, prefers label-value tables over line items
         - Returns exact value from structured rows (avoids LLM confusion with adjacent columns)
         - Falls back to LLM extraction if no table match
     *   **Entity Graph Fallback (added 2026-01-21):**
@@ -1625,9 +1628,11 @@ Structured table extraction from Azure Document Intelligence is now preserved as
 
 - **Storage:** Table nodes with `headers`, `rows`, `row_count`, `column_count` properties
 - **Relationships:** `(Table)-[:IN_CHUNK]->(TextChunk)`, `[:IN_SECTION]->(Section)`, `[:IN_DOCUMENT]->(Document)`
+- **TextChunk-Document Link:** `(TextChunk)-[:IN_DOCUMENT]->(Document)` created during chunk upsert
 - **Benefit:** Direct field extraction without LLM confusion (e.g., DUE DATE vs TERMS columns)
-- **Query:** Route 1 tries table extraction first, falls back to LLM
-- **Implementation:** `_extract_from_tables()` + `_create_table_nodes()` in neo4j_store
+- **Query Strategy:** Route 1 traverses graph from top N vector chunks to connected Tables
+- **Cell-Content Search:** Finds field labels within cell values (handles merged cells)
+- **Implementation:** `_extract_from_tables()` in orchestrator + `upsert_text_chunks_batch()` creates IN_DOCUMENT edges
 
 ```
 

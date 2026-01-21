@@ -788,6 +788,26 @@ Generate a comprehensive, detailed response that:
 Response:"""
 
     def _get_summary_prompt(self, query: str, context: str) -> str:
+        # Detect "each document" / "every document" queries
+        q_lower = query.lower()
+        is_per_document_query = any(pattern in q_lower for pattern in [
+            "each document", "every document", "all documents",
+            "summarize.*document", "list.*document"
+        ])
+        
+        document_guidance = ""
+        if is_per_document_query:
+            document_guidance = """
+IMPORTANT for Per-Document Queries:
+- The Evidence Context contains chunks grouped by "=== DOCUMENT: <title> ===" headers.
+- Count UNIQUE top-level documents only - do NOT create separate summaries for:
+  * Document sections (e.g., "Section 2: Arbitration" belongs to parent document)
+  * Exhibits, Appendices, Schedules (e.g., "Exhibit A" belongs to parent contract)
+  * Repeated excerpts from the same document
+- If you see "Builder's Warranty" and "Builder's Warranty - Section 3", combine into ONE summary.
+- If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
+"""
+        
         return f"""You are an expert analyst generating a concise summary.
 
 Question: {query}
@@ -806,7 +826,7 @@ Instructions:
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
-
+{document_guidance}
 Summary:"""
 
     def _get_audit_trail_prompt(self, query: str, context: str) -> str:

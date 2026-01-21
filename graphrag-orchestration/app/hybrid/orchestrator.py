@@ -514,7 +514,10 @@ class HybridPipeline:
             match = re.search(pattern, query_lower)
             if match:
                 potential_field = match.group(1).strip()
-                # Skip common noise words
+                # Strip leading "the" if present
+                if potential_field.startswith("the "):
+                    potential_field = potential_field[4:]
+                # Skip if it's just noise words
                 if potential_field not in ["the", "a", "an", "this", "that", "it"]:
                     break
                 else:

@@ -202,20 +202,22 @@ def _calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) -
     # Fuzzy match (string similarity)
     fuzzy = float(difflib.SequenceMatcher(None, expected_norm, actual_norm).ratio())
     
-    # Containment (expected found in actual)
-    contained = expected_norm in actual_norm if expected_norm else False
-    
-    # Token-level metrics
+    # Token-level metrics first (needed for smarter containment)
     expected_tokens = set(expected_norm.split())
     actual_tokens = set(actual_norm.split())
     
     if not expected_tokens or not actual_tokens:
         precision = recall = f1 = 0.0
+        contained = False
     else:
         overlap = expected_tokens.intersection(actual_tokens)
         precision = len(overlap) / len(actual_tokens) if actual_tokens else 0.0
         recall = len(overlap) / len(expected_tokens) if expected_tokens else 0.0
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+        
+        # Smart containment: Use recall-based metric (>=0.8) OR substring match
+        # This handles cases where expected answer is compact ("A; B") but actual is verbose ("...A...B...")
+        contained = (expected_norm in actual_norm) or (recall >= 0.8)
     
     return {
         'is_negative_test': False,

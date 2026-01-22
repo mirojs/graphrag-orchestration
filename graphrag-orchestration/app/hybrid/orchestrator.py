@@ -53,6 +53,9 @@ from .pipeline.hub_extractor import HubExtractor
 from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
+# Modular route handlers (Jan 2026 refactor)
+from .routes import VectorRAGHandler, LocalSearchHandler, GlobalSearchHandler, DRIFTHandler
+
 # Import async Neo4j service for native async operations
 try:
     from app.services.async_neo4j_service import AsyncNeo4jService
@@ -200,6 +203,18 @@ class HybridPipeline:
             relevance_budget=relevance_budget
         )
         
+        # =======================================================================
+        # Modular Route Handlers (Jan 2026 refactor)
+        # These handlers encapsulate route-specific logic and receive `self`
+        # (the pipeline) via dependency injection for access to shared services.
+        # =======================================================================
+        self._route_handlers = {
+            QueryRoute.VECTOR_RAG: VectorRAGHandler(self),
+            QueryRoute.LOCAL_SEARCH: LocalSearchHandler(self),
+            QueryRoute.GLOBAL_SEARCH: GlobalSearchHandler(self),
+            QueryRoute.DRIFT_MULTI_HOP: DRIFTHandler(self),
+        }
+        
         logger.info("hybrid_pipeline_initialized",
                    profile=profile.value,
                    relevance_budget=relevance_budget,
@@ -251,7 +266,8 @@ class HybridPipeline:
     async def query(
         self,
         query: str,
-        response_type: str = "detailed_report"
+        response_type: str = "detailed_report",
+        use_modular_handlers: bool = True,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -259,6 +275,8 @@ class HybridPipeline:
         Args:
             query: The user's natural language query.
             response_type: "detailed_report" | "summary" | "audit_trail"
+            use_modular_handlers: If True (default), use new modular route handlers.
+                                  If False, use legacy inline methods (for A/B testing).
             
         Returns:
             Dictionary containing:
@@ -271,6 +289,18 @@ class HybridPipeline:
         # Step 0: Route the query
         route = await self.router.route(query)
         
+        # =======================================================================
+        # Modular Handler Dispatch (Jan 2026 refactor)
+        # =======================================================================
+        if use_modular_handlers and route in self._route_handlers:
+            handler = self._route_handlers[route]
+            result = await handler.execute(query, response_type)
+            # Convert RouteResult to dict for API compatibility
+            return result.to_dict()
+        
+        # =======================================================================
+        # Legacy Fallback (original inline methods)
+        # =======================================================================
         if route == QueryRoute.VECTOR_RAG:
             return await self._execute_route_1_vector_rag(query)
         elif route == QueryRoute.LOCAL_SEARCH:

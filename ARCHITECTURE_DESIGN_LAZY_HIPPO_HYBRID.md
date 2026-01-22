@@ -1597,6 +1597,12 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 
 **Recommended Indexing Script:**
 
+**Current Indexing Setup:**
+
+- **Pipeline:** `app/hybrid/indexing/lazygraphrag_pipeline.py`
+- **Test Script:** `scripts/index_5pdfs.py`
+- **Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
+
 For standard 5-PDF test indexing, use `scripts/index_5pdfs.py`:
 
 ```bash
@@ -1604,14 +1610,14 @@ For standard 5-PDF test indexing, use `scripts/index_5pdfs.py`:
 python3 scripts/index_5pdfs.py
 
 # Re-index existing group (cleans old data first)
-export GROUP_ID=test-5pdfs-1768832399067050900
+export GROUP_ID=test-5pdfs-1769071711867955961
 python3 scripts/index_5pdfs.py
 
 # Check indexing completeness (reads from last_test_group_id.txt)
 python3 check_edges.py
 
-# Check specific group
-python3 check_edges.py test-5pdfs-1768988798244324597
+# Check specific group (current: test-5pdfs-1769071711867955961)
+python3 check_edges.py test-5pdfs-1769071711867955961
 ```
 
 **CRITICAL: Section-Aware Chunking Configuration**

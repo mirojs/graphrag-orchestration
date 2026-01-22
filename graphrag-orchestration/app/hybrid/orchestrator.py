@@ -798,12 +798,17 @@ class HybridPipeline:
         
         if target_doc_hint:
             # Query mentions a specific document - find chunks from that document
+            # Convert underscore to space for matching (e.g., "property_management" -> "property management")
+            target_doc_hint_spaced = target_doc_hint.replace("_", " ")
+            
             for chunk, score in chunks_with_scores:
                 doc_title = (chunk.get("document_title") or "").lower()
                 doc_id = chunk.get("document_id") or ""
                 
-                # Match document by hint
-                if target_doc_hint in doc_title or target_doc_hint in doc_id.lower():
+                # Match document by hint (check both underscore and space variants)
+                if (target_doc_hint in doc_title or 
+                    target_doc_hint_spaced in doc_title or 
+                    target_doc_hint in doc_id.lower()):
                     primary_document_id = chunk.get("document_id")
                     logger.info(
                         "llm_extraction_using_query_document_hint",

@@ -755,6 +755,10 @@ class HybridPipeline:
         2. Feed it to LLM with a strict extraction prompt.
         3. This avoids "pollution" from lower-ranked chunks (other documents).
         4. This avoids "brittle regex" (NLP) issues by letting LLM handle language nuances.
+        
+        Document-Aware Enhancement:
+        - If query mentions a specific document (e.g., "in the purchase contract"),
+          prioritize chunks from that document over the raw top-ranked chunk.
         """
         if not chunks_with_scores:
             return None
@@ -763,14 +767,58 @@ class HybridPipeline:
         # optionally try the next-best chunks under the same verification gate.
         max_chunks_to_try = 3
 
-        # Route 1 must avoid cross-document pollution. If we fall back to other
-        # chunks, only consider chunks from the same document as the top-ranked
-        # chunk (e.g., later chunks of the same PDF).
+        # ================================================================
+        # DOCUMENT-AWARE CHUNK SELECTION
+        # ================================================================
+        # If query mentions a specific document, find chunks from that document
+        # instead of blindly using the top-ranked chunk's document.
+        # This fixes queries like "In the purchase contract, what is X?" where
+        # vector search might rank a different document higher.
+        # ================================================================
+        import re
+        query_lower = query.lower()
+        
+        # Document name patterns commonly found in queries
+        doc_patterns = [
+            (r'(?:in|from|on)\s+(?:the\s+)?purchase\s+contract', 'purchase_contract'),
+            (r'(?:in|from|on)\s+(?:the\s+)?invoice', 'invoice'),
+            (r'(?:in|from|on)\s+(?:the\s+)?warranty', 'warranty'),
+            (r'(?:in|from|on)\s+(?:the\s+)?property\s+management', 'property_management'),
+            (r'(?:in|from|on)\s+(?:the\s+)?holding\s+tank', 'holding_tank'),
+        ]
+        
+        target_doc_hint = None
+        for pattern, hint in doc_patterns:
+            if re.search(pattern, query_lower):
+                target_doc_hint = hint
+                break
+        
+        # Find the best document_id based on query hint or top-ranked chunk
         primary_document_id = None
-        try:
-            primary_document_id = (chunks_with_scores[0][0] or {}).get("document_id")
-        except Exception:
-            primary_document_id = None
+        
+        if target_doc_hint:
+            # Query mentions a specific document - find chunks from that document
+            for chunk, score in chunks_with_scores:
+                doc_title = (chunk.get("document_title") or "").lower()
+                doc_id = chunk.get("document_id") or ""
+                
+                # Match document by hint
+                if target_doc_hint in doc_title or target_doc_hint in doc_id.lower():
+                    primary_document_id = chunk.get("document_id")
+                    logger.info(
+                        "llm_extraction_using_query_document_hint",
+                        target_doc_hint=target_doc_hint,
+                        matched_doc_title=doc_title,
+                        matched_doc_id=doc_id,
+                    )
+                    break
+        
+        # Fallback to top-ranked chunk's document if no hint match
+        if not primary_document_id:
+            try:
+                primary_document_id = (chunks_with_scores[0][0] or {}).get("document_id")
+            except Exception:
+                primary_document_id = None
 
         def _has_marker_near_answer(
             evidence_text_lower: str,

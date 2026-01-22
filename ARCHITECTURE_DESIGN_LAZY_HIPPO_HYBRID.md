@@ -1625,10 +1625,11 @@ The indexing pipeline uses **section-aware chunking v2** by default (changed Jan
 
 **Known Test Groups:**
 
-| Group ID | Date | Strategy | Table Nodes | Notes |
-|----------|------|----------|-------------|-------|
-| `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | ❌ No | Old baseline (table data stripped) |
-| `test-5pdfs-1768988798244324597` | Jan 21 | section_aware_v2 | ✅ Yes | Current with Table nodes |
+| Group ID | Date | Strategy | Docs | Chunks | Sections | Entities | Tables | KVPs | Notes |
+|----------|------|----------|------|--------|----------|----------|--------|------|-------|
+| `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | 5 | 74 | ? | 265 | 0 | 0 | Old baseline (table data stripped) |
+| `test-5pdfs-1768993202876876545` | Jan 21 | section_aware_v2 | 5 | 17 | 12 | 109 | 4 | 0 | Baseline for KVP comparison |
+| `test-5pdfs-1769071711867955961` | Jan 22 | section_aware_v2 | 5 | 17 | 12 | 120 | 4 | 80 | **Current** with KVP extraction (fixed relationships) |
 
 **Table Nodes Feature (Added Jan 21, 2026):**
 
@@ -1636,11 +1637,25 @@ Structured table extraction from Azure Document Intelligence is now preserved as
 
 - **Storage:** Table nodes with `headers`, `rows`, `row_count`, `column_count` properties
 - **Relationships:** `(Table)-[:IN_CHUNK]->(TextChunk)`, `[:IN_SECTION]->(Section)`, `[:IN_DOCUMENT]->(Document)`
-- **TextChunk-Document Link:** `(TextChunk)-[:IN_DOCUMENT]->(Document)` created during chunk upsert
+- **Group Isolation:** ✅ All MERGE and MATCH operations include `group_id` filter
 - **Benefit:** Direct field extraction without LLM confusion (e.g., DUE DATE vs TERMS columns)
 - **Query Strategy:** Route 1 traverses graph from top N vector chunks to connected Tables
 - **Cell-Content Search:** Finds field labels within cell values (handles merged cells)
-- **Implementation:** `_extract_from_tables()` in orchestrator + `upsert_text_chunks_batch()` creates IN_DOCUMENT edges
+- **Implementation:** `_create_table_nodes()` in neo4j_store with proper `[:IN_DOCUMENT]` relationships
+
+**KeyValue Nodes Feature (Added Jan 22, 2026):**
+
+Azure Document Intelligence key-value pair extraction is now preserved as dedicated KeyValue nodes:
+
+- **Storage:** KeyValue nodes with `key`, `value`, `confidence`, `page_number`, `section_path`, `key_embedding` properties
+- **Relationships:** `(KeyValue)-[:IN_CHUNK]->(TextChunk)`, `[:IN_SECTION]->(Section)`, `[:IN_DOCUMENT]->(Document)`
+- **Group Isolation:** ✅ All MERGE and MATCH operations include `group_id` filter
+- **Key Embeddings:** Semantic embeddings created for `key` field to enable fuzzy matching (e.g., "policy #" matches "policy number")
+- **Deduplication:** Keys deduplicated before embedding to reduce API calls (case-insensitive)
+- **Benefit:** Deterministic field lookups for forms/invoices without LLM hallucination
+- **Query Strategy:** Route 1 can perform semantic key matching + exact value retrieval
+- **Implementation:** `_create_keyvalue_nodes()` + `_embed_keyvalue_keys()` with proper `[:IN_DOCUMENT]` relationships
+- **Azure DI Cost:** +$6/1K pages for KEY_VALUE_PAIRS feature (total $16/1K pages with base model)
 
 ```
 
@@ -1652,8 +1667,11 @@ After indexing completes, verify the graph structure and new alias feature:
 # Check latest indexed group (reads from last_test_group_id.txt)
 python3 check_edges.py
 
-# Check specific group (current: test-5pdfs-1768832399067050900 with entity aliases)
-python3 check_edges.py test-5pdfs-1768832399067050900
+# Check specific group (current: test-5pdfs-1769071711867955961 with KVP nodes)
+python3 check_edges.py test-5pdfs-1769071711867955961
+
+# Compare with previous group (Jan 21 baseline: 4 tables, 0 KVPs, same chunking)
+python3 check_edges.py test-5pdfs-1768993202876876545
 ```
 
 **What the Check Script Verifies:**

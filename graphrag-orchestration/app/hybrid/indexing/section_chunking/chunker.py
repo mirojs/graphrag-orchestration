@@ -161,6 +161,7 @@ class SectionAwareChunker:
                     paragraph_count=meta.get("paragraph_count", 0),
                     table_count=meta.get("table_count", 0),
                     tables=list(meta.get("tables", []) or []),
+                    key_value_pairs=list(meta.get("key_value_pairs", []) or []),
                 )
             )
         
@@ -269,7 +270,9 @@ class SectionAwareChunker:
                             "title": doc_title,
                             "paragraph_count": section.paragraph_count,
                             "table_count": section.table_count,
-                                "tables": section.tables,
+                            "tables": section.tables,
+                            "key_value_pairs": section.key_value_pairs,
+                            "kvp_count": len(section.key_value_pairs),
                         },
                     )
                 )
@@ -373,6 +376,8 @@ class SectionAwareChunker:
                                 "title": doc_title,
                                 "table_count": section.table_count,
                                 "tables": section.tables if include_tables and chunk_idx_in_section == 0 else [],
+                                "key_value_pairs": section.key_value_pairs if chunk_idx_in_section == 0 else [],
+                                "kvp_count": len(section.key_value_pairs) if chunk_idx_in_section == 0 else 0,
                             },
                         )
                     )
@@ -411,6 +416,8 @@ class SectionAwareChunker:
                         "title": doc_title,
                         "table_count": section.table_count,
                         "tables": section.tables if include_tables and chunk_idx_in_section == 0 else [],
+                        "key_value_pairs": section.key_value_pairs if chunk_idx_in_section == 0 else [],
+                        "kvp_count": len(section.key_value_pairs) if chunk_idx_in_section == 0 else 0,
                     },
                 )
             )
@@ -475,6 +482,8 @@ class SectionAwareChunker:
                         "source": doc_source,
                         "title": doc_title,
                         "chunk_strategy": "fixed_fallback",
+                        "key_value_pairs": [],
+                        "kvp_count": 0,
                     },
                 )
             )

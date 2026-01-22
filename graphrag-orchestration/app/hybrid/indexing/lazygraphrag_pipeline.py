@@ -48,9 +48,6 @@ from app.hybrid.services.neo4j_store import Document, Entity, Neo4jStoreV3, Rela
 logger = logging.getLogger(__name__)
 
 
-USE_SECTION_CHUNKING = os.getenv("USE_SECTION_CHUNKING", "1").strip().lower() in {"1", "true", "yes"}
-
-
 def extract_document_date(content: str) -> Optional[str]:
     """Extract the most prominent date from document content.
     
@@ -390,10 +387,12 @@ class LazyGraphRAGIndexingPipeline:
         return out
 
     async def _chunk_document(self, document: Dict[str, Any], doc_id: str) -> List[TextChunk]:
+        """Chunk a document into TextChunks using section-aware chunking."""
         di_units: Sequence[LlamaDocument] = document.get("di_extracted_docs") or []
         if di_units:
-            return await self._chunk_di_units(di_units=di_units, doc_id=doc_id)
+            return await self._chunk_di_units_section_aware(di_units=di_units, doc_id=doc_id)
 
+        # Fallback for non-DI documents
         content = (document.get("content") or document.get("text") or "").strip()
         if not content:
             return []
@@ -415,77 +414,13 @@ class LazyGraphRAGIndexingPipeline:
                     document_id=doc_id,
                     embedding=None,
                     tokens=len(text.split()),
-                    metadata={"source": src, "title": title},
+                    metadata={"source": src, "title": title, "key_value_pairs": [], "kvp_count": 0},
                 )
             )
-        return chunks
-
-    async def _chunk_di_units(self, *, di_units: Sequence[LlamaDocument], doc_id: str) -> List[TextChunk]:
-        if USE_SECTION_CHUNKING:
-            return await self._chunk_di_units_section_aware(di_units=di_units, doc_id=doc_id)
-
-        chunks: List[TextChunk] = []
-        chunk_index = 0
-        for unit_i, unit in enumerate(di_units):
-            # IMPORTANT: Document Intelligence metadata can be very large (tables/layout).
-            # LlamaIndex's SentenceSplitter is metadata-aware by default and can raise
-            # when metadata alone exceeds the chunk budget.
-            #
-            # To keep indexing robust, chunk using a text-only wrapper document and
-            # attach only a small allowlist of DI fields to our stored chunk metadata.
-            unit_text = getattr(unit, "text", "") or ""
-            unit_meta = getattr(unit, "metadata", None) or {}
-
-            safe_doc = LlamaDocument(
-                text=unit_text,
-                id_=f"{doc_id}_di_{unit_i}",
-                metadata={},
-            )
-            nodes = self._splitter.get_nodes_from_documents([safe_doc])
-            for node in nodes:
-                text = node.get_content().strip()
-                if not text:
-                    continue
-                md: Dict[str, Any] = {}
-
-                # Preserve the same DI fields as V3 (matching _chunk_di_extracted_docs).
-                # Cap tables to avoid exploding metadata size.
-                tables_meta = unit_meta.get("tables")
-                if isinstance(tables_meta, list) and len(tables_meta) > 6:
-                    tables_meta = tables_meta[:6]
-
-                for k in (
-                    "chunk_type",
-                    "page_number",
-                    "section_path",
-                    "di_section_path",
-                    "di_section_part",
-                    "url",
-                    "table_count",
-                    "paragraph_count",
-                ):
-                    if k in unit_meta and unit_meta.get(k) is not None:
-                        md[k] = unit_meta.get(k)
-                if tables_meta:
-                    md["tables"] = tables_meta
-                if unit_meta.get("url"):
-                    md["source"] = unit_meta.get("url")
-
-                chunks.append(
-                    TextChunk(
-                        id=f"{doc_id}_chunk_{chunk_index}",
-                        text=text,
-                        chunk_index=chunk_index,
-                        document_id=doc_id,
-                        embedding=None,
-                        tokens=len(text.split()),
-                        metadata=md,
-                    )
-                )
-                chunk_index += 1
         return chunks
 
     async def _chunk_di_units_section_aware(self, *, di_units: Sequence[LlamaDocument], doc_id: str) -> List[TextChunk]:
+        """Chunk DI units using section-aware strategy."""
         from app.hybrid.indexing.section_chunking.integration import chunk_di_units_section_aware
 
         doc_source = ""

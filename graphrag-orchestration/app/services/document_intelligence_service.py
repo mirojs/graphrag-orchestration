@@ -226,7 +226,7 @@ class DocumentIntelligenceService:
         kvps = getattr(result, "key_value_pairs", None) or []
         if not kvps:
             return []
-        
+
         extracted: List[Dict[str, Any]] = []
         
         # Build section span index for efficient lookup

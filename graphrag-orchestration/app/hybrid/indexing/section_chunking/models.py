@@ -30,6 +30,7 @@ class SectionNode:
     paragraph_count: int = 0
     table_count: int = 0
     tables: List[Dict[str, Any]] = field(default_factory=list)
+    key_value_pairs: List[Dict[str, Any]] = field(default_factory=list)
     
     # Token count (computed during processing)
     token_count: int = 0

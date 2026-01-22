@@ -1508,7 +1508,7 @@ class Neo4jStoreV3:
         )
         
         WITH table, chunk
-        MATCH (chunk)-[:PART_OF]->(d:Document)
+        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document)
         MERGE (table)-[:IN_DOCUMENT]->(d)
         
         RETURN count(table) AS count
@@ -1579,6 +1579,10 @@ class Neo4jStoreV3:
         MATCH (chunk:TextChunk {id: kv.chunk_id, group_id: $group_id})
         MERGE (keyvalue)-[:IN_CHUNK]->(chunk)
         
+        WITH keyvalue, kv
+        MATCH (chunk:TextChunk {id: kv.chunk_id, group_id: $group_id})
+        MERGE (keyvalue)-[:IN_CHUNK]->(chunk)
+        
         WITH keyvalue, chunk
         OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
         FOREACH (_ IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
@@ -1586,7 +1590,7 @@ class Neo4jStoreV3:
         )
         
         WITH keyvalue, chunk
-        MATCH (chunk)-[:PART_OF]->(d:Document)
+        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document)
         MERGE (keyvalue)-[:IN_DOCUMENT]->(d)
         
         RETURN count(keyvalue) AS count
@@ -1636,6 +1640,9 @@ class Neo4jStoreV3:
             ("entities", "MATCH (e:Entity {group_id: $group_id}) DETACH DELETE e RETURN count(*) AS count"),
             ("communities", "MATCH (c:Community {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
             ("raptor_nodes", "MATCH (r:RaptorNode {group_id: $group_id}) DETACH DELETE r RETURN count(*) AS count"),
+            ("key_values", "MATCH (kv:KeyValue {group_id: $group_id}) DETACH DELETE kv RETURN count(*) AS count"),
+            ("tables", "MATCH (t:Table {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
+            ("sections", "MATCH (s:Section {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("text_chunks", "MATCH (t:TextChunk {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
             ("documents", "MATCH (d:Document {group_id: $group_id}) DETACH DELETE d RETURN count(*) AS count"),
         ]

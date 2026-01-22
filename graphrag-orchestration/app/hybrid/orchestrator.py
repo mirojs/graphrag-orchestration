@@ -1472,7 +1472,7 @@ Instructions:
             CALL db.index.fulltext.queryNodes('textchunk_fulltext', $query_text, {limit: $top_k})
             YIELD node, score
             WHERE node.group_id = $group_id
-            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             RETURN node.id AS id,
                    node.text AS text,
@@ -1571,7 +1571,7 @@ Instructions:
             MATCH (t:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
             
             // Get document and section context
-            OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
             
             // Score by number of matching entities mentioned in chunk
@@ -1735,7 +1735,7 @@ Instructions:
             WITH node,
                  (CASE WHEN vRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + vRank) END) +
                  (CASE WHEN lRank IS NULL THEN 0.0 ELSE 1.0 / ($rrf_k + lRank) END) AS rrfScore
-            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             RETURN node.id AS id,
                    node.text AS text,
@@ -2001,7 +2001,7 @@ Instructions:
             q = """
             MATCH (node:TextChunk {group_id: $group_id})
             WHERE node.text IS NOT NULL
-            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             WITH node, d,
                  reduce(m=0, k IN $keywords | m + CASE WHEN toLower(node.text) CONTAINS k THEN 1 ELSE 0 END) AS match_count
             WHERE match_count >= $min_matches
@@ -2148,7 +2148,7 @@ Instructions:
                  vectorRank IS NOT NULL AS hasVector
             
             // Step 4: Get metadata
-            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: group_id})
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             
             RETURN node.id AS id,
@@ -2273,7 +2273,7 @@ Instructions:
             WHERE chunk.group_id = $group_id
             
             // Get metadata
-            OPTIONAL MATCH (chunk)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
             
             RETURN chunk.id AS id,
@@ -2369,7 +2369,7 @@ Instructions:
                  CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
-            OPTIONAL MATCH (node)-[:PART_OF]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             RETURN node.id AS id,
                    node.text AS text,
                    node.chunk_index AS chunk_index,

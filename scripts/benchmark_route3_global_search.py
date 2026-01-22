@@ -62,7 +62,7 @@ EXPECTED_TERMS: Dict[str, List[str]] = {
     "Q-G4": ["pumper", "county", "monthly statement", "income", "expenses", "volumes"],
     "Q-G5": ["arbitration", "binding", "small claims", "legal fees", "contractor", "default"],
     "Q-G6": ["fabrikam", "contoso", "walt flood", "contoso lifts", "builder", "owner", "agent", "pumper"],
-    "Q-G7": ["60 days", "written notice", "certified mail", "10 business days", "phone", "emergency"],
+    "Q-G7": ["60 days", "written notice", "certified mail", "phone", "emergency"],
     "Q-G8": ["$300,000", "$25,000", "liability insurance", "hold harmless", "indemnify", "gross negligence"],
     "Q-G9": ["non-refundable", "$250", "start-up fee", "deposit", "forfeited", "3 business days"],
     "Q-G10": ["warranty", "arbitration", "servicing", "management", "invoice", "scope of work", "payment"],

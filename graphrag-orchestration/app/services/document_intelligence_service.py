@@ -39,6 +39,7 @@ from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import (
     AnalyzeDocumentRequest,
     AnalyzeResult,
+    DocumentAnalysisFeature,
     DocumentContentFormat,
     DocumentTable,
     DocumentParagraph,
@@ -192,6 +193,130 @@ class DocumentIntelligenceService:
             "headers": headers,
             "rows": rows,
         }
+
+    def _extract_key_value_pairs(
+        self,
+        result: AnalyzeResult,
+        sections: List[Any],
+        content: str,
+    ) -> List[Dict[str, Any]]:
+        """Extract key-value pairs from DI result with section association.
+        
+        Associates each KVP to a section based on span offset overlap.
+        This enables section-scoped queries for deterministic field lookups.
+        
+        Args:
+            result: Document Intelligence AnalyzeResult
+            sections: List of section objects from result.sections
+            content: Full document content for span slicing
+            
+        Returns:
+            List of KVP dicts with section association:
+            {
+                "key": str,
+                "value": str,
+                "confidence": float,
+                "page_number": int,
+                "section_id": Optional[str],
+                "section_path": List[str],
+                "key_span": {"offset": int, "length": int},
+                "value_span": {"offset": int, "length": int},
+            }
+        """
+        kvps = getattr(result, "key_value_pairs", None) or []
+        if not kvps:
+            return []
+        
+        extracted: List[Dict[str, Any]] = []
+        
+        # Build section span index for efficient lookup
+        section_spans: List[Tuple[int, int, int, str]] = []  # (start, end, section_idx, title)
+        for sec_idx, sec in enumerate(sections):
+            sec_spans = getattr(sec, "spans", None) or []
+            sec_title = self._infer_section_title_from_section(sec, result.paragraphs or [])
+            for span in sec_spans:
+                offset = getattr(span, "offset", None)
+                length = getattr(span, "length", None)
+                if offset is not None and length is not None:
+                    section_spans.append((offset, offset + length, sec_idx, sec_title))
+        
+        for kvp_idx, kvp in enumerate(kvps):
+            key_elem = getattr(kvp, "key", None)
+            value_elem = getattr(kvp, "value", None)
+            confidence = getattr(kvp, "confidence", None) or 0.0
+            
+            if not key_elem:
+                continue
+            
+            key_content = getattr(key_elem, "content", "") or ""
+            value_content = getattr(value_elem, "content", "") if value_elem else ""
+            
+            # Extract span info
+            key_spans = getattr(key_elem, "spans", None) or []
+            value_spans = getattr(value_elem, "spans", None) if value_elem else []
+            
+            key_span = None
+            value_span = None
+            if key_spans:
+                ks = key_spans[0]
+                key_span = {"offset": getattr(ks, "offset", 0), "length": getattr(ks, "length", 0)}
+            if value_spans:
+                vs = value_spans[0]
+                value_span = {"offset": getattr(vs, "offset", 0), "length": getattr(vs, "length", 0)}
+            
+            # Extract page number from bounding regions
+            page_number = 1
+            key_regions = getattr(key_elem, "bounding_regions", None) or []
+            if key_regions:
+                page_number = getattr(key_regions[0], "page_number", 1) or 1
+            
+            # Find section association based on key span offset
+            section_id = None
+            section_path: List[str] = []
+            if key_span:
+                kvp_offset = key_span["offset"]
+                for start, end, sec_idx, sec_title in section_spans:
+                    if start <= kvp_offset < end:
+                        section_id = f"section_{sec_idx}"
+                        section_path = [sec_title] if sec_title else []
+                        break
+            
+            extracted.append({
+                "key": key_content.strip(),
+                "value": value_content.strip(),
+                "confidence": confidence,
+                "page_number": page_number,
+                "section_id": section_id,
+                "section_path": section_path,
+                "key_span": key_span,
+                "value_span": value_span,
+            })
+        
+        logger.info(
+            f"📋 Extracted {len(extracted)} key-value pairs",
+            extra={"kvp_count": len(extracted), "with_section": sum(1 for k in extracted if k["section_id"])}
+        )
+        
+        return extracted
+
+    def _infer_section_title_from_section(
+        self,
+        section: Any,
+        paragraphs: List[DocumentParagraph],
+    ) -> str:
+        """Infer section title from section elements."""
+        elements = getattr(section, "elements", None) or []
+        for el in elements:
+            parsed = self._parse_di_element_ref(el)
+            if not parsed:
+                continue
+            kind, idx = parsed
+            if kind == "paragraphs" and 0 <= idx < len(paragraphs):
+                para = paragraphs[idx]
+                role = getattr(para, "role", None) or ""
+                if role in ("title", "sectionHeading"):
+                    return getattr(para, "content", "") or ""
+        return ""
 
     def _build_markdown_from_result(self, result: AnalyzeResult) -> str:
         """
@@ -417,6 +542,9 @@ class DocumentIntelligenceService:
 
         This produces more semantically coherent chunks than per-page splitting and
         makes downstream retrieval more precise.
+        
+        Also extracts key-value pairs and associates them with sections for
+        deterministic field lookups.
         """
         sections = list(getattr(result, "sections", None) or [])
         if not sections:
@@ -426,6 +554,23 @@ class DocumentIntelligenceService:
         tables: List[DocumentTable] = list(getattr(result, "tables", None) or [])
 
         content = getattr(result, "content", None) or ""
+        
+        # Extract key-value pairs with section association
+        key_value_pairs = self._extract_key_value_pairs(result, sections, content)
+        
+        # Build section_idx -> KVPs mapping for efficient lookup
+        kvps_by_section: Dict[int, List[Dict[str, Any]]] = {}
+        orphan_kvps: List[Dict[str, Any]] = []  # KVPs not associated with any section
+        for kvp in key_value_pairs:
+            section_id = kvp.get("section_id")
+            if section_id and section_id.startswith("section_"):
+                try:
+                    sec_idx = int(section_id.split("_")[1])
+                    kvps_by_section.setdefault(sec_idx, []).append(kvp)
+                except (ValueError, IndexError):
+                    orphan_kvps.append(kvp)
+            else:
+                orphan_kvps.append(kvp)
 
         def _safe_get_paragraph(i: int) -> Optional[DocumentParagraph]:
             if i < 0 or i >= len(paragraphs):
@@ -491,6 +636,12 @@ class DocumentIntelligenceService:
                     return
 
                 tables_metadata = [self._extract_table_metadata(t) for t in tbls]
+                
+                # Get KVPs associated with this section
+                section_kvps = kvps_by_section.get(section_idx, [])
+                # For first chunk of document, also include orphan KVPs
+                if section_idx == 0 and part == "direct":
+                    section_kvps = section_kvps + orphan_kvps
 
                 docs.append(
                     Document(
@@ -506,6 +657,8 @@ class DocumentIntelligenceService:
                             "tables": tables_metadata,
                             "table_count": len(tbls),
                             "paragraph_count": len(paras),
+                            "key_value_pairs": section_kvps,
+                            "kvp_count": len(section_kvps),
                         },
                     )
                 )
@@ -587,10 +740,14 @@ class DocumentIntelligenceService:
                 # DI can access Azure blob storage directly using its own Managed Identity
                 # No need to download locally - just pass the URL (with SAS if present)
                 logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
+                # Enable KEY_VALUE_PAIRS for high-precision field extraction
+                # Cost: +$6/1K pages on top of prebuilt-layout ($10/1K pages)
+                # Justification: Enables deterministic field lookups, avoids LLM hallucinations
                 poller = await client.begin_analyze_document(
                     selected_model,
                     AnalyzeDocumentRequest(url_source=url),
                     output_content_format=DocumentContentFormat.MARKDOWN,
+                    features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS],
                 )
 
                 # Wait for completion with timeout (SDK handles polling automatically)

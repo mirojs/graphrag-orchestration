@@ -100,6 +100,23 @@ class Document:
     document_date: Optional[str] = None  # ISO date (YYYY-MM-DD) extracted from content
 
 
+@dataclass
+class KeyValue:
+    """Key-value pair extracted from document (form fields, labels, etc.).
+    
+    KeyValue nodes are section-aware, aligning with the core architecture principle
+    that sections are the foundation for ground truth verification.
+    """
+    id: str
+    key: str
+    value: str
+    confidence: float = 0.0
+    page_number: int = 1
+    section_path: List[str] = field(default_factory=list)
+    key_embedding: Optional[List[float]] = None  # For semantic key matching
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
 class Neo4jStoreV3:
     """
     Unified Neo4j store for V3 GraphRAG.
@@ -218,6 +235,11 @@ class Neo4jStoreV3:
             "CREATE CONSTRAINT section_id IF NOT EXISTS FOR (s:Section) REQUIRE s.id IS UNIQUE",
             "CREATE INDEX section_group IF NOT EXISTS FOR (s:Section) ON (s.group_id)",
             "CREATE INDEX section_doc IF NOT EXISTS FOR (s:Section) ON (s.doc_id)",
+            
+            # KeyValue nodes (high-precision field extraction)
+            "CREATE CONSTRAINT keyvalue_id IF NOT EXISTS FOR (kv:KeyValue) REQUIRE kv.id IS UNIQUE",
+            "CREATE INDEX keyvalue_group IF NOT EXISTS FOR (kv:KeyValue) ON (kv.group_id)",
+            "CREATE INDEX keyvalue_key IF NOT EXISTS FOR (kv:KeyValue) ON (kv.key)",
             
             # Regular indexes for filtering
             "CREATE INDEX entity_group IF NOT EXISTS FOR (e:Entity) ON (e.group_id)",
@@ -1426,6 +1448,9 @@ class Neo4jStoreV3:
             # Create Table nodes for chunks with table data
             self._create_table_nodes(group_id, chunks)
             
+            # Create KeyValue nodes for chunks with KVP data
+            self._create_keyvalue_nodes(group_id, chunks)
+            
             return count
     
     def _create_table_nodes(self, group_id: str, chunks: List[TextChunk]) -> None:
@@ -1491,6 +1516,86 @@ class Neo4jStoreV3:
         
         with self.driver.session(database=self.database) as session:
             session.run(query, tables=tables_to_create, group_id=group_id)
+    
+    def _create_keyvalue_nodes(self, group_id: str, chunks: List[TextChunk]) -> None:
+        """Create KeyValue nodes from chunks with key-value pair metadata.
+        
+        KeyValue nodes are section-aware, linking to sections for deterministic
+        field lookups. This aligns with the core architecture principle that
+        sections are the foundation for ground truth verification.
+        
+        Relationships created:
+        - (:KeyValue)-[:IN_SECTION]->(:Section) - Primary, section association
+        - (:KeyValue)-[:IN_CHUNK]->(:TextChunk) - Secondary, chunk association  
+        - (:KeyValue)-[:IN_DOCUMENT]->(:Document) - Tertiary, document scope
+        """
+        kvps_to_create = []
+        
+        for chunk in chunks:
+            if not chunk.metadata or not isinstance(chunk.metadata, dict):
+                continue
+            
+            kvps = chunk.metadata.get("key_value_pairs", [])
+            if not kvps:
+                continue
+            
+            for kvp_idx, kvp_data in enumerate(kvps):
+                key = kvp_data.get("key", "")
+                value = kvp_data.get("value", "")
+                
+                if not key:  # Skip empty keys
+                    continue
+                
+                # Create unique KVP ID
+                kvp_id = f"{chunk.id}_kv_{kvp_idx}"
+                
+                kvps_to_create.append({
+                    "id": kvp_id,
+                    "chunk_id": chunk.id,
+                    "key": key,
+                    "value": value,
+                    "confidence": kvp_data.get("confidence", 0.0),
+                    "page_number": kvp_data.get("page_number", 1),
+                    "section_path": json.dumps(kvp_data.get("section_path", [])),
+                })
+        
+        if not kvps_to_create:
+            return
+        
+        logger.info(f"Creating {len(kvps_to_create)} KeyValue nodes for group {group_id}")
+        
+        # Batch create KeyValue nodes with section-aware relationships
+        query = """
+        UNWIND $kvps AS kv
+        MERGE (keyvalue:KeyValue {id: kv.id, group_id: $group_id})
+        SET keyvalue.key = kv.key,
+            keyvalue.value = kv.value,
+            keyvalue.confidence = kv.confidence,
+            keyvalue.page_number = kv.page_number,
+            keyvalue.section_path = kv.section_path,
+            keyvalue.updated_at = datetime()
+        
+        WITH keyvalue, kv
+        MATCH (chunk:TextChunk {id: kv.chunk_id, group_id: $group_id})
+        MERGE (keyvalue)-[:IN_CHUNK]->(chunk)
+        
+        WITH keyvalue, chunk
+        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+        FOREACH (_ IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (keyvalue)-[:IN_SECTION]->(s)
+        )
+        
+        WITH keyvalue, chunk
+        MATCH (chunk)-[:PART_OF]->(d:Document)
+        MERGE (keyvalue)-[:IN_DOCUMENT]->(d)
+        
+        RETURN count(keyvalue) AS count
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, kvps=kvps_to_create, group_id=group_id)
+            count = result.single()["count"]
+            logger.info(f"Created {count} KeyValue nodes for group {group_id}")
     
     # ==================== Document Operations ====================
     

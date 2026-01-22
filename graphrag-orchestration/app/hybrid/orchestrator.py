@@ -409,42 +409,43 @@ class HybridPipeline:
             context = "\n".join(context_parts)
             
             # ================================================================
-            # Route 1 Strategy: Try structured table extraction first, then LLM
+            # Route 1 Strategy: KVP → Table → LLM (precision cascade)
             # ================================================================
-            # For table-based queries, try extracting directly from Table nodes
-            # This avoids LLM confusion with adjacent columns (e.g., DUE DATE vs TERMS)
+            # 1. Try KVP extraction first (highest precision, exact field matches)
+            # 2. Try Table extraction second (structured data)
+            # 3. Fall back to LLM extraction (handles nuance)
             
-            # Try table-based extraction first
-            table_answer = await self._extract_from_tables(query, results)
+            # Step 1: Try KVP extraction first (highest precision)
+            kvp_answer = await self._extract_from_keyvalue_nodes(query, results)
             
-            if table_answer:
-                logger.info("route_1_table_extraction_success", 
-                           answer=table_answer[:50],
-                           from_table=True)
-                answer = table_answer
+            if kvp_answer:
+                logger.info("route_1_kvp_extraction_success", 
+                           answer=kvp_answer[:50],
+                           from_kvp=True)
+                answer = kvp_answer
             else:
-                # Fall back to LLM extraction from top chunk
-                llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
-            
-            if table_answer:
-                logger.info("route_1_table_extraction_success", 
-                           answer=table_answer[:50],
-                           from_table=True)
-                answer = table_answer
-            else:
-                # Fall back to LLM extraction from top chunk
-                llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
-            
-                if llm_answer:
-                    logger.info("route_1_llm_extraction_success", 
-                               answer=llm_answer[:50],
-                               from_top_chunk=True)
-                    answer = llm_answer
+                # Step 2: Try table-based extraction
+                table_answer = await self._extract_from_tables(query, results)
+                
+                if table_answer:
+                    logger.info("route_1_table_extraction_success", 
+                               answer=table_answer[:50],
+                               from_table=True)
+                    answer = table_answer
                 else:
-                    # If LLM can't extract, return "not found"
-                    logger.info("route_1_llm_extraction_failed",
-                               query=query[:100])
-                    answer = "Not found in the provided documents."
+                    # Step 3: Fall back to LLM extraction from top chunk
+                    llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
+                    
+                    if llm_answer:
+                        logger.info("route_1_llm_extraction_success", 
+                                   answer=llm_answer[:50],
+                                   from_top_chunk=True)
+                        answer = llm_answer
+                    else:
+                        # If LLM can't extract, return "not found"
+                        logger.info("route_1_llm_extraction_failed",
+                                   query=query[:100])
+                        answer = "Not found in the provided documents."
             
             return {
                 "response": answer,
@@ -472,6 +473,95 @@ class HybridPipeline:
             result["metadata"]["fallback_from"] = "route_1_vector_rag"
             result["metadata"]["fallback_reason"] = str(e)
             return result
+
+    async def _extract_from_keyvalue_nodes(
+        self,
+        query: str,
+        chunks_with_scores: list
+    ) -> Optional[str]:
+        """
+        Extract answer from KeyValue nodes via semantic key matching.
+        
+        This is the HIGHEST PRECISION extraction method in Route 1:
+        - Queries KeyValue nodes linked to the same sections as retrieved chunks
+        - Uses semantic similarity (cosine > 0.85) to match query to key embeddings
+        - Returns value directly if a high-confidence match is found
+        
+        This enables queries like "What is the policy number?" to match 
+        keys like "Policy #", "Policy No.", "Policy Number" via semantic similarity,
+        without LLM hallucination risk.
+        
+        Returns None if:
+        - No KVP data found in related sections
+        - No semantic key match above threshold
+        """
+        if not chunks_with_scores or not self._async_neo4j:
+            return None
+        
+        # Get chunk IDs from top vector search results
+        chunk_ids = [chunk["id"] for chunk, _ in chunks_with_scores[:8]]  # Top 8 chunks
+        
+        # Generate query embedding for semantic key matching
+        try:
+            from app.services.llm_service import LLMService
+            llm_service = LLMService()
+            
+            if llm_service.embed_model is None:
+                return None
+            
+            query_embedding = llm_service.embed_model.get_text_embedding(query)
+            if not query_embedding:
+                return None
+        except Exception as e:
+            logger.warning("route_1_kvp_embedding_failed", error=str(e))
+            return None
+        
+        try:
+            # Graph traversal: find KeyValue nodes connected to same sections as retrieved chunks
+            # This uses [:IN_SECTION] relationships for both TextChunk and KeyValue
+            # Pattern: (chunk)-[:IN_SECTION]->(section)<-[:IN_SECTION]-(keyvalue)
+            q = """
+            MATCH (c:TextChunk)-[:IN_SECTION]->(s:Section)<-[:IN_SECTION]-(kv:KeyValue)
+            WHERE c.id IN $chunk_ids AND c.group_id = $group_id
+              AND kv.key_embedding IS NOT NULL
+            WITH DISTINCT kv, 
+                 vector.similarity.cosine(kv.key_embedding, $query_embedding) AS similarity
+            WHERE similarity > 0.85
+            RETURN kv.key AS key, kv.value AS value, kv.confidence AS confidence, similarity
+            ORDER BY similarity DESC, confidence DESC
+            LIMIT 5
+            """
+            
+            records = await self._async_neo4j.execute_read(q, {
+                "chunk_ids": chunk_ids,
+                "group_id": self.group_id,
+                "query_embedding": query_embedding,
+            })
+            
+            if not records:
+                return None
+            
+            # Return the best match (highest similarity)
+            best_match = records[0]
+            key = best_match.get("key", "")
+            value = best_match.get("value", "")
+            similarity = best_match.get("similarity", 0.0)
+            confidence = best_match.get("confidence", 0.0)
+            
+            if value:
+                logger.info("route_1_kvp_match_found",
+                           key=key,
+                           value=value[:50] if len(value) > 50 else value,
+                           similarity=round(similarity, 3),
+                           confidence=round(confidence, 3),
+                           query=query[:50])
+                return value.strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.warning("route_1_kvp_extraction_failed", error=str(e))
+            return None
 
     async def _extract_from_tables(
         self,

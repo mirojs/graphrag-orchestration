@@ -254,6 +254,11 @@ class LazyGraphRAGIndexingPipeline:
         similarity_stats = await self._build_section_similarity_edges(group_id)
         stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
 
+        # 4.8) Embed KeyValue keys for semantic matching.
+        kvp_embed_stats = await self._embed_keyvalue_keys(group_id)
+        stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
+        stats["key_values_embedded"] = kvp_embed_stats.get("keys_embedded", 0)
+
         # 5) Entity/relationship extraction (best-effort, but recommended).
         entities: List[Entity] = []
         relationships: List[Relationship] = []
@@ -1739,6 +1744,103 @@ Output:
         )
         
         return {"edges_created": edges_created}
+
+    async def _embed_keyvalue_keys(self, group_id: str) -> Dict[str, Any]:
+        """Embed KeyValue keys for semantic matching at query time.
+        
+        Creates embeddings for unique KVP keys to enable semantic key matching.
+        Uses batch deduplication to avoid re-embedding identical keys.
+        
+        This enables queries like "What is the policy number?" to match 
+        keys like "Policy #", "Policy Number", "Policy ID" via semantic similarity.
+        
+        Args:
+            group_id: Tenant identifier
+            
+        Returns:
+            Stats dict with kvps_total, unique_keys, keys_embedded counts
+        """
+        if self.embedder is None:
+            logger.warning("keyvalue_embedding_skipped_no_embedder")
+            return {"kvps_total": 0, "unique_keys": 0, "keys_embedded": 0, "skipped": "no_embedder"}
+        
+        # Fetch all KeyValue nodes without embeddings
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (kv:KeyValue {group_id: $group_id})
+                WHERE kv.key_embedding IS NULL
+                RETURN kv.id AS id, kv.key AS key
+                """,
+                group_id=group_id,
+            )
+            kvps_to_embed = [{"id": record["id"], "key": record["key"]} for record in result]
+        
+        if not kvps_to_embed:
+            # Count total KVPs for stats
+            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+                result = session.run(
+                    "MATCH (kv:KeyValue {group_id: $group_id}) RETURN count(kv) AS count",
+                    group_id=group_id,
+                )
+                total = result.single()["count"]
+            return {"kvps_total": total, "unique_keys": 0, "keys_embedded": 0}
+        
+        # Deduplicate keys (case-insensitive) for efficient batch embedding
+        key_to_ids: Dict[str, List[str]] = {}
+        for kvp in kvps_to_embed:
+            normalized_key = (kvp["key"] or "").strip().lower()
+            if normalized_key:
+                key_to_ids.setdefault(normalized_key, []).append(kvp["id"])
+        
+        if not key_to_ids:
+            return {"kvps_total": len(kvps_to_embed), "unique_keys": 0, "keys_embedded": 0}
+        
+        # Embed unique keys
+        unique_keys = list(key_to_ids.keys())
+        try:
+            embeddings = await self.embedder.aget_text_embedding_batch(unique_keys)
+        except Exception as e:
+            logger.warning("keyvalue_embedding_failed", extra={"error": str(e)})
+            return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0, "error": str(e)}
+        
+        # Build updates: map embedding back to all KVP nodes with same normalized key
+        updates = []
+        for key, embedding in zip(unique_keys, embeddings):
+            if embedding is None:
+                continue
+            for kvp_id in key_to_ids[key]:
+                updates.append({"id": kvp_id, "key_embedding": embedding})
+        
+        if not updates:
+            return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0}
+        
+        # Update KeyValue nodes with embeddings
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            session.run(
+                """
+                UNWIND $updates AS u
+                MATCH (kv:KeyValue {id: u.id})
+                SET kv.key_embedding = u.key_embedding
+                """,
+                updates=updates,
+            )
+        
+        logger.info(
+            "keyvalue_keys_embedded",
+            extra={
+                "group_id": group_id,
+                "kvps_total": len(kvps_to_embed),
+                "unique_keys": len(unique_keys),
+                "keys_embedded": len(updates),
+            },
+        )
+        
+        return {
+            "kvps_total": len(kvps_to_embed),
+            "unique_keys": len(unique_keys),
+            "keys_embedded": len(updates),
+        }
 
     async def _create_foundation_edges(self, group_id: str) -> Dict[str, int]:
         """Create foundation edges for graph schema enhancement.

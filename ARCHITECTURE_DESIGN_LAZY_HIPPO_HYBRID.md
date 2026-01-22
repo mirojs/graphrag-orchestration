@@ -1,8 +1,16 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 21, 2026
+**Last Updated:** January 22, 2026
 
-**Recent Updates (January 21, 2026):**
+**Recent Updates (January 22, 2026):**
+- ✅ **KeyValue (KVP) Node Feature:** High-precision field extraction via Azure DI key-value pairs
+  - **Azure DI Integration:** `prebuilt-layout` model with `KEY_VALUE_PAIRS` feature enabled ($16/1K pages: $10 layout + $6 KVP)
+  - **Section-Aware Storage:** KeyValue nodes link to sections via `[:IN_SECTION]` relationship for deterministic field lookups
+  - **Semantic Key Matching:** Key embeddings enable "policy number" query to match "Policy #", "Policy No." etc.
+  - **Route 1 Enhancement:** New extraction cascade: KVP → Table → LLM (highest precision first)
+  - Files modified: `document_intelligence_service.py`, `neo4j_store.py`, `lazygraphrag_pipeline.py`, `orchestrator.py`
+
+**Previous Updates (January 21, 2026):**
 - ✅ **Document-Level Grouping Fix (Routes 2 & 3):** Chunks now properly grouped by Document node ID from graph
   - **Problem:** LLM was treating sections (e.g., "Exhibit A") as separate documents, causing over-segmentation (8 summaries instead of 5)
   - **Solution:** Both `text_store.py` and `synthesis.py` now extract `document_id` from Document nodes via PART_OF relationship
@@ -4035,7 +4043,12 @@ Entity           379     ✅ Yes (379)      Core - well connected
 Section          204     ✅ Yes (204)      Structure - 158 orphans
 TextChunk         74     ✅ Yes (74)       Content - fully linked
 Document           5     ❌ No             Metadata only
+Table            ~50     ❌ No             Structured data extraction
+KeyValue          *      ✅ Yes (key)      High-precision field extraction (Jan 22, 2026)
 ```
+
+*KeyValue nodes are created during indexing when Azure DI extracts key-value pairs from documents.
+Count depends on document content (e.g., forms, invoices, contracts with labeled fields).
 
 **Relationship Types:**
 ```
@@ -4048,6 +4061,9 @@ SUBSECTION_OF              120     Section → Section           ✅ Hierarchy
 PART_OF                     74     TextChunk → Document        ✅ Core
 IN_SECTION                  74     TextChunk → Section         ✅ Core
 HAS_SECTION                 21     Document → Section          ✅ Core
+IN_SECTION (KV)             *      KeyValue → Section          ✅ KVP feature (Jan 22, 2026)
+IN_CHUNK (KV)               *      KeyValue → TextChunk        ✅ KVP feature (Jan 22, 2026)
+IN_DOCUMENT (KV)            *      KeyValue → Document         ✅ KVP feature (Jan 22, 2026)
 ```
 
 **Cross-System Connectivity Analysis:**
@@ -4954,5 +4970,114 @@ SIMILAR_TO + Unified PPR:
 | **APPEARS_IN_SECTION** | Route 1 ⭐⭐⭐, Route 2 ⭐⭐ | **HIGH** - hop reduction |
 | **APPEARS_IN_DOCUMENT** | Route 2 ⭐⭐⭐ | **MEDIUM** - Route 2 specific |
 | **Unified PPR** | Route 1 ⭐⭐⭐ | **HIGH** - Route 1 specific |
+
+---
+
+## 20. KeyValue (KVP) Node Feature (January 22, 2026)
+
+### 20.1. Overview
+
+KeyValue nodes provide **high-precision field extraction** for document queries that ask for specific labeled values. This feature leverages Azure Document Intelligence's key-value pair extraction to enable deterministic lookups without LLM hallucination risk.
+
+**Problem Solved:**
+- Traditional RAG returns text chunks containing the answer, but LLM may extract wrong adjacent value
+- Example: "What is the due date?" → LLM returns payment terms from adjacent column instead of actual due date
+- Table extraction helps but requires exact header matching (no semantic flexibility)
+
+**Solution:**
+- Azure DI extracts labeled fields as structured key-value pairs during indexing
+- KeyValue nodes store these with key embeddings for semantic matching
+- Route 1 queries KVPs first (highest precision), falls back to Tables, then LLM
+
+### 20.2. Architecture
+
+#### Node Schema
+```cypher
+(:KeyValue {
+  id: string,             -- "{chunk_id}_kv_{index}"
+  key: string,            -- Raw key text (e.g., "Policy #", "Due Date")
+  value: string,          -- Raw value text (e.g., "POL-2024-001", "2024-03-15")
+  key_embedding: [float], -- For semantic key matching (1536 dims)
+  confidence: float,      -- Azure DI confidence score
+  page_number: int,       -- Page location
+  section_path: string,   -- JSON array of section hierarchy
+  group_id: string        -- Tenant isolation
+})
+```
+
+#### Relationships (Section-Centric)
+```cypher
+-- Primary: Section association (deterministic scope)
+(kv:KeyValue)-[:IN_SECTION]->(s:Section)
+
+-- Secondary: Chunk association (for lineage)
+(kv:KeyValue)-[:IN_CHUNK]->(c:TextChunk)
+
+-- Tertiary: Document scope
+(kv:KeyValue)-[:IN_DOCUMENT]->(d:Document)
+```
+
+**Design Principle:** KeyValue nodes are section-partitioned, aligning with the core architecture principle that "sections are the foundation for ground truth verification."
+
+### 20.3. Query Pattern (Route 1)
+
+```python
+# Route 1 extraction cascade: KVP → Table → LLM
+kvp_answer = await self._extract_from_keyvalue_nodes(query, results)
+if kvp_answer:
+    return kvp_answer
+
+table_answer = await self._extract_from_tables(query, results)
+if table_answer:
+    return table_answer
+
+llm_answer = await self._extract_with_llm_from_top_chunk(query, results)
+```
+
+#### Cypher Query for KVP Extraction
+```cypher
+MATCH (c:TextChunk)-[:IN_SECTION]->(s:Section)<-[:IN_SECTION]-(kv:KeyValue)
+WHERE c.id IN $chunk_ids AND c.group_id = $group_id
+  AND kv.key_embedding IS NOT NULL
+WITH DISTINCT kv, 
+     vector.similarity.cosine(kv.key_embedding, $query_embedding) AS similarity
+WHERE similarity > 0.85
+RETURN kv.key, kv.value, kv.confidence, similarity
+ORDER BY similarity DESC, confidence DESC
+LIMIT 5
+```
+
+### 20.4. Cost Analysis
+
+| Component | Cost | Notes |
+|-----------|------|-------|
+| Azure DI `prebuilt-layout` | $10/1K pages | Base document extraction |
+| Azure DI `KEY_VALUE_PAIRS` add-on | $6/1K pages | KVP feature enablement |
+| **Total** | **$16/1K pages** | One-time indexing cost |
+
+**Justification:** Tool is built for precision. One-time indexing cost enables deterministic field lookups and avoids LLM hallucinations on critical fields (invoice amounts, policy numbers, dates, etc.).
+
+### 20.5. Files Modified
+
+| File | Changes |
+|------|---------|
+| `app/services/document_intelligence_service.py` | Added `KEY_VALUE_PAIRS` feature, `_extract_key_value_pairs()` method |
+| `app/hybrid/services/neo4j_store.py` | Added `KeyValue` dataclass, `_create_keyvalue_nodes()` method, schema constraints |
+| `app/hybrid/indexing/lazygraphrag_pipeline.py` | Added `_embed_keyvalue_keys()` method, stats tracking |
+| `app/hybrid/orchestrator.py` | Added `_extract_from_keyvalue_nodes()` method, updated Route 1 cascade |
+
+### 20.6. Semantic Key Matching
+
+The key embedding enables semantic matching between query terms and stored keys:
+
+| Query | Matches | Similarity |
+|-------|---------|------------|
+| "What is the policy number?" | "Policy #", "Policy No.", "Policy Number", "Policy ID" | > 0.85 |
+| "What is the due date?" | "Due Date", "Payment Due", "Date Due" | > 0.85 |
+| "What is the total amount?" | "Total", "Amount Due", "Grand Total" | > 0.85 |
+
+**Threshold:** 0.85 cosine similarity (configurable)
+
+**Deduplication:** During indexing, identical keys (case-insensitive) share embeddings to reduce storage and embedding API costs.
 
 ---

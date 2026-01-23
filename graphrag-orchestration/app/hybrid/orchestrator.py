@@ -4759,13 +4759,25 @@ Sub-questions:"""
         self,
         query: str,
         route: QueryRoute,
-        response_type: str = "detailed_report"
+        response_type: str = "detailed_report",
+        use_modular_handlers: bool = True,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
         
         Useful for testing or when you know the query type.
+        
+        Args:
+            use_modular_handlers: If True (default), use modular route handlers.
+                                  If False, use legacy inline methods (for A/B testing).
         """
+        # Use modular handlers if available and requested
+        if use_modular_handlers and route in self._route_handlers:
+            handler = self._route_handlers[route]
+            result = await handler.execute(query, response_type)
+            return result.to_dict()
+        
+        # Legacy fallback
         if route == QueryRoute.VECTOR_RAG:
             return await self._execute_route_1_vector_rag(query)
         elif route == QueryRoute.LOCAL_SEARCH:

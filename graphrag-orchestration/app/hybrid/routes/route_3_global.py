@@ -1125,36 +1125,20 @@ class GlobalSearchHandler(BaseRouteHandler):
         ppr_evidence: List,
         response_type: str,
     ) -> Dict[str, Any]:
-        """Synthesize global response with theme coverage."""
-        # Build evidence from source chunks
-        evidence_nodes = []
-        for chunk in graph_context.source_chunks:
-            evidence_nodes.append({
-                "chunk_id": chunk.chunk_id,
-                "text": chunk.text,
-                "document_id": chunk.document_id,
-                "document_title": chunk.document_title,
-                "section_path": chunk.section_path,
-            })
+        """Synthesize global response with theme coverage.
         
-        # Add PPR evidence
-        for ev in ppr_evidence:
-            if isinstance(ev, dict):
-                evidence_nodes.append(ev)
+        Uses synthesize_with_graph_context() which expects:
+        - evidence_nodes: List[Tuple[str, float]] - entity names with PPR scores
+        - graph_context: EnhancedGraphContext with source_chunks for citations
         
-        # Deduplicate by chunk_id
-        seen_ids = set()
-        unique_evidence = []
-        for ev in evidence_nodes:
-            cid = ev.get("chunk_id") or ev.get("id")
-            if cid and cid not in seen_ids:
-                seen_ids.add(cid)
-                unique_evidence.append(ev)
-        
-        # Synthesize using the synthesizer
-        synthesis_result = await self.pipeline.synthesizer.synthesize(
+        This matches the orchestrator's Route 3 implementation.
+        """
+        # ppr_evidence from tracer.trace() returns List[Tuple[str, float]]
+        # Pass it directly to synthesize_with_graph_context
+        synthesis_result = await self.pipeline.synthesizer.synthesize_with_graph_context(
             query=query,
-            evidence_nodes=unique_evidence,
+            evidence_nodes=ppr_evidence,
+            graph_context=graph_context,
             response_type=response_type,
         )
         

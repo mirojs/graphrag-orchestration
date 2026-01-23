@@ -199,7 +199,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 3. **Q-D3:** Compare “time windows” across the set: list all explicit day-based timeframes.
-   - **Expected:** 60 days written notice (property management); 3 business days cancel window (purchase contract); 10 business days to file changes (holding tank); 60 days repair window after defect report (warranty repair timeline); 60-day warranty for certain items; demand for arbitration timing mentions 60 days after service of complaint.
+   - **Expected:** **Warranty:** 1 year warranty period (floors, walls, structural, plumbing, heating, electric, roof); 60-day warranty period (doors, windows, switches, fixtures, caulking, cabinets); 60 days repair window after defect report; 60 days after service of complaint for arbitration demand; 180 days arbitration completion target. **Holding Tank:** 10 business days to file contract changes. **Property Management:** 12 months initial term; 60 days written notice for termination; 5 business days to notify agent if property listed for sale; 180 days threshold for short-term vs long-term rentals. **Purchase Contract:** 90 days labor warranty; 3 business days cancel window with full refund.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0/1); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1); BUILDERS LIMITED WARRANTY.pdf (chunk 0/3)
 
 4. **Q-D4:** Which documents mention **insurance** and what limits are specified?

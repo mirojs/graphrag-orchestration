@@ -1,0 +1,473 @@
+{
+  "total": 41,
+  "correct": 0,
+  "accuracy": 0.0,
+  "errors": 41,
+  "route_stats": {
+    "local_search": {
+      "correct": 0,
+      "total": 24
+    },
+    "global_search": {
+      "correct": 0,
+      "total": 8
+    },
+    "drift_multi_hop": {
+      "correct": 0,
+      "total": 9
+    }
+  },
+  "results": [
+    {
+      "qid": "Q-V1",
+      "question": "What is the invoice **TOTAL** amount?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V2",
+      "question": "What is the invoice **DUE DATE**?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V3",
+      "question": "What are the invoice **TERMS**?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V4",
+      "question": "In the purchase contract, list the **3 installment amounts** and their triggers.",
+      "llm_route": "global_search",
+      "expected_route": "local_search",
+      "route_match": false,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V5",
+      "question": "What is the **labor warranty** duration in the purchase contract?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V6",
+      "question": "In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V9",
+      "question": "Who is the invoice **SALESPERSON**?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-V10",
+      "question": "What is the invoice **P.O. NUMBER**?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L1",
+      "question": "Who is the **Agent** in the property management agreement?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L2",
+      "question": "Who is the **Owner** in the property management agreement?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L3",
+      "question": "What is the managed property address in the property management agreement?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L4",
+      "question": "What is the initial term start date in the property management agreement?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L5",
+      "question": "What written notice period is required for termination of the property management agreement?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L6",
+      "question": "What is the Agent fee/commission for **short-term** rentals (<180 days)?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L7",
+      "question": "What is the Agent fee/commission for **long-term** leases (>180 days)?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L8",
+      "question": "What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-L9",
+      "question": "In the purchase contract Exhibit A, what is the job location?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G1",
+      "question": "Across the agreements, list the **termination/cancellation** rules you can find.",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G2",
+      "question": "Identify which documents reference **jurisdictions / governing law**.",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "global_search",
+      "route_match": false,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G4",
+      "question": "What obligations are explicitly described as **reporting / record-keeping**?",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G5",
+      "question": "What remedies / dispute-resolution mechanisms are described?",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G6",
+      "question": "List all **named parties/organizations** across the documents and which document(s) they appear in.",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G7",
+      "question": "Summarize all explicit **notice / delivery** mechanisms (written notice, certified mail, phone, filings) mentioned.",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G8",
+      "question": "Summarize all explicit **insurance / indemnity / hold harmless** clauses.",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-G9",
+      "question": "Identify all explicit **non-refundable / forfeiture** terms across the documents.",
+      "llm_route": "global_search",
+      "expected_route": "global_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D1",
+      "question": "If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D2",
+      "question": "In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D3",
+      "question": "Compare \"time windows\" across the set: list all explicit day-based timeframes.",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D4",
+      "question": "Which documents mention **insurance** and what limits are specified?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D6",
+      "question": "Do the purchase contract total price and the invoice total match? If so, what is that amount?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D7",
+      "question": "Which document has the latest explicit date, and what is it?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-D8",
+      "question": "Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "drift_multi_hop",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N1",
+      "question": "What is the invoice's **bank routing number** for payment?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N2",
+      "question": "What is the invoice\u2019s **IBAN / SWIFT (BIC)** for international payments?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N3",
+      "question": "What is the vendor's **VAT / Tax ID number** on the invoice?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N5",
+      "question": "What is the invoice\u2019s **bank account number** for ACH/wire payments?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N6",
+      "question": "Which documents are governed by the laws of **California**?",
+      "llm_route": "drift_multi_hop",
+      "expected_route": "local_search",
+      "route_match": false,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N7",
+      "question": "What is the property management Agent's **license number**?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N8",
+      "question": "What is the purchase contract\u2019s required **wire transfer / ACH instructions**?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N9",
+      "question": "What is the exact clause about **mold damage** coverage in the warranty?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    },
+    {
+      "qid": "Q-N10",
+      "question": "What is the invoice **shipping method** (value in \"SHIPPED VIA\")?",
+      "llm_route": "local_search",
+      "expected_route": "local_search",
+      "route_match": true,
+      "answer_correct": false,
+      "reason": "Error: [Errno 111] Connection refused",
+      "latency": 0,
+      "answer_preview": ""
+    }
+  ]
+}

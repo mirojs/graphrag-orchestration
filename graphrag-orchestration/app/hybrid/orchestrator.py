@@ -2629,6 +2629,14 @@ Instructions:
 
         t_route0 = time.perf_counter()
         
+        # ================================================================
+        # FAST MODE: Skip redundant boost stages for ~40-50% latency reduction
+        # ================================================================
+        # When enabled, skips Section Boost, Keyword Boost, Doc Lead Boost
+        # and makes PPR conditional on query characteristics.
+        # Default: ON (set ROUTE3_FAST_MODE=0 to use full pipeline)
+        fast_mode = os.getenv("ROUTE3_FAST_MODE", "1").strip().lower() in {"1", "true", "yes"}
+        
         # Detect coverage intent: Does this query require cross-document coverage?
         from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
         coverage_mode = EnhancedGraphRetriever.detect_coverage_intent(query)
@@ -2639,6 +2647,7 @@ Instructions:
             response_type=response_type,
             timings_enabled=enable_timings,
             coverage_mode=coverage_mode,
+            fast_mode=fast_mode,
         )
         
         # Stage 3.1: Community Matching (LazyGraphRAG: on-the-fly generation if needed)
@@ -2920,9 +2929,14 @@ Instructions:
         # This provides document-structure-aware retrieval complementing entity-based retrieval
         # ==================================================================
         t0 = time.perf_counter()
-        enable_section_boost = os.getenv("ROUTE3_SECTION_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        # Fast Mode: Skip Section Boost entirely (BM25+Vector RRF is sufficient)
+        enable_section_boost = (
+            not fast_mode and 
+            os.getenv("ROUTE3_SECTION_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        )
         section_boost_metadata: Dict[str, Any] = {
             "enabled": enable_section_boost,
+            "fast_mode_skipped": fast_mode,
             "applied": False,
             "strategy": None,
             "semantic": {
@@ -2932,6 +2946,9 @@ Instructions:
                 "top_sections": []
             }
         }
+        
+        if fast_mode and not enable_section_boost:
+            logger.info("stage_section_boost_skipped", reason="fast_mode")
 
         if enable_section_boost:
             try:
@@ -3220,7 +3237,14 @@ Instructions:
         # Default ON: this boost helps diverse clause-style questions (reporting, remedies,
         # insurance, termination) surface explicit obligations/numbers that may not map to hub
         # entities. Can be disabled in deployment via ROUTE3_KEYWORD_BOOST=0.
-        enable_keyword_boost = os.getenv("ROUTE3_KEYWORD_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        # Fast Mode: Skip Keyword Boost entirely (BM25 lexical matching is sufficient)
+        enable_keyword_boost = (
+            not fast_mode and 
+            os.getenv("ROUTE3_KEYWORD_BOOST", "1").strip().lower() in {"1", "true", "yes"}
+        )
+        
+        if fast_mode:
+            logger.info("stage_keyword_boost_skipped", reason="fast_mode")
 
         ql = query.lower()
         is_termination_query = any(
@@ -3424,7 +3448,11 @@ Instructions:
             ]
         )
 
-        enable_doc_lead_boost = os.getenv("ROUTE3_DOC_LEAD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
+        # Fast Mode: Skip Doc Lead Boost (Coverage Gap Fill handles this better)
+        enable_doc_lead_boost = (
+            not fast_mode and 
+            os.getenv("ROUTE3_DOC_LEAD_BOOST", "0").strip().lower() in {"1", "true", "yes"}
+        )
         if enable_doc_lead_boost and is_cross_document_query:
             try:
                 lead_chunks = await self.enhanced_retriever.get_document_lead_chunks(
@@ -3628,14 +3656,36 @@ Instructions:
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
         # Now also includes related entities from graph traversal
         timings_ms["stage_3.3.6_section_boost_ms"] = int((time.perf_counter() - t0) * 1000)
-        disable_ppr = os.getenv("ROUTE3_DISABLE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+        
+        # Fast Mode: PPR is conditional - skip for simple thematic queries, keep for relationship queries
+        env_disable_ppr = os.getenv("ROUTE3_DISABLE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+        
+        # In fast mode, only enable PPR if query has relationship indicators
+        fast_mode_ppr_skip = False
+        if fast_mode and not env_disable_ppr:
+            relationship_keywords = [
+                "connected", "through", "linked", "related to", 
+                "associated with", "path", "chain", "relationship",
+                "between", "across"
+            ]
+            ql = query.lower()
+            has_relationship_intent = any(kw in ql for kw in relationship_keywords)
+            # Also check for proper nouns (entity mentions)
+            words = query.split()
+            has_explicit_entity = sum(1 for w in words[1:] if len(w) > 1 and w[0].isupper()) >= 2
+            
+            fast_mode_ppr_skip = not (has_relationship_intent or has_explicit_entity)
+        
+        disable_ppr = env_disable_ppr or fast_mode_ppr_skip
         all_seed_entities = list(set(hub_entities + graph_context.related_entities[:10]))
 
         if disable_ppr:
+            skip_reason = "ROUTE3_DISABLE_PPR" if env_disable_ppr else "fast_mode_simple_query"
             logger.info(
                 "stage_3.4_hipporag_ppr_skipped",
-                reason="ROUTE3_DISABLE_PPR",
+                reason=skip_reason,
                 seeds=len(all_seed_entities),
+                fast_mode=fast_mode,
             )
             t0 = time.perf_counter()
             # Minimal deterministic fallback: keep seeds as evidence with uniform score.

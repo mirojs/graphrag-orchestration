@@ -65,7 +65,8 @@ EXPECTED_TERMS: Dict[str, List[str]] = {
     "Q-G7": ["60 days", "written notice", "certified mail", "phone", "emergency"],
     "Q-G8": ["$300,000", "$25,000", "liability insurance", "hold harmless", "indemnify", "gross negligence"],
     "Q-G9": ["non-refundable", "$250", "start-up fee", "deposit", "forfeited", "3 business days"],
-    "Q-G10": ["warranty", "arbitration", "servicing", "management", "invoice", "scope of work", "payment"],
+    # Note: "management" removed - no Property Management Agreement in 5-doc corpus
+    "Q-G10": ["warranty", "arbitration", "servicing", "invoice", "scope of work", "payment"],
 }
 
 NEGATIVE_QUERY_SUFFIX = (

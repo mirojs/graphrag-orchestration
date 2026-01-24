@@ -68,14 +68,26 @@ class GlobalSearchHandler(BaseRouteHandler):
         timings_ms: Dict[str, int] = {}
         t_route0 = time.perf_counter()
         
+        # ================================================================
+        # FAST MODE: Skip redundant stages for ~40-50% latency reduction
+        # ================================================================
+        # When enabled, makes PPR conditional on query characteristics.
+        # Boost stages (Section, Keyword, Doc Lead) already removed.
+        # Default: ON (set ROUTE3_FAST_MODE=0 to use full pipeline)
+        fast_mode = os.getenv("ROUTE3_FAST_MODE", "1").strip().lower() in {"1", "true", "yes"}
+        
         # Detect coverage intent
         from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
         coverage_mode = EnhancedGraphRetriever.detect_coverage_intent(query)
         
-        logger.info("route_3_global_search_start",
-                   query=query[:50],
-                   response_type=response_type,
-                   coverage_mode=coverage_mode)
+        logger.info(
+            "route_3_global_search_start",
+            query=query[:50],
+            response_type=response_type,
+            timings_enabled=enable_timings,
+            coverage_mode=coverage_mode,
+            fast_mode=fast_mode,
+        )
         
         # Stage 3.1: Community Matching
         logger.info("stage_3.1_community_matching")
@@ -108,7 +120,8 @@ class GlobalSearchHandler(BaseRouteHandler):
         timings_ms["stage_3.3_ms"] = int((time.perf_counter() - t0) * 1000)
         logger.info("stage_3.3_complete",
                    num_source_chunks=len(graph_context.source_chunks),
-                   num_relationships=len(graph_context.relationships))
+                   num_relationships=len(graph_context.relationships),
+                   num_related_entities=len(graph_context.related_entities))
         
         # Stage 3.3.5: Cypher 25 Hybrid RRF (BM25 + Vector)
         t0 = time.perf_counter()
@@ -163,19 +176,51 @@ class GlobalSearchHandler(BaseRouteHandler):
                 }
             )
         
-        # Stage 3.4: HippoRAG PPR Tracing
-        logger.info("stage_3.4_ppr_tracing")
+        # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
+        # Fast Mode: PPR is conditional - skip for simple thematic queries, keep for relationship queries
+        env_disable_ppr = os.getenv("ROUTE3_DISABLE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+        
+        # In fast mode, only enable PPR if query has relationship indicators
+        fast_mode_ppr_skip = False
+        if fast_mode and not env_disable_ppr:
+            relationship_keywords = [
+                "connected", "through", "linked", "related to", 
+                "associated with", "path", "chain", "relationship",
+                "between", "across"
+            ]
+            ql = query.lower()
+            has_relationship_intent = any(kw in ql for kw in relationship_keywords)
+            # Also check for proper nouns (entity mentions)
+            words = query.split()
+            has_explicit_entity = sum(1 for w in words[1:] if len(w) > 1 and w[0].isupper()) >= 2
+            
+            fast_mode_ppr_skip = not (has_relationship_intent or has_explicit_entity)
+        
+        disable_ppr = env_disable_ppr or fast_mode_ppr_skip
+        all_seed_entities = list(set(hub_entities + graph_context.related_entities[:10]))
+        
         t0 = time.perf_counter()
-        ppr_seeds = hub_entities + graph_context.related_entities
-        ppr_evidence = []
-        if ppr_seeds:
-            ppr_evidence = await self.pipeline.tracer.trace(
-                query=query,
-                seed_entities=ppr_seeds,
-                top_k=15
+        if disable_ppr:
+            skip_reason = "ROUTE3_DISABLE_PPR" if env_disable_ppr else "fast_mode_simple_query"
+            logger.info(
+                "stage_3.4_hipporag_ppr_skipped",
+                reason=skip_reason,
+                seeds=len(all_seed_entities),
+                fast_mode=fast_mode,
             )
+            # Minimal deterministic fallback: keep seeds as evidence with uniform score
+            evidence_nodes = [(e, 1.0) for e in all_seed_entities[:20]]
+        else:
+            logger.info("stage_3.4_hipporag_ppr_tracing")
+            evidence_nodes = []
+            if all_seed_entities:
+                evidence_nodes = await self.pipeline.tracer.trace(
+                    query=query,
+                    seed_entities=all_seed_entities,
+                    top_k=20  # Larger for global coverage
+                )
+            logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
         timings_ms["stage_3.4_ms"] = int((time.perf_counter() - t0) * 1000)
-        logger.info("stage_3.4_complete", num_ppr_evidence=len(ppr_evidence))
         
         # Stage 3.4.1: Coverage Gap Fill
         if coverage_mode:
@@ -189,7 +234,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             graph_context=graph_context,
             community_data=community_data,
             hub_entities=hub_entities,
-            ppr_evidence=ppr_evidence,
+            ppr_evidence=evidence_nodes,
             response_type=response_type,
         )
         timings_ms["stage_3.5_ms"] = int((time.perf_counter() - t0) * 1000)

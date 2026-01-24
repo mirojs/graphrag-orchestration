@@ -130,48 +130,52 @@ class DRIFTWorkflow(Workflow):
     @step
     async def fan_out_sub_questions(
         self, ctx: Context, ev: DecomposeEvent
-    ) -> List[SubQuestionEvent]:
+    ) -> SubQuestionEvent | SynthesizeEvent | None:
         """Stage 4.2 Setup: Create parallel sub-question events.
         
-        This step returns a LIST of events, which LlamaIndex Workflows
-        processes in PARALLEL. This is the key performance improvement.
+        Uses ctx.send_event() to emit multiple events for parallel processing.
+        Returns SynthesizeEvent only for deterministic short-circuit case.
+        Returns None otherwise (events already sent via ctx.send_event()).
+        
+        NOTE: Return type includes SubQuestionEvent to indicate this step
+        produces SubQuestionEvents (via send_event), even though we return None.
         """
         # Check for deterministic result short-circuit
         deterministic_result = await ctx.get("deterministic_result", None)
         if deterministic_result:
             # Skip to synthesis with deterministic result
-            return [SynthesizeEvent(
+            return SynthesizeEvent(
                 results=[],
                 all_seeds=[],
                 original_query=ev.query,
                 response_type=ev.response_type,
-            )]
+            )
         
         sub_questions = await ctx.get("sub_questions", [])
         
         logger.info("drift_fan_out", num_sub_questions=len(sub_questions))
         
-        # Return list of events - ALL will be processed in parallel
-        return [
-            SubQuestionEvent(
+        # Send each sub-question event - they will be processed in PARALLEL
+        for i, sq in enumerate(sub_questions):
+            ctx.send_event(SubQuestionEvent(
                 sub_question=sq,
                 index=i,
                 original_query=ev.query,
-            )
-            for i, sq in enumerate(sub_questions)
-        ]
+            ))
+        
+        return None  # Events already sent
     
     # =========================================================================
     # Step 3: Process Single Sub-Question (runs in parallel for each)
     # =========================================================================
     
-    @step
+    @step(num_workers=4)  # Process up to 4 sub-questions in parallel
     async def process_sub_question(
         self, ctx: Context, ev: SubQuestionEvent
     ) -> SubQuestionResultEvent:
         """Stage 4.2: Process a single sub-question.
         
-        This step runs IN PARALLEL for each SubQuestionEvent.
+        This step runs IN PARALLEL for each SubQuestionEvent (num_workers=4).
         Each instance:
         1. Disambiguates entities for this sub-question
         2. Retrieves evidence via PPR tracing
@@ -364,11 +368,14 @@ class DRIFTWorkflow(Workflow):
     @step
     async def redecompose(
         self, ctx: Context, ev: ReDecomposeEvent
-    ) -> List[SubQuestionEvent]:
+    ) -> SubQuestionEvent | None:
         """Stage 4.3.5 (retry): Generate refined sub-questions.
         
         Increments redecompose counter and generates new sub-questions
-        for another parallel processing pass.
+        for another parallel processing pass. Uses ctx.send_event() for fan-out.
+        
+        NOTE: Return type includes SubQuestionEvent to indicate this step
+        produces SubQuestionEvents (via send_event), even though we return None.
         """
         redecompose_count = await ctx.get("redecompose_count", 0)
         await ctx.set("redecompose_count", redecompose_count + 1)
@@ -386,15 +393,15 @@ class DRIFTWorkflow(Workflow):
         logger.info("drift_redecompose_complete", 
                    new_questions=len(refined_questions))
         
-        # Fan out again for parallel processing
-        return [
-            SubQuestionEvent(
+        # Fan out again for parallel processing using send_event
+        for i, sq in enumerate(refined_questions):
+            ctx.send_event(SubQuestionEvent(
                 sub_question=sq,
                 index=i,
                 original_query=ev.original_query,
-            )
-            for i, sq in enumerate(refined_questions)
-        ]
+            ))
+        
+        return None  # Events already sent via ctx.send_event()
     
     # =========================================================================
     # Step 7: Final Synthesis

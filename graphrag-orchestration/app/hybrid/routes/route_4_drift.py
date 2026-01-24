@@ -93,9 +93,21 @@ class DRIFTHandler(BaseRouteHandler):
             result = await workflow.run(start_event=start_event)
             
             # Convert dict result to RouteResult
+            # Map synthesizer citation format to Citation class format
+            citations = []
+            for i, c in enumerate(result.get("citations", [])):
+                citations.append(Citation(
+                    index=c.get("index", i + 1),
+                    chunk_id=c.get("chunk_id", ""),
+                    document_id=c.get("document_id", c.get("source", "")),
+                    document_title=c.get("document_title", c.get("document", "")),
+                    score=c.get("score", 0.0),
+                    text_preview=c.get("text_preview", ""),
+                ))
+            
             return RouteResult(
                 response=result.get("response", ""),
-                citations=[Citation(**c) for c in result.get("citations", [])],
+                citations=citations,
                 route_used=self.ROUTE_NAME,
                 evidence_path=result.get("evidence_path", []),
                 metadata={

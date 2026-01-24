@@ -15,7 +15,7 @@ Flow:
 
 import os
 import time
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 
 import structlog
 from llama_index.core.workflow import (
@@ -217,7 +217,7 @@ class DRIFTWorkflow(Workflow):
     @step
     async def collect_and_check(
         self, ctx: Context, ev: SubQuestionResultEvent
-    ) -> Optional[Union[ConfidenceCheckEvent, SynthesizeEvent]]:
+    ) -> ConfidenceCheckEvent | None:
         """Stage 4.3 + 4.3.5: Collect results and compute confidence.
         
         This step collects all SubQuestionResultEvents and, once all are
@@ -268,7 +268,7 @@ class DRIFTWorkflow(Workflow):
     @step
     async def check_confidence(
         self, ctx: Context, ev: ConfidenceCheckEvent
-    ) -> Union[SynthesizeEvent, ReDecomposeEvent]:
+    ) -> SynthesizeEvent | ReDecomposeEvent:
         """Stage 4.3.5: Evaluate confidence and decide next action.
         
         If confidence is low and we haven't exceeded redecompose attempts,

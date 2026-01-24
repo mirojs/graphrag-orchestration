@@ -11,15 +11,23 @@ Usage:
 
 import asyncio
 import json
+import os
 import re
 import sys
 from pathlib import Path
 from typing import List, Dict, Any
 from collections import defaultdict
+from dotenv import load_dotenv
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "graphrag-orchestration"))
+
+# Load environment from nested .env file
+env_path = project_root / "graphrag-orchestration" / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    print(f"Loaded environment from: {env_path}")
 
 from app.hybrid.router.main import HybridRouter, DeploymentProfile, QueryRoute
 
@@ -92,6 +100,7 @@ class RouterAccuracyEvaluator:
         print("=" * 80)
         
         for q in self.questions:
+            # Use async route() method for full complexity assessment
             actual_route = await self.router.route(q["question"])
             expected_route = q["expected_route"]
             
@@ -200,10 +209,29 @@ async def main():
         print("ERROR: No questions found in question bank")
         return
     
-    # Initialize router
+    # Initialize LLM client for routing
+    print("\nInitializing LLM client...")
+    try:
+        from llama_index.llms.azure_openai import AzureOpenAI
+        import os
+        
+        llm = AzureOpenAI(
+            deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_MINI", "gpt-4o-mini"),
+            api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+        )
+        print(f"  Using LLM: {os.getenv('AZURE_OPENAI_DEPLOYMENT_MINI', 'gpt-4o-mini')}")
+    except Exception as e:
+        print(f"WARNING: Could not initialize LLM client: {e}")
+        print("  Falling back to heuristic-only routing")
+        llm = None
+    
+    # Initialize router with LLM
     print("\nInitializing router (General Enterprise profile)...")
     router = HybridRouter(
         profile=DeploymentProfile.GENERAL_ENTERPRISE,
+        llm_client=llm,
         vector_threshold=0.25,
         global_threshold=0.5,
         drift_threshold=0.75
@@ -238,7 +266,8 @@ async def main():
     all_routes = ["vector_rag", "local_search", "global_search", "drift_multi_hop"]
     
     # Header
-    print(f"{'Expected \\ Actual':<25}", end="")
+    header_label = "Expected \\ Actual"
+    print(f"{header_label:<25}", end="")
     for route in all_routes:
         print(f"{route[:10]:<12}", end="")
     print()

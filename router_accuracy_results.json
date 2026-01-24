@@ -1,0 +1,374 @@
+{
+  "total_questions": 41,
+  "hard_accuracy": 0.926829268292683,
+  "soft_accuracy": 0.9390243902439024,
+  "hard_correct": 38,
+  "soft_correct": 38.5,
+  "confusion_matrix": {
+    "local_search": {
+      "local_search": 24,
+      "global_search": 1,
+      "drift_multi_hop": 1
+    },
+    "global_search": {
+      "global_search": 7,
+      "drift_multi_hop": 1,
+      "local_search": 0
+    },
+    "drift_multi_hop": {
+      "drift_multi_hop": 7,
+      "local_search": 0,
+      "global_search": 0
+    }
+  },
+  "per_route_metrics": {
+    "local_search": {
+      "precision": 1.0,
+      "recall": 0.9230769230769231,
+      "f1": 0.9600000000000001,
+      "support": 26
+    },
+    "global_search": {
+      "precision": 0.875,
+      "recall": 0.875,
+      "f1": 0.875,
+      "support": 8
+    },
+    "drift_multi_hop": {
+      "precision": 0.7777777777777778,
+      "recall": 1.0,
+      "f1": 0.8750000000000001,
+      "support": 7
+    }
+  },
+  "results": [
+    {
+      "qid": "Q-V1",
+      "question": "What is the invoice **TOTAL** amount?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-V2",
+      "question": "What is the invoice **DUE DATE**?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-V3",
+      "question": "What are the invoice **TERMS**?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-V4",
+      "question": "In the purchase contract, list the **3 installment amounts** and their triggers.",
+      "expected": "local_search",
+      "actual": "global_search",
+      "correct": false,
+      "soft_error": true
+    },
+    {
+      "qid": "Q-V5",
+      "question": "What is the **labor warranty** duration in the purchase contract?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-V6",
+      "question": "In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-V9",
+      "question": "Who is the invoice **SALESPERSON**?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-V10",
+      "question": "What is the invoice **P.O. NUMBER**?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L1",
+      "question": "Who is the **Agent** in the property management agreement?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L2",
+      "question": "Who is the **Owner** in the property management agreement?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L3",
+      "question": "What is the managed property address in the property management agreement?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L4",
+      "question": "What is the initial term start date in the property management agreement?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L5",
+      "question": "What written notice period is required for termination of the property management agreement?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L6",
+      "question": "What is the Agent fee/commission for **short-term** rentals (<180 days)?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L7",
+      "question": "What is the Agent fee/commission for **long-term** leases (>180 days)?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L8",
+      "question": "What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-L9",
+      "question": "In the purchase contract Exhibit A, what is the job location?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G1",
+      "question": "Across the agreements, list the **termination/cancellation** rules you can find.",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G2",
+      "question": "Identify which documents reference **jurisdictions / governing law**.",
+      "expected": "global_search",
+      "actual": "drift_multi_hop",
+      "correct": false,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G4",
+      "question": "What obligations are explicitly described as **reporting / record-keeping**?",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G5",
+      "question": "What remedies / dispute-resolution mechanisms are described?",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G6",
+      "question": "List all **named parties/organizations** across the documents and which document(s) they appear in.",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G7",
+      "question": "Summarize all explicit **notice / delivery** mechanisms (written notice, certified mail, phone, filings) mentioned.",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G8",
+      "question": "Summarize all explicit **insurance / indemnity / hold harmless** clauses.",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-G9",
+      "question": "Identify all explicit **non-refundable / forfeiture** terms across the documents.",
+      "expected": "global_search",
+      "actual": "global_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D1",
+      "question": "If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D2",
+      "question": "In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D3",
+      "question": "Compare \"time windows\" across the set: list all explicit day-based timeframes.",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D4",
+      "question": "Which documents mention **insurance** and what limits are specified?",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D6",
+      "question": "Do the purchase contract total price and the invoice total match? If so, what is that amount?",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D7",
+      "question": "Which document has the latest explicit date, and what is it?",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-D8",
+      "question": "Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?",
+      "expected": "drift_multi_hop",
+      "actual": "drift_multi_hop",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N1",
+      "question": "What is the invoice's **bank routing number** for payment?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N2",
+      "question": "What is the invoice\u2019s **IBAN / SWIFT (BIC)** for international payments?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N3",
+      "question": "What is the vendor's **VAT / Tax ID number** on the invoice?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N5",
+      "question": "What is the invoice\u2019s **bank account number** for ACH/wire payments?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N6",
+      "question": "Which documents are governed by the laws of **California**?",
+      "expected": "local_search",
+      "actual": "drift_multi_hop",
+      "correct": false,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N7",
+      "question": "What is the property management Agent's **license number**?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N8",
+      "question": "What is the purchase contract\u2019s required **wire transfer / ACH instructions**?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N9",
+      "question": "What is the exact clause about **mold damage** coverage in the warranty?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    },
+    {
+      "qid": "Q-N10",
+      "question": "What is the invoice **shipping method** (value in \"SHIPPED VIA\")?",
+      "expected": "local_search",
+      "actual": "local_search",
+      "correct": true,
+      "soft_error": false
+    }
+  ]
+}

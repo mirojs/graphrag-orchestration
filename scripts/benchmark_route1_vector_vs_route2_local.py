@@ -388,8 +388,8 @@ def main() -> int:
     question_bank_path = Path(str(args.question_bank)).expanduser().resolve()
 
     base_url = args.url.rstrip("/")
-    endpoint = f"{base_url}/graphrag/v3/query"
-    endpoint_local = f"{base_url}/graphrag/v3/query/local"
+    endpoint = f"{base_url}/hybrid/query"
+    endpoint_local = f"{base_url}/hybrid/query"
 
     if args.suite == "qv":
         questions = [BankQuestion(qid=q.qid, query=q.query) for q in _read_vector_questions(question_bank_path)]
@@ -437,7 +437,7 @@ def main() -> int:
             }
 
             per_route: Dict[str, Any] = {}
-            for route in ("vector", "local"):
+            for route in ("vector_rag", "local_search"):
                 runs: List[Dict[str, Any]] = []
                 for i in range(repeats):
                     status, resp_json, t_s, err = _http_post_json(
@@ -573,7 +573,7 @@ def main() -> int:
         ql = _read_local_questions(question_bank_path)
 
         # Each question is run only on its dedicated route.
-        jobs: List[Tuple[str, BankQuestion]] = [("vector", q) for q in qv] + [("local", q) for q in ql]
+        jobs: List[Tuple[str, BankQuestion]] = [("vector_rag", q) for q in qv] + [("local_search", q) for q in ql]
 
         repeat_rows: List[Dict[str, Any]] = []
         for route, q in jobs:
@@ -743,14 +743,14 @@ def main() -> int:
         status_v, json_v, t_v, err_v = _http_post_json(
             url=endpoint,
             headers=headers,
-            payload={**base_payload, "force_route": "vector"},
+            payload={**base_payload, "force_route": "vector_rag"},
             timeout_s=float(args.timeout),
         )
 
         status_l, json_l, t_l, err_l = _http_post_json(
             url=endpoint,
             headers=headers,
-            payload={**base_payload, "force_route": "local"},
+            payload={**base_payload, "force_route": "local_search"},
             timeout_s=float(args.timeout),
         )
 
@@ -764,7 +764,7 @@ def main() -> int:
                 "query": q.query,
                 "top_k": int(args.top_k),
                 "include_sources": True,
-                "force_route": "local",
+                "force_route": "local_search",
                 "synthesize": False,
             }
             status_lro, json_lro, t_lro, err_lro = _http_post_json(

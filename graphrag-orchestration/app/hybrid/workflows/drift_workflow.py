@@ -88,10 +88,10 @@ class DRIFTWorkflow(Workflow):
         logger.info("drift_workflow_start", query=query[:50])
         
         # Store context for later steps
-        await ctx.set("original_query", query)
-        await ctx.set("response_type", response_type)
-        await ctx.set("redecompose_count", 0)
-        await ctx.set("timings_ms", {})
+        ctx.set("original_query", query)
+        ctx.set("response_type", response_type)
+        ctx.set("redecompose_count", 0)
+        ctx.set("timings_ms", {})
         
         t0 = time.perf_counter()
         
@@ -105,21 +105,21 @@ class DRIFTWorkflow(Workflow):
                 # Handle deterministically - return StopEvent directly
                 result = await self._handle_date_metadata_query(query, date_query_type)
                 # Store result and short-circuit
-                await ctx.set("deterministic_result", result)
+                ctx.set("deterministic_result", result)
                 return DecomposeEvent(query=query, response_type=response_type)
         
         # Decompose query
         sub_questions = await self.pipeline._drift_decompose(query)
         
-        timings = await ctx.get("timings_ms", {})
+        timings = ctx.get("timings_ms", {})
         timings["stage_4.1_ms"] = int((time.perf_counter() - t0) * 1000)
-        await ctx.set("timings_ms", timings)
+        ctx.set("timings_ms", timings)
         
         logger.info("drift_decompose_complete", num_sub_questions=len(sub_questions))
         
         # Store sub-questions count for collection
-        await ctx.set("num_sub_questions", len(sub_questions))
-        await ctx.set("sub_questions", sub_questions)
+        ctx.set("num_sub_questions", len(sub_questions))
+        ctx.set("sub_questions", sub_questions)
         
         return DecomposeEvent(query=query, response_type=response_type)
     
@@ -141,7 +141,7 @@ class DRIFTWorkflow(Workflow):
         produces SubQuestionEvents (via send_event), even though we return None.
         """
         # Check for deterministic result short-circuit
-        deterministic_result = await ctx.get("deterministic_result", None)
+        deterministic_result = ctx.get("deterministic_result", None)
         if deterministic_result:
             # Skip to synthesis with deterministic result
             return SynthesizeEvent(
@@ -151,7 +151,7 @@ class DRIFTWorkflow(Workflow):
                 response_type=ev.response_type,
             )
         
-        sub_questions = await ctx.get("sub_questions", [])
+        sub_questions = ctx.get("sub_questions", [])
         
         logger.info("drift_fan_out", num_sub_questions=len(sub_questions))
         
@@ -227,7 +227,7 @@ class DRIFTWorkflow(Workflow):
         This step collects all SubQuestionResultEvents and, once all are
         received, computes confidence metrics to decide next action.
         """
-        num_expected = await ctx.get("num_sub_questions", 1)
+        num_expected = ctx.get("num_sub_questions", 1)
         
         # Collect events - returns None until all are received
         results = ctx.collect_events(ev, [SubQuestionResultEvent] * num_expected)
@@ -253,11 +253,11 @@ class DRIFTWorkflow(Workflow):
         
         # Deduplicate seeds
         all_seeds = list(set(all_seeds))
-        await ctx.set("all_seeds", all_seeds)
-        await ctx.set("intermediate_results", intermediate_results)
+        ctx.set("all_seeds", all_seeds)
+        ctx.set("intermediate_results", intermediate_results)
         
-        original_query = await ctx.get("original_query", "")
-        response_type = await ctx.get("response_type", "detailed_report")
+        original_query = ctx.get("original_query", "")
+        response_type = ctx.get("response_type", "detailed_report")
         
         return ConfidenceCheckEvent(
             results=sorted_results,
@@ -280,10 +280,10 @@ class DRIFTWorkflow(Workflow):
         """
         t0 = time.perf_counter()
         
-        sub_questions = await ctx.get("sub_questions", [])
-        intermediate_results = await ctx.get("intermediate_results", [])
-        all_seeds = await ctx.get("all_seeds", [])
-        redecompose_count = await ctx.get("redecompose_count", 0)
+        sub_questions = ctx.get("sub_questions", [])
+        intermediate_results = ctx.get("intermediate_results", [])
+        all_seeds = ctx.get("all_seeds", [])
+        redecompose_count = ctx.get("redecompose_count", 0)
         
         # Stage 4.3: Consolidated tracing with all seeds
         logger.info("drift_consolidated_tracing", num_seeds=len(all_seeds))
@@ -292,11 +292,11 @@ class DRIFTWorkflow(Workflow):
             seed_entities=all_seeds,
             top_k=30
         )
-        await ctx.set("complete_evidence", complete_evidence)
+        ctx.set("complete_evidence", complete_evidence)
         
-        timings = await ctx.get("timings_ms", {})
+        timings = ctx.get("timings_ms", {})
         timings["stage_4.3_ms"] = int((time.perf_counter() - t0) * 1000)
-        await ctx.set("timings_ms", timings)
+        ctx.set("timings_ms", timings)
         
         # Compute confidence
         confidence_metrics = self.pipeline._compute_subgraph_confidence(
@@ -377,8 +377,8 @@ class DRIFTWorkflow(Workflow):
         NOTE: Return type includes SubQuestionEvent to indicate this step
         produces SubQuestionEvents (via send_event), even though we return None.
         """
-        redecompose_count = await ctx.get("redecompose_count", 0)
-        await ctx.set("redecompose_count", redecompose_count + 1)
+        redecompose_count = ctx.get("redecompose_count", 0)
+        ctx.set("redecompose_count", redecompose_count + 1)
         
         logger.info("drift_redecompose", attempt=redecompose_count + 1)
         
@@ -386,9 +386,9 @@ class DRIFTWorkflow(Workflow):
         refined_questions = await self.pipeline._drift_decompose(ev.refinement_prompt)
         
         # Update context
-        existing_questions = await ctx.get("sub_questions", [])
-        await ctx.set("sub_questions", existing_questions + refined_questions)
-        await ctx.set("num_sub_questions", len(refined_questions))
+        existing_questions = ctx.get("sub_questions", [])
+        ctx.set("sub_questions", existing_questions + refined_questions)
+        ctx.set("num_sub_questions", len(refined_questions))
         
         logger.info("drift_redecompose_complete", 
                    new_questions=len(refined_questions))
@@ -413,16 +413,16 @@ class DRIFTWorkflow(Workflow):
         t0 = time.perf_counter()
         
         # Check for deterministic result
-        deterministic_result = await ctx.get("deterministic_result", None)
+        deterministic_result = ctx.get("deterministic_result", None)
         if deterministic_result:
             logger.info("drift_returning_deterministic_result")
             return StopEvent(result=deterministic_result)
         
         original_query = ev.original_query
         response_type = ev.response_type
-        sub_questions = await ctx.get("sub_questions", [])
-        intermediate_results = await ctx.get("intermediate_results", [])
-        complete_evidence = await ctx.get("complete_evidence", [])
+        sub_questions = ctx.get("sub_questions", [])
+        intermediate_results = ctx.get("intermediate_results", [])
+        complete_evidence = ctx.get("complete_evidence", [])
         
         # Stage 4.3.6: Coverage Gap Fill
         coverage_chunks = await self._apply_coverage_gap_fill(
@@ -440,7 +440,7 @@ class DRIFTWorkflow(Workflow):
             coverage_chunks=coverage_chunks if coverage_chunks else None,
         )
         
-        timings = await ctx.get("timings_ms", {})
+        timings = ctx.get("timings_ms", {})
         timings["stage_4.4_ms"] = int((time.perf_counter() - t0) * 1000)
         
         logger.info("drift_workflow_complete", timings=timings)
@@ -456,7 +456,7 @@ class DRIFTWorkflow(Workflow):
                 "workflow": True,
                 "parallel_sub_questions": True,
                 "timings_ms": timings,
-                "redecompose_attempts": await ctx.get("redecompose_count", 0),
+                "redecompose_attempts": ctx.get("redecompose_count", 0),
             }
         }
         

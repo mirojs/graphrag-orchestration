@@ -242,7 +242,8 @@ def _http_post_json(
 
 
 def _v3_query_endpoint(base_url: str) -> str:
-    return f"{base_url.rstrip('/')}/graphrag/v3/query"
+    # Use hybrid endpoint (correct) instead of deprecated v3
+    return f"{base_url.rstrip('/')}/hybrid/query"
 
 
 def _extract_sources_ids(resp_json: Dict[str, Any]) -> List[str]:
@@ -303,8 +304,9 @@ def main() -> int:
         for ri in range(int(args.repeats)):
             payload = {
                 "query": q.query,
-                "force_route": "graph",
-                "top_k": int(args.top_k),
+                "group_id": group_id,
+                "force_route": "global_search",
+                "profile": "general_enterprise",
             }
             headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
             status, resp, elapsed_s, err = _http_post_json(

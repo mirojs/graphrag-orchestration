@@ -1,0 +1,6 @@
+usage: benchmark_route3_global_repeatability.py
+       [-h] [--url URL] [--group-id GROUP_ID]
+       [--question-bank QUESTION_BANK] [--top-k TOP_K]
+       [--timeout TIMEOUT] [--repeats REPEATS]
+       [--max-questions MAX_QUESTIONS]
+benchmark_route3_global_repeatability.py: error: unrecognized arguments: --use-production

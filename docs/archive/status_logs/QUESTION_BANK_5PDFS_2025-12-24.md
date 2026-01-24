@@ -24,44 +24,51 @@ Note: Profile constraints always override base routing.
 
 ## A) Vector / Exact-Retrieval Questions (10)
 Use for `mode=vector` (or queries intended to route to `vector`).
+**Expected Route:** Route 1 (Vector RAG)
 
 1. **Q-V1:** What is the invoice **TOTAL** amount?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `29900.00`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 2. **Q-V2:** What is the invoice **DUE DATE**?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `12/17/2015`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 3. **Q-V3:** What are the invoice **TERMS**?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `Due on contract signing`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 4. **Q-V4:** In the purchase contract, list the **3 installment amounts** and their triggers.
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `$20,000.00 upon signing; $7,000.00 upon delivery; $2,900.00 upon completion`
    - **Source:** purchase_contract.pdf (chunk 0)
 
 5. **Q-V5:** What is the **labor warranty** duration in the purchase contract?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `90 days`
    - **Source:** purchase_contract.pdf (chunk 0 or chunk 1)
 
 6. **Q-V6:** In the property management agreement, what is the **approval threshold** requiring prior written approval for expenditures?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `in excess of Three Hundred Dollars ($300.00)`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1)
 
-7. **Q-V7:** In the holding tank contract, what is the pumper’s **registration number**?
-   - **Expected:** `REG-54321`
+7. **Q-V7:** In the holding tank contract, what is the pumper’s **registration number**?   - **Expected Route:** Route 1 (Vector RAG)   - **Expected:** `REG-54321`
    - **Source:** HOLDING TANK SERVICING CONTRACT.pdf (chunk 1)
 
-8. **Q-V8:** What is the warranty’s builder address city/state/zip?
-   - **Expected:** `Pocatello, ID 83201`
+8. **Q-V8:** What is the warranty’s builder address city/state/zip?   - **Expected Route:** Route 1 (Vector RAG)   - **Expected:** `Pocatello, ID 83201`
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3)
 
 9. **Q-V9:** Who is the invoice **SALESPERSON**?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `Jim Contoso`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
 10. **Q-V10:** What is the invoice **P.O. NUMBER**?
+   - **Expected Route:** Route 1 (Vector RAG)
    - **Expected:** `30060204`
    - **Source:** contoso_lifts_invoice.pdf (chunk 0)
 
@@ -69,53 +76,64 @@ Use for `mode=vector` (or queries intended to route to `vector`).
 
 ## B) Local / Entity-Focused Questions (10)
 Use for `mode=local` (or queries intended to route to GraphRAG local).
+**Expected Route:** Route 2 (Local Search)
 
 1. **Q-L1:** Who is the **Agent** in the property management agreement?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `Walt Flood Realty` (a Hawaii sole proprietorship)
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 2. **Q-L2:** Who is the **Owner** in the property management agreement?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `Contoso Ltd.`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 3. **Q-L3:** What is the managed property address in the property management agreement?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `456 Palm Tree Avenue, Honolulu, HI 96815`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 4. **Q-L4:** What is the initial term start date in the property management agreement?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `2010-06-15`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 5. **Q-L5:** What written notice period is required for termination of the property management agreement?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `sixty (60) days written notice`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 6. **Q-L6:** What is the Agent fee/commission for **short-term** rentals (<180 days)?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `twenty five percent (25%) of the gross revenues`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1)
 
 7. **Q-L7:** What is the Agent fee/commission for **long-term** leases (>180 days)?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `ten percent (10%) of the gross revenues`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1)
 
 8. **Q-L8:** What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `$75.00/month advertising; $50.00/month minimum admin/accounting`
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1)
 
 9. **Q-L9:** In the purchase contract Exhibit A, what is the job location?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** `811 Ocean Drive, Suite 405, Tampa, FL 33602`
    - **Source:** purchase_contract.pdf (chunk 1)
 
-10. **Q-L10:** In the purchase contract Exhibit A, what is the contact’s name and email?
-   - **Expected:** `Elizabeth Nolasco; enolasco@fabrikam.com`
+10. **Q-L10:** In the purchase contract Exhibit A, what is the contact’s name and email?   - **Expected Route:** Route 2 (Local Search)   - **Expected:** `Elizabeth Nolasco; enolasco@fabrikam.com`
    - **Source:** purchase_contract.pdf (chunk 1)
 
 ---
 
 ## C) Global / Cross-Section or “Policy” Questions (10)
 Use for `mode=global` (or queries intended to route to GraphRAG global/community summaries).
+**Expected Route:** Route 3 (Global Search)
 
 1. **Q-G1:** Across the agreements, list the **termination/cancellation** rules you can find.
+   - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
      - Property management: either party may terminate with `60 days written notice`.
      - Purchase contract: customer may cancel within `3 business days` for full refund; afterward deposit is forfeited.
@@ -124,14 +142,14 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0/1); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
 
 2. **Q-G2:** Identify which documents reference **jurisdictions / governing law**.
+   - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
      - Warranty/arbitration: disputes reference `State of Idaho` and arbitration in `Pocatello, Idaho`.
      - Purchase contract: governed by laws of `State of Florida`.
      - Property management agreement: governed by laws of `State of Hawaii`.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2)
 
-3. **Q-G3:** Summarize “who pays what” across the set (fees/charges/taxes).
-   - **Expected:**
+3. **Q-G3:** Summarize “who pays what” across the set (fees/charges/taxes).   - **Expected Route:** Route 3 (Global Search)   - **Expected:**
      - Invoice: `TOTAL/AMOUNT DUE 29900.00`.
      - Purchase contract: $29,900 in 3 installments.
      - Property management: 25%/10% commissions + $75/month advertising + $50/month admin + 10% repair fee + $35/hour scheduling + Hawaii excise tax on fees.
@@ -139,18 +157,21 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
    - **Source:** contoso_lifts_invoice.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0/1)
 
 4. **Q-G4:** What obligations are explicitly described as **reporting / record-keeping**?
+   - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
      - Holding tank: pumper submits reports to County including service dates, volumes pumped, and condition.
      - Property management: agent provides owner a monthly statement of income and expenses.
    - **Source:** HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/1)
 
 5. **Q-G5:** What remedies / dispute-resolution mechanisms are described?
+   - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
      - Warranty: binding arbitration (with small claims carveout) and confidentiality language.
      - Purchase contract: legal fees recoverable by contractor upon customer default.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/5/6); purchase_contract.pdf (chunk 0)
 
 6. **Q-G6:** List all **named parties/organizations** across the documents and which document(s) they appear in.
+    - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
        - `Fabrikam Inc.`: builder (warranty), pumper (holding tank), customer (purchase contract)
        - `Contoso Ltd.`: owner (property management), holding tank owner (holding tank)
@@ -159,6 +180,7 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
     - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0)
 
 7. **Q-G7:** Summarize all explicit **notice / delivery** mechanisms (written notice, certified mail, phone, filings) mentioned.
+    - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
        - PMA: `60 days written notice` to terminate
        - Warranty: defect notice must be `in writing` and sent by `certified mail return receipt requested`; emergencies by phone
@@ -166,18 +188,19 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
     - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); BUILDERS LIMITED WARRANTY.pdf (chunk 2/3); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1)
 
 8. **Q-G8:** Summarize all explicit **insurance / indemnity / hold harmless** clauses.
+    - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
        - PMA: requires liability insurance with minimum limits `$300,000` BI and `$25,000` PD; hold harmless/indemnify agent (except gross negligence/willful misconduct)
     - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
 
 9. **Q-G9:** Identify all explicit **non-refundable / forfeiture** terms across the documents.
+    - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
        - PMA: `non-refundable start-up fee` of `$250.00`
        - Purchase contract: after 3 business days, `deposit is forfeited`
     - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); purchase_contract.pdf (chunk 0/1)
 
-10. **Q-G10:** Summarize each document’s main purpose in one sentence.
-    - **Expected:**
+10. **Q-G10:** Summarize each document’s main purpose in one sentence.    - **Expected Route:** Route 3 (Global Search)    - **Expected:**
        - Warranty: limited warranty + arbitration process and exclusions
        - Holding tank: servicing/reporting obligations between owner and pumper
        - PMA: agent manages/rents property, fees, responsibilities, and termination
@@ -189,45 +212,50 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
 
 ## D) Drift / Multi-Hop Reasoning Questions (10)
 Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
+**Expected Route:** Route 4 (DRIFT)
 
 1. **Q-D1:** If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** Must telephone builder immediately for emergencies; failure to promptly notify relieves builder of liability for replacement/repair/damages.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3)
 
 2. **Q-D2:** In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** Owner shall honor all confirmed reservations.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
-3. **Q-D3:** Compare “time windows” across the set: list all explicit day-based timeframes.
+3. **Q-D3:** Compare "time windows" across the set: list all explicit day-based timeframes.
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** **Warranty:** 1 year warranty period (floors, walls, structural, plumbing, heating, electric, roof); 60-day warranty period (doors, windows, switches, fixtures, caulking, cabinets); 60 days repair window after defect report; 60 days after service of complaint for arbitration demand; 180 days arbitration completion target. **Holding Tank:** 10 business days to file contract changes. **Property Management:** 12 months initial term; 60 days written notice for termination; 5 business days to notify agent if property listed for sale; 180 days threshold for short-term vs long-term rentals. **Purchase Contract:** 90 days labor warranty; 3 business days cancel window with full refund.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0/1); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1); BUILDERS LIMITED WARRANTY.pdf (chunk 0/3)
 
 4. **Q-D4:** Which documents mention **insurance** and what limits are specified?
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** Property management requires liability insurance with minimum limits `$300,000` bodily injury and `$25,000` property damage; agent named additional insured.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1)
 
-5. **Q-D5:** In the warranty, explain how the “coverage start” is defined and what must happen before coverage ends.
-   - **Expected:** Coverage begins on date of final settlement or first occupancy (whichever first); claims must be made in writing within the 1-year or 60-day period.
+5. **Q-D5:** In the warranty, explain how the “coverage start” is defined and what must happen before coverage ends.   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** Coverage begins on date of final settlement or first occupancy (whichever first); claims must be made in writing within the 1-year or 60-day period.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0)
 
 6. **Q-D6:** Do the purchase contract total price and the invoice total match? If so, what is that amount?
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** Yes — both state a total of `29,900.00` / `$29,900.00`.
    - **Source:** purchase_contract.pdf (chunk 0); contoso_lifts_invoice.pdf (chunk 0)
 
 7. **Q-D7:** Which document has the latest explicit date, and what is it?
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** `Signed this 04/30/2025` in the purchase contract Exhibit A.
    - **Source:** purchase_contract.pdf (chunk 1)
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
+   - **Expected Route:** Route 4 (DRIFT)
    - **Expected:** `Fabrikam Inc.` appears in more documents (5) than `Contoso Ltd.` (4). Fabrikam appears in: warranty, holding tank, property management, purchase contract, and Exhibit A. Contoso appears in: warranty, holding tank, property management, and Exhibit A. Note: The purchase contract lists Fabrikam Inc. as the Customer, while Contoso Ltd. does not appear in that main contract document (only in Exhibit A).
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0 and Exhibit A); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
-9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
-   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20k/$7k/$2.9k).
+9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20k/$7k/$2.9k).
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)
 
-10. **Q-D10:** List the three different “risk allocation” statements across the set (risk of loss, liability limitations, non-transferability).
-   - **Expected:** Purchase contract shifts risk after delivery; PMA limits agent liability except gross negligence/willful misconduct; warranty is not transferable (terminates if first purchaser sells/moves out).
+10. **Q-D10:** List the three different “risk allocation” statements across the set (risk of loss, liability limitations, non-transferability).   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** Purchase contract shifts risk after delivery; PMA limits agent liability except gross negligence/willful misconduct; warranty is not transferable (terminates if first purchaser sells/moves out).
    - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
 
 ---
@@ -279,30 +307,40 @@ Use for `mode=raptor` (or queries intended to route to hierarchical summaries).
 
 ## F) Negative Tests (9)
 These should return **“not found / not specified in the provided documents”** (or equivalent).
+**Expected Route:** Route 2 (Local Search) - with negative detection
 
-1. **Q-N1:** What is the invoice’s **bank routing number** for payment?
+1. **Q-N1:** What is the invoice's **bank routing number** for payment?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
 2. **Q-N2:** What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
-3. **Q-N3:** What is the vendor’s **VAT / Tax ID number** on the invoice?
+3. **Q-N3:** What is the vendor's **VAT / Tax ID number** on the invoice?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
 4. **Q-N5:** What is the invoice’s **bank account number** for ACH/wire payments?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
 5. **Q-N6:** Which documents are governed by the laws of **California**?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** None (California not referenced).
 
-6. **Q-N7:** What is the property management Agent’s **license number**?
+6. **Q-N7:** What is the property management Agent's **license number**?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
 7. **Q-N8:** What is the purchase contract’s required **wire transfer / ACH instructions**?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
 8. **Q-N9:** What is the exact clause about **mold damage** coverage in the warranty?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified.
 
-9. **Q-N10:** What is the invoice **shipping method** (value in “SHIPPED VIA”)?
+9. **Q-N10:** What is the invoice **shipping method** (value in "SHIPPED VIA")?
+   - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified / blank.

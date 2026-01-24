@@ -1,8 +1,22 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 22, 2026
+**Last Updated:** January 24, 2026
 
-**Recent Updates (January 22, 2026):**
+**Recent Updates (January 24, 2026):**
+- ✅ **3-Route Architecture:** Vector RAG (Route 1) removed after proving Local Search handles all simple queries with better quality
+  - **Testing Results:** Local Search answered 100% of Vector RAG test questions correctly
+  - **Latency Impact:** Only 14% difference (not meaningful for user experience)
+  - **Router Accuracy:** Improved from 56.1% to 92.7% with simplified 3-route system
+  - **Deployment:** Both profiles now use same 3 routes (Local Search, Global Search, DRIFT)
+  - Files modified: `router/main.py`, router prompt updated for 3-route classification
+- ✅ **Route 3 Fast Mode Plan Finalized:** See `ROUTE3_FAST_MODE_PLAN_2026-01-24.md`
+  - **Correction:** "Community Matching" is actually Entity Embedding Search (not pre-computed summaries)
+  - **Target:** 40-50% latency reduction (8-16s vs 20-30s) while preserving citation quality
+  - **Stages to Skip:** Section Boost, Keyword Boost, Doc Lead Boost (redundant with BM25+Vector RRF)
+  - **PPR:** Made optional (skip for simple thematic queries, keep for relationship queries)
+  - **KVP Fast-Path:** Early exit for field-lookup queries with high-confidence KVP matches
+
+**Previous Updates (January 22, 2026):**
 - ✅ **KeyValue (KVP) Node Feature:** High-precision field extraction via Azure DI key-value pairs
   - **Azure DI Integration:** `prebuilt-layout` model with `KEY_VALUE_PAIRS` feature enabled ($16/1K pages: $10 layout + $6 KVP)
   - **Section-Aware Storage:** KeyValue nodes link to sections via `[:IN_SECTION]` relationship for deterministic field lookups
@@ -41,22 +55,23 @@
 
 ## 1. Executive Summary
 
-This document outlines the architectural transformation from a complex 6-way routing system (Local, Global, DRIFT, HippoRAG 2, Vector RAG + legacy RAPTOR) to a streamlined **4-Way Intelligent Routing System** with **2 Deployment Profiles**.
+This document outlines the architectural transformation from a complex 6-way routing system (Local, Global, DRIFT, HippoRAG 2, Vector RAG + legacy RAPTOR) to a streamlined **3-Way Intelligent Routing System** with **2 Deployment Profiles**.
 
-As of the January 1, 2026 update, **RAPTOR is removed from the indexing pipeline by default** (no new `RaptorNode` data is produced unless explicitly enabled).
+As of the January 24, 2026 update, **Vector RAG has been removed** after comprehensive testing showed Local Search handles all simple queries with better quality and only 14% latency difference. **RAPTOR is removed from the indexing pipeline by default** (no new `RaptorNode` data is produced unless explicitly enabled).
 
 The base system is **LazyGraphRAG**, enhanced with **HippoRAG 2** for deterministic detail recovery in thematic and multi-hop queries. Designed specifically for high-stakes industries such as **auditing, finance, and insurance**, this architecture prioritizes **determinism, auditability, and high precision** over raw speed.
 
 ### Key Design Principles
 - **LazyGraphRAG** is the foundation (replaces all GraphRAG search modes)
-- **HippoRAG 2** enhances Routes 3 & 4 for deterministic pathfinding
-- **2 Profiles:** General Enterprise (speed) vs High Assurance (accuracy)
+- **HippoRAG 2** enhances Routes 2 & 3 for deterministic pathfinding
+- **2 Profiles:** General Enterprise vs High Assurance (both use same 3 routes)
+- **Fast Mode:** Optional latency optimization for Route 3 (Global Search)
 
 ## 2. Architecture Overview
 
-The new architecture provides **4 distinct routes**, each optimized for a specific query pattern:
+The new architecture provides **3 distinct routes**, each optimized for a specific query pattern:
 
-### The 4-Way Routing Logic
+### The 3-Way Routing Logic
 
 ```
                               ┌─────────────────────────────────────┐
@@ -64,63 +79,65 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
                               │   (LLM + Heuristics Assessment)     │
                               └─────────────────────────────────────┘
                                               │
-            ┌─────────────────┬───────────────┼───────────────┬─────────────────┐
-            │                 │               │               │                 │
-            ▼                 ▼               ▼               ▼                 │
-┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-│   ROUTE 1         │ │   ROUTE 2         │ │   ROUTE 3         │ │   ROUTE 4         │
-│   Vector RAG      │ │   Local Search    │ │   Global Search   │ │   DRIFT Multi-Hop │
-│   (Fast Lane)     │ │   Equivalent      │ │   Equivalent      │ │   Equivalent      │
-└───────────────────┘ └───────────────────┘ └───────────────────┘ └───────────────────┘
-        │                     │                     │                     │
-        ▼                     ▼                     ▼                     ▼
-┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐ ┌───────────────────┐
-│ Embedding Search  │ │ LazyGraphRAG      │ │ LazyGraphRAG +    │ │ LLM Decomposition │
-│ Top-K retrieval   │ │ Iterative Deep.   │ │ HippoRAG 2 PPR    │ │ + HippoRAG 2 PPR  │
-│ Direct answer     │ │ Entity-focused    │ │ Detail recovery   │ │ Multi-step reason │
-└───────────────────┘ └───────────────────┘ └───────────────────┘ └───────────────────┘
+            ┌─────────────────────────────────┼─────────────────────────────────┐
+            │                                 │                                 │
+            ▼                                 ▼                                 ▼
+┌───────────────────┐               ┌───────────────────┐               ┌───────────────────┐
+│   ROUTE 1         │               │   ROUTE 2         │               │   ROUTE 3         │
+│   Local Search    │               │   Global Search   │               │   DRIFT Multi-Hop │
+│   (Entity-Focused)│               │   (Thematic)      │               │   (Complex)       │
+└───────────────────┘               └───────────────────┘               └───────────────────┘
+        │                                   │                                   │
+        ▼                                   ▼                                   ▼
+┌───────────────────┐               ┌───────────────────┐               ┌───────────────────┐
+│ LazyGraphRAG      │               │ Entity Embedding  │               │ LLM Decomposition │
+│ Iterative Deep.   │               │ + BM25/Vector RRF │               │ + HippoRAG 2 PPR  │
+│ Entity-focused    │               │ + Optional PPR    │               │ Multi-step reason │
+└───────────────────┘               └───────────────────┘               └───────────────────┘
 ```
 
-### Route 1: Vector RAG (The Fast Lane)
-*   **Trigger:** Simple, fact-based queries with clear single-entity focus
-*   **Example:** "What is the invoice amount for transaction TX-12345?"
-*   **Goal:** Ultra-low latency (<500ms), minimal cost
-*   **When to Use:** Query can be answered from a single document chunk
-*   **Engines:** Vector Search → LLM Synthesis
-*   **Profile:** General Enterprise only (disabled in High Assurance)
+> **Note (January 24, 2026):** Vector RAG was removed after testing showed Local Search provides equivalent or better answers with only 14% more latency. This simplifies routing and improves accuracy.
 
-### Route 2: Local Search Equivalent (LazyGraphRAG + HippoRAG 2)
-*   **Trigger:** Entity-focused queries with explicit entity mentions
-*   **Example:** "What are all the contracts with Vendor ABC and their payment terms?"
-*   **Goal:** Comprehensive entity-centric retrieval via PPR graph traversal
-*   **Engines:** Entity Extraction → HippoRAG 2 PPR → Text Chunk Retrieval → LLM Synthesis
-*   **Architecture:** Uses HippoRAG 2's Personalized PageRank for deterministic multi-hop traversal from extracted entities
+### Route 1: Local Search (Entity-Focused)
+*   **Trigger:** Factual lookups and entity-focused queries with explicit or implied entity mentions
+*   **Example:** "What is the invoice amount for transaction TX-12345?" or "What are all the contracts with Vendor ABC?"
+*   **Goal:** Comprehensive entity-centric retrieval via graph traversal
+*   **When to Use:** Direct questions, specific values, entity relationships
+*   **Engines:** Entity Extraction → LazyGraphRAG Iterative Deepening → LLM Synthesis
+*   **Profile:** Both profiles (default route for most queries)
 
-### Route 3: Global Search Equivalent (LazyGraphRAG + HippoRAG 2)
-*   **Trigger:** Thematic queries without explicit entities
-*   **Example:** "What are the main compliance risks in our portfolio?"
+> **Note:** Local Search now handles all queries that previously went to Vector RAG. Testing showed identical answer quality with only 14% latency difference.
+
+### Route 2: Global Search (Thematic Analysis)
+*   **Trigger:** Thematic queries without explicit entities, cross-document summaries
+*   **Example:** "What are the main compliance risks in our portfolio?" or "Summarize all termination clauses"
 *   **Goal:** Thematic coverage WITH detail preservation + hallucination prevention
-*   **Engines (Positive):** LazyGraphRAG Community Matching → Hub Entities → Graph Evidence Retrieval → Neo4j Fulltext BM25 Merge → Section-Node Expansion (IN_SECTION) → Keyword Boost Merge → HippoRAG 2 PPR (detail recovery) → Synthesis
-*   **Engines (Negative):** Deterministic Neo4j-backed field validation (post-synthesis, field-specific) → Strict refusal response
+*   **Engines (Full Mode):** Entity Embedding Search → Hub Entities → Graph Evidence → BM25+Vector RRF → Section Boost → Keyword Boost → HippoRAG 2 PPR → Synthesis
+*   **Engines (Fast Mode):** Entity Embedding Search → BM25+Vector RRF → Coverage Fill → Synthesis → Validation
+*   **Engines (Negative):** Deterministic Neo4j-backed field validation (post-synthesis) → Strict refusal response
+*   **Profile:** Both profiles (thematic queries)
 *   **Solves:** 
     - Original Global Search's **detail loss problem** (summaries lost fine print)
-    - LLM **hallucination problem** on negative queries (graph-based validation catches non-existent information)
+    - LLM **hallucination problem** on negative queries (graph-based validation)
 
-### Route 4: DRIFT Search Equivalent (Multi-Hop Reasoning)
-*   **Trigger:** Ambiguous, multi-hop queries requiring iterative decomposition
-*   **Example:** "Analyze our risk exposure to tech vendors through subsidiary connections"
-*   **Goal:** Handle vague queries through step-by-step reasoning
+### Route 3: DRIFT Multi-Hop (Complex Reasoning)
+*   **Trigger:** Ambiguous, multi-hop queries requiring iterative decomposition, comparisons
+*   **Example:** "Analyze our risk exposure to tech vendors through subsidiary connections" or "Which document has the latest date?"
+*   **Goal:** Handle vague/comparative queries through step-by-step reasoning
 *   **Engines:** LLM Decomposition + HippoRAG 2 PPR + Synthesis
+*   **Profile:** Both profiles (complex queries)
 *   **Solves:** HippoRAG 2's **ambiguous query problem** (needs clear seeds to start PPR)
 
-### 2.1. Why 4 Routes?
+### 2.1. Why 3 Routes?
 
 | Query Type | Route | Why This Route |
 |:-----------|:------|:---------------|
-| "What is vendor ABC's address?" | Route 1 | Simple fact, vector search sufficient |
-| "List all ABC contracts" | Route 2 | Explicit entity, LazyGraphRAG iterative deepening |
-| "What are the main risks?" | Route 3 | Thematic, needs community → hub → PPR for details |
-| "How are subsidiaries connected to risk?" | Route 4 | Ambiguous, needs LLM decomposition first |
+| "What is vendor ABC's address?" | Route 1 | Factual lookup, entity-focused retrieval |
+| "List all ABC contracts" | Route 1 | Explicit entity, LazyGraphRAG iterative deepening |
+| "What are the main risks?" | Route 2 | Thematic, needs entity embedding → hub → PPR for details |
+| "Summarize all termination clauses" | Route 2 | Cross-document aggregation |
+| "How are subsidiaries connected to risk?" | Route 3 | Ambiguous, needs LLM decomposition first |
+| "Which document has the latest date?" | Route 3 | Comparative, needs multi-document reasoning |
 
 ### 2.2. Division of Labor
 
@@ -134,10 +151,9 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 
 | Route | HippoRAG 2 Used? | Entity Aliases? | Why |
 |:------|:-----------------|:----------------|:----|
-| Route 1 | ❌ No | ❌ No | Vector search only (simple fact extraction, no entity lookups) |
-| Route 2 | ✅ Yes | ✅ Yes | PPR from extracted entities for multi-hop traversal |
-| Route 3 | ✅ Yes | ✅ Yes | PPR from hub entities for thematic detail recovery |
-| Route 4 | ✅ Yes | ✅ Yes | PPR after query decomposition for complex reasoning |
+| Route 1 (Local Search) | ✅ Yes | ✅ Yes | PPR from extracted entities for entity-focused traversal |
+| Route 2 (Global Search) | ✅ Optional | ✅ Yes | PPR from hub entities (full mode) or skip (fast mode) |
+| Route 3 (DRIFT) | ✅ Yes | ✅ Yes | PPR after query decomposition for complex reasoning |
 
 ---
 
@@ -198,10 +214,16 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 
 This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced with HippoRAG 2 for detail recovery.
 
-#### Stage 3.1: Community Matching
-*   **Engine:** LazyGraphRAG community summaries + embedding similarity
-*   **What:** Match thematic query to relevant communities
-*   **Output:** `["Community: Compliance", "Community: Risk Management"]`
+#### Stage 3.1: Entity Embedding Search (Corrected January 24, 2026)
+*   **Engine:** Entity embedding similarity + keyword fallback + multi-document sampling
+*   **What:** Find entities matching query via vector similarity on entity embeddings
+*   **Correction:** This stage does NOT use pre-computed Microsoft GraphRAG-style community summaries. It performs direct entity embedding search.
+*   **Process:**
+    1. Vector search on entity embeddings to find query-relevant entities
+    2. Keyword fallback: match entity names/descriptions if embedding fails
+    3. Multi-document sampling: round-robin across documents for diversity
+*   **Why Keep (Fast Mode):** Required for PPR seeds, citation provenance, and multi-doc diversity
+*   **Output:** `["Entity: Compliance_Policy_2024", "Entity: Risk_Assessment_Q3"]` (query-relevant entity clusters)
 
 #### Stage 3.2: Hub Entity Extraction
 *   **Engine:** Graph topology analysis
@@ -308,19 +330,49 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Output:** Detailed report with full audit trail
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, uses position-based sentence ranking (no LLM) for byte-identical repeatability across identical inputs
 
-#### Future Optimization: Route 3 Fast Mode (Planned)
+#### Route 2 Fast Mode (Finalized January 24, 2026)
 
-**Status:** Planned (see `ROUTE3_FAST_MODE_PLAN_2026-01-14.md`)
+**Status:** Ready for Implementation (see `ROUTE3_FAST_MODE_PLAN_2026-01-24.md`)
 
-With section-aware embeddings (added 2026-01-14), many Route 3 stages may be redundant:
-- **Section embeddings** now encode document structure directly in the embedding space
-- **BM25 + Vector RRF** (Stage 3.3.5) can find thematic content without community → hub → PPR indirection
-- **Potential simplification:** 4 stages (Hybrid Retrieval → Coverage Fill → Synthesis → Validation) vs current 12 stages
-- **Expected speedup:** 50-60% faster (7-14s vs 20-30s per query)
+**Critical Correction:** The original Fast Mode plan incorrectly assumed section embeddings could replace "community matching" entirely. Analysis revealed that "community matching" is actually **Entity Embedding Search** (not pre-computed summaries), and this stage is required for:
+- PPR seed discovery (entities are needed for graph traversal)
+- Citation provenance (entity → chunk mapping enables citations)
+- Multi-document diversity (round-robin sampling across documents)
 
-**Implementation approach:** Add `ROUTE3_FAST_MODE=1` env var to skip community matching, hub extraction, section boost, keyword boost, and PPR stages. Keep full pipeline as fallback.
+**Revised Fast Mode Pipeline (5-6 stages vs 12):**
+```
+Query → Entity Embed Search → BM25+Vector RRF → [PPR if complex] → Coverage Fill → Synthesis → Validation
+```
 
-**Decision:** Deferred until Route 4 (DRIFT) is fully implemented. Route 3 is currently achieving 100% benchmark scores, so speed optimization is lower priority than completing the full system.
+**Stages to Skip in Fast Mode:**
+- **Section Boost** - Redundant; BM25+Vector with section embeddings already finds relevant sections
+- **Keyword Boost** - Redundant; hardcoded patterns replaced by BM25 lexical matching
+- **Doc Lead Boost** - Redundant; Coverage Gap Fill handles document representation better
+
+**PPR Behavior in Fast Mode:**
+- **Skip** for simple thematic queries (no explicit entity mentions)
+- **Enable** for relationship queries ("connected to", "through", "linked to")
+
+**KVP Fast-Path (NEW):**
+- For field-lookup queries, check KeyValue nodes first
+- If high-confidence KVP match found, return immediately (bypass full pipeline)
+- If KVP miss on strict field lookup, consider strict negative before fallback
+
+**Configuration:**
+```bash
+ROUTE3_FAST_MODE=1  # Skip boost stages + optional PPR (default for General Enterprise)
+ROUTE3_FAST_MODE=0  # Full pipeline (default for High Assurance)
+```
+
+**Expected Results:**
+| Metric | Full Pipeline | Fast Mode | Change |
+|:-------|:--------------|:----------|:-------|
+| Latency | 20-30s | 8-16s | -40-50% |
+| Accuracy | 100% | ~98-100% | Minimal |
+| Citation Quality | Full provenance | Full provenance | Same |
+| Negative Detection | Graph-based | Graph-based | Same |
+
+**Implementation Effort:** ~6 hours (add flag, wrap conditionals, add KVP fast-path)
 
 ### Route 4: DRIFT Equivalent (Multi-Hop Iterative Reasoning)
 

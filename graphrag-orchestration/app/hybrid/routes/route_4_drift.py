@@ -18,6 +18,10 @@ Features:
 - Entity concentration detection
 - Section-based exhaustive coverage for "list all" queries
 - Date metadata query fast-path
+
+Performance Mode:
+- ROUTE4_WORKFLOW=1: LlamaIndex Workflow with parallel sub-questions (~700ms)
+- ROUTE4_WORKFLOW=0 (default): Sequential sub-questions (~2.1s for 3 questions)
 """
 
 import os
@@ -28,6 +32,16 @@ import structlog
 from .base import BaseRouteHandler, RouteResult, Citation
 
 logger = structlog.get_logger(__name__)
+
+# Feature flag for LlamaIndex Workflow mode
+ROUTE4_WORKFLOW = os.getenv("ROUTE4_WORKFLOW", "0").strip().lower() in {"1", "true", "yes"}
+if ROUTE4_WORKFLOW:
+    try:
+        from ..workflows import DRIFTWorkflow
+        logger.info("drift_handler_workflow_enabled")
+    except ImportError as e:
+        logger.warning("drift_handler_workflow_import_failed", error=str(e))
+        ROUTE4_WORKFLOW = False
 
 
 class DRIFTHandler(BaseRouteHandler):
@@ -52,6 +66,10 @@ class DRIFTHandler(BaseRouteHandler):
         - 4.3.6: Coverage gap fill for corpus-level queries
         - 4.4: Multi-source synthesis
         
+        Performance Mode:
+        - ROUTE4_WORKFLOW=1: LlamaIndex Workflow with parallel sub-questions
+        - ROUTE4_WORKFLOW=0 (default): Sequential sub-questions
+        
         Args:
             query: The user's natural language query
             response_type: Response format ("summary", "detailed_report", etc.)
@@ -59,6 +77,36 @@ class DRIFTHandler(BaseRouteHandler):
         Returns:
             RouteResult with response, citations, and metadata
         """
+        # ==================================================================
+        # WORKFLOW MODE: Use LlamaIndex Workflow for parallel sub-questions
+        # ==================================================================
+        if ROUTE4_WORKFLOW:
+            logger.info("route_4_drift_workflow_mode", query=query[:50])
+            workflow = DRIFTWorkflow(
+                pipeline=self.pipeline,
+                timeout=120,
+                max_redecompose_attempts=1,
+            )
+            # Run workflow - returns dict result
+            from llama_index.core.workflow import StartEvent
+            start_event = StartEvent(query=query, response_type=response_type)
+            result = await workflow.run(start_event=start_event)
+            
+            # Convert dict result to RouteResult
+            return RouteResult(
+                response=result.get("response", ""),
+                citations=[Citation(**c) for c in result.get("citations", [])],
+                route_used=self.ROUTE_NAME,
+                evidence_path=result.get("evidence_path", []),
+                metadata={
+                    **result.get("metadata", {}),
+                    "workflow_mode": True,
+                }
+            )
+        
+        # ==================================================================
+        # SEQUENTIAL MODE (default): Original implementation
+        # ==================================================================
         logger.info("route_4_drift_start", query=query[:50], response_type=response_type)
         
         # Stage 4.0: Check for deterministic document metadata queries

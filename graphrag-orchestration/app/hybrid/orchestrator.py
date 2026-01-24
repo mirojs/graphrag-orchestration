@@ -66,6 +66,19 @@ except ImportError:
 
 logger = structlog.get_logger(__name__)
 
+# LlamaIndex Workflow for parallel DRIFT execution (Jan 2026)
+# Must be after logger definition
+import os
+ROUTE4_WORKFLOW = os.getenv("ROUTE4_WORKFLOW", "0").strip().lower() in {"1", "true", "yes"}
+DRIFTWorkflow = None  # Will be set if workflow mode enabled
+if ROUTE4_WORKFLOW:
+    try:
+        from .workflows import DRIFTWorkflow
+        logger.info("drift_workflow_enabled")
+    except ImportError as e:
+        logger.warning("drift_workflow_import_failed", error=str(e))
+        ROUTE4_WORKFLOW = False
+
 
 class HighQualityError(RuntimeError):
     """Raised when strict high quality mode fails to meet evidence requirements."""
@@ -3540,7 +3553,30 @@ Instructions:
         
         The Confidence Loop (Stage 4.3.5) addresses HippoRAG 2's "Iterative Limits"
         weakness by detecting sparse subgraphs and triggering re-decomposition.
+        
+        Performance Mode:
+        - ROUTE4_WORKFLOW=1: LlamaIndex Workflow with parallel sub-questions (~700ms)
+        - ROUTE4_WORKFLOW=0 (default): Sequential sub-questions (~2.1s for 3 questions)
         """
+        # ==================================================================
+        # WORKFLOW MODE: Use LlamaIndex Workflow for parallel sub-questions
+        # ==================================================================
+        if ROUTE4_WORKFLOW:
+            logger.info("route_4_drift_workflow_mode", query=query[:50])
+            workflow = DRIFTWorkflow(
+                pipeline=self,
+                timeout=120,
+                max_redecompose_attempts=1,
+            )
+            # StartEvent with query and response_type
+            from llama_index.core.workflow import StartEvent
+            start_event = StartEvent(query=query, response_type=response_type)
+            result = await workflow.run(start_event=start_event)
+            return result
+        
+        # ==================================================================
+        # SEQUENTIAL MODE (default): Original implementation
+        # ==================================================================
         logger.info("route_4_drift_start", 
                    query=query[:50],
                    response_type=response_type)

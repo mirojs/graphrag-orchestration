@@ -1,0 +1,9 @@
+usage: benchmark_route3_global_search.py [-h]
+                                         [--url URL]
+                                         [--group-id GROUP_ID]
+                                         [--question-bank QUESTION_BANK]
+                                         [--repeats REPEATS]
+                                         [--timeout TIMEOUT]
+                                         [--top-k TOP_K]
+                                         [--max-questions MAX_QUESTIONS]
+benchmark_route3_global_search.py: error: unrecognized arguments: --legacy

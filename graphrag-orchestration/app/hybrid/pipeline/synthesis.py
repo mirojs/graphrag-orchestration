@@ -331,6 +331,14 @@ class EvidenceSynthesizer:
         context_parts = []
         citation_map: Dict[str, Dict[str, Any]] = {}
         
+        # Add unique document count header to help LLM with document-counting questions
+        # This prevents LLM from counting sections/chunks as separate documents
+        unique_doc_names = [
+            (chunks[0][1].document_title or chunks[0][1].document_source or key)
+            for key, chunks in doc_groups.items()
+        ]
+        context_parts.append(f"## Retrieved from {len(doc_groups)} unique source document(s): {', '.join(unique_doc_names)}\n")
+        
         # Build context grouped by document
         for doc_key, chunks_with_idx in doc_groups.items():
             first_chunk = chunks_with_idx[0][1]

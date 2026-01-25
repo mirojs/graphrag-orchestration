@@ -849,13 +849,29 @@ IMPORTANT for Per-Document Queries:
 - If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
 """
         
+        # Detect unit-based qualifiers (day-based, week-based, etc.) for strict filtering
+        qualifier_guidance = ""
+        unit_match = re.search(r'\b(day|week|month|year|hour|minute)-based\b', q_lower)
+        if unit_match:
+            requested_unit = unit_match.group(1)
+            excluded_units = {"day": "week/month/year", "week": "day/month/year", 
+                             "month": "day/week/year", "year": "day/week/month"}
+            excluded = excluded_units.get(requested_unit, "other units")
+            qualifier_guidance = f"""
+CRITICAL QUALIFIER FILTER:
+- The question explicitly asks for "{requested_unit}-based" timeframes ONLY.
+- EXCLUDE any timeframes expressed in {excluded} (e.g., "8-10 weeks" is NOT {requested_unit}-based).
+- Only include timeframes where the duration is explicitly stated in {requested_unit}s (e.g., "30 days", "90 days").
+- If the evidence mentions a timeframe in different units, do NOT convert it - simply exclude it.
+"""
+        
         return f"""You are an expert analyst generating a concise summary.
 
 Question: {query}
 
 Evidence Context:
 {context}
-
+{qualifier_guidance}
 Instructions:
 1. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
     - Question asks for "bank routing number" but evidence only has payment portal URL → Output: "The requested information was not found in the available documents."

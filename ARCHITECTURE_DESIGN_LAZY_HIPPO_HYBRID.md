@@ -1,8 +1,17 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 24, 2026
+**Last Updated:** January 25, 2026
 
-**Recent Updates (January 24, 2026):**
+**Recent Updates (January 25, 2026):**
+- ✅ **Route 3 Coverage Gap Fix:** Legacy handler now uses `get_document_lead_chunks()` for reliable cross-document coverage
+  - **Problem:** `get_summary_chunks_by_section()` silently skipped documents without metadata markers (Q-G3: 75% → 100%)
+  - **Solution:** Direct chunk_index [0-5] query from all Document nodes - no metadata/APOC dependencies
+  - **Results:** All Route 3 questions now achieve 100% theme coverage (Q-G1 through Q-G10)
+  - **Evidence Stability:** 100% citation and path stability across 3 runs
+  - Files modified: `orchestrator.py` (legacy handler Stage 3.4.1), removed `USE_SECTION_RETRIEVAL` env var
+  - Benchmark: `bench_route3_coverage_fix_20260125_063930.txt`
+
+**Previous Updates (January 24, 2026):**
 - ✅ **3-Route Architecture:** Vector RAG (Route 1) removed after proving Local Search handles all simple queries with better quality
   - **Testing Results:** Local Search answered 100% of Vector RAG test questions correctly
   - **Latency Impact:** Only 14% difference (not meaningful for user experience)
@@ -302,11 +311,14 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Engine:** Document Graph enumeration + gap detection
 *   **What:** After ALL relevance-based retrieval is complete, identify which documents are still missing from the context and add ONE representative chunk per missing document.
 *   **Why (minimal noise):** By running AFTER BM25/Vector/PPR, this only adds chunks for documents that couldn't be found via any relevance signal. For a typical 5-doc corpus where BM25 found 3 docs, this adds just 2 chunks. For a 100-doc corpus where BM25 already hit most docs, this adds only truly orphaned documents.
-*   **Document Graph Traversal:**
-    - Query: `MATCH (d:Document)<-[:PART_OF]-(t:TextChunk) WHERE d.group_id = $gid`
-    - **Preferred (section-aware):** If `USE_SECTION_RETRIEVAL=1`, prefer one summary/representative chunk per document based on section metadata (e.g., "Purpose" / summary sections) when available.
-    - **Fallback (position-based):** Otherwise, order by `t.chunk_index ASC` (early chunks tend to be document introductions) and take 1 chunk per missing document.
-    - Hard cap: 20 chunks total to prevent context explosion in large document sets
+*   **Document Graph Traversal (Updated January 25, 2026):**
+    - Query: `MATCH (d:Document)<-[:PART_OF]-(t:TextChunk) WHERE d.group_id = $gid AND t.chunk_index IN [0,1,2,3,4,5]`
+    - **Method:** `get_document_lead_chunks()` - Direct lead chunk retrieval (chunk_index 0-5) from all documents
+    - **Why This Works:** Simple query guarantees one chunk per document with no metadata dependencies
+    - **No APOC Required:** Avoids JSON parsing and metadata marker requirements (is_summary_section)
+    - **Built-in Fallbacks:** If chunk 0 doesn't exist, tries 1, 2, 3, 4, 5 automatically
+    - Dynamic sizing: `min(max(total_docs, 10), 200)` chunks to scale with corpus size
+    - **Legacy Removed:** `get_summary_chunks_by_section()` silently failed on documents without metadata markers
 *   **Gap Detection:**
     - Compute a stable per-document key from existing context (prefer `document_id`, else `document_source`, else `document_title`)
     - If relevance-based retrieval already covers all documents in the group, skip coverage retrieval entirely

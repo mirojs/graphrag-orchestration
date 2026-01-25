@@ -4189,6 +4189,9 @@ Guidelines:
 - Each sub-question should focus on identifying specific entities or relationships
 - Questions should build on each other (entity discovery → relationship exploration → analysis)
 - Generate 2-5 sub-questions depending on complexity
+- CRITICAL: Preserve ALL constraints and qualifiers from the original query in EACH sub-question
+  (e.g., if original asks for items "above $500", each sub-question must preserve that threshold)
+  (e.g., if original asks for "California-specific" clauses, each sub-question must include that geographic constraint)
 
 Format your response as a numbered list:
 1. [First sub-question]

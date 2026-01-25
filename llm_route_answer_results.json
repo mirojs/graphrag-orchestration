@@ -25,7 +25,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -36,7 +36,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -47,7 +47,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -58,7 +58,7 @@
       "expected_route": "local_search",
       "route_match": false,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -69,7 +69,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -80,7 +80,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -91,7 +91,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -102,7 +102,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -113,7 +113,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -124,7 +124,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -135,7 +135,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -146,7 +146,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -157,7 +157,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -168,7 +168,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -179,7 +179,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -190,7 +190,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -201,7 +201,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -212,7 +212,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -223,7 +223,7 @@
       "expected_route": "global_search",
       "route_match": false,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -234,7 +234,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -245,7 +245,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -256,7 +256,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -267,7 +267,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -278,7 +278,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -289,7 +289,7 @@
       "expected_route": "global_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -300,7 +300,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -311,7 +311,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -322,7 +322,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -333,7 +333,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -344,7 +344,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -355,7 +355,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -366,7 +366,7 @@
       "expected_route": "drift_multi_hop",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -377,7 +377,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -388,7 +388,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -399,7 +399,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -410,7 +410,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -421,7 +421,7 @@
       "expected_route": "local_search",
       "route_match": false,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -432,7 +432,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -443,7 +443,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -454,7 +454,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     },
@@ -465,7 +465,7 @@
       "expected_route": "local_search",
       "route_match": true,
       "answer_correct": false,
-      "reason": "Error: [Errno 111] Connection refused",
+      "reason": "Error: Server error '500 Internal Server Error' for url 'http://localhost:8000/hybrid/query'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/500",
       "latency": 0,
       "answer_preview": ""
     }

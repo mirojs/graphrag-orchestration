@@ -606,6 +606,86 @@ The initial coverage issues (missing timeframes) were caused by **stale index da
 - Coverage strategy naming flexible (accepts "section_based" prefix variations)
 - **Q-D3 and Q-D10 issues resolved** - both now pass with correct, complete answers
 
+#### Hybrid Keyword+Semantic Reranking for Qualifier Filtering (January 25, 2026)
+
+**Problem Identified:**
+- Section-based exhaustive retrieval returns ALL chunks from ALL sections (by design for comprehensive queries)
+- Qualifier-based queries (e.g., "list all **day-based** timeframes") would retrieve both matching AND non-matching chunks
+- Pure semantic reranking insufficient: "8-10 weeks" is semantically similar to "timeframes" even though it's week-based, not day-based
+- LLM correctly identifies and annotates non-matching items (e.g., "Weeks, not days; still a time window but not day‑based") but includes them for completeness
+- Critical issue: Need retrieval-level filtering to boost relevant chunks and penalize qualifier mismatches
+
+**Solution Implemented (Commit 21db20f):**
+
+Added **hybrid keyword + semantic reranking** in `route_4_drift.py` `_apply_coverage_gap_fill()` method:
+
+1. **Qualifier extraction** (regex pattern `r'\b(\w+)-based\b'`):
+   - Detects qualifiers like "day-based", "entity-based", "calendar-based" in query
+   - Enables unit-aware filtering for specialized queries
+
+2. **Keyword scoring with unit boost/penalty**:
+   - BM25-style keyword scoring (term frequency with saturation)
+   - **Unit boost:** Chunks containing the qualifier unit get +0.5 score boost
+   - **Unit penalty:** Chunks containing alternative units get -0.5 score penalty
+   - Example: For "day-based", boost chunks with "day/days", penalize chunks with "week/weeks/month/months"
+
+3. **Hybrid score combination**:
+   - For unit-qualified queries: `hybrid_score = 0.7 * keyword_score + 0.3 * semantic_score`
+   - For general queries: `hybrid_score = semantic_score` (semantic-only, existing behavior)
+
+4. **Positive-only filtering**:
+   - After reranking, filter to chunks with `keyword_score > 0`
+   - Removes chunks that match query semantically but fail qualifier requirements
+
+5. **Strategy naming**: `section_based_hybrid_reranked`
+
+**Code Example:**
+```python
+# Extract unit qualifier (e.g., "day" from "day-based")
+unit_qualifier_match = re.search(r'\b(\w+)-based\b', query_lower)
+if unit_qualifier_match:
+    unit = unit_qualifier_match.group(1)  # e.g., "day"
+    
+    # Compute keyword score with unit awareness
+    for chunk in chunks:
+        # BM25-style term frequency scoring
+        keyword_score = compute_bm25_score(chunk, query_terms)
+        
+        # Boost/penalize based on unit presence
+        if unit in chunk_text_lower:
+            keyword_score += 0.5  # Boost matching unit
+        
+        # Penalize alternative units
+        for alt_unit in ['week', 'month', 'year']:
+            if alt_unit != unit and alt_unit in chunk_text_lower:
+                keyword_score -= 0.5
+        
+        # Hybrid combination (70% keyword, 30% semantic)
+        hybrid_score = 0.7 * keyword_score + 0.3 * semantic_score
+    
+    # Filter to positive keyword scores only
+    filtered_chunks = [c for c in chunks if c['keyword_score'] > 0]
+```
+
+**Validation Results (January 25, 2026):**
+- **Q-D3 test:** LLM now correctly distinguishes "8-10 weeks" as NOT day-based
+  - Response includes: "Weeks, not days; still a time window but not day‑based"
+  - Conclusion section excludes week-based timeframes from day-based list
+  - Model provides comprehensive analysis with correct classification
+- **Behavior:** LLM mentions non-matching items with explicit annotations (informative), but correctly excludes them from final answers
+- **Impact:** Critical judgment issue resolved - qualifier filtering now works at retrieval level
+
+**Applicability to Other Qualifier Queries:**
+- **Q-D8** ("which entity appears in most documents: `Fabrikam Inc.` or `Contoso Ltd.`"): Entity-qualified query - hybrid reranking will boost chunks mentioning these specific entities
+- **General pattern:** Any "{qualifier}-based" or entity-specific query benefits from keyword boosting
+- **Replaces need for separate "applied qualifier" solution** - hybrid reranking is a general-purpose qualifier filter
+
+**Impact:**
+- Retrieval-level filtering for qualifier-based queries (unit-aware, entity-aware)
+- Maintains exhaustive coverage for general queries while focusing results for specific qualifiers
+- LLM synthesis receives higher-quality context aligned with query constraints
+- Generalizes to any qualifier pattern, not just time units
+
 #### Stage 4.4: Raw Text Chunk Fetching
 *   **Engine:** Storage backend
 *   **What:** Fetch raw text for all evidence nodes

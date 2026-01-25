@@ -47,11 +47,12 @@ class Settings(BaseSettings):
     # ========================================================================
     # Voyage AI V2 Embeddings (Section-Aware Contextual Chunking)
     # See VOYAGE_V2_CONTEXTUAL_CHUNKING_PLAN_2026-01-25.md for rationale
+    # Docs: https://docs.voyageai.com/docs/contextualized-chunk-embeddings
     # ========================================================================
     VOYAGE_API_KEY: Optional[str] = None
     VOYAGE_V2_ENABLED: bool = False  # Set to True to enable V2 pipeline
-    VOYAGE_MODEL_NAME: str = "voyage-context-3"  # 2048 dimensions, contextual embedding
-    VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-context-3 dimensions
+    VOYAGE_MODEL_NAME: str = "voyage-3-large"  # 2048 dimensions for better accuracy
+    VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-3-large dimensions
     
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)

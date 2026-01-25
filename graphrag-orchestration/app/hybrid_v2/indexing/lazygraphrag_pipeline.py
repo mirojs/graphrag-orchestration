@@ -134,11 +134,13 @@ class LazyGraphRAGIndexingPipeline:
         llm: Optional[Any],
         embedder: Optional[Any],
         config: Optional[LazyGraphRAGIndexingConfig] = None,
+        use_v2_embedding_property: bool = False,  # V2: store in embedding_v2
     ):
         self.neo4j_store = neo4j_store
         self.llm = llm
         self.embedder = embedder
         self.config = config or LazyGraphRAGIndexingConfig()
+        self.use_v2_embedding_property = use_v2_embedding_property  # V2 flag
 
         self._splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
@@ -452,10 +454,13 @@ class LazyGraphRAGIndexingPipeline:
         try:
             logger.info(f"Calling embedder.aget_text_embedding_batch with {len(texts)} texts...")
             embeddings = await self.embedder.aget_text_embedding_batch(texts)
-            logger.info(f"✅ Embeddings generated: {len(embeddings)} embeddings received", extra={
+            # Determine which property to use based on V2 flag
+            property_name = "embedding_v2" if self.use_v2_embedding_property else "embedding"
+            logger.info(f"✅ Embeddings generated: {len(embeddings)} embeddings received (storing in {property_name})", extra={
                 "chunks": len(chunks), 
                 "embeddings": len(embeddings),
-                "first_embedding_length": len(embeddings[0]) if embeddings and len(embeddings) > 0 else 0
+                "first_embedding_length": len(embeddings[0]) if embeddings and len(embeddings) > 0 else 0,
+                "use_v2": self.use_v2_embedding_property,
             })
         except Exception as e:
             logger.error(f"❌ EMBEDDING FAILED: {e}", exc_info=True, extra={"error": str(e), "chunks": len(chunks)})
@@ -468,11 +473,18 @@ class LazyGraphRAGIndexingPipeline:
         for chunk, emb in zip(chunks, embeddings):
             try:
                 if emb and isinstance(emb, list) and len(emb) == self.config.embedding_dimensions:
-                    chunk.embedding = emb
+                    # V2: Store in embedding_v2 property if flag is set
+                    if self.use_v2_embedding_property:
+                        chunk.embedding_v2 = emb
+                    else:
+                        chunk.embedding = emb
                     success_count += 1
                 elif emb and isinstance(emb, list):
-                    # Wrong dimensions
-                    chunk.embedding = emb
+                    # Wrong dimensions but still store
+                    if self.use_v2_embedding_property:
+                        chunk.embedding_v2 = emb
+                    else:
+                        chunk.embedding = emb
                     success_count += 1
                     wrong_dim_count += 1
                     logger.warning(f"Embedding dimension mismatch: got {len(emb)}, expected {self.config.embedding_dimensions}")
@@ -488,7 +500,8 @@ class LazyGraphRAGIndexingPipeline:
             "success": success_count, 
             "total": len(chunks),
             "null": null_count,
-            "wrong_dim": wrong_dim_count
+            "wrong_dim": wrong_dim_count,
+            "property": "embedding_v2" if self.use_v2_embedding_property else "embedding",
         })
 
     async def _extract_entities_and_relationships(

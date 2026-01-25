@@ -1,21 +1,19 @@
 """
-CU Standard Ingestion Service
+CU Standard Ingestion Service V2 - Section-Aware Chunking
 
-Calls Azure Content Understanding to extract structured Documents with layout metadata
-optimized for PropertyGraphIndex entity extraction.
+V2 Changes from V1:
+1. Buffer text by Azure DI sections (not pages)
+2. Apply min/max token rules for chunking
+3. Store parent_doc_title separately from section_title
+4. Detect summary sections for coverage retrieval
+5. Support Voyage embeddings (2048 dim) via hybrid_v2
 
-Returns LlamaIndex Documents with:
-- Clean markdown text (proper headings from paragraph roles)
-- Section hierarchy (from title/sectionHeading roles)
-- Table structure metadata (critical for entity-relationship extraction)
-- Page numbers (for context)
-
-Uses managed identity (DefaultAzureCredential) and API version 2025-11-01.
+Ref: VOYAGE_V2_IMPLEMENTATION_PLAN_2026-01-25.md Phase 2
 """
 
 import os
-
-from typing import Any, Dict, List, Union
+import re
+from typing import Any, Dict, List, Optional, Union
 import logging
 
 import httpx
@@ -27,7 +25,33 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 
-class CUStandardIngestionService:
+# ============================================================================
+# Section-Aware Chunking Constants
+# ============================================================================
+MIN_SECTION_TOKENS = 100    # Merge sections below this threshold
+MAX_SECTION_TOKENS = 1500   # Split sections above this threshold  
+OVERLAP_TOKENS = 50         # Overlap between split chunks
+
+# Summary section detection patterns
+SUMMARY_PATTERNS = [
+    "purpose", "summary", "executive summary",
+    "introduction", "overview", "scope",
+    "background", "abstract", "objectives",
+    "recitals", "whereas",
+]
+
+
+class CUStandardIngestionServiceV2:
+    """
+    V2 Ingestion Service with section-aware chunking.
+    
+    Key differences from V1:
+    - Returns Documents chunked by semantic sections (not pages)
+    - Each Document has parent_doc_title and section_title metadata
+    - Supports min/max token rules for optimal chunk sizes
+    - Detects summary sections for coverage retrieval
+    """
+    
     API_SCOPE = "https://cognitiveservices.azure.com/.default"
 
     def __init__(self) -> None:
@@ -134,6 +158,236 @@ class CUStandardIngestionService:
                 lines.append(table_md)
         
         return "\n\n".join(lines)
+
+    # ========================================================================
+    # V2 Section-Aware Chunking Methods
+    # ========================================================================
+    
+    def _count_tokens(self, text: str) -> int:
+        """Simple whitespace tokenization for token counting."""
+        return len(text.split())
+    
+    def _is_summary_section(self, title: str) -> bool:
+        """Detect summary sections by title pattern."""
+        if not title:
+            return False
+        title_lower = title.lower()
+        return any(p in title_lower for p in SUMMARY_PATTERNS)
+    
+    def _extract_doc_title(self, pages: List[Dict]) -> str:
+        """Extract document title from first page."""
+        if not pages:
+            return "Untitled Document"
+        
+        first_page = pages[0]
+        for para in first_page.get("paragraphs", []):
+            if para.get("role") == "title":
+                return para.get("content", "").strip()
+        
+        return "Untitled Document"
+    
+    def _buffer_by_sections(self, pages: List[Dict]) -> List[Dict]:
+        """
+        Buffer text by Azure DI section boundaries.
+        
+        Returns list of section dicts with:
+        - text: Complete section text
+        - section_title: Section heading
+        - section_level: Heading level (1, 2, 3)
+        - section_path: Full path ["Doc", "Section", "Subsection"]
+        - is_summary_section: True if title matches summary patterns
+        - tables: List of tables in this section
+        """
+        sections: List[Dict] = []
+        current_section: Optional[Dict] = None
+        section_path: List[str] = []
+        
+        for page in pages:
+            paragraphs = page.get("paragraphs", [])
+            tables = page.get("tables", [])
+            table_idx = 0
+            
+            for para in paragraphs:
+                role = para.get("role", "")
+                content = para.get("content", "").strip()
+                
+                if not content:
+                    continue
+                
+                if role == "title":
+                    # Save previous section
+                    if current_section and current_section["text"].strip():
+                        sections.append(current_section)
+                    
+                    # Reset to document title (level 1)
+                    section_path = [content]
+                    current_section = {
+                        "text": f"# {content}\n\n",
+                        "section_title": content,
+                        "section_level": 1,
+                        "section_path": section_path.copy(),
+                        "is_summary_section": self._is_summary_section(content),
+                        "tables": [],
+                    }
+                    
+                elif role == "sectionHeading":
+                    # Save previous section
+                    if current_section and current_section["text"].strip():
+                        sections.append(current_section)
+                    
+                    # Determine level based on heading style (heuristic)
+                    # DI doesn't always give us explicit levels, so we track path
+                    if len(section_path) == 0:
+                        section_path = [content]
+                        level = 1
+                    elif len(section_path) == 1:
+                        section_path.append(content)
+                        level = 2
+                    else:
+                        # Replace last item (same level) or add (deeper level)
+                        # Heuristic: treat all sectionHeadings as level 2+
+                        section_path = [section_path[0], content]
+                        level = 2
+                    
+                    current_section = {
+                        "text": f"## {content}\n\n",
+                        "section_title": content,
+                        "section_level": level,
+                        "section_path": section_path.copy(),
+                        "is_summary_section": self._is_summary_section(content),
+                        "tables": [],
+                    }
+                    
+                elif role in ("pageHeader", "pageFooter"):
+                    # Skip headers/footers (noise for extraction)
+                    continue
+                    
+                else:
+                    # Regular paragraph - add to current section
+                    if current_section is None:
+                        # No section yet, create implicit one
+                        current_section = {
+                            "text": "",
+                            "section_title": "Introduction",
+                            "section_level": 1,
+                            "section_path": ["Introduction"],
+                            "is_summary_section": True,  # Treat intro as summary
+                            "tables": [],
+                        }
+                    current_section["text"] += content + "\n\n"
+            
+            # Add tables from this page to current section
+            for table in tables:
+                table_md = table.get("content", "")
+                if table_md and current_section:
+                    current_section["text"] += table_md + "\n\n"
+                    current_section["tables"].append(self._extract_table_metadata(table))
+        
+        # Don't forget last section
+        if current_section and current_section["text"].strip():
+            sections.append(current_section)
+        
+        return sections
+    
+    def _apply_chunking_rules(
+        self,
+        sections: List[Dict],
+        min_tokens: int = MIN_SECTION_TOKENS,
+        max_tokens: int = MAX_SECTION_TOKENS,
+        overlap_tokens: int = OVERLAP_TOKENS,
+    ) -> List[Dict]:
+        """
+        Apply split/merge rules to sections.
+        
+        - Merge sections < min_tokens with previous sibling
+        - Split sections > max_tokens at paragraph boundaries
+        """
+        if not sections:
+            return []
+        
+        processed: List[Dict] = []
+        
+        for section in sections:
+            token_count = self._count_tokens(section["text"])
+            
+            if token_count < min_tokens and processed:
+                # Merge with previous section
+                prev = processed[-1]
+                prev["text"] += "\n\n" + section["text"]
+                # Keep the more specific section path
+                if len(section["section_path"]) > len(prev["section_path"]):
+                    prev["section_path"] = section["section_path"]
+                # Preserve summary flag if either is summary
+                prev["is_summary_section"] = prev["is_summary_section"] or section["is_summary_section"]
+                prev["tables"].extend(section["tables"])
+                
+            elif token_count > max_tokens:
+                # Split at paragraph boundaries
+                chunks = self._split_section(section, max_tokens, overlap_tokens)
+                processed.extend(chunks)
+                
+            else:
+                # Section is within bounds
+                processed.append(section)
+        
+        return processed
+    
+    def _split_section(
+        self,
+        section: Dict,
+        max_tokens: int,
+        overlap_tokens: int,
+    ) -> List[Dict]:
+        """Split a large section at paragraph boundaries."""
+        text = section["text"]
+        paragraphs = text.split("\n\n")
+        
+        chunks: List[Dict] = []
+        current_chunk = ""
+        chunk_idx = 0
+        
+        for para in paragraphs:
+            para_tokens = self._count_tokens(para)
+            current_tokens = self._count_tokens(current_chunk)
+            
+            if current_tokens + para_tokens <= max_tokens:
+                current_chunk += para + "\n\n"
+            else:
+                # Save current chunk
+                if current_chunk.strip():
+                    chunks.append({
+                        "text": current_chunk.strip(),
+                        "section_title": f"{section['section_title']} (part {chunk_idx + 1})",
+                        "section_level": section["section_level"],
+                        "section_path": section["section_path"],
+                        "is_summary_section": section["is_summary_section"],
+                        "tables": section["tables"] if chunk_idx == 0 else [],
+                        "chunk_part": chunk_idx + 1,
+                    })
+                    chunk_idx += 1
+                
+                # Start new chunk with overlap
+                if overlap_tokens > 0 and current_chunk:
+                    # Get last N tokens for overlap
+                    words = current_chunk.split()
+                    overlap_text = " ".join(words[-overlap_tokens:]) if len(words) > overlap_tokens else ""
+                    current_chunk = overlap_text + "\n\n" + para + "\n\n"
+                else:
+                    current_chunk = para + "\n\n"
+        
+        # Don't forget last chunk
+        if current_chunk.strip():
+            chunks.append({
+                "text": current_chunk.strip(),
+                "section_title": f"{section['section_title']} (part {chunk_idx + 1})" if chunk_idx > 0 else section["section_title"],
+                "section_level": section["section_level"],
+                "section_path": section["section_path"],
+                "is_summary_section": section["is_summary_section"],
+                "tables": [],
+                "chunk_part": chunk_idx + 1 if chunk_idx > 0 else None,
+            })
+        
+        return chunks if chunks else [section]
 
     async def extract_documents(self, group_id: str, input_items: List[Union[str, Dict[str, Any]]]) -> List[Document]:
         """
@@ -247,46 +501,66 @@ class CUStandardIngestionService:
                         raw_text = content_item.get("content") or content_item.get("text") or ""
                         documents.append(Document(
                             text=raw_text,
-                            metadata={"group_id": group_id, "source": "cu-standard", "url": url}
+                            metadata={"group_id": group_id, "source": "cu-standard-v2", "url": url}
                         ))
                         continue
                     
-                    # Process each page as a Document
-                    for page in pages:
-                        page_num = page.get("pageNumber", 1)
-                        
-                        # Build markdown text
-                        markdown = self._build_markdown_from_page(page)
-                        
-                        # Debug first page
-                        if len(documents) == 0:
-                            print(f"[DEBUG] First page keys: {list(page.keys())}")
-                            print(f"[DEBUG] Paragraphs count: {len(page.get('paragraphs', []))}")
-                            print(f"[DEBUG] Tables count: {len(page.get('tables', []))}")
-                            print(f"[DEBUG] Markdown length: {len(markdown)}")
-                            print(f"[DEBUG] Markdown preview: {markdown[:200]}")
-                        
-                        # Extract metadata
-                        section_path = self._build_section_path(page.get("paragraphs", []))
-                        
-                        tables_metadata = [
-                            self._extract_table_metadata(t)
-                            for t in page.get("tables", [])
-                        ]
-                        
-                        # Create Document with rich metadata
-                        doc = Document(
-                            text=markdown,
+                    # ================================================================
+                    # V2: Section-aware chunking (instead of page-based)
+                    # ================================================================
+                    
+                    # Extract document title from first page
+                    parent_doc_title = self._extract_doc_title(pages)
+                    
+                    # Step 1: Buffer text by section boundaries
+                    sections = self._buffer_by_sections(pages)
+                    
+                    if not sections:
+                        # Fallback: No sections found, create single document
+                        all_text = "\n\n".join(
+                            self._build_markdown_from_page(p) for p in pages
+                        )
+                        documents.append(Document(
+                            text=all_text,
                             metadata={
-                                "page_number": page_num,
-                                "section_path": section_path,
-                                "tables": tables_metadata,
                                 "group_id": group_id,
-                                "source": "cu-standard",
-                                "url": url
+                                "source": "cu-standard-v2",
+                                "url": url,
+                                "parent_doc_title": parent_doc_title,
+                                "section_title": parent_doc_title,
+                                "is_summary_section": True,
+                            }
+                        ))
+                        continue
+                    
+                    # Step 2: Apply chunking rules (merge small, split large)
+                    chunks = self._apply_chunking_rules(sections)
+                    
+                    logger.info(
+                        f"V2 Section chunking: {url[:50]}... -> "
+                        f"{len(sections)} sections -> {len(chunks)} chunks"
+                    )
+                    
+                    # Step 3: Create Documents from chunks
+                    for chunk_idx, chunk in enumerate(chunks):
+                        doc = Document(
+                            text=chunk["text"],
+                            metadata={
+                                "group_id": group_id,
+                                "source": "cu-standard-v2",
+                                "url": url,
+                                # V2 metadata: separate parent/section titles
+                                "parent_doc_title": parent_doc_title,
+                                "section_title": chunk["section_title"],
+                                "section_level": chunk["section_level"],
+                                "section_path": chunk["section_path"],
+                                "is_summary_section": chunk["is_summary_section"],
+                                "tables": chunk.get("tables", []),
+                                "chunk_index": chunk_idx,
+                                "chunk_part": chunk.get("chunk_part"),
                             }
                         )
                         documents.append(doc)
         
-        logger.info(f"Extracted {len(documents)} documents for group {group_id}")
+        logger.info(f"V2 Extracted {len(documents)} section-aware chunks for group {group_id}")
         return documents

@@ -86,6 +86,7 @@ class TextChunk:
     chunk_index: int
     document_id: str
     embedding: Optional[List[float]] = None
+    embedding_v2: Optional[List[float]] = None  # V2: Voyage embeddings (2048 dim)
     tokens: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -1393,9 +1394,16 @@ class Neo4jStoreV3:
             t.group_id = $group_id,
             t.updated_at = datetime()
         
+        // V1 embedding (OpenAI 3072 dim)
         WITH t, c
         FOREACH (_ IN CASE WHEN c.embedding IS NOT NULL AND size(c.embedding) > 0 THEN [1] ELSE [] END |
             SET t.embedding = c.embedding
+        )
+        
+        // V2 embedding (Voyage 2048 dim) - for parallel V1/V2 operation
+        WITH t, c
+        FOREACH (_ IN CASE WHEN c.embedding_v2 IS NOT NULL AND size(c.embedding_v2) > 0 THEN [1] ELSE [] END |
+            SET t.embedding_v2 = c.embedding_v2
         )
         
         // Create IN_DOCUMENT edge to link chunk to its document
@@ -1435,6 +1443,7 @@ class Neo4jStoreV3:
                     "chunk_index": c.chunk_index,
                     "document_id": c.document_id,
                     "embedding": c.embedding,
+                    "embedding_v2": c.embedding_v2,  # V2: Voyage embeddings
                     "tokens": c.tokens,
                     "metadata": json.dumps(metadata_to_store) if metadata_to_store else "{}",
                 }

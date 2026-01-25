@@ -1,10 +1,21 @@
 """
 Stage 3.2: Hub Entity Extraction
 
+⚠️ DEPRECATED for V2 Pipeline:
+In V2 (Voyage contextual embeddings + section-aware chunking), hub entity
+extraction is less critical because:
+1. Contextual embeddings already capture document structure
+2. Section-aware chunks ARE semantic units (no need for hub navigation)
+3. Direct vector search is more effective with contextual embeddings
+
+This module is retained for V1 backward compatibility only.
+V2 pipelines should use direct vector search via Voyage embeddings.
+
+Original Purpose:
 Extracts hub entities (most connected nodes) from matched communities.
 These hub entities serve as deterministic "landing pads" for HippoRAG PPR.
 
-Used in: Route 3 (Global Search Equivalent)
+Used in: Route 3 (Global Search Equivalent) - V1 only
 """
 
 from typing import List, Dict, Any, Optional, Tuple

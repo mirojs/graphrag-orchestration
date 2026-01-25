@@ -6,6 +6,12 @@ This module provides graph-aware retrieval that fully utilizes:
 3. Section metadata: Document structure (for organized citations)
 4. Entity embeddings: Semantic entity discovery
 5. Section graph: IN_SECTION edges for section-aware diversification
+
+V2 Mode (VOYAGE_V2_ENABLED=True):
+- Chunks ARE sections (section-aware chunking)
+- No section diversification needed (chunks already represent complete sections)
+- Uses Voyage embeddings (2048 dim) for semantic search
+- See VOYAGE_V2_IMPLEMENTATION_PLAN_2026-01-25.md Phase 3
 """
 
 from __future__ import annotations
@@ -671,6 +677,7 @@ class EnhancedGraphRetriever:
         section_diversify: bool = True,
         max_per_section: int = 3,
         max_per_document: int = 6,
+        use_v2_mode: bool = False,
     ) -> EnhancedGraphContext:
         """
         Get complete graph context for the given hub entities.
@@ -686,10 +693,19 @@ class EnhancedGraphRetriever:
             section_diversify: Whether to diversify chunks across sections
             max_per_section: Max chunks per section (when section_diversify=True)
             max_per_document: Max chunks per document (when section_diversify=True)
+            use_v2_mode: V2 mode - skip section diversification (chunks ARE sections)
             
         Returns:
             EnhancedGraphContext with all retrieved information
         """
+        # V2 mode: skip section diversification (chunks are already complete sections)
+        # In V2 section-aware chunking, each chunk represents a semantic section
+        # so per-section caps don't make sense - the chunk IS the section
+        if use_v2_mode:
+            section_diversify = False
+            logger.info("get_full_context_v2_mode", 
+                       message="V2 mode: skipping section diversification (chunks ARE sections)")
+        
         # Check if section graph is enabled via environment variable
         section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         section_diversify = section_diversify and section_graph_enabled

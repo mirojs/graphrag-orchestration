@@ -10,22 +10,68 @@ This route uses:
 2. LazyGraphRAG iterative deepening to expand context
 3. Evidence synthesis with citations
 
+V2 Mode (VOYAGE_V2_ENABLED=True):
+- Uses Voyage embeddings (2048 dim) instead of OpenAI (3072 dim)
+- Section-aware chunks for better semantic coherence
+- BM25+Vector hybrid approach retained
+
 Note: No HippoRAG in this route - entities are explicit in the query.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import structlog
 
+from app.core.config import settings
 from .base import BaseRouteHandler, RouteResult, Citation
 
 logger = structlog.get_logger(__name__)
 
+# V2 Voyage embedding service (lazy import to avoid circular deps)
+_voyage_service: Optional["VoyageEmbedService"] = None
+
+
+def _get_voyage_service():
+    """Get Voyage embedding service for V2 mode."""
+    global _voyage_service
+    if _voyage_service is None:
+        try:
+            from app.hybrid_v2.embeddings import get_voyage_embed_service, is_voyage_v2_enabled
+            if is_voyage_v2_enabled():
+                _voyage_service = get_voyage_embed_service()
+        except Exception as e:
+            logger.warning("voyage_service_init_failed", error=str(e))
+    return _voyage_service
+
 
 class LocalSearchHandler(BaseRouteHandler):
-    """Route 2: Entity-focused search with LazyGraphRAG iterative deepening."""
+    """Route 2: Entity-focused search with LazyGraphRAG iterative deepening.
+    
+    V2 Mode (when VOYAGE_V2_ENABLED=True):
+    - Uses Voyage embeddings (2048 dim) for query embedding
+    - Searches embedding_v2 property on TextChunk nodes
+    - Section-aware chunks for better semantic coherence
+    """
 
     ROUTE_NAME = "route_2_local_search"
+
+    def _is_v2_enabled(self) -> bool:
+        """Check if V2 Voyage mode is enabled."""
+        return settings.VOYAGE_V2_ENABLED and bool(settings.VOYAGE_API_KEY)
+
+    async def _get_query_embedding(self, query: str):
+        """Get query embedding using V2 Voyage or V1 OpenAI based on config."""
+        if self._is_v2_enabled():
+            voyage_service = _get_voyage_service()
+            if voyage_service:
+                logger.info("route_2_using_voyage_embeddings")
+                return voyage_service.embed_query(query)
+        
+        # Fallback to V1 OpenAI embeddings via pipeline
+        if hasattr(self.pipeline, 'embed_model') and self.pipeline.embed_model:
+            return await self.pipeline.embed_model.aget_query_embedding(query)
+        
+        return None
 
     async def execute(
         self,

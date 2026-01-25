@@ -1300,6 +1300,72 @@ class Neo4jStoreV3:
         
         return results
 
+    def search_text_chunks_v2(
+        self,
+        group_id: str,
+        query_text: str,
+        embedding: List[float],
+        top_k: int = 10,
+    ) -> List[Tuple[TextChunk, float]]:
+        """
+        V2 Vector search for TextChunk nodes using Voyage embeddings.
+        
+        Uses the embedding_v2 property (2048 dim Voyage) instead of
+        embedding (3072 dim OpenAI) for V2 section-aware chunking.
+        
+        Also returns section metadata for V2 chunks.
+        """
+        query = """
+        MATCH (t:TextChunk {group_id: $group_id})
+        WHERE t.embedding_v2 IS NOT NULL
+        WITH t, vector.similarity.cosine(t.embedding_v2, $embedding) AS score
+        ORDER BY score DESC
+        LIMIT $top_k
+        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+        RETURN t, d, score
+        """
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id, embedding=embedding, top_k=top_k)
+            for record in result:
+                t = record["t"]
+                d = record.get("d")
+
+                chunk_metadata: Dict[str, Any] = {}
+                raw_metadata = t.get("metadata")
+                if raw_metadata:
+                    if isinstance(raw_metadata, str):
+                        try:
+                            chunk_metadata = json.loads(raw_metadata)
+                        except Exception:
+                            chunk_metadata = {}
+                    elif isinstance(raw_metadata, dict):
+                        chunk_metadata = dict(raw_metadata)
+
+                # V2 metadata: include section info
+                chunk_metadata["document_title"] = (d.get("title") if d else "")
+                chunk_metadata["document_source"] = (d.get("source") if d else "")
+                chunk_metadata["is_v2_chunk"] = True
+
+                chunk = TextChunk(
+                    id=t["id"],
+                    text=t["text"],
+                    chunk_index=t["chunk_index"],
+                    document_id=(d.get("id") if d else ""),
+                    tokens=t.get("tokens", 0),
+                    embedding=t.get("embedding"),
+                    embedding_v2=t.get("embedding_v2"),
+                    metadata=chunk_metadata,
+                )
+                results.append((chunk, record["score"]))
+        
+        logger.info("search_text_chunks_v2_complete",
+                   group_id=group_id,
+                   top_k=top_k,
+                   results=len(results))
+        return results
+
     def search_text_chunks_by_terms(
         self,
         group_id: str,

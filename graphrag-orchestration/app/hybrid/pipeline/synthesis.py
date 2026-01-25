@@ -850,28 +850,29 @@ IMPORTANT for Per-Document Queries:
 """
         
         # Detect unit-based qualifiers (day-based, week-based, etc.) for strict filtering
-        qualifier_guidance = ""
+        qualifier_instruction = ""
         unit_match = re.search(r'\b(day|week|month|year|hour|minute)-based\b', q_lower)
         if unit_match:
             requested_unit = unit_match.group(1)
             excluded_units = {"day": "week/month/year", "week": "day/month/year", 
                              "month": "day/week/year", "year": "day/week/month"}
             excluded = excluded_units.get(requested_unit, "other units")
-            qualifier_guidance = f"""
-CRITICAL QUALIFIER FILTER:
-- The question explicitly asks for "{requested_unit}-based" timeframes ONLY.
-- EXCLUDE any timeframes expressed in {excluded} (e.g., "8-10 weeks" is NOT {requested_unit}-based).
-- Only include timeframes where the duration is explicitly stated in {requested_unit}s (e.g., "30 days", "90 days").
-- If the evidence mentions a timeframe in different units, do NOT convert it - simply exclude it.
+            qualifier_instruction = f"""
+**MANDATORY UNIT FILTER** (HIGHEST PRIORITY):
+The question specifies "{requested_unit}-based" timeframes. You MUST:
+- ONLY include timeframes explicitly stated in {requested_unit}s (e.g., "60 days", "90 days", "180 days")
+- COMPLETELY EXCLUDE any timeframes in {excluded} - even if relevant (e.g., "8-10 weeks" MUST be omitted)
+- Do NOT convert units (e.g., do not say "8-10 weeks (56-70 days)")
+- If you include a non-{requested_unit} timeframe, your response is INCORRECT
 """
         
         return f"""You are an expert analyst generating a concise summary.
 
 Question: {query}
-
+{qualifier_instruction}
 Evidence Context:
 {context}
-{qualifier_guidance}
+
 Instructions:
 1. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
     - Question asks for "bank routing number" but evidence only has payment portal URL → Output: "The requested information was not found in the available documents."

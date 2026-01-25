@@ -3,6 +3,13 @@
 **Last Updated:** January 25, 2026
 
 **Recent Updates (January 25, 2026):**
+- 🚀 **V2 Contextual Chunking Plan Approved:** Migration to `voyage-context-3` (2048 dim) with section-aware embeddings
+  - **Plan Document:** `VOYAGE_V2_CONTEXTUAL_CHUNKING_PLAN_2026-01-25.md`
+  - **Implementation Plan:** `VOYAGE_V2_IMPLEMENTATION_PLAN_2026-01-25.md`
+  - **Key Benefits:** 33% smaller embeddings, 54% cheaper API costs, semantic alignment (chunks = sections)
+  - **Strategy:** Parallel development (V2 alongside V1), validate before cut-over
+  - **Timeline:** 5-6 weeks to production
+  - **Solves:** Q-D8 document counting issue (Exhibit A counted correctly as part of parent document)
 - ✅ **Route 3 Coverage Gap Fix:** Legacy handler now uses `get_document_lead_chunks()` for reliable cross-document coverage
   - **Problem:** `get_summary_chunks_by_section()` silently skipped documents without metadata markers (Q-G3: 75% → 100%)
   - **Solution:** Direct chunk_index [0-5] query from all Document nodes - no metadata/APOC dependencies

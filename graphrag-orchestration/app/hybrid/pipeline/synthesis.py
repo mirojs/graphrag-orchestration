@@ -860,9 +860,9 @@ IMPORTANT for Per-Document Queries:
             qualifier_instruction = f"""
 **MANDATORY UNIT FILTER** (HIGHEST PRIORITY):
 The question specifies "{requested_unit}-based" timeframes. You MUST:
-- ONLY include timeframes explicitly stated in {requested_unit}s (e.g., "60 days", "90 days", "180 days")
-- COMPLETELY EXCLUDE any timeframes in {excluded} - even if relevant (e.g., "8-10 weeks" MUST be omitted)
-- Do NOT convert units (e.g., do not say "8-10 weeks (56-70 days)")
+- ONLY include timeframes explicitly stated in {requested_unit}s
+- COMPLETELY EXCLUDE any timeframes in {excluded} - even if they seem relevant
+- Do NOT convert units between different time measures
 - If you include a non-{requested_unit} timeframe, your response is INCORRECT
 """
         

@@ -648,48 +648,115 @@ Sub-questions:"""
                 )
                 coverage_strategy = "section_based_exhaustive"
                 
-                # SEMANTIC RERANKING: Filter section-based chunks by query relevance
-                # This ensures exhaustive retrieval (nothing missed) + relevance filtering (noise reduced)
+                # HYBRID RERANKING: Semantic + Keyword (BM25-style) scoring
+                # Semantic alone ranks "8-10 weeks" similar to "day-based timeframes" (both about time)
+                # Keyword matching ensures "day-based" query boosts chunks with "day"/"days"
                 if coverage_source_chunks:
                     try:
                         from app.services.llm_service import LLMService
+                        import re
+                        import math
                         llm_service = LLMService()
-                        if llm_service.embed_model:
-                            query_embedding = llm_service.embed_model.get_text_embedding(query)
+                        
+                        # Extract key terms from query for keyword matching
+                        query_lower = query.lower()
+                        # Extract unit qualifiers (e.g., "day-based" -> "day")
+                        unit_match = re.search(r'\b(\w+)-based\b', query_lower)
+                        query_unit = unit_match.group(1) if unit_match else None
+                        
+                        # Extract other important keywords (nouns, key terms)
+                        query_keywords = set(re.findall(r'\b[a-z]{3,}\b', query_lower))
+                        # Remove stop words
+                        stop_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 
+                                     'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been',
+                                     'this', 'that', 'with', 'they', 'what', 'which', 'from', 'into',
+                                     'each', 'list', 'across', 'compare', 'explicit', 'set'}
+                        query_keywords -= stop_words
+                        
+                        def compute_keyword_score(text: str) -> float:
+                            """Compute simple keyword match score (BM25-inspired)."""
+                            if not text:
+                                return 0.0
+                            text_lower = text.lower()
+                            score = 0.0
                             
-                            # Score each chunk by cosine similarity to query
-                            import numpy as np
-                            scored_chunks = []
-                            for chunk in coverage_source_chunks:
-                                if chunk.text:
+                            # Heavy boost if query specifies a unit and chunk matches it
+                            if query_unit:
+                                # Count occurrences of the unit (e.g., "day", "days")
+                                unit_pattern = rf'\b{re.escape(query_unit)}s?\b'
+                                unit_matches = len(re.findall(unit_pattern, text_lower))
+                                if unit_matches > 0:
+                                    score += 2.0 * math.log(1 + unit_matches)  # Strong boost
+                                else:
+                                    # Penalize if chunk has OTHER time units but not the requested one
+                                    other_units = ['week', 'month', 'year', 'hour', 'minute']
+                                    if query_unit in ['day', 'week', 'month', 'year', 'hour', 'minute']:
+                                        other_units = [u for u in other_units if u != query_unit]
+                                    for other in other_units:
+                                        if re.search(rf'\b{other}s?\b', text_lower):
+                                            score -= 0.5  # Penalty for wrong unit
+                            
+                            # Standard keyword matching
+                            for kw in query_keywords:
+                                if kw in text_lower:
+                                    score += 0.3
+                            
+                            return score
+                        
+                        # Compute hybrid scores
+                        scored_chunks = []
+                        for chunk in coverage_source_chunks:
+                            if chunk.text:
+                                keyword_score = compute_keyword_score(chunk.text)
+                                
+                                # Semantic score (optional - can be slow for many chunks)
+                                semantic_score = 0.5  # Default neutral
+                                if llm_service.embed_model and len(coverage_source_chunks) <= 100:
+                                    query_embedding = llm_service.embed_model.get_text_embedding(query)
                                     chunk_embedding = llm_service.embed_model.get_text_embedding(chunk.text[:2000])
-                                    # Cosine similarity
-                                    similarity = np.dot(query_embedding, chunk_embedding) / (
+                                    import numpy as np
+                                    semantic_score = np.dot(query_embedding, chunk_embedding) / (
                                         np.linalg.norm(query_embedding) * np.linalg.norm(chunk_embedding) + 1e-9
                                     )
-                                    scored_chunks.append((chunk, similarity))
-                            
-                            # Sort by similarity and keep top chunks
-                            scored_chunks.sort(key=lambda x: x[1], reverse=True)
-                            
-                            # Keep top 50% or minimum 20 chunks (whichever is larger)
+                                
+                                # Hybrid score: 60% keyword, 40% semantic
+                                # Keyword is weighted higher for qualifier-based queries
+                                if query_unit:
+                                    hybrid_score = 0.7 * keyword_score + 0.3 * semantic_score
+                                else:
+                                    hybrid_score = 0.4 * keyword_score + 0.6 * semantic_score
+                                
+                                scored_chunks.append((chunk, hybrid_score, keyword_score, semantic_score))
+                        
+                        # Sort by hybrid score
+                        scored_chunks.sort(key=lambda x: x[1], reverse=True)
+                        
+                        # For unit-qualified queries, filter out chunks with zero/negative keyword score
+                        if query_unit:
+                            # Keep chunks with positive keyword score OR top 20 by hybrid
+                            positive_kw = [(c, h, k, s) for c, h, k, s in scored_chunks if k > 0]
+                            if len(positive_kw) >= 10:
+                                filtered_chunks = [c for c, h, k, s in positive_kw]
+                            else:
+                                # Not enough positive matches, fall back to top by hybrid
+                                min_chunks = max(20, len(scored_chunks) // 2)
+                                filtered_chunks = [c for c, h, k, s in scored_chunks[:min_chunks]]
+                        else:
+                            # No unit qualifier - use standard filtering
                             min_chunks = max(20, len(scored_chunks) // 2)
-                            # Also filter by minimum similarity threshold (0.3)
-                            filtered_chunks = [
-                                chunk for chunk, sim in scored_chunks[:min_chunks]
-                                if sim >= 0.3
-                            ]
-                            
-                            logger.info("stage_4.3.6_semantic_rerank_applied",
-                                       original_count=len(coverage_source_chunks),
-                                       filtered_count=len(filtered_chunks),
-                                       top_similarity=scored_chunks[0][1] if scored_chunks else 0,
-                                       min_similarity=scored_chunks[-1][1] if scored_chunks else 0)
-                            
-                            coverage_source_chunks = filtered_chunks
-                            coverage_strategy = "section_based_exhaustive_reranked"
+                            filtered_chunks = [c for c, h, k, s in scored_chunks[:min_chunks]]
+                        
+                        logger.info("stage_4.3.6_hybrid_rerank_applied",
+                                   original_count=len(coverage_source_chunks),
+                                   filtered_count=len(filtered_chunks),
+                                   query_unit=query_unit,
+                                   top_hybrid=scored_chunks[0][1] if scored_chunks else 0,
+                                   top_keyword=scored_chunks[0][2] if scored_chunks else 0)
+                        
+                        coverage_source_chunks = filtered_chunks
+                        coverage_strategy = "section_based_hybrid_reranked"
                     except Exception as rerank_err:
-                        logger.warning("stage_4.3.6_semantic_rerank_failed", 
+                        logger.warning("stage_4.3.6_hybrid_rerank_failed", 
                                       error=str(rerank_err),
                                       falling_back_to="unranked_section_chunks")
                 

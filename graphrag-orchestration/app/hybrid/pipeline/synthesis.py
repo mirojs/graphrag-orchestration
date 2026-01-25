@@ -829,12 +829,26 @@ Generate a comprehensive, detailed response that:
 Response:"""
 
     def _get_summary_prompt(self, query: str, context: str) -> str:
-        # Detect "each document" / "every document" queries
+        # Detect document-counting and per-document queries
+        # These patterns trigger document consolidation guidance
         q_lower = query.lower()
-        is_per_document_query = any(pattern in q_lower for pattern in [
+        
+        # Simple string patterns (exact match)
+        simple_patterns = [
             "each document", "every document", "all documents",
-            "summarize.*document", "list.*document"
-        ])
+            "different documents", "how many documents", "most documents",
+        ]
+        # Regex patterns (for flexible matching)
+        regex_patterns = [
+            r"summarize.*document", r"list.*document",
+            r"appears?\s+in.*documents",  # "appears in X documents"
+            r"which.*documents?",  # "which document(s)"
+        ]
+        
+        is_per_document_query = (
+            any(pattern in q_lower for pattern in simple_patterns) or
+            any(re.search(pattern, q_lower) for pattern in regex_patterns)
+        )
         
         document_guidance = ""
         if is_per_document_query:

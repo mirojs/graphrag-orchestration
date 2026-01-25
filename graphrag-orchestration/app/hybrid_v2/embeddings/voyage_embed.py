@@ -79,7 +79,7 @@ class VoyageEmbedService:
             )
         
         # Initialize native Voyage client for contextual embeddings
-        self._client = voyageai.Client(api_key=self.api_key)
+        self._client = voyageai.Client(api_key=self.api_key)  # type: ignore[union-attr]
         
         # Also initialize LlamaIndex wrapper for pipeline compatibility
         self._embed_model = None

@@ -1,4 +1,3 @@
-"""
 """Create V2 Vector Index for Voyage Embeddings (2048 dimensions)
 
 This script creates the chunk_embeddings_v2 index in Neo4j for V2 section-aware

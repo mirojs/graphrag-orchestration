@@ -20,6 +20,9 @@ llama-index-llms-openai==0.6.12  # upgrade candidate - requires testing
 llama-index-embeddings-azure-openai==0.4.1  # upgrade to match llama-index-core 0.14.x
 llama-index-vector-stores-azureaisearch==0.4.4
 llama-index-vector-stores-lancedb==0.4.4
+# llama-index-embeddings-voyageai removed - incompatible with llama-index-core 0.14.x
+# Using voyageai SDK directly for V2 contextual chunking (see app/hybrid_v2/embeddings/)
+voyageai>=0.3.0  # Voyage AI SDK for contextual embeddings (V2)
 # llama-index-graph-stores-neo4j removed - replaced by app/services/neo4j_standalone_store.py
 # This enables neo4j driver v6.0+ compatibility for native Vector type support
 scikit-learn>=1.4.0

@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 3072  # text-embedding-3-large dimensions
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Latest stable version
     
+    # ========================================================================
+    # Voyage AI V2 Embeddings (Section-Aware Contextual Chunking)
+    # See VOYAGE_V2_CONTEXTUAL_CHUNKING_PLAN_2026-01-25.md for rationale
+    # ========================================================================
+    VOYAGE_API_KEY: Optional[str] = None
+    VOYAGE_V2_ENABLED: bool = False  # Set to True to enable V2 pipeline
+    VOYAGE_MODEL_NAME: str = "voyage-context-3"  # 2048 dimensions, contextual embedding
+    VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-context-3 dimensions
+    
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)
     # Note: Neo4j is still used for entity/relationship storage and hybrid search on KG

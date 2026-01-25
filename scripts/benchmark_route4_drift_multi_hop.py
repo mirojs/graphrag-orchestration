@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from benchmark_accuracy_utils import GroundTruth, extract_ground_truth, calculate_accuracy_metrics
+from benchmark_accuracy_utils import GroundTruth, extract_ground_truth, calculate_accuracy_metrics, BankQuestion, read_question_bank
 
 DEFAULT_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
@@ -77,12 +77,6 @@ def _read_text_maybe(p: Path) -> Optional[str]:
     except Exception:
         return None
     return None
-
-
-@dataclass(frozen=True)
-class BankQuestion:
-    qid: str
-    query: str
 
 
 def _now_utc_stamp() -> str:
@@ -159,30 +153,8 @@ def _http_post_json(
 
 
 def _read_question_bank(path: Path, *, positive_prefix: str = "Q-D", negative_prefix: str = "Q-N") -> List[BankQuestion]:
-    """Read questions from question bank (positive + negative tests)."""
-    questions: List[BankQuestion] = []
-    
-    # Read positive questions
-    pattern_pos = re.compile(rf"\*\*({re.escape(positive_prefix)}\d+):\*\*\s*(.+?)\s*$")
-    for line in path.read_text(encoding="utf-8").splitlines():
-        m = pattern_pos.search(line)
-        if m:
-            qid, qtext = m.group(1).strip(), m.group(2).strip()
-            if qid and qtext:
-                questions.append(BankQuestion(qid=qid, query=qtext))
-    
-    # Read negative questions
-    pattern_neg = re.compile(rf"\*\*({re.escape(negative_prefix)}\d+):\*\*\s*(.+?)\s*$")
-    for line in path.read_text(encoding="utf-8").splitlines():
-        m = pattern_neg.search(line)
-        if m:
-            qid, qtext = m.group(1).strip(), m.group(2).strip()
-            if qid and qtext:
-                questions.append(BankQuestion(qid=qid, query=qtext))
-    
-    if not questions:
-        raise RuntimeError(f"No {positive_prefix}* or {negative_prefix}* questions found in {path}")
-    return questions
+    """Read questions from question bank. Wrapper for shared read_question_bank()."""
+    return read_question_bank(path, positive_prefix=positive_prefix, negative_prefix=negative_prefix)
 
 
 def _extract_citation_ids(resp: Any) -> List[str]:

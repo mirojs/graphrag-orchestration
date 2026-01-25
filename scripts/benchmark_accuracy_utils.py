@@ -195,3 +195,70 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
         "recall": recall,
         "f1_score": f1_score,
     }
+
+
+@dataclass
+class BankQuestion:
+    """A question from the question bank."""
+    qid: str
+    query: str
+
+
+def read_question_bank(
+    path: Path,
+    *,
+    positive_prefix: str = "Q-V",
+    negative_prefix: str = "Q-N"
+) -> list:
+    """Read questions from question bank (positive + negative tests).
+    
+    Handles two question bank formats:
+    1. Multi-line format with expected on separate line:
+       **Q-D1:** Question text here?
+          - **Expected:** Answer text
+    2. Single-line format with expected on same line:
+       **Q-D1:** Question text here?   - **Expected Route:** Route 4   - **Expected:** Answer text
+    
+    The regex stops at ' - **' or '  - **' markers to avoid including expected answers in the query.
+    
+    Args:
+        path: Path to question bank markdown file
+        positive_prefix: Prefix for positive test questions (e.g., "Q-V", "Q-D", "Q-G")
+        negative_prefix: Prefix for negative test questions (e.g., "Q-N")
+    
+    Returns:
+        List of BankQuestion objects
+    """
+    questions: list = []
+    
+    def extract_question(line: str, prefix: str) -> tuple:
+        """Extract (qid, query_text) from a question bank line."""
+        # Pattern stops at ' - **' (common metadata marker) or end of line
+        pattern = re.compile(rf"\*\*({re.escape(prefix)}\d+):\*\*\s*(.+?)(?:\s+-\s+\*\*|\s*$)")
+        m = pattern.search(line)
+        if m:
+            qid = m.group(1).strip()
+            qtext = m.group(2).strip()
+            # Additional cleanup: remove any trailing ' -' or '  -' 
+            qtext = re.sub(r'\s+-\s*$', '', qtext).strip()
+            return qid, qtext
+        return None, None
+    
+    # Read positive questions
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if f"**{positive_prefix}" in line:
+            qid, qtext = extract_question(line, positive_prefix)
+            if qid and qtext:
+                questions.append(BankQuestion(qid=qid, query=qtext))
+    
+    # Read negative questions
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if f"**{negative_prefix}" in line:
+            qid, qtext = extract_question(line, negative_prefix)
+            if qid and qtext:
+                questions.append(BankQuestion(qid=qid, query=qtext))
+    
+    if not questions:
+        raise RuntimeError(f"No {positive_prefix}* or {negative_prefix}* questions found in {path}")
+    
+    return questions

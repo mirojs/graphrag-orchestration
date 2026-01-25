@@ -849,27 +849,10 @@ IMPORTANT for Per-Document Queries:
 - If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
 """
         
-        # Detect unit-based qualifiers (day-based, week-based, etc.) for strict filtering
-        qualifier_instruction = ""
-        unit_match = re.search(r'\b(day|week|month|year|hour|minute)-based\b', q_lower)
-        if unit_match:
-            requested_unit = unit_match.group(1)
-            excluded_units = {"day": "week/month/year", "week": "day/month/year", 
-                             "month": "day/week/year", "year": "day/week/month"}
-            excluded = excluded_units.get(requested_unit, "other units")
-            qualifier_instruction = f"""
-**MANDATORY UNIT FILTER** (HIGHEST PRIORITY):
-The question specifies "{requested_unit}-based" timeframes. You MUST:
-- ONLY include timeframes explicitly stated in {requested_unit}s
-- COMPLETELY EXCLUDE any timeframes in {excluded} - even if they seem relevant
-- Do NOT convert units between different time measures
-- If you include a non-{requested_unit} timeframe, your response is INCORRECT
-"""
-        
         return f"""You are an expert analyst generating a concise summary.
 
 Question: {query}
-{qualifier_instruction}
+
 Evidence Context:
 {context}
 
@@ -880,10 +863,13 @@ Instructions:
     - Question asks for "California law" but evidence shows Texas law → Output: "The requested information was not found in the available documents."
    - Do NOT say "The invoice does not provide X, but here is Y" — Just refuse entirely.
 2. ONLY if the EXACT requested information IS present: provide a brief summary (2-3 paragraphs).
-5. Include citations [N] for factual claims (aim for every sentence that states a fact).
-6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
-7. Prefer concrete obligations/thresholds over general paraphrases.
-8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
+3. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+   - Include ONLY items matching that qualifier
+   - EXCLUDE items that don't match, even if they seem related
+4. Include citations [N] for factual claims (aim for every sentence that states a fact).
+5. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+6. Prefer concrete obligations/thresholds over general paraphrases.
+7. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 {document_guidance}
 Summary:"""
 

@@ -648,6 +648,51 @@ Sub-questions:"""
                 )
                 coverage_strategy = "section_based_exhaustive"
                 
+                # SEMANTIC RERANKING: Filter section-based chunks by query relevance
+                # This ensures exhaustive retrieval (nothing missed) + relevance filtering (noise reduced)
+                if coverage_source_chunks:
+                    try:
+                        from app.services.llm_service import LLMService
+                        llm_service = LLMService()
+                        if llm_service.embed_model:
+                            query_embedding = llm_service.embed_model.get_text_embedding(query)
+                            
+                            # Score each chunk by cosine similarity to query
+                            import numpy as np
+                            scored_chunks = []
+                            for chunk in coverage_source_chunks:
+                                if chunk.text:
+                                    chunk_embedding = llm_service.embed_model.get_text_embedding(chunk.text[:2000])
+                                    # Cosine similarity
+                                    similarity = np.dot(query_embedding, chunk_embedding) / (
+                                        np.linalg.norm(query_embedding) * np.linalg.norm(chunk_embedding) + 1e-9
+                                    )
+                                    scored_chunks.append((chunk, similarity))
+                            
+                            # Sort by similarity and keep top chunks
+                            scored_chunks.sort(key=lambda x: x[1], reverse=True)
+                            
+                            # Keep top 50% or minimum 20 chunks (whichever is larger)
+                            min_chunks = max(20, len(scored_chunks) // 2)
+                            # Also filter by minimum similarity threshold (0.3)
+                            filtered_chunks = [
+                                chunk for chunk, sim in scored_chunks[:min_chunks]
+                                if sim >= 0.3
+                            ]
+                            
+                            logger.info("stage_4.3.6_semantic_rerank_applied",
+                                       original_count=len(coverage_source_chunks),
+                                       filtered_count=len(filtered_chunks),
+                                       top_similarity=scored_chunks[0][1] if scored_chunks else 0,
+                                       min_similarity=scored_chunks[-1][1] if scored_chunks else 0)
+                            
+                            coverage_source_chunks = filtered_chunks
+                            coverage_strategy = "section_based_exhaustive_reranked"
+                    except Exception as rerank_err:
+                        logger.warning("stage_4.3.6_semantic_rerank_failed", 
+                                      error=str(rerank_err),
+                                      falling_back_to="unranked_section_chunks")
+                
                 # If section-based retrieval returns nothing, fall back to semantic
                 # but with MUCH higher chunks_per_doc (15-20) to simulate section coverage
                 if not coverage_source_chunks:

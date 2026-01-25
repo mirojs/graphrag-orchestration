@@ -3228,8 +3228,6 @@ Instructions:
                 total_docs_in_group = len(all_documents)
                 # Cover every document for small/medium groups; cap for very large groups.
                 coverage_max_total = min(max(total_docs_in_group, 0), 200)
-                
-                use_section_retrieval = os.getenv("USE_SECTION_RETRIEVAL", "1").strip().lower() in {"1", "true", "yes"}
 
                 # If we already cover every document, skip coverage retrieval entirely.
                 if total_docs_in_group > 0 and len(existing_docs) >= total_docs_in_group:
@@ -3250,20 +3248,14 @@ Instructions:
                         reason="already_full_coverage",
                     )
                 else:
-                    # Prefer section-aware summary chunks if enabled; fall back to position-based.
-                    coverage_chunks = []
-                    if use_section_retrieval:
-                        coverage_chunks = await self.enhanced_retriever.get_summary_chunks_by_section(
-                            max_per_document=1,
-                            max_total=coverage_max_total,
-                        )
-
-                    if not coverage_chunks:
-                        # Get representative chunks from ALL documents (1 per doc to minimize noise)
-                        coverage_chunks = await self.enhanced_retriever.get_coverage_chunks(
-                            max_per_document=1,  # Minimal: just 1 chunk per missing doc
-                            max_total=coverage_max_total,
-                        )
+                    # Use document lead chunks for reliable cross-document coverage.
+                    # This approach directly guarantees document coverage by fetching
+                    # early chunks (chunk_index 0-5) from each document, avoiding the
+                    # metadata/APOC dependencies of get_summary_chunks_by_section().
+                    coverage_chunks = await self.enhanced_retriever.get_document_lead_chunks(
+                        max_total=coverage_max_total,
+                        min_text_chars=20,
+                    )
 
                     # Only add chunks for documents we're MISSING
                     added_count = 0

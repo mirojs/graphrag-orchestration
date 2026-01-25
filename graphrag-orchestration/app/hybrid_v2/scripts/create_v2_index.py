@@ -1,9 +1,11 @@
-"""Create V2 Vector Index for Voyage Embeddings (2048 dimensions)
+"""Create V2 Vector Index for Voyage Embeddings (1024 dimensions)
 
 This script creates the chunk_embeddings_v2 index in Neo4j for V2 section-aware
-chunking with Voyage embeddings.
+chunking with Voyage contextual embeddings.
 
-V2 uses voyage-3-large (2048 dimensions) vs V1's text-embedding-3-large (3072 dimensions).
+V2 uses voyage-context-3 (1024 dimensions) with contextualized_embed() method.
+This provides contextual awareness - chunks are embedded with knowledge of
+their surrounding document context.
 
 Usage:
     python -m app.hybrid_v2.scripts.create_v2_index
@@ -23,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # V2 Index Configuration
 V2_INDEX_NAME = "chunk_embeddings_v2"
-V2_EMBEDDING_DIM = 2048  # voyage-3-large dimensions (per config.py)
+V2_EMBEDDING_DIM = 2048  # voyage-context-3 with output_dimension=2048
 V2_EMBEDDING_PROPERTY = "embedding_v2"
 
 

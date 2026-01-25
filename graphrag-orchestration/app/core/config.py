@@ -51,8 +51,8 @@ class Settings(BaseSettings):
     # ========================================================================
     VOYAGE_API_KEY: Optional[str] = None
     VOYAGE_V2_ENABLED: bool = False  # Set to True to enable V2 pipeline
-    VOYAGE_MODEL_NAME: str = "voyage-3-large"  # 2048 dimensions for better accuracy
-    VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-3-large dimensions
+    VOYAGE_MODEL_NAME: str = "voyage-context-3"  # Contextual embedding model
+    VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-context-3 with output_dimension=2048
     
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)

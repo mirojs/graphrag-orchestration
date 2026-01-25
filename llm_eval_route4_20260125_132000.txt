@@ -1,0 +1,48 @@
+2026-01-25 13:35:42,821 - INFO - Loaded 19 ground truth entries
+2026-01-25 13:35:42,863 - INFO - Using Judge Model: gpt-5.1
+
+============================================================
+Starting Evaluation for route4_drift_multi_hop_20260125T131229Z.json
+============================================================
+
+Evaluating Q-D1...2026-01-25 13:35:44,198 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-D2...2026-01-25 13:35:45,293 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 0/3
+Evaluating Q-D3...2026-01-25 13:35:47,314 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 2/3
+Evaluating Q-D4...2026-01-25 13:35:48,277 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-D5...2026-01-25 13:35:49,880 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 2/3
+Evaluating Q-D6...2026-01-25 13:35:50,742 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-D7...2026-01-25 13:35:51,587 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-D8...2026-01-25 13:35:52,830 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 1/3
+Evaluating Q-D9...2026-01-25 13:35:53,960 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-D10...2026-01-25 13:35:55,486 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N1...2026-01-25 13:35:56,353 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N2...2026-01-25 13:35:57,190 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N3...2026-01-25 13:35:58,378 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N5...2026-01-25 13:35:59,139 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N6...2026-01-25 13:36:00,092 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N7...2026-01-25 13:36:01,206 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N8...2026-01-25 13:36:02,270 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N9...2026-01-25 13:36:02,971 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+Evaluating Q-N10...2026-01-25 13:36:03,798 - INFO - HTTP Request: POST https://graphrag-openai-8476.openai.azure.com/openai/deployments/gpt-5.1/chat/completions?api-version=2024-10-21 "HTTP/1.1 200 OK"
+ Score: 3/3
+
+Evaluation Complete. Report written to:
+benchmarks/route4_drift_multi_hop_20260125T131229Z.eval.md

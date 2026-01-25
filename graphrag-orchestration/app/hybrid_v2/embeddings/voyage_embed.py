@@ -34,7 +34,7 @@ except ImportError:
         "Install with: pip install voyageai"
     )
 
-# Also try LlamaIndex wrapper for compatibility
+# LlamaIndex wrapper for pipeline compatibility (v0.5.3 supports llama-index-core 0.14.x)
 try:
     from llama_index.embeddings.voyageai import VoyageEmbedding
     LLAMAINDEX_VOYAGE_AVAILABLE = True

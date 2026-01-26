@@ -195,10 +195,6 @@ module graphragApp './core/host/container-app.bicep' = {
         value: !empty(voyageApiKey) ? 'true' : 'false'
       }
       {
-        name: 'VOYAGE_API_KEY'
-        secretRef: 'voyage-api-key'
-      }
-      {
         name: 'VOYAGE_EMBEDDING_MODEL'
         value: 'voyage-context-3'
       }
@@ -206,7 +202,12 @@ module graphragApp './core/host/container-app.bicep' = {
         name: 'VOYAGE_EMBEDDING_DIM'
         value: '2048'
       }
-    ])
+    ], !empty(voyageApiKey) ? [
+      {
+        name: 'VOYAGE_API_KEY'
+        secretRef: 'voyage-api-key'
+      }
+    ] : [])
     secrets: concat([
       {
         name: 'neo4j-password'

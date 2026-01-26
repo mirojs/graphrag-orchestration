@@ -832,11 +832,13 @@ async def _run_indexing_job(
     _indexing_jobs[job_id]["progress"] = "Starting indexing pipeline..."
     
     try:
-        from app.hybrid.indexing.lazygraphrag_indexing_pipeline import (
-            get_lazygraphrag_indexing_pipeline,
+        from app.core.config import settings
+        from app.hybrid_v2.indexing.lazygraphrag_indexing_pipeline import (
+            get_lazygraphrag_indexing_pipeline_v2,
         )
 
-        pipeline = get_lazygraphrag_indexing_pipeline()
+        # Use V2 pipeline (with embedding_v2 property) when Voyage V2 is enabled
+        pipeline = get_lazygraphrag_indexing_pipeline_v2()
         
         _indexing_jobs[job_id]["progress"] = "Indexing documents..."
         stats = await pipeline.index_documents(

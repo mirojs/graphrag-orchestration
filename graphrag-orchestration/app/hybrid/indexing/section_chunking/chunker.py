@@ -65,6 +65,7 @@ class SectionAwareChunker:
         doc_id: str,
         doc_source: str = "",
         doc_title: str = "",
+        doc_language: Optional[str] = None,  # ISO 639-1/BCP 47 locale code
     ) -> List[SectionChunk]:
         """
         Chunk a document using Azure DI section structure.
@@ -74,6 +75,7 @@ class SectionAwareChunker:
             doc_id: Document identifier
             doc_source: Document URL/path
             doc_title: Document title
+            doc_language: ISO 639-1/BCP 47 locale (e.g., "zh-Hans", "en")
             
         Returns:
             List of SectionChunk objects ready for embedding and storage
@@ -91,7 +93,7 @@ class SectionAwareChunker:
                     "section_chunking_fallback",
                     extra={"doc_id": doc_id, "reason": "no_sections_found"},
                 )
-                return self._fallback_fixed_chunking(di_units, doc_id, doc_source, doc_title)
+                return self._fallback_fixed_chunking(di_units, doc_id, doc_source, doc_title, doc_language)
             return []
         
         # Step 2: Build hierarchy and merge tiny sections
@@ -99,7 +101,7 @@ class SectionAwareChunker:
             sections = self._merge_tiny_sections(sections)
         
         # Step 3: Split large sections
-        chunks = self._sections_to_chunks(sections, doc_id, doc_source, doc_title)
+        chunks = self._sections_to_chunks(sections, doc_id, doc_source, doc_title, doc_language)
         
         logger.info(
             "section_chunking_complete",
@@ -108,6 +110,7 @@ class SectionAwareChunker:
                 "sections_found": len(sections),
                 "chunks_created": len(chunks),
                 "summary_sections": sum(1 for c in chunks if c.is_summary_section),
+                "language": doc_language,
             },
         )
         
@@ -239,6 +242,7 @@ class SectionAwareChunker:
         doc_id: str,
         doc_source: str,
         doc_title: str,
+        doc_language: Optional[str] = None,
     ) -> List[SectionChunk]:
         """Convert sections to chunks, splitting large sections as needed."""
         chunks: List[SectionChunk] = []
@@ -265,6 +269,7 @@ class SectionAwareChunker:
                         tokens=section.token_count,
                         is_section_start=True,
                         is_summary_section=is_summary,
+                        language=doc_language,
                         metadata={
                             "source": doc_source,
                             "title": doc_title,
@@ -287,6 +292,7 @@ class SectionAwareChunker:
                     doc_title=doc_title,
                     start_chunk_idx=global_chunk_idx,
                     is_summary=is_summary,
+                    doc_language=doc_language,
                 )
                 chunks.extend(sub_chunks)
                 global_chunk_idx += len(sub_chunks)
@@ -320,6 +326,7 @@ class SectionAwareChunker:
         doc_title: str,
         start_chunk_idx: int,
         is_summary: bool,
+        doc_language: Optional[str] = None,
     ) -> List[SectionChunk]:
         """Split a large section into smaller chunks at paragraph boundaries."""
         content = section.content
@@ -371,6 +378,7 @@ class SectionAwareChunker:
                             tokens=current_tokens,
                             is_section_start=(chunk_idx_in_section == 0),
                             is_summary_section=is_summary,
+                            language=doc_language,
                             metadata={
                                 "source": doc_source,
                                 "title": doc_title,
@@ -411,6 +419,7 @@ class SectionAwareChunker:
                     tokens=current_tokens,
                     is_section_start=(chunk_idx_in_section == 0),
                     is_summary_section=is_summary,
+                    language=doc_language,
                     metadata={
                         "source": doc_source,
                         "title": doc_title,
@@ -435,6 +444,7 @@ class SectionAwareChunker:
         doc_id: str,
         doc_source: str,
         doc_title: str,
+        doc_language: Optional[str] = None,
     ) -> List[SectionChunk]:
         """Fallback to fixed-size chunking when no sections available."""
         from llama_index.core.node_parser import SentenceSplitter
@@ -478,6 +488,7 @@ class SectionAwareChunker:
                     tokens=len(text.split()),
                     is_section_start=(idx == 0),
                     is_summary_section=(idx == 0),  # First chunk as pseudo-summary
+                    language=doc_language,
                     metadata={
                         "source": doc_source,
                         "title": doc_title,

@@ -97,15 +97,51 @@ def section_chunks_to_text_chunks(section_chunks: List[SectionChunk]) -> List[Te
     return text_chunks
 
 
+def extract_dominant_language(di_units: Sequence[Any]) -> Optional[str]:
+    """
+    Extract dominant language from DI units metadata.
+    
+    Azure DI stores language info in the first unit's metadata under 'languages' key.
+    This function finds the language with the most span coverage.
+    
+    Returns:
+        ISO 639-1/BCP 47 locale code (e.g., "zh-Hans", "en") or None if not detected.
+    """
+    if not di_units:
+        return None
+    
+    # Check first unit's metadata (languages are stored at document level)
+    first_meta = getattr(di_units[0], "metadata", None) or {}
+    languages = first_meta.get("languages") or []
+    
+    if not languages:
+        return None
+    
+    # Find language with highest span count (proxy for coverage)
+    best_lang = None
+    best_coverage = 0
+    
+    for lang in languages:
+        span_count = lang.get("span_count", 0)
+        if span_count > best_coverage:
+            best_coverage = span_count
+            best_lang = lang.get("locale")
+    
+    return best_lang
+
+
 async def chunk_di_units_section_aware(
     di_units: Sequence[Any],
     doc_id: str,
     doc_source: str = "",
     doc_title: str = "",
     chunker: Optional[SectionAwareChunker] = None,
+    doc_language: Optional[str] = None,  # Explicit language override
 ) -> List[TextChunk]:
     """
     Drop-in replacement for _chunk_di_units in lazygraphrag_pipeline.py.
+    
+    Supports multilingual documents by extracting and propagating language metadata.
     
     Usage:
         # In lazygraphrag_pipeline.py, replace:
@@ -118,11 +154,15 @@ async def chunk_di_units_section_aware(
     if chunker is None:
         chunker = create_section_aware_chunker()
     
+    # Extract language from DI metadata if not explicitly provided
+    language = doc_language or extract_dominant_language(di_units)
+    
     section_chunks = await chunker.chunk_document(
         di_units=di_units,
         doc_id=doc_id,
         doc_source=doc_source,
         doc_title=doc_title,
+        doc_language=language,
     )
     
     return section_chunks_to_text_chunks(section_chunks)

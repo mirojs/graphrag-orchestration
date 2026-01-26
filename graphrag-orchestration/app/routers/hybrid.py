@@ -27,6 +27,7 @@ import time
 from app.hybrid.orchestrator import HybridPipeline, HighQualityError
 from app.hybrid.router.main import DeploymentProfile, QueryRoute
 from app.hybrid.indexing import DualIndexService, get_hipporag_service
+from app.core.config import settings
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -234,10 +235,22 @@ async def _get_or_create_pipeline(
         else:
             text_unit_store = HippoRAGTextUnitStore(hipporag_service)
 
+        # Use V2 Voyage embedder if enabled (2048D), otherwise V1 OpenAI (3072D)
+        # Must match the embedding dimensions used during indexing
+        embedding_client = llm_service.embed_model  # Default: V1 OpenAI
+        if settings.VOYAGE_V2_ENABLED and settings.VOYAGE_API_KEY:
+            try:
+                from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                voyage_service = VoyageEmbedService()
+                embedding_client = voyage_service.get_llama_index_model()
+                logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id)
+            except Exception as e:
+                logger.warning("hybrid_v2_voyage_embedder_failed", error=str(e), group_id=group_id)
+
         pipeline = HybridPipeline(
             profile=profile,
             llm_client=llm_client,
-            embedding_client=llm_service.embed_model,  # For semantic entity matching in Route 3
+            embedding_client=embedding_client,  # V2 Voyage (2048D) or V1 OpenAI (3072D)
             hipporag_instance=hipporag_instance,
             graph_store=graph_store,
             text_unit_store=text_unit_store,

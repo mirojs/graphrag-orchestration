@@ -39,12 +39,12 @@ page.page_number       # ✅ USED
 page.spans             # ✅ USED
 ```
 
-### 3. FREE Add-On Features (Not Enabled)
+### 3. FREE Add-On Features (v4 API - 2024-11-30)
 | Feature | Cost | Status | Value |
 |---------|------|--------|-------|
-| `BARCODES` | **FREE** | 🔴 NOT ENABLED | QR codes, UPC, Code128, etc. |
-| `LANGUAGES` | **FREE** | 🔴 NOT ENABLED | Per-span language detection |
-| `KEY_VALUE_PAIRS` | +$0.50/1K | ✅ ENABLED | Form field extraction |
+| `BARCODES` | **FREE** | ✅ ENABLED | QR codes, UPC, Code128, tracking numbers |
+| `LANGUAGES` | **FREE** | ✅ ENABLED | Per-span language detection |
+| `KEY_VALUE_PAIRS` | **FREE** | ✅ ENABLED | Form field extraction |
 
 ### 4. Paid Add-On Features (Not Enabled)
 | Feature | Cost | Status | Value |
@@ -53,6 +53,15 @@ page.spans             # ✅ USED
 | `STYLE_FONT` | +$0.50/1K | 🔴 NOT ENABLED | Font family, bold, italic |
 | `OCR_HIGH_RESOLUTION` | +$1.50/1K | 🔴 NOT ENABLED | Small text OCR |
 | `QUERY_FIELDS` | +$1.00/1K | 🔴 NOT ENABLED | Custom field extraction |
+
+### 5. Base Model Features (Included in prebuilt-layout)
+| Feature | Cost | Status | Value |
+|---------|------|--------|-------|
+| `page.selection_marks` | **Included** | ✅ EXTRACTED | Checkboxes (☑/☐) |
+| `result.sections` | **Included** | ✅ USED | Section hierarchy |
+| `result.paragraphs` | **Included** | ✅ USED | Text content |
+| `result.tables` | **Included** | ✅ USED | Table structure |
+| `result.figures` | **Included** | ✅ EXTRACTED | Cross-section references |
 
 ### 2. DocumentFigure (The Gold Mine)
 ```python
@@ -362,37 +371,39 @@ def _extract_selection_marks(self, result: AnalyzeResult) -> List[Dict]:
 
 ---
 
-## Cost-Benefit Analysis
+## Cost-Benefit Analysis (v4 API Pricing)
 
-| Feature | Cost | Benefit | Priority |
-|---------|------|---------|----------|
-| **Barcodes** | **$0 (FREE)** | Tracking #s, UPC codes, QR links | 🔴 HIGH |
-| **Languages** | **$0 (FREE)** | Multilingual routing, compliance | 🔴 HIGH |
-| Figure cross-refs | $0 (already returned) | Cross-section graph connectivity | 🟡 MEDIUM |
-| Selection marks | $0 (already returned) | Checkbox state extraction | 🟡 MEDIUM |
-| Footnote citations | $0 | Citation graph for legal/financial | 🟡 MEDIUM |
-| Style-based NER | +$0.50/1K pages | Bold text = entity hints | 🟢 LOW |
-| Formulas | +$5.00/1K pages | LaTeX math extraction | 🟢 LOW |
+| Feature | Cost | Benefit | Status |
+|---------|------|---------|--------|
+| **Key-value pairs** | **$0 (FREE in v4)** | Deterministic field extraction | ✅ ENABLED |
+| **Barcodes** | **$0 (FREE)** | Tracking #s, UPC codes, QR links | ✅ ENABLED |
+| **Languages** | **$0 (FREE)** | Multilingual document routing | ✅ ENABLED |
+| **Selection marks** | **$0 (Included)** | Checkbox state extraction | ✅ EXTRACTED |
+| Figure cross-refs | $0 (Included) | Cross-section graph connectivity | ✅ EXTRACTED |
+| Style-based NER | +$0.50/1K pages | Bold text = entity hints | 🔴 NOT ENABLED |
+| Formulas | +$5.00/1K pages | LaTeX math extraction | 🔴 NOT ENABLED |
 
 ---
 
 ## Current vs Proposed Feature Flags
 
-### Current Implementation
-```python
-features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS]
-```
-
-### Proposed Implementation
+### Current Implementation (v4 API - All FREE features enabled!)
 ```python
 features=[
-    DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # +$0.50/1K (already enabled)
+    DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # FREE in v4!
     DocumentAnalysisFeature.BARCODES,          # FREE!
     DocumentAnalysisFeature.LANGUAGES,         # FREE!
-    # Optional paid features:
-    # DocumentAnalysisFeature.STYLE_FONT,      # +$0.50/1K
-    # DocumentAnalysisFeature.FORMULAS,        # +$5.00/1K
 ]
+# Selection marks: Included in base prebuilt-layout (no add-on needed)
+```
+
+### Optional Paid Features (Not Enabled)
+```python
+# Add these only if needed:
+# DocumentAnalysisFeature.STYLE_FONT,          # +$0.50/1K
+# DocumentAnalysisFeature.FORMULAS,            # +$5.00/1K
+# DocumentAnalysisFeature.OCR_HIGH_RESOLUTION, # +$1.50/1K
+# DocumentAnalysisFeature.QUERY_FIELDS,        # +$1.00/1K
 ```
 
 ---

@@ -938,18 +938,19 @@ class DocumentIntelligenceService:
                 # DI can access Azure blob storage directly using its own Managed Identity
                 # No need to download locally - just pass the URL (with SAS if present)
                 logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
-                # Enable add-on features for enhanced extraction
-                # KEY_VALUE_PAIRS: +$0.50/1K pages - deterministic field lookups
+                # Enable add-on features for enhanced extraction (v4 API pricing)
+                # KEY_VALUE_PAIRS: FREE in v4 API - deterministic field lookups
                 # BARCODES: FREE - QR codes, UPC, tracking numbers
                 # LANGUAGES: FREE - per-span language detection
+                # Selection marks: Included in base prebuilt-layout (no add-on needed)
                 poller = await client.begin_analyze_document(
                     selected_model,
                     AnalyzeDocumentRequest(url_source=url),
                     output_content_format=DocumentContentFormat.MARKDOWN,
                     features=[
-                        DocumentAnalysisFeature.KEY_VALUE_PAIRS,
-                        DocumentAnalysisFeature.BARCODES,    # FREE!
-                        DocumentAnalysisFeature.LANGUAGES,   # FREE!
+                        DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # FREE in v4!
+                        DocumentAnalysisFeature.BARCODES,         # FREE!
+                        DocumentAnalysisFeature.LANGUAGES,        # FREE!
                     ],
                 )
 

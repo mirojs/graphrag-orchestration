@@ -45,6 +45,7 @@ from app.services.document_intelligence_service import DocumentIntelligenceServi
 from app.hybrid_v2.services.entity_deduplication import EntityDeduplicationService
 from app.hybrid_v2.services.neo4j_store import Document, Entity, Neo4jStoreV3, Relationship, TextChunk
 from app.hybrid_v2.utils.language import canonical_key_for_entity, is_cjk, detect_cjk_from_text
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

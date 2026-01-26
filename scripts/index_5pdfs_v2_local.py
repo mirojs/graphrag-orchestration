@@ -117,13 +117,16 @@ def persist_group_id(group_id: str) -> None:
 
 async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
     """Run V2 indexing with Voyage embeddings."""
-    from app.hybrid.indexing.lazygraphrag_indexing_pipeline import (
-        get_lazygraphrag_indexing_pipeline,
-        _is_v2_enabled,
+    from app.hybrid_v2.indexing.lazygraphrag_pipeline import (
+        LazyGraphRAGIndexingPipeline,
+        LazyGraphRAGIndexingConfig,
     )
+    from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+    from app.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+    from app.services.llm_service import LLMService
     
     # Verify V2 mode
-    if not _is_v2_enabled():
+    if not settings.VOYAGE_V2_ENABLED or not settings.VOYAGE_API_KEY:
         log("❌ V2 mode is not enabled. Check .env configuration.")
         return None
     
@@ -135,9 +138,41 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
     log(f"Dry Run: {dry_run}")
     log("")
     
-    # Get V2 pipeline
+    # Initialize V2 pipeline directly
     log("📦 Initializing V2 pipeline...")
-    pipeline = get_lazygraphrag_indexing_pipeline()
+    
+    # Neo4j store
+    neo4j_store = Neo4jStoreV3(
+        uri=settings.NEO4J_URI or "",
+        username=settings.NEO4J_USERNAME or "",
+        password=settings.NEO4J_PASSWORD or "",
+    )
+    
+    # LLM service for entity extraction
+    llm_service = LLMService()
+    
+    # Voyage embedder
+    voyage_embedder = VoyageEmbedService(
+        model_name=settings.VOYAGE_MODEL_NAME,
+        api_key=settings.VOYAGE_API_KEY,
+    )
+    
+    # V2 config
+    config = LazyGraphRAGIndexingConfig(
+        chunk_size=512,
+        chunk_overlap=64,
+        embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,
+    )
+    
+    # V2 pipeline
+    pipeline = LazyGraphRAGIndexingPipeline(
+        neo4j_store=neo4j_store,
+        llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
+        embedder=voyage_embedder,
+        config=config,
+        use_v2_embedding_property=True,
+    )
+    
     log(f"   Pipeline: {type(pipeline).__module__}")
     log(f"   Embedder: {type(pipeline.embedder).__name__}")
     log(f"   use_v2_embedding_property: {pipeline.use_v2_embedding_property}")

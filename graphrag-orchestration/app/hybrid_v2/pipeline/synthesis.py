@@ -355,6 +355,8 @@ class EvidenceSynthesizer:
                     "source": chunk.document_source or chunk.document_title,
                     "chunk_id": chunk.chunk_id,
                     "document": doc_title,  # Add document for proper attribution
+                    "document_id": chunk.document_id or "",  # Include document ID from SourceChunk
+                    "document_title": chunk.document_title or doc_title,  # Include document title
                     "section": section_str,
                     "entity": chunk.entity_name,
                     "text_preview": chunk.text[:150] + "..." if len(chunk.text) > 150 else chunk.text

@@ -24,6 +24,19 @@ CJK_PREFIXES = ("zh", "ja", "ko")
 # RTL (Right-to-Left) locale prefixes
 RTL_PREFIXES = ("ar", "he", "fa", "ur", "yi")
 
+# Non-Latin script locale prefixes (need character preservation in canonicalization)
+# This includes CJK, RTL, Indic, Thai, and other scripts that would be destroyed by ASCII-only regex
+NON_LATIN_PREFIXES = (
+    "zh", "ja", "ko",           # CJK
+    "ar", "he", "fa", "ur",    # RTL/Arabic
+    "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa",  # Indic
+    "th",                        # Thai
+    "el",                        # Greek
+    "ru", "uk", "bg", "sr",    # Cyrillic
+    "ka", "hy",                  # Georgian, Armenian
+    "am", "ti",                  # Ethiopic
+)
+
 # Sentence delimiters by language category
 CJK_SENTENCE_DELIMITERS = ["。", "！", "？", "．", "!", "?", "."]
 DEFAULT_SENTENCE_DELIMITERS = [".", "!", "?"]
@@ -113,6 +126,60 @@ def detect_cjk_from_text(text: str) -> bool:
     return (cjk_count / total_count) > 0.2
 
 
+def detect_non_latin_from_text(text: str) -> bool:
+    """
+    Detect if text contains significant non-Latin characters.
+    
+    This is more inclusive than detect_cjk_from_text - it catches:
+    - CJK (Chinese, Japanese, Korean)
+    - Arabic, Hebrew, Persian
+    - Indic scripts (Hindi, Bengali, Tamil, etc.)
+    - Thai, Cyrillic, Greek, etc.
+    
+    Args:
+        text: Text to analyze
+    
+    Returns:
+        True if >20% of characters are non-Latin
+    """
+    if not text:
+        return False
+    
+    non_latin_count = 0
+    total_count = 0
+    
+    for char in text:
+        if char.isspace():
+            continue
+        total_count += 1
+        # Check if character is outside basic Latin + digits
+        # Basic Latin: U+0000 - U+007F (ASCII)
+        # We consider anything with letters outside A-Za-z as non-Latin
+        if char.isalpha() and not char.isascii():
+            non_latin_count += 1
+    
+    if total_count == 0:
+        return False
+    
+    return (non_latin_count / total_count) > 0.2
+
+
+def is_non_latin_locale(locale: Optional[str]) -> bool:
+    """
+    Check if locale uses a non-Latin script.
+    
+    Args:
+        locale: ISO 639-1/BCP 47 locale code
+    
+    Returns:
+        True if the locale uses non-Latin script
+    """
+    if not locale:
+        return False
+    locale_lower = locale.lower()
+    return any(locale_lower.startswith(prefix) for prefix in NON_LATIN_PREFIXES)
+
+
 def normalize_text(text: str, locale: Optional[str] = None) -> str:
     """
     Apply language-specific text normalization.
@@ -185,16 +252,17 @@ def canonical_key_for_entity(name: str, locale: Optional[str] = None) -> str:
     # Apply Unicode normalization first
     s = normalize_text(s, locale)
     
-    # Determine if this is CJK content
-    is_cjk_content = is_cjk(locale) if locale else detect_cjk_from_text(s)
+    # Determine if this is non-Latin content (CJK, Arabic, Indic, Cyrillic, etc.)
+    # Use locale if provided, otherwise auto-detect from text
+    is_non_latin = is_non_latin_locale(locale) if locale else detect_non_latin_from_text(s)
     
-    if is_cjk_content:
-        # For CJK: Keep characters, remove excessive punctuation
-        # Don't lowercase CJK (no case), but lowercase any mixed Latin
+    if is_non_latin:
+        # For non-Latin scripts: Preserve native characters
+        # Apply lowercase (for scripts that have case), normalize whitespace
         s = s.lower()
-        # Remove common punctuation but preserve CJK characters and alphanumerics
-        # Keep: CJK chars, Latin alphanumerics, basic connectors
-        s = re.sub(r"[^\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af&]", " ", s)
+        # Keep all word characters (\w includes Unicode letters/digits)
+        # Remove only punctuation while preserving native script characters
+        s = re.sub(r"[^\w&\s]", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
     else:
         # For Latin scripts: Original ASCII-only approach

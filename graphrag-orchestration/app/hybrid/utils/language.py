@@ -24,6 +24,29 @@ CJK_PREFIXES = ("zh", "ja", "ko")
 # RTL (Right-to-Left) locale prefixes
 RTL_PREFIXES = ("ar", "he", "fa", "ur", "yi")
 
+# All non-Latin locale prefixes (for entity canonicalization)
+# This list covers scripts that should NOT have their characters stripped
+NON_LATIN_PREFIXES = (
+    # CJK
+    "zh", "ja", "ko",
+    # RTL
+    "ar", "he", "fa", "ur", "yi",
+    # Indic scripts
+    "hi", "bn", "ta", "te", "ml", "mr", "gu", "kn", "pa", "or", "as", "ne", "si",
+    # Southeast Asian
+    "th", "lo", "my", "km",
+    # Cyrillic
+    "ru", "uk", "bg", "sr", "mk", "be", "kk", "ky", "tg", "mn",
+    # Greek
+    "el",
+    # Georgian
+    "ka",
+    # Armenian
+    "hy",
+    # Ethiopic
+    "am", "ti",
+)
+
 # Sentence delimiters by language category
 CJK_SENTENCE_DELIMITERS = ["。", "！", "？", "．", "!", "?", "."]
 DEFAULT_SENTENCE_DELIMITERS = [".", "!", "?"]
@@ -113,6 +136,55 @@ def detect_cjk_from_text(text: str) -> bool:
     return (cjk_count / total_count) > 0.2
 
 
+def detect_non_latin_from_text(text: str) -> bool:
+    """
+    Heuristic fallback: detect if text contains significant non-Latin characters.
+    
+    Use this when locale metadata is unavailable. Detects ANY non-ASCII letters
+    including CJK, Arabic, Hebrew, Hindi, Thai, Cyrillic, Greek, etc.
+    
+    Args:
+        text: Text to analyze
+    
+    Returns:
+        True if >20% of characters are non-ASCII letters
+    """
+    if not text:
+        return False
+    
+    non_latin_count = 0
+    total_count = 0
+    
+    for char in text:
+        if char.isspace():
+            continue
+        total_count += 1
+        # Check if it's a letter but not ASCII (a-zA-Z)
+        if char.isalpha() and ord(char) > 127:
+            non_latin_count += 1
+    
+    if total_count == 0:
+        return False
+    
+    return (non_latin_count / total_count) > 0.2
+
+
+def is_non_latin_locale(locale: Optional[str]) -> bool:
+    """
+    Check if locale uses a non-Latin script.
+    
+    Args:
+        locale: ISO 639-1/BCP 47 locale code
+    
+    Returns:
+        True if the locale uses a non-Latin script
+    """
+    if not locale:
+        return False
+    locale_lower = locale.lower()
+    return any(locale_lower.startswith(prefix) for prefix in NON_LATIN_PREFIXES)
+
+
 def normalize_text(text: str, locale: Optional[str] = None) -> str:
     """
     Apply language-specific text normalization.
@@ -159,9 +231,16 @@ def canonical_key_for_entity(name: str, locale: Optional[str] = None) -> str:
     """
     Generate a canonical key for entity matching.
     
-    This function handles the critical difference between Latin and CJK scripts:
+    This function handles the critical difference between Latin and non-Latin scripts:
     - Latin: Lowercase, strip punctuation, normalize whitespace
-    - CJK: Preserve characters, apply NFKC normalization, lowercase
+    - Non-Latin: Preserve native characters, apply NFKC normalization, lowercase
+    
+    Uses Python's \\w regex which is Unicode-aware and matches:
+    - All Unicode letters (any script)
+    - All Unicode digits
+    - Underscore
+    
+    This approach is UNIVERSAL - no reindexing needed for new languages!
     
     Args:
         name: Entity name to canonicalize
@@ -175,8 +254,10 @@ def canonical_key_for_entity(name: str, locale: Optional[str] = None) -> str:
         'microsoft corp'
         >>> canonical_key_for_entity("株式会社トヨタ")
         '株式会社トヨタ'
-        >>> canonical_key_for_entity("华为技术有限公司")
-        '华为技术有限公司'
+        >>> canonical_key_for_entity("شركة أرامكو السعودية")
+        'شركة أرامكو السعودية'
+        >>> canonical_key_for_entity("Газпром")
+        'газпром'
     """
     s = (name or "").strip()
     if not s:
@@ -185,16 +266,15 @@ def canonical_key_for_entity(name: str, locale: Optional[str] = None) -> str:
     # Apply Unicode normalization first
     s = normalize_text(s, locale)
     
-    # Determine if this is CJK content
-    is_cjk_content = is_cjk(locale) if locale else detect_cjk_from_text(s)
+    # Determine if this is non-Latin content (CJK, Arabic, Hebrew, Hindi, Thai, etc.)
+    is_non_latin = is_non_latin_locale(locale) if locale else detect_non_latin_from_text(s)
     
-    if is_cjk_content:
-        # For CJK: Keep characters, remove excessive punctuation
-        # Don't lowercase CJK (no case), but lowercase any mixed Latin
+    if is_non_latin:
+        # For non-Latin scripts: Keep all Unicode word characters
+        # \w in Python regex is Unicode-aware: matches letters, digits, underscore in ANY script
         s = s.lower()
-        # Remove common punctuation but preserve CJK characters and alphanumerics
-        # Keep: CJK chars, Latin alphanumerics, basic connectors
-        s = re.sub(r"[^\w\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af&]", " ", s)
+        # Remove everything except word characters, ampersand, and spaces
+        s = re.sub(r"[^\w&\s]", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
     else:
         # For Latin scripts: Original ASCII-only approach

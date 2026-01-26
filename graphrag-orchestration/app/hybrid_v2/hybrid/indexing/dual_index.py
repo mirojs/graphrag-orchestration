@@ -188,11 +188,11 @@ class DualIndexService:
         if not self.driver:
             return []
 
-        # Schema note: chunks are typically :TextChunk and linked to :Document via (:TextChunk)-[:PART_OF]->(:Document).
+        # Schema note: chunks are typically :TextChunk and linked to :Document via (:TextChunk)-[:IN_DOCUMENT]->(:Document).
         query = """
         MATCH (c:TextChunk)
         WHERE c.group_id = $group_id
-        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         RETURN
             elementId(c) as id,
             c.text as text,

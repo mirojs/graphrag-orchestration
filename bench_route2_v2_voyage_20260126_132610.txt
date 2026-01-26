@@ -1,0 +1,130 @@
+Loaded 19 questions from QUESTION_BANK_5PDFS_2025-12-24.md
+  Positive tests (Q-L): 10
+  Negative tests (Q-N): 9
+Loaded 51 ground truth answers
+
+======================================================================
+Scenario: hybrid_route2_summary (response_type=summary)
+Questions: 19, Repeats: 3
+======================================================================
+
+[Q-L1] Who is the **Agent** in the property management agreement?
+  [1/3] 6021ms - 267 chars
+  [2/3] 3077ms - 106 chars
+  [3/3] 3031ms - 106 chars
+  Accuracy: containment=1.00, f1=0.35
+  Summary: exact=0.33, min_sim=0.56, latency_p50=3077ms
+[Q-L2] Who is the **Owner** in the property management agreement?
+  [1/3] 5875ms - 347 chars
+  [2/3] 3348ms - 371 chars
+  [3/3] 3526ms - 371 chars
+  Accuracy: containment=1.00, f1=0.10
+  Summary: exact=0.33, min_sim=0.80, latency_p50=3526ms
+[Q-L3] What is the managed property address in the property management agreement?
+  [1/3] 4714ms - 254 chars
+  [2/3] 3083ms - 116 chars
+  [3/3] 3001ms - 116 chars
+  Accuracy: containment=1.00, f1=0.30
+  Summary: exact=0.33, min_sim=0.63, latency_p50=3083ms
+[Q-L4] What is the initial term start date in the property management agreement?
+  [1/3] 5034ms - 87 chars
+  [2/3] 3811ms - 87 chars
+  [3/3] 3194ms - 87 chars
+  Accuracy: containment=1.00, f1=0.00
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3811ms
+[Q-L5] What written notice period is required for termination of the property management agreement?
+  [1/3] 20627ms - 234 chars
+  [2/3] 4979ms - 232 chars
+  [3/3] 3494ms - 232 chars
+  Accuracy: containment=1.00, f1=0.27
+  Summary: exact=0.33, min_sim=0.60, latency_p50=4979ms
+[Q-L6] What is the Agent fee/commission for **short-term** rentals (<180 days)?
+  [1/3] 5333ms - 322 chars
+  [2/3] 4338ms - 277 chars
+  [3/3] 3090ms - 172 chars
+  Accuracy: containment=1.00, f1=0.39
+  Summary: exact=0.33, min_sim=0.69, latency_p50=4338ms
+[Q-L7] What is the Agent fee/commission for **long-term** leases (>180 days)?
+  [1/3] 4156ms - 160 chars
+  [2/3] 6607ms - 157 chars
+  [3/3] 5775ms - 160 chars
+  Accuracy: containment=1.00, f1=0.52
+  Summary: exact=0.67, min_sim=1.00, latency_p50=5775ms
+[Q-L8] What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?
+  [1/3] 5027ms - 301 chars
+  [2/3] 16131ms - 247 chars
+  [3/3] 6327ms - 247 chars
+  Accuracy: containment=0.00, f1=0.10
+  Summary: exact=0.33, min_sim=0.71, latency_p50=6327ms
+[Q-L9] In the purchase contract Exhibit A, what is the job location?
+  [1/3] 4315ms - 118 chars
+  [2/3] 4191ms - 118 chars
+  [3/3] 4319ms - 118 chars
+  Accuracy: containment=1.00, f1=0.50
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4315ms
+[Q-L10] In the purchase contract Exhibit A, what is the contact’s name and email?   - **Expected Route:** Route 2 (Local Search)   - **Expected:** `Elizabeth Nolasco; enolasco@fabrikam.com`
+  [1/3] 3686ms - 148 chars
+  [2/3] 4788ms - 151 chars
+  [3/3] 6000ms - 148 chars
+  Summary: exact=0.67, min_sim=0.99, latency_p50=4788ms
+[Q-N1] What is the invoice's **bank routing number** for payment?
+  [1/3] 1894ms - 67 chars
+  [2/3] 2481ms - 67 chars
+  [3/3] 839ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1894ms
+[Q-N2] What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+  [1/3] 1105ms - 67 chars
+  [2/3] 962ms - 67 chars
+  [3/3] 986ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=986ms
+[Q-N3] What is the vendor's **VAT / Tax ID number** on the invoice?
+  [1/3] 3060ms - 67 chars
+  [2/3] 2464ms - 67 chars
+  [3/3] 3564ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3060ms
+[Q-N5] What is the invoice’s **bank account number** for ACH/wire payments?
+  [1/3] 1181ms - 67 chars
+  [2/3] 839ms - 67 chars
+  [3/3] 920ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=920ms
+[Q-N6] Which documents are governed by the laws of **California**?
+  [1/3] 1516ms - 67 chars
+  [2/3] 1238ms - 67 chars
+  [3/3] 1381ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1381ms
+[Q-N7] What is the property management Agent's **license number**?
+  [1/3] 1931ms - 67 chars
+  [2/3] 6101ms - 67 chars
+  [3/3] 4318ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4318ms
+[Q-N8] What is the purchase contract’s required **wire transfer / ACH instructions**?
+  [1/3] 5208ms - 67 chars
+  [2/3] 3400ms - 67 chars
+  [3/3] 3966ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3966ms
+[Q-N9] What is the exact clause about **mold damage** coverage in the warranty?
+  [1/3] 3731ms - 67 chars
+  [2/3] 2124ms - 67 chars
+  [3/3] 2133ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2133ms
+[Q-N10] What is the invoice **shipping method** (value in "SHIPPED VIA")?
+  [1/3] 882ms - 67 chars
+  [2/3] 1239ms - 67 chars
+  [3/3] 1059ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1059ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route2_local_search_20260126T132610Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route2_local_search_20260126T132610Z.md
+======================================================================
+

@@ -1253,7 +1253,7 @@ class Neo4jStoreV3:
         Used for pure Vector RAG (finding exact quotes).
         """
         # Use native vector similarity for efficient calculation.
-        # Also pull the related Document (via PART_OF) so callers can attribute
+        # Also pull the related Document (via IN_DOCUMENT) so callers can attribute
         # concrete terms (jurisdiction/amounts) per document.
         query = """
         MATCH (t:TextChunk {group_id: $group_id})
@@ -1261,7 +1261,7 @@ class Neo4jStoreV3:
         WITH t, vector.similarity.cosine(t.embedding, $embedding) AS score
         ORDER BY score DESC
         LIMIT $top_k
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         RETURN t, d, score
         """
         
@@ -1321,7 +1321,7 @@ class Neo4jStoreV3:
         WITH t, vector.similarity.cosine(t.embedding_v2, $embedding) AS score
         ORDER BY score DESC
         LIMIT $top_k
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         RETURN t, d, score
         """
         
@@ -1404,7 +1404,7 @@ class Neo4jStoreV3:
         WHERE score > 0
         ORDER BY score DESC, t.chunk_index ASC
         LIMIT $top_k
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         RETURN t, d, score
         """
 

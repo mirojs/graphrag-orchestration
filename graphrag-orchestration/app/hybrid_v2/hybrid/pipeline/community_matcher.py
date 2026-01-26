@@ -284,7 +284,7 @@ class CommunityMatcher:
                     WHERE similarity > 0.35
                     OPTIONAL MATCH (c:TextChunk)-[:MENTIONS]->(e)
                     WHERE c.group_id = $group_id
-                    OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                    OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
                     WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e.name AS name, similarity
                     ORDER BY similarity DESC
                     // Get top entities per document for diversity
@@ -323,7 +323,7 @@ class CommunityMatcher:
                 WITH c, e
                 WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
-                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e.name AS name
                 // Get first matching entity from each document, round-robin
                 WITH doc_url, collect(DISTINCT name)[..3] AS entities_per_doc
@@ -357,7 +357,7 @@ class CommunityMatcher:
                 MATCH (c:TextChunk)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND c.group_id = $group_id AND e.group_id = $group_id
-                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url,
                      e.name AS name,
                      coalesce(e.degree, 0) AS deg
@@ -454,7 +454,7 @@ class CommunityMatcher:
                 MATCH (c:TextChunk)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND c.group_id = $group_id AND e.group_id = $group_id
-                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+                OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e, coalesce(e.degree, 0) AS deg
                 ORDER BY deg DESC
                 WITH doc_url, collect({name: e.name, description: e.description, degree: deg})[..3] AS top_entities

@@ -374,7 +374,7 @@ class EnhancedGraphRetriever:
         Get documents where entities appear (1-hop via APPEARS_IN_DOCUMENT).
         
         This is a 5x speedup over the old 3-hop traversal:
-        Old: Entity ← MENTIONS ← TextChunk → PART_OF → Document
+        Old: Entity ← MENTIONS ← TextChunk → IN_DOCUMENT → Document
         New: Entity → APPEARS_IN_DOCUMENT → Document
         
         Args:
@@ -411,7 +411,7 @@ class EnhancedGraphRetriever:
             # Fallback to 3-hop traversal
             query = """
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:PART_OF]->(d:Document)
+            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_DOCUMENT]->(d:Document)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND c.group_id = $group_id
@@ -827,7 +827,7 @@ class EnhancedGraphRetriever:
                 MATCH (c:TextChunk)-[:IN_SECTION]->(s)
                 WHERE c.group_id = $group_id
                 // Get document info
-                OPTIONAL MATCH (c)-[:PART_OF]->(d:Document)
+                OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                 WITH entity_name, c, s, d, 
                      // Prioritize chunks that mention the entity (if MENTIONS edge exists)
                      CASE WHEN exists((e)-[:MENTIONS]->(c)) THEN 1.0 ELSE 0.5 END AS score
@@ -949,7 +949,7 @@ class EnhancedGraphRetriever:
                     AND t.group_id = $group_id
                     AND e.group_id = $group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-                OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+                OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 WITH entity_name, t, s, d
                 ORDER BY coalesce(t.chunk_index, 0)
                 WITH entity_name, collect({
@@ -983,7 +983,7 @@ class EnhancedGraphRetriever:
                     YIELD node AS t, score
                 WHERE t.group_id = group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-                OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+                OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 WITH
                     entity_name,
                     max_per_entity,
@@ -1330,7 +1330,7 @@ class EnhancedGraphRetriever:
              ) AS match_count
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
         RETURN
             t.id AS chunk_id,
             t.text AS text,
@@ -1449,7 +1449,7 @@ class EnhancedGraphRetriever:
             return []
 
         query = """
-        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.chunk_index IN $chunk_indexes
@@ -1585,7 +1585,7 @@ class EnhancedGraphRetriever:
                 cnt + CASE WHEN toLower(coalesce(s.path_key, "")) CONTAINS k THEN 1 ELSE 0 END
              ) AS match_count
         WHERE match_count >= $min_matches
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
         RETURN
             t.id AS chunk_id,
             t.text AS text,
@@ -1709,7 +1709,7 @@ class EnhancedGraphRetriever:
         WHERE t.group_id = $group_id
           AND s.group_id = $group_id
           AND s.id IN $section_ids
-        OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
         RETURN
             t.id AS chunk_id,
             t.text AS text,
@@ -2281,7 +2281,7 @@ class EnhancedGraphRetriever:
                 # IMPORTANT: Do not apply a global LIMIT here; it can truncate later
                 # documents and break the intended “every document” coverage behavior.
         query = """
-        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
@@ -2435,7 +2435,7 @@ class EnhancedGraphRetriever:
         
         # Use native vector similarity to find the best chunk per document
         query = """
-        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.embedding IS NOT NULL
@@ -2589,7 +2589,7 @@ class EnhancedGraphRetriever:
             MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
             WHERE t.group_id = $group_id
               AND s.group_id = $group_id
-            OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             RETURN
@@ -2610,7 +2610,7 @@ class EnhancedGraphRetriever:
             MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
             WHERE t.group_id = $group_id
               AND s.group_id = $group_id
-            OPTIONAL MATCH (t)-[:PART_OF]->(d:Document)
+            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             WITH s, collect({
@@ -2738,7 +2738,7 @@ class EnhancedGraphRetriever:
         query = """
         MATCH (s:Section {group_id: $group_id})
         WHERE s.embedding IS NOT NULL
-        OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:TextChunk)-[:PART_OF]->(d:Document)
+        OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:TextChunk)-[:IN_DOCUMENT]->(d:Document)
         WITH s, d, vector.similarity.cosine(s.embedding, $query_embedding) AS score
         WHERE score >= $score_threshold
         WITH s, d, score
@@ -2817,7 +2817,7 @@ class EnhancedGraphRetriever:
         max_per_document = max(0, max_per_document)
 
         query = """
-        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.metadata IS NOT NULL

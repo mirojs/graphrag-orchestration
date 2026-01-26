@@ -133,7 +133,7 @@ STEP_4_SUMMARY_RETRIEVAL = '''
         
         # Query prefers is_summary_section=true, falls back to chunk_index=0
         query = """
-        MATCH (d:Document)<-[:PART_OF]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
         WITH d, t,

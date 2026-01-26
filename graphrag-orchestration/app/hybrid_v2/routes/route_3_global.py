@@ -319,15 +319,13 @@ class GlobalSearchHandler(BaseRouteHandler):
         
         try:
             from app.hybrid_v2.pipeline.enhanced_graph_retriever import SourceChunk
+            from app.hybrid_v2.orchestrator import get_query_embedding
             
-            # Get query embedding
+            # Get query embedding (V2 Voyage 2048D if enabled, else V1 OpenAI 3072D)
             query_embedding = None
             if enable_hybrid:
                 try:
-                    from app.services.llm_service import LLMService
-                    llm_service = LLMService()
-                    if llm_service.embed_model:
-                        query_embedding = llm_service.embed_model.get_text_embedding(query)
+                    query_embedding = get_query_embedding(query)
                 except Exception as e:
                     logger.warning("hybrid_rrf_embedding_failed", error=str(e))
             

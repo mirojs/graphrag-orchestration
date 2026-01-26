@@ -710,10 +710,12 @@ Sub-questions:"""
                                 keyword_score = compute_keyword_score(chunk.text)
                                 
                                 # Semantic score (optional - can be slow for many chunks)
+                                # NOTE: Chunk embeddings are pre-computed in Neo4j, so we only embed the query here
                                 semantic_score = 0.5  # Default neutral
                                 if llm_service.embed_model and len(coverage_source_chunks) <= 100:
-                                    query_embedding = llm_service.embed_model.get_text_embedding(query)
-                                    chunk_embedding = llm_service.embed_model.get_text_embedding(chunk.text[:2000])
+                                    from app.hybrid_v2.orchestrator import get_query_embedding
+                                    query_embedding = get_query_embedding(query)
+                                    chunk_embedding = get_query_embedding(chunk.text[:2000])
                                     import numpy as np
                                     semantic_score = np.dot(query_embedding, chunk_embedding) / (
                                         np.linalg.norm(query_embedding) * np.linalg.norm(chunk_embedding) + 1e-9
@@ -773,13 +775,11 @@ Sub-questions:"""
             if not coverage_source_chunks:
                 coverage_max = min(max(total_docs * chunks_per_doc, 0), 200)
                 
-                # Try to get query embedding for semantic coverage
+                # Try to get query embedding for semantic coverage (V2 Voyage or V1 OpenAI)
                 query_embedding = None
                 try:
-                    from app.services.llm_service import LLMService
-                    llm_service = LLMService()
-                    if llm_service.embed_model:
-                        query_embedding = llm_service.embed_model.get_text_embedding(query)
+                    from app.hybrid_v2.orchestrator import get_query_embedding
+                    query_embedding = get_query_embedding(query)
                 except Exception as emb_err:
                     logger.warning("coverage_embedding_failed", error=str(emb_err))
                 

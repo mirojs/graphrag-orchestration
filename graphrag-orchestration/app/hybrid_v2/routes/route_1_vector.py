@@ -64,16 +64,11 @@ class VectorRAGHandler(BaseRouteHandler):
             raise RuntimeError("Route 1 requires Neo4j driver. Neo4j is not configured.")
         
         try:
-            # Get query embedding
-            from app.services.llm_service import LLMService
-            llm_service = LLMService()
-            
-            if llm_service.embed_model is None:
-                logger.error("vector_rag_embedding_unavailable")
-                raise RuntimeError("Route 1 requires embedding model. Embeddings are not configured.")
+            # Get query embedding (V2 Voyage 2048D if enabled, else V1 OpenAI 3072D)
+            from app.hybrid_v2.orchestrator import get_query_embedding
             
             try:
-                query_embedding = llm_service.embed_model.get_text_embedding(query)
+                query_embedding = get_query_embedding(query)
                 logger.info("vector_rag_embedding_success",
                            embedding_dims=len(query_embedding) if query_embedding else 0)
             except Exception as e:
@@ -225,15 +220,10 @@ class VectorRAGHandler(BaseRouteHandler):
         
         chunk_ids = [chunk["id"] for chunk, _ in chunks_with_scores[:8]]
         
-        # Generate query embedding for semantic key matching
+        # Generate query embedding for semantic key matching (V2 Voyage or V1 OpenAI)
         try:
-            from app.services.llm_service import LLMService
-            llm_service = LLMService()
-            
-            if llm_service.embed_model is None:
-                return None
-            
-            query_embedding = llm_service.embed_model.get_text_embedding(query)
+            from app.hybrid_v2.orchestrator import get_query_embedding
+            query_embedding = get_query_embedding(query)
             if not query_embedding:
                 return None
         except Exception as e:

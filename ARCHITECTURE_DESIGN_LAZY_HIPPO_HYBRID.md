@@ -1856,13 +1856,22 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 
 **Current Indexing Setup (V2 - Voyage voyage-context-3):**
 
-- **V2 Pipeline Factory:** `app/hybrid/indexing/lazygraphrag_indexing_pipeline.py`
+- **V2 Pipeline Factory:** `app/hybrid/indexing/lazygraphrag_indexing_pipeline.py` (`get_lazygraphrag_indexing_pipeline_v2()`)
 - **V2 Pipeline Engine:** `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
-- **V2 Test Script:** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
-- **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server)
+- **V2 Test Script (RECOMMENDED):** `scripts/index_5pdfs_v2_cloud.py` (uses API server with V2 factory)
+- **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
+- **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
 - **Verification Script:** `check_edges.py` (compares graph structure between groups)
-- **V2 Latest Group:** `test-5pdfs-v2-1769427385` (Jan 26, 2026)
+- **V2 Latest Group:** `test-5pdfs-v2-1769440005` (Jan 26, 2026) - **NEEDS RE-INDEXING** (has wrong embeddings)
 - **V1 Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
+
+**⚠️ IMPORTANT - V2 Indexing Gotcha (Fixed Jan 26, 2026):**
+
+The `/hybrid/index/documents` API endpoint now correctly uses the V2 factory when `VOYAGE_V2_ENABLED=true`. Previously it always used the V1 factory, causing chunks to have OpenAI embeddings in the `embedding` property instead of Voyage embeddings in the `embedding_v2` property. This resulted in vector search failures at query time.
+
+**Fix Applied:** `app/routers/hybrid.py` line 220 now checks `settings.VOYAGE_V2_ENABLED` and calls `get_lazygraphrag_indexing_pipeline_v2()` when true.
+
+**If you have V2 groups indexed before Jan 26, 2026 18:30 UTC, they must be re-indexed!**
 
 **V2 Features (Added Jan 26, 2026):**
 
@@ -1962,7 +1971,19 @@ Voyage `voyage-context-3` internally maintains relationship awareness during emb
 
 ---
 
-**V2 Local Indexing (Recommended for Testing):**
+**V2 Cloud Indexing (Recommended - Uses API with V2 Factory):**
+
+```bash
+cd graphrag-orchestration
+
+# Fresh V2 indexing (creates new group ID)
+python3 ../scripts/index_5pdfs_v2_cloud.py
+
+# Verify the group has correct V2 embeddings
+python3 ../scripts/index_5pdfs_v2_local.py --verify-only test-5pdfs-v2-<timestamp>
+```
+
+**V2 Local Indexing (Alternative - Direct Pipeline Execution):**
 
 ```bash
 cd graphrag-orchestration

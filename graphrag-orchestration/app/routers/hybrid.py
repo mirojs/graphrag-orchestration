@@ -192,7 +192,9 @@ async def _get_or_create_pipeline(
         from app.services import GraphService, LLMService
         from app.services.community_service import CommunityService
         from app.hybrid.indexing.hipporag_service import get_hipporag_service
-        from app.hybrid.indexing.text_store import HippoRAGTextUnitStore, Neo4jTextUnitStore
+        # V2 text store has proper IN_DOCUMENT relationship support
+        from app.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
+        from app.hybrid.indexing.text_store import HippoRAGTextUnitStore
 
         llm_service = LLMService()
         # Use dedicated synthesis model for final answer generation (Route 2/3)

@@ -9,9 +9,19 @@ This module provides graph-aware retrieval that fully utilizes:
 
 V2 Mode (VOYAGE_V2_ENABLED=True):
 - Chunks ARE sections (section-aware chunking)
-- No section diversification needed (chunks already represent complete sections)
+- Section diversification skipped for normal queries (chunks already represent complete sections)
 - Uses Voyage embeddings (2048 dim) for semantic search
 - See VOYAGE_V2_IMPLEMENTATION_PLAN_2026-01-25.md Phase 3
+
+Large Document Handling (January 26, 2026 Update):
+- Documents exceeding Voyage's 32K token context window are bin-packed during embedding
+- No overlap needed between bins - knowledge graph provides cross-bin connections:
+  * Entities span bins via MENTIONS_ENTITY edges
+  * PPR traversal hops across bins naturally
+  * SHARES_ENTITY edges connect related chunks
+- RETAINED: get_coverage_chunks() for coverage-style queries (ensures all sections covered)
+- RETAINED: get_all_sections_chunks() for comprehensive queries (handles bin-packed docs)
+- See PROPOSED_NEO4J_DOC_TITLE_FIX_2026-01-26.md for details
 """
 
 from __future__ import annotations
@@ -697,14 +707,25 @@ class EnhancedGraphRetriever:
             
         Returns:
             EnhancedGraphContext with all retrieved information
+            
+        Note on V2 Mode and Large Documents:
+            In V2 mode, section diversification is skipped because chunks ARE sections.
+            However, for large documents that required bin-packing during embedding,
+            section coverage retrieval (`get_coverage_chunks()`) is still retained
+            as a fallback to ensure cross-bin coverage. The knowledge graph provides
+            cross-bin connections via entity edges, but explicit section coverage
+            ensures no sections are missed in coverage-style queries.
         """
         # V2 mode: skip section diversification (chunks are already complete sections)
         # In V2 section-aware chunking, each chunk represents a semantic section
         # so per-section caps don't make sense - the chunk IS the section
+        # NOTE: get_coverage_chunks() is still retained for coverage-style queries
+        # to handle large bin-packed documents (see bin-packing in voyage_embed.py)
         if use_v2_mode:
             section_diversify = False
             logger.info("get_full_context_v2_mode", 
-                       message="V2 mode: skipping section diversification (chunks ARE sections)")
+                       message="V2 mode: skipping section diversification (chunks ARE sections). "
+                               "Note: get_coverage_chunks() retained for large document coverage.")
         
         # Check if section graph is enabled via environment variable
         section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}

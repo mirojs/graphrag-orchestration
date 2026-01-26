@@ -1,6 +1,15 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 25, 2026
+**Last Updated:** January 26, 2026
+
+**Recent Updates (January 26, 2026):**
+- 🚀 **V2 Bin-Packing for Large Documents:** Voyage-context-3's 32K token limit handled via bin-packing
+  - **Key Insight:** No overlap needed between bins - knowledge graph provides cross-bin connections
+  - **Graph advantages:** MENTIONS_ENTITY, SHARES_ENTITY, RELATED_TO edges connect chunks across bins
+  - **PPR Traversal:** Naturally hops across bins via entity paths
+  - **Section Coverage Retained:** `get_coverage_chunks()` kept for coverage-style queries on large documents
+  - Implementation: `app/hybrid_v2/embeddings/voyage_embed.py` (bin-packing logic)
+  - See Section 6.5.11 for detailed design
 
 **Recent Updates (January 25, 2026):**
 - 🚀 **V2 Contextual Chunking Plan Approved:** Migration to `voyage-context-3` (2048 dim) with section-aware embeddings
@@ -1534,6 +1543,103 @@ config = SectionChunkConfig(
 
 
 *   Section hierarchy provides context for understanding where information came from
+
+#### 6.5.11. V2 Large Document Handling: Bin-Packing (January 26, 2026)
+
+**Problem:** Voyage-context-3's `contextualized_embed()` API has a 32,000 token context window limit per document. Large documents (e.g., 100-page contracts with 50+ sections) can exceed this limit.
+
+**Solution: Bin-Packing Without Overlap**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ TRADITIONAL RAG: Token Overlap Between Chunks                   │
+│ ─────────────────────────────────────────────────────────────── │
+│ Chunk 1: [text...............overlap]                           │
+│ Chunk 2:                     [overlap...............text]       │
+│                               ↑ Redundant tokens for context    │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│ GRAPHRAG V2: No Overlap - Graph Provides Cross-Bin Connections  │
+│ ─────────────────────────────────────────────────────────────── │
+│ Bin 1: [section1][section2][section3]  → Voyage API call 1      │
+│ Bin 2: [section4][section5][section6]  → Voyage API call 2      │
+│                     │                                           │
+│                     └─ Entity "Contoso Ltd." mentioned in both  │
+│                        → MENTIONS_ENTITY edge connects bins     │
+│                        → PPR traversal hops across naturally    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why No Overlap is Needed:**
+
+| Traditional RAG | GraphRAG V2 |
+|-----------------|-------------|
+| Token overlap between chunks | Entity edges between chunks |
+| Loses context at chunk boundaries | Graph preserves semantic relationships |
+| Redundant storage (overlap duplicated) | Efficient storage (no duplication) |
+| Limited to adjacent context | Can hop across distant chunks |
+
+**Graph Edges That Replace Overlap:**
+1. **`MENTIONS_ENTITY`**: Entity mentioned in bin 1 also mentioned in bin 3 → direct connection
+2. **`SHARES_ENTITY`**: Chunks sharing entities are semantically connected
+3. **`RELATED_TO`**: Entity relationships span document sections
+4. **PPR Traversal**: Personalized PageRank naturally follows entity paths across bins
+
+**Implementation:**
+
+```python
+# app/hybrid_v2/embeddings/voyage_embed.py
+
+MAX_CONTEXT_TOKENS = 30000  # Leave 2K headroom from 32K limit
+
+def _bin_pack_chunks(self, chunks: List[str]) -> List[List[str]]:
+    """
+    Bin-pack chunks into groups fitting Voyage's context window.
+    
+    No overlap between bins - knowledge graph provides cross-bin connections.
+    """
+    bins = []
+    current_bin = []
+    current_tokens = 0
+    
+    for chunk in chunks:
+        chunk_tokens = self._estimate_tokens(chunk)
+        if current_tokens + chunk_tokens > MAX_CONTEXT_TOKENS:
+            bins.append(current_bin)
+            current_bin = [chunk]
+            current_tokens = chunk_tokens
+        else:
+            current_bin.append(chunk)
+            current_tokens += chunk_tokens
+    
+    if current_bin:
+        bins.append(current_bin)
+    
+    return bins
+```
+
+**Section Coverage Retention for Large Documents:**
+
+Even with graph edges providing cross-bin connections, we retain `get_coverage_chunks()` and `get_all_sections_chunks()` methods for:
+- Coverage-style queries ("summarize each document")
+- Comprehensive queries that need explicit section enumeration
+- Fallback when entity extraction misses connections
+
+```python
+# app/hybrid_v2/pipeline/enhanced_graph_retriever.py
+
+# V2 mode: section diversification skipped (chunks ARE sections)
+# BUT: coverage methods retained for large bin-packed documents
+if use_v2_mode:
+    section_diversify = False  # Skip per-section caps
+    # get_coverage_chunks() still available for coverage queries
+```
+
+**References:**
+- Implementation: `app/hybrid_v2/embeddings/voyage_embed.py`
+- Design Document: `PROPOSED_NEO4J_DOC_TITLE_FIX_2026-01-26.md`
+- Voyage API Docs: https://docs.voyageai.com/docs/contextualized-chunk-embeddings
 
 #### Azure DI Model Selection & Key-Value Pairs (Jan 2026 Analysis)
 

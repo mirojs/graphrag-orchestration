@@ -12,8 +12,18 @@ Key insight from docs.voyageai.com/docs/contextualized-chunk-embeddings:
 Configuration:
 - Model: voyage-context-3 (the only model that supports contextualized_embed)
 - Dimensions: 2048 (via output_dimension parameter)
+- Context Window: 32,000 tokens (requires bin-packing for large documents)
+
+Bin-Packing Strategy (January 26, 2026):
+- Large documents (>30K tokens) are split into bins that fit the context window
+- NO OVERLAP needed between bins because the knowledge graph provides cross-bin connections:
+  * Entities mentioned in multiple bins have graph edges connecting them
+  * PPR traversal naturally hops across bins via MENTIONS_ENTITY edges
+  * SHARES_ENTITY and RELATED_TO edges preserve semantic relationships
+- Section coverage retrieval is retained as fallback for large documents
 
 See: VOYAGE_V2_CONTEXTUAL_CHUNKING_PLAN_2026-01-25.md
+     PROPOSED_NEO4J_DOC_TITLE_FIX_2026-01-26.md
 """
 
 import logging
@@ -42,6 +52,16 @@ try:
 except ImportError:
     VoyageEmbedding = None  # type: ignore
     LLAMAINDEX_VOYAGE_AVAILABLE = False
+
+
+# ============================================================================
+# Bin-Packing Constants for Large Documents
+# ============================================================================
+# Voyage-context-3 has a 32K token context window for contextualized_embed()
+# Leave headroom for safety (30K instead of 32K)
+MAX_CONTEXT_TOKENS = 30000
+# Approximate tokens per character (conservative estimate for English)
+TOKENS_PER_CHAR_ESTIMATE = 0.25
 
 
 class VoyageEmbedService:
@@ -103,6 +123,97 @@ class VoyageEmbedService:
         # Dimension: 2048 for voyage-context-3 with output_dimension
         return settings.VOYAGE_EMBEDDING_DIM
     
+    def _estimate_tokens(self, text: str) -> int:
+        """
+        Estimate token count for a text string.
+        
+        Uses character-based estimation (conservative for English).
+        For production, consider using tiktoken or voyageai's tokenizer.
+        
+        Args:
+            text: Input text string
+            
+        Returns:
+            Estimated token count
+        """
+        return int(len(text) * TOKENS_PER_CHAR_ESTIMATE)
+    
+    def _bin_pack_chunks(
+        self,
+        chunks: List[str],
+        max_context_tokens: int = MAX_CONTEXT_TOKENS,
+    ) -> List[List[str]]:
+        """
+        Bin-pack chunks into groups that fit within Voyage's 32K context window.
+        
+        Strategy:
+        - Each bin is treated as a separate "document" for contextualized_embed()
+        - NO OVERLAP between bins (the knowledge graph provides cross-bin connections)
+        - Graph advantages that replace traditional overlap:
+          * Entities span bins via MENTIONS_ENTITY edges
+          * PPR traversal hops across bins naturally
+          * SHARES_ENTITY edges connect related chunks
+        
+        Args:
+            chunks: List of text chunks from a single document
+            max_context_tokens: Maximum tokens per bin (default: 30K with 2K headroom)
+            
+        Returns:
+            List of bins, where each bin is a list of chunks
+        """
+        if not chunks:
+            return []
+        
+        # Check if all chunks fit in one bin
+        total_tokens = sum(self._estimate_tokens(c) for c in chunks)
+        if total_tokens <= max_context_tokens:
+            return [chunks]  # Single bin - no splitting needed
+        
+        # Bin-pack chunks (no overlap - graph provides cross-bin connections)
+        bins: List[List[str]] = []
+        current_bin: List[str] = []
+        current_tokens = 0
+        
+        for chunk in chunks:
+            chunk_tokens = self._estimate_tokens(chunk)
+            
+            # If this chunk alone exceeds the limit, it's a single-chunk bin
+            if chunk_tokens > max_context_tokens:
+                # Save current bin if non-empty
+                if current_bin:
+                    bins.append(current_bin)
+                # Large chunk gets its own bin (will be truncated by API if needed)
+                bins.append([chunk])
+                current_bin = []
+                current_tokens = 0
+                logger.warning(
+                    f"Chunk exceeds context window ({chunk_tokens} > {max_context_tokens} tokens). "
+                    "Placed in separate bin - may lose some context."
+                )
+            elif current_tokens + chunk_tokens > max_context_tokens:
+                # Start a new bin
+                if current_bin:
+                    bins.append(current_bin)
+                current_bin = [chunk]
+                current_tokens = chunk_tokens
+            else:
+                # Add to current bin
+                current_bin.append(chunk)
+                current_tokens += chunk_tokens
+        
+        # Don't forget the last bin
+        if current_bin:
+            bins.append(current_bin)
+        
+        if len(bins) > 1:
+            logger.info(
+                f"Large document bin-packed into {len(bins)} bins "
+                f"({total_tokens} total tokens, {len(chunks)} chunks). "
+                "Graph edges provide cross-bin connections (no overlap needed)."
+            )
+        
+        return bins
+    
     def embed_documents_contextualized(
         self,
         document_chunks: List[List[str]],
@@ -125,19 +236,43 @@ class VoyageEmbedService:
         Returns:
             List of documents, where each document is a list of embedding vectors.
             E.g.: result[doc_idx][chunk_idx] = embedding vector (1024 dims)
+            
+        Note on Large Documents:
+            Documents exceeding the 32K token context window are automatically
+            bin-packed into multiple batches. Each bin is embedded separately,
+            then results are concatenated. Cross-bin context is preserved via
+            the knowledge graph (no token overlap needed).
         """
-        result = self._client.contextualized_embed(
-            inputs=document_chunks,
-            model=self.model_name,
-            input_type="document",
-            output_dimension=settings.VOYAGE_EMBEDDING_DIM,
-        )
+        all_embeddings: List[List[List[float]]] = []
         
-        # Extract embeddings from result structure
-        # result.results[doc_idx].embeddings[chunk_idx]
-        all_embeddings = []
-        for doc_result in result.results:
-            all_embeddings.append(doc_result.embeddings)
+        for doc_chunks in document_chunks:
+            # Check if document needs bin-packing
+            bins = self._bin_pack_chunks(doc_chunks)
+            
+            if len(bins) == 1:
+                # Small document - single API call
+                result = self._client.contextualized_embed(
+                    inputs=[doc_chunks],
+                    model=self.model_name,
+                    input_type="document",
+                    output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+                )
+                all_embeddings.append(result.results[0].embeddings)
+            else:
+                # Large document - embed each bin, concatenate results
+                doc_embeddings: List[List[float]] = []
+                for bin_idx, bin_chunks in enumerate(bins):
+                    result = self._client.contextualized_embed(
+                        inputs=[bin_chunks],
+                        model=self.model_name,
+                        input_type="document",
+                        output_dimension=settings.VOYAGE_EMBEDDING_DIM,
+                    )
+                    doc_embeddings.extend(result.results[0].embeddings)
+                    logger.debug(
+                        f"Embedded bin {bin_idx + 1}/{len(bins)} with {len(bin_chunks)} chunks"
+                    )
+                all_embeddings.append(doc_embeddings)
         
         logger.debug(
             f"Contextual embedded {len(document_chunks)} documents with "

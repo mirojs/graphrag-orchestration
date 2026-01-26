@@ -1964,8 +1964,11 @@ Output:
         
         with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
             # Create SIMILAR_TO edges (Entity ↔ Entity)
-            # Connects entities with high embedding similarity (>0.85 threshold)
+            # Connects entities with high embedding similarity
+            # V2 uses 0.87 threshold (voyage-context-3 clusters tighter than OpenAI)
+            # V1 used 0.85 threshold (text-embedding-3-large)
             # Skips entities that already have explicit RELATED_TO relationships
+            similarity_threshold = getattr(settings, 'VOYAGE_V2_SIMILARITY_THRESHOLD', 0.87)
             result = session.run(
                 """
                 MATCH (e1:Entity {group_id: $group_id}), (e2:Entity {group_id: $group_id})
@@ -1984,7 +1987,7 @@ Output:
                 RETURN count(r) AS count
                 """,
                 group_id=group_id,
-                threshold=0.85,  # High threshold for semantic similarity
+                threshold=similarity_threshold,
             )
             stats["similar_to"] = result.single()["count"]
         

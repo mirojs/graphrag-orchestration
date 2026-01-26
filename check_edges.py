@@ -124,4 +124,79 @@ with driver.session(database='neo4j') as session:
                 aliases_str += f" (+{len(record['aliases'])-3} more)"
             print(f"  • {record['name']:30s} → [{aliases_str}]")
 
+    print("\n" + "="*70)
+    print("V2 Embeddings (Voyage voyage-context-3)")
+    print("="*70)
+    
+    # Check chunks with V2 embeddings
+    result = session.run('''
+        MATCH (c:TextChunk {group_id: $group_id})
+        WHERE c.embedding_v2 IS NOT NULL
+        RETURN count(c) as count
+    ''', group_id=group_id)
+    chunks_v2 = result.single()["count"]
+    
+    result = session.run('''
+        MATCH (c:TextChunk {group_id: $group_id})
+        WHERE c.embedding IS NOT NULL
+        RETURN count(c) as count
+    ''', group_id=group_id)
+    chunks_v1 = result.single()["count"]
+    
+    result = session.run('''
+        MATCH (c:TextChunk {group_id: $group_id})
+        RETURN count(c) as count
+    ''', group_id=group_id)
+    total_chunks = result.single()["count"]
+    
+    print(f'TextChunks with embedding_v2: {chunks_v2}/{total_chunks} ({100*chunks_v2//total_chunks if total_chunks > 0 else 0}%)')
+    print(f'TextChunks with embedding (v1): {chunks_v1}/{total_chunks} ({100*chunks_v1//total_chunks if total_chunks > 0 else 0}%)')
+    
+    # Check V2 embedding dimensions
+    if chunks_v2 > 0:
+        result = session.run('''
+            MATCH (c:TextChunk {group_id: $group_id})
+            WHERE c.embedding_v2 IS NOT NULL
+            RETURN size(c.embedding_v2) as dim
+            LIMIT 1
+        ''', group_id=group_id)
+        dim = result.single()["dim"]
+        expected_dim = 2048  # voyage-context-3
+        status = "✅" if dim == expected_dim else "❌"
+        print(f'{status} V2 embedding dimension: {dim} (expected: {expected_dim})')
+    
+    # Check Table nodes
+    print("\n" + "="*70)
+    print("Table & KeyValue Nodes")
+    print("="*70)
+    
+    result = session.run('''
+        MATCH (t:Table {group_id: $group_id})
+        RETURN count(t) as count
+    ''', group_id=group_id)
+    tables = result.single()["count"]
+    print(f'Table nodes: {tables}')
+    
+    result = session.run('''
+        MATCH (kv:KeyValue {group_id: $group_id})
+        RETURN count(kv) as count
+    ''', group_id=group_id)
+    kvps = result.single()["count"]
+    print(f'KeyValue nodes: {kvps}')
+    
+    # Document nodes
+    print("\n" + "="*70)
+    print("Document Nodes")
+    print("="*70)
+    
+    result = session.run('''
+        MATCH (d:Document {group_id: $group_id})
+        RETURN d.title as title
+        ORDER BY d.title
+    ''', group_id=group_id)
+    docs = list(result)
+    print(f'Total documents: {len(docs)}')
+    for doc in docs:
+        print(f'  • {doc["title"]}')
+
 driver.close()

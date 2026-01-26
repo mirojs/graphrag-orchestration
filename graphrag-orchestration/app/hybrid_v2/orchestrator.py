@@ -64,6 +64,59 @@ except ImportError:
     ASYNC_NEO4J_AVAILABLE = False
     AsyncNeo4jService = None
 
+# V2 Voyage embedding support (Jan 26, 2026)
+from app.core.config import settings
+
+def _is_v2_enabled() -> bool:
+    """Check if V2 Voyage embeddings are enabled."""
+    return settings.VOYAGE_V2_ENABLED and settings.VOYAGE_API_KEY
+
+_v2_embedder = None  # Lazy-initialized VoyageEmbedService
+
+def _get_v2_embedder():
+    """Get or create the V2 Voyage embedder (singleton)."""
+    global _v2_embedder
+    if _v2_embedder is None and _is_v2_enabled():
+        try:
+            from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+            _v2_embedder = VoyageEmbedService()
+            logger.info("v2_voyage_embedder_initialized")
+        except Exception as e:
+            logger.warning("v2_voyage_embedder_init_failed", error=str(e))
+    return _v2_embedder
+
+def get_query_embedding(query: str) -> List[float]:
+    """
+    Get embedding for a query string.
+    
+    Uses V2 Voyage embedder if enabled (voyage-context-3 with input_type="query"),
+    otherwise falls back to V1 OpenAI embedder (text-embedding-3-large).
+    
+    Args:
+        query: The search query to embed
+        
+    Returns:
+        Embedding vector (2048d for V2, 3072d for V1)
+    """
+    if _is_v2_enabled():
+        embedder = _get_v2_embedder()
+        if embedder:
+            return embedder.embed_query(query)
+    
+    # Fallback to V1 (OpenAI)
+    from app.services.llm_service import LLMService
+    llm_service = LLMService()
+    return llm_service.embed_model.get_text_embedding(query)
+
+def get_vector_index_name() -> str:
+    """
+    Get the appropriate vector index name based on V2 mode.
+    
+    Returns:
+        'chunk_embeddings_v2' if V2 enabled, 'chunk_embedding' otherwise
+    """
+    return "chunk_embeddings_v2" if _is_v2_enabled() else "chunk_embedding"
+
 logger = structlog.get_logger(__name__)
 
 # LlamaIndex Workflow for parallel DRIFT execution (Jan 2026)
@@ -360,15 +413,17 @@ class HybridPipeline:
             from app.services.llm_service import LLMService
             llm_service = LLMService()
             
-            if llm_service.embed_model is None:
+            if llm_service.embed_model is None and not _is_v2_enabled():
                 logger.error("vector_rag_embedding_unavailable",
                             reason="Embedding model not initialized")
                 raise RuntimeError("Route 1 requires embedding model. Embeddings are not configured.")
             
             try:
-                query_embedding = llm_service.embed_model.get_text_embedding(query)
+                # Use V2 (Voyage) or V1 (OpenAI) embedder based on config
+                query_embedding = get_query_embedding(query)
                 logger.info("vector_rag_embedding_success",
-                           embedding_dims=len(query_embedding) if query_embedding else 0)
+                           embedding_dims=len(query_embedding) if query_embedding else 0,
+                           v2_enabled=_is_v2_enabled())
             except Exception as e:
                 logger.error("vector_rag_embedding_failed", error=str(e))
                 raise RuntimeError(f"Failed to generate query embedding: {str(e)}") from e
@@ -546,13 +601,8 @@ class HybridPipeline:
         
         # Generate query embedding for semantic key matching
         try:
-            from app.services.llm_service import LLMService
-            llm_service = LLMService()
-            
-            if llm_service.embed_model is None:
-                return None
-            
-            query_embedding = llm_service.embed_model.get_text_embedding(query)
+            # Use V2 (Voyage) or V1 (OpenAI) embedder based on config
+            query_embedding = get_query_embedding(query)
             if not query_embedding:
                 return None
         except Exception as e:
@@ -1787,13 +1837,16 @@ Instructions:
         oversample_factor = 50
         oversample_cap = 2000
         candidate_k = min(max(vector_k, vector_k * oversample_factor), oversample_cap)
+        
+        # V2 uses chunk_embeddings_v2 index, V1 uses chunk_embedding
+        index_name = get_vector_index_name()
 
         def _run_sync():
-            q = """
+            q = f"""
             // Vector candidates (global topK -> tenant filter)
-                        CALL () {
+                        CALL () {{
                             WITH $candidate_k AS candidate_k, $embedding AS embedding, $group_id AS group_id
-              CALL db.index.vector.queryNodes('chunk_embedding', candidate_k, embedding)
+              CALL db.index.vector.queryNodes('{index_name}', candidate_k, embedding)
               YIELD node, score
               WHERE node.group_id = group_id
               WITH node, score
@@ -1802,13 +1855,13 @@ Instructions:
               WITH collect(node) AS nodes
               UNWIND range(0, size(nodes)-1) AS i
               RETURN nodes[i] AS node, (i + 1) AS rank
-            }
-            WITH collect({node: node, rank: rank}) AS vectorList
+            }}
+            WITH collect({{node: node, rank: rank}}) AS vectorList
 
             // Fulltext candidates (tenant filter)
-                        CALL () {
+                        CALL () {{
                             WITH $query_text AS query_text, $group_id AS group_id
-                            CALL db.index.fulltext.queryNodes('textchunk_fulltext', query_text, {limit: $fulltext_k})
+                            CALL db.index.fulltext.queryNodes('textchunk_fulltext', query_text, {{limit: $fulltext_k}})
               YIELD node, score
               WHERE node.group_id = group_id
               WITH node, score
@@ -1817,7 +1870,7 @@ Instructions:
               WITH collect(node) AS nodes
               UNWIND range(0, size(nodes)-1) AS i
               RETURN nodes[i] AS node, (i + 1) AS rank
-            }
+            }}
             WITH vectorList, collect({node: node, rank: rank}) AS lexList
 
             // Union + RRF fusion
@@ -2200,7 +2253,7 @@ Instructions:
             // ================================================================
             
             // Step 1: BM25 Search (phrase-aware, exact match precision)
-            WITH $bm25_query AS bm25_query, $group_id AS group_id, $bm25_k AS bm25_k, $embedding AS embedding, $vector_k AS vector_k, $rrf_k AS rrf_k, $top_k AS top_k
+            WITH $bm25_query AS bm25_query, $group_id AS group_id, $bm25_k AS bm25_k, $embedding AS embedding, $vector_k AS vector_k, $rrf_k AS rrf_k, $top_k AS top_k, $index_name AS index_name
             CALL (bm25_query, group_id) {
                 CALL db.index.fulltext.queryNodes('textchunk_fulltext', bm25_query)
                 YIELD node, score
@@ -2212,11 +2265,11 @@ Instructions:
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank
             }
-            WITH collect({node: node, rank: rank}) AS bm25List, embedding, group_id, vector_k, rrf_k, top_k
+            WITH collect({node: node, rank: rank}) AS bm25List, embedding, group_id, vector_k, rrf_k, top_k, index_name
             
-            // Step 2: Vector Search (semantic matching)
-            CALL (embedding, group_id) {
-                CALL db.index.vector.queryNodes('chunk_embedding', $vector_k * 10, embedding)
+            // Step 2: Vector Search (semantic matching) - V2 or V1 index
+            CALL (embedding, group_id, index_name) {
+                CALL db.index.vector.queryNodes(index_name, $vector_k * 10, embedding)
                 YIELD node, score
                 WHERE node.group_id = group_id
                 WITH node, score
@@ -2274,6 +2327,7 @@ Instructions:
                         bm25_k=bm25_k,
                         rrf_k=rrf_k,
                         top_k=top_k,
+                        index_name=get_vector_index_name(),
                     )
                     for r in result:
                         chunk = {
@@ -2456,16 +2510,20 @@ Instructions:
         oversample_cap = 2000
         candidate_k = min(max(top_k, top_k * oversample_factor), oversample_cap)
         
+        # V2 uses chunk_embeddings_v2 index (2048d voyage-context-3)
+        # V1 uses chunk_embedding index (3072d text-embedding-3-large)
+        index_name = get_vector_index_name()
+        
         def _run_sync_query():
             """Execute Neo4j vector search synchronously in thread pool."""
             # Use native vector index API (Neo4j 5.11+)
-            # Index name: chunk_embedding (created during schema initialization)
+            # Index: chunk_embeddings_v2 (V2) or chunk_embedding (V1)
             # HNSW index provides efficient approximate nearest neighbor search
-            query = """
-                 CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
+            query = f"""
+                 CALL db.index.vector.queryNodes('{index_name}', $candidate_k, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
-            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
             RETURN node.id AS id,
                    node.text AS text,
                    node.chunk_index AS chunk_index,
@@ -2750,14 +2808,11 @@ Instructions:
             try:
                 from .pipeline.enhanced_graph_retriever import SourceChunk
                 
-                # Get query embedding for hybrid search
+                # Get query embedding for hybrid search (V2 or V1 based on config)
                 query_embedding = None
                 if enable_cypher25_hybrid_rrf:
                     try:
-                        from app.services.llm_service import LLMService
-                        llm_service = LLMService()
-                        if llm_service.embed_model:
-                            query_embedding = llm_service.embed_model.get_text_embedding(query)
+                        query_embedding = get_query_embedding(query)
                     except Exception as emb_err:
                         logger.warning("cypher25_hybrid_rrf_embedding_failed", error=str(emb_err))
                 
@@ -3915,10 +3970,8 @@ Instructions:
                         # Try to get query embedding for semantic coverage
                         query_embedding = None
                         try:
-                            from app.services.llm_service import LLMService
-                            llm_service = LLMService()
-                            if llm_service.embed_model:
-                                query_embedding = llm_service.embed_model.get_text_embedding(query)
+                            # Use V2 (Voyage) or V1 (OpenAI) embedder based on config
+                            query_embedding = get_query_embedding(query)
                         except Exception as emb_err:
                             logger.warning("coverage_embedding_failed", error=str(emb_err))
                         

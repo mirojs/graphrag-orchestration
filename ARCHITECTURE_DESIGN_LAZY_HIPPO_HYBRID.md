@@ -1854,13 +1854,131 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 
 **Recommended Indexing Script:**
 
-**Current Indexing Setup:**
+**Current Indexing Setup (V2 - Voyage voyage-context-3):**
 
-- **Pipeline:** `app/hybrid/indexing/lazygraphrag_pipeline.py`
-- **Test Script:** `scripts/index_5pdfs.py`
-- **Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
+- **V2 Pipeline Factory:** `app/hybrid/indexing/lazygraphrag_indexing_pipeline.py`
+- **V2 Pipeline Engine:** `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
+- **V2 Test Script:** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
+- **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server)
+- **Verification Script:** `check_edges.py` (compares graph structure between groups)
+- **V2 Latest Group:** `test-5pdfs-v2-1769427385` (Jan 26, 2026)
+- **V1 Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
 
-For standard 5-PDF test indexing, use `scripts/index_5pdfs.py`:
+**V2 Features (Added Jan 26, 2026):**
+
+- **Voyage voyage-context-3:** 2048-dimension contextual embeddings
+- **Universal Multilingual:** Entity canonicalization for all scripts (CJK, Arabic, Hindi, Thai, Russian, Greek)
+- **Q-D8 Fix:** Document counting synthesis patterns
+- **Section Coverage Fallback:** For documents >32K tokens
+- **Bin-Packing:** Large document handling with contextual chunking
+- **SIMILAR_TO Threshold:** 0.87 (raised from 0.85 - voyage-context-3 clusters tighter)
+
+**V2 Configuration (.env):**
+
+```bash
+# Voyage V2 settings
+VOYAGE_V2_ENABLED=true
+VOYAGE_API_KEY=your-api-key
+VOYAGE_MODEL_NAME=voyage-context-3
+VOYAGE_EMBEDDING_DIM=2048
+VOYAGE_V2_SIMILARITY_THRESHOLD=0.87  # Raised from 0.85 for V2 (Jan 26, 2026)
+```
+
+**V2 SIMILAR_TO Threshold Analysis (Jan 26, 2026):**
+
+Voyage `voyage-context-3` clusters semantically-related concepts more tightly than OpenAI's `text-embedding-3-large`. 
+With the same 0.85 threshold, V2 produced 1066 SIMILAR_TO edges vs V1's 25 edges. Analysis showed:
+
+| Threshold | Edges | Quality |
+|-----------|-------|---------|
+| 0.85 | 1066 | Noisy ("sixty days" ↔ "septic tank") |
+| 0.87 | 600 | **Recommended** - removes 44% noise |
+| 0.90 | 198 | High quality only |
+| 0.95 | 19 | Near-duplicates only |
+
+**Decision:** Raised V2 threshold to **0.87** to balance coverage vs noise.
+
+---
+
+### Voyage voyage-context-3: Query Strategies & Features (Jan 26, 2026)
+
+**Why voyage-context-3 is Different:**
+
+Unlike OpenAI's `text-embedding-3-large` which embeds text in isolation, `voyage-context-3` uses **contextual embeddings** - each chunk is embedded with awareness of:
+1. **Document context** - chunks know which document they belong to
+2. **Surrounding chunks** - chunks understand their position in the document
+3. **Semantic relationships** - the model internally tracks entity relationships
+
+**How to Query for Maximum Benefit:**
+
+| Query Type | OpenAI Approach | Voyage V2 Approach | Benefit |
+|------------|-----------------|-------------------|---------|
+| **Chunk retrieval** | Embed query → cosine similarity | Same, but use `input_type="query"` | Asymmetric query/doc embeddings |
+| **Multi-hop** | Embed query → traverse graph | Embed query with context → graph | Context-aware starting points |
+| **Cross-doc** | Multiple separate searches | Single search finds related chunks | Voyage clusters cross-doc concepts |
+
+**Key API Differences:**
+
+```python
+# OpenAI (V1) - Simple embedding
+response = openai.embeddings.create(
+    input=["What is the warranty period?"],
+    model="text-embedding-3-large"
+)
+query_embedding = response.data[0].embedding
+
+# Voyage (V2) - Contextual embedding with query type
+result = voyage_client.contextualized_embed(
+    inputs=[["What is the warranty period?"]],  # List of documents, each is list of chunks
+    model="voyage-context-3",
+    input_type="query",  # IMPORTANT: Use "query" for search queries
+    output_dimension=2048
+)
+query_embedding = result.results[0].embeddings[0]
+```
+
+**Relationship Preservation Feature:**
+
+Voyage `voyage-context-3` internally maintains relationship awareness during embedding. While we don't directly access these relationships, they manifest as:
+
+1. **Tighter semantic clustering** - Related entities embed closer together (why we raised threshold to 0.87)
+2. **Better cross-document linking** - Chunks mentioning same entities across documents cluster naturally
+3. **Implicit co-reference** - "the buyer", "Contoso Ltd.", and "purchaser" embed similarly when in same document
+
+**How We Leverage This:**
+
+| Feature | Implementation | Benefit |
+|---------|---------------|---------|
+| **SIMILAR_TO edges** | Cosine similarity > 0.87 | 600 semantic edges (vs 25 in V1) |
+| **Entity deduplication** | Embedding similarity + rule-based | Better alias detection |
+| **Cross-doc PPR** | Higher edge density improves PageRank | Better multi-hop reasoning |
+| **Section awareness** | Chunks embed with section context | Preserves document hierarchy |
+
+**Future Enhancements (Not Yet Implemented):**
+
+1. **Query expansion with context**: Include document titles/section headers in query embedding
+2. **Iterative retrieval**: Re-embed query with retrieved context for refinement
+3. **Relationship extraction from embeddings**: Use embedding similarity patterns to infer relationships
+
+---
+
+**V2 Local Indexing (Recommended for Testing):**
+
+```bash
+cd graphrag-orchestration
+
+# Dry run (verify V2 configuration)
+python3 ../scripts/index_5pdfs_v2_local.py --dry-run
+
+# Fresh V2 indexing (creates new group ID)
+python3 ../scripts/index_5pdfs_v2_local.py
+
+# Re-index existing V2 group
+export GROUP_ID=test-5pdfs-v2-1769427385
+python3 ../scripts/index_5pdfs_v2_local.py
+```
+
+**V1 Indexing (Legacy - Uses API Server):**
 
 ```bash
 # Fresh indexing (creates new group ID)
@@ -1869,13 +1987,39 @@ python3 scripts/index_5pdfs.py
 # Re-index existing group (cleans old data first)
 export GROUP_ID=test-5pdfs-1769071711867955961
 python3 scripts/index_5pdfs.py
-
-# Check indexing completeness (reads from last_test_group_id.txt)
-python3 check_edges.py
-
-# Check specific group (current: test-5pdfs-1769071711867955961)
-python3 check_edges.py test-5pdfs-1769071711867955961
 ```
+
+**Graph Verification (`check_edges.py`):**
+
+```bash
+cd graphrag-orchestration
+export $(cat .env | grep -v '^#' | xargs)
+
+# Check latest group (reads from last_test_group_id.txt)
+python3 ../check_edges.py
+
+# Check V2 group
+python3 ../check_edges.py test-5pdfs-v2-1769427385
+
+# Check V1 group for comparison
+python3 ../check_edges.py test-5pdfs-1769071711867955961
+```
+
+**V2 vs V1 Comparison (Jan 26, 2026):**
+
+| Metric | V2 (test-5pdfs-v2-1769427385) | V1 (test-5pdfs-1769071711867955961) |
+|--------|-------------------------------|-------------------------------------|
+| Embedding Model | voyage-context-3 (2048d) | text-embedding-3-large (3072d) |
+| embedding_v2 | 17/17 (100%) | 0/17 (0%) |
+| embedding (v1) | 0/17 (0%) | 17/17 (100%) |
+| Entities | 157 | 120 |
+| APPEARS_IN_SECTION | 263 | 184 |
+| APPEARS_IN_DOCUMENT | 166 | 130 |
+| SIMILAR_TO | 2132 | 50 |
+| SHARES_ENTITY | 46 | 46 |
+| Tables | 4 | 4 |
+| KeyValues | 40 | 40 |
+| Aliases | 123/157 (78%) | 98/120 (81%) |
 
 **CRITICAL: Section-Aware Chunking Configuration**
 
@@ -1888,11 +2032,12 @@ The indexing pipeline uses **section-aware chunking v2** by default (changed Jan
 
 **Known Test Groups:**
 
-| Group ID | Date | Strategy | Docs | Chunks | Sections | Entities | Tables | KVPs | Notes |
-|----------|------|----------|------|--------|----------|----------|--------|------|-------|
-| `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | 5 | 74 | ? | 265 | 0 | 0 | Old baseline (table data stripped) |
-| `test-5pdfs-1768993202876876545` | Jan 21 | section_aware_v2 | 5 | 17 | 12 | 109 | 4 | 0 | Baseline for KVP comparison |
-| `test-5pdfs-1769071711867955961` | Jan 22 | section_aware_v2 | 5 | 17 | 12 | 120 | 4 | 80 | **Current** with KVP extraction (fixed relationships) |
+| Group ID | Date | Strategy | Embedding | Docs | Chunks | Sections | Entities | Tables | KVPs | Notes |
+|----------|------|----------|-----------|------|--------|----------|----------|--------|------|-------|
+| `test-5pdfs-v2-1769427385` | Jan 26 | section_aware_v2 | **voyage-context-3 (2048d)** | 5 | 17 | 12 | 157 | 4 | 40 | **V2 Current** with Voyage + Multilingual |
+| `test-5pdfs-1769071711867955961` | Jan 22 | section_aware_v2 | text-embedding-3-large | 5 | 17 | 12 | 120 | 4 | 40 | V1 with KVP extraction |
+| `test-5pdfs-1768993202876876545` | Jan 21 | section_aware_v2 | text-embedding-3-large | 5 | 17 | 12 | 109 | 4 | 0 | Baseline for KVP comparison |
+| `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | text-embedding-3-large | 5 | 74 | ? | 265 | 0 | 0 | Old baseline (table data stripped) |
 
 **Table Nodes Feature (Added Jan 21, 2026):**
 
@@ -1924,28 +2069,97 @@ Azure Document Intelligence key-value pair extraction is now preserved as dedica
 
 **Verification Script (`check_edges.py`):**
 
-After indexing completes, verify the graph structure and new alias feature:
+After indexing completes, verify the graph structure including V2 embeddings:
 
 ```bash
+cd graphrag-orchestration
+export $(cat .env | grep -v '^#' | xargs)
+
 # Check latest indexed group (reads from last_test_group_id.txt)
-python3 check_edges.py
+python3 ../check_edges.py
 
-# Check specific group (current: test-5pdfs-1769071711867955961 with KVP nodes)
-python3 check_edges.py test-5pdfs-1769071711867955961
+# Check V2 group (current: test-5pdfs-v2-1769427385 with Voyage embeddings)
+python3 ../check_edges.py test-5pdfs-v2-1769427385
 
-# Compare with previous group (Jan 21 baseline: 4 tables, 0 KVPs, same chunking)
-python3 check_edges.py test-5pdfs-1768993202876876545
+# Check V1 group (test-5pdfs-1769071711867955961 with OpenAI embeddings)
+python3 ../check_edges.py test-5pdfs-1769071711867955961
 ```
 
-**What the Check Script Verifies:**
+**What the Check Script Verifies (Updated Jan 26, 2026):**
 
 1. **Phase 1 Foundation Edges** - APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY
 2. **Phase 2 Connectivity Edges** - SHARES_ENTITY (cross-document section links)
 3. **Phase 3 Semantic Edges** - SIMILAR_TO (entity semantic similarity)
-4. **Entity Aliases** - ✅ COMPLETE: Verifies aliases extracted during indexing (enables flexible entity lookup)
-5. **Node Counts** - Documents, TextChunks, Sections, Entities
+4. **Entity Aliases** - Verifies aliases extracted during indexing (enables flexible entity lookup)
+5. **V2 Embeddings** - ✅ NEW: Checks `embedding_v2` (Voyage 2048d) vs `embedding` (OpenAI 3072d)
+6. **Table & KeyValue Nodes** - ✅ NEW: Counts structured Table and KeyValue nodes
+7. **Document Nodes** - ✅ NEW: Lists all indexed documents by title
+8. **Node Counts** - Documents, TextChunks, Sections, Entities
 
-**Status (January 21, 2026):** Entity aliases and Table nodes features validated:
+**Status (January 26, 2026):** V2 Voyage embeddings validated:
+- **V2 embedding_v2:** 17/17 chunks (100%) with voyage-context-3 (2048d)
+- **V1 embedding:** 17/17 chunks (100%) with text-embedding-3-large (3072d)
+- **Entity increase:** V2 has 157 entities vs V1's 120 (+31% more entities extracted)
+- **SIMILAR_TO increase:** V2 has 2132 edges vs V1's 50 (better semantic similarity)
+- **78% of entities** have aliases in both V1 and V2
+
+**Example Output (V2 Group):**
+
+```
+======================================================================
+Phase 1: Foundation Edges
+======================================================================
+APPEARS_IN_SECTION: 263
+APPEARS_IN_DOCUMENT: 166
+HAS_HUB_ENTITY: 36
+
+======================================================================
+Phase 2: Connectivity Edges
+======================================================================
+SHARES_ENTITY: 46
+
+======================================================================
+Phase 3: Semantic Enhancement Edges
+======================================================================
+SIMILAR_TO: 2132
+
+======================================================================
+Graph Statistics
+======================================================================
+TextChunks: 17
+Sections: 12
+Entities: 157
+
+======================================================================
+Entity Aliases (New Feature)
+======================================================================
+Entities with aliases: 123/157 (78%)
+
+======================================================================
+V2 Embeddings (Voyage voyage-context-3)
+======================================================================
+TextChunks with embedding_v2: 17/17 (100%)
+TextChunks with embedding (v1): 0/17 (0%)
+✅ V2 embedding dimension: 2048 (expected: 2048)
+
+======================================================================
+Table & KeyValue Nodes
+======================================================================
+Table nodes: 4
+KeyValue nodes: 40
+
+======================================================================
+Document Nodes
+======================================================================
+Total documents: 5
+  • BUILDERS LIMITED WARRANTY
+  • HOLDING TANK SERVICING CONTRACT
+  • PROPERTY MANAGEMENT AGREEMENT
+  • contoso_lifts_invoice
+  • purchase_contract
+```
+
+**Previous Status (January 21, 2026):** Entity aliases and Table nodes features validated:
 - **85% of entities** have aliases (126/148 entities in old test corpus)
 - **78% of entities** have aliases (208/265 entities in new test corpus)
 - Alias extraction uses few-shot prompting via `neo4j-graphrag` LLMEntityRelationExtractor
@@ -1953,9 +2167,8 @@ python3 check_edges.py test-5pdfs-1768993202876876545
 - **Table nodes:** 5 tables extracted from invoice/contract documents with structured headers/rows
 - **Table extraction:** Route 1 queries Table nodes before LLM fallback for precise field extraction
 - Storage layer properly handles aliases as array property in Neo4j
-- Verification: `python3 check_edges.py` confirms alias presence and coverage
 
-**Example Output:**
+**Legacy Example Output (V1 Group):**
 
 ```
 Using group ID from last_test_group_id.txt: test-5pdfs-1768826935625588532

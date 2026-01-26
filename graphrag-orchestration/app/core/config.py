@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     VOYAGE_V2_ENABLED: bool = False  # Set to True to enable V2 pipeline
     VOYAGE_MODEL_NAME: str = "voyage-context-3"  # Contextual embedding model
     VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-context-3 with output_dimension=2048
+    VOYAGE_V2_SIMILARITY_THRESHOLD: float = 0.87  # SIMILAR_TO edge threshold (raised from 0.85 for V2)
     
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)

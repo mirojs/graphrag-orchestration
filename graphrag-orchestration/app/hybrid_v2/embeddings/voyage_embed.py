@@ -358,6 +358,37 @@ class VoyageEmbedService:
         )
         return [doc.embeddings[0] for doc in result.results]
     
+    async def aget_text_embedding_batch(
+        self, 
+        texts: List[str],
+        show_progress: bool = False,
+    ) -> List[List[float]]:
+        """
+        Async embedding method for LlamaIndex pipeline compatibility.
+        
+        Wraps embed_documents() in an async interface. This is required
+        because the LazyGraphRAG pipeline uses async embedding calls.
+        
+        For V2 contextual embeddings, treats all texts as chunks from a
+        single document, providing contextual awareness within the batch.
+        
+        Args:
+            texts: List of text chunks to embed
+            show_progress: Ignored (kept for API compatibility)
+            
+        Returns:
+            List of embedding vectors (2048 dimensions each)
+        """
+        import asyncio
+        
+        # Run synchronous embedding in executor to avoid blocking
+        loop = asyncio.get_event_loop()
+        embeddings = await loop.run_in_executor(
+            None,
+            lambda: self.embed_documents(texts)
+        )
+        return embeddings
+    
     def get_llama_index_embed_model(self):
         """
         Get the LlamaIndex VoyageEmbedding model for pipeline compatibility.

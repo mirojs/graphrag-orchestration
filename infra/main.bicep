@@ -192,7 +192,7 @@ module graphragApp './core/host/container-app.bicep' = {
       }
       {
         name: 'VOYAGE_V2_ENABLED'
-        value: !empty(voyageApiKey) ? 'true' : 'false'
+        value: 'true'
       }
       {
         name: 'VOYAGE_EMBEDDING_MODEL'

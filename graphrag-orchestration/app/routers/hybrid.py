@@ -25,8 +25,8 @@ import asyncio
 import time
 
 from app.hybrid_v2.orchestrator import HybridPipeline, HighQualityError
-from app.hybrid.router.main import DeploymentProfile, QueryRoute
-from app.hybrid.indexing import DualIndexService, get_hipporag_service
+from app.hybrid_v2.router.main import DeploymentProfile, QueryRoute
+from app.hybrid_v2.indexing import DualIndexService, get_hipporag_service
 from app.core.config import settings
 
 router = APIRouter()

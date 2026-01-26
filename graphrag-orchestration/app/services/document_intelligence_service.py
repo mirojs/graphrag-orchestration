@@ -43,6 +43,8 @@ from azure.ai.documentintelligence.models import (
     DocumentContentFormat,
     DocumentTable,
     DocumentParagraph,
+    DocumentBarcode,
+    DocumentLanguage,
 )
 from azure.core.credentials import AzureKeyCredential
 from azure.identity.aio import DefaultAzureCredential
@@ -193,6 +195,187 @@ class DocumentIntelligenceService:
             "headers": headers,
             "rows": rows,
         }
+
+    def _extract_barcodes(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract barcodes/QR codes from document pages (FREE add-on).
+        
+        Barcode kinds: QRCode, Code39, Code128, UPC-A, UPC-E, EAN-8, EAN-13,
+                      ITF, Codabar, DataBar, PDF417, Aztec, DataMatrix
+        
+        Returns:
+            List of barcode dicts with kind, value, confidence, page_number
+        """
+        barcodes: List[Dict[str, Any]] = []
+        
+        for page in (getattr(result, "pages", None) or []):
+            page_num = getattr(page, "page_number", 1) or 1
+            page_barcodes = getattr(page, "barcodes", None) or []
+            
+            for bc in page_barcodes:
+                kind = getattr(bc, "kind", "") or ""
+                value = getattr(bc, "value", "") or ""
+                confidence = getattr(bc, "confidence", 0.0) or 0.0
+                
+                if value:  # Only include barcodes with decoded values
+                    # Infer entity type from barcode kind
+                    entity_type = self._infer_barcode_entity_type(kind, value)
+                    
+                    barcodes.append({
+                        "kind": kind,
+                        "value": value,
+                        "confidence": confidence,
+                        "page_number": page_num,
+                        "entity_type": entity_type,
+                    })
+        
+        if barcodes:
+            logger.info(
+                f"📊 Extracted {len(barcodes)} barcodes",
+                extra={"barcode_count": len(barcodes), "kinds": list(set(b["kind"] for b in barcodes))}
+            )
+        
+        return barcodes
+
+    def _infer_barcode_entity_type(self, kind: str, value: str) -> str:
+        """Infer entity type from barcode kind and value pattern."""
+        kind_lower = kind.lower()
+        
+        # UPC/EAN are product codes
+        if any(k in kind_lower for k in ["upc", "ean"]):
+            return "PRODUCT_CODE"
+        
+        # QR codes often contain URLs
+        if "qr" in kind_lower:
+            if value.startswith(("http://", "https://")):
+                return "URL"
+            return "QR_DATA"
+        
+        # Code128 with specific patterns
+        if "code128" in kind_lower or "code39" in kind_lower:
+            # UPS tracking: 1Z...
+            if value.startswith("1Z") and len(value) == 18:
+                return "TRACKING_NUMBER"
+            # FedEx tracking: 12-34 digits
+            if value.isdigit() and 12 <= len(value) <= 34:
+                return "TRACKING_NUMBER"
+        
+        # PDF417 often used for IDs
+        if "pdf417" in kind_lower:
+            return "DOCUMENT_ID"
+        
+        return "BARCODE"
+
+    def _extract_languages(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract detected languages from document (FREE add-on).
+        
+        Returns:
+            List of language dicts with locale, confidence, span_count
+        """
+        languages: List[Dict[str, Any]] = []
+        
+        for lang in (getattr(result, "languages", None) or []):
+            locale = getattr(lang, "locale", "") or ""
+            confidence = getattr(lang, "confidence", 0.0) or 0.0
+            spans = getattr(lang, "spans", None) or []
+            
+            if locale:
+                languages.append({
+                    "locale": locale,
+                    "confidence": confidence,
+                    "span_count": len(spans),
+                })
+        
+        if languages:
+            primary_lang = max(languages, key=lambda x: x.get("span_count", 0))
+            logger.info(
+                f"🌐 Detected {len(languages)} languages, primary: {primary_lang.get('locale')}",
+                extra={"languages": [l["locale"] for l in languages]}
+            )
+        
+        return languages
+
+    def _extract_figures(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract figures with cross-section element references.
+        
+        Figures can reference paragraphs/tables from different sections,
+        creating cross-section graph edges without LLM extraction.
+        
+        Returns:
+            List of figure dicts with id, caption, element_refs, footnotes
+        """
+        figures: List[Dict[str, Any]] = []
+        
+        for fig in (getattr(result, "figures", None) or []):
+            fig_id = getattr(fig, "id", "") or ""
+            elements = getattr(fig, "elements", None) or []
+            
+            # Extract caption
+            caption_obj = getattr(fig, "caption", None)
+            caption_text = ""
+            if caption_obj:
+                caption_text = getattr(caption_obj, "content", "") or ""
+            
+            # Extract footnotes
+            footnotes: List[str] = []
+            for fn in (getattr(fig, "footnotes", None) or []):
+                fn_content = getattr(fn, "content", "") or ""
+                if fn_content:
+                    footnotes.append(fn_content)
+            
+            # Parse element references (e.g., "/paragraphs/42", "/tables/5")
+            element_refs: List[Dict[str, Any]] = []
+            for el in elements:
+                parsed = self._parse_di_element_ref(el)
+                if parsed:
+                    kind, idx = parsed
+                    element_refs.append({"kind": kind, "index": idx, "ref": el})
+            
+            figures.append({
+                "id": fig_id,
+                "caption": caption_text,
+                "element_refs": element_refs,
+                "footnotes": footnotes,
+                "element_count": len(elements),
+            })
+        
+        if figures:
+            logger.info(
+                f"📈 Extracted {len(figures)} figures with {sum(len(f['element_refs']) for f in figures)} element references",
+                extra={"figure_count": len(figures)}
+            )
+        
+        return figures
+
+    def _extract_selection_marks(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract selection marks (checkboxes) from document.
+        
+        Returns:
+            List of selection mark dicts with state, confidence, page_number
+        """
+        marks: List[Dict[str, Any]] = []
+        
+        for page in (getattr(result, "pages", None) or []):
+            page_num = getattr(page, "page_number", 1) or 1
+            page_marks = getattr(page, "selection_marks", None) or []
+            
+            for mark in page_marks:
+                state = getattr(mark, "state", "") or ""
+                confidence = getattr(mark, "confidence", 0.0) or 0.0
+                
+                marks.append({
+                    "state": state,  # "selected" or "unselected"
+                    "confidence": confidence,
+                    "page_number": page_num,
+                })
+        
+        if marks:
+            selected_count = sum(1 for m in marks if m["state"] == "selected")
+            logger.info(
+                f"☑️ Extracted {len(marks)} selection marks ({selected_count} selected)",
+                extra={"total": len(marks), "selected": selected_count}
+            )
+        
+        return marks
 
     def _extract_key_value_pairs(
         self,
@@ -543,8 +726,12 @@ class DocumentIntelligenceService:
         This produces more semantically coherent chunks than per-page splitting and
         makes downstream retrieval more precise.
         
-        Also extracts key-value pairs and associates them with sections for
-        deterministic field lookups.
+        Also extracts:
+        - Key-value pairs associated with sections
+        - Barcodes/QR codes (FREE add-on)
+        - Language detection (FREE add-on)
+        - Figure cross-references
+        - Selection marks (checkboxes)
         """
         sections = list(getattr(result, "sections", None) or [])
         if not sections:
@@ -557,6 +744,12 @@ class DocumentIntelligenceService:
         
         # Extract key-value pairs with section association
         key_value_pairs = self._extract_key_value_pairs(result, sections, content)
+        
+        # Extract FREE add-on features
+        barcodes = self._extract_barcodes(result)
+        languages = self._extract_languages(result)
+        figures = self._extract_figures(result)
+        selection_marks = self._extract_selection_marks(result)
         
         # Build section_idx -> KVPs mapping for efficient lookup
         kvps_by_section: Dict[int, List[Dict[str, Any]]] = {}
@@ -659,6 +852,11 @@ class DocumentIntelligenceService:
                             "paragraph_count": len(paras),
                             "key_value_pairs": section_kvps,
                             "kvp_count": len(section_kvps),
+                            # Document-level metadata (included in first chunk)
+                            **({"barcodes": barcodes} if section_idx == 0 and part == "direct" and barcodes else {}),
+                            **({"languages": languages} if section_idx == 0 and part == "direct" and languages else {}),
+                            **({"figures": figures} if section_idx == 0 and part == "direct" and figures else {}),
+                            **({"selection_marks": selection_marks} if section_idx == 0 and part == "direct" and selection_marks else {}),
                         },
                     )
                 )
@@ -740,14 +938,19 @@ class DocumentIntelligenceService:
                 # DI can access Azure blob storage directly using its own Managed Identity
                 # No need to download locally - just pass the URL (with SAS if present)
                 logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
-                # Enable KEY_VALUE_PAIRS for high-precision field extraction
-                # Cost: +$6/1K pages on top of prebuilt-layout ($10/1K pages)
-                # Justification: Enables deterministic field lookups, avoids LLM hallucinations
+                # Enable add-on features for enhanced extraction
+                # KEY_VALUE_PAIRS: +$0.50/1K pages - deterministic field lookups
+                # BARCODES: FREE - QR codes, UPC, tracking numbers
+                # LANGUAGES: FREE - per-span language detection
                 poller = await client.begin_analyze_document(
                     selected_model,
                     AnalyzeDocumentRequest(url_source=url),
                     output_content_format=DocumentContentFormat.MARKDOWN,
-                    features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS],
+                    features=[
+                        DocumentAnalysisFeature.KEY_VALUE_PAIRS,
+                        DocumentAnalysisFeature.BARCODES,    # FREE!
+                        DocumentAnalysisFeature.LANGUAGES,   # FREE!
+                    ],
                 )
 
                 # Wait for completion with timeout (SDK handles polling automatically)

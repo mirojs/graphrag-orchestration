@@ -1,4 +1,4 @@
-# Analysis: Azure Document Intelligence - Untapped Cross-Section Relationships
+# Analysis: Azure Document Intelligence - Untapped Gold Mine
 
 **Date:** 2026-01-26  
 **Status:** Investigation Complete  
@@ -8,22 +8,51 @@
 
 ## Executive Summary
 
-Azure Document Intelligence (DI) output contains **rich cross-section relationships** through figures, footnotes, and element references that we are **completely ignoring**. This is a massive opportunity for improving graph connectivity without additional LLM calls.
+Azure Document Intelligence (DI) output contains **rich cross-section relationships** and **FREE add-on features** (barcodes, languages) that we are **completely ignoring**. This is a massive opportunity for improving graph connectivity and entity extraction without additional LLM calls or costs.
 
 ---
 
-## What Azure DI Provides (Current SDK)
+## What Azure DI Provides vs What We Use
 
-### 1. AnalyzeResult Properties
+### 1. AnalyzeResult Properties (Top-Level)
 ```python
-result.figures       # 🔴 NOT USED - Cross-section figure references
-result.sections      # ✅ USED - Section hierarchy
-result.paragraphs    # ✅ USED - Text content
-result.tables        # ✅ USED - Table structure
-result.key_value_pairs  # ✅ USED - Form fields
-result.languages     # 🔴 NOT USED - Language detection
-result.styles        # 🔴 NOT USED - Font/styling info
+result.figures         # 🔴 NOT USED - Cross-section figure references
+result.sections        # ✅ USED - Section hierarchy
+result.paragraphs      # ✅ USED - Text content
+result.tables          # ✅ USED - Table structure
+result.key_value_pairs # ✅ USED - Form fields (with add-on)
+result.languages       # 🔴 NOT USED - Language detection (FREE add-on!)
+result.styles          # 🔴 NOT USED - Font/styling info
+result.warnings        # 🔴 NOT USED - Processing warnings
+result.content         # ✅ USED - Full markdown content
 ```
+
+### 2. DocumentPage Properties (Per-Page)
+```python
+page.barcodes          # 🔴 NOT USED - Barcode/QR codes (FREE add-on!)
+page.formulas          # 🔴 NOT USED - Math equations ($5/1K pages)
+page.selection_marks   # 🔴 NOT USED - Checkboxes (☑/☐)
+page.words             # 🔴 NOT USED - Word-level OCR
+page.lines             # 🔴 NOT USED - Line-level OCR
+page.angle             # 🔴 NOT USED - Page rotation
+page.page_number       # ✅ USED
+page.spans             # ✅ USED
+```
+
+### 3. FREE Add-On Features (Not Enabled)
+| Feature | Cost | Status | Value |
+|---------|------|--------|-------|
+| `BARCODES` | **FREE** | 🔴 NOT ENABLED | QR codes, UPC, Code128, etc. |
+| `LANGUAGES` | **FREE** | 🔴 NOT ENABLED | Per-span language detection |
+| `KEY_VALUE_PAIRS` | +$0.50/1K | ✅ ENABLED | Form field extraction |
+
+### 4. Paid Add-On Features (Not Enabled)
+| Feature | Cost | Status | Value |
+|---------|------|--------|-------|
+| `FORMULAS` | +$5.00/1K | 🔴 NOT ENABLED | LaTeX math extraction |
+| `STYLE_FONT` | +$0.50/1K | 🔴 NOT ENABLED | Font family, bold, italic |
+| `OCR_HIGH_RESOLUTION` | +$1.50/1K | 🔴 NOT ENABLED | Small text OCR |
+| `QUERY_FIELDS` | +$1.00/1K | 🔴 NOT ENABLED | Custom field extraction |
 
 ### 2. DocumentFigure (The Gold Mine)
 ```python
@@ -70,7 +99,90 @@ section.elements = [
 
 ## The "Gold Mine" Opportunities
 
-### Opportunity 1: Figure Cross-References (FREE Graph Edges)
+### 🆓 Opportunity 1: FREE Barcode/QR Code Extraction
+
+**Current State:** Not enabled. We're missing barcodes entirely.
+
+**What It Provides:**
+```python
+# DocumentBarcode structure
+barcode.kind        # "QRCode", "Code128", "UPC-A", "EAN-13", etc.
+barcode.value       # Decoded content (URL, product ID, tracking number)
+barcode.confidence  # OCR confidence
+barcode.polygon     # Bounding box
+barcode.span        # Position in content
+```
+
+**Use Cases:**
+- **Shipping documents**: Tracking numbers (FedEx, UPS, USPS)
+- **Invoices**: Product UPC codes
+- **Contracts**: QR code links to digital signatures
+- **Inventory**: SKU/barcode to product entity mapping
+
+**Implementation:**
+```python
+# Add BARCODES to features list (FREE!)
+poller = await client.begin_analyze_document(
+    selected_model,
+    AnalyzeDocumentRequest(url_source=url),
+    output_content_format=DocumentContentFormat.MARKDOWN,
+    features=[
+        DocumentAnalysisFeature.KEY_VALUE_PAIRS,
+        DocumentAnalysisFeature.BARCODES,      # FREE!
+        DocumentAnalysisFeature.LANGUAGES,      # FREE!
+    ],
+)
+
+# Extract barcodes from pages
+def _extract_barcodes(self, result: AnalyzeResult) -> List[Dict]:
+    barcodes = []
+    for page in (result.pages or []):
+        for bc in (getattr(page, "barcodes", None) or []):
+            barcodes.append({
+                "kind": getattr(bc, "kind", ""),
+                "value": getattr(bc, "value", ""),
+                "confidence": getattr(bc, "confidence", 0.0),
+                "page_number": page.page_number,
+            })
+    return barcodes
+```
+
+**Impact:** 
+- FREE entity extraction (tracking numbers, product IDs)
+- No LLM needed for barcode content
+- Direct graph edges: `(Document)-[:HAS_BARCODE]->(BarcodeEntity)`
+
+### 🆓 Opportunity 2: FREE Language Detection
+
+**Current State:** Not enabled. Missing multilingual document handling.
+
+**What It Provides:**
+```python
+# DocumentLanguage structure
+language.locale      # "en", "es", "zh-Hans", "ar", etc.
+language.confidence  # Detection confidence
+language.spans       # Which text spans are in this language
+```
+
+**Use Cases:**
+- **Multilingual contracts**: Detect primary language for translation
+- **Mixed documents**: Route sections to language-specific models
+- **Compliance**: Verify required language presence
+
+**Implementation:**
+```python
+def _extract_languages(self, result: AnalyzeResult) -> List[Dict]:
+    languages = []
+    for lang in (result.languages or []):
+        languages.append({
+            "locale": getattr(lang, "locale", ""),
+            "confidence": getattr(lang, "confidence", 0.0),
+            "span_count": len(getattr(lang, "spans", []) or []),
+        })
+    return languages
+```
+
+### Opportunity 3: Figure Cross-References (FREE Graph Edges)
 
 **Scenario:** A report says "See Figure 3" in Section A, and Figure 3 references Table 5 in Section B.
 
@@ -185,117 +297,219 @@ def _extract_styled_entities(self, result: AnalyzeResult) -> List[Dict]:
 
 ---
 
+## Opportunity 4: Selection Marks (Checkboxes)
+
+**Current State:** Not extracted. Missing checkbox state in forms.
+
+**What It Provides:**
+```python
+# DocumentSelectionMark structure
+mark.state       # "selected" or "unselected"
+mark.confidence  # Detection confidence
+mark.polygon     # Bounding box
+mark.span        # Position
+```
+
+**Use Cases:**
+- **Compliance forms**: Which boxes are checked?
+- **Surveys**: Multiple choice answers
+- **Contracts**: Agreement checkboxes
+
+**Implementation:**
+```python
+def _extract_selection_marks(self, result: AnalyzeResult) -> List[Dict]:
+    marks = []
+    for page in (result.pages or []):
+        for mark in (getattr(page, "selection_marks", None) or []):
+            marks.append({
+                "state": getattr(mark, "state", ""),
+                "confidence": getattr(mark, "confidence", 0.0),
+                "page_number": page.page_number,
+            })
+    return marks
+```
+
+---
+
 ## Implementation Plan
 
-### Phase 1: Extract Figure Cross-References (High Impact)
+### Phase 1: Enable FREE Add-Ons (Immediate - 1 hour)
 
 | Step | Action | Effort |
 |------|--------|--------|
-| 1.1 | Add `_extract_figure_relationships()` method | 1 hr |
-| 1.2 | Call during `_build_section_aware_documents()` | 30 min |
-| 1.3 | Include edges in chunk metadata | 30 min |
-| 1.4 | Pass to Neo4j during indexing | 1 hr |
+| 1.1 | Add `BARCODES` to features list | 5 min |
+| 1.2 | Add `LANGUAGES` to features list | 5 min |
+| 1.3 | Add `_extract_barcodes()` method | 30 min |
+| 1.4 | Add `_extract_languages()` method | 15 min |
+| 1.5 | Include in chunk metadata | 15 min |
 
-### Phase 2: Footnote Citations (Medium Impact)
-
-| Step | Action | Effort |
-|------|--------|--------|
-| 2.1 | Add `_extract_footnote_relationships()` method | 1 hr |
-| 2.2 | Create CITES_FOOTNOTE edge type | 30 min |
-| 2.3 | Integrate with entity extraction | 1 hr |
-
-### Phase 3: Style-Based NER (Lower Priority)
+### Phase 2: Extract Figure Cross-References (High Impact)
 
 | Step | Action | Effort |
 |------|--------|--------|
-| 3.1 | Enable `STYLE_FONT` feature in DI call | 15 min |
-| 3.2 | Add `_extract_styled_entities()` method | 1 hr |
-| 3.3 | Merge with LLM-extracted entities | 1 hr |
+| 2.1 | Add `_extract_figure_relationships()` method | 1 hr |
+| 2.2 | Call during `_build_section_aware_documents()` | 30 min |
+| 2.3 | Include edges in chunk metadata | 30 min |
+| 2.4 | Pass to Neo4j during indexing | 1 hr |
+
+### Phase 3: Selection Marks & Styles (Medium Priority)
+
+| Step | Action | Effort |
+|------|--------|--------|
+| 3.1 | Add `_extract_selection_marks()` method | 30 min |
+| 3.2 | Enable `STYLE_FONT` feature (+$0.50/1K) | 5 min |
+| 3.3 | Add `_extract_styled_entities()` method | 1 hr |
 
 ---
 
 ## Cost-Benefit Analysis
 
-| Feature | Cost | Benefit |
-|---------|------|---------|
-| Figure cross-refs | $0 (already in DI response) | Cross-section graph connectivity |
-| Footnote citations | $0 | Citation graph for financial/legal docs |
-| Style-based NER | $0 | Reduced LLM entity extraction load |
-| Enable `STYLE_FONT` | +$0.50/1K pages | Font-based entity hints |
+| Feature | Cost | Benefit | Priority |
+|---------|------|---------|----------|
+| **Barcodes** | **$0 (FREE)** | Tracking #s, UPC codes, QR links | 🔴 HIGH |
+| **Languages** | **$0 (FREE)** | Multilingual routing, compliance | 🔴 HIGH |
+| Figure cross-refs | $0 (already returned) | Cross-section graph connectivity | 🟡 MEDIUM |
+| Selection marks | $0 (already returned) | Checkbox state extraction | 🟡 MEDIUM |
+| Footnote citations | $0 | Citation graph for legal/financial | 🟡 MEDIUM |
+| Style-based NER | +$0.50/1K pages | Bold text = entity hints | 🟢 LOW |
+| Formulas | +$5.00/1K pages | LaTeX math extraction | 🟢 LOW |
+
+---
+
+## Current vs Proposed Feature Flags
+
+### Current Implementation
+```python
+features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS]
+```
+
+### Proposed Implementation
+```python
+features=[
+    DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # +$0.50/1K (already enabled)
+    DocumentAnalysisFeature.BARCODES,          # FREE!
+    DocumentAnalysisFeature.LANGUAGES,         # FREE!
+    # Optional paid features:
+    # DocumentAnalysisFeature.STYLE_FONT,      # +$0.50/1K
+    # DocumentAnalysisFeature.FORMULAS,        # +$5.00/1K
+]
+```
 
 ---
 
 ## Files to Modify
 
 1. **document_intelligence_service.py**
+   - Add `BARCODES` and `LANGUAGES` to features list
+   - Add `_extract_barcodes()` method
+   - Add `_extract_languages()` method
    - Add `_extract_figure_relationships()`
-   - Add `_extract_footnote_relationships()`
-   - Update `_build_section_aware_documents()` to include edges
-   - Add new metadata fields: `figure_references`, `footnotes`, `cross_section_edges`
+   - Add `_extract_selection_marks()`
+   - Update `_build_section_aware_documents()` to include new metadata
+   - New metadata fields: `barcodes`, `languages`, `figure_references`, `selection_marks`
 
 2. **indexing_pipeline.py** (or V2 equivalent)
-   - Process cross-section edges from DI metadata
+   - Process barcode values as entities
    - Create Neo4j relationships for figure references
+   - Handle multilingual content routing
 
 3. **Neo4j Schema**
+   - Add `BARCODE` entity type with `kind`, `value` properties
    - Add `REFERENCES` edge type (Figure → Table/Paragraph)
-   - Add `CITES_FOOTNOTE` edge type
-   - Add `HAS_CAPTION` edge type
+   - Add `HAS_BARCODE` edge type (Document → Barcode)
+   - Add `LANGUAGE` metadata on chunks
 
 ---
 
-## Example: Insurance Document
+## Barcode Types Supported by Azure DI
+
+| Kind | Description | Example Value |
+|------|-------------|---------------|
+| `QRCode` | QR Code | URL, text, vCard |
+| `Code39` | Code 39 | Alphanumeric |
+| `Code128` | Code 128 | Alphanumeric |
+| `UPC-A` | Universal Product Code | 12 digits |
+| `UPC-E` | UPC-E (compressed) | 6 digits |
+| `EAN-8` | European Article Number | 8 digits |
+| `EAN-13` | European Article Number | 13 digits |
+| `ITF` | Interleaved 2 of 5 | Numeric pairs |
+| `Codabar` | Codabar | Numeric + symbols |
+| `DataBar` | GS1 DataBar | Variable |
+| `DataBarExpanded` | GS1 DataBar Expanded | Variable |
+| `PDF417` | PDF417 | Large data capacity |
+| `Aztec` | Aztec Code | Small footprint |
+| `DataMatrix` | Data Matrix | Industrial marking |
+
+---
+
+## Example: Shipping Invoice with Barcode
 
 **Input PDF:**
 ```
-Section 1: Policy Overview
-  Policy Number: POL-2024-001
-  See Figure 1 for premium schedule.
+SHIPPING INVOICE
+================
+Order #: ORD-2024-12345
+Tracking: [BARCODE: 1Z999AA10123456784]
+         ^^^^^^^^^^^^^^^^^^^^^^^^
+         Code128 barcode (UPS tracking)
 
-Section 2: Premium Details
-  [Figure 1: Premium Schedule]
-  | Year | Premium |
-  | 2024 | $5,000  |
-  | 2025 | $5,250  |
-  
-  Note¹: Premiums subject to annual adjustment.
+Items:
+- Widget A [BARCODE: 012345678905] - $49.99
+            ^^^^^^^^^^^^^^^^^^^^
+            UPC-A barcode (product)
 ```
 
 **Current Output:**
-- 2 isolated chunks (Section 1, Section 2)
-- No connection between "See Figure 1" and actual Figure 1
+- Text mentions tracking number (might be missed by LLM)
+- No barcode entity extraction
 
 **Proposed Output:**
-```
-Chunk 1 (Section 1):
-  metadata: {
-    "cross_section_edges": [
-      {"source": "chunk_1", "target": "figure_1", "relationship": "REFERENCES_FIGURE"}
+```json
+{
+  "text": "SHIPPING INVOICE...",
+  "metadata": {
+    "barcodes": [
+      {
+        "kind": "Code128",
+        "value": "1Z999AA10123456784",
+        "confidence": 0.99,
+        "page_number": 1,
+        "entity_type": "TRACKING_NUMBER"
+      },
+      {
+        "kind": "UPC-A",
+        "value": "012345678905",
+        "confidence": 0.98,
+        "page_number": 1,
+        "entity_type": "PRODUCT_CODE"
+      }
+    ],
+    "languages": [
+      {"locale": "en", "confidence": 0.99}
     ]
   }
+}
 
-Chunk 2 (Section 2):
-  metadata: {
-    "figure_id": "figure_1",
-    "figure_caption": "Premium Schedule",
-    "footnotes": ["Premiums subject to annual adjustment"]
-  }
-
-Neo4j Edges (from DI - no LLM needed):
-  (Section_1)-[:REFERENCES_FIGURE]->(Figure_1)
-  (Figure_1)-[:CONTAINS]->(Table_Premium_Schedule)
-  (Figure_1)-[:HAS_FOOTNOTE]->(Note_1)
+Neo4j Entities (from DI - no LLM needed):
+  (Document)-[:HAS_BARCODE]->(Barcode_1Z999AA10123456784 {kind: "Code128", type: "TRACKING_NUMBER"})
+  (Document)-[:HAS_BARCODE]->(Barcode_012345678905 {kind: "UPC-A", type: "PRODUCT_CODE"})
 ```
 
 ---
 
 ## Conclusion
 
-Azure DI provides **FREE cross-section relationships** through figures and footnotes that we're completely ignoring. Implementing this would:
+Azure DI provides **FREE features** (barcodes, languages) and **rich cross-section relationships** that we're completely ignoring. Implementing this would:
 
-1. **Improve graph connectivity** without LLM calls
-2. **Enable citation tracking** for financial/legal documents  
-3. **Reduce entity extraction load** via style-based NER hints
-4. **Cost: $0** (data is already in the response)
+1. **Enable FREE barcode extraction** - tracking numbers, product codes, QR links
+2. **Enable FREE language detection** - multilingual document routing
+3. **Improve graph connectivity** without LLM calls via figure cross-references
+4. **Extract checkbox states** for form processing
+5. **Cost: $0** for Phase 1 (just enable existing FREE features)
 
-**Recommendation:** Implement Phase 1 (Figure cross-references) in the next sprint.
+**Immediate Actions (Phase 1):**
+1. Add `BARCODES` feature flag (FREE)
+2. Add `LANGUAGES` feature flag (FREE)
+3. Extract and store in chunk metadata
+
+**Recommendation:** Implement Phase 1 immediately - it's literally free money on the table.

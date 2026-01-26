@@ -715,10 +715,15 @@ Response:"""
                 elif isinstance(section_path, str) and section_path:
                     section_str = section_path
                 
+                # Extract document_id from metadata (set by Neo4jTextUnitStore from IN_DOCUMENT edge)
+                document_id = meta.get("document_id", "")
+                
                 citation_map[citation_id] = {
                     "source": source,
                     "chunk_id": chunk.get("id", f"chunk_{original_idx}"),
                     "document": doc_title,
+                    "document_id": document_id,  # Graph node ID for citation attribution
+                    "document_title": doc_title,  # Explicit title for Route 2/3 citation format
                     "section": section_str,
                     "text_preview": text[:100] + "..." if len(text) > 100 else text
                 }

@@ -17,6 +17,10 @@ param serviceGraphragImageName string
 @description('Neo4j Password')
 param neo4jPassword string
 
+@secure()
+@description('Voyage API Key for V2 embeddings')
+param voyageApiKey string = ''
+
 @description('Azure Document Intelligence Endpoint')
 param azureDocumentIntelligenceEndpoint string = 'https://doc-intel-graphrag.cognitiveservices.azure.com/'
 
@@ -186,11 +190,31 @@ module graphragApp './core/host/container-app.bicep' = {
         name: 'USE_SECTION_CHUNKING'
         value: '1'
       }
+      {
+        name: 'VOYAGE_V2_ENABLED'
+        value: 'true'
+      }
+      {
+        name: 'VOYAGE_API_KEY'
+        secretRef: 'voyage-api-key'
+      }
+      {
+        name: 'VOYAGE_EMBEDDING_MODEL'
+        value: 'voyage-context-3'
+      }
+      {
+        name: 'VOYAGE_EMBEDDING_DIM'
+        value: '2048'
+      }
     ])
     secrets: [
       {
         name: 'neo4j-password'
         value: neo4jPassword
+      }
+      {
+        name: 'voyage-api-key'
+        value: voyageApiKey
       }
     ]
   }

@@ -44,6 +44,7 @@ except ImportError:
 from app.services.document_intelligence_service import DocumentIntelligenceService
 from app.hybrid_v2.services.entity_deduplication import EntityDeduplicationService
 from app.hybrid_v2.services.neo4j_store import Document, Entity, Neo4jStoreV3, Relationship, TextChunk
+from app.hybrid_v2.utils.language import canonical_key_for_entity, is_cjk, detect_cjk_from_text
 
 logger = logging.getLogger(__name__)
 
@@ -1258,14 +1259,22 @@ Output:
         return GraphSchema(node_types=entity_types, relationship_types=relationship_types)
 
     @staticmethod
-    def _canonical_entity_key(name: str) -> str:
-        s = (name or "").strip().lower()
-        if not s:
-            return ""
-        s = s.replace("\u00a0", " ")
-        s = re.sub(r"[^a-z0-9_&\s]", " ", s)
-        s = re.sub(r"\s+", " ", s).strip()
-        return s
+    def _canonical_entity_key(name: str, locale: Optional[str] = None) -> str:
+        """Generate canonical key for entity matching.
+        
+        Handles both Latin and CJK scripts appropriately:
+        - Latin: Lowercase, strip punctuation, normalize whitespace
+        - CJK: Preserve characters, apply NFKC normalization
+        
+        Args:
+            name: Entity name to canonicalize
+            locale: Optional language hint (e.g., "zh-Hans", "ja", "ko")
+                    If None, auto-detects CJK from text content.
+        
+        Returns:
+            Canonical key for entity matching
+        """
+        return canonical_key_for_entity(name, locale)
 
     @staticmethod
     def _stable_entity_id(group_id: str, canonical_key: str) -> str:

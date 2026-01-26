@@ -5,8 +5,8 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-# Set Voyage API key
-os.environ['VOYAGE_API_KEY'] = 'al-xRhrLGWWq3FdZFjC3Fn0Mqw68wYWlO1NvcrwujecQW2'
+# Set Voyage API key (updated 2026-01-26)
+os.environ['VOYAGE_API_KEY'] = 'al-jNBBh4drdqfov6ZPCQjhJxE7ZamIXuAQPERWFORvULX'
 
 from app.services.cu_standard_ingestion_service_v2 import CUStandardIngestionServiceV2
 from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService

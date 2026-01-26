@@ -73,6 +73,9 @@ class SectionChunk:
     is_section_start: bool = True  # True if this is the first chunk of a section
     is_summary_section: bool = False  # True if section matches summary patterns
     
+    # Language metadata (from Azure DI LANGUAGES feature)
+    language: Optional[str] = None  # ISO 639-1/BCP 47 locale code (e.g., "zh-Hans", "en")
+    
     def to_text_chunk_dict(self) -> Dict[str, Any]:
         """Convert to TextChunk-compatible dict for Neo4j storage."""
         return {
@@ -94,6 +97,7 @@ class SectionChunk:
                 "is_section_start": self.is_section_start,
                 "is_summary_section": self.is_summary_section,
                 "chunk_strategy": "section_aware_v2",
+                **(({"language": self.language}) if self.language else {}),
             },
         }
 

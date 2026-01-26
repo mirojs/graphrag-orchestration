@@ -24,7 +24,7 @@ import structlog
 import asyncio
 import time
 
-from app.hybrid.orchestrator import HybridPipeline, HighQualityError
+from app.hybrid_v2.orchestrator import HybridPipeline, HighQualityError
 from app.hybrid.router.main import DeploymentProfile, QueryRoute
 from app.hybrid.indexing import DualIndexService, get_hipporag_service
 from app.core.config import settings

@@ -246,7 +246,8 @@ async def _process_documents(operation_id: str, request: ProcessRequest) -> None
         
         # Process documents
         documents_result = []
-        enable_section_chunking = request.options.get("enable_section_chunking", True)
+        options = request.options or {}
+        enable_section_chunking = options.get("enable_section_chunking", True)
         
         # Process URLs one at a time for fail-fast behavior
         for doc_id, url in urls_with_ids:

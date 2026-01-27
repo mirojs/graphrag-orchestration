@@ -45,14 +45,18 @@ async def lifespan(app: FastAPI):
             try:
                 from app.hybrid.services.neo4j_store import Neo4jStoreV3
                 from app.core.config import settings as app_settings
-                hybrid_store = Neo4jStoreV3(
-                    uri=app_settings.NEO4J_URI,
-                    username=app_settings.NEO4J_USERNAME,
-                    password=app_settings.NEO4J_PASSWORD,
-                )
-                hybrid_store.initialize_schema()
-                logger.info("hybrid_neo4j_schema_initialized", 
-                           message="Vector indexes and constraints created")
+                if app_settings.NEO4J_URI and app_settings.NEO4J_USERNAME and app_settings.NEO4J_PASSWORD:
+                    hybrid_store = Neo4jStoreV3(
+                        uri=app_settings.NEO4J_URI,
+                        username=app_settings.NEO4J_USERNAME,
+                        password=app_settings.NEO4J_PASSWORD,
+                    )
+                    hybrid_store.initialize_schema()
+                    logger.info("hybrid_neo4j_schema_initialized", 
+                               message="Vector indexes and constraints created")
+                else:
+                    logger.warning("hybrid_schema_skip",
+                                  message="Neo4j credentials incomplete - skipping schema init")
             except Exception as e:
                 logger.error("hybrid_schema_initialization_failed", error=str(e))
         else:

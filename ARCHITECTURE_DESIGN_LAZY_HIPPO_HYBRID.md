@@ -3,6 +3,19 @@
 **Last Updated:** January 27, 2026
 
 **Recent Updates (January 27, 2026):**
+- 🚀 **Knowledge Map Document Processing API:** New async batch API for document intelligence with Azure DI/CU abstraction
+  - **Design:** Batch-first async polling pattern (POST /process → GET /operations/{id} with Retry-After headers)
+  - **Endpoints:** `/api/v1/knowledge-map/process` (batch submit) and `/api/v1/knowledge-map/operations/{operation_id}` (status polling)
+  - **TTL:** 60-second operation store expiry after terminal state (succeeded/failed)
+  - **Error Handling:** Fail-fast (stop on first document error, no partial results)
+  - **Backend:** SimpleDocumentAnalysisService abstracts Azure Document Intelligence and Content Understanding
+  - **Testing:** Validated with 64-page PDF extraction (tables, sections, metadata) using Azure DI West US
+  - Implementation: `app/routers/knowledge_map.py` (async API), `app/routers/document_analysis.py` (sync API), `app/services/simple_document_analysis_service.py` (backend abstraction)
+- 🚀 **SimpleDocumentAnalysisService:** Unified DI/CU backend abstraction at `/api/v1/document-analysis`
+  - **Purpose:** Flexible document processing for internal use with automatic backend selection
+  - **Backends:** Azure Document Intelligence (preferred), Azure Content Understanding (fallback)
+  - **Methods:** `analyze_documents()` supports both URLs and text content
+  - **Endpoints:** POST /analyze (batch), GET /backend-info (diagnostics), POST /analyze-single (convenience)
 - 🚀 **GDS Integration (AuraDB Professional):** Full Graph Data Science algorithms now run during V2 indexing
   - **KNN (K-Nearest Neighbors):** Creates `SIMILAR_TO` edges (Figure/KVP → Entity) and `SEMANTICALLY_SIMILAR` edges (Entity ↔ Entity)
   - **Louvain Community Detection:** Assigns `community_id` property to all nodes for clustering
@@ -1181,6 +1194,319 @@ PROFILE_CONFIG = {
 | **Auditability** | Black box | **Full trace** | Evidence path visible |
 
 ## 6. Implementation Strategy (Technical)
+
+### 6.1. Knowledge Map Document Processing API (January 27, 2026)
+
+The **Knowledge Map API** provides an async batch document processing interface as a drop-in replacement for Azure Content Understanding, with simplified design and fail-fast error handling.
+
+#### API Design Philosophy
+
+**Key Principles:**
+- **Batch-first:** All requests accept `inputs[]` array (single document = array of 1)
+- **Async polling:** POST creates operation → GET polls status with `Retry-After` header
+- **Fail-fast:** Any document error stops processing (no partial results)
+- **Flat response:** Simplified structure vs. nested Azure CU response
+- **60s TTL:** Operations expire 60 seconds after terminal state
+- **Optional auth:** `KNOWLEDGE_MAP_AUTH_ENABLED` for future APIM integration
+
+#### Endpoints
+
+**Process Documents (Batch Submit)**
+```http
+POST /api/v1/knowledge-map/process
+Content-Type: application/json
+
+{
+  "inputs": [
+    {
+      "source": "https://storage.blob.core.windows.net/docs/contract.pdf"
+    },
+    {
+      "source": "https://storage.blob.core.windows.net/docs/invoice.pdf"
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "operation_id": "km-1769496129-abc123",
+  "status": "pending"
+}
+```
+
+**Poll Operation Status**
+```http
+GET /api/v1/knowledge-map/operations/{operation_id}
+```
+
+**Response (Processing):**
+```http
+HTTP/1.1 200 OK
+Retry-After: 2
+
+{
+  "operation_id": "km-1769496129-abc123",
+  "status": "running",
+  "created_at": "2026-01-27T10:00:00Z"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "operation_id": "km-1769496129-abc123",
+  "status": "succeeded",
+  "created_at": "2026-01-27T10:00:00Z",
+  "completed_at": "2026-01-27T10:00:15Z",
+  "documents": [
+    {
+      "id": "doc-0",
+      "source": "https://storage.blob.core.windows.net/docs/contract.pdf",
+      "markdown": "# Contract Agreement\n\n...",
+      "chunks": [
+        {
+          "content": "Section 1: Parties...",
+          "page_numbers": [1],
+          "section_hierarchy": ["1.0 Parties"]
+        }
+      ],
+      "metadata": {
+        "page_count": 12,
+        "language": "en",
+        "tables_found": 3
+      }
+    }
+  ]
+}
+```
+
+**Response (Failed):**
+```json
+{
+  "operation_id": "km-1769496129-abc123",
+  "status": "failed",
+  "created_at": "2026-01-27T10:00:00Z",
+  "completed_at": "2026-01-27T10:00:08Z",
+  "error": {
+    "code": "DocumentProcessingError",
+    "message": "Failed to process document at index 1: Invalid PDF format"
+  }
+}
+```
+
+**Delete Operation (Optional)**
+```http
+DELETE /api/v1/knowledge-map/operations/{operation_id}
+```
+
+#### Implementation Architecture
+
+**Components:**
+
+1. **`app/routers/knowledge_map.py`** (472 lines)
+   - Async API router with polling pattern
+   - In-memory operation store with TTL management
+   - Background task processing with `asyncio.create_task()`
+   - Status transitions: `pending` → `running` → `succeeded`/`failed`
+
+2. **`app/services/simple_document_analysis_service.py`** (315 lines)
+   - Backend abstraction layer for DI/CU
+   - Method: `analyze_documents(group_id, documents, options)`
+   - Automatic backend selection (DI preferred, CU fallback)
+   - Supports both URL and text content inputs
+
+3. **`app/routers/document_analysis.py`** (275 lines)
+   - Synchronous DI/CU API for internal use
+   - Endpoints: POST /analyze, GET /backend-info, POST /analyze-single
+   - Direct access to backend capabilities without polling
+
+**Operation Store Design:**
+
+```python
+# In-memory store with TTL
+operations: Dict[str, OperationState] = {}
+
+class OperationState:
+    operation_id: str
+    status: Literal["pending", "running", "succeeded", "failed"]
+    created_at: datetime
+    completed_at: Optional[datetime]
+    documents: Optional[List[Dict]]
+    error: Optional[Dict]
+    
+    # TTL: 60 seconds after terminal state
+    def is_expired(self) -> bool:
+        if self.status in ("succeeded", "failed"):
+            return (datetime.utcnow() - self.completed_at).seconds > 60
+        return False
+```
+
+**Background Processing Flow:**
+
+```python
+async def process_batch(operation_id: str, inputs: List[Dict]):
+    try:
+        # Update status to running
+        operations[operation_id].status = "running"
+        
+        # Call SimpleDocumentAnalysisService
+        results = await service.analyze_documents(
+            group_id=generate_group_id(),
+            documents=[{"url": inp["source"]} for inp in inputs],
+            options={}
+        )
+        
+        # Transform results to flat structure
+        documents = transform_to_knowledge_map_format(results)
+        
+        # Update operation with success
+        operations[operation_id].status = "succeeded"
+        operations[operation_id].documents = documents
+        operations[operation_id].completed_at = datetime.utcnow()
+        
+    except Exception as e:
+        # Fail-fast on any error
+        operations[operation_id].status = "failed"
+        operations[operation_id].error = {
+            "code": "DocumentProcessingError",
+            "message": str(e)
+        }
+        operations[operation_id].completed_at = datetime.utcnow()
+```
+
+#### Backend Selection Logic
+
+**SimpleDocumentAnalysisService** automatically selects the best available backend:
+
+| Backend | Priority | Configuration | Use Case |
+|---------|----------|---------------|----------|
+| **Azure Document Intelligence** | 1 (preferred) | `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` | Layout-aware extraction, tables, sections |
+| **Azure Content Understanding** | 2 (fallback) | `AZURE_CONTENT_UNDERSTANDING_ENDPOINT` | High-scale processing, async polling |
+
+**Method Signature:**
+```python
+async def analyze_documents(
+    self,
+    group_id: str,
+    documents: List[DocumentInput],
+    options: Optional[Dict] = None
+) -> List[DocumentAnalysisResult]:
+    """
+    Analyze documents using available backend (DI or CU).
+    
+    Args:
+        group_id: Tenant/group identifier
+        documents: List of {"url": "..."} or {"text": "..."}
+        options: Backend-specific options (model, features, etc.)
+    
+    Returns:
+        List of analysis results with markdown, chunks, metadata
+    """
+```
+
+#### Testing & Validation
+
+**Test Environment:**
+- Azure DI Sweden Central: `doc-intel-graphrag.cognitiveservices.azure.com` (experienced issues)
+- Azure DI West US: `westus.api.cognitive.microsoft.com` (validated ✅)
+
+**Validation Results (January 27, 2026):**
+- **Test Document:** 64-page PDF (contract)
+- **Extraction Success:** Full content, tables, sections, metadata
+- **Processing Time:** ~15 seconds for 64 pages
+- **Response Size:** ~500KB JSON (markdown + chunks + metadata)
+- **Tables Extracted:** 8 tables with proper structure
+- **Section Hierarchy:** Preserved from Azure DI
+
+**Region Failover:**
+When Azure DI Sweden Central experienced `InternalServerError`, testing with West US AIServices resource confirmed the API works correctly. This demonstrates the importance of multi-region deployment for production.
+
+#### Use Cases
+
+1. **Document Ingestion Pipeline:**
+   - Batch submit PDFs for processing
+   - Poll until complete
+   - Extract markdown + chunks for indexing
+
+2. **API Gateway Integration:**
+   - Azure APIM can front the Knowledge Map API
+   - Optional `KNOWLEDGE_MAP_AUTH_ENABLED` for auth layer
+   - Rate limiting and throttling via APIM policies
+
+3. **Sync/Async Flexibility:**
+   - Use `/api/v1/knowledge-map` for async batch processing
+   - Use `/api/v1/document-analysis` for sync single-document processing
+
+4. **Backend Abstraction:**
+   - Swap between Azure DI and Azure CU without client changes
+   - Test with different Azure regions for failover
+   - Mock backend for unit testing
+
+#### Configuration
+
+**Environment Variables:**
+
+```bash
+# Knowledge Map API
+KNOWLEDGE_MAP_AUTH_ENABLED=false  # Optional: Enable auth for APIM
+
+# Azure Document Intelligence (Primary)
+AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT=https://westus.api.cognitive.microsoft.com/
+AZURE_DOCUMENT_INTELLIGENCE_KEY=<key>  # Or use Managed Identity
+
+# Azure Content Understanding (Fallback)
+AZURE_CONTENT_UNDERSTANDING_ENDPOINT=https://<region>.api.cognitive.microsoft.com/
+AZURE_CONTENT_UNDERSTANDING_KEY=<key>
+```
+
+**FastAPI Router Registration:**
+
+```python
+# app/main.py
+from app.routers import knowledge_map, document_analysis
+
+app.include_router(knowledge_map.router, prefix="/api/v1/knowledge-map", tags=["knowledge-map"])
+app.include_router(document_analysis.router, prefix="/api/v1/document-analysis", tags=["document-analysis"])
+```
+
+#### API Contract Compatibility
+
+The Knowledge Map API follows Azure Content Understanding's polling pattern but with simplified response structure:
+
+| Aspect | Azure CU | Knowledge Map API |
+|--------|----------|-------------------|
+| **Submit Endpoint** | POST /analyze-documents | POST /process |
+| **Poll Endpoint** | GET /operations/{id} | GET /operations/{id} |
+| **Status Values** | notStarted, running, succeeded, failed | pending, running, succeeded, failed |
+| **Retry Header** | Retry-After: 5 | Retry-After: 2 |
+| **Response Structure** | Nested `contents[].fields` | Flat `documents[]` |
+| **TTL** | None specified | 60s after terminal state |
+| **Error Handling** | Partial success possible | Fail-fast (no partial) |
+
+**Design Decision Rationale:**
+- **Batch-first:** Eliminates single-document endpoint complexity
+- **Fail-fast:** Partial results complicate error recovery; better to retry entire batch
+- **60s TTL:** Balances memory usage with reasonable polling window
+- **Flat response:** Simpler client parsing, no nested navigation needed
+
+#### Future Enhancements
+
+**Planned (Not Yet Implemented):**
+1. **Persistent operation store:** Use Redis/CosmosDB instead of in-memory dict
+2. **Webhook notifications:** Callback URL when operation completes
+3. **Batch prioritization:** Queue management for high-volume scenarios
+4. **Streaming results:** WebSocket connection for real-time progress
+5. **Result caching:** Store results in blob storage, return URL
+
+**Implementation References:**
+- PR #1: https://github.com/your-repo/pull/1
+- Implementation Complete: `IMPLEMENTATION_COMPLETE.md`
+- **API Documentation:** [`docs/KNOWLEDGE_MAP_API_GUIDE.md`](docs/KNOWLEDGE_MAP_API_GUIDE.md) - Complete API integration guide with Python/TypeScript examples
+- Sync API Documentation: [`docs/SIMPLIFIED_DOCUMENT_ANALYSIS.md`](docs/SIMPLIFIED_DOCUMENT_ANALYSIS.md)
+
+---
 
 ### Shared Infrastructure
 *   **Graph Database:** Neo4j for unified storage (both LazyGraphRAG and HippoRAG 2 access)

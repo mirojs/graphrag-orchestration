@@ -201,9 +201,11 @@ class SimpleDocumentAnalysisService:
                 logger.info(f"Analyzing {len(urls)} documents from URLs using {backend}")
                 
                 if backend == DocumentAnalysisBackend.DOCUMENT_INTELLIGENCE:
-                    # DI has native batch processing
+                    # DI has native batch processing via extract_documents
                     try:
-                        url_docs = await service.analyze_document_batch(urls)
+                        # DocumentIntelligenceService needs group_id
+                        group_id = "default"  # Could be passed as parameter if needed
+                        url_docs = await service.extract_documents(group_id, urls)
                         documents.extend(url_docs)
                     except Exception as e:
                         logger.error(f"Failed to analyze URLs in batch: {e}")

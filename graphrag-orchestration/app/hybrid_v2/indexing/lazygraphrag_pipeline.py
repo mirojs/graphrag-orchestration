@@ -1117,16 +1117,23 @@ Output:
            - Entity types: PRODUCT_CODE, TRACKING_NUMBER, QR_DATA, URL, BARCODE
            - Enables queries like "find documents with tracking number 1Z..."
         
-        2. **Figures** → :Figure nodes with REFERENCES edges to elements
+        2. **Figures** → :Figure nodes with REFERENCES edges to elements + embedding_v2
            - Captures cross-section relationships without LLM extraction
-           - Figure captions create searchable content
+           - Figure captions create searchable content with V2 embeddings
         
-        3. **Languages** → Updates Document nodes with detected_languages property
+        3. **Key-Value Pairs** → :KeyValuePair nodes with FOUND_IN edges + embedding_v2
+           - Deterministic field lookups from Azure DI
+           - Enables queries like "find documents where 'Invoice Number' = '12345'"
+        
+        4. **Languages** → Updates Document nodes with detected_languages property
            - Primary language stored as metadata
            - Enables multilingual corpus queries
         
-        4. **Selection Marks** → :ChecklistItem nodes (future enhancement)
+        5. **Selection Marks** → :ChecklistItem nodes (future enhancement)
            - Currently logged for analysis
+        
+        After creating nodes, embeddings are generated for Figure captions and KVP text
+        to enable GDS KNN similarity matching with Entity nodes.
         
         Args:
             group_id: Group identifier for multi-tenancy
@@ -1140,7 +1147,9 @@ Output:
             "barcodes_created": 0,
             "figures_created": 0,
             "figure_ref_edges": 0,
+            "kvps_created": 0,
             "languages_updated": 0,
+            "embeddings_generated": 0,
         }
         
         # Collect DI metadata from the first DI unit's metadata for each document
@@ -1161,7 +1170,14 @@ Output:
             languages = first_meta.get("languages") or []
             selection_marks = first_meta.get("selection_marks") or []
             
-            if not any([barcodes, figures, languages]):
+            # Collect KVPs from ALL DI units (they're distributed per-section)
+            all_kvps: List[Dict[str, Any]] = []
+            for di_unit in di_units:
+                unit_meta = getattr(di_unit, "metadata", None) or {}
+                unit_kvps = unit_meta.get("key_value_pairs") or []
+                all_kvps.extend(unit_kvps)
+            
+            if not any([barcodes, figures, languages, all_kvps]):
                 continue
             
             logger.info(
@@ -1173,6 +1189,7 @@ Output:
                     "figures": len(figures),
                     "languages": len(languages),
                     "selection_marks": len(selection_marks),
+                    "kvps": len(all_kvps),
                 }
             )
             
@@ -1305,6 +1322,59 @@ Output:
                         f"☑️ Selection marks detected in {doc_id}: {len(selection_marks)} total, {selected} selected",
                         extra={"doc_id": doc_id, "total": len(selection_marks), "selected": selected}
                     )
+                
+                # 5. Create KeyValuePair nodes with FOUND_IN edges
+                if all_kvps:
+                    kvp_data = []
+                    for kvp in all_kvps:
+                        key_text = kvp.get("key", "")
+                        value_text = kvp.get("value", "")
+                        if not key_text:
+                            continue
+                        kvp_id = self._stable_kvp_id(group_id, doc_id, key_text, value_text)
+                        kvp_data.append({
+                            "id": kvp_id,
+                            "group_id": group_id,
+                            "key": key_text,
+                            "value": value_text,
+                            "confidence": kvp.get("confidence", 0.0),
+                            "page_number": kvp.get("page_number", 1),
+                            "section_id": kvp.get("section_id", ""),
+                            "section_path": kvp.get("section_path", []),
+                            "searchable_text": f"{key_text}: {value_text}",  # For embedding
+                            "doc_id": doc_id,
+                        })
+                    
+                    if kvp_data:
+                        result = session.run(
+                            """
+                            UNWIND $kvps AS kvp
+                            MERGE (k:KeyValuePair {id: kvp.id})
+                            SET k.group_id = kvp.group_id,
+                                k.key = kvp.key,
+                                k.value = kvp.value,
+                                k.confidence = kvp.confidence,
+                                k.page_number = kvp.page_number,
+                                k.section_id = kvp.section_id,
+                                k.section_path = kvp.section_path,
+                                k.searchable_text = kvp.searchable_text,
+                                k.updated_at = datetime()
+                            WITH k, kvp
+                            MATCH (d:Document {id: kvp.doc_id, group_id: kvp.group_id})
+                            MERGE (k)-[:FOUND_IN]->(d)
+                            RETURN count(DISTINCT k) AS count
+                            """,
+                            kvps=kvp_data,
+                        )
+                        count = result.single()["count"]
+                        stats["kvps_created"] += count
+                        logger.info(f"🔑 Created {count} KeyValuePair nodes for {doc_id}")
+        
+        # 6. Generate embeddings for Figure captions and KVP searchable text
+        # Then use GDS KNN to create SIMILAR_TO edges with Entity nodes
+        embedding_stats = await self._generate_di_node_embeddings_and_knn(group_id=group_id)
+        stats["embeddings_generated"] = embedding_stats.get("embeddings_created", 0)
+        stats["knn_edges_created"] = embedding_stats.get("knn_edges_created", 0)
         
         logger.info(
             "di_metadata_processing_complete",
@@ -1325,6 +1395,260 @@ Output:
         """Generate stable ID for figure entity."""
         key = f"figure:{group_id}:{fig_id}"
         return f"figure_{hashlib.md5(key.encode()).hexdigest()[:16]}"
+
+    def _stable_kvp_id(self, group_id: str, doc_id: str, key: str, value: str) -> str:
+        """Generate stable ID for key-value pair entity."""
+        # Include doc_id to allow same key in different documents
+        composite_key = f"kvp:{group_id}:{doc_id}:{key}:{value}"
+        return f"kvp_{hashlib.md5(composite_key.encode()).hexdigest()[:16]}"
+
+    async def _generate_di_node_embeddings_and_knn(
+        self,
+        *,
+        group_id: str,
+    ) -> Dict[str, Any]:
+        """Generate V2 embeddings for Figure/KVP nodes and create SIMILAR_TO edges via GDS KNN.
+        
+        This method:
+        1. Finds Figure nodes with captions but no embeddings
+        2. Finds KeyValuePair nodes with searchable_text but no embeddings
+        3. Generates V2 (Voyage voyage-3) embeddings for these nodes
+        4. Uses GDS KNN algorithm to find similar Entity nodes
+        5. Creates SIMILAR_TO edges between DI nodes and Entities
+        
+        Args:
+            group_id: Group identifier for multi-tenancy
+            
+        Returns:
+            Statistics dictionary with embedding and edge counts
+        """
+        stats = {
+            "embeddings_created": 0,
+            "knn_edges_created": 0,
+            "figures_processed": 0,
+            "kvps_processed": 0,
+        }
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # 1. Get Figure nodes needing embeddings (have caption, no embedding_v2)
+            figure_result = session.run(
+                """
+                MATCH (f:Figure {group_id: $group_id})
+                WHERE f.caption IS NOT NULL AND f.caption <> '' AND f.embedding_v2 IS NULL
+                RETURN f.id AS id, f.caption AS text
+                LIMIT 500
+                """,
+                group_id=group_id,
+            )
+            figures_to_embed = [{"id": r["id"], "text": r["text"]} for r in figure_result]
+            
+            # 2. Get KVP nodes needing embeddings
+            kvp_result = session.run(
+                """
+                MATCH (k:KeyValuePair {group_id: $group_id})
+                WHERE k.searchable_text IS NOT NULL AND k.embedding_v2 IS NULL
+                RETURN k.id AS id, k.searchable_text AS text
+                LIMIT 500
+                """,
+                group_id=group_id,
+            )
+            kvps_to_embed = [{"id": r["id"], "text": r["text"]} for r in kvp_result]
+        
+        # 3. Generate embeddings for all nodes
+        all_nodes = figures_to_embed + kvps_to_embed
+        if not all_nodes:
+            logger.info("No DI nodes need embeddings")
+            return stats
+        
+        logger.info(f"🔢 Generating embeddings for {len(figures_to_embed)} Figures and {len(kvps_to_embed)} KVPs")
+        
+        texts = [n["text"] for n in all_nodes]
+        try:
+            embeddings = await self.embedding_service.embed_batch(texts)
+        except Exception as e:
+            logger.error(f"Failed to generate DI node embeddings: {e}")
+            return stats
+        
+        # 4. Update nodes with embeddings
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # Update Figure embeddings
+            for i, fig in enumerate(figures_to_embed):
+                if i < len(embeddings) and embeddings[i]:
+                    session.run(
+                        """
+                        MATCH (f:Figure {id: $id})
+                        SET f.embedding_v2 = $embedding
+                        """,
+                        id=fig["id"],
+                        embedding=embeddings[i],
+                    )
+                    stats["embeddings_created"] += 1
+                    stats["figures_processed"] += 1
+            
+            # Update KVP embeddings
+            kvp_start_idx = len(figures_to_embed)
+            for i, kvp in enumerate(kvps_to_embed):
+                emb_idx = kvp_start_idx + i
+                if emb_idx < len(embeddings) and embeddings[emb_idx]:
+                    session.run(
+                        """
+                        MATCH (k:KeyValuePair {id: $id})
+                        SET k.embedding_v2 = $embedding
+                        """,
+                        id=kvp["id"],
+                        embedding=embeddings[emb_idx],
+                    )
+                    stats["embeddings_created"] += 1
+                    stats["kvps_processed"] += 1
+        
+        logger.info(f"✅ Generated {stats['embeddings_created']} embeddings")
+        
+        # 5. Use GDS KNN to create SIMILAR_TO edges between DI nodes and Entities
+        knn_edges = await self._run_gds_knn_for_di_nodes(group_id=group_id)
+        stats["knn_edges_created"] = knn_edges
+        
+        return stats
+
+    async def _run_gds_knn_for_di_nodes(
+        self,
+        *,
+        group_id: str,
+        top_k: int = 3,
+        similarity_cutoff: float = 0.65,
+    ) -> int:
+        """Run GDS KNN to connect Figure/KVP nodes to similar Entity nodes.
+        
+        Creates a graph projection including Entity, Figure, and KeyValuePair nodes,
+        then runs KNN to find similar pairs and creates SIMILAR_TO relationships.
+        
+        Args:
+            group_id: Group identifier for multi-tenancy
+            top_k: Number of nearest neighbors to find (default: 3)
+            similarity_cutoff: Minimum similarity score for creating edges (default: 0.65)
+            
+        Returns:
+            Number of SIMILAR_TO edges created
+        """
+        edges_created = 0
+        projection_name = f"di_entity_similarity_{group_id.replace('-', '_')}"
+        
+        try:
+            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+                # Drop existing projection if exists
+                session.run(
+                    """
+                    CALL gds.graph.drop($name, false)
+                    """,
+                    name=projection_name,
+                )
+                
+                # Create projection with Entity, Figure, and KeyValuePair nodes
+                # Filter by group_id and ensure nodes have embeddings
+                session.run(
+                    """
+                    CALL gds.graph.project.cypher(
+                        $name,
+                        'MATCH (n) WHERE n.group_id = $group_id 
+                         AND n.embedding_v2 IS NOT NULL 
+                         AND (n:Entity OR n:Figure OR n:KeyValuePair)
+                         RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding_v2',
+                        'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id AND m.group_id = $group_id
+                         RETURN id(n) AS source, id(m) AS target, type(r) AS type',
+                        {parameters: {group_id: $group_id}}
+                    )
+                    """,
+                    name=projection_name,
+                    group_id=group_id,
+                )
+                logger.info(f"📊 Created GDS projection: {projection_name}")
+                
+                # Run KNN to find similar nodes
+                result = session.run(
+                    """
+                    CALL gds.knn.stream($name, {
+                        nodeProperties: ['embedding_v2'],
+                        topK: $topK,
+                        similarityCutoff: $cutoff,
+                        concurrency: 4
+                    })
+                    YIELD node1, node2, similarity
+                    WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
+                    // Only create edges FROM Figure/KVP TO Entity (not between Entities)
+                    WHERE (n1:Figure OR n1:KeyValuePair) AND n2:Entity
+                    MERGE (n1)-[r:SIMILAR_TO]->(n2)
+                    SET r.score = similarity, r.method = 'gds_knn', r.created_at = datetime()
+                    RETURN count(r) AS edges_created
+                    """,
+                    name=projection_name,
+                    topK=top_k,
+                    cutoff=similarity_cutoff,
+                )
+                edges_created = result.single()["edges_created"]
+                logger.info(f"🔗 GDS KNN created {edges_created} SIMILAR_TO edges")
+                
+                # Clean up projection
+                session.run("CALL gds.graph.drop($name, false)", name=projection_name)
+                
+        except Exception as e:
+            logger.error(f"GDS KNN failed: {e}", extra={"error": str(e)})
+            # Fallback to non-GDS approach if GDS fails
+            edges_created = await self._fallback_similarity_edges(group_id=group_id, similarity_cutoff=similarity_cutoff)
+        
+        return edges_created
+
+    async def _fallback_similarity_edges(
+        self,
+        *,
+        group_id: str,
+        similarity_cutoff: float = 0.65,
+        top_k: int = 3,
+    ) -> int:
+        """Fallback method using vector index if GDS is not available.
+        
+        Uses the existing entity_v2_idx vector index to find similar entities
+        for Figure and KVP nodes.
+        """
+        edges_created = 0
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # For each Figure with embedding, find similar entities via vector index
+            result = session.run(
+                """
+                MATCH (f:Figure {group_id: $group_id})
+                WHERE f.embedding_v2 IS NOT NULL
+                CALL db.index.vector.queryNodes('entity_v2_idx', $topK, f.embedding_v2)
+                YIELD node AS e, score
+                WHERE score >= $cutoff AND e.group_id = $group_id
+                MERGE (f)-[r:SIMILAR_TO]->(e)
+                SET r.score = score, r.method = 'vector_index', r.created_at = datetime()
+                RETURN count(r) AS count
+                """,
+                group_id=group_id,
+                topK=top_k,
+                cutoff=similarity_cutoff,
+            )
+            edges_created += result.single()["count"]
+            
+            # For each KVP with embedding, find similar entities
+            result = session.run(
+                """
+                MATCH (k:KeyValuePair {group_id: $group_id})
+                WHERE k.embedding_v2 IS NOT NULL
+                CALL db.index.vector.queryNodes('entity_v2_idx', $topK, k.embedding_v2)
+                YIELD node AS e, score
+                WHERE score >= $cutoff AND e.group_id = $group_id
+                MERGE (k)-[r:SIMILAR_TO]->(e)
+                SET r.score = score, r.method = 'vector_index', r.created_at = datetime()
+                RETURN count(r) AS count
+                """,
+                group_id=group_id,
+                topK=top_k,
+                cutoff=similarity_cutoff,
+            )
+            edges_created += result.single()["count"]
+            
+        logger.info(f"🔗 Fallback vector index created {edges_created} SIMILAR_TO edges")
+        return edges_created
 
     def _deduplicate_entities(
         self,

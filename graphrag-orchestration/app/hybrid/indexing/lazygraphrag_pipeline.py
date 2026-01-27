@@ -1096,7 +1096,12 @@ Output:
         """Process Azure Document Intelligence metadata and create graph nodes/edges.
         
         This method extracts FREE Azure DI add-on data from the original DI documents
-        and converts it into proper graph entities and relationships.
+        and converts it into proper graph entities and relationships:
+        
+        1. **Barcodes** → :Barcode nodes with FOUND_IN edges to Documents
+        2. **Figures** → :Figure nodes with captions + embeddings
+        3. **Key-Value Pairs** → :KeyValuePair nodes with searchable text + embeddings
+        4. **Languages** → Updates Document nodes with detected_languages
         
         Args:
             group_id: Group identifier for multi-tenancy
@@ -1110,7 +1115,9 @@ Output:
             "barcodes_created": 0,
             "figures_created": 0,
             "figure_ref_edges": 0,
+            "kvps_created": 0,
             "languages_updated": 0,
+            "embeddings_generated": 0,
         }
         
         for doc in expanded_docs:
@@ -1127,7 +1134,14 @@ Output:
             figures = first_meta.get("figures") or []
             languages = first_meta.get("languages") or []
             
-            if not any([barcodes, figures, languages]):
+            # Collect KVPs from ALL DI units (they're distributed per-section)
+            all_kvps: List[Dict[str, Any]] = []
+            for di_unit in di_units:
+                unit_meta = getattr(di_unit, "metadata", None) or {}
+                unit_kvps = unit_meta.get("key_value_pairs") or []
+                all_kvps.extend(unit_kvps)
+            
+            if not any([barcodes, figures, languages, all_kvps]):
                 continue
             
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
@@ -1228,8 +1242,136 @@ Output:
                         all_langs=all_locales,
                     )
                     stats["languages_updated"] += result.single()["count"]
+                
+                # Create KeyValuePair nodes with FOUND_IN edges
+                if all_kvps:
+                    kvp_data = []
+                    for kvp in all_kvps:
+                        key_text = kvp.get("key", "")
+                        value_text = kvp.get("value", "")
+                        if not key_text:
+                            continue
+                        kvp_id = self._stable_kvp_id(group_id, doc_id, key_text, value_text)
+                        kvp_data.append({
+                            "id": kvp_id,
+                            "group_id": group_id,
+                            "key": key_text,
+                            "value": value_text,
+                            "confidence": kvp.get("confidence", 0.0),
+                            "page_number": kvp.get("page_number", 1),
+                            "section_id": kvp.get("section_id", ""),
+                            "section_path": kvp.get("section_path", []),
+                            "searchable_text": f"{key_text}: {value_text}",
+                            "doc_id": doc_id,
+                        })
+                    
+                    if kvp_data:
+                        result = session.run(
+                            """
+                            UNWIND $kvps AS kvp
+                            MERGE (k:KeyValuePair {id: kvp.id})
+                            SET k.group_id = kvp.group_id,
+                                k.key = kvp.key,
+                                k.value = kvp.value,
+                                k.confidence = kvp.confidence,
+                                k.page_number = kvp.page_number,
+                                k.section_id = kvp.section_id,
+                                k.section_path = kvp.section_path,
+                                k.searchable_text = kvp.searchable_text,
+                                k.updated_at = datetime()
+                            WITH k, kvp
+                            MATCH (d:Document {id: kvp.doc_id, group_id: kvp.group_id})
+                            MERGE (k)-[:FOUND_IN]->(d)
+                            RETURN count(DISTINCT k) AS count
+                            """,
+                            kvps=kvp_data,
+                        )
+                        stats["kvps_created"] += result.single()["count"]
+        
+        # Generate embeddings for Figure captions and KVP text (V1 uses self.embedder)
+        if self.embedder is not None:
+            embedding_stats = await self._generate_di_node_embeddings_v1(group_id=group_id)
+            stats["embeddings_generated"] = embedding_stats.get("embeddings_created", 0)
         
         return stats
+    
+    async def _generate_di_node_embeddings_v1(
+        self,
+        *,
+        group_id: str,
+    ) -> Dict[str, Any]:
+        """Generate embeddings for Figure/KVP nodes using V1 embedder.
+        
+        Uses self.embedder (LlamaIndex embedder) for V1 pipeline.
+        """
+        stats = {"embeddings_created": 0}
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            # Get Figure nodes needing embeddings
+            figure_result = session.run(
+                """
+                MATCH (f:Figure {group_id: $group_id})
+                WHERE f.caption IS NOT NULL AND f.caption <> '' AND f.embedding IS NULL
+                RETURN f.id AS id, f.caption AS text
+                LIMIT 500
+                """,
+                group_id=group_id,
+            )
+            figures_to_embed = [{"id": r["id"], "text": r["text"]} for r in figure_result]
+            
+            # Get KVP nodes needing embeddings
+            kvp_result = session.run(
+                """
+                MATCH (k:KeyValuePair {group_id: $group_id})
+                WHERE k.searchable_text IS NOT NULL AND k.embedding IS NULL
+                RETURN k.id AS id, k.searchable_text AS text
+                LIMIT 500
+                """,
+                group_id=group_id,
+            )
+            kvps_to_embed = [{"id": r["id"], "text": r["text"]} for r in kvp_result]
+        
+        all_nodes = figures_to_embed + kvps_to_embed
+        if not all_nodes:
+            return stats
+        
+        texts = [n["text"] for n in all_nodes]
+        try:
+            embeddings = await self.embedder.aget_text_embedding_batch(texts)
+        except Exception as e:
+            logger.error(f"Failed to generate DI node embeddings: {e}")
+            return stats
+        
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            for i, node in enumerate(all_nodes):
+                if i < len(embeddings) and embeddings[i]:
+                    node_label = "Figure" if i < len(figures_to_embed) else "KeyValuePair"
+                    session.run(
+                        f"""
+                        MATCH (n:{node_label} {{id: $id}})
+                        SET n.embedding = $embedding
+                        """,
+                        id=node["id"],
+                        embedding=embeddings[i],
+                    )
+                    stats["embeddings_created"] += 1
+        
+        return stats
+
+    def _stable_barcode_id(self, group_id: str, value: str) -> str:
+        """Generate stable ID for barcode entity."""
+        key = f"barcode:{group_id}:{value}"
+        return f"barcode_{hashlib.md5(key.encode()).hexdigest()[:16]}"
+
+    def _stable_figure_id(self, group_id: str, fig_id: str) -> str:
+        """Generate stable ID for figure entity."""
+        key = f"figure:{group_id}:{fig_id}"
+        return f"figure_{hashlib.md5(key.encode()).hexdigest()[:16]}"
+
+    def _stable_kvp_id(self, group_id: str, doc_id: str, key: str, value: str) -> str:
+        """Generate stable ID for key-value pair entity."""
+        composite_key = f"kvp:{group_id}:{doc_id}:{key}:{value}"
+        return f"kvp_{hashlib.md5(composite_key.encode()).hexdigest()[:16]}"
 
     def _deduplicate_entities(
         self,

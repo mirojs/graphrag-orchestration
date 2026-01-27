@@ -88,11 +88,11 @@ def check_v2_config():
     return True
 
 
-# 5 Test PDFs
+# 5 Test PDFs (URL-encoded for Azure DI compatibility)
 PDF_URLS = [
-    "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS LIMITED WARRANTY.pdf",
-    "https://neo4jstorage21224.blob.core.windows.net/test-docs/HOLDING TANK SERVICING CONTRACT.pdf",
-    "https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY MANAGEMENT AGREEMENT.pdf",
+    "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS%20LIMITED%20WARRANTY.pdf",
+    "https://neo4jstorage21224.blob.core.windows.net/test-docs/HOLDING%20TANK%20SERVICING%20CONTRACT.pdf",
+    "https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
     "https://neo4jstorage21224.blob.core.windows.net/test-docs/contoso_lifts_invoice.pdf",
     "https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf",
 ]

@@ -86,6 +86,7 @@ class Settings(BaseSettings):
     AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT: Optional[str] = None
     AZURE_DOCUMENT_INTELLIGENCE_KEY: Optional[str] = None
     AZURE_DOC_INTELLIGENCE_API_VERSION: str = "2024-11-30"
+    AZURE_DI_TIMEOUT: int = 120  # Per-document timeout in seconds (increase if DI is slow)
     
     # LlamaParse (for layout-aware document parsing)
     LLAMA_CLOUD_API_KEY: Optional[str] = None

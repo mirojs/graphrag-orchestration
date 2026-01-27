@@ -955,15 +955,16 @@ class DocumentIntelligenceService:
                 )
 
                 # Wait for completion with timeout (SDK handles polling automatically)
-                # Azure DI typically takes 2-10 seconds per document
+                # Azure DI typically takes 2-10 seconds per document, can be slower under load
+                di_timeout = settings.AZURE_DI_TIMEOUT
                 try:
                     result: AnalyzeResult = await asyncio.wait_for(
                         poller.result(), 
-                        timeout=60  # 60 seconds max per document
+                        timeout=di_timeout
                     )
                     logger.info(f"✅ Document Intelligence analysis completed for {url[:80]}")
                 except asyncio.TimeoutError:
-                    logger.error(f"❌ Document Intelligence analysis timed out after 60s for {url[:80]}")
+                    logger.error(f"❌ Document Intelligence analysis timed out after {di_timeout}s for {url[:80]}")
                     raise TimeoutError(f"Document Intelligence analysis timed out for {url}")
 
                 if not getattr(result, "pages", None):

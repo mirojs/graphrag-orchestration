@@ -5,7 +5,7 @@ import structlog
 from app.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from app.middleware.group_isolation import GroupIsolationMiddleware
-from app.routers import health, graphrag, orchestration, hybrid, document_analysis
+from app.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map
 
 # NOTE: GraphService and LLMService are core services used by V3
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
@@ -139,6 +139,13 @@ app.include_router(hybrid.router, prefix="/hybrid", tags=["hybrid-pipeline"])
 # ============================================================================
 # Unified, simplified API for document analysis (replaces Azure Content Understanding)
 app.include_router(document_analysis.router, tags=["document-analysis"])
+
+# ============================================================================
+# Knowledge Map API - Batch-first Async Document Processing
+# ============================================================================
+# Follows Azure CU polling pattern with simplified response format
+# POST /process -> GET /operations/{id} with Retry-After, 60s TTL, fail-fast
+app.include_router(knowledge_map.router, tags=["knowledge-map"])
 
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation

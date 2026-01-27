@@ -1,3 +1,3 @@
-from . import health, graphrag, orchestration, hybrid
+from . import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map
 
-__all__ = ["health", "graphrag", "orchestration", "hybrid"]
+__all__ = ["health", "graphrag", "orchestration", "hybrid", "document_analysis", "knowledge_map"]

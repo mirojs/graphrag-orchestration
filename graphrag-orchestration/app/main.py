@@ -5,7 +5,7 @@ import structlog
 from app.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from app.middleware.group_isolation import GroupIsolationMiddleware
-from app.routers import health, graphrag, orchestration, hybrid
+from app.routers import health, graphrag, orchestration, hybrid, document_analysis
 
 # NOTE: GraphService and LLMService are core services used by V3
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
@@ -133,6 +133,12 @@ app.include_router(health.router, tags=["health"])
 # ============================================================================
 # This is the primary interface for the 4-way routing system
 app.include_router(hybrid.router, prefix="/hybrid", tags=["hybrid-pipeline"])
+
+# ============================================================================
+# Document Analysis API - Simplified Drop-in Replacement for Azure CU
+# ============================================================================
+# Unified, simplified API for document analysis (replaces Azure Content Understanding)
+app.include_router(document_analysis.router, tags=["document-analysis"])
 
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation

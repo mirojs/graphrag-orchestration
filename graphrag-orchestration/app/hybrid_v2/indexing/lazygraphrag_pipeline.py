@@ -260,6 +260,19 @@ class LazyGraphRAGIndexingPipeline:
         stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
         stats["key_values_embedded"] = kvp_embed_stats.get("keys_embedded", 0)
 
+        # 4.9) Process DI metadata: extract barcodes, figures, languages → graph entities/edges.
+        # This leverages Azure DI FREE add-ons that are already extracted but not yet in the graph.
+        # Note: DI metadata is stored in di_extracted_docs (LlamaIndex Documents), not in TextChunks.
+        di_metadata_stats = await self._process_di_metadata_to_graph(
+            group_id=group_id,
+            expanded_docs=expanded_docs,
+            chunk_to_doc_id=chunk_to_doc_id,
+        )
+        stats["di_barcodes"] = di_metadata_stats.get("barcodes_created", 0)
+        stats["di_figures"] = di_metadata_stats.get("figures_created", 0)
+        stats["di_figure_refs"] = di_metadata_stats.get("figure_ref_edges", 0)
+        stats["di_languages"] = di_metadata_stats.get("languages_updated", 0)
+
         # 5) Entity/relationship extraction (best-effort, but recommended).
         entities: List[Entity] = []
         relationships: List[Relationship] = []
@@ -1087,6 +1100,232 @@ Output:
             out_rels.append(r)
         return list(by_key.values()), out_rels
 
+    async def _process_di_metadata_to_graph(
+        self,
+        *,
+        group_id: str,
+        expanded_docs: List[Dict[str, Any]],
+        chunk_to_doc_id: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Process Azure Document Intelligence metadata and create graph nodes/edges.
+        
+        This method extracts FREE Azure DI add-on data from the original DI documents
+        (LlamaIndex Documents stored in di_extracted_docs) and converts it into proper
+        graph entities and relationships:
+        
+        1. **Barcodes** → :Barcode nodes with FOUND_IN edges to Documents
+           - Entity types: PRODUCT_CODE, TRACKING_NUMBER, QR_DATA, URL, BARCODE
+           - Enables queries like "find documents with tracking number 1Z..."
+        
+        2. **Figures** → :Figure nodes with REFERENCES edges to elements
+           - Captures cross-section relationships without LLM extraction
+           - Figure captions create searchable content
+        
+        3. **Languages** → Updates Document nodes with detected_languages property
+           - Primary language stored as metadata
+           - Enables multilingual corpus queries
+        
+        4. **Selection Marks** → :ChecklistItem nodes (future enhancement)
+           - Currently logged for analysis
+        
+        Args:
+            group_id: Group identifier for multi-tenancy
+            expanded_docs: List of document dicts with di_extracted_docs containing LlamaIndex Documents
+            chunk_to_doc_id: Mapping from chunk ID to document ID
+            
+        Returns:
+            Statistics dictionary with counts of created entities/edges
+        """
+        stats: Dict[str, Any] = {
+            "barcodes_created": 0,
+            "figures_created": 0,
+            "figure_ref_edges": 0,
+            "languages_updated": 0,
+        }
+        
+        # Collect DI metadata from the first DI unit's metadata for each document
+        # (DI stores document-level metadata like barcodes, figures, languages in first unit)
+        for doc in expanded_docs:
+            doc_id = doc.get("id", "")
+            di_units = doc.get("di_extracted_docs") or []
+            
+            if not di_units:
+                continue
+            
+            # Get metadata from first DI unit (document-level metadata)
+            first_unit = di_units[0]
+            first_meta = getattr(first_unit, "metadata", None) or {}
+            
+            barcodes = first_meta.get("barcodes") or []
+            figures = first_meta.get("figures") or []
+            languages = first_meta.get("languages") or []
+            selection_marks = first_meta.get("selection_marks") or []
+            
+            if not any([barcodes, figures, languages]):
+                continue
+            
+            logger.info(
+                "processing_di_metadata_for_doc",
+                extra={
+                    "group_id": group_id,
+                    "doc_id": doc_id,
+                    "barcodes": len(barcodes),
+                    "figures": len(figures),
+                    "languages": len(languages),
+                    "selection_marks": len(selection_marks),
+                }
+            )
+            
+            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+                # 1. Create Barcode nodes and FOUND_IN edges
+                if barcodes:
+                    barcode_data = []
+                    for bc in barcodes:
+                        bc_id = self._stable_barcode_id(group_id, bc.get("value", ""))
+                        barcode_data.append({
+                            "id": bc_id,
+                            "group_id": group_id,
+                            "kind": bc.get("kind", "UNKNOWN"),
+                            "value": bc.get("value", ""),
+                            "confidence": bc.get("confidence", 0.0),
+                            "page_number": bc.get("page_number", 1),
+                            "entity_type": bc.get("entity_type", "BARCODE"),
+                            "doc_id": doc_id,
+                        })
+                    
+                    result = session.run(
+                        """
+                        UNWIND $barcodes AS bc
+                        MERGE (b:Barcode {id: bc.id})
+                        SET b.group_id = bc.group_id,
+                            b.kind = bc.kind,
+                            b.value = bc.value,
+                            b.confidence = bc.confidence,
+                            b.page_number = bc.page_number,
+                            b.entity_type = bc.entity_type,
+                            b.updated_at = datetime()
+                        WITH b, bc
+                        MATCH (d:Document {id: bc.doc_id, group_id: bc.group_id})
+                        MERGE (b)-[:FOUND_IN]->(d)
+                        RETURN count(DISTINCT b) AS count
+                        """,
+                        barcodes=barcode_data,
+                    )
+                    stats["barcodes_created"] += result.single()["count"]
+                    logger.info(f"📊 Created {result.single()['count'] if result else 0} Barcode nodes for {doc_id}")
+                
+                # 2. Create Figure nodes with captions (cross-references captured via element_refs)
+                if figures:
+                    figure_data = []
+                    for fig in figures:
+                        fig_id = self._stable_figure_id(group_id, fig.get("id", ""))
+                        figure_data.append({
+                            "id": fig_id,
+                            "group_id": group_id,
+                            "di_id": fig.get("id", ""),
+                            "caption": fig.get("caption", ""),
+                            "footnotes": fig.get("footnotes", []),
+                            "element_count": fig.get("element_count", 0),
+                            "doc_id": doc_id,
+                        })
+                    
+                    result = session.run(
+                        """
+                        UNWIND $figures AS fig
+                        MERGE (f:Figure {id: fig.id})
+                        SET f.group_id = fig.group_id,
+                            f.di_id = fig.di_id,
+                            f.caption = fig.caption,
+                            f.footnotes = fig.footnotes,
+                            f.element_count = fig.element_count,
+                            f.updated_at = datetime()
+                        WITH f, fig
+                        MATCH (d:Document {id: fig.doc_id, group_id: fig.group_id})
+                        MERGE (f)-[:FOUND_IN]->(d)
+                        RETURN count(DISTINCT f) AS count
+                        """,
+                        figures=figure_data,
+                    )
+                    count = result.single()["count"]
+                    stats["figures_created"] += count
+                    
+                    # Create REFERENCES edges from figures to elements (cross-section graph edges!)
+                    ref_edges = []
+                    for fig in figures:
+                        fig_id = self._stable_figure_id(group_id, fig.get("id", ""))
+                        for ref in fig.get("element_refs", []):
+                            # refs are like {"kind": "paragraphs", "index": 42, "ref": "/paragraphs/42"}
+                            ref_edges.append({
+                                "figure_id": fig_id,
+                                "ref_kind": ref.get("kind", ""),
+                                "ref_index": ref.get("index", -1),
+                                "ref_path": ref.get("ref", ""),
+                            })
+                    
+                    if ref_edges:
+                        # Store reference metadata on the Figure node for later retrieval
+                        session.run(
+                            """
+                            UNWIND $refs AS r
+                            MATCH (f:Figure {id: r.figure_id})
+                            SET f.element_refs = coalesce(f.element_refs, []) + [r.ref_path]
+                            """,
+                            refs=ref_edges,
+                        )
+                        stats["figure_ref_edges"] += len(ref_edges)
+                    
+                    logger.info(f"📈 Created {count} Figure nodes with {len(ref_edges)} element references for {doc_id}")
+                
+                # 3. Update Document nodes with detected languages
+                if languages:
+                    # Find primary language (most spans)
+                    primary_lang = max(languages, key=lambda x: x.get("span_count", 0))
+                    all_locales = [lang.get("locale", "") for lang in languages if lang.get("locale")]
+                    
+                    result = session.run(
+                        """
+                        MATCH (d:Document {id: $doc_id, group_id: $group_id})
+                        SET d.primary_language = $primary_lang,
+                            d.detected_languages = $all_langs,
+                            d.language_updated_at = datetime()
+                        RETURN count(d) AS count
+                        """,
+                        doc_id=doc_id,
+                        group_id=group_id,
+                        primary_lang=primary_lang.get("locale", ""),
+                        all_langs=all_locales,
+                    )
+                    stats["languages_updated"] += result.single()["count"]
+                    logger.info(f"🌐 Updated language metadata for {doc_id}: primary={primary_lang.get('locale')}, all={all_locales}")
+                
+                # 4. Log selection marks for future enhancement
+                if selection_marks:
+                    selected = sum(1 for m in selection_marks if m.get("state") == "selected")
+                    logger.info(
+                        f"☑️ Selection marks detected in {doc_id}: {len(selection_marks)} total, {selected} selected",
+                        extra={"doc_id": doc_id, "total": len(selection_marks), "selected": selected}
+                    )
+        
+        logger.info(
+            "di_metadata_processing_complete",
+            extra={
+                "group_id": group_id,
+                **stats,
+            }
+        )
+        
+        return stats
+
+    def _stable_barcode_id(self, group_id: str, value: str) -> str:
+        """Generate stable ID for barcode entity."""
+        key = f"barcode:{group_id}:{value}"
+        return f"barcode_{hashlib.md5(key.encode()).hexdigest()[:16]}"
+
+    def _stable_figure_id(self, group_id: str, fig_id: str) -> str:
+        """Generate stable ID for figure entity."""
+        key = f"figure:{group_id}:{fig_id}"
+        return f"figure_{hashlib.md5(key.encode()).hexdigest()[:16]}"
+
     def _deduplicate_entities(
         self,
         *,
@@ -1255,6 +1494,9 @@ Output:
             RelationshipType(label="LOCATED_IN", description="Entity is located in a place"),
             RelationshipType(label="MENTIONS", description="Document mentions an entity"),
             RelationshipType(label="DEFINES", description="Document defines a term or concept"),
+            # Azure DI-extracted relationships (FREE add-ons)
+            RelationshipType(label="FOUND_IN", description="Barcode or Figure found in a Document"),
+            RelationshipType(label="REFERENCES", description="Figure references another element (paragraph, table, section)"),
         ]
         
         return GraphSchema(node_types=entity_types, relationship_types=relationship_types)

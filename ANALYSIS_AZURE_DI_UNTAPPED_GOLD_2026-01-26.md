@@ -1,8 +1,27 @@
 # Analysis: Azure Document Intelligence - Untapped Gold Mine
 
 **Date:** 2026-01-26  
-**Status:** Investigation Complete  
-**Verdict:** 🔴 **NOT fully utilized** - significant gold mine untapped
+**Status:** ✅ **IMPLEMENTED** (2026-01-27)  
+**Verdict:** ✅ Option 2 (FREE Graph Edges) fully implemented
+
+---
+
+## Implementation Status (2026-01-27)
+
+### ✅ Implemented - Azure DI Metadata → Graph Nodes/Edges
+
+The `_process_di_metadata_to_graph()` method was added to both V1 and V2 LazyGraphRAG pipelines:
+
+**Files Modified:**
+- `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
+- `app/hybrid/indexing/lazygraphrag_pipeline.py`
+
+**New Graph Schema:**
+- `:Barcode` nodes with `FOUND_IN` edges to `:Document`
+- `:Figure` nodes with `FOUND_IN` edges to `:Document` and `element_refs` property
+- `:Document` nodes now have `primary_language`, `detected_languages` properties
+
+**Note:** Current test PDFs (5 contract documents) don't contain barcodes, figures, or multi-language content. The implementation will create these nodes when processing documents that have these features.
 
 ---
 

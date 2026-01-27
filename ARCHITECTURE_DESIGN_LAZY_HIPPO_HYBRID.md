@@ -1,6 +1,19 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 26, 2026
+**Last Updated:** January 27, 2026
+
+**Recent Updates (January 27, 2026):**
+- 🚀 **GDS Integration (AuraDB Professional):** Full Graph Data Science algorithms now run during V2 indexing
+  - **KNN (K-Nearest Neighbors):** Creates `SIMILAR_TO` edges (Figure/KVP → Entity) and `SEMANTICALLY_SIMILAR` edges (Entity ↔ Entity)
+  - **Louvain Community Detection:** Assigns `community_id` property to all nodes for clustering
+  - **PageRank:** Computes `pagerank` score for node importance ranking
+  - Implementation: `app/hybrid_v2/indexing/lazygraphrag_pipeline.py` (`_run_gds_graph_algorithms()`)
+- 🚀 **Azure DI Metadata → Graph Nodes:** FREE Azure DI add-ons now create proper graph entities
+  - **Barcode nodes:** `:Barcode` with `FOUND_IN` edge to Document
+  - **Figure nodes:** `:Figure` with caption, `embedding_v2`, and `SIMILAR_TO` edges to Entities
+  - **KeyValuePair nodes:** `:KeyValuePair` with key/value, `embedding_v2`, and `SIMILAR_TO` edges to Entities
+  - **Language metadata:** `primary_language` and `detected_languages` on Document nodes
+  - Implementation: `_process_di_metadata_to_graph()` in both V1 and V2 pipelines
 
 **Recent Updates (January 26, 2026):**
 - 🚀 **V2 Bin-Packing for Large Documents:** Voyage-context-3's 32K token limit handled via bin-packing
@@ -3413,12 +3426,48 @@ Migrated all query-time vector similarity operations from GDS (`gds.similarity.c
 | `app/hybrid/services/neo4j_store.py` | `search_text_chunks()` | Same |
 | `app/hybrid/pipeline/enhanced_graph_retriever.py` | `search_entities_by_embedding()` | Same |
 
-#### 14.5.3. GDS Still Used For
+#### 14.5.3. GDS Now Fully Integrated (Jan 27, 2026)
 
-- **Community Detection (index-time):** `gds.leiden.write()` and `gds.louvain.write()` in `graph_service.py`
-- **Graph Projection:** `gds.graph.project.cypher()` for community algorithms
+**Status:** ✅ **GDS algorithms integrated into V2 indexing pipeline**
 
-These remain GDS-dependent because Neo4j does not have native community detection algorithms. Aura Professional includes GDS for this purpose.
+AuraDB Professional includes GDS, and we now use it during indexing for:
+
+| Algorithm | Purpose | Output | Used For |
+|-----------|---------|--------|----------|
+| **gds.knn** | Semantic similarity | `SIMILAR_TO` edges (DI→Entity) | Connect Figure/KVP to related Entities |
+| **gds.knn** | Entity similarity | `SEMANTICALLY_SIMILAR` edges | Connect semantically related Entities |
+| **gds.louvain** | Community detection | `community_id` property | Cluster related nodes for retrieval |
+| **gds.pageRank** | Node importance | `pagerank` property | Rank nodes for retrieval priority |
+
+**Implementation:** `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
+- Method: `_run_gds_graph_algorithms()`
+- Called automatically during `_process_di_metadata_to_graph()`
+- Creates single projection, runs all algorithms, cleans up
+
+**Graph Projection:**
+```cypher
+CALL gds.graph.project.cypher(
+    'graphrag_{group_id}',
+    'MATCH (n) WHERE n.group_id = $group_id 
+     AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+     RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding_v2',
+    'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id ...
+     RETURN id(n) AS source, id(m) AS target, type(r) AS type'
+)
+```
+
+**KNN Parameters:**
+- `topK: 5` - Find 5 nearest neighbors per node
+- `similarityCutoff: 0.60` - Minimum similarity threshold
+
+**Louvain Parameters:**
+- `writeProperty: 'community_id'` - Property name for community assignment
+- `includeIntermediateCommunities: false` - Only final communities
+
+**PageRank Parameters:**
+- `writeProperty: 'pagerank'` - Property name for importance score
+- `dampingFactor: 0.85` - Standard PageRank damping
+- `maxIterations: 20` - Convergence limit
 
 #### 14.5.4. Compatibility
 
@@ -4553,18 +4602,25 @@ Total                       7.8s avg
 
 **Node Types:**
 ```
-Node Type       Count    Has Embedding?    Status
-─────────────────────────────────────────────────────
-Entity           379     ✅ Yes (379)      Core - well connected
-Section          204     ✅ Yes (204)      Structure - 158 orphans
-TextChunk         74     ✅ Yes (74)       Content - fully linked
-Document           5     ❌ No             Metadata only
-Table            ~50     ❌ No             Structured data extraction
-KeyValue          *      ✅ Yes (key)      High-precision field extraction (Jan 22, 2026)
+Node Type       Count    Has Embedding?    GDS Properties      Status
+───────────────────────────────────────────────────────────────────────────
+Entity           379     ✅ embedding_v2   community_id,       Core - well connected
+                                           pagerank
+Section          204     ✅ embedding_v2   community_id,       Structure - 158 orphans
+                                           pagerank
+TextChunk         74     ✅ embedding_v2   community_id,       Content - fully linked
+                                           pagerank
+Document           5     ❌ No             primary_language,   Metadata only
+                                           detected_languages
+Table            ~50     ❌ No             -                   Structured data extraction
+KeyValue          *      ✅ embedding_v2   -                   High-precision field extraction (Jan 22)
+Barcode           *      ❌ No             -                   Azure DI barcode extraction (Jan 27)
+Figure            *      ✅ embedding_v2   -                   Azure DI figure extraction (Jan 27)
+KeyValuePair      *      ✅ embedding_v2   -                   Azure DI KVP extraction (Jan 27)
 ```
 
-*KeyValue nodes are created during indexing when Azure DI extracts key-value pairs from documents.
-Count depends on document content (e.g., forms, invoices, contracts with labeled fields).
+*Barcode, Figure, KeyValuePair nodes are created from Azure DI FREE add-ons during indexing.
+Count depends on document content (e.g., barcodes in shipping docs, figures in technical manuals).
 
 **Relationship Types:**
 ```
@@ -4573,10 +4629,13 @@ Relationship              Count    Connects                    Status
 MENTIONS                   831     TextChunk → Entity          ✅ Core
 RELATED_TO                 711     Entity ↔ Entity             ✅ Core
 SEMANTICALLY_SIMILAR       465     Section ↔ Section           ✅ Implemented Jan 2026
+SEMANTICALLY_SIMILAR        *      Entity ↔ Entity             ✅ GDS KNN (Jan 27, 2026)
+SIMILAR_TO                  *      Figure/KVP → Entity         ✅ GDS KNN (Jan 27, 2026)
 SUBSECTION_OF              120     Section → Section           ✅ Hierarchy
 PART_OF                     74     TextChunk → Document        ✅ Core
 IN_SECTION                  74     TextChunk → Section         ✅ Core
 HAS_SECTION                 21     Document → Section          ✅ Core
+FOUND_IN                    *      Barcode/Figure/KVP → Doc    ✅ Azure DI (Jan 27, 2026)
 IN_SECTION (KV)             *      KeyValue → Section          ✅ KVP feature (Jan 22, 2026)
 IN_CHUNK (KV)               *      KeyValue → TextChunk        ✅ KVP feature (Jan 22, 2026)
 IN_DOCUMENT (KV)            *      KeyValue → Document         ✅ KVP feature (Jan 22, 2026)

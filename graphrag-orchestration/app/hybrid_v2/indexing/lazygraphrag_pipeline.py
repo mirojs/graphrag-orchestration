@@ -1150,6 +1150,10 @@ Output:
             "kvps_created": 0,
             "languages_updated": 0,
             "embeddings_generated": 0,
+            "knn_edges_created": 0,
+            "entity_similarity_edges": 0,
+            "communities_detected": 0,
+            "pagerank_scored": 0,
         }
         
         # Collect DI metadata from the first DI unit's metadata for each document
@@ -1503,56 +1507,59 @@ Output:
         
         logger.info(f"✅ Generated {stats['embeddings_created']} embeddings")
         
-        # 5. Use GDS KNN to create SIMILAR_TO edges between DI nodes and Entities
-        knn_edges = await self._run_gds_knn_for_di_nodes(group_id=group_id)
-        stats["knn_edges_created"] = knn_edges
+        # 5. Run GDS algorithms: KNN for similarity, Louvain for communities, PageRank for importance
+        gds_stats = await self._run_gds_graph_algorithms(group_id=group_id)
+        stats["knn_edges_created"] = gds_stats.get("knn_edges", 0)
+        stats["entity_similarity_edges"] = gds_stats.get("entity_edges", 0)
+        stats["communities_detected"] = gds_stats.get("communities", 0)
+        stats["pagerank_scored"] = gds_stats.get("pagerank_nodes", 0)
         
         return stats
 
-    async def _run_gds_knn_for_di_nodes(
+    async def _run_gds_graph_algorithms(
         self,
         *,
         group_id: str,
-        top_k: int = 3,
-        similarity_cutoff: float = 0.65,
-    ) -> int:
-        """Run GDS KNN to connect Figure/KVP nodes to similar Entity nodes.
+        knn_top_k: int = 5,
+        knn_similarity_cutoff: float = 0.60,
+    ) -> Dict[str, int]:
+        """Run GDS algorithms to enhance the graph with computed properties.
         
-        Creates a graph projection including Entity, Figure, and KeyValuePair nodes,
-        then runs KNN to find similar pairs and creates SIMILAR_TO relationships.
+        Algorithms run:
+        1. **KNN** - Creates similarity edges:
+           - Figure/KVP → Entity (SIMILAR_TO)
+           - Entity ↔ Entity (SEMANTICALLY_SIMILAR)
+        2. **Louvain** - Detects communities and assigns community_id to nodes
+        3. **PageRank** - Computes importance scores for all nodes
         
         Args:
             group_id: Group identifier for multi-tenancy
-            top_k: Number of nearest neighbors to find (default: 3)
-            similarity_cutoff: Minimum similarity score for creating edges (default: 0.65)
+            knn_top_k: Number of nearest neighbors for KNN (default: 5)
+            knn_similarity_cutoff: Minimum similarity for KNN edges (default: 0.60)
             
         Returns:
-            Number of SIMILAR_TO edges created
+            Statistics dictionary with algorithm results
         """
-        edges_created = 0
-        projection_name = f"di_entity_similarity_{group_id.replace('-', '_')}"
+        stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
+        projection_name = f"graphrag_{group_id.replace('-', '_')}"
         
         try:
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
                 # Drop existing projection if exists
-                session.run(
-                    """
-                    CALL gds.graph.drop($name, false)
-                    """,
-                    name=projection_name,
-                )
+                session.run("CALL gds.graph.drop($name, false)", name=projection_name)
                 
-                # Create projection with Entity, Figure, and KeyValuePair nodes
-                # Filter by group_id and ensure nodes have embeddings
+                # Create comprehensive projection for all algorithms
+                # Include Entity, Figure, KeyValuePair, Chunk nodes
                 session.run(
                     """
                     CALL gds.graph.project.cypher(
                         $name,
                         'MATCH (n) WHERE n.group_id = $group_id 
-                         AND n.embedding_v2 IS NOT NULL 
-                         AND (n:Entity OR n:Figure OR n:KeyValuePair)
-                         RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding_v2',
+                         AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                         RETURN id(n) AS id, labels(n) AS labels,
                         'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id AND m.group_id = $group_id
+                         AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                         AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
                          RETURN id(n) AS source, id(m) AS target, type(r) AS type',
                         {parameters: {group_id: $group_id}}
                     )
@@ -1562,93 +1569,118 @@ Output:
                 )
                 logger.info(f"📊 Created GDS projection: {projection_name}")
                 
-                # Run KNN to find similar nodes
-                result = session.run(
-                    """
-                    CALL gds.knn.stream($name, {
-                        nodeProperties: ['embedding_v2'],
-                        topK: $topK,
-                        similarityCutoff: $cutoff,
-                        concurrency: 4
-                    })
-                    YIELD node1, node2, similarity
-                    WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
-                    // Only create edges FROM Figure/KVP TO Entity (not between Entities)
-                    WHERE (n1:Figure OR n1:KeyValuePair) AND n2:Entity
-                    MERGE (n1)-[r:SIMILAR_TO]->(n2)
-                    SET r.score = similarity, r.method = 'gds_knn', r.created_at = datetime()
-                    RETURN count(r) AS edges_created
-                    """,
-                    name=projection_name,
-                    topK=top_k,
-                    cutoff=similarity_cutoff,
-                )
-                edges_created = result.single()["edges_created"]
-                logger.info(f"🔗 GDS KNN created {edges_created} SIMILAR_TO edges")
+                # ============================================
+                # 1a. KNN - DI nodes (Figure/KVP) → Entity
+                # ============================================
+                try:
+                    result = session.run(
+                        """
+                        CALL gds.knn.stream($name, {
+                            nodeProperties: ['embedding_v2'],
+                            topK: $topK,
+                            similarityCutoff: $cutoff,
+                            concurrency: 4
+                        })
+                        YIELD node1, node2, similarity
+                        WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
+                        WHERE (n1:Figure OR n1:KeyValuePair) AND n2:Entity
+                        MERGE (n1)-[r:SIMILAR_TO]->(n2)
+                        SET r.score = similarity, r.method = 'gds_knn', r.created_at = datetime()
+                        RETURN count(r) AS edges_created
+                        """,
+                        name=projection_name,
+                        topK=knn_top_k,
+                        cutoff=knn_similarity_cutoff,
+                    )
+                    stats["knn_edges"] = result.single()["edges_created"]
+                    logger.info(f"🔗 GDS KNN (DI→Entity): {stats['knn_edges']} SIMILAR_TO edges")
+                except Exception as e:
+                    logger.warning(f"KNN (DI→Entity) failed: {e}")
+                
+                # ============================================
+                # 1b. KNN - Entity ↔ Entity (semantic similarity)
+                # ============================================
+                try:
+                    result = session.run(
+                        """
+                        CALL gds.knn.stream($name, {
+                            nodeProperties: ['embedding_v2'],
+                            topK: $topK,
+                            similarityCutoff: $cutoff,
+                            concurrency: 4
+                        })
+                        YIELD node1, node2, similarity
+                        WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
+                        WHERE n1:Entity AND n2:Entity AND id(n1) < id(n2)  // Avoid duplicates
+                        MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                        SET r.score = similarity, r.method = 'gds_knn', r.created_at = datetime()
+                        RETURN count(r) AS edges_created
+                        """,
+                        name=projection_name,
+                        topK=knn_top_k,
+                        cutoff=knn_similarity_cutoff,
+                    )
+                    stats["entity_edges"] = result.single()["edges_created"]
+                    logger.info(f"🔗 GDS KNN (Entity↔Entity): {stats['entity_edges']} SEMANTICALLY_SIMILAR edges")
+                except Exception as e:
+                    logger.warning(f"KNN (Entity↔Entity) failed: {e}")
+                
+                # ============================================
+                # 2. Louvain - Community Detection
+                # ============================================
+                # Creates community_id property on nodes - essential for GraphRAG community summaries
+                try:
+                    result = session.run(
+                        """
+                        CALL gds.louvain.write($name, {
+                            writeProperty: 'community_id',
+                            includeIntermediateCommunities: false,
+                            concurrency: 4
+                        })
+                        YIELD communityCount, modularity
+                        RETURN communityCount, modularity
+                        """,
+                        name=projection_name,
+                    )
+                    record = result.single()
+                    stats["communities"] = record["communityCount"]
+                    modularity = record["modularity"]
+                    logger.info(f"🏘️ Louvain: {stats['communities']} communities (modularity: {modularity:.3f})")
+                except Exception as e:
+                    logger.warning(f"Louvain community detection failed: {e}")
+                
+                # ============================================
+                # 3. PageRank - Node Importance
+                # ============================================
+                # Computes pagerank score for retrieval ranking
+                try:
+                    result = session.run(
+                        """
+                        CALL gds.pageRank.write($name, {
+                            writeProperty: 'pagerank',
+                            dampingFactor: 0.85,
+                            maxIterations: 20,
+                            concurrency: 4
+                        })
+                        YIELD nodePropertiesWritten, ranIterations
+                        RETURN nodePropertiesWritten, ranIterations
+                        """,
+                        name=projection_name,
+                    )
+                    record = result.single()
+                    stats["pagerank_nodes"] = record["nodePropertiesWritten"]
+                    logger.info(f"📈 PageRank: scored {stats['pagerank_nodes']} nodes ({record['ranIterations']} iterations)")
+                except Exception as e:
+                    logger.warning(f"PageRank failed: {e}")
                 
                 # Clean up projection
                 session.run("CALL gds.graph.drop($name, false)", name=projection_name)
+                logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
                 
         except Exception as e:
-            logger.error(f"GDS KNN failed: {e}", extra={"error": str(e)})
-            # Fallback to non-GDS approach if GDS fails
-            edges_created = await self._fallback_similarity_edges(group_id=group_id, similarity_cutoff=similarity_cutoff)
+            logger.error(f"GDS graph algorithms failed: {e}", extra={"error": str(e)})
         
-        return edges_created
-
-    async def _fallback_similarity_edges(
-        self,
-        *,
-        group_id: str,
-        similarity_cutoff: float = 0.65,
-        top_k: int = 3,
-    ) -> int:
-        """Fallback method using vector index if GDS is not available.
-        
-        Uses the existing entity_v2_idx vector index to find similar entities
-        for Figure and KVP nodes.
-        """
-        edges_created = 0
-        
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-            # For each Figure with embedding, find similar entities via vector index
-            result = session.run(
-                """
-                MATCH (f:Figure {group_id: $group_id})
-                WHERE f.embedding_v2 IS NOT NULL
-                CALL db.index.vector.queryNodes('entity_v2_idx', $topK, f.embedding_v2)
-                YIELD node AS e, score
-                WHERE score >= $cutoff AND e.group_id = $group_id
-                MERGE (f)-[r:SIMILAR_TO]->(e)
-                SET r.score = score, r.method = 'vector_index', r.created_at = datetime()
-                RETURN count(r) AS count
-                """,
-                group_id=group_id,
-                topK=top_k,
-                cutoff=similarity_cutoff,
-            )
-            edges_created += result.single()["count"]
-            
-            # For each KVP with embedding, find similar entities
-            result = session.run(
-                """
-                MATCH (k:KeyValuePair {group_id: $group_id})
-                WHERE k.embedding_v2 IS NOT NULL
-                CALL db.index.vector.queryNodes('entity_v2_idx', $topK, k.embedding_v2)
-                YIELD node AS e, score
-                WHERE score >= $cutoff AND e.group_id = $group_id
-                MERGE (k)-[r:SIMILAR_TO]->(e)
-                SET r.score = score, r.method = 'vector_index', r.created_at = datetime()
-                RETURN count(r) AS count
-                """,
-                group_id=group_id,
-                topK=top_k,
-                cutoff=similarity_cutoff,
-            )
-            edges_created += result.single()["count"]
-            
-        logger.info(f"🔗 Fallback vector index created {edges_created} SIMILAR_TO edges")
-        return edges_created
+        return stats
 
     def _deduplicate_entities(
         self,

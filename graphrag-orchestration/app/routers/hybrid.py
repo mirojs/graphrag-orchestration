@@ -833,7 +833,7 @@ async def _run_indexing_job(
     
     try:
         from app.core.config import settings
-        from app.hybrid_v2.indexing.lazygraphrag_indexing_pipeline import (
+        from app.hybrid_v2.indexing.pipeline_factory import (
             get_lazygraphrag_indexing_pipeline_v2,
         )
 

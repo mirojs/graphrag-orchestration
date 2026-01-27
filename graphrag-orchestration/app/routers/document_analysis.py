@@ -170,7 +170,9 @@ async def analyze_documents(request: DocumentAnalysisRequest) -> DocumentAnalysi
     # Build response
     documents_info = []
     for doc in result.documents:
-        text_preview = doc.text[:200] if len(doc.text) > 200 else doc.text
+        # Handle None text gracefully
+        doc_text = doc.text if doc.text is not None else ""
+        text_preview = doc_text[:200] if len(doc_text) > 200 else doc_text
         documents_info.append(
             DocumentInfo(
                 doc_id=doc.doc_id or "unknown",

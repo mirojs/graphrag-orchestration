@@ -91,14 +91,18 @@ class SimpleDocumentAnalysisService:
         available = []
         
         # Check Document Intelligence
-        if settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT or settings.AZURE_CONTENT_UNDERSTANDING_ENDPOINT:
-            if settings.AZURE_DOCUMENT_INTELLIGENCE_KEY or settings.AZURE_CONTENT_UNDERSTANDING_API_KEY or not settings.AZURE_DOCUMENT_INTELLIGENCE_KEY:
-                available.append(DocumentAnalysisBackend.DOCUMENT_INTELLIGENCE)
+        # Note: DI service has backwards compatibility - it can use the CU endpoint
+        # if DI endpoint is not set. This allows gradual migration from CU to DI.
+        di_endpoint = settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT or settings.AZURE_CONTENT_UNDERSTANDING_ENDPOINT
         
-        # Check Content Understanding
+        if di_endpoint:
+            # DI is available if endpoint exists (auth is handled by the DI service itself)
+            available.append(DocumentAnalysisBackend.DOCUMENT_INTELLIGENCE)
+        
+        # Check Content Understanding  
         if settings.AZURE_CONTENT_UNDERSTANDING_ENDPOINT:
-            if settings.AZURE_CONTENT_UNDERSTANDING_API_KEY or not settings.AZURE_CONTENT_UNDERSTANDING_API_KEY:
-                available.append(DocumentAnalysisBackend.CONTENT_UNDERSTANDING)
+            # CU is available if endpoint exists (auth is handled by the CU service itself)
+            available.append(DocumentAnalysisBackend.CONTENT_UNDERSTANDING)
         
         return available
     
@@ -183,6 +187,8 @@ class SimpleDocumentAnalysisService:
             
             # Process documents
             documents = []
+            failed_urls = []
+            failed_texts = []
             metadata = {
                 "backend": backend,
                 "section_chunking_enabled": enable_section_chunking,
@@ -196,8 +202,12 @@ class SimpleDocumentAnalysisService:
                 
                 if backend == DocumentAnalysisBackend.DOCUMENT_INTELLIGENCE:
                     # DI has native batch processing
-                    url_docs = await service.analyze_document_batch(urls)
-                    documents.extend(url_docs)
+                    try:
+                        url_docs = await service.analyze_document_batch(urls)
+                        documents.extend(url_docs)
+                    except Exception as e:
+                        logger.error(f"Failed to analyze URLs in batch: {e}")
+                        failed_urls.extend(urls)
                 else:
                     # CU processes one at a time
                     for url in urls:
@@ -206,6 +216,7 @@ class SimpleDocumentAnalysisService:
                             documents.extend(doc_list)
                         except Exception as e:
                             logger.error(f"Failed to analyze URL {url}: {e}")
+                            failed_urls.append(url)
                             # Continue with other URLs instead of failing completely
             
             # Process texts
@@ -215,18 +226,28 @@ class SimpleDocumentAnalysisService:
                 for idx, text in enumerate(texts):
                     try:
                         if backend == DocumentAnalysisBackend.DOCUMENT_INTELLIGENCE:
-                            # DI doesn't support direct text input, would need to upload
-                            logger.warning(
-                                "Document Intelligence doesn't support direct text input. "
-                                "Skipping text document."
+                            # DI doesn't support direct text input
+                            error_msg = (
+                                f"Document Intelligence doesn't support direct text input. "
+                                f"Text document {idx} skipped. Use Content Understanding backend "
+                                f"or convert text to document URL."
                             )
+                            logger.warning(error_msg)
+                            failed_texts.append(idx)
                         else:
                             doc_list = await service.ingest_from_text(text, f"text_{idx}")
                             documents.extend(doc_list)
                     except Exception as e:
                         logger.error(f"Failed to analyze text {idx}: {e}")
+                        failed_texts.append(idx)
             
             metadata["documents_extracted"] = len(documents)
+            if failed_urls:
+                metadata["failed_urls"] = failed_urls
+                metadata["failed_url_count"] = len(failed_urls)
+            if failed_texts:
+                metadata["failed_texts"] = failed_texts
+                metadata["failed_text_count"] = len(failed_texts)
             
             logger.info(
                 f"Document analysis complete: {len(documents)} documents extracted "

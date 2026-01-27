@@ -249,19 +249,21 @@ async def _process_documents(operation_id: str, request: ProcessRequest) -> None
         options = request.options or {}
         enable_section_chunking = options.get("enable_section_chunking", True)
         
-        # Process URLs one at a time for fail-fast behavior
-        for doc_id, url in urls_with_ids:
+        # Process all URLs in batch
+        if urls_with_ids:
+            url_list = [url for _, url in urls_with_ids]
             result = await service.analyze_documents(
-                urls=[url],
+                urls=url_list,
                 enable_section_chunking=enable_section_chunking,
             )
             
             if not result.success:
-                # Fail-fast: stop on first error
-                raise RuntimeError(f"Failed to process document '{doc_id}': {result.error}")
+                # Fail-fast: stop on error
+                raise RuntimeError(f"Failed to process documents: {result.error}")
             
             # Convert to our response format
-            for doc in result.documents:
+            # Map documents back to IDs (assuming same order)
+            for (doc_id, _), doc in zip(urls_with_ids, result.documents):
                 documents_result.append(DocumentResult(
                     id=doc_id,
                     markdown=doc.text or "",

@@ -1472,7 +1472,7 @@ Output:
         
         texts = [n["text"] for n in all_nodes]
         try:
-            embeddings = await self.embedder.embed_batch(texts)
+            embeddings = await self.embedder.aget_text_embedding_batch(texts)
         except Exception as e:
             logger.error(f"Failed to generate DI node embeddings: {e}")
             return stats

@@ -836,6 +836,33 @@ class DocumentIntelligenceService:
                 if section_idx == 0 and part == "direct":
                     section_kvps = section_kvps + orphan_kvps
 
+                # Extract page number from first paragraph's bounding regions
+                page_number = None
+                for para in paras:
+                    bounding_regions = getattr(para, "bounding_regions", None) or []
+                    if bounding_regions:
+                        page_number = getattr(bounding_regions[0], "page_number", None)
+                        if page_number:
+                            break
+                # Fallback: try tables if no paragraph has bounding region
+                if page_number is None:
+                    for tbl in tbls:
+                        bounding_regions = getattr(tbl, "bounding_regions", None) or []
+                        if bounding_regions:
+                            page_number = getattr(bounding_regions[0], "page_number", None)
+                            if page_number:
+                                break
+                
+                # Extract character offsets from merged spans
+                start_offset = None
+                end_offset = None
+                if merged:
+                    first_span = merged[0]
+                    start_offset = first_span.get("offset")
+                    length = first_span.get("length")
+                    if start_offset is not None and length is not None:
+                        end_offset = start_offset + length
+
                 docs.append(
                     Document(
                         text=text,
@@ -852,6 +879,10 @@ class DocumentIntelligenceService:
                             "paragraph_count": len(paras),
                             "key_value_pairs": section_kvps,
                             "kvp_count": len(section_kvps),
+                            # Location metadata for citation tracking
+                            **({"page_number": page_number} if page_number is not None else {}),
+                            **({"start_offset": start_offset} if start_offset is not None else {}),
+                            **({"end_offset": end_offset} if end_offset is not None else {}),
                             # Document-level metadata (included in first chunk)
                             **({"barcodes": barcodes} if section_idx == 0 and part == "direct" and barcodes else {}),
                             **({"languages": languages} if section_idx == 0 and part == "direct" and languages else {}),

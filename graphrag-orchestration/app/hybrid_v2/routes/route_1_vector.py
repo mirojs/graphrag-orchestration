@@ -128,11 +128,21 @@ class VectorRAGHandler(BaseRouteHandler):
                 
                 for i, chunk, score in chunks_with_idx:
                     context_parts.append(f"[{i}] (Score: {score:.2f}) {chunk['text']}")
+                    # Extract metadata for enhanced citations
+                    meta = chunk.get("metadata") or {}
+                    section_path = meta.get("section_path") or meta.get("section_path_key") or ""
+                    if isinstance(section_path, list):
+                        section_path = " > ".join(str(s) for s in section_path if s)
                     citations.append(Citation(
                         index=i,
                         chunk_id=chunk["id"],
                         document_id=chunk.get("document_id", ""),
                         document_title=chunk.get("document_title", ""),
+                        document_url=chunk.get("document_source", "") or meta.get("url", ""),
+                        page_number=meta.get("page_number"),
+                        section_path=section_path,
+                        start_offset=meta.get("start_offset"),
+                        end_offset=meta.get("end_offset"),
                         score=float(score),
                         text_preview=chunk["text"][:200] + "..." if len(chunk["text"]) > 200 else chunk["text"]
                     ))

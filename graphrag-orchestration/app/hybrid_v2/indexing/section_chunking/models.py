@@ -48,6 +48,9 @@ class SectionChunk:
     
     This is compatible with TextChunk but carries additional section metadata.
     When stored in Neo4j, it maps to :TextChunk nodes with enriched metadata.
+    
+    Location metadata (page_number, start_offset, end_offset) enables precise
+    citation tracking back to the original document location.
     """
     id: str
     text: str
@@ -76,6 +79,11 @@ class SectionChunk:
     # Language metadata (from Azure DI LANGUAGES feature)
     language: Optional[str] = None  # ISO 639-1/BCP 47 locale code (e.g., "zh-Hans", "en")
     
+    # Location metadata (from Azure DI) for precise citation tracking
+    page_number: Optional[int] = None  # Page number where chunk appears
+    start_offset: Optional[int] = None  # Character offset in original document
+    end_offset: Optional[int] = None  # End character offset in original document
+    
     def to_text_chunk_dict(self) -> Dict[str, Any]:
         """Convert to TextChunk-compatible dict for Neo4j storage."""
         return {
@@ -98,6 +106,10 @@ class SectionChunk:
                 "is_summary_section": self.is_summary_section,
                 "chunk_strategy": "section_aware_v2",
                 **(({"language": self.language}) if self.language else {}),
+                # Location metadata for citation tracking
+                **(({"page_number": self.page_number}) if self.page_number is not None else {}),
+                **(({"start_offset": self.start_offset}) if self.start_offset is not None else {}),
+                **(({"end_offset": self.end_offset}) if self.end_offset is not None else {}),
             },
         }
 

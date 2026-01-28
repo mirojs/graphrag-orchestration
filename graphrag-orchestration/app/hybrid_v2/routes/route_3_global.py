@@ -257,11 +257,21 @@ class GlobalSearchHandler(BaseRouteHandler):
         citations = []
         for i, c in enumerate(synthesis_result.get("citations", []), 1):
             if isinstance(c, dict):
+                # Extract metadata for enhanced citations
+                meta = c.get("metadata") or {}
+                section_path = meta.get("section_path") or meta.get("section_path_key") or c.get("section_path", "")
+                if isinstance(section_path, list):
+                    section_path = " > ".join(str(s) for s in section_path if s)
                 citations.append(Citation(
                     index=i,
                     chunk_id=c.get("chunk_id", f"chunk_{i}"),
                     document_id=c.get("document_id", ""),
                     document_title=c.get("document_title", c.get("document", "Unknown")),
+                    document_url=c.get("document_url", "") or c.get("document_source", "") or meta.get("url", ""),
+                    page_number=c.get("page_number") or meta.get("page_number"),
+                    section_path=section_path,
+                    start_offset=c.get("start_offset") or meta.get("start_offset"),
+                    end_offset=c.get("end_offset") or meta.get("end_offset"),
                     score=c.get("score", 0.0),
                     text_preview=c.get("text_preview", c.get("text", ""))[:200],
                 ))

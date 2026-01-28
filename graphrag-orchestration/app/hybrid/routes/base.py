@@ -31,24 +31,50 @@ logger = structlog.get_logger(__name__)
 
 @dataclass
 class Citation:
-    """A citation reference to source content."""
+    """A citation reference to source content with location metadata.
+    
+    Provides complete traceability from query results back to source documents:
+    - Document identification (id, title, url)
+    - Location within document (page, section, character offsets)
+    - Relevance scoring and text preview
+    
+    Character offsets (start_offset, end_offset) are from Azure Document Intelligence
+    and represent positions in the original document content.
+    """
     index: int
     chunk_id: str
     document_id: str
     document_title: str
     score: float
     text_preview: str
+    # New fields for document source linking and location
+    document_url: str = ""  # Blob storage URL for clickable links
+    page_number: Optional[int] = None  # Page number from Azure DI
+    section_path: str = ""  # Section hierarchy (e.g., "Terms > Payment")
+    start_offset: Optional[int] = None  # Character offset in document (from DI spans)
+    end_offset: Optional[int] = None  # End character offset in document
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
-        return {
+        result = {
             "index": self.index,
             "chunk_id": self.chunk_id,
             "document_id": self.document_id,
             "document_title": self.document_title,
+            "document_url": self.document_url,
             "score": self.score,
             "text_preview": self.text_preview,
         }
+        # Include optional location fields only if present
+        if self.page_number is not None:
+            result["page_number"] = self.page_number
+        if self.section_path:
+            result["section_path"] = self.section_path
+        if self.start_offset is not None:
+            result["start_offset"] = self.start_offset
+        if self.end_offset is not None:
+            result["end_offset"] = self.end_offset
+        return result
 
 
 @dataclass

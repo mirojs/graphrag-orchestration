@@ -2201,7 +2201,7 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 - **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
 - **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
 - **Verification Script:** `check_edges.py` (compares graph structure between groups)
-- **V2 Latest Group:** `test-5pdfs-v2-1769603510` (Jan 28, 2026) - **GDS ENABLED** ✅ (KNN, Louvain, PageRank)
+- **V2 Latest Group:** `test-5pdfs-v2-1769609082` (Jan 28, 2026) - **GDS UNIFIED** ✅ (KNN only, deduplicated)
 - **V1 Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
 
 **⚠️ IMPORTANT - V2 Indexing Gotcha (Fixed Jan 26, 2026):**
@@ -2212,14 +2212,14 @@ The `/hybrid/index/documents` API endpoint now correctly uses the V2 factory whe
 
 **If you have V2 groups indexed before Jan 26, 2026 18:30 UTC, they must be re-indexed!**
 
-**V2 Features (Added Jan 26, 2026):**
+**V2 Features (Updated Jan 28, 2026):**
 
 - **Voyage voyage-context-3:** 2048-dimension contextual embeddings
 - **Universal Multilingual:** Entity canonicalization for all scripts (CJK, Arabic, Hindi, Thai, Russian, Greek)
 - **Q-D8 Fix:** Document counting synthesis patterns
 - **Section Coverage Fallback:** For documents >32K tokens
 - **Bin-Packing:** Large document handling with contextual chunking
-- **SIMILAR_TO Threshold:** 0.87 (raised from 0.85 - voyage-context-3 clusters tighter)
+- **GDS-Only Semantic Edges:** Unified to `SEMANTICALLY_SIMILAR` via GDS KNN (legacy cosine similarity removed)
 
 **V2 Configuration (.env):**
 
@@ -2229,22 +2229,28 @@ VOYAGE_V2_ENABLED=true
 VOYAGE_API_KEY=your-api-key
 VOYAGE_MODEL_NAME=voyage-context-3
 VOYAGE_EMBEDDING_DIM=2048
-VOYAGE_V2_SIMILARITY_THRESHOLD=0.87  # Raised from 0.85 for V2 (Jan 26, 2026)
+
+# GDS KNN settings for semantic edges
+# No longer using cosine similarity threshold - all semantic edges via GDS KNN
 ```
 
-**V2 SIMILAR_TO Threshold Analysis (Jan 26, 2026):**
+**V2 Semantic Edge Evolution (Jan 28, 2026):**
 
-Voyage `voyage-context-3` clusters semantically-related concepts more tightly than OpenAI's `text-embedding-3-large`. 
-With the same 0.85 threshold, V2 produced 1066 SIMILAR_TO edges vs V1's 25 edges. Analysis showed:
+**Legacy Approach (REMOVED):**
+- `_create_semantic_edges()` method using cosine similarity with threshold 0.87
+- Created `SIMILAR_TO` edges for Entity↔Entity pairs
+- Separate from GDS KNN, causing redundant edge creation
 
-| Threshold | Edges | Quality |
-|-----------|-------|---------|
-| 0.85 | 1066 | Noisy ("sixty days" ↔ "septic tank") |
-| 0.87 | 600 | **Recommended** - removes 44% noise |
-| 0.90 | 198 | High quality only |
-| 0.95 | 19 | Near-duplicates only |
+**New Unified Approach (Jan 28, 2026):**
+- **All semantic edges via GDS KNN only** (K=5, similarity cutoff 0.60)
+- **Single edge type:** `SEMANTICALLY_SIMILAR` (SIMILAR_TO eliminated)
+- **Deduplication:** `id(n1) < id(n2)` constraint prevents bidirectional edges
+- **Coverage:** Entity, Figure, KeyValuePair, Chunk nodes
 
-**Decision:** Raised V2 threshold to **0.87** to balance coverage vs noise.
+**Results Comparison:**
+- V1 baseline: 50 SIMILAR_TO edges (legacy cosine)
+- V2 GDS: **506 SEMANTICALLY_SIMILAR edges** (+912% increase, 10x improvement)
+- **Semantic edge density:** 2.71 edges/entity (vs 0.42 in V1)
 
 ---
 
@@ -2367,19 +2373,21 @@ python3 ../check_edges.py test-5pdfs-1769071711867955961
 
 **V2 vs V1 Comparison (Jan 26, 2026):**
 
-| Metric | V2 (test-5pdfs-v2-1769427385) | V1 (test-5pdfs-1769071711867955961) |
+| Metric | V2 (test-5pdfs-v2-1769609082) | V1 (test-5pdfs-1769071711867955961) |
 |--------|-------------------------------|-------------------------------------|
 | Embedding Model | voyage-context-3 (2048d) | text-embedding-3-large (3072d) |
 | embedding_v2 | 17/17 (100%) | 0/17 (0%) |
 | embedding (v1) | 0/17 (0%) | 17/17 (100%) |
-| Entities | 157 | 120 |
-| APPEARS_IN_SECTION | 263 | 184 |
-| APPEARS_IN_DOCUMENT | 166 | 130 |
-| SIMILAR_TO | 2132 | 50 |
+| Entities | 187 (+56%) | 120 |
+| APPEARS_IN_SECTION | 278 (+51%) | 184 |
+| APPEARS_IN_DOCUMENT | 196 (+51%) | 130 |
+| SIMILAR_TO (legacy) | 0 ✅ | 50 |
+| SEMANTICALLY_SIMILAR (GDS) | 506 ✅ | 0 |
 | SHARES_ENTITY | 46 | 46 |
 | Tables | 4 | 4 |
 | KeyValues | 40 | 40 |
-| Aliases | 123/157 (78%) | 98/120 (81%) |
+| Aliases | 132/187 (70%) | 98/120 (81%) |
+| **GDS Algorithms** | ✅ KNN, Louvain, PageRank | ❌ N/A |
 
 **CRITICAL: Section-Aware Chunking Configuration**
 
@@ -2394,7 +2402,8 @@ The indexing pipeline uses **section-aware chunking v2** by default (changed Jan
 
 | Group ID | Date | Strategy | Embedding | Docs | Chunks | Sections | Entities | Tables | KVPs | Notes |
 |----------|------|----------|-----------|------|--------|----------|----------|--------|------|-------|
-| `test-5pdfs-v2-1769603510` | Jan 28 | section_aware_v2 | **voyage-context-3 (2048d)** | 5 | 17 | 12 | 163 | 38 | 218 | **V2 Current** with GDS (KNN, Louvain, PageRank) ✅ |
+| `test-5pdfs-v2-1769609082` | Jan 28 | section_aware_v2 | **voyage-context-3 (2048d)** | 5 | 17 | 12 | 187 | 4 | 40 | **V2 Current** - GDS Unified (506 SEMANTICALLY_SIMILAR) ✅ |
+| `test-5pdfs-v2-1769603510` | Jan 28 | section_aware_v2 | **voyage-context-3 (2048d)** | 5 | 17 | 12 | 163 | 38 | 218 | V2 with mixed edges (558 SIMILAR_TO + 364 SEMANTICALLY_SIMILAR) |
 | `test-5pdfs-1769071711867955961` | Jan 22 | section_aware_v2 | text-embedding-3-large | 5 | 17 | 12 | 120 | 4 | 40 | V1 with KVP extraction |
 | `test-5pdfs-1768993202876876545` | Jan 21 | section_aware_v2 | text-embedding-3-large | 5 | 17 | 12 | 109 | 4 | 0 | Baseline for KVP comparison |
 | `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | text-embedding-3-large | 5 | 74 | ? | 265 | 0 | 0 | Old baseline (table data stripped) |
@@ -3765,25 +3774,32 @@ AuraDB Professional includes GDS, and we now use it during indexing for:
 | **gds.pageRank** | Node importance | `pagerank` property | Rank nodes for retrieval priority |
 
 **Implementation:** `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
-- Method: `_run_gds_graph_algorithms()`
+- Method: `_run_gds_graph_algorithms()` (Step 8 in indexing pipeline)
 - Called automatically during `_process_di_metadata_to_graph()`
-- Creates single projection, runs all algorithms, cleans up
+- Creates single projection with unique job ID, runs all algorithms, cleans up
 
-**Graph Projection:**
+**Graph Projection (Aura Serverless GDS):**
 ```cypher
-CALL gds.graph.project.cypher(
-    'graphrag_{group_id}',
-    'MATCH (n) WHERE n.group_id = $group_id 
-     AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-     RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding_v2',
-    'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id ...
-     RETURN id(n) AS source, id(m) AS target, type(r) AS type'
+// Timestamp with milliseconds + random suffix ensures unique job ID
+CALL gds.graph.project.remote(
+    source, target,
+    {
+        sourceNodeProperties: n.embedding_v2,
+        targetNodeProperties: m.embedding_v2,
+        sourceNodeLabels: labels(n),
+        targetNodeLabels: labels(m),
+        relationshipType: type(r)
+    }
 )
+WHERE n.group_id = $group_id
+  AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+  AND n.embedding_v2 IS NOT NULL
 ```
 
 **KNN Parameters:**
 - `topK: 5` - Find 5 nearest neighbors per node
 - `similarityCutoff: 0.60` - Minimum similarity threshold
+- **Edge Creation:** `MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2) WHERE id(n1) < id(n2)`
 
 **Louvain Parameters:**
 - `writeProperty: 'community_id'` - Property name for community assignment
@@ -5277,28 +5293,47 @@ SET r.shared_entities = shared[0..10],  // Cap at 10 for storage
 
 ### 19.6. Phase 3: Semantic Enhancement
 
-#### 3.1 SIMILAR_TO (Entity ↔ Entity via Embeddings)
+#### 3.1 SEMANTICALLY_SIMILAR (All Nodes via GDS KNN) ✅ UNIFIED Jan 28, 2026
 
-**Purpose:** Connect semantically similar entities that aren't explicitly RELATED_TO.
+**Purpose:** Connect semantically similar nodes across all types (Entity, Figure, KeyValuePair, Chunk).
+
+**Status:** ✅ **Fully implemented via GDS KNN** - Legacy cosine similarity method removed.
 
 **Schema:**
 ```cypher
-(e1:Entity)-[:SIMILAR_TO {score: FLOAT}]->(e2:Entity)
+(n1)-[:SEMANTICALLY_SIMILAR {similarity: FLOAT}]->(n2)
+// Where n1, n2 can be Entity, Figure, KeyValuePair, or Chunk
 ```
 
-**Creation Query:**
+**Creation Method (GDS KNN):**
 ```cypher
-MATCH (e1:Entity), (e2:Entity)
-WHERE e1.group_id = $group_id
-  AND e2.group_id = $group_id
-  AND e1 <> e2
-  AND e1.embedding IS NOT NULL
-  AND e2.embedding IS NOT NULL
-  AND NOT (e1)-[:RELATED_TO]-(e2)  // Skip explicit relationships
-WITH e1, e2, vector.similarity.cosine(e1.embedding, e2.embedding) AS score
-WHERE score > 0.85  // High threshold for semantic similarity
-MERGE (e1)-[r:SIMILAR_TO]->(e2)
-SET r.score = score,
+// GDS KNN finds K=5 nearest neighbors with cutoff=0.60
+CALL gds.knn.stream(projection_name, {
+    nodeProperties: ['embedding_v2'],
+    topK: 5,
+    similarityCutoff: 0.60
+})
+YIELD node1, node2, similarity
+
+// Create deduplicated edges (only one direction per pair)
+MATCH (n1) WHERE id(n1) = node1
+MATCH (n2) WHERE id(n2) = node2
+WHERE id(n1) < id(n2)  // Deduplication constraint
+MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+SET r.similarity = similarity
+```
+
+**Results (test-5pdfs-v2-1769609082):**
+- **506 SEMANTICALLY_SIMILAR edges** created
+- Connects 187 entities + Figure/KVP/Chunk nodes
+- **10x improvement** over V1 baseline (50 SIMILAR_TO edges)
+- **Semantic edge density:** 2.71 edges per entity (vs 0.42 in V1)
+
+**Legacy Method (REMOVED Jan 28, 2026):**
+- `_create_semantic_edges()` - 62-line method using cosine similarity threshold
+- Created `SIMILAR_TO` edges only for Entity↔Entity
+- Caused redundant edge creation with GDS KNN
+- Required manual threshold tuning (0.87 was last value)
     r.group_id = $group_id
 ```
 

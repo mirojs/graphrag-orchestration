@@ -1,6 +1,18 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 27, 2026
+**Last Updated:** January 28, 2026
+
+**Recent Updates (January 28, 2026):**
+- 🚀 **Pre-Indexing OCR QA Workflow Design:** Enterprise-grade document quality assurance using Azure DI confidence scores
+  - **Approach:** Pre-indexing human-in-the-loop QA gate (preferred over query-time filtering)
+  - **Confidence Source:** Word-level OCR confidence from Azure DI, aggregated to document/chunk level
+  - **Thresholds:** HIGH (≥0.90) auto-approve, MEDIUM (0.75-0.90) flagged, LOW (<0.75) human review required
+  - **Audit Trail:** `ocr_reviewed` flag and `ocr_min_confidence` on Document nodes for compliance
+  - **Use Case:** Insurance claims processing with scanned/handwritten documents
+  - Documentation: `ANALYSIS_OCR_CONFIDENCE_QA_WORKFLOW_2026-01-28.md`, Section 21 below
+- ✅ **Route 4 Benchmark:** 98.2% (56/57) on GDS V2 unified index with 506 SEMANTICALLY_SIMILAR edges
+  - Q-D8 ground truth corrected (Contoso appears in 4 docs as Buyer/Owner in WARRANTY)
+  - Negative test detection improved (+10 phrases: "is not present", "no vat", etc.)
 
 **Recent Updates (January 27, 2026):**
 - 🚀 **Knowledge Map Document Processing API:** New async batch API for document intelligence with Azure DI/CU abstraction
@@ -6014,5 +6026,134 @@ The key embedding enables semantic matching between query terms and stored keys:
 **Threshold:** 0.85 cosine similarity (configurable)
 
 **Deduplication:** During indexing, identical keys (case-insensitive) share embeddings to reduce storage and embedding API costs.
+
+---
+
+## 21. Pre-Indexing OCR Quality Assurance (QA) Workflow
+
+**Added:** January 28, 2026  
+**Reference:** `ANALYSIS_OCR_CONFIDENCE_QA_WORKFLOW_2026-01-28.md`
+
+### 21.1. Overview
+
+For high-stakes enterprise use cases (insurance, auditing, finance), ensuring OCR quality **before** data enters the knowledge graph is critical. This section describes the pre-indexing QA workflow using Azure DI confidence scores.
+
+### 21.2. Azure DI Confidence Score Availability
+
+| Element | Has Confidence? | Location | Stored in Graph? |
+|---------|----------------|----------|-----------------|
+| **Words** | ✅ Yes | `DocumentWord.confidence` | Aggregated to doc/chunk |
+| **Lines** | ❌ No | N/A | N/A |
+| **Paragraphs** | ❌ No | N/A | N/A |
+| **Tables** | ❌ No | N/A | N/A |
+| **Sections** | ❌ No | N/A | N/A |
+| **Barcodes** | ✅ Yes | `DocumentBarcode.confidence` | ✅ On Barcode nodes |
+| **Key-Value Pairs** | ✅ Yes | `DocumentKeyValuePair.confidence` | ✅ On KeyValuePair nodes |
+| **Selection Marks** | ✅ Yes | `DocumentSelectionMark.confidence` | ✅ On SelectionMark nodes |
+
+**Key Insight:** Entities are NOT extracted by Azure DI - they come from LLM extraction. OCR confidence applies to word-level text recognition only.
+
+### 21.3. Pre-Indexing QA vs Query-Time Filtering
+
+| Approach | Pros | Cons | Recommendation |
+|----------|------|------|----------------|
+| **Pre-Indexing QA** | Prevents bad data entry, audit trail, human-in-the-loop | Adds latency, requires review workflow | ✅ **Recommended** |
+| **Query-Time Filtering** | Fast onboarding, no bottleneck | Bad data in graph, hard to audit | ❌ Not recommended |
+
+**Rationale:** For insurance companies, preventing bad data is more valuable than filtering at query time.
+
+### 21.4. QA Workflow Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PRE-INDEXING QA PIPELINE                         │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│   Document → Azure DI → Confidence Aggregation → QA Decision Gate   │
+│                                                    │                │
+│                              ┌─────────────────────┼────────────────┐
+│                              │                     │                │
+│                              ▼                     ▼                │
+│                   ┌──────────────────┐  ┌──────────────────────┐   │
+│                   │   AUTO-APPROVE   │  │    HUMAN REVIEW      │   │
+│                   │  (min_conf ≥ T)  │  │      QUEUE           │   │
+│                   └────────┬─────────┘  └──────────┬───────────┘   │
+│                            │                       │               │
+│                            │                       ▼               │
+│                            │            ┌──────────────────────┐   │
+│                            │            │   Human Reviewer     │   │
+│                            │            │  - Correct OCR       │   │
+│                            │            │  - Approve/Reject    │   │
+│                            │            └──────────┬───────────┘   │
+│                            │                       │               │
+│                            ▼                       ▼               │
+│                   ┌──────────────────────────────────────────────┐ │
+│                   │        GRAPH INDEXING (Neo4j)                │ │
+│                   │    (with ocr_reviewed audit flag)            │ │
+│                   └──────────────────────────────────────────────┘ │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### 21.5. Confidence Thresholds
+
+| Threshold | Range | Action | Use Case |
+|-----------|-------|--------|----------|
+| **HIGH** | ≥ 0.90 | Auto-approve | Clean digital documents |
+| **MEDIUM** | 0.75 - 0.90 | Auto-approve with flag | Minor issues |
+| **LOW** | < 0.75 | Human review required | Scanned/handwritten docs |
+
+### 21.6. Document Node Extensions
+
+```cypher
+(:Document {
+    id: "doc-123",
+    group_id: "tenant-abc",
+    title: "Policy_2026.pdf",
+    // ... existing properties ...
+    
+    // OCR Quality Metadata (NEW)
+    ocr_min_confidence: 0.87,           // Minimum word confidence
+    ocr_avg_confidence: 0.96,           // Average word confidence
+    ocr_reviewed: true,                 // Human reviewed flag
+    ocr_review_date: datetime(),        // When reviewed
+    ocr_reviewer: "john.doe@company.com" // Who reviewed (optional)
+})
+```
+
+### 21.7. When OCR QA Matters
+
+| Document Type | Typical Confidence | QA Need |
+|---------------|-------------------|---------|
+| Scanned claims forms | 0.70-0.90 | **Critical** |
+| Handwritten notes | 0.50-0.80 | **Critical** |
+| Faxed documents | 0.75-0.92 | **High** |
+| Old photocopies | 0.65-0.85 | **High** |
+| Digital PDFs | 0.98-1.00 | **Low** |
+| Word exports | 0.99-1.00 | **Low** |
+
+### 21.8. Implementation Priority
+
+| Phase | Component | Priority |
+|-------|-----------|----------|
+| 1 | Compute doc-level `ocr_min_confidence` during indexing | High |
+| 2 | Add `ocr_reviewed` flag to Document nodes | High |
+| 3 | Build review queue API | Medium |
+| 4 | Build reviewer UI | Low |
+| 5 | Add chunk-level confidence (optional) | Low |
+
+### 21.9. Review Queue API (Future)
+
+```
+POST /api/v1/qa/documents/{doc_id}/review
+{
+    "action": "approve" | "reject" | "correct",
+    "corrections": [...],
+    "notes": "..."
+}
+
+GET /api/v1/qa/pending
+→ Returns list of documents awaiting human review
+```
 
 ---

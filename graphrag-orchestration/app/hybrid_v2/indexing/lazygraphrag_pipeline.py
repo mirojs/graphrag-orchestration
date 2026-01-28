@@ -1687,6 +1687,7 @@ Output:
             
             # Process KNN results and create edges in Neo4j
             # Use SEMANTICALLY_SIMILAR for ALL KNN edges (consistency with GDS)
+            # Only create one edge per pair (id(n1) < id(n2)) to avoid bidirectional duplicates
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
                 edges_created = 0
                 
@@ -1696,10 +1697,12 @@ Output:
                     similarity = float(row["similarity"])
                     
                     # Create SEMANTICALLY_SIMILAR edge for all node type combinations
-                    # (Entity↔Entity, Figure/KVP→Entity, etc.)
+                    # Only create edge if node1 < node2 (avoids A→B and B→A duplicates)
+                    # Similarity is symmetric, so one edge per pair is sufficient
                     result = session.run("""
                         MATCH (n1), (n2) 
                         WHERE id(n1) = $node1 AND id(n2) = $node2
+                          AND id(n1) < id(n2)
                         MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
                         SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
                         RETURN count(r) AS cnt

@@ -349,20 +349,6 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Why:** Finds ALL structurally connected nodes (even "boring" ones LLM might skip)
 *   **Output:** Ranked evidence nodes with PPR scores
 
-#### Stage 3.4.2: PPR Entity Chunk Enrichment (NEW - January 28, 2026)
-*   **Engine:** Enhanced Graph Retriever
-*   **What:** Fetch text chunks for PPR-discovered entities not in original hub list
-*   **Why (Root Cause):** Hub entities (top 10 from community matching) drive initial chunk retrieval via MENTIONS edges. PPR tracing may discover additional relevant entities (e.g., "Pocatello, Idaho") that have valuable context not captured by hub entities alone. Without this stage, these PPR-discovered entities appear in `evidence_path` but their actual text chunks are NOT sent to the LLM.
-*   **How It Works:**
-    1. Compare PPR evidence_nodes with original hub_entities (case-insensitive)
-    2. Identify NEW entities discovered by PPR (not in hub list, PPR score > 0.01)
-    3. Sort by PPR score, take top 5 new entities
-    4. Fetch their chunks via MENTIONS edges (max 2 chunks per entity)
-    5. Merge into `graph_context.source_chunks` (deduplicated by chunk_id)
-    6. Mark chunks with "ppr:" prefix for traceability
-*   **Example Fix:** Q-G2 "jurisdictions/governing law" question - PPR found "Pocatello, Idaho" entity but its text chunks (containing "1820 Summit Ridge Dr., Pocatello, ID 83201") were not sent to LLM. Now they are included.
-*   **Output:** Enriched source_chunks with context from PPR-discovered entities
-
 #### Stage 3.4.1: Coverage Gap Fill (FINAL DOC COVERAGE)
 *   **Engine:** Document Graph enumeration + gap detection
 *   **What:** After ALL relevance-based retrieval is complete, identify which documents are still missing from the context and add ONE representative chunk per missing document.

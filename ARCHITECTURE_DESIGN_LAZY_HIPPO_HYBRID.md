@@ -2201,7 +2201,7 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 - **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
 - **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
 - **Verification Script:** `check_edges.py` (compares graph structure between groups)
-- **V2 Latest Group:** `test-5pdfs-v2-1769496129` (Jan 27, 2026) - **CORRECT EMBEDDINGS** ✅
+- **V2 Latest Group:** `test-5pdfs-v2-1769603510` (Jan 28, 2026) - **GDS ENABLED** ✅ (KNN, Louvain, PageRank)
 - **V1 Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
 
 **⚠️ IMPORTANT - V2 Indexing Gotcha (Fixed Jan 26, 2026):**
@@ -2394,8 +2394,7 @@ The indexing pipeline uses **section-aware chunking v2** by default (changed Jan
 
 | Group ID | Date | Strategy | Embedding | Docs | Chunks | Sections | Entities | Tables | KVPs | Notes |
 |----------|------|----------|-----------|------|--------|----------|----------|--------|------|-------|
-| `test-5pdfs-v2-1769496129` | Jan 27 | section_aware_v2 | **voyage-context-3 (2048d)** | 5 | 17 | 12 | 158 | 9 | 17 | **V2 Current** with Voyage + Correct Factory ✅ |
-| `test-5pdfs-v2-1769427385` | Jan 26 | section_aware_v2 | voyage-context-3 (WRONG) | 5 | 17 | 12 | 157 | 4 | 40 | V2 OLD - Had wrong OpenAI embeddings |
+| `test-5pdfs-v2-1769603510` | Jan 28 | section_aware_v2 | **voyage-context-3 (2048d)** | 5 | 17 | 12 | 163 | 38 | 218 | **V2 Current** with GDS (KNN, Louvain, PageRank) ✅ |
 | `test-5pdfs-1769071711867955961` | Jan 22 | section_aware_v2 | text-embedding-3-large | 5 | 17 | 12 | 120 | 4 | 40 | V1 with KVP extraction |
 | `test-5pdfs-1768993202876876545` | Jan 21 | section_aware_v2 | text-embedding-3-large | 5 | 17 | 12 | 109 | 4 | 0 | Baseline for KVP comparison |
 | `test-5pdfs-1768832399067050900` | Jan 6 | section_aware_v2 | text-embedding-3-large | 5 | 74 | ? | 265 | 0 | 0 | Old baseline (table data stripped) |
@@ -2439,8 +2438,8 @@ export $(cat .env | grep -v '^#' | xargs)
 # Check latest indexed group (reads from last_test_group_id.txt)
 python3 ../check_edges.py
 
-# Check V2 group (current: test-5pdfs-v2-1769496129 with Voyage embeddings)
-python3 ../check_edges.py test-5pdfs-v2-1769496129
+# Check V2 group (current: test-5pdfs-v2-1769603510 with GDS enabled)
+python3 ../check_edges.py test-5pdfs-v2-1769603510
 
 # Check V1 group (test-5pdfs-1769071711867955961 with OpenAI embeddings)
 python3 ../check_edges.py test-5pdfs-1769071711867955961

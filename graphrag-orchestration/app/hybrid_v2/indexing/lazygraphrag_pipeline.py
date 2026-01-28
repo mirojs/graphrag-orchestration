@@ -1105,10 +1105,10 @@ Output:
         connectivity_stats = await self._create_connectivity_edges(group_id)
         details["connectivity_edges"] = connectivity_stats
         
-        # Create semantic enhancement edges (Phase 3 Week 5-6)
-        # SIMILAR_TO edges connect semantically similar entities via embeddings
-        semantic_stats = await self._create_semantic_edges(group_id)
-        details["semantic_edges"] = semantic_stats
+        # NOTE: Semantic edges (SIMILAR_TO) are now created by GDS KNN in Step 8 (index_documents)
+        # as SEMANTICALLY_SIMILAR edges. The legacy _create_semantic_edges() method is kept
+        # as fallback but no longer called here to avoid redundant Entity↔Entity edges.
+        # GDS KNN is more comprehensive: covers Entity, KVP, Chunk, Figure nodes.
         
         return {"passed": True, "details": details, "stats": {"entities": len(entities), "relationships": len(relationships)}}
 
@@ -2629,68 +2629,6 @@ Output:
             extra={
                 "group_id": group_id,
                 "shares_entity": stats["shares_entity"],
-            },
-        )
-        
-        return stats
-
-    async def _create_semantic_edges(self, group_id: str) -> Dict[str, int]:
-        """Create Phase 3 semantic enhancement edges.
-        
-        Creates:
-        1. SIMILAR_TO: Entity ↔ Entity (via embedding similarity)
-        
-        These edges enable:
-        - Fuzzy entity matching ("warranty period" ↔ "coverage duration")
-        - Alternative PPR paths for entity disambiguation
-        - Cross-document entity bridging without explicit RELATED_TO
-        
-        Args:
-            group_id: Group identifier for multi-tenancy
-            
-        Returns:
-            Dictionary with edge counts: {"similar_to": N}
-        """
-        logger.info("creating_semantic_edges", extra={"group_id": group_id})
-        
-        stats = {
-            "similar_to": 0,
-        }
-        
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-            # Create SIMILAR_TO edges (Entity ↔ Entity)
-            # Connects entities with high embedding similarity
-            # V2 uses 0.87 threshold (voyage-context-3 clusters tighter than OpenAI)
-            # V1 used 0.85 threshold (text-embedding-3-large)
-            # Skips entities that already have explicit RELATED_TO relationships
-            similarity_threshold = getattr(settings, 'VOYAGE_V2_SIMILARITY_THRESHOLD', 0.87)
-            result = session.run(
-                """
-                MATCH (e1:Entity {group_id: $group_id}), (e2:Entity {group_id: $group_id})
-                WHERE e1 <> e2
-                  AND e1.embedding IS NOT NULL
-                  AND e2.embedding IS NOT NULL
-                  AND elementId(e1) < elementId(e2)  // Avoid duplicates (create undirected edges once)
-                  AND NOT (e1)-[:RELATED_TO]-(e2)  // Skip explicit relationships
-                WITH e1, e2, 
-                     vector.similarity.cosine(e1.embedding, e2.embedding) AS score
-                WHERE score > $threshold
-                MERGE (e1)-[r:SIMILAR_TO]-(e2)
-                SET r.score = score,
-                    r.group_id = $group_id,
-                    r.created_at = datetime()
-                RETURN count(r) AS count
-                """,
-                group_id=group_id,
-                threshold=similarity_threshold,
-            )
-            stats["similar_to"] = result.single()["count"]
-        
-        logger.info(
-            "semantic_edges_created",
-            extra={
-                "group_id": group_id,
-                "similar_to": stats["similar_to"],
             },
         )
         

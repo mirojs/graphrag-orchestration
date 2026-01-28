@@ -187,6 +187,10 @@ class LazyGraphRAGIndexingPipeline:
         if reindex:
             self.neo4j_store.delete_group_data(group_id)
 
+        # Initialize GroupMeta node for lifecycle tracking.
+        # This creates or updates the GroupMeta node to track GDS staleness, etc.
+        self.neo4j_store.initialize_group_meta(group_id)
+
         # 1) Normalize + (optional) extract with Document Intelligence.
         expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
 
@@ -1550,16 +1554,19 @@ Output:
                 
                 # Create comprehensive projection for all algorithms
                 # Include Entity, Figure, KeyValuePair, Chunk nodes
+                # Exclude :Deprecated nodes from GDS computation
                 session.run(
                     """
                     CALL gds.graph.project.cypher(
                         $name,
                         'MATCH (n) WHERE n.group_id = $group_id 
                          AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                         AND NOT n:Deprecated
                          RETURN id(n) AS id, labels(n) AS labels,
                         'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id AND m.group_id = $group_id
                          AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
                          AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
+                         AND NOT n:Deprecated AND NOT m:Deprecated
                          RETURN id(n) AS source, id(m) AS target, type(r) AS type',
                         {parameters: {group_id: $group_id}}
                     )
@@ -1585,7 +1592,7 @@ Output:
                         WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
                         WHERE (n1:Figure OR n1:KeyValuePair) AND n2:Entity
                         MERGE (n1)-[r:SIMILAR_TO]->(n2)
-                        SET r.score = similarity, r.method = 'gds_knn', r.created_at = datetime()
+                        SET r.score = similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
                         RETURN count(r) AS edges_created
                         """,
                         name=projection_name,
@@ -1613,7 +1620,7 @@ Output:
                         WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
                         WHERE n1:Entity AND n2:Entity AND id(n1) < id(n2)  // Avoid duplicates
                         MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                        SET r.score = similarity, r.method = 'gds_knn', r.created_at = datetime()
+                        SET r.score = similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
                         RETURN count(r) AS edges_created
                         """,
                         name=projection_name,
@@ -1676,6 +1683,9 @@ Output:
                 # Clean up projection
                 session.run("CALL gds.graph.drop($name, false)", name=projection_name)
                 logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
+                
+                # Mark GDS as freshly computed for this group
+                self.neo4j_store.clear_gds_stale(group_id)
                 
         except Exception as e:
             logger.error(f"GDS graph algorithms failed: {e}", extra={"error": str(e)})
@@ -2282,7 +2292,7 @@ Output:
                 MATCH (s1:Section {id: e.source_id, group_id: $group_id})
                 MATCH (s2:Section {id: e.target_id, group_id: $group_id})
                 MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
-                SET r.similarity = e.similarity, r.created_at = datetime()
+                SET r.similarity = e.similarity, r.group_id = $group_id, r.created_at = datetime()
                 RETURN count(r) AS count
                 """,
                 edges=edges_to_create,

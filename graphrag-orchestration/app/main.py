@@ -6,6 +6,7 @@ from app.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from app.middleware.group_isolation import GroupIsolationMiddleware
 from app.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map
+from app.hybrid_v2.routers import document_lifecycle, maintenance
 
 # NOTE: GraphService and LLMService are core services used by V3
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
@@ -150,6 +151,14 @@ app.include_router(document_analysis.router, tags=["document-analysis"])
 # Follows Azure CU polling pattern with simplified response format
 # POST /process -> GET /operations/{id} with Retry-After, 60s TTL, fail-fast
 app.include_router(knowledge_map.router, tags=["knowledge-map"])
+
+# ============================================================================
+# Document Lifecycle & Maintenance API
+# ============================================================================
+# Document deprecation, restoration, and hard deletion
+app.include_router(document_lifecycle.router, prefix="/lifecycle", tags=["document-lifecycle"])
+# Maintenance jobs: GC orphans, stale edges, GDS recompute, health checks
+app.include_router(maintenance.router, prefix="/maintenance", tags=["maintenance"])
 
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation

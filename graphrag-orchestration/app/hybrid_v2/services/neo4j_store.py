@@ -248,6 +248,12 @@ class Neo4jStoreV3:
             "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
             "CREATE INDEX community_group IF NOT EXISTS FOR (c:Community) ON (c.group_id)",
             
+            # Document lifecycle indexes (deprecation queries)
+            "CREATE INDEX document_deprecated_at IF NOT EXISTS FOR (d:Document) ON (d.deprecated_at)",
+            "CREATE INDEX entity_deprecated_at IF NOT EXISTS FOR (e:Entity) ON (e.deprecated_at)",
+            "CREATE INDEX chunk_deprecated_at IF NOT EXISTS FOR (t:TextChunk) ON (t.deprecated_at)",
+            "CREATE INDEX groupmeta_gds_stale IF NOT EXISTS FOR (g:GroupMeta) ON (g.gds_stale)",
+            
             # Full-text index for hybrid search (keyword matching)
             "CREATE FULLTEXT INDEX entity_fulltext IF NOT EXISTS FOR (e:Entity) ON EACH [e.name, e.description]",
             "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)",
@@ -1679,7 +1685,7 @@ class Neo4jStoreV3:
     # ==================== Document Operations ====================
     
     def upsert_document(self, group_id: str, document: Document) -> str:
-        """Insert or update a document."""
+        """Insert or update a document with lifecycle metadata."""
         query = """
         MERGE (d:Document {id: $id, group_id: $group_id})
         SET d.title = $title,
@@ -1687,7 +1693,8 @@ class Neo4jStoreV3:
             d.group_id = $group_id,
             d.metadata = $metadata,
             d.date = $document_date,
-            d.updated_at = datetime()
+            d.updated_at = datetime(),
+            d.created_at = coalesce(d.created_at, datetime())
         RETURN d.id AS id
         """
         
@@ -1706,6 +1713,53 @@ class Neo4jStoreV3:
             )
             record = result.single()
             return cast(str, record["id"]) if record else document.id
+    
+    def initialize_group_meta(self, group_id: str) -> None:
+        """Initialize or update GroupMeta node for lifecycle tracking.
+        
+        Call this at the start of indexing to ensure the group metadata
+        node exists for lifecycle management.
+        """
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        ON CREATE SET 
+            g.created_at = datetime(),
+            g.gds_stale = true,
+            g.gds_stale_since = datetime()
+        SET g.last_indexing_at = datetime()
+        RETURN g.group_id AS group_id
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            session.run(query, group_id=group_id)
+            logger.info(f"Initialized GroupMeta for {group_id}")
+    
+    def mark_gds_stale(self, group_id: str, reason: str = None) -> None:
+        """Mark a group as needing GDS recomputation.
+        
+        Call this after any lifecycle changes (deprecation, deletion, etc.)
+        """
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        SET g.gds_stale = true,
+            g.gds_stale_since = datetime(),
+            g.gds_stale_reason = $reason
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            session.run(query, group_id=group_id, reason=reason)
+    
+    def clear_gds_stale(self, group_id: str) -> None:
+        """Mark GDS as freshly computed."""
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        SET g.gds_stale = false,
+            g.gds_last_computed = datetime(),
+            g.gds_stale_reason = null
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            session.run(query, group_id=group_id)
     
     # ==================== Cleanup Operations ====================
     

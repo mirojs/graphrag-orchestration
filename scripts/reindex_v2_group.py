@@ -16,8 +16,8 @@ import sys
 
 API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
-# Use same group ID to overwrite existing data
-V2_GROUP_ID = "test-5pdfs-v2-1769440005"
+# Use existing group to test new lifecycle features
+V2_GROUP_ID = "test-5pdfs-v2-1769496129"
 
 # 5 Test PDFs
 PDF_URLS = [

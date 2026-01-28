@@ -47,6 +47,13 @@ from app.hybrid_v2.services.neo4j_store import Document, Entity, Neo4jStoreV3, R
 from app.hybrid_v2.utils.language import canonical_key_for_entity, is_cjk, detect_cjk_from_text
 from app.core.config import settings
 
+# Aura Graph Analytics (serverless GDS) - for KNN, Louvain, PageRank
+try:
+    from graphdatascience import GraphDataScience
+    GDS_CLIENT_AVAILABLE = True
+except ImportError:
+    GDS_CLIENT_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -1512,11 +1519,19 @@ Output:
         logger.info(f"✅ Generated {stats['embeddings_created']} embeddings")
         
         # 5. Run GDS algorithms: KNN for similarity, Louvain for communities, PageRank for importance
-        gds_stats = await self._run_gds_graph_algorithms(group_id=group_id)
-        stats["knn_edges_created"] = gds_stats.get("knn_edges", 0)
-        stats["entity_similarity_edges"] = gds_stats.get("entity_edges", 0)
-        stats["communities_detected"] = gds_stats.get("communities", 0)
-        stats["pagerank_scored"] = gds_stats.get("pagerank_nodes", 0)
+        # GDS is optional - if not available, skip it gracefully
+        try:
+            gds_stats = await self._run_gds_graph_algorithms(group_id=group_id)
+            stats["knn_edges_created"] = gds_stats.get("knn_edges", 0)
+            stats["entity_similarity_edges"] = gds_stats.get("entity_edges", 0)
+            stats["communities_detected"] = gds_stats.get("communities", 0)
+            stats["pagerank_scored"] = gds_stats.get("pagerank_nodes", 0)
+        except Exception as e:
+            logger.warning(f"⚠️  GDS algorithms skipped (not available): {e}")
+            stats["knn_edges_created"] = 0
+            stats["entity_similarity_edges"] = 0
+            stats["communities_detected"] = 0
+            stats["pagerank_scored"] = 0
         
         return stats
 
@@ -1528,6 +1543,9 @@ Output:
         knn_similarity_cutoff: float = 0.60,
     ) -> Dict[str, int]:
         """Run GDS algorithms to enhance the graph with computed properties.
+        
+        Uses graphdatascience Python client for Aura serverless Graph Analytics.
+        Falls back to native vector similarity if GDS client unavailable.
         
         Algorithms run:
         1. **KNN** - Creates similarity edges:
@@ -1547,143 +1565,295 @@ Output:
         stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
         projection_name = f"graphrag_{group_id.replace('-', '_')}"
         
+        # Try Aura Graph Analytics via graphdatascience client
+        use_gds = False
+        gds = None
+        G = None
+        
+        if GDS_CLIENT_AVAILABLE and settings.NEO4J_URI:
+            try:
+                logger.info(f"📊 Connecting to Aura Graph Analytics...")
+                # Connect to AuraDB with Graph Analytics enabled
+                gds = GraphDataScience(
+                    settings.NEO4J_URI,
+                    auth=(settings.NEO4J_USERNAME or "neo4j", settings.NEO4J_PASSWORD or ""),
+                    aura_ds=True,  # Enable Graph Analytics session management
+                )
+                logger.info(f"✅ GDS client connected, version: {gds.version()}")
+                
+                # Project graph from Neo4j into GDS session
+                logger.info(f"📊 Creating GDS projection: {projection_name}")
+                G, project_result = gds.graph.project.cypher(
+                    projection_name,
+                    f"""
+                    MATCH (n) 
+                    WHERE n.group_id = '{group_id}'
+                      AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                      AND NOT n:Deprecated
+                      AND n.embedding_v2 IS NOT NULL
+                    RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding
+                    """,
+                    f"""
+                    MATCH (n)-[r]->(m) 
+                    WHERE n.group_id = '{group_id}' AND m.group_id = '{group_id}'
+                      AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                      AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
+                      AND NOT n:Deprecated AND NOT m:Deprecated
+                    RETURN id(n) AS source, id(m) AS target, type(r) AS type
+                    """,
+                )
+                use_gds = True
+                logger.info(f"✅ GDS projection created: {projection_name} ({G.node_count()} nodes, {G.relationship_count()} relationships)")
+            except Exception as e:
+                logger.warning(f"Aura Graph Analytics connection failed: {e}")
+                logger.warning("Falling back to native vector similarity")
+                gds = None
+                G = None
+        else:
+            if not GDS_CLIENT_AVAILABLE:
+                logger.warning("graphdatascience package not installed, using native fallback")
+            else:
+                logger.warning("NEO4J_URI not configured, using native fallback")
+        
         try:
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-                # Drop existing projection if exists
-                session.run("CALL gds.graph.drop($name, false)", name=projection_name)
-                
-                # Create comprehensive projection for all algorithms
-                # Include Entity, Figure, KeyValuePair, Chunk nodes
-                # Exclude :Deprecated nodes from GDS computation
-                session.run(
-                    """
-                    CALL gds.graph.project.cypher(
-                        $name,
-                        'MATCH (n) WHERE n.group_id = $group_id 
-                         AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-                         AND NOT n:Deprecated
-                         RETURN id(n) AS id, labels(n) AS labels,
-                        'MATCH (n)-[r]->(m) WHERE n.group_id = $group_id AND m.group_id = $group_id
-                         AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-                         AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
-                         AND NOT n:Deprecated AND NOT m:Deprecated
-                         RETURN id(n) AS source, id(m) AS target, type(r) AS type',
-                        {parameters: {group_id: $group_id}}
-                    )
-                    """,
-                    name=projection_name,
-                    group_id=group_id,
-                )
-                logger.info(f"📊 Created GDS projection: {projection_name}")
-                
                 # ============================================
                 # 1a. KNN - DI nodes (Figure/KVP) → Entity
                 # ============================================
-                try:
-                    result = session.run(
-                        """
-                        CALL gds.knn.stream($name, {
-                            nodeProperties: ['embedding_v2'],
-                            topK: $topK,
-                            similarityCutoff: $cutoff,
-                            concurrency: 4
-                        })
-                        YIELD node1, node2, similarity
-                        WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
-                        WHERE (n1:Figure OR n1:KeyValuePair) AND n2:Entity
-                        MERGE (n1)-[r:SIMILAR_TO]->(n2)
-                        SET r.score = similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
-                        RETURN count(r) AS edges_created
-                        """,
-                        name=projection_name,
-                        topK=knn_top_k,
-                        cutoff=knn_similarity_cutoff,
-                    )
-                    stats["knn_edges"] = result.single()["edges_created"]
-                    logger.info(f"🔗 GDS KNN (DI→Entity): {stats['knn_edges']} SIMILAR_TO edges")
-                except Exception as e:
-                    logger.warning(f"KNN (DI→Entity) failed: {e}")
+                if use_gds and gds and G:
+                    try:
+                        logger.info(f"🔗 Running GDS KNN (DI→Entity)...")
+                        knn_result = gds.knn.stream(
+                            G,
+                            nodeProperties=["embedding"],
+                            topK=knn_top_k,
+                            similarityCutoff=knn_similarity_cutoff,
+                            concurrency=4,
+                        )
+                        # Filter and write results back to Neo4j
+                        # KNN returns DataFrame with node1, node2, similarity
+                        edges_created = 0
+                        for _, row in knn_result.iterrows():
+                            # Write each similarity edge for DI→Entity
+                            result = session.run(
+                                """
+                                MATCH (n1), (n2) 
+                                WHERE id(n1) = $node1 AND id(n2) = $node2
+                                  AND (n1:Figure OR n1:KeyValuePair) AND n2:Entity
+                                MERGE (n1)-[r:SIMILAR_TO]->(n2)
+                                SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
+                                RETURN count(r) AS cnt
+                                """,
+                                node1=int(row["node1"]),
+                                node2=int(row["node2"]),
+                                similarity=float(row["similarity"]),
+                                group_id=group_id,
+                            )
+                            rec = result.single()
+                            if rec:
+                                edges_created += rec["cnt"]
+                        stats["knn_edges"] = edges_created
+                        logger.info(f"🔗 GDS KNN (DI→Entity): {stats['knn_edges']} SIMILAR_TO edges")
+                    except Exception as e:
+                        logger.warning(f"GDS KNN (DI→Entity) failed: {e}")
+                        use_gds = False  # Fall through to native
+                
+                if not use_gds or stats["knn_edges"] == 0:
+                    # Fallback to native vector similarity
+                    try:
+                        result = session.run(
+                            """
+                            MATCH (src)
+                            WHERE src.group_id = $group_id 
+                              AND (src:Figure OR src:KeyValuePair)
+                              AND src.embedding_v2 IS NOT NULL
+                              AND NOT src:Deprecated
+                            MATCH (tgt:Entity)
+                            WHERE tgt.group_id = $group_id
+                              AND tgt.embedding_v2 IS NOT NULL
+                              AND NOT tgt:Deprecated
+                            WITH src, tgt, vector.similarity.cosine(src.embedding_v2, tgt.embedding_v2) AS score
+                            WHERE score >= $cutoff
+                            ORDER BY src, score DESC
+                            WITH src, collect({node: tgt, similarity: score})[0..$topK] AS top_targets
+                            UNWIND top_targets AS t
+                            WITH src, t.node AS target, t.similarity AS sim
+                            MERGE (src)-[r:SIMILAR_TO]->(target)
+                            SET r.score = sim, r.method = 'native_vector', r.group_id = $group_id, r.created_at = datetime()
+                            RETURN count(r) AS edges_created
+                            """,
+                            group_id=group_id,
+                            topK=knn_top_k,
+                            cutoff=knn_similarity_cutoff,
+                        )
+                        record = result.single()
+                        if record:
+                            stats["knn_edges"] = record["edges_created"]
+                        logger.info(f"🔗 Native KNN (DI→Entity): {stats['knn_edges']} SIMILAR_TO edges")
+                    except Exception as e2:
+                        logger.warning(f"Native KNN also failed: {e2}")
                 
                 # ============================================
                 # 1b. KNN - Entity ↔ Entity (semantic similarity)
                 # ============================================
-                try:
-                    result = session.run(
-                        """
-                        CALL gds.knn.stream($name, {
-                            nodeProperties: ['embedding_v2'],
-                            topK: $topK,
-                            similarityCutoff: $cutoff,
-                            concurrency: 4
-                        })
-                        YIELD node1, node2, similarity
-                        WITH gds.util.asNode(node1) AS n1, gds.util.asNode(node2) AS n2, similarity
-                        WHERE n1:Entity AND n2:Entity AND id(n1) < id(n2)  // Avoid duplicates
-                        MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                        SET r.score = similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
-                        RETURN count(r) AS edges_created
-                        """,
-                        name=projection_name,
-                        topK=knn_top_k,
-                        cutoff=knn_similarity_cutoff,
-                    )
-                    stats["entity_edges"] = result.single()["edges_created"]
-                    logger.info(f"🔗 GDS KNN (Entity↔Entity): {stats['entity_edges']} SEMANTICALLY_SIMILAR edges")
-                except Exception as e:
-                    logger.warning(f"KNN (Entity↔Entity) failed: {e}")
+                if use_gds and gds and G:
+                    try:
+                        logger.info(f"🔗 Running GDS KNN (Entity↔Entity)...")
+                        # Re-run KNN and filter for Entity↔Entity pairs
+                        knn_result = gds.knn.stream(
+                            G,
+                            nodeProperties=["embedding"],
+                            topK=knn_top_k,
+                            similarityCutoff=knn_similarity_cutoff,
+                            concurrency=4,
+                        )
+                        edges_created = 0
+                        for _, row in knn_result.iterrows():
+                            # Write each similarity edge for Entity↔Entity (avoid duplicates with id check)
+                            result = session.run(
+                                """
+                                MATCH (n1:Entity), (n2:Entity) 
+                                WHERE id(n1) = $node1 AND id(n2) = $node2
+                                  AND id(n1) < id(n2)
+                                MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                                SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
+                                RETURN count(r) AS cnt
+                                """,
+                                node1=int(row["node1"]),
+                                node2=int(row["node2"]),
+                                similarity=float(row["similarity"]),
+                                group_id=group_id,
+                            )
+                            rec = result.single()
+                            if rec:
+                                edges_created += rec["cnt"]
+                        stats["entity_edges"] = edges_created
+                        logger.info(f"🔗 GDS KNN (Entity↔Entity): {stats['entity_edges']} SEMANTICALLY_SIMILAR edges")
+                    except Exception as e:
+                        logger.warning(f"GDS KNN (Entity↔Entity) failed: {e}")
+                        use_gds = False
+                
+                if not use_gds or stats["entity_edges"] == 0:
+                    # Fallback to native vector similarity
+                    try:
+                        result = session.run(
+                            """
+                            MATCH (src:Entity)
+                            WHERE src.group_id = $group_id
+                              AND src.embedding_v2 IS NOT NULL
+                              AND NOT src:Deprecated
+                            MATCH (tgt:Entity)
+                            WHERE tgt.group_id = $group_id
+                              AND tgt.embedding_v2 IS NOT NULL
+                              AND NOT tgt:Deprecated
+                              AND id(src) < id(tgt)
+                            WITH src, tgt, vector.similarity.cosine(src.embedding_v2, tgt.embedding_v2) AS score
+                            WHERE score >= $cutoff
+                            ORDER BY src, score DESC
+                            WITH src, collect({node: tgt, similarity: score})[0..$topK] AS top_targets
+                            UNWIND top_targets AS t
+                            WITH src, t.node AS target, t.similarity AS sim
+                            MERGE (src)-[r:SEMANTICALLY_SIMILAR]->(target)
+                            SET r.score = sim, r.method = 'native_vector', r.group_id = $group_id, r.created_at = datetime()
+                            RETURN count(r) AS edges_created
+                            """,
+                            group_id=group_id,
+                            topK=knn_top_k,
+                            cutoff=knn_similarity_cutoff,
+                        )
+                        record = result.single()
+                        if record:
+                            stats["entity_edges"] = record["edges_created"]
+                        logger.info(f"🔗 Native KNN (Entity↔Entity): {stats['entity_edges']} SEMANTICALLY_SIMILAR edges")
+                    except Exception as e2:
+                        logger.warning(f"Native KNN (Entity↔Entity) also failed: {e2}")
                 
                 # ============================================
                 # 2. Louvain - Community Detection
                 # ============================================
-                # Creates community_id property on nodes - essential for GraphRAG community summaries
-                try:
-                    result = session.run(
-                        """
-                        CALL gds.louvain.write($name, {
-                            writeProperty: 'community_id',
-                            includeIntermediateCommunities: false,
-                            concurrency: 4
-                        })
-                        YIELD communityCount, modularity
-                        RETURN communityCount, modularity
-                        """,
-                        name=projection_name,
-                    )
-                    record = result.single()
-                    stats["communities"] = record["communityCount"]
-                    modularity = record["modularity"]
-                    logger.info(f"🏘️ Louvain: {stats['communities']} communities (modularity: {modularity:.3f})")
-                except Exception as e:
-                    logger.warning(f"Louvain community detection failed: {e}")
+                if use_gds and gds and G:
+                    try:
+                        logger.info(f"🏘️ Running GDS Louvain community detection...")
+                        louvain_result = gds.louvain.stream(
+                            G,
+                            includeIntermediateCommunities=False,
+                            concurrency=4,
+                        )
+                        # Write community assignments back to Neo4j
+                        community_ids = set()
+                        for _, row in louvain_result.iterrows():
+                            session.run(
+                                """
+                                MATCH (n) WHERE id(n) = $nodeId
+                                SET n.community_id = $communityId
+                                """,
+                                nodeId=int(row["nodeId"]),
+                                communityId=int(row["communityId"]),
+                            )
+                            community_ids.add(row["communityId"])
+                        stats["communities"] = len(community_ids)
+                        logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
+                    except Exception as e:
+                        logger.warning(f"Louvain failed: {e}")
                 
                 # ============================================
                 # 3. PageRank - Node Importance
                 # ============================================
-                # Computes pagerank score for retrieval ranking
-                try:
-                    result = session.run(
-                        """
-                        CALL gds.pageRank.write($name, {
-                            writeProperty: 'pagerank',
-                            dampingFactor: 0.85,
-                            maxIterations: 20,
-                            concurrency: 4
-                        })
-                        YIELD nodePropertiesWritten, ranIterations
-                        RETURN nodePropertiesWritten, ranIterations
-                        """,
-                        name=projection_name,
-                    )
-                    record = result.single()
-                    stats["pagerank_nodes"] = record["nodePropertiesWritten"]
-                    logger.info(f"📈 PageRank: scored {stats['pagerank_nodes']} nodes ({record['ranIterations']} iterations)")
-                except Exception as e:
-                    logger.warning(f"PageRank failed: {e}")
+                if use_gds and gds and G:
+                    try:
+                        logger.info(f"📈 Running GDS PageRank...")
+                        pagerank_result = gds.pageRank.stream(
+                            G,
+                            dampingFactor=0.85,
+                            maxIterations=20,
+                            concurrency=4,
+                        )
+                        # Write PageRank scores back to Neo4j
+                        nodes_scored = 0
+                        for _, row in pagerank_result.iterrows():
+                            session.run(
+                                """
+                                MATCH (n) WHERE id(n) = $nodeId
+                                SET n.pagerank = $score
+                                """,
+                                nodeId=int(row["nodeId"]),
+                                score=float(row["score"]),
+                            )
+                            nodes_scored += 1
+                        stats["pagerank_nodes"] = nodes_scored
+                        logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
+                    except Exception as e:
+                        logger.warning(f"PageRank failed, using native approximation: {e}")
                 
-                # Clean up projection
-                session.run("CALL gds.graph.drop($name, false)", name=projection_name)
-                logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
+                if stats["pagerank_nodes"] == 0:
+                    # Native PageRank approximation
+                    try:
+                        result = session.run(
+                            """
+                            MATCH (e:Entity {group_id: $group_id})
+                            WHERE NOT e:Deprecated
+                            OPTIONAL MATCH (e)<-[r:MENTIONS|RELATES_TO|SIMILAR_TO|SEMANTICALLY_SIMILAR]-()
+                            WITH e, count(r) AS in_degree
+                            SET e.pagerank = toFloat(in_degree + 1) / 10.0
+                            RETURN count(e) AS nodes_scored
+                            """,
+                            group_id=group_id,
+                        )
+                        record = result.single()
+                        if record:
+                            stats["pagerank_nodes"] = record["nodes_scored"]
+                        logger.info(f"📈 Native PageRank: scored {stats['pagerank_nodes']} nodes")
+                    except Exception as e2:
+                        logger.warning(f"Native PageRank also failed: {e2}")
                 
+                # Cleanup GDS projection
+                if use_gds and G:
+                    try:
+                        G.drop()
+                        logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
+                    except Exception:
+                        pass
+
                 # Mark GDS as freshly computed for this group
                 self.neo4j_store.clear_gds_stale(group_id)
                 

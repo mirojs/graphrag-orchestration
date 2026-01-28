@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     AURA_INSTANCEID: Optional[str] = None
     AURA_INSTANCENAME: Optional[str] = None
     
+    # Aura Graph Analytics (serverless GDS)
+    # Required for KNN, Louvain, PageRank on AuraDB Professional
+    # Get from Aura Console > API Credentials
+    AURA_DS_CLIENT_ID: Optional[str] = None
+    AURA_DS_CLIENT_SECRET: Optional[str] = None
+    
     # Cosmos DB (Schema Vault)
     COSMOS_ENDPOINT: Optional[str] = None
     COSMOS_KEY: Optional[str] = None

@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from typing import Dict, Any
 
 from app.hybrid_v2.services.document_lifecycle import DocumentLifecycleService
-from app.hybrid_v2.services.maintenance import MaintenanceService
+from app.hybrid_v2.services.maintenance import MaintenanceService, MaintenanceJobType
 
 
 # ============================================================================
@@ -305,9 +305,9 @@ class TestDocumentLifecycleIntegration:
         from app.core.config import settings
         
         store = Neo4jStoreV3(
-            uri=settings.NEO4J_URI,
-            username=settings.NEO4J_USERNAME,
-            password=settings.NEO4J_PASSWORD,
+            uri=settings.NEO4J_URI or "",
+            username=settings.NEO4J_USERNAME or "",
+            password=settings.NEO4J_PASSWORD or "",
         )
         yield store
         store.driver.close()
@@ -318,7 +318,7 @@ class TestDocumentLifecycleIntegration:
         import uuid
         return f"test-lifecycle-{uuid.uuid4().hex[:8]}"
     
-    def test_full_lifecycle_flow(self, live_neo4j_store, test_group_id):
+    async def test_full_lifecycle_flow(self, live_neo4j_store, test_group_id):
         """Test complete deprecation → GC → restore flow."""
         lifecycle_svc = DocumentLifecycleService(neo4j_store=live_neo4j_store)
         maintenance_svc = MaintenanceService(neo4j_store=live_neo4j_store)
@@ -335,31 +335,31 @@ class TestDocumentLifecycleIntegration:
         
         try:
             # Step 1: Deprecate document
-            result = lifecycle_svc.deprecate_document(
+            result = await lifecycle_svc.deprecate_document(
                 group_id=test_group_id,
-                doc_id="test-doc-1",
+                document_id="test-doc-1",
                 deprecated_by="test-user",
                 reason="Integration test",
             )
-            assert result["doc_deprecated"] is True
+            assert result.success is True
             
             # Step 2: Verify GDS marked stale
-            health = maintenance_svc.get_group_health(group_id=test_group_id)
-            assert health["gds_stale"] is True
+            health = await maintenance_svc.get_group_health(group_id=test_group_id)
+            assert health.gds_stale is True
             
             # Step 3: Run GC
-            gc_result = maintenance_svc.run_gc_job(
+            gc_result = await maintenance_svc.run_job(
                 group_id=test_group_id,
-                job_type="stale_edges",
+                job_type=MaintenanceJobType.GC_STALE_EDGES,
             )
-            assert gc_result["status"] == "completed"
+            assert gc_result.success is True
             
             # Step 4: Restore document
-            restore_result = lifecycle_svc.restore_document(
+            restore_result = await lifecycle_svc.restore_document(
                 group_id=test_group_id,
-                doc_id="test-doc-1",
+                document_id="test-doc-1",
             )
-            assert restore_result["doc_restored"] is True
+            assert restore_result.success is True
             
         finally:
             # Cleanup: Delete test data

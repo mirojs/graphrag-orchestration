@@ -47,9 +47,9 @@ from app.hybrid_v2.services.neo4j_store import Document, Entity, Neo4jStoreV3, R
 from app.hybrid_v2.utils.language import canonical_key_for_entity, is_cjk, detect_cjk_from_text
 from app.core.config import settings
 
-# Aura Graph Analytics (serverless GDS) - for KNN, Louvain, PageRank
+# GDS client - works with both self-managed GDS and Aura Graph Analytics
 try:
-    from graphdatascience.session import GdsSessions, AuraAPICredentials, DbmsConnectionInfo, SessionMemory
+    from graphdatascience import GraphDataScience
     GDS_CLIENT_AVAILABLE = True
 except ImportError:
     GDS_CLIENT_AVAILABLE = False
@@ -1544,8 +1544,8 @@ Output:
     ) -> Dict[str, int]:
         """Run GDS algorithms to enhance the graph with computed properties.
         
-        Uses graphdatascience Python client for Aura serverless Graph Analytics.
-        Requires AURA_DS_CLIENT_ID and AURA_DS_CLIENT_SECRET in settings.
+        Uses graphdatascience Python client to connect to GDS library.
+        Works with both self-managed GDS plugin and Aura serverless Graph Analytics.
         
         Algorithms run:
         1. **KNN** - Creates similarity edges:
@@ -1563,74 +1563,55 @@ Output:
             Statistics dictionary with algorithm results
         """
         stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
-        session_name = f"graphrag_{group_id.replace('-', '_')}"
+        projection_name = f"graphrag_{group_id.replace('-', '_')}"
         
         if not GDS_CLIENT_AVAILABLE:
             raise RuntimeError("graphdatascience package not installed - required for GDS algorithms")
         
-        if not settings.AURA_DS_CLIENT_ID or not settings.AURA_DS_CLIENT_SECRET:
-            raise RuntimeError(
-                "AURA_DS_CLIENT_ID and AURA_DS_CLIENT_SECRET not configured - "
-                "required for Aura Graph Analytics. Get credentials from Aura Console > API Credentials."
-            )
-        
         if not settings.NEO4J_URI:
             raise RuntimeError("NEO4J_URI not configured - required for GDS algorithms")
         
-        if not settings.AURA_INSTANCEID:
-            raise RuntimeError("AURA_INSTANCEID not configured - required for Aura Graph Analytics")
-        
-        logger.info(f"📊 Creating Aura Graph Analytics session: {session_name}")
-        
-        # Create Aura API credentials
-        aura_creds = AuraAPICredentials(
-            client_id=settings.AURA_DS_CLIENT_ID,
-            client_secret=settings.AURA_DS_CLIENT_SECRET,
+        logger.info(f"📊 Connecting to GDS...")
+        # Connect to Neo4j GDS (works with plugin or Aura serverless)
+        gds = GraphDataScience(
+            settings.NEO4J_URI,
+            auth=(settings.NEO4J_USERNAME or "neo4j", settings.NEO4J_PASSWORD or ""),
         )
         
-        # Create sessions manager
-        sessions = GdsSessions(api_credentials=aura_creds)
+        try:
+            gds_version = gds.version()
+            logger.info(f"✅ GDS connected, version: {gds_version}")
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to connect to GDS: {e}. "
+                "Ensure GDS library is installed (plugin or Aura Graph Analytics enabled)."
+            )
         
-        # Create database connection info
-        db_connection = DbmsConnectionInfo(
-            uri=settings.NEO4J_URI,
-            username=settings.NEO4J_USERNAME or "neo4j",
-            password=settings.NEO4J_PASSWORD or "",
-        )
-        
-        # Get or create a GDS session with 8GB memory
-        gds = sessions.get_or_create(
-            session_name=session_name,
-            memory=SessionMemory.m_8GB,
-            db_connection=db_connection,
-        )
-        
-        logger.info(f"✅ GDS session created/retrieved: {session_name}")
-        
-        # Project graph from Neo4j into GDS session
-        projection_name = f"proj_{group_id.replace('-', '_')}"
+        # Project graph from Neo4j into GDS
         logger.info(f"📊 Creating GDS projection: {projection_name}")
-        
-        G, project_result = gds.graph.project.cypher(
-            projection_name,
-            f"""
-            MATCH (n) 
-            WHERE n.group_id = '{group_id}'
-              AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-              AND NOT n:Deprecated
-              AND n.embedding_v2 IS NOT NULL
-            RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding
-            """,
-            f"""
-            MATCH (n)-[r]->(m) 
-            WHERE n.group_id = '{group_id}' AND m.group_id = '{group_id}'
-              AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-              AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
-              AND NOT n:Deprecated AND NOT m:Deprecated
-            RETURN id(n) AS source, id(m) AS target, type(r) AS type
-            """,
-        )
-        logger.info(f"✅ GDS projection created: {projection_name} ({G.node_count()} nodes, {G.relationship_count()} relationships)")
+        try:
+            G, project_result = gds.graph.project.cypher(
+                projection_name,
+                f"""
+                MATCH (n) 
+                WHERE n.group_id = '{group_id}'
+                  AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                  AND NOT n:Deprecated
+                  AND n.embedding_v2 IS NOT NULL
+                RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding
+                """,
+                f"""
+                MATCH (n)-[r]->(m) 
+                WHERE n.group_id = '{group_id}' AND m.group_id = '{group_id}'
+                  AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                  AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
+                  AND NOT n:Deprecated AND NOT m:Deprecated
+                RETURN id(n) AS source, id(m) AS target, type(r) AS type
+                """,
+            )
+            logger.info(f"✅ GDS projection created: {projection_name} ({G.node_count()} nodes, {G.relationship_count()} relationships)")
+        except Exception as e:
+            raise RuntimeError(f"Failed to create GDS projection: {e}. Check GDS installation and permissions.")
         
         try:
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
@@ -1754,7 +1735,7 @@ Output:
                 stats["pagerank_nodes"] = nodes_scored
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
                 
-                # Cleanup GDS projection (drop from session, not session itself)
+                # Cleanup GDS projection
                 G.drop()
                 logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
 
@@ -1763,13 +1744,7 @@ Output:
                 
         except Exception as e:
             logger.error(f"GDS graph algorithms failed: {e}", extra={"error": str(e)})
-            raise  # Re-raise since we don't have fallback
-        
-        finally:
-            # Note: We don't delete the session here - it can be reused.
-            # Sessions auto-expire after TTL (default 1 hour).
-            # To explicitly delete: sessions.delete(session_name=session_name)
-            pass
+            raise
         
         return stats
 

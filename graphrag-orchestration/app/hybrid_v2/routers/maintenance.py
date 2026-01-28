@@ -73,10 +73,10 @@ def get_maintenance_service() -> MaintenanceService:
     """Get or create MaintenanceService instance."""
     # settings imported from app.core.config
     neo4j_store = Neo4jStoreV3(
-        uri=settings.neo4j_uri,
-        username=settings.neo4j_username,
-        password=settings.neo4j_password,
-        database=settings.neo4j_database,
+        uri=settings.NEO4J_URI,
+        username=settings.NEO4J_USERNAME,
+        password=settings.NEO4J_PASSWORD,
+        database=settings.NEO4J_DATABASE,
     )
     return MaintenanceService(neo4j_store)
 

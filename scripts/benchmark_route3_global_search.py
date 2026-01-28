@@ -57,7 +57,8 @@ EXPECTED_TERMS: Dict[str, List[str]] = {
     # termination/cancellation provisions and was causing false negatives for an
     # otherwise correct termination-focused answer.
     "Q-G1": ["60 days", "written notice", "3 business days", "full refund", "deposit", "forfeited", "terminates"],
-    "Q-G2": ["idaho", "florida", "hawaii", "pocatello", "arbitration", "governing law"],
+    # Note: "pocatello" removed - it's the builder's mailing address, not a jurisdiction/governing law
+    "Q-G2": ["idaho", "florida", "hawaii", "arbitration", "governing law"],
     "Q-G3": ["29900", "25%", "10%", "installment", "commission", "$75", "$50", "tax"],
     "Q-G4": ["pumper", "county", "monthly statement", "income", "expenses", "volumes"],
     "Q-G5": ["arbitration", "binding", "small claims", "legal fees", "contractor", "default"],

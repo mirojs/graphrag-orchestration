@@ -144,9 +144,10 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
 2. **Q-G2:** Identify which documents reference **jurisdictions / governing law**.
    - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
-     - Warranty/arbitration: disputes reference `State of Idaho` and arbitration in `Pocatello, Idaho`.
+     - Warranty/arbitration: disputes governed by `State of Idaho` substantive law.
      - Purchase contract: governed by laws of `State of Florida`.
      - Property management agreement: governed by laws of `State of Hawaii`.
+   - **Note:** "Pocatello" is the builder's mailing address (1820 Summit Ridge Dr., Pocatello, ID 83201), not a jurisdiction reference.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2)
 
 3. **Q-G3:** Summarize “who pays what” across the set (fees/charges/taxes).   - **Expected Route:** Route 3 (Global Search)   - **Expected:**

@@ -222,16 +222,6 @@ class GlobalSearchHandler(BaseRouteHandler):
             logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
         timings_ms["stage_3.4_ms"] = int((time.perf_counter() - t0) * 1000)
         
-        # Stage 3.4.2: Enrich chunks from PPR-discovered entities
-        # PPR may find entities not in hub_entities - fetch their chunks too
-        t0 = time.perf_counter()
-        await self._enrich_chunks_from_ppr_entities(
-            evidence_nodes=evidence_nodes,
-            hub_entities=hub_entities,
-            graph_context=graph_context,
-        )
-        timings_ms["stage_3.4.2_ms"] = int((time.perf_counter() - t0) * 1000)
-        
         # Stage 3.4.1: Coverage Gap Fill
         if coverage_mode:
             await self._apply_coverage_gap_fill(query, graph_context)
@@ -581,86 +571,6 @@ class GlobalSearchHandler(BaseRouteHandler):
             return False
         
         return True
-
-    # ==========================================================================
-    # PPR ENTITY CHUNK ENRICHMENT
-    # ==========================================================================
-    
-    async def _enrich_chunks_from_ppr_entities(
-        self,
-        evidence_nodes: List[Tuple[str, float]],
-        hub_entities: List[str],
-        graph_context,
-    ) -> None:
-        """Enrich graph_context with chunks from PPR-discovered entities.
-        
-        PPR may discover entities that weren't in the top hub_entities list.
-        These entities (like 'Pocatello, Idaho') have valuable context that
-        should be included in the LLM synthesis.
-        
-        Args:
-            evidence_nodes: List of (entity_name, ppr_score) from PPR tracing
-            hub_entities: Original hub entities used for initial chunk retrieval  
-            graph_context: EnhancedGraphContext to enrich with additional chunks
-        """
-        if not evidence_nodes:
-            return
-            
-        try:
-            # Find PPR entities that weren't in original hub_entities
-            hub_set = set(e.lower() for e in hub_entities)
-            ppr_new_entities = [
-                (name, score) for name, score in evidence_nodes
-                if name.lower() not in hub_set and score > 0.01  # Threshold for relevance
-            ]
-            
-            if not ppr_new_entities:
-                logger.debug("ppr_enrichment_no_new_entities")
-                return
-            
-            # Get top N new entities by PPR score
-            ppr_new_entities.sort(key=lambda x: x[1], reverse=True)
-            top_new_entities = [name for name, _ in ppr_new_entities[:5]]
-            
-            logger.info(
-                "stage_3.4.2_ppr_chunk_enrichment",
-                new_entities=top_new_entities,
-                total_ppr=len(evidence_nodes),
-                new_count=len(ppr_new_entities),
-            )
-            
-            # Fetch chunks for these entities via enhanced_retriever
-            additional_context = await self.pipeline.enhanced_retriever.get_full_context(
-                hub_entities=top_new_entities,
-                expand_relationships=False,  # Just get MENTIONS chunks
-                get_source_chunks=True,
-                max_chunks_per_entity=2,  # Limit to avoid bloat
-                max_relationships=0,
-            )
-            
-            if not additional_context.source_chunks:
-                logger.debug("ppr_enrichment_no_chunks_found")
-                return
-            
-            # Deduplicate and merge into graph_context
-            existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-            added_count = 0
-            
-            for chunk in additional_context.source_chunks:
-                if chunk.chunk_id not in existing_ids:
-                    chunk.entity_name = f"ppr:{chunk.entity_name}"  # Mark source
-                    graph_context.source_chunks.append(chunk)
-                    existing_ids.add(chunk.chunk_id)
-                    added_count += 1
-            
-            logger.info(
-                "stage_3.4.2_ppr_enrichment_complete",
-                added_chunks=added_count,
-                total_chunks=len(graph_context.source_chunks),
-            )
-            
-        except Exception as e:
-            logger.warning("ppr_chunk_enrichment_failed", error=str(e))
 
     # ==========================================================================
     # COVERAGE GAP FILL

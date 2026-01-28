@@ -250,8 +250,8 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** `Fabrikam Inc.` appears in more documents (4) than `Contoso Ltd.` (3). Fabrikam appears in: warranty (as builder), holding tank (as pumper), property management (referenced), and purchase contract (as customer, including Exhibit A which is part of the same PDF). Contoso appears in: holding tank (as owner), property management (as owner), and purchase contract Exhibit A. Note: Exhibit A is a section within purchase_contract.pdf, not a separate document. The invoice lists "Fabrikam Construction" as recipient, which may be a related entity.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0 and Exhibit A section); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same number of documents (4 each - they are tied). Fabrikam appears in: warranty (as Builder), holding tank (as Pumper), property management (referenced), and purchase contract (as Customer). Contoso appears in: warranty (as Buyer/Owner), holding tank (as Owner), property management (as Owner), and purchase contract (as Contractor). Note: The invoice lists "Contoso Lifts LLC" which is a different entity.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20k/$7k/$2.9k).
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)

@@ -136,7 +136,12 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
             "not available", "cannot be determined", "information is not",
             "not explicitly include", "not explicitly mention", "not explicitly provide",
             "not explicitly state", "no documents explicitly state", "does not explicitly",
-            "not explicitly detailed", "no explicit mention"
+            "not explicitly detailed", "no explicit mention",
+            # Additional phrases for responses like "no VAT number is present"
+            "is not present", "not present", "does not provide", "doesn't provide",
+            "nowhere in", "no vat", "no tax id", "no routing", "no account",
+            "no wire transfer", "no ach", "no bank", "not include", "does not include",
+            "doesn't include", "no such", "none of the", "not contain",
         ]
         negative_test_pass = any(phrase in actual_lower for phrase in not_found_phrases)
         return {

@@ -1,0 +1,92 @@
+Loaded 19 questions from QUESTION_BANK_5PDFS_2025-12-24.md
+  Positive tests (Q-L): 10
+  Negative tests (Q-N): 9
+Loaded 51 ground truth answers
+
+======================================================================
+Scenario: hybrid_route2_summary (response_type=summary)
+Questions: 19, Repeats: 1
+======================================================================
+
+[Q-L1] Who is the **Agent** in the property management agreement?
+  [1/1] 13213ms - 244 chars
+  Accuracy: containment=1.00, f1=0.34
+  Summary: exact=1.00, min_sim=1.00, latency_p50=13213ms
+[Q-L2] Who is the **Owner** in the property management agreement?
+  [1/1] 4204ms - 216 chars
+  Accuracy: containment=1.00, f1=0.17
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4204ms
+[Q-L3] What is the managed property address in the property management agreement?
+  [1/1] 2995ms - 116 chars
+  Accuracy: containment=1.00, f1=0.52
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2995ms
+[Q-L4] What is the initial term start date in the property management agreement?
+  [1/1] 5396ms - 314 chars
+  Accuracy: containment=1.00, f1=0.05
+  Summary: exact=1.00, min_sim=1.00, latency_p50=5396ms
+[Q-L5] What written notice period is required for termination of the property management agreement?
+  [1/1] 6476ms - 108 chars
+  Accuracy: containment=1.00, f1=0.36
+  Summary: exact=1.00, min_sim=1.00, latency_p50=6476ms
+[Q-L6] What is the Agent fee/commission for **short-term** rentals (<180 days)?
+  [1/1] 37079ms - 175 chars
+  Accuracy: containment=1.00, f1=0.55
+  Summary: exact=1.00, min_sim=1.00, latency_p50=37079ms
+[Q-L7] What is the Agent fee/commission for **long-term** leases (>180 days)?
+  [1/1] 8964ms - 160 chars
+  Accuracy: containment=1.00, f1=0.52
+  Summary: exact=1.00, min_sim=1.00, latency_p50=8964ms
+[Q-L8] What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?
+  [1/1] 4213ms - 454 chars
+  Accuracy: containment=0.00, f1=0.08
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4213ms
+[Q-L9] In the purchase contract Exhibit A, what is the job location?
+  [1/1] 5409ms - 156 chars
+  Accuracy: containment=1.00, f1=0.50
+  Summary: exact=1.00, min_sim=1.00, latency_p50=5409ms
+[Q-L10] In the purchase contract Exhibit A, what is the contact’s name and email?   - **Expected Route:** Route 2 (Local Search)   - **Expected:** `Elizabeth Nolasco; enolasco@fabrikam.com`
+  [1/1] 4898ms - 150 chars
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4898ms
+[Q-N1] What is the invoice's **bank routing number** for payment?
+  [1/1] 2281ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2281ms
+[Q-N2] What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?
+  [1/1] 2066ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2066ms
+[Q-N3] What is the vendor's **VAT / Tax ID number** on the invoice?
+  [1/1] 32260ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=32260ms
+[Q-N5] What is the invoice’s **bank account number** for ACH/wire payments?
+  [1/1] 2349ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=2349ms
+[Q-N6] Which documents are governed by the laws of **California**?
+  [1/1] 1707ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=1707ms
+[Q-N7] What is the property management Agent's **license number**?
+  [1/1] 4905ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4905ms
+[Q-N8] What is the purchase contract’s required **wire transfer / ACH instructions**?
+  [1/1] 4458ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=4458ms
+[Q-N9] What is the exact clause about **mold damage** coverage in the warranty?
+  [1/1] 3530ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=3530ms
+[Q-N10] What is the invoice **shipping method** (value in "SHIPPED VIA")?
+  [1/1] 919ms - 67 chars
+  Accuracy: NEGATIVE_TEST PASS
+  Summary: exact=1.00, min_sim=1.00, latency_p50=919ms
+
+======================================================================
+✅ Benchmark complete!
+   JSON: /afh/projects/graphrag-orchestration/benchmarks/route2_local_search_20260128T144419Z.json
+   MD:   /afh/projects/graphrag-orchestration/benchmarks/route2_local_search_20260128T144419Z.md
+======================================================================
+

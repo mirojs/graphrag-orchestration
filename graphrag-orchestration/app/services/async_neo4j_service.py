@@ -456,7 +456,7 @@ class AsyncNeo4jService:
         
         Path 1: Standard Entity-to-Entity relationships (original behavior)
         Path 2: SEMANTICALLY_SIMILAR between Sections (thematic hops)
-        Path 3: SIMILAR_TO between Entities (Phase 3 semantic similarity)
+        Path 3: SEMANTICALLY_SIMILAR between Entities (GDS KNN semantic similarity, unified Jan 28 2026)
         Path 4: SHARES_ENTITY between Sections (Phase 2 cross-document links)
         Path 5: APPEARS_IN_SECTION + HAS_HUB_ENTITY (Phase 1 foundation edges)
         
@@ -464,12 +464,12 @@ class AsyncNeo4jService:
         - Direct entity relationships: damping (0.85)
         - 2-hop entity relationships: damping² (0.72)
         - Section-path entities: similarity * damping²
-        - SIMILAR_TO entities: similarity * damping
+        - SEMANTICALLY_SIMILAR entities: similarity * damping (GDS KNN with cutoff 0.60)
         - SHARES_ENTITY path: shared_entities * damping² (normalized)
         - Hub entities: mention_count/10 * damping
         
         Addresses HippoRAG 2's weaknesses:
-        - "Latent Transitions": SEMANTICALLY_SIMILAR + SIMILAR_TO
+        - "Latent Transitions": SEMANTICALLY_SIMILAR (sections + entities)
         - "Cross-document reasoning": SHARES_ENTITY
         - "Hub entity importance": HAS_HUB_ENTITY
         """
@@ -531,17 +531,17 @@ class AsyncNeo4jService:
             }
 
             // =====================================================================
-            // Path 3: SIMILAR_TO edges (Phase 3 - direct entity semantic similarity)
+            // Path 3: SEMANTICALLY_SIMILAR edges (GDS KNN - unified semantic similarity)
             // =====================================================================
             CALL (seed, group_id, per_seed_limit) {
-                MATCH (seed)-[sim:SIMILAR_TO]-(neighbor)
+                MATCH (seed)-[sim:SEMANTICALLY_SIMILAR|SIMILAR_TO]-(neighbor)
                 WHERE neighbor.group_id = group_id
                     AND (neighbor:Entity OR neighbor:`__Entity__`)
-                    AND coalesce(sim.similarity, 0.85) >= 0.8
-                WITH neighbor, max(coalesce(sim.similarity, 0.85)) AS sim_weight
+                    AND coalesce(sim.similarity, 0.60) >= 0.60
+                WITH neighbor, max(coalesce(sim.similarity, 0.60)) AS sim_weight
                 ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
                 LIMIT $per_seed_limit
-                RETURN collect({node: neighbor, weight: sim_weight, path: 'similar_to'}) AS similar_entities
+                RETURN collect({node: neighbor, weight: sim_weight, path: 'semantically_similar'}) AS similar_entities
             }
 
             // =====================================================================

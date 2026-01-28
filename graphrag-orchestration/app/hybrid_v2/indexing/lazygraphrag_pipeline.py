@@ -47,12 +47,17 @@ from app.hybrid_v2.services.neo4j_store import Document, Entity, Neo4jStoreV3, R
 from app.hybrid_v2.utils.language import canonical_key_for_entity, is_cjk, detect_cjk_from_text
 from app.core.config import settings
 
-# GDS client - works with both self-managed GDS and Aura Graph Analytics
+# GDS client - works with Aura Serverless Graph Analytics via GdsSessions API
 try:
-    from graphdatascience import GraphDataScience
-    GDS_CLIENT_AVAILABLE = True
+    from graphdatascience.session import (
+        GdsSessions,
+        AuraAPICredentials,
+        DbmsConnectionInfo,
+        SessionMemory,
+    )
+    GDS_SESSIONS_AVAILABLE = True
 except ImportError:
-    GDS_CLIENT_AVAILABLE = False
+    GDS_SESSIONS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +327,24 @@ class LazyGraphRAGIndexingPipeline:
         stats["entities"] = len(entities)
         stats["relationships"] = len(relationships)
         stats["foundation_edges"] = commit_result.get("details", {}).get("foundation_edges", {})
+        
+        # 8) Run GDS graph algorithms (KNN, Louvain, PageRank) - AFTER entities are in Neo4j
+        # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
+        try:
+            logger.info("🔬 Running GDS algorithms (KNN, Louvain, PageRank)...")
+            gds_stats = await self._run_gds_graph_algorithms(group_id=group_id)
+            stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
+            stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
+            stats["gds_communities"] = gds_stats.get("communities", 0)
+            stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
+            logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities, {stats['gds_pagerank_nodes']} nodes scored")
+        except Exception as e:
+            logger.warning(f"⚠️  GDS algorithms failed: {e}")
+            stats["gds_knn_edges"] = 0
+            stats["gds_entity_edges"] = 0
+            stats["gds_communities"] = 0
+            stats["gds_pagerank_nodes"] = 0
+        
         stats["elapsed_s"] = round(time.time() - start_time, 2)
         return stats
 
@@ -1516,22 +1539,10 @@ Output:
                     stats["embeddings_created"] += 1
                     stats["kvps_processed"] += 1
         
-        logger.info(f"✅ Generated {stats['embeddings_created']} embeddings")
+        logger.info(f"✅ Generated {stats['embeddings_created']} embeddings for DI nodes")
         
-        # 5. Run GDS algorithms: KNN for similarity, Louvain for communities, PageRank for importance
-        # GDS is optional - if not available, skip it gracefully
-        try:
-            gds_stats = await self._run_gds_graph_algorithms(group_id=group_id)
-            stats["knn_edges_created"] = gds_stats.get("knn_edges", 0)
-            stats["entity_similarity_edges"] = gds_stats.get("entity_edges", 0)
-            stats["communities_detected"] = gds_stats.get("communities", 0)
-            stats["pagerank_scored"] = gds_stats.get("pagerank_nodes", 0)
-        except Exception as e:
-            logger.warning(f"⚠️  GDS algorithms skipped (not available): {e}")
-            stats["knn_edges_created"] = 0
-            stats["entity_similarity_edges"] = 0
-            stats["communities_detected"] = 0
-            stats["pagerank_scored"] = 0
+        # Note: GDS algorithms now run AFTER entities are committed (see index_documents step 8)
+        # This ensures all nodes (Entities, Figures, KVPs) are in Neo4j before GDS projection
         
         return stats
 
@@ -1544,8 +1555,8 @@ Output:
     ) -> Dict[str, int]:
         """Run GDS algorithms to enhance the graph with computed properties.
         
-        Uses graphdatascience Python client to connect to GDS library.
-        Works with both self-managed GDS plugin and Aura serverless Graph Analytics.
+        Uses Aura Serverless Graph Analytics via GdsSessions API.
+        Requires AURA_DS_CLIENT_ID and AURA_DS_CLIENT_SECRET configured.
         
         Algorithms run:
         1. **KNN** - Creates similarity edges:
@@ -1563,188 +1574,207 @@ Output:
             Statistics dictionary with algorithm results
         """
         stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
-        projection_name = f"graphrag_{group_id.replace('-', '_')}"
         
-        if not GDS_CLIENT_AVAILABLE:
-            raise RuntimeError("graphdatascience package not installed - required for GDS algorithms")
+        if not GDS_SESSIONS_AVAILABLE:
+            logger.warning("⚠️  GDS sessions not available - skipping graph algorithms. Install: pip install graphdatascience")
+            return stats
         
-        if not settings.NEO4J_URI:
-            raise RuntimeError("NEO4J_URI not configured - required for GDS algorithms")
+        if not settings.NEO4J_URI or not settings.AURA_DS_CLIENT_ID or not settings.AURA_DS_CLIENT_SECRET:
+            logger.warning("⚠️  GDS configuration incomplete - skipping graph algorithms. Need: NEO4J_URI, AURA_DS_CLIENT_ID, AURA_DS_CLIENT_SECRET")
+            return stats
         
-        logger.info(f"📊 Connecting to GDS...")
-        # Connect to Neo4j GDS (works with plugin or Aura serverless)
-        gds = GraphDataScience(
-            settings.NEO4J_URI,
-            auth=(settings.NEO4J_USERNAME or "neo4j", settings.NEO4J_PASSWORD or ""),
-        )
+        # Use timestamp to make projection name unique (avoids job ID collisions in Aura GDS)
+        import time
+        timestamp = int(time.time())
+        projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}"
+        session_name = "graphrag_session"
         
         try:
-            gds_version = gds.version()
-            logger.info(f"✅ GDS connected, version: {gds_version}")
-        except Exception as e:
-            raise RuntimeError(
-                f"Failed to connect to GDS: {e}. "
-                "Ensure GDS library is installed (plugin or Aura Graph Analytics enabled)."
+            # 1. Setup GDS session (Aura Serverless Graph Analytics)
+            logger.info(f"📊 Connecting to Aura GDS session...")
+            api_creds = AuraAPICredentials(
+                client_id=settings.AURA_DS_CLIENT_ID,
+                client_secret=settings.AURA_DS_CLIENT_SECRET
             )
-        
-        # Project graph from Neo4j into GDS
-        logger.info(f"📊 Creating GDS projection: {projection_name}")
-        try:
-            G, project_result = gds.graph.project.cypher(
-                projection_name,
-                f"""
-                MATCH (n) 
-                WHERE n.group_id = '{group_id}'
-                  AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-                  AND NOT n:Deprecated
-                  AND n.embedding_v2 IS NOT NULL
-                RETURN id(n) AS id, labels(n) AS labels, n.embedding_v2 AS embedding
-                """,
-                f"""
-                MATCH (n)-[r]->(m) 
-                WHERE n.group_id = '{group_id}' AND m.group_id = '{group_id}'
-                  AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
-                  AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
-                  AND NOT n:Deprecated AND NOT m:Deprecated
-                RETURN id(n) AS source, id(m) AS target, type(r) AS type
-                """,
+            sessions = GdsSessions(api_credentials=api_creds)
+            
+            # Extract Aura instance ID from URI (e.g., neo4j+s://abc123.databases.neo4j.io -> abc123)
+            import re
+            aura_match = re.search(r'neo4j\+s://([^.]+)\.databases\.neo4j\.io', settings.NEO4J_URI)
+            if not aura_match:
+                raise ValueError(f"Could not extract Aura instance ID from URI: {settings.NEO4J_URI}")
+            aura_instance_id = aura_match.group(1)
+            
+            db_connection = DbmsConnectionInfo(
+                uri=settings.NEO4J_URI,
+                username=settings.NEO4J_USERNAME or "neo4j",
+                password=settings.NEO4J_PASSWORD
             )
-            logger.info(f"✅ GDS projection created: {projection_name} ({G.node_count()} nodes, {G.relationship_count()} relationships)")
-        except Exception as e:
-            raise RuntimeError(f"Failed to create GDS projection: {e}. Check GDS installation and permissions.")
-        
-        try:
+            
+            # Get or create GDS session (2GB minimum for Aura Serverless)
+            gds = sessions.get_or_create(
+                session_name=session_name,
+                memory=SessionMemory.m_2GB,
+                db_connection=db_connection
+            )
+            logger.info(f"✅ GDS session ready: version {gds.version()}")
+            
+            # 2. Project graph using gds.graph.project.remote() - the correct Aura Serverless approach
+            logger.info(f"📊 Creating GDS projection: {projection_name}")
+            
+            # Drop existing graph if present
+            try:
+                existing_graphs = gds.graph.list()
+                for g in existing_graphs.itertuples():
+                    if g.graphName == projection_name:
+                        gds.graph.drop(projection_name)
+                        logger.info(f"🧹 Dropped existing projection: {projection_name}")
+            except Exception as e:
+                logger.debug(f"Graph list/drop check: {e}")
+            
+            # Escape group_id for Cypher (double quotes with backslash escaping)
+            escaped_group_id = group_id.replace('"', '\\"')
+            
+            # Single Cypher query with gds.graph.project.remote() - required for Aura Serverless
+            # Add timestamp to query to avoid job ID collisions (Aura GDS uses query string as job ID)
+            # This projects nodes with their embeddings and relationships in one call
+            projection_query = f'''
+                // Timestamp: {timestamp} - Ensures unique job ID in Aura GDS
+                CALL () {{
+                    // Project all nodes with embeddings
+                    MATCH (n)
+                    WHERE n.group_id = "{escaped_group_id}"
+                      AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+                      AND NOT n:Deprecated
+                      AND n.embedding_v2 IS NOT NULL
+                    OPTIONAL MATCH (n)-[r]->(m)
+                    WHERE m.group_id = "{escaped_group_id}"
+                      AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
+                      AND NOT m:Deprecated
+                      AND m.embedding_v2 IS NOT NULL
+                    RETURN 
+                      n AS source, r AS rel, m AS target,
+                      n {{ .embedding_v2 }} AS sourceNodeProperties,
+                      m {{ .embedding_v2 }} AS targetNodeProperties
+                }}
+                RETURN gds.graph.project.remote(source, target, {{
+                    sourceNodeProperties: sourceNodeProperties,
+                    targetNodeProperties: targetNodeProperties,
+                    sourceNodeLabels: labels(source),
+                    targetNodeLabels: labels(target),
+                    relationshipType: type(rel)
+                }})
+            '''
+            
+            # Project the graph
+            G, result = gds.graph.project(projection_name, projection_query)
+            logger.info(f"✅ GDS projection created: {G.name()} ({G.node_count()} nodes, {G.relationship_count()} rels)")
+            
+            if G.node_count() == 0:
+                logger.warning(f"⚠️  No nodes in projection - skipping algorithms (check embedding_v2 exists)")
+                gds.graph.drop(projection_name)
+                return stats
+            
+            # 3. Run KNN algorithm
+            logger.info(f"🔗 Running GDS KNN...")
+            knn_df = gds.knn.stream(
+                G,
+                nodeProperties=["embedding_v2"],
+                topK=knn_top_k,
+                similarityCutoff=knn_similarity_cutoff,
+                concurrency=4
+            )
+            
+            # Process KNN results and create edges in Neo4j
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-                # ============================================
-                # 1a. KNN - DI nodes (Figure/KVP) → Entity
-                # ============================================
-                logger.info(f"🔗 Running GDS KNN (DI→Entity)...")
-                knn_result = gds.knn.stream(
-                    G,
-                    nodeProperties=["embedding"],
-                    topK=knn_top_k,
-                    similarityCutoff=knn_similarity_cutoff,
-                    concurrency=4,
-                )
-                # Filter and write results back to Neo4j
-                # KNN returns DataFrame with node1, node2, similarity
-                edges_created = 0
-                for _, row in knn_result.iterrows():
-                    # Write each similarity edge for DI→Entity
-                    result = session.run(
-                        """
+                di_edges = 0
+                entity_edges = 0
+                
+                for _, row in knn_df.iterrows():
+                    node1_id = int(row["node1"])
+                    node2_id = int(row["node2"])
+                    similarity = float(row["similarity"])
+                    
+                    # Try DI→Entity edge
+                    result = session.run("""
                         MATCH (n1), (n2) 
                         WHERE id(n1) = $node1 AND id(n2) = $node2
                           AND (n1:Figure OR n1:KeyValuePair) AND n2:Entity
                         MERGE (n1)-[r:SIMILAR_TO]->(n2)
                         SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
                         RETURN count(r) AS cnt
-                        """,
-                        node1=int(row["node1"]),
-                        node2=int(row["node2"]),
-                        similarity=float(row["similarity"]),
-                        group_id=group_id,
-                    )
+                    """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id)
                     rec = result.single()
-                    if rec:
-                        edges_created += rec["cnt"]
-                stats["knn_edges"] = edges_created
-                logger.info(f"🔗 GDS KNN (DI→Entity): {stats['knn_edges']} SIMILAR_TO edges")
-                
-                # ============================================
-                # 1b. KNN - Entity ↔ Entity (semantic similarity)
-                # ============================================
-                logger.info(f"🔗 Running GDS KNN (Entity↔Entity)...")
-                # Re-run KNN and filter for Entity↔Entity pairs
-                knn_result = gds.knn.stream(
-                    G,
-                    nodeProperties=["embedding"],
-                    topK=knn_top_k,
-                    similarityCutoff=knn_similarity_cutoff,
-                    concurrency=4,
-                )
-                edges_created = 0
-                for _, row in knn_result.iterrows():
-                    # Write each similarity edge for Entity↔Entity (avoid duplicates with id check)
-                    result = session.run(
-                        """
+                    if rec and rec["cnt"] > 0:
+                        di_edges += rec["cnt"]
+                        continue
+                    
+                    # Try Entity↔Entity edge
+                    result = session.run("""
                         MATCH (n1:Entity), (n2:Entity) 
                         WHERE id(n1) = $node1 AND id(n2) = $node2
                           AND id(n1) < id(n2)
                         MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
                         SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
                         RETURN count(r) AS cnt
-                        """,
-                        node1=int(row["node1"]),
-                        node2=int(row["node2"]),
-                        similarity=float(row["similarity"]),
-                        group_id=group_id,
-                    )
+                    """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id)
                     rec = result.single()
-                    if rec:
-                        edges_created += rec["cnt"]
-                stats["entity_edges"] = edges_created
-                logger.info(f"🔗 GDS KNN (Entity↔Entity): {stats['entity_edges']} SEMANTICALLY_SIMILAR edges")
+                    if rec and rec["cnt"] > 0:
+                        entity_edges += rec["cnt"]
                 
-                # ============================================
-                # 2. Louvain - Community Detection
-                # ============================================
-                logger.info(f"🏘️ Running GDS Louvain community detection...")
-                louvain_result = gds.louvain.stream(
-                    G,
-                    includeIntermediateCommunities=False,
-                    concurrency=4,
-                )
-                # Write community assignments back to Neo4j
+                stats["knn_edges"] = di_edges
+                stats["entity_edges"] = entity_edges
+                logger.info(f"🔗 GDS KNN: {stats['knn_edges']} DI edges, {stats['entity_edges']} Entity edges")
+            
+            # 4. Run Louvain community detection
+            logger.info(f"🏘️ Running GDS Louvain community detection...")
+            louvain_df = gds.louvain.stream(G, includeIntermediateCommunities=False, concurrency=4)
+            
+            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
                 community_ids = set()
-                for _, row in louvain_result.iterrows():
-                    session.run(
-                        """
+                for _, row in louvain_df.iterrows():
+                    node_id = int(row["nodeId"])
+                    community_id = int(row["communityId"])
+                    
+                    session.run("""
                         MATCH (n) WHERE id(n) = $nodeId
                         SET n.community_id = $communityId
-                        """,
-                        nodeId=int(row["nodeId"]),
-                        communityId=int(row["communityId"]),
-                    )
-                    community_ids.add(row["communityId"])
+                    """, nodeId=node_id, communityId=community_id)
+                    community_ids.add(community_id)
+                
                 stats["communities"] = len(community_ids)
                 logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
-                
-                # ============================================
-                # 3. PageRank - Node Importance
-                # ============================================
-                logger.info(f"📈 Running GDS PageRank...")
-                pagerank_result = gds.pageRank.stream(
-                    G,
-                    dampingFactor=0.85,
-                    maxIterations=20,
-                    concurrency=4,
-                )
-                # Write PageRank scores back to Neo4j
+            
+            # 5. Run PageRank
+            logger.info(f"📈 Running GDS PageRank...")
+            pagerank_df = gds.pageRank.stream(G, dampingFactor=0.85, maxIterations=20, concurrency=4)
+            
+            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
                 nodes_scored = 0
-                for _, row in pagerank_result.iterrows():
-                    session.run(
-                        """
+                for _, row in pagerank_df.iterrows():
+                    node_id = int(row["nodeId"])
+                    score = float(row["score"])
+                    
+                    session.run("""
                         MATCH (n) WHERE id(n) = $nodeId
                         SET n.pagerank = $score
-                        """,
-                        nodeId=int(row["nodeId"]),
-                        score=float(row["score"]),
-                    )
+                    """, nodeId=node_id, score=score)
                     nodes_scored += 1
+                
                 stats["pagerank_nodes"] = nodes_scored
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
-                
-                # Cleanup GDS projection
-                G.drop()
-                logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
-
-                # Mark GDS as freshly computed for this group
-                self.neo4j_store.clear_gds_stale(group_id)
-                
+            
+            # 6. Cleanup
+            gds.graph.drop(projection_name)
+            logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
+            
+            # Mark GDS as freshly computed for this group
+            self.neo4j_store.clear_gds_stale(group_id)
+            
         except Exception as e:
-            logger.error(f"GDS graph algorithms failed: {e}", extra={"error": str(e)})
-            raise
+            logger.error(f"⚠️  GDS graph algorithms failed: {e}", extra={"error": str(e)})
+            logger.warning(f"⚠️  Continuing indexing without GDS algorithms")
+            # Don't raise - allow indexing to continue without GDS
         
         return stats
 
@@ -2640,7 +2670,7 @@ Output:
                 WHERE e1 <> e2
                   AND e1.embedding IS NOT NULL
                   AND e2.embedding IS NOT NULL
-                  AND id(e1) < id(e2)  // Avoid duplicates (create undirected edges once)
+                  AND elementId(e1) < elementId(e2)  // Avoid duplicates (create undirected edges once)
                   AND NOT (e1)-[:RELATED_TO]-(e2)  // Skip explicit relationships
                 WITH e1, e2, 
                      vector.similarity.cosine(e1.embedding, e2.embedding) AS score

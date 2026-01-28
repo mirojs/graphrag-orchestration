@@ -1950,7 +1950,7 @@ Output:
                 WHERE e1 <> e2
                   AND e1.embedding IS NOT NULL
                   AND e2.embedding IS NOT NULL
-                  AND id(e1) < id(e2)  // Avoid duplicates (create undirected edges once)
+                  AND elementId(e1) < elementId(e2)  // Avoid duplicates (create undirected edges once)
                   AND NOT (e1)-[:RELATED_TO]-(e2)  // Skip explicit relationships
                 WITH e1, e2, 
                      vector.similarity.cosine(e1.embedding, e2.embedding) AS score

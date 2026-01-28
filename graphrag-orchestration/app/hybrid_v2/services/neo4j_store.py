@@ -443,6 +443,11 @@ class Neo4jStoreV3:
             entity.updated_at = datetime()
         
         WITH entity, e
+        // V2: Store embeddings in embedding_v2 property (Voyage 2048-dim)
+        FOREACH (_ IN CASE WHEN e.embedding_v2 IS NOT NULL AND size(e.embedding_v2) > 0 THEN [1] ELSE [] END |
+            SET entity.embedding_v2 = e.embedding_v2
+        )
+        // V1 fallback: Store in embedding property (OpenAI 3072-dim)
         FOREACH (_ IN CASE WHEN e.embedding IS NOT NULL AND size(e.embedding) > 0 THEN [1] ELSE [] END |
             SET entity.embedding = e.embedding
         )
@@ -463,7 +468,8 @@ class Neo4jStoreV3:
                 "name": e.name,
                 "type": e.type,
                 "description": e.description,
-                "embedding": e.embedding,
+                "embedding": e.embedding if hasattr(e, 'embedding') else None,  # V1: OpenAI embeddings
+                "embedding_v2": e.embedding_v2 if hasattr(e, 'embedding_v2') else e.embedding,  # V2: Voyage embeddings (fallback to embedding if no embedding_v2)
                 "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
                 "aliases": e.aliases if hasattr(e, 'aliases') else [],
             }
@@ -529,6 +535,11 @@ class Neo4jStoreV3:
             entity.updated_at = datetime()
         
         WITH entity, e
+        // V2: Store embeddings in embedding_v2 property (Voyage 2048-dim)
+        FOREACH (_ IN CASE WHEN e.embedding_v2 IS NOT NULL AND size(e.embedding_v2) > 0 THEN [1] ELSE [] END |
+            SET entity.embedding_v2 = e.embedding_v2
+        )
+        // V1 fallback: Store in embedding property (OpenAI 3072-dim)
         FOREACH (_ IN CASE WHEN e.embedding IS NOT NULL AND size(e.embedding) > 0 THEN [1] ELSE [] END |
             SET entity.embedding = e.embedding
         )
@@ -549,12 +560,20 @@ class Neo4jStoreV3:
                 "name": e.name,
                 "type": e.type,
                 "description": e.description,
-                "embedding": e.embedding,
+                "embedding": e.embedding if hasattr(e, 'embedding') else None,  # V1: OpenAI embeddings
+                "embedding_v2": e.embedding_v2 if hasattr(e, 'embedding_v2') else e.embedding,  # V2: Voyage embeddings (fallback to embedding if no embedding_v2)
                 "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
                 "aliases": e.aliases if hasattr(e, 'aliases') else [],
             }
             for e in entities
         ]
+        
+        # Debug: Check if embedding_v2 is actually populated
+        if entity_data:
+            sample = entity_data[0]
+            logger.warning(f"   Sample entity_data: has embedding={sample['embedding'] is not None and len(sample['embedding']) > 0 if sample['embedding'] else False}, has embedding_v2={sample['embedding_v2'] is not None and len(sample['embedding_v2']) > 0 if sample['embedding_v2'] else False}")
+            if sample['embedding_v2']:
+                logger.warning(f"   embedding_v2 dim: {len(sample['embedding_v2'])}")
         
         async with self.async_driver.session(database=self.database) as session:
             result = await session.run(query, entities=entity_data, group_id=group_id)

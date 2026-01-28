@@ -1686,45 +1686,30 @@ Output:
             )
             
             # Process KNN results and create edges in Neo4j
+            # Use SEMANTICALLY_SIMILAR for ALL KNN edges (consistency with GDS)
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-                di_edges = 0
-                entity_edges = 0
+                edges_created = 0
                 
                 for _, row in knn_df.iterrows():
                     node1_id = int(row["node1"])
                     node2_id = int(row["node2"])
                     similarity = float(row["similarity"])
                     
-                    # Try DI→Entity edge
+                    # Create SEMANTICALLY_SIMILAR edge for all node type combinations
+                    # (Entity↔Entity, Figure/KVP→Entity, etc.)
                     result = session.run("""
                         MATCH (n1), (n2) 
                         WHERE id(n1) = $node1 AND id(n2) = $node2
-                          AND (n1:Figure OR n1:KeyValuePair) AND n2:Entity
-                        MERGE (n1)-[r:SIMILAR_TO]->(n2)
-                        SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
-                        RETURN count(r) AS cnt
-                    """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id)
-                    rec = result.single()
-                    if rec and rec["cnt"] > 0:
-                        di_edges += rec["cnt"]
-                        continue
-                    
-                    # Try Entity↔Entity edge
-                    result = session.run("""
-                        MATCH (n1:Entity), (n2:Entity) 
-                        WHERE id(n1) = $node1 AND id(n2) = $node2
-                          AND id(n1) < id(n2)
                         MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
                         SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
                         RETURN count(r) AS cnt
                     """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id)
                     rec = result.single()
                     if rec and rec["cnt"] > 0:
-                        entity_edges += rec["cnt"]
+                        edges_created += rec["cnt"]
                 
-                stats["knn_edges"] = di_edges
-                stats["entity_edges"] = entity_edges
-                logger.info(f"🔗 GDS KNN: {stats['knn_edges']} DI edges, {stats['entity_edges']} Entity edges")
+                stats["knn_edges"] = edges_created
+                logger.info(f"🔗 GDS KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges created")
             
             # 4. Run Louvain community detection
             logger.info(f"🏘️ Running GDS Louvain community detection...")

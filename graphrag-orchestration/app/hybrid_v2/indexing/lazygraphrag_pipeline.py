@@ -1583,10 +1583,12 @@ Output:
             logger.warning("⚠️  GDS configuration incomplete - skipping graph algorithms. Need: NEO4J_URI, AURA_DS_CLIENT_ID, AURA_DS_CLIENT_SECRET")
             return stats
         
-        # Use timestamp to make projection name unique (avoids job ID collisions in Aura GDS)
+        # Use timestamp + random to make projection name unique (avoids job ID collisions in Aura GDS)
         import time
-        timestamp = int(time.time())
-        projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}"
+        import random
+        timestamp = int(time.time() * 1000)  # milliseconds for more uniqueness
+        random_suffix = random.randint(1000, 9999)
+        projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}_{random_suffix}"
         session_name = "graphrag_session"
         
         try:
@@ -1622,13 +1624,23 @@ Output:
             # 2. Project graph using gds.graph.project.remote() - the correct Aura Serverless approach
             logger.info(f"📊 Creating GDS projection: {projection_name}")
             
-            # Drop existing graph if present
+            # Drop existing graph if present (handles both SUCCESS and FAILED states)
             try:
                 existing_graphs = gds.graph.list()
                 for g in existing_graphs.itertuples():
                     if g.graphName == projection_name:
-                        gds.graph.drop(projection_name)
-                        logger.info(f"🧹 Dropped existing projection: {projection_name}")
+                        try:
+                            gds.graph.drop(projection_name)
+                            logger.info(f"🧹 Dropped existing projection: {projection_name}")
+                        except Exception as drop_err:
+                            # If drop fails, try via low-level query (handles FAILED jobs)
+                            logger.warning(f"Standard drop failed, trying direct cleanup: {drop_err}")
+                            try:
+                                with driver.session() as session:
+                                    session.run(f"CALL gds.graph.drop('{projection_name}', false)")
+                                    logger.info(f"🧹 Force-dropped projection via query: {projection_name}")
+                            except Exception as force_err:
+                                logger.warning(f"Could not force-drop projection: {force_err}")
             except Exception as e:
                 logger.debug(f"Graph list/drop check: {e}")
             
@@ -1636,10 +1648,10 @@ Output:
             escaped_group_id = group_id.replace('"', '\\"')
             
             # Single Cypher query with gds.graph.project.remote() - required for Aura Serverless
-            # Add timestamp to query to avoid job ID collisions (Aura GDS uses query string as job ID)
+            # Add timestamp+random to query to avoid job ID collisions (Aura GDS uses query string as job ID)
             # This projects nodes with their embeddings and relationships in one call
             projection_query = f'''
-                // Timestamp: {timestamp} - Ensures unique job ID in Aura GDS
+                // Timestamp: {timestamp}_{random_suffix} - Ensures unique job ID in Aura GDS
                 CALL () {{
                     // Project all nodes with embeddings
                     MATCH (n)

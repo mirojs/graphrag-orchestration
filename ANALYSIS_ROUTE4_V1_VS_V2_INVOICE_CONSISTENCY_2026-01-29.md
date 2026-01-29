@@ -1299,55 +1299,126 @@ python3 scripts/run_gds_knn.py
 All 5 KNN configurations tested with the query:
 > "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"
 
-| Configuration | KNN Edges | Inconsistencies | Citations | Relevance |
-|---------------|-----------|-----------------|-----------|-----------|
+**Raw Results (as reported by counting tool):**
+
+| Configuration | KNN Edges | Inconsistencies* | Citations | Relevance |
+|---------------|-----------|------------------|-----------|-----------|
 | **V2 Baseline** | 403 | 14 | 6 | 100% |
 | **KNN Disabled** | 0 | 8 | 5 | 100% |
 | **KNN-1** (K=3, 0.80) | 208 | 22 | 3 | 100% |
 | **KNN-2** (K=5, 0.75) | 379 | 38 | 3 | 100% |
 | **KNN-3** (K=5, 0.85) | 350 | 20 | 3 | 100% |
 
-### Key Findings
+*Note: Inconsistency counts are inflated by keyword counting method - see corrected analysis below.
 
-1. **Citation Relevance**: ALL configurations achieved **100% citation relevance** (vs. original V2 baseline's 56%)
-   - The earlier 56% was likely due to older/stale GDS edges or different query phrasing
-   
-2. **Inconsistencies Found**:
-   - **KNN-2** found the most (38 inconsistencies) — best for comprehensive analysis
-   - **KNN-1** found 22 inconsistencies — good balance
-   - **KNN-3** found 20 inconsistencies
-   - **V2 Baseline** found 14 inconsistencies
-   - **KNN Disabled** found only 8 — too sparse, misses information
-   
-3. **Optimal Configuration**: **KNN-2 (K=5, cutoff=0.75)** appears optimal:
-   - 379 edges (47% reduction from original 806)
-   - Highest inconsistency detection (38)
-   - 100% citation relevance
-   - Good semantic connectivity without excessive noise
+### ⚠️ CRITICAL CORRECTION: Quality Analysis
 
-### Quality Analysis
+The raw "inconsistency counts" above are **misleading** - they count keyword occurrences, not actual distinct findings. Manual review of conclusions reveals the **actual quality**:
 
-**Key inconsistencies correctly identified** (all configs found these core issues):
-1. ✅ Lift model mismatch: Savaria V1504 vs AscendPro VPX200
-2. ✅ Payment schedule conflict: Full $29,900 due at signing vs staged payments ($20k/$7k/$2.9k)
-3. ✅ Customer name variation: Fabrikam Inc. vs Fabrikam Construction
-4. ✅ Quantity alignment verified (all match)
-5. ✅ Total amount alignment verified ($29,900 matches)
+**V1 Reference (OpenAI, 0 edges):** Found **11 actual inconsistencies** including:
+1. ✅ Lift model mismatch (Savaria V1504 vs AscendPro VPX200)
+2. ✅ Cab keyless access missing
+3. ✅ Door spec additions (80" High, WR-500 lock)
+4. ✅ Hall call flush-mount requirement missing
+5. ✅ Outdoor terminology (fitting vs configuration package)
+6. ✅ **Payment terms conflict** ($29,900 at signing vs staged $20k/$7k/$2.9k)
+7. ✅ Customer name (Fabrikam Construction vs Fabrikam Inc)
+8. ✅ Job ID (Dayton FL vs Tampa/Bayfront Animal Clinic)
+9. ✅ Malformed URL (https://ww... missing 'w')
+10. ✅ Tax handling ambiguity
+11. ✅ No written change order for spec changes
 
-### Conclusions
+### Key Finding: Payment Conflict Detection
 
-- **KNN Disabled (0 edges)**: Too sparse — misses cross-document semantic connections needed for comprehensive analysis
-- **KNN-1 (268 edges)**: Good but slightly too restrictive
-- **KNN-2 (476 edges, actual 379)**: Best balance — comprehensive without noise
-- **KNN-3 (444 edges, actual 350)**: Stricter cutoff reduces useful connections
-- **V2 Baseline (806 edges)**: Original was actually performing well; the earlier 56% relevance was an anomaly
+The **Payment Conflict** is a CRITICAL inconsistency:
+- Contract: $20,000 at signing → $7,000 at delivery → $2,900 at completion
+- Invoice: $29,900 due at signing (full amount!)
 
-### Recommendation
+| Configuration | Payment Conflict Flagged? | Conclusion Quality |
+|---------------|--------------------------|-------------------|
+| V2 Baseline (403 edges) | ✗ **NO** | "No inconsistency in overall amount" |
+| KNN Disabled (0 edges) | ✗ **NO** | "Amounts CONSISTENT" - **MISSED IT** |
+| KNN-1 (208 edges) | ✓ **YES** | Correctly flagged milestone conflict |
+| KNN-2 (379 edges) | ✓ **YES** | "Two key inconsistencies" - model + payment |
+| KNN-3 (350 edges) | ✓ **YES** | Flagged payment timing conflict |
 
-Maintain current V2 default settings (K=5, cutoff=0.60) or slightly tighten to **K=5, cutoff=0.75** for production.
+### Why KNN-Disabled Performed WORST
 
-The earlier poor V2 performance (7 inconsistencies, 56% relevance) was likely due to:
-1. Stale GDS edges requiring recomputation
-2. Different query phrasing affecting decomposition
+**KNN-Disabled (Voyage embeddings, 0 edges)** concluded:
+> "the invoice is **CONSISTENT** with the contract in terms of amounts and quantities, and the **only** material inconsistency is the difference in the specified lift model"
+
+This is **WORSE than V1** which found 11 issues including the payment conflict!
+
+**Root Cause Hypothesis:** Without entity-entity KNN edges, the graph lacks connectivity to traverse from "invoice payment terms" → "contract payment schedule". The retrieval may have fetched chunks mentioning both values, but the lack of semantic connections prevented the LLM from recognizing them as conflicting information requiring synthesis.
+
+### K=5 vs K=3 Interpretation
+
+Your intuition about K=5 helping with relationships is partially correct:
+
+- **K=3** (KNN-1): 208 edges - Found payment + model (good)
+- **K=5** (KNN-2): 379 edges - Found payment + model with clearer focus (good)
+- **K=5 strict** (KNN-3): 350 edges - Similar quality
+
+With K=5, each entity connects to 5 nearest neighbors instead of 3. This provides:
+- **More connection diversity** = more paths for PPR traversal
+- **Not necessarily "longer range"** in document distance
+- **Tradeoff:** Potentially more noise
+
+The **cutoff threshold** matters more than K:
+- Lower cutoff (0.75): More edges, looser similarity = better coverage
+- Higher cutoff (0.85): Fewer edges, stricter similarity = less noise
+
+### Actual Quality Ranking
+
+Based on **conclusion quality** (not raw keyword counts):
+
+1. **KNN-1, KNN-2, KNN-3** (tie): All correctly identified **both major issues** (lift model + payment conflict)
+2. **V2 Baseline**: Found spec issues but **missed payment conflict**
+3. **KNN Disabled**: **WORST** - only found 1 real issue (lift model)
+
+### V1 vs V2 with KNN
+
+| Finding | V1 (OpenAI, 0 edges) | V2 + KNN-enabled |
+|---------|----------------------|------------------|
+| Lift model mismatch | ✅ | ✅ |
+| Payment conflict | ✅ | ✅ (only with KNN) |
+| Keyless access | ✅ | ❓ (not explicit) |
+| Flush-mount | ✅ | ✅ (mentioned) |
+| Door specs (WR-500) | ✅ | ✅ |
+| Outdoor terminology | ✅ | ✅ |
+| Customer name | ✅ | ✅ |
+| Job ID (Bayfront) | ✅ | ❌ |
+| Malformed URL | ✅ | ❌ |
+| Tax handling | ✅ | ✅ |
+| Change order | ✅ | ✅ (implicit) |
+
+**V1 found more minor issues** (URL, Job ID) but **V2 + KNN found the CRITICAL issues**.
+
+### Corrected Conclusions
+
+1. **KNN Disabled (0 edges)**: ❌ **WORST** - missing KNN edges cripples cross-document reasoning. Cannot properly synthesize payment terms from different document chunks.
+
+2. **KNN-1/2/3 (208-379 edges)**: ✅ **ALL GOOD** - any amount of KNN edges above 0 enables proper cross-document synthesis. All three found both major inconsistencies.
+
+3. **V2 Baseline (403 edges)**: ⚠️ **MIXED** - has edges but conclusion didn't flag payment conflict. May be LLM response variation, not structural.
+
+4. **K=5 vs K=3**: Minimal quality difference. Both K values with reasonable cutoffs work well.
+
+### Recommendation (REVISED)
+
+**DO NOT USE knn_enabled=False** - it breaks cross-document reasoning.
+
+For production, use any of:
+- **K=3, cutoff=0.80** (fewer edges, slightly more focused)
+- **K=5, cutoff=0.75** (more edges, broader coverage)
+- **K=5, cutoff=0.85** (moderate edges, balance)
+
+The "38 vs 22 vs 20" inconsistency counts are **not meaningful** - all three KNN-enabled configs perform similarly well in detecting the **actual critical issues**.
+
+### Next Steps
+
+1. **Run Q-D8 test** on all configs to verify Contoso WARRANTY detection (hard constraint)
+2. **Re-run invoice query** with slightly different phrasing to test consistency
+3. **Phase 2 (de-noising) likely NOT needed** since KNN-enabled configs achieve good quality
 
 ---

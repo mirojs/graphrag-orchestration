@@ -819,6 +819,28 @@ Output:
   {"type": "PARTY_TO", "start_node_id": "1", "end_node_id": "0", "properties": {}},
   {"type": "PARTY_TO", "start_node_id": "2", "end_node_id": "0", "properties": {}}
 ]}
+
+Example 3:
+Text: "Invoice for Savaria V1504 Vertical Platform Lift - Unit Price: $68,500. Pay online at https://portal.example.com/pay"
+Output:
+{"nodes": [
+  {"id": "0", "label": "CONCEPT", "properties": {"name": "Savaria V1504", "aliases": ["V1504", "Savaria V1504 Vertical Platform Lift", "Savaria lift"], "description": "Product model - vertical platform lift"}},
+  {"id": "1", "label": "CONCEPT", "properties": {"name": "$68,500", "aliases": ["68500", "unit price"], "description": "Price amount"}},
+  {"id": "2", "label": "CONCEPT", "properties": {"name": "https://portal.example.com/pay", "aliases": ["portal.example.com", "payment portal", "online payment URL"], "description": "Payment URL"}}
+], "relationships": [
+  {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "unit price for product"}}
+]}
+
+Example 4:
+Text: "Model: AscendPro VPX200 differs from the contracted Savaria V1504. Website shows https://ww.contosolifts.com/portal/pay"
+Output:
+{"nodes": [
+  {"id": "0", "label": "CONCEPT", "properties": {"name": "AscendPro VPX200", "aliases": ["VPX200", "AscendPro"], "description": "Product model - elevator/lift"}},
+  {"id": "1", "label": "CONCEPT", "properties": {"name": "Savaria V1504", "aliases": ["V1504", "Savaria"], "description": "Product model - elevator/lift"}},
+  {"id": "2", "label": "CONCEPT", "properties": {"name": "https://ww.contosolifts.com/portal/pay", "aliases": ["contosolifts.com", "contosolifts portal", "payment URL"], "description": "Payment website URL"}}
+], "relationships": [
+  {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "product comparison/mismatch"}}
+]}
 '''
         
         # Run extraction with schema AND examples for alias extraction

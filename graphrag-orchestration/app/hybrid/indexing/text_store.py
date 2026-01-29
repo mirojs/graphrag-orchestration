@@ -109,7 +109,7 @@ class Neo4jTextUnitStore:
         WITH c, [kw IN $keywords WHERE toLower(coalesce(c.text, '')) CONTAINS kw] AS matched
         WITH c, size(matched) AS score
         WHERE score > 0
-        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         WITH c, d, score
         ORDER BY score DESC, coalesce(c.chunk_index, 0) ASC
         RETURN c AS chunk, d AS doc, score,
@@ -225,13 +225,16 @@ class Neo4jTextUnitStore:
         section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         
         # Enhanced query: also fetch section info via IN_SECTION edge
+        # FIX: Support both Entity and __Entity__ labels (different indexing pipelines use different labels)
+        # FIX: Use IN_DOCUMENT instead of PART_OF (actual relationship type in graph)
         query = """
         UNWIND $entity_names AS entity_name
-        MATCH (e:`__Entity__` {group_id: $group_id})
-        WHERE toLower(e.name) = toLower(entity_name)
-            OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name))
+        MATCH (e {group_id: $group_id})
+        WHERE (e:Entity OR e:`__Entity__`)
+          AND (toLower(e.name) = toLower(entity_name)
+               OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
         MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
-        OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
         WITH entity_name, c, d, s
         ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
@@ -412,7 +415,7 @@ class Neo4jTextUnitStore:
         query = """
         MATCH (d:Document)
         WHERE d.group_id = $group_id
-        OPTIONAL MATCH (d)<-[:PART_OF]-(c)
+        OPTIONAL MATCH (d)<-[:IN_DOCUMENT]-(c)
         WITH d, count(c) AS chunk_count
         RETURN 
             d.id AS id,

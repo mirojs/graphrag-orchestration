@@ -3,17 +3,31 @@
 **Last Updated:** January 29, 2026
 
 **Recent Updates (January 29, 2026):**
-- ✅ **HippoRAG Alias & KVP Resolution:** Enhanced seed-to-node resolution for Route 2/Local Search
-  - **5-Strategy Matching:** Exact ID → Alias → KVP Key → Substring → Jaccard (0.5 threshold)
-  - **Problem Solved:** Seeds like "INVOICE" now resolve to entities with that alias (e.g., "INVOICE # 1256003")
-  - **KVP Support:** KeyValue node keys now used for seed resolution (e.g., "payment_date" → KeyValue node)
-  - **Impact:** Improves Route 2 retrieval for queries using generic terms that map to specific entity aliases
-  - Files modified: `app/hybrid/retrievers/hipporag_retriever.py`, `app/hybrid_v2/retrievers/hipporag_retriever.py`
-- ✅ **V2 Generic Alias Extraction:** Fixed V2 indexing pipeline missing generic aliases
-  - **Root Cause:** V2 lacked `_generate_generic_aliases()` function that V1 has
-  - **Impact:** Invoice consistency queries now find "INVOICE" → "INVOICE # 1256003" mappings
-  - **Result:** V2 KNN-disabled now detects payment conflicts (was failing before)
-  - Documentation: `ANALYSIS_ROUTE4_V1_VS_V2_INVOICE_CONSISTENCY_2026-01-29.md`
+- ✅ **HippoRAG Alias & KVP Resolution:** Enhanced seed-to-node resolution for Route 2/Local Search & Route 4/DRIFT
+  - **5-Strategy Matching:** Exact ID → Alias → KVP Key → Substring → Jaccard similarity
+  - **Problem Solved:** Generic seeds like "Invoice" now resolve to entities via aliases (e.g., "Invoice #1256003" has alias "Invoice")
+  - **KVP Support:** KeyValue node keys used for seed resolution (e.g., "payment date" matches key "Payment Due Date")
+  - **Route 4 Impact:** PPR graph traversal now succeeds with generic query terms
+  - Files modified: `app/hybrid/retrievers/hipporag_retriever.py`, `app/hybrid_v2/retrievers/hipporag_retriever.py`, `app/hybrid_v2/hybrid/retrievers/hipporag_retriever.py`
+- ✅ **V2 Generic Alias Generation:** Implemented `_generate_generic_aliases()` in V2 indexing pipeline
+  - **Root Cause:** V2 lacked alias extraction that V1 had since Jan 19
+  - **Solution:** Extracts first word + prefix patterns (e.g., "Invoice #1256003" → ["Invoice"], "Payment installment: $20k" → ["Payment"])
+  - **Impact:** Invoice consistency queries resolve seeds → 15 evidence chunks (was 0 before)
+  - **Result:** V2 now detects payment conflicts V1 missed (32 vs 20 inconsistencies found)
+  - Files modified: `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`, `app/hybrid_v2/hybrid/indexing/lazygraphrag_pipeline.py`
+- ✅ **AsyncNeo4j Fail-Fast:** Removed dangerous vector-only fallback from Route 4 tracing service
+  - **Problem:** Route 4 silently fell back to vector-only when AsyncNeo4j unavailable (no multi-hop reasoning)
+  - **Solution:** Raise RuntimeError with clear message: "Route 4 DRIFT requires AsyncNeo4jService for PPR graph traversal"
+  - **Root Cause Fix:** Test scripts now call `await pipeline.initialize()` to connect AsyncNeo4j before querying
+  - **Impact:** Forces proper initialization, prevents silent quality degradation
+  - Files modified: `app/hybrid/pipeline/tracing.py`, `app/hybrid_v2/pipeline/tracing.py`, `app/hybrid_v2/hybrid/pipeline/tracing.py`, `scripts/test_knn_direct.py`
+- ✅ **V1 vs V2 Invoice Consistency Validation:** Comprehensive test proves V2 > V1 after alias fix
+  - **Test Query:** "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"
+  - **V2 WINS:** 32 vs 20 inconsistencies, detected payment conflict V1 missed
+  - **Evidence:** V2 retrieved 15 chunks via PPR (V1 got 0 - all seeds failed to resolve)
+  - **Root Cause:** V2 alias resolution → "Invoice" seed matches entity → PPR traversal succeeds
+  - Documentation: `ANALYSIS_ROUTE4_V1_VS_V2_INVOICE_CONSISTENCY_2026-01-29.md` (Sections 9-12)
+  - Test script: `scripts/test_invoice_consistency_v1_v2.py`
 
 **Recent Updates (January 28, 2026):**
 - 🚀 **Pre-Indexing OCR QA Workflow Design:** Enterprise-grade document quality assurance using Azure DI confidence scores

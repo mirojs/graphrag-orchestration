@@ -1,0 +1,120 @@
+## Analysis
+
+Across all ten sub-questions, there is **no underlying evidence** provided describing any specific invoices, line items, quantities, totals, contracts, pricing schedules, or contract terms. Every sub-question’s “Evidence points” count is 0, and no factual invoice or contract data is presented that could be compared, calculated, or tested for inconsistency.
+
+Because of that, every place where the questions ask “what are the invoice details…”, “how do the invoiced quantities compare…”, “how do the invoiced amounts compare…”, or “where are there inconsistencies…”, there is **no concrete information** in the context from which to derive an answer. Any attempt to state that a quantity, amount, or pricing structure is consistent/inconsistent would be speculative and not grounded in the record.
+
+Below is how this affects each sub‑question:
+
+### Q1  
+> What are the invoice details for each invoice, specifically the total amounts, individual line items, and quantities billed, that 
+...
+--------------------------------------------------------------------------------
+
+================================================================================
+🔬 Testing: V2 (Voyage + Aliases)
+================================================================================
+Group: test-5pdfs-v2-knn-disabled
+Query: Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms
+
+2026-01-29 11:58:41 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details (amou' response_type=summary
+2026-01-29 11:58:41 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:58:51 [info     ] stage_4.1_complete             num_sub_questions=3
+2026-01-29 11:58:51 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:58:51 [info     ] processing_sub_question_1      question='associated with each relevant contract, preserving'
+2026-01-29 11:59:02 [info     ] intent_disambiguation_success  dropped_count=0 query='associated with each relevant contract, preserving all contract terms for reference when comparing invoice information to those contract terms?' seed_entities=['Contract Terms', 'Invoice Information', 'Relevant Contract', 'Master Service Agreement', 'Purchase Agreement']
+2026-01-29 11:59:02 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Contract Terms', 'Invoice Information', 'Relevant Contract', 'Master Service Agreement', 'Purchase Agreement']
+2026-01-29 11:59:02 [info     ] processing_sub_question_2      question='What are the corresponding contract terms that def'
+2026-01-29 11:59:13 [info     ] intent_disambiguation_success  dropped_count=0 query='What are the corresponding contract terms that define expected amounts, permitted line items, and agreed quantities for the same invoices, ensuring that each invoice’s amounts, line items, and quantities are matched to the correct contract terms?' seed_entities=['Contract Terms', 'Invoices', 'Line Items', 'Quantities', 'Expected Amounts']
+2026-01-29 11:59:15 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Contract Terms', 'Invoices', 'Line Items', 'Quantities', 'Expected Amounts']
+2026-01-29 11:59:15 [info     ] processing_sub_question_3      question='and the applicable contract terms?'
+2026-01-29 11:59:25 [info     ] intent_disambiguation_success  dropped_count=0 query='and the applicable contract terms?' seed_entities=[]
+2026-01-29 11:59:25 [info     ] stage_4.2_complete             num_results=3 total_seeds=9
+2026-01-29 11:59:25 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:59:25 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Purchase Agreement', 'Contract Terms', 'Invoice Information', 'Invoices', 'Master Service Agreement', 'Line Items', 'Relevant Contract', 'Expected Amounts', 'Quantities']
+2026-01-29 11:59:25 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:59:25 [info     ] stage_4.3.5_confidence_check   confidence_score=0.31000000000000005 entity_diversity=0.9 satisfied_ratio=0.0 thin_questions=3
+2026-01-29 11:59:38 [info     ] processing_sub_question_1      question='to those contract terms?'
+2026-01-29 11:59:49 [info     ] intent_disambiguation_success  dropped_count=0 query='to those contract terms?' seed_entities=[]
+2026-01-29 11:59:49 [info     ] processing_sub_question_2      question='For the same invoices, what are the corresponding '
+2026-01-29 11:59:56 [info     ] intent_disambiguation_success  dropped_count=0 query='For the same invoices, what are the corresponding contract terms that define the expected amounts, the permitted line items, and the agreed quantities, ensuring that each invoice’s amounts, line items, and quantities are matched to the correct and fully preserved contract terms for the relevant contract?' seed_entities=['Invoice', 'Contract', 'Contract Terms', 'Line Item', 'Quantity']
+2026-01-29 11:59:57 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=1 query='For the same invoices, what are the corresponding '
+2026-01-29 11:59:57 [info     ] processing_sub_question_3      question='that must be identified and preserved in full to s'
+2026-01-29 12:00:07 [info     ] intent_disambiguation_success  dropped_count=0 query='that must be identified and preserved in full to support accurate comparison and validation of each invoice against its correct contract terms?' seed_entities=['Invoice', 'Contract Terms']
+2026-01-29 12:00:08 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=1 query='that must be identified and preserved in full to s'
+2026-01-29 12:00:08 [info     ] async_neo4j_ppr_success        num_results=15 num_seeds=1 query='Find inconsistencies between invoice details (amou'
+2026-01-29 12:00:08 [info     ] stage_4.3.5_complete           additional_seeds=5 total_evidence=15
+2026-01-29 12:00:08 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+2026-01-29 12:00:13 [info     ] v2_voyage_embedder_initialized
+2026-01-29 12:00:13 [info     ] stage_4.4_synthesis
+2026-01-29 12:00:13 [warning  ] no_text_store_available
+2026-01-29 12:00:13 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 12:00:33 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms' response_length=9142 response_type=summary
+2026-01-29 12:00:33 [info     ] stage_4.4_complete
+✅ Query Complete (111.9s)
+📊 Inconsistencies Found: 32
+📚 Citations: 0
+📝 Response Length: 9,142 chars
+
+Key Findings:
+  ✅ Payment Conflict
+  ❌ Lift Model
+  ❌ Door Hardware
+  ❌ Contoso Mentioned
+  ❌ Fabrikam Mentioned
+  ❌ Specific Amounts
+
+Response Preview (first 1000 chars):
+--------------------------------------------------------------------------------
+## Analysis
+
+### Q1: Contract information to preserve for comparison
+
+Across the decomposed questions, the core requirement is to ensure that **all relevant contract terms are fully preserved and associated with each invoice’s governing contract** so they can be used as a stable reference when comparing invoice details (amounts, line items, quantities) to those terms.[5][6]
+
+From this, the necessary contract data elements to preserve include at least:[5][6]  
+- Identification of the **relevant contract** for each invoice (e.g., MSA, purchase agreement, work order, SOW).[5][6]  
+- The **full set of contract terms** that may affect billing, not just summarized fields.[5][6]  
+- Terms governing **pricing/amounts** (rates, fees, discounts, caps, minimums).[5][6]  
+- Terms defining **permitted line items** (what can be billed, allowed fee types, charge categories).[5][6]  
+- Terms defining **quantities** (units, limits, usage rules, frequency, volume thresholds).[5][6]
+
+The emphasis in Q1 i
+...
+--------------------------------------------------------------------------------
+
+================================================================================
+📊 SIDE-BY-SIDE COMPARISON
+================================================================================
+
+Metric                         |     V1 (OpenAI) |     V2 (Voyage) |     Winner
+--------------------------------------------------------------------------------
+Inconsistencies Found          |              20 |              32 |         V2
+Total Key Findings             |               0 |               1 |         V2
+Payment Conflict Detected      |              No |             Yes |          -
+Citations                      |               0 |               0 |          -
+Response Length (chars)        |           7,571 |           9,142 |          -
+Latency (seconds)              |            62.4 |           111.9 |         V1
+
+================================================================================
+KEY FINDINGS COMPARISON
+================================================================================
+
+Finding                        |              V1 |              V2
+--------------------------------------------------------------------------------
+Payment Conflict               |               ❌ |               ✅
+Lift Model                     |               ❌ |               ❌
+Door Hardware                  |               ❌ |               ❌
+Contoso Mentioned              |               ❌ |               ❌
+Fabrikam Mentioned             |               ❌ |               ❌
+Specific Amounts               |               ❌ |               ❌
+
+================================================================================
+🏆 V2 WINS: Found more inconsistencies after alias fix
+   ✨ V2 FIXED: Now detects payment conflict (key improvement)
+2026-01-29 12:00:33 [info     ] async_neo4j_closed
+2026-01-29 12:00:34 [info     ] async_neo4j_closed
+
+✅ Test Complete

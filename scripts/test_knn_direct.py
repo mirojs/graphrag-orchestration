@@ -70,6 +70,9 @@ async def test_group(name, group_id, edges):
             group_id=group_id
         )
         
+        # CRITICAL: Connect async Neo4j for PPR graph traversal
+        await pipeline.initialize()
+        
         # Run query with forced route
         result = await pipeline.force_route(
             query=QUERY,

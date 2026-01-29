@@ -797,6 +797,14 @@ Output:
                 else:
                     aliases_list = []
                 
+                # Generate generic aliases from entity name to improve seed resolution
+                # E.g., "Invoice #1256003" → add "Invoice" alias
+                # E.g., "PURCHASE CONTRACT" → add "Contract" alias
+                generic_aliases = self._generate_generic_aliases(name)
+                for ga in generic_aliases:
+                    if ga.lower() not in [a.lower() for a in aliases_list]:
+                        aliases_list.append(ga)
+                
                 entities_by_id[ent_id] = Entity(
                     id=ent_id,
                     name=name,
@@ -1253,6 +1261,50 @@ Output:
         s = re.sub(r"[^a-z0-9_&\s]", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
         return s
+
+    @staticmethod
+    def _generate_generic_aliases(name: str) -> List[str]:
+        """
+        Generate generic aliases from entity name to improve seed resolution.
+        
+        Examples:
+        - "Invoice #1256003" → ["Invoice"]
+        - "PURCHASE CONTRACT" → ["Contract"]
+        - "Payment installment: $20,000.00 upon signing" → ["Payment"]
+        - "Fabrikam Inc." → ["Fabrikam"]
+        
+        This helps when LLM generates generic seeds like "Invoice" or "Contract"
+        to match specific entities.
+        """
+        aliases = []
+        if not name:
+            return aliases
+            
+        # Extract first word (often the type/category)
+        first_word = name.split()[0] if name.split() else ""
+        
+        # Clean up first word - remove punctuation
+        first_word_clean = re.sub(r'[^a-zA-Z]', '', first_word)
+        
+        # Only add if it's a meaningful word (3+ chars) and different from full name
+        if len(first_word_clean) >= 3 and first_word_clean.lower() != name.lower():
+            # Capitalize first letter for consistency
+            aliases.append(first_word_clean.capitalize())
+        
+        # For compound names with # or : separators, extract the type prefix
+        # E.g., "Invoice #1256003" → "Invoice"
+        # E.g., "Payment installment: $20,000" → "Payment"
+        for sep in ['#', ':', '-']:
+            if sep in name:
+                prefix = name.split(sep)[0].strip()
+                prefix_clean = re.sub(r'[^a-zA-Z\s]', '', prefix).strip()
+                if prefix_clean and len(prefix_clean) >= 3:
+                    # Take first word of prefix
+                    prefix_first = prefix_clean.split()[0] if prefix_clean.split() else ""
+                    if prefix_first and prefix_first.lower() not in [a.lower() for a in aliases]:
+                        aliases.append(prefix_first.capitalize())
+        
+        return aliases
 
     @staticmethod
     def _stable_entity_id(group_id: str, canonical_key: str) -> str:

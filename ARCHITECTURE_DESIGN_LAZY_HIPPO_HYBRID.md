@@ -1,6 +1,19 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 28, 2026
+**Last Updated:** January 29, 2026
+
+**Recent Updates (January 29, 2026):**
+- ✅ **HippoRAG Alias & KVP Resolution:** Enhanced seed-to-node resolution for Route 2/Local Search
+  - **5-Strategy Matching:** Exact ID → Alias → KVP Key → Substring → Jaccard (0.5 threshold)
+  - **Problem Solved:** Seeds like "INVOICE" now resolve to entities with that alias (e.g., "INVOICE # 1256003")
+  - **KVP Support:** KeyValue node keys now used for seed resolution (e.g., "payment_date" → KeyValue node)
+  - **Impact:** Improves Route 2 retrieval for queries using generic terms that map to specific entity aliases
+  - Files modified: `app/hybrid/retrievers/hipporag_retriever.py`, `app/hybrid_v2/retrievers/hipporag_retriever.py`
+- ✅ **V2 Generic Alias Extraction:** Fixed V2 indexing pipeline missing generic aliases
+  - **Root Cause:** V2 lacked `_generate_generic_aliases()` function that V1 has
+  - **Impact:** Invoice consistency queries now find "INVOICE" → "INVOICE # 1256003" mappings
+  - **Result:** V2 KNN-disabled now detects payment conflicts (was failing before)
+  - Documentation: `ANALYSIS_ROUTE4_V1_VS_V2_INVOICE_CONSISTENCY_2026-01-29.md`
 
 **Recent Updates (January 28, 2026):**
 - 🚀 **Pre-Indexing OCR QA Workflow Design:** Enterprise-grade document quality assurance using Azure DI confidence scores

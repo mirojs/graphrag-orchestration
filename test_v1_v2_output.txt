@@ -1,0 +1,470 @@
+================================================================================
+🧪 V1 vs V2 DIFFERENTIATION TEST - Route 4 Deep Reasoning
+================================================================================
+V1 Group: invoice-contract-verification
+V2 Group: test-5pdfs-v2-knn-disabled
+Questions: 5
+
+Initializing V1 pipeline...
+2026-01-29 11:38:53 [info     ] async_neo4j_service_configured
+2026-01-29 11:38:53 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-29 11:38:53 [info     ] community_matcher_created      group_id=invoice-contract-verification has_embedding_client=False has_neo4j_service=True
+2026-01-29 11:38:53 [info     ] hub_extractor_created          group_id=invoice-contract-verification has_graph_store=False has_neo4j=False
+2026-01-29 11:38:53 [info     ] hybrid_pipeline_initialized    group_id=invoice-contract-verification has_async_neo4j=True has_community_matcher=False has_hipporag=False has_neo4j=False profile=general_enterprise relevance_budget=0.8
+2026-01-29 11:38:56 [info     ] async_neo4j_connected
+Initializing V2 pipeline...
+2026-01-29 11:38:56 [info     ] async_neo4j_service_configured
+2026-01-29 11:38:56 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-29 11:38:56 [info     ] community_matcher_created      group_id=test-5pdfs-v2-knn-disabled has_embedding_client=False has_neo4j_service=True
+2026-01-29 11:38:56 [info     ] hub_extractor_created          group_id=test-5pdfs-v2-knn-disabled has_graph_store=False has_neo4j=False
+2026-01-29 11:38:56 [info     ] hybrid_pipeline_initialized    group_id=test-5pdfs-v2-knn-disabled has_async_neo4j=True has_community_matcher=False has_hipporag=False has_neo4j=False profile=general_enterprise relevance_budget=0.8
+2026-01-29 11:38:58 [info     ] async_neo4j_connected
+
+================================================================================
+📝 Q-DR1: Identify the vendor responsible for the vertical platform lift maintenance. Does...
+================================================================================
+
+🔵 V1 Processing...
+2026-01-29 11:38:58 [info     ] route_4_drift_start            query='Identify the vendor responsible for the vertical p' response_type=summary
+2026-01-29 11:38:58 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:39:01 [info     ] stage_4.1_complete             num_sub_questions=4
+2026-01-29 11:39:01 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:39:01 [info     ] processing_sub_question_1      question='What vendor is identified in the relevant document'
+2026-01-29 11:39:01 [info     ] intent_disambiguation_success  dropped_count=3 query='What vendor is identified in the relevant documents as responsible for the **vertical platform lift maintenance** under the original Purchase Agreement and any related service or maintenance agreements?' seed_entities=['Purchase Agreement', 'original Purchase Agreement']
+2026-01-29 11:39:02 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Purchase Agreement', 'original Purchase Agreement']
+2026-01-29 11:39:02 [info     ] processing_sub_question_2      question='specified in the **original Purchase Agreement** f'
+2026-01-29 11:39:02 [info     ] intent_disambiguation_success  dropped_count=1 query='specified in the **original Purchase Agreement** for the **vertical platform lift maintenance** performed by that vendor?' seed_entities=['original Purchase Agreement', 'Purchase Agreement']
+2026-01-29 11:39:02 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['original Purchase Agreement', 'Purchase Agreement']
+2026-01-29 11:39:02 [info     ] processing_sub_question_3      question='is stated on the **invoice** issued by that vendor'
+2026-01-29 11:39:03 [info     ] intent_disambiguation_success  dropped_count=0 query='is stated on the **invoice** issued by that vendor for the **vertical platform lift maintenance**?' seed_entities=['Invoice', 'Vendor', 'Vertical Platform Lift', 'Vertical Platform Lift Maintenance', 'Maintenance Invoice']
+2026-01-29 11:39:03 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice', 'Vendor', 'Vertical Platform Lift', 'Vertical Platform Lift Maintenance', 'Maintenance Invoice']
+2026-01-29 11:39:03 [info     ] processing_sub_question_4      question='Do the **payment schedule terms** stated on the ve'
+2026-01-29 11:39:04 [info     ] intent_disambiguation_success  dropped_count=0 query='Do the **payment schedule terms** stated on the vendor’s **invoice** for the **vertical platform lift maintenance** exactly match the **payment schedule terms** in the **original Purchase Agreement** for that same vertical platform lift maintenance, and if not, what specific discrepancies exist?' seed_entities=['Vendor Invoice for Vertical Platform Lift Maintenance', 'Original Purchase Agreement for Vertical Platform Lift Maintenance', 'Payment Schedule Terms in Vendor Invoice', 'Payment Schedule Terms in Original Purchase Agreement', 'Vertical Platform Lift Maintenance Service']
+2026-01-29 11:39:04 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Vendor Invoice for Vertical Platform Lift Maintenance', 'Original Purchase Agreement for Vertical Platform Lift Maintenance', 'Payment Schedule Terms in Vendor Invoice', 'Payment Schedule Terms in Original Purchase Agreement', 'Vertical Platform Lift Maintenance Service']
+2026-01-29 11:39:04 [info     ] stage_4.2_complete             num_results=4 total_seeds=12
+2026-01-29 11:39:04 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:39:04 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Vertical Platform Lift', 'Maintenance Invoice', 'Invoice', 'original Purchase Agreement', 'Vertical Platform Lift Maintenance', 'Payment Schedule Terms in Vendor Invoice', 'Vendor', 'Purchase Agreement', 'Vendor Invoice for Vertical Platform Lift Maintenance', 'Original Purchase Agreement for Vertical Platform Lift Maintenance', 'Vertical Platform Lift Maintenance Service', 'Payment Schedule Terms in Original Purchase Agreement']
+2026-01-29 11:39:04 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:39:04 [info     ] stage_4.3.5_confidence_check   confidence_score=0.34285714285714286 entity_diversity=0.8571428571428571 satisfied_ratio=0.0 thin_questions=4
+2026-01-29 11:39:07 [info     ] processing_sub_question_1      question='Based on what we found, which vendor is identified'
+2026-01-29 11:39:07 [info     ] intent_disambiguation_success  dropped_count=0 query='Based on what we found, which vendor is identified in the relevant documents as responsible for the **vertical platform lift maintenance** under the **original Purchase Agreement** and any **related service or maintenance agreements**?' seed_entities=['Original Purchase Agreement', 'Vertical Platform Lift Maintenance Agreement', 'Service Agreement', 'Maintenance Agreement', 'Purchase Agreement – Vertical Platform Lift']
+2026-01-29 11:39:08 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Original Purchase Agreement', 'Vertical Platform Lift Maintenance Agreement', 'Service Agreement', 'Maintenance Agreement', 'Purchase Agreement – Vertical Platform Lift']
+2026-01-29 11:39:08 [info     ] processing_sub_question_2      question='Based on what we found, what specific **vertical p'
+2026-01-29 11:39:08 [info     ] intent_disambiguation_success  dropped_count=0 query='Based on what we found, what specific **vertical platform lift maintenance** responsibilities or services performed by that vendor are specified in the **original Purchase Agreement** and any **related service or maintenance agreements**?' seed_entities=['Purchase Agreement', 'Vertical Platform Lift Maintenance Agreement', 'Service Agreement', 'Maintenance Agreement', 'Vendor Service Contract']
+2026-01-29 11:39:09 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Purchase Agreement', 'Vertical Platform Lift Maintenance Agreement', 'Service Agreement', 'Maintenance Agreement', 'Vendor Service Contract']
+2026-01-29 11:39:09 [info     ] processing_sub_question_3      question='is stated on the **invoice** issued by that same v'
+2026-01-29 11:39:09 [info     ] intent_disambiguation_success  dropped_count=0 query='is stated on the **invoice** issued by that same vendor for the **vertical platform lift maintenance**?' seed_entities=['Invoice', 'Vendor', 'Vertical Platform Lift Maintenance']
+2026-01-29 11:39:09 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice', 'Vendor', 'Vertical Platform Lift Maintenance']
+2026-01-29 11:39:09 [info     ] processing_sub_question_4      question='Based on what we found, do the **payment schedule '
+2026-01-29 11:39:11 [info     ] intent_disambiguation_success  dropped_count=0 query='Based on what we found, do the **payment schedule terms** stated on the vendor’s **invoice** for the **vertical platform lift maintenance** exactly match the **payment schedule terms** in the **original Purchase Agreement** for that same **vertical platform lift maintenance**, and if not, what specific discrepancies in **payment schedule terms** exist between the **invoice** and the **original Purchase Agreement**?' seed_entities=['Invoice for Vertical Platform Lift Maintenance', 'Original Purchase Agreement for Vertical Platform Lift Maintenance']
+2026-01-29 11:39:11 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice for Vertical Platform Lift Maintenance', 'Original Purchase Agreement for Vertical Platform Lift Maintenance']
+2026-01-29 11:39:11 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Service Agreement', 'Invoice', 'Original Purchase Agreement', 'Vertical Platform Lift Maintenance', 'Vendor', 'Vertical Platform Lift Maintenance Agreement', 'Purchase Agreement', 'Vendor Service Contract', 'Maintenance Agreement', 'Purchase Agreement – Vertical Platform Lift', 'Invoice for Vertical Platform Lift Maintenance', 'Original Purchase Agreement for Vertical Platform Lift Maintenance']
+2026-01-29 11:39:11 [info     ] stage_4.3.5_complete           additional_seeds=12 total_evidence=0
+2026-01-29 11:39:11 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:39:12 [info     ] stage_4.4_synthesis
+2026-01-29 11:39:12 [warning  ] no_text_store_available
+2026-01-29 11:39:12 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:39:25 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query="Identify the vendor responsible for the vertical platform lift maintenance. Does their invoice's payment schedule match the terms in the original Purchase Agreement?" response_length=5286 response_type=summary
+2026-01-29 11:39:25 [info     ] stage_4.4_complete
+   Score: 33% (2/6 keywords)
+   Citations: 0
+   Missing: ['Contoso', '$20,000', '$7,000']
+
+🟢 V2 Processing...
+2026-01-29 11:39:25 [info     ] route_4_drift_start            query='Identify the vendor responsible for the vertical p' response_type=summary
+2026-01-29 11:39:25 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:39:27 [info     ] stage_4.1_complete             num_sub_questions=4
+2026-01-29 11:39:27 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:39:27 [info     ] processing_sub_question_1      question='What is the name and contact information of the ve'
+2026-01-29 11:39:27 [info     ] intent_disambiguation_success  dropped_count=0 query='What is the name and contact information of the vendor responsible for the vertical platform lift maintenance, as specified in the original Purchase Agreement for the vertical platform lift?' seed_entities=['Vertical Platform Lift', 'Original Purchase Agreement for the Vertical Platform Lift', 'Vendor Responsible for Vertical Platform Lift Maintenance']
+2026-01-29 11:39:28 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=1 query='What is the name and contact information of the ve'
+2026-01-29 11:39:28 [info     ] processing_sub_question_2      question='What maintenance responsibilities for the vertical'
+2026-01-29 11:39:29 [info     ] intent_disambiguation_success  dropped_count=2 query='What maintenance responsibilities for the vertical platform lift are assigned to this vendor in the original Purchase Agreement, including any references to service, inspection, or ongoing support?' seed_entities=['Purchase Agreement']
+2026-01-29 11:39:29 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Purchase Agreement']
+2026-01-29 11:39:29 [info     ] processing_sub_question_3      question='is specified in the original Purchase Agreement fo'
+2026-01-29 11:39:30 [info     ] intent_disambiguation_success  dropped_count=0 query='is specified in the original Purchase Agreement for the vertical platform lift maintenance services provided by this vendor?' seed_entities=['Purchase Agreement', 'Vertical Platform Lift Maintenance Services']
+2026-01-29 11:39:30 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Purchase Agreement', 'Vertical Platform Lift Maintenance Services']
+2026-01-29 11:39:30 [info     ] processing_sub_question_4      question='is shown on the vendor’s invoice for the vertical '
+2026-01-29 11:39:30 [info     ] intent_disambiguation_success  dropped_count=0 query='is shown on the vendor’s invoice for the vertical platform lift maintenance, and how does this schedule compare to the payment schedule defined in the original Purchase Agreement for the same maintenance services?' seed_entities=['Vendor’s Invoice for Vertical Platform Lift Maintenance', 'Vertical Platform Lift Maintenance', 'Payment Schedule', 'Original Purchase Agreement', 'Maintenance Services']
+2026-01-29 11:39:31 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Vendor’s Invoice for Vertical Platform Lift Maintenance', 'Vertical Platform Lift Maintenance', 'Payment Schedule', 'Original Purchase Agreement', 'Maintenance Services']
+2026-01-29 11:39:31 [info     ] stage_4.2_complete             num_results=4 total_seeds=10
+2026-01-29 11:39:31 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:39:31 [info     ] async_neo4j_ppr_success        num_results=28 num_seeds=1 query='Identify the vendor responsible for the vertical p'
+2026-01-29 11:39:31 [info     ] stage_4.3_complete             num_evidence=28
+2026-01-29 11:39:31 [info     ] stage_4.3.5_confidence_check   confidence_score=0.5136363636363637 entity_diversity=0.9090909090909091 satisfied_ratio=0.25 thin_questions=3
+2026-01-29 11:39:31 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+2026-01-29 11:39:36 [info     ] v2_voyage_embedder_initialized
+2026-01-29 11:39:36 [info     ] stage_4.4_synthesis
+2026-01-29 11:39:36 [warning  ] no_text_store_available
+2026-01-29 11:39:36 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:39:49 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query="Identify the vendor responsible for the vertical platform lift maintenance. Does their invoice's payment schedule match the terms in the original Purchase Agreement?" response_length=5193 response_type=summary
+2026-01-29 11:39:49 [info     ] stage_4.4_complete
+   Score: 33% (2/6 keywords)
+   Citations: 0
+   Missing: ['Contoso', '$20,000', '$7,000']
+
+   ⚪ TIE (diff: +0%)
+
+================================================================================
+📝 Q-DR3: A pipe burst in the kitchen (emergency) on a Sunday. If the homeowner notifies t...
+================================================================================
+
+🔵 V1 Processing...
+2026-01-29 11:39:51 [info     ] route_4_drift_start            query='A pipe burst in the kitchen (emergency) on a Sunda' response_type=summary
+2026-01-29 11:39:51 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:39:54 [info     ] stage_4.1_complete             num_sub_questions=3
+2026-01-29 11:39:54 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:39:54 [info     ] processing_sub_question_1      question='are specified as valid ways for the homeowner to g'
+2026-01-29 11:39:55 [info     ] intent_disambiguation_success  dropped_count=0 query='are specified as valid ways for the homeowner to give notice to the Builder for an emergency condition such as a kitchen pipe burst that occurs on a Sunday?' seed_entities=[]
+2026-01-29 11:39:55 [info     ] processing_sub_question_2      question='Under the Warranty terms, what deadlines or time f'
+2026-01-29 11:39:56 [info     ] intent_disambiguation_success  dropped_count=3 query='Under the Warranty terms, what deadlines or time frames are required for the homeowner to provide notice to the Builder about an emergency event like a kitchen pipe burst that occurs on a Sunday, and does providing notice via certified mail on the next day satisfy those timing requirements?' seed_entities=['Warranty terms', 'Builder']
+2026-01-29 11:39:57 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Warranty terms', 'Builder']
+2026-01-29 11:39:57 [info     ] processing_sub_question_3      question='that would affect whether certified mail sent by t'
+2026-01-29 11:39:59 [info     ] intent_disambiguation_success  dropped_count=0 query='that would affect whether certified mail sent by the homeowner the next day is considered valid notice to the Builder?' seed_entities=['Certified Mail', 'Homeowner', 'Builder']
+2026-01-29 11:39:59 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Certified Mail', 'Homeowner', 'Builder']
+2026-01-29 11:39:59 [info     ] stage_4.2_complete             num_results=3 total_seeds=4
+2026-01-29 11:39:59 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:40:00 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Homeowner', 'Builder', 'Warranty terms', 'Certified Mail']
+2026-01-29 11:40:00 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:40:00 [info     ] stage_4.3.5_confidence_check   confidence_score=0.2700000000000001 entity_diversity=0.8 satisfied_ratio=0.0 thin_questions=3
+2026-01-29 11:40:01 [info     ] processing_sub_question_1      question='Under the Warranty terms, what specific methods of'
+2026-01-29 11:40:02 [info     ] intent_disambiguation_success  dropped_count=1 query='Under the Warranty terms, what specific methods of notice are specified as valid ways for the homeowner to give notice to the Builder for an emergency condition such as a kitchen pipe burst that occurs on a Sunday?' seed_entities=['Warranty terms', 'Warranty', 'Builder']
+2026-01-29 11:40:02 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Warranty terms', 'Warranty', 'Builder']
+2026-01-29 11:40:02 [info     ] processing_sub_question_2      question='Under the Warranty terms, what specific deadlines '
+2026-01-29 11:40:03 [info     ] intent_disambiguation_success  dropped_count=3 query='Under the Warranty terms, what specific deadlines or time frames are required for the homeowner to provide notice to the Builder about an emergency event like a kitchen pipe burst that occurs on a Sunday, and does providing notice via certified mail on the next day satisfy those timing requirements?' seed_entities=['Warranty', 'Builder']
+2026-01-29 11:40:03 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Warranty', 'Builder']
+2026-01-29 11:40:03 [info     ] processing_sub_question_3      question='Under the Warranty terms, what provisions, conditi'
+2026-01-29 11:40:04 [info     ] intent_disambiguation_success  dropped_count=3 query='Under the Warranty terms, what provisions, conditions, or requirements would affect whether certified mail sent by the homeowner on the next day after an emergency condition such as a kitchen pipe burst that occurs on a Sunday is considered valid notice to the Builder?' seed_entities=['Warranty terms', 'Builder']
+2026-01-29 11:40:04 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Warranty terms', 'Builder']
+2026-01-29 11:40:04 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Builder', 'Warranty', 'Warranty terms']
+2026-01-29 11:40:04 [info     ] stage_4.3.5_complete           additional_seeds=3 total_evidence=0
+2026-01-29 11:40:04 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:40:04 [info     ] stage_4.4_synthesis
+2026-01-29 11:40:04 [warning  ] no_text_store_available
+2026-01-29 11:40:04 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:40:19 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='A pipe burst in the kitchen (emergency) on a Sunday. If the homeowner notifies the Builder via certified mail the next day, is this considered valid notice under the Warranty terms?' response_length=5769 response_type=summary
+2026-01-29 11:40:19 [info     ] stage_4.4_complete
+   Score: 83% (5/6 keywords)
+   Citations: 0
+   Missing: ['invalid']
+
+🟢 V2 Processing...
+2026-01-29 11:40:19 [info     ] route_4_drift_start            query='A pipe burst in the kitchen (emergency) on a Sunda' response_type=summary
+2026-01-29 11:40:19 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:40:21 [info     ] stage_4.1_complete             num_sub_questions=3
+2026-01-29 11:40:21 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:40:21 [info     ] processing_sub_question_1      question='Under the Warranty terms, how is “valid notice” de'
+2026-01-29 11:40:21 [info     ] intent_disambiguation_success  dropped_count=1 query='Under the Warranty terms, how is “valid notice” defined when a pipe burst in the kitchen is an emergency that occurred on a Sunday?' seed_entities=['Warranty terms']
+2026-01-29 11:40:23 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Warranty terms']
+2026-01-29 11:40:23 [info     ] processing_sub_question_2      question='Under the Warranty terms, are there any timing req'
+2026-01-29 11:40:24 [info     ] intent_disambiguation_success  dropped_count=3 query='Under the Warranty terms, are there any timing requirements or deadlines for providing valid notice when a pipe burst in the kitchen is an emergency that occurred on a Sunday, and does sending certified mail the next day comply with those timing requirements?' seed_entities=['Warranty', 'Warranty terms']
+2026-01-29 11:40:25 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=6 query='Under the Warranty terms, are there any timing req'
+2026-01-29 11:40:25 [info     ] processing_sub_question_3      question='required instead?'
+2026-01-29 11:40:25 [info     ] intent_disambiguation_success  dropped_count=0 query='required instead?' seed_entities=[]
+2026-01-29 11:40:25 [info     ] stage_4.2_complete             num_results=3 total_seeds=2
+2026-01-29 11:40:25 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:40:26 [info     ] async_neo4j_ppr_success        num_results=30 num_seeds=6 query='A pipe burst in the kitchen (emergency) on a Sunda'
+2026-01-29 11:40:26 [info     ] stage_4.3_complete             num_evidence=30
+2026-01-29 11:40:26 [info     ] stage_4.3.5_confidence_check   confidence_score=0.4166666666666667 entity_diversity=0.6666666666666666 satisfied_ratio=0.3333333333333333 thin_questions=2
+2026-01-29 11:40:28 [info     ] processing_sub_question_1      question='of notice (e.g., certified mail, email, phone) and'
+2026-01-29 11:40:29 [info     ] intent_disambiguation_success  dropped_count=0 query='of notice (e.g., certified mail, email, phone) and any required content of the notice?' seed_entities=[]
+2026-01-29 11:40:29 [info     ] processing_sub_question_2      question='Under the Warranty terms, when a pipe burst in the'
+2026-01-29 11:40:29 [info     ] intent_disambiguation_success  dropped_count=4 query='Under the Warranty terms, when a pipe burst in the kitchen is an emergency that occurred on a Sunday, what specific timing requirements or deadlines apply to providing “valid notice,” including whether timing is measured in hours or days from the emergency event?' seed_entities=['Warranty terms']
+2026-01-29 11:40:30 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Warranty terms']
+2026-01-29 11:40:30 [info     ] processing_sub_question_3      question='comply with the timing requirements or deadlines f'
+2026-01-29 11:40:30 [info     ] intent_disambiguation_success  dropped_count=5 query='comply with the timing requirements or deadlines for providing “valid notice,” and if so, is compliance measured by the date of sending or the date of receipt?' seed_entities=[]
+2026-01-29 11:40:30 [info     ] processing_sub_question_4      question='that must be used either in addition to or instead'
+2026-01-29 11:40:31 [info     ] intent_disambiguation_success  dropped_count=0 query='that must be used either in addition to or instead of sending certified mail the next day?' seed_entities=[]
+2026-01-29 11:40:31 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Warranty terms']
+2026-01-29 11:40:31 [info     ] stage_4.3.5_complete           additional_seeds=1 total_evidence=30
+2026-01-29 11:40:31 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:40:31 [info     ] stage_4.4_synthesis
+2026-01-29 11:40:31 [warning  ] no_text_store_available
+2026-01-29 11:40:31 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:40:44 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='A pipe burst in the kitchen (emergency) on a Sunday. If the homeowner notifies the Builder via certified mail the next day, is this considered valid notice under the Warranty terms?' response_length=5451 response_type=summary
+2026-01-29 11:40:44 [info     ] stage_4.4_complete
+   Score: 83% (5/6 keywords)
+   Citations: 0
+   Missing: ['invalid']
+
+   ⚪ TIE (diff: +0%)
+
+================================================================================
+📝 Q-DR5: Compare the strictness of the 'financial penalties' for early termination in the...
+================================================================================
+
+🔵 V1 Processing...
+2026-01-29 11:40:46 [info     ] route_4_drift_start            query="Compare the strictness of the 'financial penalties" response_type=summary
+2026-01-29 11:40:46 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:40:49 [info     ] stage_4.1_complete             num_sub_questions=3
+2026-01-29 11:40:49 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:40:49 [info     ] processing_sub_question_1      question='In the Property Management Agreement, what specifi'
+2026-01-29 11:40:50 [info     ] intent_disambiguation_success  dropped_count=0 query='In the Property Management Agreement, what specific provisions define the "financial penalties" for early termination, including how they are calculated, when they apply, and any limits or exceptions on those penalties?' seed_entities=['Property Management Agreement', 'Financial Penalties', 'Early Termination', 'Termination Penalties', 'Liquidated Damages']
+2026-01-29 11:40:52 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Property Management Agreement', 'Financial Penalties', 'Early Termination', 'Termination Penalties', 'Liquidated Damages']
+2026-01-29 11:40:52 [info     ] processing_sub_question_2      question='In the Holding Tank Servicing Contract, what speci'
+2026-01-29 11:40:52 [info     ] intent_disambiguation_success  dropped_count=4 query='In the Holding Tank Servicing Contract, what specific provisions define the "financial penalties" for early termination, including how they are calculated, when they apply, and any limits or exceptions on those penalties?' seed_entities=['Holding Tank Servicing Contract']
+2026-01-29 11:40:53 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Holding Tank Servicing Contract']
+2026-01-29 11:40:53 [info     ] processing_sub_question_3      question='Comparing your characterizations in the Property M'
+2026-01-29 11:40:53 [info     ] intent_disambiguation_success  dropped_count=3 query='Comparing your characterizations in the Property Management Agreement and the Holding Tank Servicing Contract, which agreement imposes stricter "financial penalties" for early termination and why, considering the size of the penalties, conditions for triggering them, opportunities to avoid or reduce them, and any contractual safeguards for the terminating party?' seed_entities=['Property Management Agreement', 'Holding Tank Servicing Contract']
+2026-01-29 11:40:53 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Property Management Agreement', 'Holding Tank Servicing Contract']
+2026-01-29 11:40:53 [info     ] stage_4.2_complete             num_results=3 total_seeds=6
+2026-01-29 11:40:53 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:40:53 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Termination Penalties', 'Property Management Agreement', 'Financial Penalties', 'Early Termination', 'Liquidated Damages', 'Holding Tank Servicing Contract']
+2026-01-29 11:40:53 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:40:53 [info     ] stage_4.3.5_confidence_check   confidence_score=0.20000000000000004 entity_diversity=0.75 satisfied_ratio=0.0 thin_questions=3
+2026-01-29 11:40:55 [info     ] processing_sub_question_1      question='how those penalties are calculated, (b) when they '
+2026-01-29 11:40:56 [info     ] intent_disambiguation_success  dropped_count=0 query='how those penalties are calculated, (b) when they apply, and (c) any limits or exceptions on those penalties, based on what we found?' seed_entities=[]
+2026-01-29 11:40:56 [info     ] processing_sub_question_2      question='the size of the penalties, (b) the conditions for '
+2026-01-29 11:40:56 [info     ] intent_disambiguation_success  dropped_count=0 query='the size of the penalties, (b) the conditions for triggering them, (c) the opportunities to avoid or reduce them, and (d) any contractual safeguards for the terminating party, based on what we found?' seed_entities=[]
+2026-01-29 11:40:56 [info     ] stage_4.3.5_complete           additional_seeds=0 total_evidence=0
+2026-01-29 11:40:56 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=5 domain_keywords=[] is_comprehensive=True
+2026-01-29 11:40:56 [info     ] stage_4.3.6_using_section_based_coverage reason=comprehensive_enumeration_query
+2026-01-29 11:40:56 [warning  ] stage_4.3.6_section_fallback   fallback_chunks_per_doc=15 reason=no_sections_found
+2026-01-29 11:40:59 [info     ] stage_4.4_synthesis
+2026-01-29 11:40:59 [warning  ] no_text_store_available
+2026-01-29 11:40:59 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:41:10 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query="Compare the strictness of the 'financial penalties' for early termination in the Property Management Agreement versus the Holding Tank Servicing Contract." response_length=6404 response_type=summary
+2026-01-29 11:41:10 [info     ] stage_4.4_complete
+   Score: 100% (6/6 keywords)
+   Citations: 0
+
+🟢 V2 Processing...
+2026-01-29 11:41:10 [info     ] route_4_drift_start            query="Compare the strictness of the 'financial penalties" response_type=summary
+2026-01-29 11:41:10 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:41:13 [info     ] stage_4.1_complete             num_sub_questions=3
+2026-01-29 11:41:13 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:41:13 [info     ] processing_sub_question_1      question='of those financial penalties for early termination'
+2026-01-29 11:41:13 [info     ] intent_disambiguation_success  dropped_count=0 query='of those financial penalties for early termination?' seed_entities=[]
+2026-01-29 11:41:13 [info     ] processing_sub_question_2      question=', and what does this indicate about the relative s'
+2026-01-29 11:41:14 [info     ] intent_disambiguation_success  dropped_count=0 query=', and what does this indicate about the relative strictness of each contract’s financial penalties for early termination?' seed_entities=[]
+2026-01-29 11:41:14 [info     ] processing_sub_question_3      question='in both the Property Management Agreement and the '
+2026-01-29 11:41:15 [info     ] intent_disambiguation_success  dropped_count=1 query='in both the Property Management Agreement and the Holding Tank Servicing Contract, how do these procedures affect the practical strictness and enforceability of the financial penalties for early termination in each contract?' seed_entities=['Property Management Agreement', 'Holding Tank Servicing Contract']
+2026-01-29 11:41:17 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=3 query='in both the Property Management Agreement and the '
+2026-01-29 11:41:17 [info     ] stage_4.2_complete             num_results=3 total_seeds=2
+2026-01-29 11:41:17 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:41:17 [info     ] async_neo4j_ppr_success        num_results=30 num_seeds=3 query="Compare the strictness of the 'financial penalties"
+2026-01-29 11:41:17 [info     ] stage_4.3_complete             num_evidence=30
+2026-01-29 11:41:17 [info     ] stage_4.3.5_confidence_check   confidence_score=0.6 entity_diversity=1.0 satisfied_ratio=0.3333333333333333 thin_questions=2
+2026-01-29 11:41:17 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=5 domain_keywords=[] is_comprehensive=True
+2026-01-29 11:41:17 [info     ] stage_4.3.6_using_section_based_coverage reason=comprehensive_enumeration_query
+2026-01-29 11:41:17 [warning  ] stage_4.3.6_section_fallback   fallback_chunks_per_doc=15 reason=no_sections_found
+2026-01-29 11:41:17 [info     ] stage_4.4_synthesis
+2026-01-29 11:41:17 [warning  ] no_text_store_available
+2026-01-29 11:41:17 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:41:29 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query="Compare the strictness of the 'financial penalties' for early termination in the Property Management Agreement versus the Holding Tank Servicing Contract." response_length=6131 response_type=summary
+2026-01-29 11:41:29 [info     ] stage_4.4_complete
+   Score: 83% (5/6 keywords)
+   Citations: 0
+   Missing: ['commission']
+
+   🔴 V1 BETTER (diff: -17%)
+
+================================================================================
+📝 Q-DR7: The Purchase Contract lists specific payment milestones. Do these match the line...
+================================================================================
+
+🔵 V1 Processing...
+2026-01-29 11:41:31 [info     ] route_4_drift_start            query='The Purchase Contract lists specific payment miles' response_type=summary
+2026-01-29 11:41:31 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:41:33 [info     ] stage_4.1_complete             num_sub_questions=4
+2026-01-29 11:41:33 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:41:33 [info     ] processing_sub_question_1      question='What specific payment milestones are listed in the'
+2026-01-29 11:41:34 [info     ] intent_disambiguation_success  dropped_count=0 query='What specific payment milestones are listed in the Purchase Contract that relate to Invoice #1256003, and what are their corresponding amounts and due dates?' seed_entities=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:35 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:35 [info     ] processing_sub_question_2      question='What are the individual line items and the total a'
+2026-01-29 11:41:36 [info     ] intent_disambiguation_success  dropped_count=0 query='What are the individual line items and the total amount shown on Invoice #1256003, including any descriptions, quantities, and prices?' seed_entities=['Invoice #1256003']
+2026-01-29 11:41:36 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003']
+2026-01-29 11:41:36 [info     ] processing_sub_question_3      question='For each specific payment milestone listed in the '
+2026-01-29 11:41:37 [info     ] intent_disambiguation_success  dropped_count=2 query='For each specific payment milestone listed in the Purchase Contract related to Invoice #1256003, does the amount and timing directly match any individual line item on Invoice #1256003?' seed_entities=['Invoice #1256003', 'Purchase Contract', 'Invoice 1256003']
+2026-01-29 11:41:37 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003', 'Purchase Contract', 'Invoice 1256003']
+2026-01-29 11:41:37 [info     ] processing_sub_question_4      question='When taken together, do the specific payment miles'
+2026-01-29 11:41:38 [info     ] intent_disambiguation_success  dropped_count=0 query='When taken together, do the specific payment milestones listed in the Purchase Contract total to the same overall amount as the total shown on Invoice #1256003?' seed_entities=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:38 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:38 [info     ] stage_4.2_complete             num_results=4 total_seeds=3
+2026-01-29 11:41:38 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:41:38 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003', 'Invoice 1256003', 'Purchase Contract']
+2026-01-29 11:41:38 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:41:38 [info     ] stage_4.3.5_confidence_check   confidence_score=0.05000000000000002 entity_diversity=0.375 satisfied_ratio=0.0 thin_questions=4
+2026-01-29 11:41:40 [info     ] processing_sub_question_1      question='Based on what we found, what specific payment mile'
+2026-01-29 11:41:40 [info     ] intent_disambiguation_success  dropped_count=0 query='Based on what we found, what specific payment milestones are listed in the Purchase Contract that relate to Invoice #1256003, and what are their corresponding amounts and due dates?' seed_entities=['Invoice #1256003', 'Purchase Contract']
+2026-01-29 11:41:40 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003', 'Purchase Contract']
+2026-01-29 11:41:40 [info     ] processing_sub_question_2      question='Based on what we found, what are the individual li'
+2026-01-29 11:41:41 [info     ] intent_disambiguation_success  dropped_count=0 query='Based on what we found, what are the individual line items and the total amount shown on Invoice #1256003, including any descriptions, quantities, and prices?' seed_entities=['Invoice #1256003']
+2026-01-29 11:41:41 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003']
+2026-01-29 11:41:41 [info     ] processing_sub_question_3      question='directly match any individual line item on Invoice'
+2026-01-29 11:41:42 [info     ] intent_disambiguation_success  dropped_count=0 query='directly match any individual line item on Invoice #1256003 (including its descriptions, quantities, and prices)?' seed_entities=['Invoice #1256003']
+2026-01-29 11:41:42 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003']
+2026-01-29 11:41:42 [info     ] processing_sub_question_4      question='Based on what we found, when taken together, do th'
+2026-01-29 11:41:44 [info     ] intent_disambiguation_success  dropped_count=0 query='Based on what we found, when taken together, do the specific payment milestones listed in the Purchase Contract that relate to Invoice #1256003 total to the same overall amount as the total shown on Invoice #1256003?' seed_entities=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:44 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:44 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoice #1256003', 'Purchase Contract']
+2026-01-29 11:41:44 [info     ] stage_4.3.5_complete           additional_seeds=2 total_evidence=0
+2026-01-29 11:41:44 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:41:45 [info     ] stage_4.4_synthesis
+2026-01-29 11:41:45 [warning  ] no_text_store_available
+2026-01-29 11:41:45 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:41:50 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='The Purchase Contract lists specific payment milestones. Do these match the line items or total on the Invoice #1256003?' response_length=3314 response_type=summary
+2026-01-29 11:41:50 [info     ] stage_4.4_complete
+   Score: 50% (3/6 keywords)
+   Citations: 0
+   Missing: ['$20,000', '$7,000', '$2,900']
+
+🟢 V2 Processing...
+2026-01-29 11:41:50 [info     ] route_4_drift_start            query='The Purchase Contract lists specific payment miles' response_type=summary
+2026-01-29 11:41:50 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:41:52 [info     ] stage_4.1_complete             num_sub_questions=4
+2026-01-29 11:41:52 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:41:52 [info     ] processing_sub_question_1      question='What specific payment milestones are listed in the'
+2026-01-29 11:41:52 [info     ] intent_disambiguation_success  dropped_count=0 query='What specific payment milestones are listed in the Purchase Contract that are relevant to Invoice #1256003?' seed_entities=['Payment Milestones', 'Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:54 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=2 query='What specific payment milestones are listed in the'
+2026-01-29 11:41:54 [info     ] processing_sub_question_2      question='What are the specific line items and the total amo'
+2026-01-29 11:41:55 [info     ] intent_disambiguation_success  dropped_count=0 query='What are the specific line items and the total amount shown on Invoice #1256003?' seed_entities=['Invoice #1256003']
+2026-01-29 11:41:55 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=1 query='What are the specific line items and the total amo'
+2026-01-29 11:41:55 [info     ] processing_sub_question_3      question='For each payment milestone listed in the Purchase '
+2026-01-29 11:41:56 [info     ] intent_disambiguation_success  dropped_count=0 query='For each payment milestone listed in the Purchase Contract, is there a corresponding line item on Invoice #1256003 with matching amount and description?' seed_entities=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:56 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=2 query='For each payment milestone listed in the Purchase '
+2026-01-29 11:41:56 [info     ] processing_sub_question_4      question='Does the sum of the payment milestones listed in t'
+2026-01-29 11:41:57 [info     ] intent_disambiguation_success  dropped_count=0 query='Does the sum of the payment milestones listed in the Purchase Contract match the total amount shown on Invoice #1256003?' seed_entities=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:41:57 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=2 query='Does the sum of the payment milestones listed in t'
+2026-01-29 11:41:57 [info     ] stage_4.2_complete             num_results=4 total_seeds=3
+2026-01-29 11:41:57 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:41:57 [info     ] async_neo4j_ppr_success        num_results=30 num_seeds=2 query='The Purchase Contract lists specific payment miles'
+2026-01-29 11:41:57 [info     ] stage_4.3_complete             num_evidence=30
+2026-01-29 11:41:57 [info     ] stage_4.3.5_confidence_check   confidence_score=0.65 entity_diversity=0.375 satisfied_ratio=1.0 thin_questions=0
+2026-01-29 11:41:59 [info     ] processing_sub_question_1      question=', in what distinct roles or contexts does the enti'
+2026-01-29 11:42:00 [info     ] intent_disambiguation_success  dropped_count=0 query=', in what distinct roles or contexts does the entity **"Purchase Contract"** appear that are specifically relevant to the question: *“What specific payment milestones are listed in the Purchase Contract that are relevant to Invoice #1256003?”*?' seed_entities=['Purchase Contract', 'Invoice #1256003', 'Invoice 1256003', 'Payment Milestones', 'Purchase Agreement']
+2026-01-29 11:42:00 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=2 query=', in what distinct roles or contexts does the enti'
+2026-01-29 11:42:00 [info     ] processing_sub_question_2      question=', in what distinct roles or contexts does the enti'
+2026-01-29 11:42:00 [info     ] intent_disambiguation_success  dropped_count=0 query=', in what distinct roles or contexts does the entity **"Purchase Contract"** appear that are specifically relevant to the question: *“What are the specific line items and the total amount shown on Invoice #1256003?”*?' seed_entities=['Purchase Contract', 'Invoice #1256003']
+2026-01-29 11:42:01 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=2 query=', in what distinct roles or contexts does the enti'
+2026-01-29 11:42:01 [info     ] processing_sub_question_3      question=', in what distinct roles or contexts does the enti'
+2026-01-29 11:42:03 [info     ] intent_disambiguation_success  dropped_count=0 query=', in what distinct roles or contexts does the entity **"Purchase Contract"** appear that are specifically relevant to the question: *“For each payment milestone listed in the Purchase Contract, is there a corresponding line item on Invoice #1256003 with matching amount and description?”*?' seed_entities=['Purchase Contract', 'Invoice #1256003', 'Payment Milestone', 'Line Item', 'Amount and Description']
+2026-01-29 11:42:03 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=2 query=', in what distinct roles or contexts does the enti'
+2026-01-29 11:42:04 [info     ] async_neo4j_ppr_success        num_results=15 num_seeds=2 query='The Purchase Contract lists specific payment miles'
+2026-01-29 11:42:04 [info     ] stage_4.3.5_complete           additional_seeds=8 total_evidence=30
+2026-01-29 11:42:04 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:42:04 [info     ] stage_4.4_synthesis
+2026-01-29 11:42:04 [warning  ] no_text_store_available
+2026-01-29 11:42:04 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:42:24 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='The Purchase Contract lists specific payment milestones. Do these match the line items or total on the Invoice #1256003?' response_length=10925 response_type=summary
+2026-01-29 11:42:24 [info     ] stage_4.4_complete
+   Score: 50% (3/6 keywords)
+   Citations: 0
+   Missing: ['$20,000', '$7,000', '$2,900']
+
+   ⚪ TIE (diff: +0%)
+
+================================================================================
+📝 CONSISTENCY: Find inconsistencies between invoice details (amounts, line items, quantities) a...
+================================================================================
+
+🔵 V1 Processing...
+2026-01-29 11:42:26 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details (amou' response_type=summary
+2026-01-29 11:42:26 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:42:29 [info     ] stage_4.1_complete             num_sub_questions=4
+2026-01-29 11:42:29 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:42:29 [info     ] processing_sub_question_1      question='specified in the invoices that need to be compared'
+2026-01-29 11:42:29 [info     ] intent_disambiguation_success  dropped_count=0 query='specified in the invoices that need to be compared against the corresponding contract terms?' seed_entities=['Invoices', 'Contract Terms']
+2026-01-29 11:42:31 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Invoices', 'Contract Terms']
+2026-01-29 11:42:31 [info     ] processing_sub_question_2      question='for these same invoices?'
+2026-01-29 11:42:32 [info     ] intent_disambiguation_success  dropped_count=0 query='for these same invoices?' seed_entities=[]
+2026-01-29 11:42:32 [info     ] processing_sub_question_3      question='For each line item on the invoices, how do the des'
+2026-01-29 11:42:32 [info     ] intent_disambiguation_success  dropped_count=0 query='For each line item on the invoices, how do the described goods/services and their quantities compare to the corresponding contract terms specifying those same goods/services and quantities, and where do any inconsistencies appear?' seed_entities=[]
+2026-01-29 11:42:32 [info     ] processing_sub_question_4      question=', how do the billed amounts compare to the corresp'
+2026-01-29 11:42:33 [info     ] intent_disambiguation_success  dropped_count=0 query=', how do the billed amounts compare to the corresponding contract terms (such as agreed prices, discounts, and caps), and where do any inconsistencies appear in amounts, line items, or quantities relative to those contract terms?' seed_entities=[]
+2026-01-29 11:42:33 [info     ] stage_4.2_complete             num_results=4 total_seeds=2
+2026-01-29 11:42:33 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:42:33 [info     ] seed_entities_not_resolved     group_id=invoice-contract-verification seeds=['Contract Terms', 'Invoices']
+2026-01-29 11:42:33 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:42:33 [info     ] stage_4.3.5_confidence_check   confidence_score=0.4 entity_diversity=1.0 satisfied_ratio=0.0 thin_questions=4
+2026-01-29 11:42:34 [info     ] processing_sub_question_1      question='For each of the specified invoices that need to be'
+2026-01-29 11:42:35 [info     ] intent_disambiguation_success  dropped_count=0 query='For each of the specified invoices that need to be compared against the corresponding contract terms, what goods/services, quantities, billed amounts, agreed prices, discounts, caps, and other relevant billing details are explicitly specified on those invoices?' seed_entities=[]
+2026-01-29 11:42:35 [info     ] processing_sub_question_2      question='For the same invoices that need to be compared aga'
+2026-01-29 11:42:35 [info     ] intent_disambiguation_success  dropped_count=0 query='For the same invoices that need to be compared against the corresponding contract terms, what are the corresponding contract terms specifying the same goods/services, quantities, agreed prices, discounts, caps, and other relevant billing conditions that apply to those invoices?' seed_entities=[]
+2026-01-29 11:42:35 [info     ] processing_sub_question_3      question='For each line item on the invoices that need to be'
+2026-01-29 11:42:36 [info     ] intent_disambiguation_success  dropped_count=0 query='For each line item on the invoices that need to be compared against the corresponding contract terms, how do the described goods/services and their quantities compare to the corresponding contract terms specifying those same goods/services and quantities, and where do any inconsistencies appear in the descriptions or quantities relative to those contract terms?' seed_entities=[]
+2026-01-29 11:42:36 [info     ] processing_sub_question_4      question=', and where do any inconsistencies appear in amoun'
+2026-01-29 11:42:36 [info     ] intent_disambiguation_success  dropped_count=0 query=', and where do any inconsistencies appear in amounts, line items, or quantities relative to those contract terms?' seed_entities=[]
+2026-01-29 11:42:36 [info     ] stage_4.3.5_complete           additional_seeds=0 total_evidence=0
+2026-01-29 11:42:36 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:42:36 [info     ] stage_4.4_synthesis
+2026-01-29 11:42:36 [warning  ] no_text_store_available
+2026-01-29 11:42:36 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:42:44 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms' response_length=4103 response_type=summary
+2026-01-29 11:42:44 [info     ] stage_4.4_complete
+   Score: 33% (2/6 keywords)
+   Citations: 0
+   Missing: ['payment', 'due', 'conflict']
+
+🟢 V2 Processing...
+2026-01-29 11:42:44 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details (amou' response_type=summary
+2026-01-29 11:42:44 [info     ] stage_4.1_query_decomposition
+2026-01-29 11:42:47 [info     ] stage_4.1_complete             num_sub_questions=5
+2026-01-29 11:42:47 [info     ] stage_4.2_iterative_discovery
+2026-01-29 11:42:47 [info     ] processing_sub_question_1      question='What are the invoice details for each invoice, spe'
+2026-01-29 11:42:47 [info     ] intent_disambiguation_success  dropped_count=5 query='What are the invoice details for each invoice, specifically the billed amounts, individual line items, and their quantities, that need to be checked for inconsistencies against the corresponding contract terms?' seed_entities=[]
+2026-01-29 11:42:47 [info     ] processing_sub_question_2      question=', and quantities, which must be used as the refere'
+2026-01-29 11:42:48 [info     ] intent_disambiguation_success  dropped_count=0 query=', and quantities, which must be used as the reference to detect inconsistencies with the invoice details?' seed_entities=[]
+2026-01-29 11:42:48 [info     ] processing_sub_question_3      question='For each invoice line item, how do the invoiced qu'
+2026-01-29 11:42:49 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice line item, how do the invoiced quantities compare to the quantities specified in the corresponding contract terms, and where do any inconsistencies between these quantities appear?' seed_entities=['Invoice Line Item', 'Invoiced Quantity', 'Contract Terms', 'Contract Quantity', 'Quantity Discrepancy']
+2026-01-29 11:42:49 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Invoice Line Item', 'Invoiced Quantity', 'Contract Terms', 'Contract Quantity', 'Quantity Discrepancy']
+2026-01-29 11:42:49 [info     ] processing_sub_question_4      question='compare to the amounts and pricing rules specified'
+2026-01-29 11:42:50 [info     ] intent_disambiguation_success  dropped_count=0 query='compare to the amounts and pricing rules specified in the corresponding contract terms, and where do any inconsistencies between these amounts appear?' seed_entities=['Contract Terms', 'Pricing Rules', 'Amounts', 'Inconsistencies', 'Corresponding Contract Terms']
+2026-01-29 11:42:50 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Contract Terms', 'Pricing Rules', 'Amounts', 'Inconsistencies', 'Corresponding Contract Terms']
+2026-01-29 11:42:50 [info     ] processing_sub_question_5      question='For each invoice line item, are there any invoiced'
+2026-01-29 11:42:51 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice line item, are there any invoiced items, item descriptions, or charge types that do not exist in, or conflict with, the line items and allowed charges defined in the corresponding contract terms, and where do these line-item inconsistencies occur?' seed_entities=['Invoice Line Item', 'Invoiced Item', 'Item Description', 'Charge Type', 'Contract Terms']
+2026-01-29 11:42:51 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Invoice Line Item', 'Invoiced Item', 'Item Description', 'Charge Type', 'Contract Terms']
+2026-01-29 11:42:51 [info     ] stage_4.2_complete             num_results=5 total_seeds=12
+2026-01-29 11:42:51 [info     ] stage_4.3_consolidated_tracing
+2026-01-29 11:42:51 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Invoiced Quantity', 'Charge Type', 'Corresponding Contract Terms', 'Inconsistencies', 'Contract Quantity', 'Invoiced Item', 'Pricing Rules', 'Amounts', 'Item Description', 'Quantity Discrepancy', 'Invoice Line Item', 'Contract Terms']
+2026-01-29 11:42:51 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-29 11:42:51 [info     ] stage_4.3.5_confidence_check   confidence_score=0.2700000000000001 entity_diversity=0.8 satisfied_ratio=0.0 thin_questions=5
+2026-01-29 11:42:55 [info     ] processing_sub_question_1      question='For each invoice, what are the complete invoice de'
+2026-01-29 11:42:55 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice, what are the complete invoice details that need to be checked for inconsistencies against the corresponding contract terms, specifically: the total billed amounts, all individual line items, and the quantities for each line item?' seed_entities=['Invoice', 'Invoice Details', 'Total Billed Amount', 'Line Item', 'Contract Terms']
+2026-01-29 11:42:56 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=1 query='For each invoice, what are the complete invoice de'
+2026-01-29 11:42:56 [info     ] processing_sub_question_2      question='For each contract corresponding to those invoices,'
+2026-01-29 11:42:56 [info     ] intent_disambiguation_success  dropped_count=0 query='For each contract corresponding to those invoices, what are the detailed contract terms that must be used as the reference to detect inconsistencies with the invoice details, specifically: the contractually agreed quantities, the contractually agreed amounts, and the pricing rules that govern those amounts and quantities?' seed_entities=['Contract Terms', 'Invoices', 'Contractually Agreed Quantities', 'Contractually Agreed Amounts', 'Pricing Rules']
+2026-01-29 11:42:56 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Contract Terms', 'Invoices', 'Contractually Agreed Quantities', 'Contractually Agreed Amounts', 'Pricing Rules']
+2026-01-29 11:42:56 [info     ] processing_sub_question_3      question='For each invoice line item, how do the invoiced qu'
+2026-01-29 11:42:57 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice line item, how do the invoiced quantities compare to the quantities specified in the corresponding contract terms, and where do any inconsistencies between these quantities appear when the invoiced quantities are checked against the contractually agreed quantities?' seed_entities=['Invoice Line Item', 'Invoice', 'Contract Terms', 'Invoiced Quantities', 'Contractually Agreed Quantities']
+2026-01-29 11:42:57 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=1 query='For each invoice line item, how do the invoiced qu'
+2026-01-29 11:42:57 [info     ] processing_sub_question_4      question='For each invoice line item, how do the invoiced bi'
+2026-01-29 11:42:58 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice line item, how do the invoiced billed amounts compare to the amounts and pricing rules specified in the corresponding contract terms, and where do any inconsistencies between these amounts appear when the invoiced billed amounts are checked against the contractually agreed amounts and pricing rules?' seed_entities=['Invoice Line Item', 'Invoiced Billed Amounts', 'Contract Terms', 'Contractually Agreed Amounts', 'Pricing Rules']
+2026-01-29 11:42:58 [info     ] seed_entities_not_resolved     group_id=test-5pdfs-v2-knn-disabled seeds=['Invoice Line Item', 'Invoiced Billed Amounts', 'Contract Terms', 'Contractually Agreed Amounts', 'Pricing Rules']
+2026-01-29 11:42:58 [info     ] processing_sub_question_5      question='For each invoice line item, are there any invoiced'
+2026-01-29 11:42:59 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice line item, are there any invoiced items, item descriptions, or charge types that do not exist in, or conflict with, the line items and allowed charges defined in the corresponding contract terms, and where do these line-item inconsistencies occur when comparing the invoiced items, descriptions, and charge types to the contract’s defined line items and allowed charges?' seed_entities=[]
+2026-01-29 11:42:59 [info     ] async_neo4j_ppr_success        num_results=15 num_seeds=1 query='Find inconsistencies between invoice details (amou'
+2026-01-29 11:42:59 [info     ] stage_4.3.5_complete           additional_seeds=12 total_evidence=15
+2026-01-29 11:42:59 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-29 11:42:59 [info     ] stage_4.4_synthesis
+2026-01-29 11:42:59 [warning  ] no_text_store_available
+2026-01-29 11:42:59 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-29 11:43:25 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms' response_length=11436 response_type=summary
+2026-01-29 11:43:25 [info     ] stage_4.4_complete
+   Score: 67% (4/6 keywords)
+   Citations: 0
+   Missing: ['payment', 'due']
+
+   🟢 V2 BETTER (diff: +33%)
+
+================================================================================
+📊 FINAL SUMMARY
+================================================================================
+
+Question        |   V1 Score |   V2 Score |     Diff | Verdict     
+----------------------------------------------------------------------
+Q-DR1           |        33% |        33% |      +0% | ⚪ TIE
+Q-DR3           |        83% |        83% |      +0% | ⚪ TIE
+Q-DR5           |       100% |        83% |     -17% | 🔴 V1 BETTER
+Q-DR7           |        50% |        50% |      +0% | ⚪ TIE
+CONSISTENCY     |        33% |        67% |     +33% | 🟢 V2 BETTER
+----------------------------------------------------------------------
+AVERAGE         |      60.0% |      63.3% |    +3.3%
+
+🏆 OVERALL: TIE (within 5% margin)
+
+📁 Results saved to: /afh/projects/graphrag-orchestration/bench_v1_v2_differentiation_20260129_114327.json
+2026-01-29 11:43:27 [info     ] async_neo4j_closed
+2026-01-29 11:43:27 [info     ] async_neo4j_closed

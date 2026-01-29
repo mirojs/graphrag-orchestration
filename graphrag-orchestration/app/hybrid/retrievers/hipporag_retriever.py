@@ -125,6 +125,8 @@ class HippoRAGRetriever(BaseRetriever):
         self._nodes: List[str] = []
         self._nodes_lower: Dict[str, str] = {}
         self._node_properties: Dict[str, Dict[str, Any]] = {}
+        self._alias_to_nodes: Dict[str, List[str]] = {}  # alias.lower() -> [node_id, ...]
+        self._kvp_key_to_nodes: Dict[str, List[str]] = {}  # kvp_key.lower() -> [node_id, ...]
         self._graph_loaded = False
         
         logger.info(
@@ -182,36 +184,65 @@ class HippoRAGRetriever(BaseRetriever):
                         reverse_adjacency.setdefault(source, [])
             
             # Also query node properties for context retrieval
+            # Include aliases for Entity nodes and key for KeyValue nodes
             props_query = f"""
             MATCH (n)
             {group_filter.replace('AND m.group_id = $group_id', '')}
-            RETURN n.id AS node_id, n.name AS name, n.text AS text, labels(n) AS labels
+            RETURN n.id AS node_id, n.name AS name, n.text AS text, labels(n) AS labels,
+                   coalesce(n.aliases, []) AS aliases,
+                   n.key AS kvp_key
             LIMIT 50000
             """
             
             node_properties: Dict[str, Dict[str, Any]] = {}
+            # Build alias-to-node and kvp_key-to-node lookup maps for seed resolution
+            alias_to_nodes: Dict[str, List[str]] = {}  # alias.lower() -> [node_id, ...]
+            kvp_key_to_nodes: Dict[str, List[str]] = {}  # kvp_key.lower() -> [node_id, ...]
+            
             with driver.session(database=database) as session:
                 result = session.run(props_query, params)
                 for record in result:
                     node_id = record.get("node_id")
                     if node_id:
+                        aliases = record.get("aliases") or []
+                        kvp_key = record.get("kvp_key") or ""
+                        
                         node_properties[node_id] = {
                             "name": record.get("name", node_id),
                             "text": record.get("text", ""),
                             "labels": record.get("labels", []),
+                            "aliases": aliases,
+                            "kvp_key": kvp_key,
                         }
+                        
+                        # Build alias lookup: map each alias to its node
+                        for alias in aliases:
+                            if alias:
+                                alias_lc = alias.lower().strip()
+                                if alias_lc:
+                                    alias_to_nodes.setdefault(alias_lc, []).append(node_id)
+                        
+                        # Build KVP key lookup: map key to its node
+                        if kvp_key:
+                            kvp_key_lc = kvp_key.lower().strip()
+                            if kvp_key_lc:
+                                kvp_key_to_nodes.setdefault(kvp_key_lc, []).append(node_id)
             
             self._adjacency = adjacency
             self._reverse_adjacency = reverse_adjacency
             self._nodes = sorted(nodes)
             self._nodes_lower = {n: n.lower() for n in self._nodes}
             self._node_properties = node_properties
+            self._alias_to_nodes = alias_to_nodes
+            self._kvp_key_to_nodes = kvp_key_to_nodes
             self._graph_loaded = True
             
             logger.info(
                 "hipporag_graph_loaded",
                 num_nodes=len(self._nodes),
                 num_edges=sum(len(v) for v in adjacency.values()),
+                num_aliases=len(alias_to_nodes),
+                num_kvp_keys=len(kvp_key_to_nodes),
                 group_id=self.group_id,
             )
             
@@ -255,7 +286,21 @@ class HippoRAGRetriever(BaseRetriever):
         return " ".join(text.lower().strip().split())
     
     def _expand_seeds_to_nodes(self, seeds: List[str]) -> List[str]:
-        """Map seed phrases to actual graph nodes using fuzzy matching."""
+        """
+        Map seed phrases to actual graph nodes using multi-strategy matching.
+        
+        Matching strategies (in priority order):
+        1. Exact match on node ID (case-insensitive)
+        2. Alias match - check entity aliases for exact match
+        3. KVP key match - check KeyValue node keys for exact match
+        4. Substring match on node ID
+        5. Token overlap (Jaccard similarity) on node ID
+        
+        This ensures seeds like "Invoice" can match entities with:
+        - ID: "Invoice #1256003"
+        - Alias: ["Invoice", "inv-1256003"]
+        - Or KeyValue nodes with key: "Invoice Number"
+        """
         if not self._nodes:
             return []
         
@@ -267,39 +312,54 @@ class HippoRAGRetriever(BaseRetriever):
             if not seed_norm:
                 continue
             
-            # 1. Exact match (case-insensitive)
+            seed_matches: List[str] = []
+            
+            # 1. Exact match on node ID (case-insensitive)
             for node, node_lc in self._nodes_lower.items():
                 if node_lc == seed_norm:
-                    expanded.append(node)
+                    seed_matches.append(node)
                     break
             
-            # 2. Substring match
-            substring_hits: List[str] = []
-            for node, node_lc in self._nodes_lower.items():
-                if seed_norm in node_lc or node_lc in seed_norm:
-                    substring_hits.append(node)
-            if substring_hits:
-                expanded.extend(substring_hits[:max_per_seed])
-                continue
+            # 2. Alias match - check if seed matches any entity alias exactly
+            if not seed_matches and self._alias_to_nodes:
+                alias_nodes = self._alias_to_nodes.get(seed_norm, [])
+                if alias_nodes:
+                    seed_matches.extend(alias_nodes[:max_per_seed])
             
-            # 3. Token overlap (Jaccard similarity)
-            seed_tokens = set(seed_norm.split())
-            if not seed_tokens:
-                continue
+            # 3. KVP key match - check if seed matches any KeyValue node key
+            if not seed_matches and self._kvp_key_to_nodes:
+                kvp_nodes = self._kvp_key_to_nodes.get(seed_norm, [])
+                if kvp_nodes:
+                    seed_matches.extend(kvp_nodes[:max_per_seed])
             
-            scored: List[Tuple[float, str]] = []
-            for node, node_lc in self._nodes_lower.items():
-                node_tokens = set(node_lc.split())
-                if not node_tokens:
-                    continue
-                intersection = len(seed_tokens & node_tokens)
-                if intersection == 0:
-                    continue
-                jaccard = intersection / float(len(seed_tokens | node_tokens))
-                scored.append((jaccard, node))
+            # 4. Substring match on node ID
+            if not seed_matches:
+                substring_hits: List[str] = []
+                for node, node_lc in self._nodes_lower.items():
+                    if seed_norm in node_lc or node_lc in seed_norm:
+                        substring_hits.append(node)
+                if substring_hits:
+                    seed_matches.extend(substring_hits[:max_per_seed])
             
-            scored.sort(key=lambda x: x[0], reverse=True)
-            expanded.extend([n for _, n in scored[:max_per_seed]])
+            # 5. Token overlap (Jaccard similarity) on node ID
+            if not seed_matches:
+                seed_tokens = set(seed_norm.split())
+                if seed_tokens:
+                    scored: List[Tuple[float, str]] = []
+                    for node, node_lc in self._nodes_lower.items():
+                        node_tokens = set(node_lc.split())
+                        if not node_tokens:
+                            continue
+                        intersection = len(seed_tokens & node_tokens)
+                        if intersection == 0:
+                            continue
+                        jaccard = intersection / float(len(seed_tokens | node_tokens))
+                        scored.append((jaccard, node))
+                    
+                    scored.sort(key=lambda x: x[0], reverse=True)
+                    seed_matches.extend([n for _, n in scored[:max_per_seed]])
+            
+            expanded.extend(seed_matches)
         
         # Deduplicate while preserving order
         seen: set = set()

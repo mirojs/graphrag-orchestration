@@ -195,7 +195,11 @@ class DeterministicTracer:
             
         except Exception as e:
             logger.error("async_neo4j_ppr_failed", error=str(e))
-            return await self._trace_with_fallback(query, seed_entities, top_k)
+            # Fail fast: Route 4 DRIFT requires graph traversal for multi-hop reasoning
+            raise RuntimeError(
+                f"Route 4 DRIFT requires AsyncNeo4jService for PPR graph traversal. "
+                f"Error: {e}. Ensure pipeline.initialize() was called."
+            )
 
     async def trace_semantic_beam(
         self,

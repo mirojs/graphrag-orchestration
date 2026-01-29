@@ -796,6 +796,19 @@ class HybridIndexDocumentsRequest(BaseModel):
         default=False,
         description="If true, delete existing group data before indexing",
     )
+    # KNN tuning parameters (for testing different configurations)
+    knn_enabled: bool = Field(
+        default=True,
+        description="Enable GDS KNN to create SEMANTICALLY_SIMILAR edges between entities",
+    )
+    knn_top_k: int = Field(
+        default=5,
+        description="Number of nearest neighbors per node in KNN (default: 5)",
+    )
+    knn_similarity_cutoff: float = Field(
+        default=0.60,
+        description="Minimum similarity threshold for KNN edges (default: 0.60)",
+    )
 
 
 class HybridIndexDocumentsResponse(BaseModel):
@@ -826,6 +839,9 @@ async def _run_indexing_job(
     ingestion: str,
     run_community_detection: bool,
     run_raptor: bool,
+    knn_enabled: bool = True,
+    knn_top_k: int = 5,
+    knn_similarity_cutoff: float = 0.60,
 ):
     """Background task to run indexing."""
     _indexing_jobs[job_id]["status"] = "running"
@@ -848,6 +864,9 @@ async def _run_indexing_job(
             ingestion=ingestion,
             run_community_detection=run_community_detection,
             run_raptor=run_raptor,
+            knn_enabled=knn_enabled,
+            knn_top_k=knn_top_k,
+            knn_similarity_cutoff=knn_similarity_cutoff,
         )
         
         _indexing_jobs[job_id]["status"] = "completed"
@@ -941,6 +960,9 @@ async def hybrid_index_documents(
         body.ingestion,
         body.run_community_detection,
         body.run_raptor,
+        body.knn_enabled,
+        body.knn_top_k,
+        body.knn_similarity_cutoff,
     )
     
     logger.info(

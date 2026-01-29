@@ -173,6 +173,10 @@ class LazyGraphRAGIndexingPipeline:
         run_community_detection: bool = False,
         run_raptor: bool = False,
         dry_run: bool = False,
+        # KNN tuning parameters
+        knn_enabled: bool = True,
+        knn_top_k: int = 5,
+        knn_similarity_cutoff: float = 0.60,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -331,12 +335,29 @@ class LazyGraphRAGIndexingPipeline:
         # 8) Run GDS graph algorithms (KNN, Louvain, PageRank) - AFTER entities are in Neo4j
         # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
         try:
-            logger.info("🔬 Running GDS algorithms (KNN, Louvain, PageRank)...")
-            gds_stats = await self._run_gds_graph_algorithms(group_id=group_id)
+            if knn_enabled:
+                logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, Louvain, PageRank)...")
+                gds_stats = await self._run_gds_graph_algorithms(
+                    group_id=group_id,
+                    knn_top_k=knn_top_k,
+                    knn_similarity_cutoff=knn_similarity_cutoff,
+                )
+            else:
+                logger.info("🔬 KNN disabled - running Louvain and PageRank only...")
+                gds_stats = await self._run_gds_graph_algorithms(
+                    group_id=group_id,
+                    knn_top_k=0,  # Signal to skip KNN
+                    knn_similarity_cutoff=1.0,  # No edges will pass this threshold
+                )
             stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
             stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
             stats["gds_communities"] = gds_stats.get("communities", 0)
             stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
+            stats["knn_config"] = {
+                "enabled": knn_enabled,
+                "top_k": knn_top_k if knn_enabled else 0,
+                "similarity_cutoff": knn_similarity_cutoff if knn_enabled else None,
+            }
             logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities, {stats['gds_pagerank_nodes']} nodes scored")
         except Exception as e:
             logger.warning(f"⚠️  GDS algorithms failed: {e}")
@@ -1687,15 +1708,20 @@ Output:
                 gds.graph.drop(projection_name)
                 return stats
             
-            # 3. Run KNN algorithm
-            logger.info(f"🔗 Running GDS KNN...")
-            knn_df = gds.knn.stream(
-                G,
-                nodeProperties=["embedding_v2"],
-                topK=knn_top_k,
-                similarityCutoff=knn_similarity_cutoff,
-                concurrency=4
-            )
+            # 3. Run KNN algorithm (skip if knn_top_k is 0)
+            if knn_top_k > 0:
+                logger.info(f"🔗 Running GDS KNN (k={knn_top_k}, cutoff={knn_similarity_cutoff})...")
+                knn_df = gds.knn.stream(
+                    G,
+                    nodeProperties=["embedding_v2"],
+                    topK=knn_top_k,
+                    similarityCutoff=knn_similarity_cutoff,
+                    concurrency=4
+                )
+            else:
+                logger.info(f"🔗 KNN disabled (knn_top_k=0) - skipping SEMANTICALLY_SIMILAR edge creation")
+                import pandas as pd
+                knn_df = pd.DataFrame(columns=["node1", "node2", "similarity"])
             
             # Process KNN results and create edges in Neo4j
             # Use SEMANTICALLY_SIMILAR for ALL KNN edges (consistency with GDS)

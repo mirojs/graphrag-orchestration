@@ -4,6 +4,60 @@
 
 ---
 
+## ⚠️ CRITICAL FINDING: Graph Structure Differences
+
+**Neo4j Graph Analysis (2026-01-29):**
+
+| Metric | V1 (OpenAI) | V2 Baseline | V2 KNN-disabled |
+|--------|-------------|-------------|-----------------|
+| **Entities** | 120 | 187 | 182 |
+| **TextChunks** | 17 | 17 | 17 |
+| **MENTIONS edges** | 222 | 314 | 343 |
+| **RELATES_TO edges** | 0 | 0 | 0 |
+| **SEMANTICALLY_SIMILAR** | 0 | 806 | 0 |
+| **Total edges** | 222 | 1,120 | 343 |
+
+### Why KNN-disabled (0 edges) Performed WORSE Than V1
+
+**The puzzle:** V2 KNN-disabled has MORE entities (182 vs 120) and MORE MENTIONS edges (343 vs 222), yet performed WORSE than V1 on invoice consistency detection.
+
+**Root Cause Analysis:**
+
+1. **Entity Over-Extraction (Primary Hypothesis)**
+   - V2's Voyage embeddings + NER extracted **50% more entities** (182 vs 120)
+   - More entities = **sparser connections per entity** = weaker PPR signal
+   - V1's OpenAI may have extracted fewer but **more semantically precise** entities
+   - Example: V2 might extract "payment", "terms", "contract" as separate entities instead of "payment terms"
+
+2. **Entity Naming Differences**
+   - Same concept might have different entity names in V1 vs V2
+   - "$29,900" vs "twenty-nine thousand nine hundred" vs "total price"
+   - LLM IntentDisambiguator can't find entities with different names
+
+3. **PPR Traversal Dilution**
+   - With 182 entities but only MENTIONS edges (no RELATES_TO, no KNN)
+   - PPR spreads across MORE entities but with WEAKER per-entity signal
+   - V1's 120 entities create a TIGHTER graph with stronger connections
+
+4. **KNN as Critical Entity Bridge**
+   - Without KNN edges, entities are ISLANDS connected only via shared chunks
+   - Invoice entity "$29,900" and contract entity "payment schedule" share no direct edge
+   - KNN creates: `$29,900 -[SEMANTICALLY_SIMILAR]-> payment terms`
+   - This bridge allows PPR to discover related payment concepts
+
+### Why KNN-enabled Configs Work Better
+
+KNN edges create **semantic bridges between entity islands**:
+- Without KNN: Payment entity → Chunk A → Contract entity (indirect)
+- With KNN: Payment entity → Contract entity (direct semantic link)
+
+The PPR algorithm needs entity-entity edges to traverse from:
+- "invoice amount" → "payment schedule" → "contract terms"
+
+**Conclusion:** It's NOT the embedding model (Voyage vs OpenAI) that matters for Route 4. It's the **graph connectivity**. KNN edges provide the critical semantic bridges that MENTIONS edges alone cannot.
+
+---
+
 ## Test Questions
 
 ### Context/Summary

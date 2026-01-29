@@ -12,6 +12,11 @@ Usage:
 import asyncio
 import os
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "graphrag-orchestration", ".env")
+load_dotenv(env_path)
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)

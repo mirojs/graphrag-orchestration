@@ -1210,3 +1210,84 @@ Overall, the most significant inconsistencies are:
 - **V2 Group:** `test-5pdfs-v2-1769609082`
 - **Question Bank:** `docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md`
 - **Architecture:** `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` (lines 2216-2217 for group IDs)
+
+---
+
+## Phase 1: KNN Tuning Results (2026-01-29)
+
+### Test Groups Created
+
+Successfully created 4 KNN test groups with different configurations:
+
+| Group ID | Name | KNN Enabled | K (neighbors) | Similarity Cutoff | KNN Edges Created |
+|----------|------|-------------|---------------|-------------------|-------------------|
+| `test-5pdfs-v2-knn-disabled` | KNN Disabled | No | 0 | 1.0 | **0** |
+| `test-5pdfs-v2-knn-1` | KNN-1 | Yes | 3 | 0.80 | **268** |
+| `test-5pdfs-v2-knn-2` | KNN-2 | Yes | 5 | 0.75 | **476** |
+| `test-5pdfs-v2-knn-3` | KNN-3 | Yes | 5 | 0.85 | **444** |
+
+**Baseline for comparison:** V2 baseline (`test-5pdfs-v2-1769609082`) has **806 edges** (K=5, cutoff=0.60)
+
+### Indexing Commands
+
+```bash
+# Create all test groups
+python3 ../scripts/index_5pdfs_knn_test.py
+
+# Re-run GDS after session fix
+python3 scripts/run_gds_knn.py
+```
+
+### GDS Session Fix Applied
+
+**Problem:** GDS KNN failed with "Session expired due to inactivity" error when using hardcoded session name `"graphrag_session"`.
+
+**Root Cause:** Sequential indexing runs attempted to reuse the same session name, but GdsSessions expire after inactivity and cannot be recreated without deletion.
+
+**Solution:** Modified `lazygraphrag_pipeline.py` (lines 1614-1629):
+- Changed session name to unique: `f"graphrag_session_{timestamp}_{random_suffix}"`
+- Added `sessions.delete(session_name)` before creation to handle stale sessions
+- Added session cleanup after successful completion
+- Added session cleanup in exception handler
+
+**Commit:** `186ca8f` - "Fix GDS session handling - use unique names and explicit cleanup"
+
+### Entity and Relationship Counts
+
+| Group | Entities | Relationships | KNN Edges | Louvain Communities | PageRank Nodes |
+|-------|----------|---------------|-----------|---------------------|----------------|
+| knn-disabled | 182 | 380 | 0 | 0 | 0 |
+| knn-1 | 161 | 318 | 268 | 57 | 199 |
+| knn-2 | 166 | 366 | 476 | 65 | 204 |
+| knn-3 | 164 | 345 | 444 | 49 | 202 |
+
+### KNN Configuration Analysis
+
+**KNN Edge Counts vs Parameters:**
+- V2 baseline (K=5, 0.60): 806 edges — **Too many** (56% citation relevance, cross-document noise)
+- KNN-2 (K=5, 0.75): 476 edges — **Moderate reduction** (41% fewer edges)
+- KNN-3 (K=5, 0.85): 444 edges — **Strict cutoff** (45% fewer edges)
+- KNN-1 (K=3, 0.80): 268 edges — **Aggressive reduction** (67% fewer edges)
+- KNN Disabled: 0 edges — **Maximum sparsity** (like V1)
+
+**Hypothesis:** Reducing edge count should improve citation precision by eliminating cross-document semantic connections that cause noise in Route 4's PPR traversal and coverage retrieval stages.
+
+### Next Steps
+
+1. **Query Testing:** Run invoice consistency query on all 5 groups:
+   - V2 baseline (806 edges)
+   - knn-disabled (0 edges)
+   - knn-1 (268 edges)
+   - knn-2 (476 edges)
+   - knn-3 (444 edges)
+
+2. **Metrics to Record:**
+   - Inconsistencies found
+   - Citation relevance %
+   - Q-D8 pass/fail (hard constraint: must find Contoso in WARRANTY)
+
+3. **Decision Matrix:** Determine optimal KNN config:
+   - Best case: ≥10 inconsistencies + Q-D8 ✅ → Done
+   - Fallback: If no config passes both → Phase 2 (de-noising)
+
+---

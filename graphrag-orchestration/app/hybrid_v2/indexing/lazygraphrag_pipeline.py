@@ -1610,16 +1610,23 @@ Output:
         timestamp = int(time.time() * 1000)  # milliseconds for more uniqueness
         random_suffix = random.randint(1000, 9999)
         projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}_{random_suffix}"
-        session_name = "graphrag_session"
+        session_name = f"graphrag_session_{timestamp}_{random_suffix}"  # Unique session per call
         
         try:
             # 1. Setup GDS session (Aura Serverless Graph Analytics)
-            logger.info(f"📊 Connecting to Aura GDS session...")
+            logger.info(f"📊 Connecting to Aura GDS session: {session_name}")
             api_creds = AuraAPICredentials(
                 client_id=settings.AURA_DS_CLIENT_ID,
                 client_secret=settings.AURA_DS_CLIENT_SECRET
             )
             sessions = GdsSessions(api_credentials=api_creds)
+            
+            # Delete any existing session with this name (handles expired sessions)
+            try:
+                sessions.delete(session_name)
+                logger.info(f"🧹 Deleted existing GDS session: {session_name}")
+            except Exception:
+                pass  # Session doesn't exist, that's fine
             
             # Extract Aura instance ID from URI (e.g., neo4j+s://abc123.databases.neo4j.io -> abc123)
             import re
@@ -1794,12 +1801,26 @@ Output:
             gds.graph.drop(projection_name)
             logger.info(f"🧹 Cleaned up GDS projection: {projection_name}")
             
+            # Delete the GDS session to free resources
+            try:
+                sessions.delete(session_name)
+                logger.info(f"🧹 Deleted GDS session: {session_name}")
+            except Exception as cleanup_err:
+                logger.warning(f"⚠️  Could not delete session {session_name}: {cleanup_err}")
+            
             # Mark GDS as freshly computed for this group
             self.neo4j_store.clear_gds_stale(group_id)
             
         except Exception as e:
             logger.error(f"⚠️  GDS graph algorithms failed: {e}", extra={"error": str(e)})
             logger.warning(f"⚠️  Continuing indexing without GDS algorithms")
+            # Try to cleanup session even on failure
+            try:
+                if 'sessions' in locals() and 'session_name' in locals():
+                    sessions.delete(session_name)
+                    logger.info(f"🧹 Cleaned up failed session: {session_name}")
+            except Exception:
+                pass
             # Don't raise - allow indexing to continue without GDS
         
         return stats

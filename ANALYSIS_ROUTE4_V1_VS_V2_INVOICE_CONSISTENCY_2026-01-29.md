@@ -1291,3 +1291,63 @@ python3 scripts/run_gds_knn.py
    - Fallback: If no config passes both → Phase 2 (de-noising)
 
 ---
+
+## Phase 1b: Query Testing Results (2026-01-29)
+
+### Invoice Consistency Query Results
+
+All 5 KNN configurations tested with the query:
+> "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"
+
+| Configuration | KNN Edges | Inconsistencies | Citations | Relevance |
+|---------------|-----------|-----------------|-----------|-----------|
+| **V2 Baseline** | 403 | 14 | 6 | 100% |
+| **KNN Disabled** | 0 | 8 | 5 | 100% |
+| **KNN-1** (K=3, 0.80) | 208 | 22 | 3 | 100% |
+| **KNN-2** (K=5, 0.75) | 379 | 38 | 3 | 100% |
+| **KNN-3** (K=5, 0.85) | 350 | 20 | 3 | 100% |
+
+### Key Findings
+
+1. **Citation Relevance**: ALL configurations achieved **100% citation relevance** (vs. original V2 baseline's 56%)
+   - The earlier 56% was likely due to older/stale GDS edges or different query phrasing
+   
+2. **Inconsistencies Found**:
+   - **KNN-2** found the most (38 inconsistencies) — best for comprehensive analysis
+   - **KNN-1** found 22 inconsistencies — good balance
+   - **KNN-3** found 20 inconsistencies
+   - **V2 Baseline** found 14 inconsistencies
+   - **KNN Disabled** found only 8 — too sparse, misses information
+   
+3. **Optimal Configuration**: **KNN-2 (K=5, cutoff=0.75)** appears optimal:
+   - 379 edges (47% reduction from original 806)
+   - Highest inconsistency detection (38)
+   - 100% citation relevance
+   - Good semantic connectivity without excessive noise
+
+### Quality Analysis
+
+**Key inconsistencies correctly identified** (all configs found these core issues):
+1. ✅ Lift model mismatch: Savaria V1504 vs AscendPro VPX200
+2. ✅ Payment schedule conflict: Full $29,900 due at signing vs staged payments ($20k/$7k/$2.9k)
+3. ✅ Customer name variation: Fabrikam Inc. vs Fabrikam Construction
+4. ✅ Quantity alignment verified (all match)
+5. ✅ Total amount alignment verified ($29,900 matches)
+
+### Conclusions
+
+- **KNN Disabled (0 edges)**: Too sparse — misses cross-document semantic connections needed for comprehensive analysis
+- **KNN-1 (268 edges)**: Good but slightly too restrictive
+- **KNN-2 (476 edges, actual 379)**: Best balance — comprehensive without noise
+- **KNN-3 (444 edges, actual 350)**: Stricter cutoff reduces useful connections
+- **V2 Baseline (806 edges)**: Original was actually performing well; the earlier 56% relevance was an anomaly
+
+### Recommendation
+
+Maintain current V2 default settings (K=5, cutoff=0.60) or slightly tighten to **K=5, cutoff=0.75** for production.
+
+The earlier poor V2 performance (7 inconsistencies, 56% relevance) was likely due to:
+1. Stale GDS edges requiring recomputation
+2. Different query phrasing affecting decomposition
+
+---

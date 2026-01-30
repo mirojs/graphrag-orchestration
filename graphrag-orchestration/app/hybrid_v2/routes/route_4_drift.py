@@ -25,13 +25,20 @@ Performance Mode:
 """
 
 import os
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple, Optional, List
 
 import structlog
 
 from .base import BaseRouteHandler, RouteResult, Citation
 
 logger = structlog.get_logger(__name__)
+
+
+def _get_query_embedding(query: str) -> List[float]:
+    """Get embedding for a query string (uses V2 Voyage if enabled)."""
+    # Lazy import to avoid circular dependency
+    from ..orchestrator import get_query_embedding
+    return get_query_embedding(query)
 
 # Feature flag for LlamaIndex Workflow mode
 ROUTE4_WORKFLOW = os.getenv("ROUTE4_WORKFLOW", "0").strip().lower() in {"1", "true", "yes"}
@@ -148,12 +155,16 @@ class DRIFTHandler(BaseRouteHandler):
                    total_seeds=len(all_seeds),
                    num_results=len(intermediate_results))
         
-        # Stage 4.3: Consolidated HippoRAG PPR Tracing
-        logger.info("stage_4.3_consolidated_tracing")
-        complete_evidence = await self.pipeline.tracer.trace(
+        # Stage 4.3: Consolidated HippoRAG PPR Tracing with Semantic Beam Search
+        # Uses query embedding at each hop to re-align traversal with query intent
+        logger.info("stage_4.3_consolidated_tracing_semantic_beam")
+        query_embedding = _get_query_embedding(query)
+        complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
             query=query,
+            query_embedding=query_embedding,
             seed_entities=all_seeds,
-            top_k=30
+            max_hops=3,
+            beam_width=30,
         )
         logger.info("stage_4.3_complete", num_evidence=len(complete_evidence))
         
@@ -220,12 +231,14 @@ class DRIFTHandler(BaseRouteHandler):
                     all_seeds = list(set(all_seeds + additional_seeds))
                     intermediate_results.extend(additional_results)
                     
-                    # Re-run tracing with expanded seeds
+                    # Re-run tracing with expanded seeds (semantic beam for query alignment)
                     if additional_seeds:
-                        additional_evidence = await self.pipeline.tracer.trace(
+                        additional_evidence = await self.pipeline.tracer.trace_semantic_beam(
                             query=query,
+                            query_embedding=query_embedding,  # Reuse from Stage 4.3
                             seed_entities=additional_seeds,
-                            top_k=15
+                            max_hops=2,  # Shorter for refinement pass
+                            beam_width=15,
                         )
                         
                         # Deduplicate
@@ -449,13 +462,16 @@ Sub-questions:"""
             sub_entities = await self.pipeline.disambiguator.disambiguate(sub_q)
             all_seeds.extend(sub_entities)
             
-            # Run partial search for context
+            # Run partial search for context (semantic beam for query alignment)
             evidence_count = 0
             if sub_entities:
-                partial_evidence = await self.pipeline.tracer.trace(
+                sub_q_embedding = _get_query_embedding(sub_q)
+                partial_evidence = await self.pipeline.tracer.trace_semantic_beam(
                     query=sub_q,
+                    query_embedding=sub_q_embedding,
                     seed_entities=sub_entities,
-                    top_k=5
+                    max_hops=2,  # Shorter for sub-question context
+                    beam_width=5,
                 )
                 evidence_count = len(partial_evidence)
             

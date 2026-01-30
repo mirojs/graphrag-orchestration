@@ -659,3 +659,84 @@ echo "Rolled back to $PREVIOUS_REVISION"
 ---
 
 *Document generated: January 30, 2026*
+
+---
+
+## Appendix A: V2 Configuration Reference (Updated 2026-01-30)
+
+### Active Test Groups
+
+| Group ID | Version | Embedding Model | Dimensions | Status |
+|----------|---------|-----------------|------------|--------|
+| `test-5pdfs-1769071711867955961` | V1 | OpenAI text-embedding-3-large | 3072 | Active |
+| `test-5pdfs-v2-enhanced-ex` | V2 | Voyage voyage-context-3 | 2048 | Active |
+
+### Vector Index Configuration
+
+| Index Name | Label | Property | Dimensions | Status |
+|------------|-------|----------|------------|--------|
+| `entity_embedding` | `__Entity__` | `embedding` | 3072 (OpenAI) | ONLINE |
+| `entity_embedding_v2` | `Entity` | `embedding_v2` | 2048 (Voyage) | ONLINE |
+| `chunk_embedding` | `TextChunk` | `embedding` | 3072 | ONLINE |
+| `chunk_embeddings_v2` | `TextChunk` | `embedding_v2` | 2048 | ONLINE |
+
+### V2 Embedding Configuration
+
+```python
+# app/core/config.py
+VOYAGE_MODEL_NAME: str = "voyage-context-3"  # NOT voyage-3 or voyage-3-large
+VOYAGE_EMBEDDING_DIM: int = 2048
+VOYAGE_V2_ENABLED: bool = True  # Set in .env
+```
+
+### KNN Status
+
+**Current:** KNN disabled in V2 semantic beam search  
+**TODO:** Enable KNN for better recall on entity expansion
+
+---
+
+## Appendix B: Changes Log (2026-01-30)
+
+### Bug Fixes
+
+1. **Missing Vector Index** (`entity_embedding_v2`)
+   - **Symptom:** V2 semantic beam search returned 0 results
+   - **Root Cause:** `app/main.py` only called V1 `initialize_schema()`, not V2
+   - **Fix:** Added V2 schema initialization at app startup
+   - **Commit:** `b2c6bd8`
+
+2. **Logging Reserved Keyword Errors**
+   - **Symptom:** `Logger._log() got unexpected keyword argument 'error'`
+   - **Root Cause:** structlog reserves `error=` parameter
+   - **Fix:** Changed to `logger.exception()` or `error_msg=`
+   - **Files:** `tracing.py`, `intent.py`, `async_neo4j_service.py`
+
+3. **Wrong Voyage Model in Test Scripts**
+   - **Symptom:** `403 Model voyage-3 is not available for caller`
+   - **Root Cause:** Test used `voyage-3` instead of `voyage-context-3`
+   - **Fix:** Updated `scripts/test_v1_v2_comprehensive.py`
+
+4. **API Embedding Version Mismatch**
+   - **Symptom:** API used global `VOYAGE_V2_ENABLED` for all groups
+   - **Root Cause:** V1 groups queried with V2 embeddings = dimension mismatch
+   - **Fix:** Added `detect_embedding_version(group_id)` to auto-detect per group
+   - **Commit:** `10878d0`
+
+### Test Results (2026-01-30)
+
+```
+V1 vs V2 Comprehensive Test (voyage-context-3)
+──────────────────────────────────────────────
+Average Score:   V1: 93.3%  |  V2: 93.3%  |  TIE
+Total Citations: V1: 138    |  V2: 144    |  V2 wins
+Total Time:      V1: 252.3s |  V2: 241.0s |  V2 wins
+
+Question Breakdown:
+  CONSISTENCY_DEEP: V1=100%, V2=100% (TIE)
+  Q-DR1:            V1=100%, V2=100% (TIE)
+  Q-DR3:            V1=67%,  V2=67%  (TIE)
+  Q-DR5:            V1=100%, V2=100% (TIE)
+  Q-DR7:            V1=100%, V2=100% (TIE)
+```
+

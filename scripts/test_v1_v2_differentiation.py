@@ -26,6 +26,8 @@ from app.hybrid.orchestrator import HybridPipeline as V1Pipeline
 from app.hybrid_v2.orchestrator import HybridPipeline as V2Pipeline, DeploymentProfile
 from app.hybrid.router.main import QueryRoute as V1Route
 from app.hybrid_v2.router.main import QueryRoute as V2Route
+from app.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
+from neo4j import GraphDatabase
 
 # Initialize LlamaIndex Azure OpenAI LLM
 from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI
@@ -39,7 +41,7 @@ llm_client = LlamaIndexAzureOpenAI(
 
 # Test groups
 V1_GROUP = "invoice-contract-verification"  # V1 unified index
-V2_GROUP = "test-5pdfs-v2-knn-disabled"     # V2 KNN-disabled (with alias fix)
+V2_GROUP = "test-5pdfs-v2-enhanced-ex"      # V2 with Voyage embeddings + alias fix
 
 # Differentiation questions from QUESTION_BANK_ROUTE4_DEEP_REASONING_2026.md
 QUESTIONS = [
@@ -142,12 +144,24 @@ async def main():
     print(f"Questions: {len(QUESTIONS)}")
     print()
     
+    # Initialize Neo4j driver and text stores
+    neo4j_driver = GraphDatabase.driver(
+        settings.NEO4J_URI,
+        auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
+    )
+    
+    # Create text stores for both groups
+    v1_text_store = Neo4jTextUnitStore(neo4j_driver, V1_GROUP)
+    v2_text_store = Neo4jTextUnitStore(neo4j_driver, V2_GROUP)
+    
     # Initialize pipelines
     print("Initializing V1 pipeline...")
     v1_pipeline = V1Pipeline(
         profile=DeploymentProfile.GENERAL_ENTERPRISE,
         llm_client=llm_client,
-        group_id=V1_GROUP
+        group_id=V1_GROUP,
+        neo4j_driver=neo4j_driver,
+        text_unit_store=v1_text_store
     )
     await v1_pipeline.initialize()  # CRITICAL: Connect async Neo4j for PPR
     
@@ -155,7 +169,9 @@ async def main():
     v2_pipeline = V2Pipeline(
         profile=DeploymentProfile.GENERAL_ENTERPRISE,
         llm_client=llm_client,
-        group_id=V2_GROUP
+        group_id=V2_GROUP,
+        neo4j_driver=neo4j_driver,
+        text_unit_store=v2_text_store
     )
     await v2_pipeline.initialize()  # CRITICAL: Connect async Neo4j for PPR
     
@@ -260,6 +276,7 @@ async def main():
     # Cleanup
     await v1_pipeline.close()
     await v2_pipeline.close()
+    neo4j_driver.close()
 
 
 if __name__ == "__main__":

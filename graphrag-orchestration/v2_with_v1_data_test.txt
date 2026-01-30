@@ -1,0 +1,37 @@
+2026-01-30 13:53:45 [info     ] async_neo4j_service_configured
+2026-01-30 13:53:45 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-30 13:53:45 [info     ] community_matcher_created      group_id=test-5pdfs-1769071711867955961 has_embedding_client=False has_neo4j_service=True
+2026-01-30 13:53:45 [info     ] hub_extractor_created          group_id=test-5pdfs-1769071711867955961 has_graph_store=False has_neo4j=False
+2026-01-30 13:53:45 [info     ] hybrid_pipeline_initialized    group_id=test-5pdfs-1769071711867955961 has_async_neo4j=True has_community_matcher=False has_hipporag=False has_neo4j=False profile=general_enterprise relevance_budget=0.8
+2026-01-30 13:53:48 [info     ] async_neo4j_connected
+Using route 4 drift handler directly
+2026-01-30 13:53:48 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details and c' response_type=summary
+2026-01-30 13:53:48 [info     ] stage_4.1_query_decomposition
+2026-01-30 13:53:48 [info     ] stage_4.1_complete             num_sub_questions=1
+2026-01-30 13:53:48 [info     ] stage_4.2_iterative_discovery
+2026-01-30 13:53:48 [info     ] processing_sub_question_1      question='Find inconsistencies between invoice details and c'
+2026-01-30 13:53:48 [warning  ] llm_not_configured_cannot_disambiguate
+2026-01-30 13:53:48 [info     ] stage_4.2_complete             num_results=1 total_seeds=0
+2026-01-30 13:53:48 [info     ] stage_4.3_consolidated_tracing_semantic_beam
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+2026-01-30 13:53:53 [info     ] v2_voyage_embedder_initialized
+2026-01-30 13:53:53 [warning  ] semantic_beam_no_seeds         seeds=[]
+2026-01-30 13:53:53 [info     ] stage_4.3_complete             num_evidence=0
+2026-01-30 13:53:53 [info     ] stage_4.3.5_confidence_check   confidence_score=0.4 entity_diversity=1.0 satisfied_ratio=0.0 thin_questions=1
+2026-01-30 13:53:53 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-30 13:53:53 [info     ] stage_4.4_synthesis
+2026-01-30 13:53:53 [warning  ] no_text_store_available
+2026-01-30 13:53:53 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-30 13:53:53 [error    ] llm_not_configured_cannot_generate_response
+2026-01-30 13:53:53 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='Find inconsistencies between invoice details and contract terms' response_length=32 response_type=summary
+2026-01-30 13:53:53 [info     ] stage_4.4_complete
+Citations: 0
+Response length: 32
+Contains Bayfront: False
+Contains keyless: False
+Contains Exhibit A: False
+
+=== RESPONSE (first 2000 chars) ===
+Error: LLM client not configured
+2026-01-30 13:53:53 [info     ] async_neo4j_closed

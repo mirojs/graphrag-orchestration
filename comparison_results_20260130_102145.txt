@@ -1,0 +1,238 @@
+2026-01-30 10:21:47 [info     ] upstream_hipporag_not_installed message='Using LlamaIndex-native implementation'
+================================================================================
+🧪 INVOICE CONSISTENCY TEST: V1 vs V2
+================================================================================
+Query: Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms
+
+Connecting to Neo4j...
+Initializing V1 pipeline...
+2026-01-30 10:21:48 [info     ] async_neo4j_service_configured
+2026-01-30 10:21:48 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-30 10:21:48 [info     ] community_matcher_created      group_id=invoice-contract-verification has_embedding_client=False has_neo4j_service=True
+2026-01-30 10:21:48 [info     ] hub_extractor_created          group_id=invoice-contract-verification has_graph_store=False has_neo4j=True
+2026-01-30 10:21:48 [info     ] hybrid_pipeline_initialized    group_id=invoice-contract-verification has_async_neo4j=True has_community_matcher=False has_hipporag=False has_neo4j=True profile=general_enterprise relevance_budget=0.8
+2026-01-30 10:21:50 [info     ] async_neo4j_connected
+Initializing V2 pipeline...
+2026-01-30 10:21:50 [info     ] async_neo4j_service_configured
+2026-01-30 10:21:50 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-30 10:21:50 [info     ] community_matcher_created      group_id=test-5pdfs-v2-knn-disabled has_embedding_client=False has_neo4j_service=True
+2026-01-30 10:21:50 [info     ] hub_extractor_created          group_id=test-5pdfs-v2-knn-disabled has_graph_store=False has_neo4j=True
+2026-01-30 10:21:50 [info     ] hybrid_pipeline_initialized    group_id=test-5pdfs-v2-knn-disabled has_async_neo4j=True has_community_matcher=False has_hipporag=False has_neo4j=True profile=general_enterprise relevance_budget=0.8
+2026-01-30 10:21:53 [info     ] async_neo4j_connected
+
+================================================================================
+
+================================================================================
+🔬 Testing: V1 (OpenAI)
+================================================================================
+Group: invoice-contract-verification
+Query: Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms
+
+2026-01-30 10:21:53 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details (amou' response_type=summary
+2026-01-30 10:21:53 [info     ] stage_4.1_query_decomposition
+2026-01-30 10:21:57 [info     ] stage_4.1_complete             num_sub_questions=5
+2026-01-30 10:21:57 [info     ] stage_4.2_iterative_discovery
+2026-01-30 10:21:57 [info     ] processing_sub_question_1      question='that relate to the corresponding contract terms, a'
+2026-01-30 10:21:58 [info     ] intent_disambiguation_success  dropped_count=0 query='that relate to the corresponding contract terms, and what are the specific contract line items (descriptions, agreed unit prices, agreed quantities, and total amounts) they are supposed to match?' seed_entities=[]
+2026-01-30 10:21:58 [info     ] processing_sub_question_2      question='and the original contract context?'
+2026-01-30 10:21:59 [info     ] intent_disambiguation_success  dropped_count=0 query='and the original contract context?' seed_entities=[]
+2026-01-30 10:21:59 [info     ] processing_sub_question_3      question=', do the resulting invoice line-item totals and in'
+2026-01-30 10:22:00 [info     ] intent_disambiguation_success  dropped_count=0 query=', do the resulting invoice line-item totals and invoice grand totals align with the corresponding contractually agreed totals (including any contract-specified discounts, caps, or rate structures), considering all invoice details (amounts, line items, quantities) and the governing contract terms?' seed_entities=[]
+2026-01-30 10:22:00 [info     ] processing_sub_question_4      question='that have no corresponding authorization or covera'
+2026-01-30 10:22:01 [info     ] intent_disambiguation_success  dropped_count=0 query='that have no corresponding authorization or coverage in the contract terms (e.g., extra line items, higher quantities than allowed, or non-covered services), when comparing the full invoice detail against the full set of applicable contract clauses?' seed_entities=['Invoice Detail', 'Contract Terms', 'Extra Line Items', 'Applicable Contract Clauses', 'Non-Covered Services']
+2026-01-30 10:22:02 [warning  ] semantic_beam_no_seeds         seeds=['Invoice Detail', 'Contract Terms', 'Extra Line Items', 'Applicable Contract Clauses', 'Non-Covered Services']
+2026-01-30 10:22:02 [info     ] processing_sub_question_5      question='over time, do the cumulative billed quantities and'
+2026-01-30 10:22:03 [info     ] intent_disambiguation_success  dropped_count=0 query='over time, do the cumulative billed quantities and amounts remain within the limits, caps, and constraints specified in the contract terms for those same line items and services, or do any cumulative inconsistencies appear between the invoices and the contract?' seed_entities=[]
+2026-01-30 10:22:03 [info     ] stage_4.2_complete             num_results=5 total_seeds=5
+2026-01-30 10:22:03 [info     ] stage_4.3_consolidated_tracing_semantic_beam
+2026-01-30 10:22:04 [warning  ] semantic_beam_no_seeds         seeds=['Non-Covered Services', 'Invoice Detail', 'Contract Terms', 'Applicable Contract Clauses', 'Extra Line Items']
+2026-01-30 10:22:04 [info     ] stage_4.3_complete             num_evidence=5
+2026-01-30 10:22:04 [info     ] stage_4.3.5_confidence_check   confidence_score=0.52 entity_diversity=1.0 satisfied_ratio=0.2 thin_questions=4
+2026-01-30 10:22:04 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-30 10:22:06 [info     ] all_documents_retrieved        group_id=invoice-contract-verification num_docs=0
+2026-01-30 10:22:06 [info     ] semantic_coverage_chunks_retrieved group_id=invoice-contract-verification max_per_document=1 max_total=0 num_chunks=0 num_unique_docs=0
+2026-01-30 10:22:06 [info     ] stage_4.4_synthesis
+2026-01-30 10:22:06 [info     ] route2_chunks_retrieved        entities_with_chunks=0 max_per_document=6 max_per_section=3 num_entities=5 section_diversification=True total_chunks=0
+2026-01-30 10:22:06 [info     ] text_chunks_retrieved          batched=True num_chunks=0 num_entities=5
+2026-01-30 10:22:06 [warning  ] text_chunks_retrieved_zero     hint='Likely entity/chunk label or MENTIONS direction mismatch, or chunks not linked to entities for this group_id' num_entities=5 sample_entities=['Non-Covered Services', 'Invoice Detail', 'Contract Terms', 'Applicable Contract Clauses', 'Extra Line Items']
+2026-01-30 10:22:06 [info     ] text_chunks_query_fallback     num_chunks=0
+2026-01-30 10:22:06 [info     ] build_cited_context_grouping   doc_keys=[] num_chunks=0 num_doc_groups=0
+2026-01-30 10:22:20 [info     ] synthesis_complete             is_drift_mode=True num_citations=0 query='Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms' response_length=7226 response_type=summary
+2026-01-30 10:22:20 [info     ] stage_4.4_complete
+✅ Query Complete (27.5s)
+📊 Inconsistencies Found: 39
+📚 Citations: 0
+📝 Response Length: 7,226 chars
+
+Key Findings:
+  ❌ Payment Conflict
+  ❌ Lift Model
+  ❌ Door Hardware
+  ❌ Contoso Mentioned
+  ❌ Fabrikam Mentioned
+  ❌ Specific Amounts
+
+Response Preview (first 1000 chars):
+--------------------------------------------------------------------------------
+## Analysis
+
+### Q1 – Mapping invoice details to corresponding contract terms
+
+For this review, there was no usable evidence showing:  
+- the actual contract line items,  
+- their descriptions,  
+- agreed unit prices,  
+- agreed quantities, or  
+- agreed total amounts.  
+
+Because no contract line-item data was available in the evidence set, it is not possible to concretely map any invoice line items to specific contract line items or to state how they are “supposed to match.” [0]
+
+**Result for Q1:** The correspondence between invoice line items and specific contract terms cannot be established from the available evidence. [0]
+
+---
+
+### Q2 – Relationship between invoices and the original contract context
+
+Similarly, the evidence contains no excerpts or summaries of the “original contract context” (e.g., scope of work, pricing schedules, term, renewal conditions, or special provisions). [0]
+
+Without this context, we cannot determine:
+- whether the invoiced services/products fall within t
+...
+--------------------------------------------------------------------------------
+
+================================================================================
+🔬 Testing: V2 (Voyage + Aliases)
+================================================================================
+Group: test-5pdfs-v2-knn-disabled
+Query: Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms
+
+2026-01-30 10:22:22 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details (amou' response_type=summary
+2026-01-30 10:22:22 [info     ] stage_4.1_query_decomposition
+2026-01-30 10:22:25 [info     ] stage_4.1_complete             num_sub_questions=3
+2026-01-30 10:22:25 [info     ] stage_4.2_iterative_discovery
+2026-01-30 10:22:25 [info     ] processing_sub_question_1      question='that correspond to each relevant contract, preserv'
+2026-01-30 10:22:25 [info     ] intent_disambiguation_success  dropped_count=0 query='that correspond to each relevant contract, preserving the association between each invoice and its underlying contract terms?' seed_entities=[]
+2026-01-30 10:22:25 [info     ] processing_sub_question_2      question=', line items (descriptions, inclusions/exclusions)'
+2026-01-30 10:22:26 [info     ] intent_disambiguation_success  dropped_count=0 query=', line items (descriptions, inclusions/exclusions), and quantities (minimums, maximums, agreed volumes) that should govern the corresponding invoice details (amounts, line items, quantities)?' seed_entities=[]
+2026-01-30 10:22:26 [info     ] processing_sub_question_3      question='For each invoice–contract pair, where do the invoi'
+2026-01-30 10:22:26 [info     ] intent_disambiguation_success  dropped_count=0 query='For each invoice–contract pair, where do the invoiced amounts differ from the amounts implied or specified by the corresponding contract terms, considering the agreed pricing structures, discounts, and any applicable adjustments?' seed_entities=['Invoice', 'Contract', 'Contract Terms', 'Pricing Structure', 'Discounts']
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+2026-01-30 10:22:31 [info     ] v2_voyage_embedder_initialized
+2026-01-30 10:22:33 [info     ] semantic_beam_trace_success    query='For each invoice–contract pair, where do the invoi' results=14 seeds=8
+2026-01-30 10:22:33 [info     ] stage_4.2_complete             num_results=3 total_seeds=5
+2026-01-30 10:22:33 [info     ] stage_4.3_consolidated_tracing_semantic_beam
+2026-01-30 10:22:35 [info     ] semantic_beam_trace_success    query='Find inconsistencies between invoice details (amou' results=42 seeds=8
+2026-01-30 10:22:35 [info     ] stage_4.3_complete             num_evidence=42
+2026-01-30 10:22:35 [info     ] stage_4.3.5_confidence_check   confidence_score=0.6 entity_diversity=1.0 satisfied_ratio=0.3333333333333333 thin_questions=2
+2026-01-30 10:22:35 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-30 10:22:35 [info     ] all_documents_retrieved        group_id=test-5pdfs-v2-knn-disabled num_docs=5
+2026-01-30 10:22:36 [info     ] semantic_coverage_chunks_retrieved group_id=test-5pdfs-v2-knn-disabled max_per_document=1 max_total=5 num_chunks=0 num_unique_docs=0
+2026-01-30 10:22:36 [info     ] stage_4.4_synthesis
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='61 S 34th Street, Dayton, FL 33155' unique_docs=2 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=4 entity='Aluminum door with plexi-glass inserts & automatic opener' unique_docs=1 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Applicable Law' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity=Assignment unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Cab Size: 42" x 62", keyless access' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity=Changes unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='Contoso Lifts LLC' unique_docs=2 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Contractor labor warranty for 90 days' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=4 entity='Custom cab 42" x 62" with Type 3 90-degree access' unique_docs=1 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Customer Default' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity=Delivery unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='EXHIBIT A - SCOPE OF WORK' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Fabrikam Construction' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=4 entity='Flush-mount Hall Call stations (upper & lower)' unique_docs=1 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Holding Tank Servicing Contract' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Invoice #1256003' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Jim Contoso' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='John Doe' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='P.O. Box 123567 Key West, FL. 33304-0708' unique_docs=2 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Payment Terms' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Payment installment: $2,900.00 upon completion' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Payment installment: $20,000.00 upon signing' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Payment installment: $7,000.00 upon delivery' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=4 entity='Power system: 110 VAC 60 Hz up, 12 VAC down' unique_docs=1 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Purchase Contract' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Right to Cancel' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Risk of Loss' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=4 entity='Scope of Work' unique_docs=1 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=2 entity=TERM unique_docs=2 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Term of Warranty Coverage' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Total contract price $29,900.00' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=4 entity='Vertical Platform Lift (AscendPro VPX200)' unique_docs=1 unique_sections=2
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=5 entity=Warranty unique_docs=2 unique_sections=4
+2026-01-30 10:22:37 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='terms hereof' unique_docs=1 unique_sections=1
+2026-01-30 10:22:37 [info     ] route2_chunks_retrieved        entities_with_chunks=34 max_per_document=6 max_per_section=3 num_entities=34 section_diversification=True total_chunks=74
+2026-01-30 10:22:37 [info     ] text_chunks_retrieved          batched=True num_chunks=74 num_entities=34
+2026-01-30 10:22:37 [info     ] build_cited_context_grouping   doc_keys=['doc_b4a8139a4be1465688530d2cbfc50679', 'doc_7d92b9f71e0b453da4928e17d367de1c', 'doc_3e053600a07146719591847b726d7a5f', 'doc_d0c03975cab744718d5ba7d76ccb2c94', 'doc_f2487e57fc4f437e8fc440dbc3b9dcf5'] num_chunks=74 num_doc_groups=5
+2026-01-30 10:23:13 [info     ] synthesis_complete             is_drift_mode=True num_citations=35 query='Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms' response_length=15319 response_type=summary
+2026-01-30 10:23:13 [info     ] stage_4.4_complete
+✅ Query Complete (51.2s)
+📊 Inconsistencies Found: 78
+📚 Citations: 35
+📝 Response Length: 15,319 chars
+
+Key Findings:
+  ✅ Payment Conflict
+  ✅ Lift Model
+  ✅ Door Hardware
+  ✅ Contoso Mentioned
+  ✅ Fabrikam Mentioned
+  ✅ Specific Amounts
+
+Response Preview (first 1000 chars):
+--------------------------------------------------------------------------------
+## Analysis
+
+### Q1 – Identify invoice–contract pairs and preserve associations
+
+There is one clear pairing between invoice(s) and a corresponding purchase contract:
+
+- **Purchase Contract – Contoso Lifts LLC / Fabrikam Inc.**  
+  - Parties: Contoso Lifts LLC (Contractor) and Fabrikam Inc. (Customer)  
+  - Customer address: 61 S 34th Street, Dayton, FL 33155 [1][31][33][35][37][39][41][45][48][50][52][54][60][62][64][65][66][67][68][73][74]  
+  - Scope of work: furnish and install  
+    - 1 Vertical Platform Lift (AscendPro VPX200)  
+    - 1 Power system: 110 VAC 60 Hz up, 12 VAC down  
+    - 1 Custom cab 42" x 62" with Type 3 90-degree access  
+    - 1 Outdoor configuration package  
+    - 1 Aluminum door with plexi-glass inserts & automatic opener  
+    - 2 Flush-mount Hall Call stations (upper & lower) [1][31][33][35][37][39][41][45][48][50][52][54][60][62][64][65][66][67][68][73][74]  
+  - **Total contract price:** $29,900.00 [1][31][33][35][37][39][41][45][48][50][52][54][60][62][
+...
+--------------------------------------------------------------------------------
+
+================================================================================
+📊 SIDE-BY-SIDE COMPARISON
+================================================================================
+
+Metric                         |     V1 (OpenAI) |     V2 (Voyage) |     Winner
+--------------------------------------------------------------------------------
+Inconsistencies Found          |              39 |              78 |         V2
+Total Key Findings             |               0 |               6 |         V2
+Payment Conflict Detected      |              No |             Yes |          -
+Citations                      |               0 |              35 |          -
+Response Length (chars)        |           7,226 |          15,319 |          -
+Latency (seconds)              |            27.5 |            51.2 |         V1
+
+================================================================================
+KEY FINDINGS COMPARISON
+================================================================================
+
+Finding                        |              V1 |              V2
+--------------------------------------------------------------------------------
+Payment Conflict               |               ❌ |               ✅
+Lift Model                     |               ❌ |               ✅
+Door Hardware                  |               ❌ |               ✅
+Contoso Mentioned              |               ❌ |               ✅
+Fabrikam Mentioned             |               ❌ |               ✅
+Specific Amounts               |               ❌ |               ✅
+
+================================================================================
+🏆 V2 WINS: Found more inconsistencies after alias fix
+   ✨ V2 FIXED: Now detects payment conflict (key improvement)
+2026-01-30 10:23:14 [info     ] async_neo4j_closed
+2026-01-30 10:23:14 [info     ] async_neo4j_closed
+
+✅ Test Complete

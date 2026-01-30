@@ -156,7 +156,7 @@ Do not include any explanation, just the JSON array.
                 return []
                 
         except Exception as e:
-            logger.error("intent_disambiguation_failed", error=str(e))
+            logger.error("intent_disambiguation_failed", error_msg=str(e))
             return []
     
     def _build_community_context(self) -> str:

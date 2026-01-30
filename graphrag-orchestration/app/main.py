@@ -46,8 +46,10 @@ async def lifespan(app: FastAPI):
             # Initialize Neo4j schema for hybrid routes (vector indexes, constraints)
             try:
                 from app.hybrid.services.neo4j_store import Neo4jStoreV3
+                from app.hybrid_v2.services.neo4j_store import Neo4jStoreV3 as Neo4jStoreV3_V2
                 from app.core.config import settings as app_settings
                 if app_settings.NEO4J_URI and app_settings.NEO4J_USERNAME and app_settings.NEO4J_PASSWORD:
+                    # V1 schema (OpenAI 3072-dim embeddings)
                     hybrid_store = Neo4jStoreV3(
                         uri=app_settings.NEO4J_URI,
                         username=app_settings.NEO4J_USERNAME,
@@ -55,7 +57,17 @@ async def lifespan(app: FastAPI):
                     )
                     hybrid_store.initialize_schema()
                     logger.info("hybrid_neo4j_schema_initialized", 
-                               message="Vector indexes and constraints created")
+                               message="V1 vector indexes and constraints created")
+                    
+                    # V2 schema (Voyage 2048-dim embeddings) 
+                    hybrid_store_v2 = Neo4jStoreV3_V2(
+                        uri=app_settings.NEO4J_URI,
+                        username=app_settings.NEO4J_USERNAME,
+                        password=app_settings.NEO4J_PASSWORD,
+                    )
+                    hybrid_store_v2.initialize_schema()
+                    logger.info("hybrid_v2_neo4j_schema_initialized", 
+                               message="V2 vector indexes (entity_embedding_v2) created")
                 else:
                     logger.warning("hybrid_schema_skip",
                                   message="Neo4j credentials incomplete - skipping schema init")

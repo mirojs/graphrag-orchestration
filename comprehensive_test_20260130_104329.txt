@@ -1,0 +1,29 @@
+2026-01-30 10:43:31 [info     ] upstream_hipporag_not_installed message='Using LlamaIndex-native implementation'
+
+================================================================================
+🔍 CONFIGURATION VERIFICATION
+================================================================================
+V1 Group: invoice-contract-verification
+V2 Group: test-5pdfs-v2-enhanced-ex
+Neo4j URI: neo4j+s://a86dcf63.databases.neo4j.io
+================================================================================
+
+
+================================================================================
+🧪 COMPREHENSIVE V1 vs V2 TEST SUITE
+================================================================================
+Timestamp: 20260130_104332
+Questions: 4
+
+Traceback (most recent call last):
+  File "/afh/projects/graphrag-orchestration/scripts/test_v1_v2_comprehensive.py", line 464, in <module>
+    asyncio.run(main())
+  File "/anaconda/envs/azureml_py38/lib/python3.10/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/anaconda/envs/azureml_py38/lib/python3.10/asyncio/base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "/afh/projects/graphrag-orchestration/scripts/test_v1_v2_comprehensive.py", line 195, in main
+    auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
+  File "/anaconda/envs/azureml_py38/lib/python3.10/site-packages/pydantic/main.py", line 1026, in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+AttributeError: 'Settings' object has no attribute 'NEO4J_USER'. Did you mean: 'NEO4J_URI'?

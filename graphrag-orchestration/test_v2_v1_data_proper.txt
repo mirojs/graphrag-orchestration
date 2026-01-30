@@ -1,0 +1,177 @@
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+voyage-3 is not the latest model by Voyage AI. Please note that `model_name` will be a required argument in the future. We recommend setting it explicitly. Please see https://docs.voyageai.com/docs/embeddings for the latest models offered by Voyage AI.
+Initializing LLM client...
+Initializing Voyage embedding client...
+2026-01-30 13:58:53 [info     ] upstream_hipporag_not_installed message='Using LlamaIndex-native implementation'
+2026-01-30 13:58:53 [info     ] async_neo4j_service_configured
+2026-01-30 13:58:53 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-30 13:58:53 [info     ] community_matcher_created      group_id=test-5pdfs-1769071711867955961 has_embedding_client=True has_neo4j_service=True
+2026-01-30 13:58:53 [info     ] hub_extractor_created          group_id=test-5pdfs-1769071711867955961 has_graph_store=False has_neo4j=True
+2026-01-30 13:58:53 [info     ] hybrid_pipeline_initialized    group_id=test-5pdfs-1769071711867955961 has_async_neo4j=True has_community_matcher=True has_hipporag=False has_neo4j=True profile=general_enterprise relevance_budget=0.8
+2026-01-30 13:58:55 [info     ] async_neo4j_connected
+
+Testing V2 code with V1 data (group=test-5pdfs-1769071711867955961)
+Query: Find inconsistencies between invoice details and contract terms
+
+2026-01-30 13:58:55 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details and c' response_type=summary
+2026-01-30 13:58:55 [info     ] stage_4.1_query_decomposition
+2026-01-30 13:58:58 [info     ] stage_4.1_complete             num_sub_questions=5
+2026-01-30 13:58:58 [info     ] stage_4.2_iterative_discovery
+2026-01-30 13:58:58 [info     ] processing_sub_question_1      question='What are the detailed invoice line items, amounts,'
+2026-01-30 13:58:59 [info     ] intent_disambiguation_success  dropped_count=0 query='What are the detailed invoice line items, amounts, dates, and payment terms specified on the invoice, and what are the corresponding product/service descriptions, quantities, rates, dates, and payment terms specified in the contract, so that we can compare them to find any inconsistencies between invoice details and contract terms?' seed_entities=['Invoice', 'Contract', 'Invoice Line Items', 'Payment Terms', 'Product/Service Descriptions']
+2026-01-30 13:58:59 [info     ] v2_voyage_embedder_initialized
+2026-01-30 13:59:01 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:02 [info     ] strategy_6_vector_fallback_start unmatched_count=1 unmatched_seeds=['Product/Service Descriptions']
+2026-01-30 13:59:03 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:03 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'7f3f1786fc105d944c3d18c87411b0ab\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Product/Service Descriptions'
+2026-01-30 13:59:03 [info     ] strategy_6_complete            final_seed_count=7 vector_matches=0
+2026-01-30 13:59:03 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=7 query='What are the detailed invoice line items, amounts,'
+2026-01-30 13:59:03 [info     ] processing_sub_question_2      question='For each product or service listed on the invoice,'
+2026-01-30 13:59:04 [info     ] intent_disambiguation_success  dropped_count=0 query='For each product or service listed on the invoice, does there exist a matching product or service in the contract with the same or appropriately specified description, scope, and unit of measure, and if not, where are there inconsistencies between these invoice details and the contract terms?' seed_entities=['Invoice', 'Contract', 'Invoice Details', 'Contract Terms', 'Unit of Measure']
+2026-01-30 13:59:05 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:06 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=8 query='For each product or service listed on the invoice,'
+2026-01-30 13:59:06 [info     ] processing_sub_question_3      question='For each matched product or service, do the quanti'
+2026-01-30 13:59:07 [info     ] intent_disambiguation_success  dropped_count=0 query='For each matched product or service, do the quantities, unit prices, discounts, taxes, and total amounts on the invoice align with the quantities, pricing structure, discounts, taxes, and financial limits defined in the contract, and where are there inconsistencies between these invoice details and the contract terms?' seed_entities=['Invoice', 'Contract', 'Pricing Structure', 'Discounts', 'Taxes']
+2026-01-30 13:59:09 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:09 [info     ] strategy_6_vector_fallback_start unmatched_count=3 unmatched_seeds=['Pricing Structure', 'Discounts', 'Taxes']
+2026-01-30 13:59:10 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:09 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'7f78d862c252ef9a491ac901c5aa0597\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Pricing Structure'
+2026-01-30 13:59:10 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:09 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'1b4cd00af348c387491ac901c5aa09ff\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed=Discounts
+2026-01-30 13:59:10 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:09 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'90a1cf8c75937953491ac901c5aa0dfe\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed=Taxes
+2026-01-30 13:59:10 [info     ] strategy_6_complete            final_seed_count=5 vector_matches=0
+2026-01-30 13:59:10 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=5 query='For each matched product or service, do the quanti'
+2026-01-30 13:59:10 [info     ] processing_sub_question_4      question='Do the invoice’s billing dates, service or deliver'
+2026-01-30 13:59:11 [info     ] intent_disambiguation_success  dropped_count=0 query='Do the invoice’s billing dates, service or delivery periods, milestones, and payment due dates fall within the time frames, milestones, and payment schedules specified in the contract, and where are there inconsistencies between these invoice details and the contract terms?' seed_entities=['Invoice', 'Contract', 'Billing Dates', 'Service Periods', 'Payment Schedules']
+2026-01-30 13:59:12 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:13 [info     ] strategy_6_vector_fallback_start unmatched_count=2 unmatched_seeds=['Billing Dates', 'Service Periods']
+2026-01-30 13:59:13 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:13 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'b6c59a0343fd7b67491ac901c5aa0730\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Billing Dates'
+2026-01-30 13:59:14 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:13 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'13dc003059739464491ac901c5aa0c21\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Service Periods'
+2026-01-30 13:59:14 [info     ] strategy_6_complete            final_seed_count=8 vector_matches=0
+2026-01-30 13:59:14 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=8 query='Do the invoice’s billing dates, service or deliver'
+2026-01-30 13:59:14 [info     ] processing_sub_question_5      question='explicitly allowed or defined in the contract, inc'
+2026-01-30 13:59:14 [info     ] intent_disambiguation_success  dropped_count=0 query='explicitly allowed or defined in the contract, including their calculation method and conditions, and where are there inconsistencies between these invoice details and the contract terms?' seed_entities=[]
+2026-01-30 13:59:14 [info     ] stage_4.2_complete             num_results=5 total_seeds=14
+2026-01-30 13:59:14 [info     ] stage_4.3_consolidated_tracing_semantic_beam
+2026-01-30 13:59:17 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:18 [info     ] strategy_6_vector_fallback_start unmatched_count=6 unmatched_seeds=['Discounts', 'Billing Dates', 'Taxes', 'Product/Service Descriptions', 'Pricing Structure']
+2026-01-30 13:59:18 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:18 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'5b24da9e7d1d652f82f658b696d789bf\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed=Discounts
+2026-01-30 13:59:19 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:18 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'1d0acc4c4b4dbdd482f658b696d786e5\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Billing Dates'
+2026-01-30 13:59:19 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:18 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'e6ac0a95cd1b91e482f658b696d789b3\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed=Taxes
+2026-01-30 13:59:19 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:18 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'5e2fed888ddb4b5182f658b696d78e60\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Product/Service Descriptions'
+2026-01-30 13:59:19 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:18 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'4916b3a10856cbec82f658b696d7803b\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Pricing Structure'
+2026-01-30 13:59:19 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:19 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'8a6714effa092d8482f658b696d78124\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Service Periods'
+2026-01-30 13:59:19 [info     ] strategy_6_complete            final_seed_count=13 vector_matches=0
+2026-01-30 13:59:20 [info     ] async_neo4j_ppr_success        num_results=30 num_seeds=13 query='Find inconsistencies between invoice details and c'
+2026-01-30 13:59:20 [info     ] stage_4.3_complete             num_evidence=30
+2026-01-30 13:59:20 [info     ] stage_4.3.5_confidence_check   confidence_score=0.66 entity_diversity=0.7 satisfied_ratio=0.8 thin_questions=1
+2026-01-30 13:59:23 [info     ] processing_sub_question_1      question='specified on the invoice, and what are the corresp'
+2026-01-30 13:59:23 [info     ] intent_disambiguation_success  dropped_count=0 query='specified on the invoice, and what are the corresponding product/service descriptions, quantities, rates, dates, payment terms, and any explicitly allowed or defined additional charges (including their calculation method and conditions) specified in the contract, so that we can compare them to find any inconsistencies between invoice details and contract terms?' seed_entities=[]
+2026-01-30 13:59:23 [info     ] processing_sub_question_2      question=', and if not, where are there inconsistencies betw'
+2026-01-30 13:59:24 [info     ] intent_disambiguation_success  dropped_count=2 query=', and if not, where are there inconsistencies between these invoice details and the contract terms?' seed_entities=[]
+2026-01-30 13:59:24 [info     ] processing_sub_question_3      question='on the invoice align with the quantities, pricing '
+2026-01-30 13:59:24 [info     ] intent_disambiguation_success  dropped_count=0 query='on the invoice align with the quantities, pricing structure, discounts, taxes, financial limits, and any explicitly allowed or defined additional charges (including their calculation method and conditions) in the contract, and where are there inconsistencies between these invoice details and the contract terms?' seed_entities=['Invoice', 'Contract', 'Pricing Structure', 'Financial Limits', 'Additional Charges']
+2026-01-30 13:59:26 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:27 [info     ] strategy_6_vector_fallback_start unmatched_count=3 unmatched_seeds=['Pricing Structure', 'Financial Limits', 'Additional Charges']
+2026-01-30 13:59:27 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:26 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'545c8531f33c4eb52b7a8ca5f6595f81\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Pricing Structure'
+2026-01-30 13:59:27 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:26 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'c50dc96b3a76546a2b7a8ca5f6595bc0\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Financial Limits'
+2026-01-30 13:59:27 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:26 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'446e0e1c1902931c2b7a8ca5f6595a91\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Additional Charges'
+2026-01-30 13:59:27 [info     ] strategy_6_complete            final_seed_count=5 vector_matches=0
+2026-01-30 13:59:27 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=5 query='on the invoice align with the quantities, pricing '
+2026-01-30 13:59:27 [info     ] processing_sub_question_4      question=', which appear on the invoice without such explici'
+2026-01-30 13:59:28 [info     ] intent_disambiguation_success  dropped_count=0 query=', which appear on the invoice without such explicit contractual authorization, and where are there inconsistencies between these invoice details and the contract terms?' seed_entities=[]
+2026-01-30 13:59:29 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 13:59:30 [info     ] strategy_6_vector_fallback_start unmatched_count=3 unmatched_seeds=['Financial Limits', 'Additional Charges', 'Pricing Structure']
+2026-01-30 13:59:30 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:29 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'9712b40a35672e4754c6b3eec3bdfa7c\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Financial Limits'
+2026-01-30 13:59:30 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:29 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'d73d04406edff55254c6b3eec3bdf31d\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Additional Charges'
+2026-01-30 13:59:31 [warning  ] strategy_6_failed_for_seed     error='Model voyage-3 is not available for caller {"detail":"Model voyage-3 is not available for caller"} 403 {\'detail\': \'Model voyage-3 is not available for caller\'} {\'date\': \'Fri, 30 Jan 2026 13:59:30 GMT\', \'server\': \'uvicorn\', \'Content-Length\': \'55\', \'content-type\': \'application/json\', \'x-request-id\': \'fb1f9c1c99d6dd8854c6b3eec3bdfed8\', \'Via\': \'1.1 google\', \'Alt-Svc\': \'h3=":443"; ma=2592000,h3-29=":443"; ma=2592000\'}' seed='Pricing Structure'
+2026-01-30 13:59:31 [info     ] strategy_6_complete            final_seed_count=5 vector_matches=0
+2026-01-30 13:59:31 [info     ] async_neo4j_ppr_success        num_results=15 num_seeds=5 query='Find inconsistencies between invoice details and c'
+2026-01-30 13:59:31 [info     ] stage_4.3.5_complete           additional_seeds=5 total_evidence=31
+2026-01-30 13:59:31 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-30 13:59:33 [info     ] all_documents_retrieved        group_id=test-5pdfs-1769071711867955961 num_docs=5
+2026-01-30 13:59:33 [error    ] semantic_coverage_chunks_retrieval_failed error="{neo4j_code: Neo.ClientError.Statement.ArgumentError} {message: Invalid input for 'vector.similarity.cosine()': The supplied vectors do not have the same number of dimensions.} {gql_status: 22N38} {gql_status_description: error: data exception - invalid function argument. Invalid argument to the function vector.similarity.cosine.}"
+2026-01-30 13:59:33 [info     ] stage_4.4_synthesis
+2026-01-30 13:59:34 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='123 Mockup Lane, Washburn County, WI' unique_docs=1 unique_sections=1
+2026-01-30 13:59:34 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='61 S 34th Street, Dayton, FL 33155' unique_docs=2 unique_sections=2
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=5 entity=AAA unique_docs=1 unique_sections=3
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=6 entity='Arbitration Program' unique_docs=1 unique_sections=3
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Building Contractors Association of South East Idaho' unique_docs=1 unique_sections=2
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='Contoso Lifts LLC' unique_docs=2 unique_sections=2
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=10 entity='Contoso Ltd.' unique_docs=4 unique_sections=8
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Fabrikam Construction' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=12 entity='Fabrikam Inc.' unique_docs=4 unique_sections=8
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='HOLDING TANK SERVICING CONTRACT' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='INVOICE # 1256003' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Initial payment in accordance with contract' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Meadow Estates' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Online payment portal' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='P.O. Box 123567 Key West, FL. 33304-0708' unique_docs=2 unique_sections=2
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='PURCHASE CONTRACT' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Parcel ID # 65- 081 -0-10 - 11-12 -1-13 - 123 - 123456' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Payment Terms' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Pumper Registration Number REG-54321' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=6 entity='State of Idaho' unique_docs=1 unique_sections=3
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Tax ID# 0098765' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=2 entity=Term unique_docs=2 unique_sections=2
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Unit #: B202' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Vertical Platform Lift (AscendPro VPX200)' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='WI Code SPS 383.21(2)5' unique_docs=1 unique_sections=1
+2026-01-30 13:59:35 [info     ] route2_chunks_retrieved        entities_with_chunks=25 max_per_document=6 max_per_section=3 num_entities=25 section_diversification=True total_chunks=69
+2026-01-30 13:59:35 [info     ] text_chunks_retrieved          batched=True num_chunks=69 num_entities=25
+2026-01-30 13:59:35 [info     ] build_cited_context_grouping   doc_keys=['doc_dc2f6157d09b41928ebb971f688af35f', 'doc_1a4a24e975f74b85b21fe664fbbe7bd9', 'doc_853e4ab63ca94ea492804fe91688f9ce', 'doc_6b62c0bafc0644f39d2d17e3e7433c22', 'doc_2d0e8d47ba7540efa95d79743679c19e'] num_chunks=69 num_doc_groups=5
+2026-01-30 14:00:07 [info     ] synthesis_complete             is_drift_mode=True num_citations=20 query='Find inconsistencies between invoice details and contract terms' response_length=12552 response_type=summary
+2026-01-30 14:00:07 [info     ] stage_4.4_complete
+Citations: 20
+Response length: 12552
+Contains Bayfront: False
+Contains keyless: False
+Contains Exhibit A: False
+
+=== RESPONSE (first 2500 chars) ===
+## Analysis
+
+### Q1 – What is on the invoice vs. what is in the contract?
+
+**Invoice details (Contoso Lifts LLC → Fabrikam / John Doe)**  
+From the Contoso Lifts invoice (#1256003, dated 2015‑12‑17) the billed items are: [26][29][34][36][40][61][67]
+
+- Customer / ship‑to: John Doe, Fabrikam Construction, 61 S 34th Street, Dayton, FL 33155 [26]  
+- Comment: “Initial payment in accordance with contract” [26]  
+- Terms: “Due on contract signing” [26]  
+- Line items:
+  1. Vertical Platform Lift (Savaria V1504), qty 1, unit price $11,200.00, total $11,200.00 [26]  
+  2. 110 VAC 60 Hz up, 12 VAC down operation parts, qty 1, unit price $3,000.00, total $3,000.00 [26]  
+  3. Special Size 42" x 62" cab with 90 degree Type 3, qty 1, unit price $5,800.00, total $5,800.00 [26]  
+  4. Outdoor fitting, qty 1, unit price $2,000.00, total $2,000.00 [26]  
+  5. 80" High low profile aluminum door with plexi‑glass inserts, WR‑500 lock, automatic door operator, qty 1, unit price $5,000.00, total $5,000.00 [26]  
+  6. Hall Call stations for bottom and upper landing, qty 2, unit price $1,450.00, total $2,900.00 [26]  
+- Subtotal / total: $29,900.00, tax N/A [26]  
+- Amount due: $29,900.00 [26]  
+
+**Purchase contract details (Contoso Lifts LLC ↔ Fabrikam Inc.)**  
+
+The purchase contract between Contoso Lifts LLC (Contractor) and Fabrikam Inc. (Customer), at the same customer address, provides: [4][9][13][24][25][27][28][30][31][32][33][68][69]
+
+- Scope of Work – Contractor to furnish and install:  
+  - 1 Vertical Platform Lift (AscendPro VPX200) [4]  
+  - 1 Power system: 110 VAC 60 Hz up, 12 VAC down [4]  
+  - 1 Custom cab 42" x 62" with Type 3 90‑degree access [4]  
+  - 1 Outdoor configuration package [4]  
+  - 1 Aluminum door with plexi‑glass inserts & automatic opener [4]  
+  - 2 Flush‑mount Hall Call stations (upper & lower) [4]  
+
+- Payment Terms – Total contract price $29,900.00, payable in 3 installments:  
+  - $20,000.00 upon signing  
+  - $7,000.00 upon delivery  
+  - $2,900.00 upon completion [4]  
+
+No line‑by‑line unit prices are set in the contract; only the total contract price and installment schedule are defined [4].
+
+### Q2 – Do invoice items have matching contract items (description/scope/UOM)?
+
+Comparing line items one‑by‑one:
+
+1. **Platform lift**  
+   - Invoice: “Vertical Platform Lift (Savaria V1504)” qty 1 [26]  
+   - Contract: “1 Vertical Platform Lift (AscendPro VPX200)” qty 1 [4]  
+   - Scope: Both are a vertical platform lift, but the **model differs** 
+2026-01-30 14:00:07 [info     ] async_neo4j_closed

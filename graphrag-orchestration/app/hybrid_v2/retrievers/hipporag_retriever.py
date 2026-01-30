@@ -315,10 +315,10 @@ class HippoRAGRetriever(BaseRetriever):
             if driver is None:
                 return []
             
-            # Query vector index - try embedding_v2 first (V2), then embedding (V1)
+            # Query vector index - use entity_embedding_v2 for V2 data
             # Use group_id filter for multi-tenant isolation
             query = """
-            CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
+            CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
             RETURN node.id AS node_id, score

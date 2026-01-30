@@ -42,7 +42,7 @@ llm_client = LlamaIndexAzureOpenAI(
 
 # Test groups
 V1_GROUP = "invoice-contract-verification"  # V1 unified index with aliases
-V2_GROUP = "test-5pdfs-v2-enhanced-ex"      # V2 with embedding_v2 fix (no KNN)
+V2_GROUP = "test-5pdfs-v2-enhanced-ex"      # V2 with Voyage embeddings (re-indexed 2026-01-30 with embedding_v2 fix)
 
 # The exact query from the analysis
 QUERY = "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"

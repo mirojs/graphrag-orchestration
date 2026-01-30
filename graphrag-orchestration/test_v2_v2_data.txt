@@ -1,0 +1,139 @@
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+voyage-3 is not the latest model by Voyage AI. Please note that `model_name` will be a required argument in the future. We recommend setting it explicitly. Please see https://docs.voyageai.com/docs/embeddings for the latest models offered by Voyage AI.
+Initializing LLM client...
+Initializing Voyage embedding client...
+2026-01-30 14:01:53 [info     ] upstream_hipporag_not_installed message='Using LlamaIndex-native implementation'
+2026-01-30 14:01:53 [info     ] async_neo4j_service_configured
+2026-01-30 14:01:53 [info     ] router_initialized             drift_threshold=0.75 global_threshold=0.5 profile=general_enterprise vector_threshold=0.25
+2026-01-30 14:01:53 [info     ] community_matcher_created      group_id=test-5pdfs-v2-enhanced-ex has_embedding_client=True has_neo4j_service=True
+2026-01-30 14:01:53 [info     ] hub_extractor_created          group_id=test-5pdfs-v2-enhanced-ex has_graph_store=False has_neo4j=True
+2026-01-30 14:01:53 [info     ] hybrid_pipeline_initialized    group_id=test-5pdfs-v2-enhanced-ex has_async_neo4j=True has_community_matcher=True has_hipporag=False has_neo4j=True profile=general_enterprise relevance_budget=0.8
+2026-01-30 14:01:56 [info     ] async_neo4j_connected
+
+Testing V2 code with V2 data (group=test-5pdfs-v2-enhanced-ex)
+Query: Find inconsistencies between invoice details and contract terms
+
+2026-01-30 14:01:56 [info     ] route_4_drift_start            query='Find inconsistencies between invoice details and c' response_type=summary
+2026-01-30 14:01:56 [info     ] stage_4.1_query_decomposition
+2026-01-30 14:01:59 [info     ] stage_4.1_complete             num_sub_questions=2
+2026-01-30 14:01:59 [info     ] stage_4.2_iterative_discovery
+2026-01-30 14:01:59 [info     ] processing_sub_question_1      question='that are covered by the same contract terms for wh'
+2026-01-30 14:02:00 [info     ] intent_disambiguation_success  dropped_count=0 query='that are covered by the same contract terms for which we need to find inconsistencies between invoice details and contract terms?' seed_entities=[]
+2026-01-30 14:02:00 [info     ] processing_sub_question_2      question='that apply to the same invoice details for which w'
+2026-01-30 14:02:00 [info     ] intent_disambiguation_success  dropped_count=0 query='that apply to the same invoice details for which we need to find inconsistencies between invoice details and contract terms?' seed_entities=['Invoice Details', 'Contract Terms']
+2026-01-30 14:02:00 [info     ] v2_voyage_embedder_initialized
+2026-01-30 14:02:02 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 14:02:02 [info     ] async_neo4j_ppr_success        num_results=5 num_seeds=5 query='that apply to the same invoice details for which w'
+2026-01-30 14:02:02 [info     ] stage_4.2_complete             num_results=2 total_seeds=2
+2026-01-30 14:02:02 [info     ] stage_4.3_consolidated_tracing_semantic_beam
+2026-01-30 14:02:04 [error    ] semantic_beam_trace_failed     error="Logger._log() got an unexpected keyword argument 'error'"
+2026-01-30 14:02:05 [info     ] async_neo4j_ppr_success        num_results=30 num_seeds=5 query='Find inconsistencies between invoice details and c'
+2026-01-30 14:02:05 [info     ] stage_4.3_complete             num_evidence=30
+2026-01-30 14:02:05 [info     ] stage_4.3.5_confidence_check   confidence_score=0.7 entity_diversity=1.0 satisfied_ratio=0.5 thin_questions=1
+2026-01-30 14:02:05 [info     ] stage_4.3.6_coverage_gap_fill_start chunks_per_doc=1 domain_keywords=[] is_comprehensive=False
+2026-01-30 14:02:07 [info     ] all_documents_retrieved        group_id=test-5pdfs-v2-enhanced-ex num_docs=5
+2026-01-30 14:02:07 [info     ] semantic_coverage_chunks_retrieved group_id=test-5pdfs-v2-enhanced-ex max_per_document=1 max_total=5 num_chunks=0 num_unique_docs=0
+2026-01-30 14:02:07 [info     ] stage_4.4_synthesis
+2026-01-30 14:02:08 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='110 VAC 60 Hz up, 12 VAC down operation parts' unique_docs=1 unique_sections=1
+2026-01-30 14:02:08 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='61 S 34th Street, Dayton, FL 33155' unique_docs=2 unique_sections=2
+2026-01-30 14:02:08 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='80" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator' unique_docs=1 unique_sections=1
+2026-01-30 14:02:08 [debug    ] route2_section_diversification_applied chunks_returned=6 entity='Arbitration Program' unique_docs=1 unique_sections=3
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=5 entity="Builder's Limited Warranty" unique_docs=1 unique_sections=5
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='Contoso Lifts LLC' unique_docs=2 unique_sections=2
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=5 entity=Dispute unique_docs=1 unique_sections=3
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Due on contract signing' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Fabrikam Construction' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=12 entity='Fabrikam Inc.' unique_docs=4 unique_sections=8
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='INVOICE # 1256003' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=3 entity=Invalidity unique_docs=1 unique_sections=3
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='John Doe' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Outdoor fitting' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=3 entity='P.O. Box 123567 Key West, FL. 33304-0708' unique_docs=2 unique_sections=2
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=2 entity=Permitting unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Purchase Contract' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='Risk of Loss' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='Special Size 42" x 62" cab with 90 degree Type 3' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=6 entity='State of Idaho' unique_docs=1 unique_sections=3
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=3 entity=Term unique_docs=1 unique_sections=2
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=5 entity=Warranty unique_docs=2 unique_sections=4
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='air conditioner' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=1 entity='terms hereof including specific provisions for other features of the home and appliances' unique_docs=1 unique_sections=1
+2026-01-30 14:02:09 [debug    ] route2_section_diversification_applied chunks_returned=2 entity='warranty period (term)' unique_docs=1 unique_sections=2
+2026-01-30 14:02:09 [info     ] route2_chunks_retrieved        entities_with_chunks=25 max_per_document=6 max_per_section=3 num_entities=25 section_diversification=True total_chunks=72
+2026-01-30 14:02:09 [info     ] text_chunks_retrieved          batched=True num_chunks=72 num_entities=25
+2026-01-30 14:02:09 [info     ] build_cited_context_grouping   doc_keys=['doc_6caa3b7a3af34f64b47a95a94653e70c', 'doc_5217f97593ee4f92ad493ae57a6e4157', 'doc_8205bc1673724d689a86d302d72da287', 'doc_2a26892fdba540b8af1e0afe1ddb544b', 'doc_657dee67210c43f2af2649c7d71d8c8c'] num_chunks=72 num_doc_groups=5
+2026-01-30 14:02:27 [info     ] synthesis_complete             is_drift_mode=True num_citations=13 query='Find inconsistencies between invoice details and contract terms' response_length=7487 response_type=summary
+2026-01-30 14:02:27 [info     ] stage_4.4_complete
+Citations: 13
+Response length: 7487
+Contains Bayfront: False
+Contains keyless: False
+Contains Exhibit A: False
+
+=== RESPONSE (first 3000 chars) ===
+## Analysis
+
+### Q1: Items covered by the same contract terms (basis for checking inconsistencies)
+
+All relevant commercial terms come from the **Purchase Contract** between Contoso Lifts LLC (Contractor) and Fabrikam Inc. (Customer) [2][3]. The contract defines:
+
+**Scope of Work (equipment/services to be provided)**  
+Contractor agrees to furnish and install [2][3]:
+
+- 1 Vertical Platform Lift (**AscendPro VPX200**)  
+- 1 Power system: 110 VAC 60 Hz up, 12 VAC down  
+- 1 Custom cab 42" x 62" with Type 3 90-degree access  
+- 1 Outdoor configuration package  
+- 1 Aluminum door with plexi-glass inserts & automatic opener  
+- 2 Flush-mount Hall Call stations (upper & lower)
+
+These items are all governed by the same scope-of-work terms in Section 1 of the contract and are the baseline against which the invoice’s line items should be compared [2][3].
+
+**Payment Terms (commercial/financial terms)**  
+The same contract sets a total contract price of **$29,900.00**, payable in three installments [2][3]:
+
+- $20,000.00 upon signing  
+- $7,000.00 upon delivery  
+- $2,900.00 upon completion  
+
+These terms govern how and when invoicing should occur, and for which amounts [2][3].
+
+Thus, all equipment components listed in the scope and all payment-related obligations are “covered by the same contract terms” that must be used to check for inconsistencies with the invoice.
+
+---
+
+### Q2: How those contract terms apply to the same invoice details (and what inconsistencies exist)
+
+The **Contoso Lifts invoice** (INVOICE #1256003) from Contoso Lifts LLC to Fabrikam Construction/John Doe shows the following [1][6][16][28][29][35][68][69][70][71][72]:
+
+**Invoice header / purpose**
+
+- Seller: Contoso Lifts LLC [1]  
+- Customer: John Doe, Fabrikam Construction, 61 S 34th Street, Dayton, FL 33155 [1]  
+- Comment: “**Initial payment in accordance with contract**” [1]  
+- Terms: “**Due on contract signing**” [1]
+
+**Invoice line items and pricing**
+
+- 1 Vertical Platform Lift (**Savaria V1504**) – $11,200.00 [1]  
+- 1 110 VAC 60 Hz up, 12 VAC down operation parts – $3,000.00 [1]  
+- 1 Special Size 42" x 62" cab with 90 degree Type 3 – $5,800.00 [1]  
+- 1 Outdoor fitting – $2,000.00 [1]  
+- 1 80" high low-profile aluminum door with plexi-glass inserts, WR‑500 lock, automatic door operator – $5,000.00 [1]  
+- 2 Hall call stations for bottom and upper landing @ $1,450.00 = $2,900.00 [1]  
+- Subtotal/Total/Amount Due: **$29,900.00**; Tax: N/A [1]
+
+Comparing these invoice details to the contract terms reveals:
+
+#### 1. Model/name inconsistency for the lift
+
+- Contract scope specifies: **“1 Vertical Platform Lift (AscendPro VPX200)”** [2][3].  
+- Invoice bills for: **“Vertical Platform Lift (Savaria V1504)”** [1].
+
+This is a direct inconsistency in the product model/brand between invoice and contract, though both describe a “Vertical Platform Lift.” [1][2]
+
+#### 2. Consistency of configuration and accessories (other than model)
+
+Despite the model mismatch, most configuration detail
+2026-01-30 14:02:28 [info     ] async_neo4j_closed

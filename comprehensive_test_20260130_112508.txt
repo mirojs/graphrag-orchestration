@@ -1,0 +1,5 @@
+2026-01-30 11:25:10 [info     ] upstream_hipporag_not_installed message='Using LlamaIndex-native implementation'
+Traceback (most recent call last):
+  File "/afh/projects/graphrag-orchestration/scripts/test_v1_v2_comprehensive.py", line 34, in <module>
+    from llama_index.embeddings.voyageai import VoyageEmbedding
+ModuleNotFoundError: No module named 'llama_index.embeddings.voyageai'

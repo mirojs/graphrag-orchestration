@@ -119,7 +119,7 @@ class DeterministicTracer:
             return ranked_nodes
             
         except Exception as e:
-            logger.error("hipporag_trace_failed", error=str(e))
+            logger.error("hipporag_trace_failed", error_msg=str(e))
             # Fallback to async Neo4j or sync graph_store
             if self._use_async_neo4j:
                 return await self._trace_with_async_neo4j(query, seed_entities, top_k)
@@ -230,7 +230,7 @@ class DeterministicTracer:
                                            matched_entity=rec["name"],
                                            similarity=rec.get("similarity", 0))
                     except Exception as e:
-                        logger.warning("strategy_6_failed_for_seed", seed=seed, error=str(e))
+                        logger.warning("strategy_6_failed_for_seed", seed=seed, error_msg=str(e))
                         continue
                 
                 logger.info("strategy_6_complete", 
@@ -268,7 +268,7 @@ class DeterministicTracer:
             return ranked_nodes
             
         except Exception as e:
-            logger.error("async_neo4j_ppr_failed", error=str(e))
+            logger.error("async_neo4j_ppr_failed", error_msg=str(e))
             # Fail fast: Route 4 DRIFT requires graph traversal for multi-hop reasoning
             raise RuntimeError(
                 f"Route 4 DRIFT requires AsyncNeo4jService for PPR graph traversal. "
@@ -340,7 +340,7 @@ class DeterministicTracer:
             return ranked
 
         except Exception as e:
-            logger.error("semantic_beam_trace_failed", error=str(e))
+            logger.error("semantic_beam_trace_failed", error_msg=str(e))
             # Fallback to structure-only PPR
             return await self.trace(query, seed_entities, top_k=beam_width)
 
@@ -409,7 +409,7 @@ class DeterministicTracer:
             return [(entity, 1.0) for entity in seed_entities]
             
         except Exception as e:
-            logger.error("fallback_ppr_trace_failed", error=str(e))
+            logger.error("fallback_ppr_trace_failed", error_msg=str(e))
             # Return seeds with equal weight as last resort
             return [(entity, 1.0) for entity in seed_entities]
     

@@ -1216,14 +1216,29 @@ class AsyncNeo4jService:
           AND src.id = eid
           AND neighbor.group_id = $group_id
           AND type(r) <> 'MENTIONS'
-          AND neighbor.embedding IS NOT NULL
+          AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
         WITH DISTINCT neighbor,
-             vector.similarity.cosine(neighbor.embedding, $query_embedding) AS sim
+             vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
         ORDER BY sim DESC
         LIMIT $beam_width
         RETURN neighbor.id AS id,
                neighbor.name AS name,
                sim AS similarity
+        """)
+        
+        # Vector expansion query (hop 0) - finds semantically similar entities
+        # regardless of relationship edges. Critical for isolated entities like
+        # Exhibit A details that may not have edges to other entities.
+        vector_expansion_query = cypher25_query("""
+        CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $query_embedding)
+        YIELD node, score
+        WHERE node.group_id = $group_id
+          AND (node:Entity OR node:`__Entity__`)
+        RETURN node.id AS id,
+               node.name AS name,
+               score AS similarity
+        ORDER BY score DESC
+        LIMIT $beam_width
         """)
 
         import time
@@ -1235,6 +1250,41 @@ class AsyncNeo4jService:
         # Initialize names from seed_names parameter to ensure seeds return names, not IDs
         names: Dict[str, str] = dict(seed_names) if seed_names else {}
         current_ids = list(seed_entity_ids)
+        
+        # HOP 0: Vector expansion - discover semantically similar entities regardless of edges
+        # This is critical for finding isolated entities (e.g., Exhibit A details)
+        try:
+            async with self._get_session() as session:
+                result = await session.run(
+                    vector_expansion_query,
+                    query_embedding=query_embedding,
+                    group_id=group_id,
+                    top_k=beam_width * 2,  # Oversample for filtering
+                    beam_width=beam_width,
+                )
+                vector_records = await result.data()
+            
+            # Add vector-matched entities to the beam with slightly lower initial score
+            vector_boost_count = 0
+            for r in vector_records:
+                eid = r["id"]
+                sim = float(r["similarity"])
+                if eid not in scores:
+                    # Slight penalty vs seed entities (0.9 vs 1.0)
+                    scores[eid] = sim * 0.9
+                    names[eid] = r["name"]
+                    current_ids.append(eid)
+                    vector_boost_count += 1
+            
+            if vector_boost_count > 0:
+                logger.info(
+                    "semantic_beam_vector_expansion group=%s vector_entities=%d",
+                    group_id,
+                    vector_boost_count,
+                )
+        except Exception as e:
+            # Log but don't fail - fall back to relationship-only traversal
+            logger.warning("semantic_beam_vector_expansion_failed: %s", str(e))
 
         for hop in range(max_hops):
             if not current_ids:

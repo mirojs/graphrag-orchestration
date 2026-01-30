@@ -1,0 +1,14 @@
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+voyage-3 is not the latest model by Voyage AI. Please note that `model_name` will be a required argument in the future. We recommend setting it explicitly. Please see https://docs.voyageai.com/docs/embeddings for the latest models offered by Voyage AI.
+Traceback (most recent call last):
+  File "<string>", line 103, in <module>
+  File "/anaconda/envs/azureml_py38/lib/python3.10/asyncio/runners.py", line 44, in run
+    return loop.run_until_complete(main)
+  File "/anaconda/envs/azureml_py38/lib/python3.10/asyncio/base_events.py", line 649, in run_until_complete
+    return future.result()
+  File "<string>", line 44, in run
+TypeError: HybridPipeline.__init__() got an unexpected keyword argument 'neo4j_uri'
+================================================================================
+V2 GROUND TRUTH TEST - WITH VECTOR EXPANSION FIX
+================================================================================

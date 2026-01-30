@@ -241,6 +241,8 @@ class DeterministicTracer:
                 entity_names=seed_entities,
             )
             seed_ids = [r["id"] for r in seed_records]
+            # Build seed_names map (id -> name) so results return names, not IDs
+            seed_names = {r["id"]: r["name"] for r in seed_records}
 
             if not seed_ids:
                 logger.warning("semantic_beam_no_seeds", seeds=seed_entities)
@@ -252,6 +254,7 @@ class DeterministicTracer:
                 seed_entity_ids=seed_ids,
                 max_hops=max_hops,
                 beam_width=beam_width,
+                seed_names=seed_names,
             )
 
             logger.info(

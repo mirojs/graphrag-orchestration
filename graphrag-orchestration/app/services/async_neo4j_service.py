@@ -1184,6 +1184,7 @@ class AsyncNeo4jService:
         max_hops: int = 3,
         beam_width: int = 10,
         damping: float = 0.85,
+        seed_names: Optional[Dict[str, str]] = None,
     ) -> List[Tuple[str, float]]:
         """
         Semantic-guided multi-hop expansion using beam search + vector similarity.
@@ -1231,7 +1232,8 @@ class AsyncNeo4jService:
 
         # Initialize beam with seeds (each seed gets full score 1.0)
         scores: Dict[str, float] = {eid: 1.0 for eid in seed_entity_ids}
-        names: Dict[str, str] = {}
+        # Initialize names from seed_names parameter to ensure seeds return names, not IDs
+        names: Dict[str, str] = dict(seed_names) if seed_names else {}
         current_ids = list(seed_entity_ids)
 
         for hop in range(max_hops):

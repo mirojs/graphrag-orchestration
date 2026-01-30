@@ -27,6 +27,8 @@ from app.hybrid.orchestrator import HybridPipeline as V1Pipeline
 from app.hybrid_v2.orchestrator import HybridPipeline as V2Pipeline, DeploymentProfile
 from app.hybrid.router.main import QueryRoute as V1Route
 from app.hybrid_v2.router.main import QueryRoute as V2Route
+from app.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
+from neo4j import GraphDatabase
 
 # Initialize LlamaIndex Azure OpenAI LLM
 from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI
@@ -40,7 +42,7 @@ llm_client = LlamaIndexAzureOpenAI(
 
 # Test groups
 V1_GROUP = "invoice-contract-verification"  # V1 unified index with aliases
-V2_GROUP = "test-5pdfs-v2-knn-disabled"     # V2 KNN-disabled with manually-added aliases
+V2_GROUP = "test-5pdfs-v2-enhanced-ex"      # V2 with embedding_v2 fix (no KNN)
 
 # The exact query from the analysis
 QUERY = "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"
@@ -157,12 +159,25 @@ async def main():
     print(f"Query: {QUERY}")
     print()
     
+    # Initialize Neo4j driver for text unit store
+    print("Connecting to Neo4j...")
+    neo4j_driver = GraphDatabase.driver(
+        settings.NEO4J_URI,
+        auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD)
+    )
+    
+    # Create text unit stores for each group
+    v1_text_store = Neo4jTextUnitStore(neo4j_driver, group_id=V1_GROUP)
+    v2_text_store = Neo4jTextUnitStore(neo4j_driver, group_id=V2_GROUP)
+    
     # Initialize pipelines
     print("Initializing V1 pipeline...")
     v1_pipeline = V1Pipeline(
         profile=DeploymentProfile.GENERAL_ENTERPRISE,
         llm_client=llm_client,
-        group_id=V1_GROUP
+        group_id=V1_GROUP,
+        neo4j_driver=neo4j_driver,
+        text_unit_store=v1_text_store
     )
     await v1_pipeline.initialize()
     
@@ -170,7 +185,9 @@ async def main():
     v2_pipeline = V2Pipeline(
         profile=DeploymentProfile.GENERAL_ENTERPRISE,
         llm_client=llm_client,
-        group_id=V2_GROUP
+        group_id=V2_GROUP,
+        neo4j_driver=neo4j_driver,
+        text_unit_store=v2_text_store
     )
     await v2_pipeline.initialize()
     
@@ -234,6 +251,7 @@ async def main():
     # Cleanup
     await v1_pipeline.close()
     await v2_pipeline.close()
+    neo4j_driver.close()
     
     print("\n✅ Test Complete")
 

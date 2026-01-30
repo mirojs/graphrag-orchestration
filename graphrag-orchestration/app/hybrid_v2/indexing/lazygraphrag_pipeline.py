@@ -1874,16 +1874,18 @@ Output:
         )
 
         # Use embedding_v2 (V2/Voyage) if available, otherwise embedding (V1/OpenAI)
-        entity_dicts = [
-            {
+        entity_dicts = []
+        for e in entities:
+            emb = e.embedding_v2 if hasattr(e, 'embedding_v2') and e.embedding_v2 else e.embedding
+            if emb is None:
+                continue  # Skip entities without embeddings
+            entity_dicts.append({
                 "name": e.name,
-                "embedding": e.embedding_v2 if hasattr(e, 'embedding_v2') and e.embedding_v2 else e.embedding,
+                "embedding": emb,
                 "type": e.type,
                 "description": e.description,
                 "properties": (e.metadata or {}),
-            }
-            for e in entities
-        ]
+            })
 
         dedup_result = dedup_service.deduplicate_entities(entity_dicts, group_id=group_id)
         if not dedup_result.merge_map:
@@ -1925,10 +1927,10 @@ Output:
                 merged_type = m.type or merged_type
                 merged_meta.update(m.metadata or {})
                 # V1: Copy embedding property
-                if merged_emb is None and m.embedding:
+                if merged_emb is None and m.embedding is not None:
                     merged_emb = m.embedding
                 # V2: Copy embedding_v2 property (Voyage embeddings)
-                if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2:
+                if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:
                     merged_emb_v2 = m.embedding_v2
 
             canonical_entities[canon_id] = Entity(

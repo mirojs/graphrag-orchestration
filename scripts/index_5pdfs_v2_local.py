@@ -203,6 +203,7 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
         ingestion="document-intelligence",
         run_community_detection=False,
         run_raptor=False,
+        knn_enabled=False,  # Disabled for troubleshooting entity embeddings
     )
     
     elapsed = time.time() - start_time

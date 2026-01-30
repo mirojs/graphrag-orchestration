@@ -187,16 +187,38 @@ class AsyncNeo4jService:
         self,
         group_id: str,
         entity_names: List[str],
+        use_extended_matching: bool = True,
+        return_unmatched: bool = False,
     ) -> List[Dict[str, Any]]:
         """
-        Get specific entities by name or alias (case-insensitive).
+        Get specific entities by name using multi-strategy matching.
         
-        Matches against both the canonical name and any aliases stored on the entity.
-        This enables flexible entity lookup when users refer to entities by common
-        variations (e.g., "Fabrikam Inc." matches "Fabrikam Construction").
+        Matching strategies (in priority order):
+        1. Exact match on entity name (case-insensitive)
+        2. Alias match - check entity aliases for exact match
+        3. KVP key match - check KeyValue node keys for exact match
+        4. Substring match on entity name/aliases
+        5. Token overlap (Jaccard-like) via CONTAINS on individual words
+        
+        Strategy 6 (Vector similarity) is handled separately via
+        get_entities_by_vector_similarity() when needed. The caller can use
+        return_unmatched=True to get unmatched seeds for Strategy 6 processing.
+        
+        Args:
+            group_id: Tenant isolation ID
+            entity_names: List of seed names to resolve
+            use_extended_matching: If True, use strategies 3-5 for unmatched seeds
+            return_unmatched: If True, return tuple of (records, unmatched_seeds)
+            
+        Returns:
+            If return_unmatched=False: List of entity records with id, name, etc.
+            If return_unmatched=True: Tuple of (records, unmatched_seed_names)
         """
-        query = cypher25_query("""
-        // Support both Entity and __Entity__ labels
+        if not entity_names:
+            return []
+        
+        # Strategy 1 & 2: Exact name match + Alias match
+        query_exact = cypher25_query("""
         UNWIND $names AS name
         MATCH (e)
         WHERE (e:Entity OR e:`__Entity__`)
@@ -210,13 +232,239 @@ class AsyncNeo4jService:
             e.name AS name,
             e.degree AS degree,
             e.chunk_count AS chunk_count,
-            coalesce(e.degree, 0) AS importance_score
+            coalesce(e.degree, 0) AS importance_score,
+            name AS matched_seed,
+            'exact_or_alias' AS match_strategy
         """)
         
         async with self._get_session() as session:
-            result = await session.run(query, group_id=group_id, names=entity_names)
+            result = await session.run(query_exact, group_id=group_id, names=entity_names)
             records = await result.data()
+        
+        # Track which seeds were matched
+        matched_seeds = {r["matched_seed"].lower() for r in records}
+        unmatched_seeds = [n for n in entity_names if n.lower() not in matched_seeds]
+        
+        if not unmatched_seeds or not use_extended_matching:
+            logger.info(
+                "get_entities_by_names_result",
+                total_seeds=len(entity_names),
+                matched_exact=len(records),
+                unmatched=len(unmatched_seeds),
+            )
             return records
+        
+        # Strategy 3: KVP key match for unmatched seeds
+        query_kvp = cypher25_query("""
+        UNWIND $names AS name
+        MATCH (k:KeyValuePair {group_id: $group_id})
+        WHERE toLower(k.key) = toLower(name)
+        // KVP nodes link to entities via SIMILAR_TO
+        OPTIONAL MATCH (k)-[:SIMILAR_TO]->(e)
+        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+        WITH name, COALESCE(e, k) AS node
+        WHERE node IS NOT NULL
+        RETURN DISTINCT
+            node.id AS id,
+            COALESCE(node.name, node.key) AS name,
+            COALESCE(node.degree, 0) AS degree,
+            COALESCE(node.chunk_count, 0) AS chunk_count,
+            COALESCE(node.degree, 0) AS importance_score,
+            name AS matched_seed,
+            'kvp_key' AS match_strategy
+        """)
+        
+        async with self._get_session() as session:
+            result = await session.run(query_kvp, group_id=group_id, names=unmatched_seeds)
+            kvp_records = await result.data()
+        
+        records.extend(kvp_records)
+        matched_seeds.update(r["matched_seed"].lower() for r in kvp_records)
+        unmatched_seeds = [n for n in unmatched_seeds if n.lower() not in matched_seeds]
+        
+        if not unmatched_seeds:
+            logger.info(
+                "get_entities_by_names_result",
+                total_seeds=len(entity_names),
+                matched_exact=len(records) - len(kvp_records),
+                matched_kvp=len(kvp_records),
+            )
+            return records
+        
+        # Strategy 4: Substring match for unmatched seeds
+        query_substring = cypher25_query("""
+        UNWIND $names AS name
+        MATCH (e)
+        WHERE (e:Entity OR e:`__Entity__`)
+            AND e.group_id = $group_id
+            AND (
+                toLower(e.name) CONTAINS toLower(name)
+                OR toLower(name) CONTAINS toLower(e.name)
+                OR ANY(alias IN coalesce(e.aliases, []) WHERE 
+                    toLower(alias) CONTAINS toLower(name) OR toLower(name) CONTAINS toLower(alias)
+                )
+            )
+        RETURN DISTINCT
+            e.id AS id,
+            e.name AS name,
+            e.degree AS degree,
+            e.chunk_count AS chunk_count,
+            coalesce(e.degree, 0) AS importance_score,
+            name AS matched_seed,
+            'substring' AS match_strategy
+        LIMIT 10
+        """)
+        
+        async with self._get_session() as session:
+            result = await session.run(query_substring, group_id=group_id, names=unmatched_seeds)
+            substring_records = await result.data()
+        
+        records.extend(substring_records)
+        matched_seeds.update(r["matched_seed"].lower() for r in substring_records)
+        unmatched_seeds = [n for n in unmatched_seeds if n.lower() not in matched_seeds]
+        
+        if not unmatched_seeds:
+            logger.info(
+                "get_entities_by_names_result",
+                total_seeds=len(entity_names),
+                matched_substring=len(substring_records),
+            )
+            return records
+        
+        # Strategy 5: Token overlap (word-level CONTAINS) for remaining seeds
+        # Split seeds into words and find entities containing those words
+        query_token = cypher25_query("""
+        UNWIND $names AS name
+        WITH name, split(toLower(name), ' ') AS words
+        UNWIND words AS word
+        WITH name, word
+        WHERE size(word) >= 3  // Skip short words like 'the', 'a'
+        MATCH (e)
+        WHERE (e:Entity OR e:`__Entity__`)
+            AND e.group_id = $group_id
+            AND toLower(e.name) CONTAINS word
+        WITH name, e, count(DISTINCT word) AS word_matches
+        WHERE word_matches >= 1
+        RETURN
+            e.id AS id,
+            e.name AS name,
+            e.degree AS degree,
+            e.chunk_count AS chunk_count,
+            coalesce(e.degree, 0) AS importance_score,
+            name AS matched_seed,
+            'token_overlap' AS match_strategy,
+            word_matches AS match_score
+        ORDER BY match_score DESC
+        LIMIT 10
+        """)
+        
+        async with self._get_session() as session:
+            result = await session.run(query_token, group_id=group_id, names=unmatched_seeds)
+            token_records = await result.data()
+        
+        records.extend(token_records)
+        
+        # Log final results
+        final_unmatched = [n for n in entity_names if n.lower() not in 
+                          {r["matched_seed"].lower() for r in records}]
+        
+        logger.info(
+            "get_entities_by_names_result",
+            total_seeds=len(entity_names),
+            total_matched=len(records),
+            strategies_used=list({r.get("match_strategy", "unknown") for r in records}),
+            unmatched_seeds=final_unmatched[:5] if final_unmatched else [],
+        )
+        
+        if return_unmatched:
+            return records, final_unmatched
+        return records
+    
+    async def get_entities_by_vector_similarity(
+        self,
+        group_id: str,
+        seed_text: str,
+        seed_embedding: List[float],
+        top_k: int = 3,
+        index_name: str = "entity_embedding",  # V1: entity_embedding, V2: entity_embedding_v2
+    ) -> List[Dict[str, Any]]:
+        """
+        Strategy 6: Find entities using vector similarity on entity embeddings.
+        
+        Uses Neo4j's native vector index to find semantically similar entities
+        when lexical matching (strategies 1-5) fails.
+        
+        Index selection:
+        - V1 (OpenAI 3072d): Use 'entity_embedding' index
+        - V2 (Voyage 2048d): Use 'entity_embedding_v2' index
+        
+        This is the last-resort fallback for cases like:
+        - "elevator equipment" → matches "Vertical Platform Lift" 
+        - "payment portal" → matches "Online Remittance URL"
+        
+        Args:
+            group_id: Tenant isolation ID
+            seed_text: The seed phrase (for logging)
+            seed_embedding: Vector embedding of the seed phrase
+            top_k: Number of similar entities to return
+            index_name: Vector index to query ('entity_embedding' or 'entity_embedding_v2')
+            
+        Returns:
+            List of entity records with id, name, degree, importance_score, similarity
+        """
+        if not seed_embedding:
+            return []
+        
+        # Query vector index with group filtering
+        # Note: Neo4j vector search returns top-k globally, we filter by group after
+        # Use parameterized index name - try both Entity and __Entity__ labels
+        query = cypher25_query(f"""
+        CALL db.index.vector.queryNodes('{index_name}', $top_k_oversample, $embedding)
+        YIELD node, score
+        WHERE node.group_id = $group_id
+        RETURN
+            node.id AS id,
+            node.name AS name,
+            node.degree AS degree,
+            node.chunk_count AS chunk_count,
+            coalesce(node.degree, 0) AS importance_score,
+            score AS similarity,
+            $seed_text AS matched_seed,
+            'vector_similarity' AS match_strategy
+        ORDER BY score DESC
+        LIMIT $top_k
+        """)
+        
+        try:
+            async with self._get_session() as session:
+                result = await session.run(
+                    query,
+                    group_id=group_id,
+                    embedding=seed_embedding,
+                    top_k=top_k,
+                    top_k_oversample=top_k * 3,  # Oversample to account for group filtering
+                    seed_text=seed_text,
+                )
+                records = await result.data()
+            
+            if records:
+                logger.info(
+                    "get_entities_by_vector_similarity_success: seed=%s num_results=%d top_match=%s top_similarity=%.3f",
+                    seed_text,
+                    len(records),
+                    records[0]["name"] if records else None,
+                    records[0]["similarity"] if records else 0,
+                )
+            
+            return records
+            
+        except Exception as e:
+            logger.warning(
+                "get_entities_by_vector_similarity_failed: seed=%s error=%s",
+                seed_text,
+                str(e),
+            )
+            return []
     
     # =========================================================================
     # Graph Traversal (Route 2/3 - No GDS Required)

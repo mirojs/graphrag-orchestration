@@ -29,6 +29,10 @@ class DeterministicTracer:
     - HippoRAG native PPR (if available)
     - Async Neo4j service with native PPR approximation (recommended)
     - Sync graph_store fallback (legacy)
+    
+    Seed Resolution Strategy (6 layers):
+    - Strategies 1-5 are graph-grounded (lexical matching)
+    - Strategy 6 is vector fallback (semantic similarity) for vocabulary mismatch
     """
     
     def __init__(
@@ -37,6 +41,7 @@ class DeterministicTracer:
         graph_store: Optional[Any] = None,
         async_neo4j: Optional["AsyncNeo4jService"] = None,
         group_id: Optional[str] = None,
+        embed_model: Optional[Any] = None,
     ):
         """
         Args:
@@ -44,11 +49,14 @@ class DeterministicTracer:
             graph_store: Fallback graph store if HippoRAG is not available.
             async_neo4j: AsyncNeo4jService for native async Neo4j queries (preferred).
             group_id: Tenant ID for multi-tenant isolation.
+            embed_model: Embedding model for Strategy 6 vector fallback.
+                        Should have get_query_embedding(text) or embed_query(text) method.
         """
         self.hipporag = hipporag_instance
         self.graph_store = graph_store
         self.async_neo4j = async_neo4j
         self.group_id = group_id
+        self.embed_model = embed_model
         self._use_hipporag = hipporag_instance is not None
         self._use_async_neo4j = async_neo4j is not None
     
@@ -128,6 +136,10 @@ class DeterministicTracer:
         
         This is the recommended approach - true async with no thread pool overhead.
         Uses distance-based decay as PPR approximation (no GDS required).
+        
+        Seed Resolution:
+        - Strategies 1-5: Lexical matching (exact, alias, KVP, substring, token)
+        - Strategy 6: Vector similarity fallback for vocabulary mismatch
         """
         if not self.async_neo4j:
             logger.warning("async_neo4j_not_available", reason="Service not initialized")
@@ -156,12 +168,74 @@ class DeterministicTracer:
             per_seed_limit = _get_int_env("ROUTE3_PPR_PER_SEED_LIMIT", 25)
             per_neighbor_limit = _get_int_env("ROUTE3_PPR_PER_NEIGHBOR_LIMIT", 10)
 
-            # First, resolve seed entity names to IDs
-            seed_records = await self.async_neo4j.get_entities_by_names(
+            # First, resolve seed entity names to IDs using Strategies 1-5
+            result = await self.async_neo4j.get_entities_by_names(
                 group_id=self.group_id,
                 entity_names=seed_entities,
+                return_unmatched=True,  # Get unmatched for Strategy 6
             )
+            
+            # Handle both return formats (with/without unmatched)
+            if isinstance(result, tuple):
+                seed_records, unmatched_seeds = result
+            else:
+                seed_records = result
+                unmatched_seeds = []
+            
             seed_ids = [r["id"] for r in seed_records]
+            
+            # Strategy 6: Vector similarity for unmatched seeds (if embed_model available)
+            if unmatched_seeds and self.embed_model:
+                logger.info("strategy_6_vector_fallback_start", 
+                           unmatched_count=len(unmatched_seeds),
+                           unmatched_seeds=unmatched_seeds[:5])
+                
+                # Determine which vector index to use based on embedding dimensions
+                # V2 Voyage: 2048-dim → entity_embedding_v2
+                # V1 OpenAI: 3072-dim → entity_embedding
+                for seed in unmatched_seeds:
+                    try:
+                        # Get embedding using either method signature
+                        if hasattr(self.embed_model, 'get_query_embedding'):
+                            embedding = self.embed_model.get_query_embedding(seed)
+                        elif hasattr(self.embed_model, 'embed_query'):
+                            embedding = self.embed_model.embed_query(seed)
+                        else:
+                            continue
+                        
+                        if not embedding:
+                            continue
+                        
+                        # Select index based on embedding dimension
+                        # V2 Voyage: 2048 dims → entity_embedding_v2
+                        # V1 OpenAI: 3072 dims → entity_embedding
+                        index_name = "entity_embedding_v2" if len(embedding) <= 2048 else "entity_embedding"
+                        
+                        # Search for similar entities
+                        vector_records = await self.async_neo4j.get_entities_by_vector_similarity(
+                            group_id=self.group_id,
+                            seed_text=seed,
+                            seed_embedding=embedding,
+                            top_k=3,  # Limit per unmatched seed
+                            index_name=index_name,
+                        )
+                        
+                        for rec in vector_records:
+                            # Avoid duplicates
+                            if rec["id"] not in seed_ids:
+                                seed_ids.append(rec["id"])
+                                seed_records.append(rec)
+                                logger.info("strategy_6_match",
+                                           seed=seed,
+                                           matched_entity=rec["name"],
+                                           similarity=rec.get("similarity", 0))
+                    except Exception as e:
+                        logger.warning("strategy_6_failed_for_seed", seed=seed, error=str(e))
+                        continue
+                
+                logger.info("strategy_6_complete", 
+                           final_seed_count=len(seed_ids),
+                           vector_matches=len(seed_ids) - len([r for r in seed_records if r.get("match_strategy") != "vector_similarity"]))
             
             if not seed_ids:
                 # These seeds were discovered by the LLM but do not correspond

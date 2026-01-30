@@ -202,11 +202,13 @@ class HybridPipeline:
         )
         
         # Routes 3 & 4: Deterministic tracing
+        # Pass embed_model for Strategy 6 vector fallback in seed resolution
         self.tracer = DeterministicTracer(
             hipporag_instance=hipporag_instance,
             graph_store=graph_store,
             async_neo4j=self._async_neo4j,
-            group_id=group_id
+            group_id=group_id,
+            embed_model=embedding_client,  # For Strategy 6 vector fallback
         )
         
         # All routes: Synthesis

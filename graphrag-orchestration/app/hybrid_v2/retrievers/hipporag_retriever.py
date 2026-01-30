@@ -285,6 +285,77 @@ class HippoRAGRetriever(BaseRetriever):
         """Normalize text for matching."""
         return " ".join(text.lower().strip().split())
     
+    def _vector_search_entities(self, seed: str, top_k: int = 3) -> List[str]:
+        """
+        Search for entities using vector similarity on entity embeddings.
+        
+        Uses Neo4j's native vector index 'entity_embedding' to find semantically
+        similar entities when lexical matching fails.
+        
+        Args:
+            seed: The seed phrase to search for
+            top_k: Number of similar entities to return
+            
+        Returns:
+            List of entity node IDs ordered by similarity
+        """
+        if self.embed_model is None:
+            return []
+        
+        try:
+            # Get embedding for the seed phrase
+            seed_embedding = self.embed_model.get_query_embedding(seed)
+            if not seed_embedding:
+                return []
+            
+            # Get Neo4j driver from graph store
+            driver = getattr(self.graph_store, '_driver', None)
+            database = getattr(self.graph_store, '_database', 'neo4j')
+            
+            if driver is None:
+                return []
+            
+            # Query vector index - try embedding_v2 first (V2), then embedding (V1)
+            # Use group_id filter for multi-tenant isolation
+            query = """
+            CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
+            YIELD node, score
+            WHERE node.group_id = $group_id
+            RETURN node.id AS node_id, score
+            ORDER BY score DESC
+            LIMIT $top_k
+            """
+            
+            params = {
+                "embedding": seed_embedding,
+                "top_k": top_k * 2,  # Oversample to account for group filtering
+                "group_id": self.group_id,
+            }
+            
+            results: List[str] = []
+            with driver.session(database=database) as session:
+                result = session.run(query, params)
+                for record in result:
+                    node_id = record.get("node_id")
+                    if node_id:
+                        results.append(node_id)
+                        if len(results) >= top_k:
+                            break
+            
+            if results:
+                logger.info(
+                    "hipporag_vector_search_success",
+                    seed=seed,
+                    num_results=len(results),
+                    top_match=results[0] if results else None,
+                )
+            
+            return results
+            
+        except Exception as e:
+            logger.warning("hipporag_vector_search_failed", seed=seed, error=str(e))
+            return []
+    
     def _expand_seeds_to_nodes(self, seeds: List[str]) -> List[str]:
         """
         Map seed phrases to actual graph nodes using multi-strategy matching.
@@ -295,11 +366,13 @@ class HippoRAGRetriever(BaseRetriever):
         3. KVP key match - check KeyValue node keys for exact match
         4. Substring match on node ID
         5. Token overlap (Jaccard similarity) on node ID
+        6. Vector similarity - semantic search on entity embeddings (last resort)
         
         This ensures seeds like "Invoice" can match entities with:
         - ID: "Invoice #1256003"
         - Alias: ["Invoice", "inv-1256003"]
         - Or KeyValue nodes with key: "Invoice Number"
+        - Or semantically similar entities via vector search
         """
         if not self._nodes:
             return []
@@ -358,6 +431,33 @@ class HippoRAGRetriever(BaseRetriever):
                     
                     scored.sort(key=lambda x: x[0], reverse=True)
                     seed_matches.extend([n for _, n in scored[:max_per_seed]])
+            
+            # 6. Vector similarity on entity embeddings (last resort fallback)
+            if not seed_matches:
+                vector_hits = self._vector_search_entities(seed, top_k=max_per_seed)
+                if vector_hits:
+                    seed_matches.extend(vector_hits)
+                    logger.info(
+                        "hipporag_seed_matched_via_vector",
+                        seed=seed,
+                        matches=vector_hits[:3],
+                        strategy="vector_similarity",
+                    )
+            
+            # Log which strategy matched this seed
+            if seed_matches:
+                logger.debug(
+                    "hipporag_seed_expanded",
+                    seed=seed,
+                    num_matches=len(seed_matches),
+                    first_match=seed_matches[0] if seed_matches else None,
+                )
+            else:
+                logger.warning(
+                    "hipporag_seed_no_match",
+                    seed=seed,
+                    strategies_tried=["exact", "alias", "kvp", "substring", "jaccard", "vector"],
+                )
             
             expanded.extend(seed_matches)
         

@@ -33,7 +33,8 @@ class Entity:
     name: str
     type: str
     description: str = ""
-    embedding: Optional[List[float]] = None
+    embedding: Optional[List[float]] = None  # V1: OpenAI 3072-dim
+    embedding_v2: Optional[List[float]] = None  # V2: Voyage 2048-dim
     metadata: Dict[str, Any] = field(default_factory=dict)
     text_unit_ids: List[str] = field(default_factory=list)  # For DRIFT MENTIONS relationships
     aliases: List[str] = field(default_factory=list)  # Alternative names/variations for entity lookup
@@ -299,6 +300,24 @@ class Neo4jStoreV3:
             FOR (t:TextChunk) ON (t.embedding)
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 3072,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
+            # V2: Entity embeddings with Voyage (2048-dim)
+            """
+            CREATE VECTOR INDEX entity_embedding_v2 IF NOT EXISTS
+            FOR (e:Entity) ON (e.embedding_v2)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 2048,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
+            # V2: Also index __Entity__ label for embedding_v2
+            """
+            CREATE VECTOR INDEX entity_embedding_v2_internal IF NOT EXISTS
+            FOR (e:`__Entity__`) ON (e.embedding_v2)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
             }}
             """,

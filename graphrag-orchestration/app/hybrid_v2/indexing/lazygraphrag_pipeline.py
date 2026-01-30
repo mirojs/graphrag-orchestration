@@ -711,7 +711,12 @@ class LazyGraphRAGIndexingPipeline:
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
-                    ent.embedding = emb
+                    # V2: Store in embedding_v2 property (Voyage 2048-dim)
+                    # V1: Store in embedding property (OpenAI 3072-dim)
+                    if self.use_v2_embedding_property:
+                        ent.embedding_v2 = emb
+                    else:
+                        ent.embedding = emb
             except Exception as e:
                 logger.warning("lazy_index_entity_embedding_failed", extra={"error": str(e)})
 
@@ -977,7 +982,12 @@ Output:
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
-                    ent.embedding = emb
+                    # V2: Store in embedding_v2 property (Voyage 2048-dim)
+                    # V1: Store in embedding property (OpenAI 3072-dim)
+                    if self.use_v2_embedding_property:
+                        ent.embedding_v2 = emb
+                    else:
+                        ent.embedding = emb
             except Exception as e:
                 logger.warning("native_extractor_entity_embedding_failed", extra={"error": str(e)})
         

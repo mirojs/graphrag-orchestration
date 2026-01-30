@@ -1,0 +1,159 @@
+{
+  "timestamp": "20260130_142314",
+  "v1_group": "invoice-contract-verification",
+  "v2_group": "test-5pdfs-v2-enhanced-ex",
+  "v1_avg_score": 37.5,
+  "v2_avg_score": 100.0,
+  "diff": 62.5,
+  "results": [
+    {
+      "question_id": "CONSISTENCY_DEEP",
+      "query": "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms",
+      "v1": {
+        "success": true,
+        "response": "## Analysis\n\nBecause no concrete evidence was identified for sub\u2011questions 1\u20134 and 6, and only a small amount of structured context was detected for sub\u2011question 5, the analysis necessarily remains high\u2011level and methodological rather than document\u2011specific.\n\n### Q1: Relevant invoice details vs. contract terms for the same billing period\n\nThe goal of Q1 is to map invoice details (amounts, line items, quantities) to the corresponding contract terms for the same billing period, and describe how each is represented. However, the evidence set for this question is empty (0 evidence points), so:\n\n- No specific invoice fields (e.g., \u201cService A \u2013 10 units at $X/unit\u201d) are documented for the relevant billing period.  \n- No specific contract clauses (e.g., \u201cSection 2.1: Service A at $X/unit, minimum quantity Y, discount Z%\u201d) are available to link to those invoice items.  \n- We therefore cannot identify or describe how these details are represented in each document for a concrete billing period.  \n\nBecause of this, we cannot make factual claims about actual invoice lines or contract clauses for Q1.\n\n### Q2: Specific line items with inconsistencies (including discounts, taxes, surcharges)\n\nQ2 asks which specific invoice line items show inconsistencies between invoice amounts and contractually agreed amounts, considering discounts, taxes, and surcharges.\n\n- No evidence points were identified for Q2, so there is no itemized example of \u201cLine Item X on Invoice Y differs from Contract Term Z by $N\u201d.  \n- The entities \u201cInvoice Line Item,\u201d \u201cContract,\u201d \u201cDiscount,\u201d \u201cTax,\u201d or \u201cSurcharge\u201d are not tied to any concrete numerical or textual discrepancy in the available evidence for Q2.  \n\nThus, we cannot name any particular invoice line items or quantify any inconsistencies for Q2 based on the given data.\n\n### Q3: Nature and monetary significance of each discrepancy\n\nQ3 asks, for inconsistencies between invoice and contract terms, what kind of discrepancy is present (overbilling, underbilling, incorrect item, wrong rate, unauthorized quantity) and how significant it is in monetary terms.\n\n- No evidence points were found for Q3.  \n- Consequently, we cannot attribute any specific discrepancy type (e.g., \u201coverbilling by $500 due to wrong rate\u201d) to any line item or service.  \n\nWithout concrete examples, we cannot characterize or measure any discrepancy.\n\n### Q4: Contract details corresponding to each invoiced service or product\n\nQ4 focuses on identifying the contract details that correspond to each invoiced service/product and describing how those contract details are represented.\n\n- Again, there are 0 evidence points for Q4.  \n- We therefore cannot list mappings such as \u201cInvoice item \u2018Cloud Storage \u2013 100 GB\u2019 corresponds to Contract Section 3.2, priced at $X/GB with Y% discount above Z GB\u201d because no such text or numbers are present.  \n\nNo factual mapping between invoice items and contract sections can be asserted.\n\n### Q5: Line items with inconsistencies for the same billing period (with discounts, taxes, surcharges)\n\nQ5 restates Q2 more precisely and is the only sub\u2011question with any evidence points:\n\n- Entities identified: *Invoice, Invoice Line Item, Contract, Discount, Tax.*  \n- Evidence points: 5.\n\nFrom this, we can infer that the available evidence recognized the structures relevant to the question (e.g., that there are invoices with line items, associated contracts, and mentions of discounts and taxes), but:\n\n- The evidence does not include explicit, itemized examples such as \u201cInvoice Line Item #3 is billed at $120 but contractually should be $100 after a 10% discount plus 5% tax.\u201d  \n- There is no numerical comparison or explicit flag of inconsistency tied to a specific line item in the evidence.  \n\nThus, even for Q5, while we know conceptually that invoice and contract entities, plus discount and tax concepts, exist in the dataset, there is no concrete, citable discrepancy between a given invoiced amount and a contract rate/term. Without concrete records, we cannot state that any particular line item is inconsistent.\n\n### Q6: Precise nature and monetary significance of each discrepancy\n\nQ6 parallels Q3 but emphasizes \u201cprecise\u201d characterization and monetary magnitude of each discrepancy.\n\n- No evidence points were linked to Q6.  \n- There are no numerical comparisons or labels that would allow assigning a discrepancy type (e.g., \u201cwrong rate\u201d) or a dollar value for any specific line item.  \n\nTherefore, no precise discrepancy descriptions can be made.\n\n## Key Connections\n\n1. **Q1 and Q4 (mapping and representation)**  \n   - Both aim to establish a mapping between invoice items and contract terms (Q1 by billing period, Q4 by service/product).  \n   - Because there is no evidence for either, we lack the foundational mapping that Q2, Q3, Q5, and Q6 rely upon.\n\n2. **Q2 and Q5 (identifying inconsistent line items)**  \n   - Q5 is essentially a more detailed version of Q2, specifically requiring alignment on the same billing period and explicit consideration of discounts, taxes, and surcharges.  \n   - The structured entities for Q5 (invoice, line item, contract, discount, tax) show that the right conceptual objects are recognized, but there is no concrete mismatch documented, so Q2 and Q5 cannot be answered with specific examples.\n\n3. **Q3 and Q6 (classifying and quantifying discrepancies)**  \n   - Q3 and Q6 both depend on having identified specific inconsistent line items first (from Q2/Q5).  \n   - Since no inconsistencies are evidenced, Q3 and Q6 cannot classify the discrepancy types (overbilling vs. underbilling, etc.) or quantify monetary impact.\n\n4. **Dependency chain back to the original query**  \n   - Original query: \u201cFind inconsistencies between invoice details (amounts, line items, quantities) and contract terms.\u201d  \n   - To fully answer this, we would need:\n     - A mapping from invoice entries to contract clauses (Q1, Q4).  \n     - Detection of mismatched amounts considering discounts/taxes (Q2, Q5).  \n     - Characterization and valuation of each discrepancy (Q3, Q6).  \n   - Due to the lack of specific, itemized evidence throughout (except for high\u2011level entity recognition in Q5), this chain breaks at the first step: there is no documented mapping or numerical comparison that can be cited.\n\n## Conclusion\n\nBased on the available evidence:\n\n- No specific invoice line items or contract clauses can be identified for the same billing period.  \n- No concrete inconsistencies between billed amounts/quantities and contractually agreed terms (including discounts, taxes, and surcharges) are documented.  \n- Consequently, no discrepancy can be characterized as overbilling, underbilling, wrong item, wrong rate, or unauthorized quantity, nor can any monetary impact be quantified.\n\nTherefore, within the provided evidence set, **no demonstrable inconsistencies between invoice details and contract terms can be identified or substantiated.**",
+        "citations": 0,
+        "elapsed_seconds": 32.337327,
+        "response_length": 6931
+      },
+      "v2": {
+        "success": true,
+        "response": "## Analysis\n\n### Q1 & Q5 \u2013 Contracted vs. invoiced amounts, line items, and quantities\n\n**Contract terms (Contoso\u2013Fabrikam lift contract)**  \n\nScope of Work in the purchase contract specifies the following items and quantities [1][2][3][5][6][7][9][12][13][22][23][24]:\n\n- 1 Vertical Platform Lift (**AscendPro VPX200**)  \n- 1 Power system: **110 VAC 60 Hz up, 12 VAC down**  \n- 1 Custom cab **42\" x 62\" with Type 3 90\u2011degree access**  \n- 1 Outdoor configuration package  \n- 1 Aluminum door with plexi-glass inserts & automatic opener  \n- 2 Flush-mount Hall Call stations (upper & lower)\n\nPayment terms (total and milestones) [1][2][3][5][6][7][9][12][13][22][23][24]:\n\n- Total contract price: **$29,900.00**  \n- Installments:  \n  - $20,000.00 upon signing  \n  - $7,000.00 upon delivery  \n  - $2,900.00 upon completion  \n\n**Invoice details (Contoso Lifts invoice #1256003 to Fabrikam Construction)**  \n\nThe invoice lists the following line items, quantities, and amounts [4][8][10][11][25][26][27][28][29]:\n\n- 1 Vertical Platform Lift (**Savaria V1504**) \u2013 Unit price $11,200.00; line total $11,200.00  \n- 1 **110 VAC 60 Hz up, 12 VAC down operation parts** \u2013 Unit price $3,000.00; line total $3,000.00  \n- 1 **Special Size 42\" x 62\" cab with 90 degree Type 3** \u2013 Unit price $5,800.00; line total $5,800.00  \n- 1 **Outdoor fitting** \u2013 Unit price $2,000.00; line total $2,000.00  \n- 1 **80\" High low profile aluminum door with plexi-glass inserts, WR\u2011500 lock, automatic door operator** \u2013 Unit price $5,000.00; line total $5,000.00  \n- 2 **Hall Call stations for bottom and upper landing** \u2013 Unit price $1,450.00; line total $2,900.00  \n\nTotals [4][8][10][11][25][26][27][28][29]:\n\n- Subtotal: **$29,900.00**  \n- Tax: N/A  \n- Total / Amount due: **$29,900.00**\n\n**Mapping contract terms to invoice lines**\n\n- Vertical platform lift:  \n  - Contract: \u201c1 Vertical Platform Lift (AscendPro VPX200)\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n  - Invoice: \u201c1 Vertical Platform Lift (Savaria V1504)\u201d [4][8][10][11][25][26][27][28][29]  \n  - Quantity matches (1 vs 1); model name differs (AscendPro VPX200 vs Savaria V1504).\n\n- Power system:  \n  - Contract: \u201c1 Power system: 110 VAC 60 Hz up, 12 VAC down\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n  - Invoice: \u201c1 110 VAC 60 Hz up, 12 VAC down operation parts\u201d [4][8][10][11][25][26][27][28][29]  \n  - Description and quantity align; invoice adds \u201coperation parts\u201d but the electrical spec matches.\n\n- Cab:  \n  - Contract: \u201c1 Custom cab 42\" x 62\" with Type 3 90-degree access\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n  - Invoice: \u201c1 Special Size 42\" x 62\" cab with 90 degree Type 3\u201d [4][8][10][11][25][26][27][28][29]  \n  - Same size and Type 3/90\u2011degree configuration; wording differs but represents the same item and quantity.\n\n- Outdoor package:  \n  - Contract: \u201c1 Outdoor configuration package\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n  - Invoice: \u201c1 Outdoor fitting\u201d [4][8][10][11][25][26][27][28][29]  \n  - Quantity matches; description is similar but not identical.\n\n- Door:  \n  - Contract: \u201c1 Aluminum door with plexi-glass inserts & automatic opener\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n  - Invoice: \u201c1 80\" High low profile aluminum door with plexi-glass inserts, WR\u2011500 lock, automatic door operator\u201d [4][8][10][11][25][26][27][28][29]  \n  - Invoice appears to be an elaborated version of the contracted door; quantity matches.\n\n- Hall call stations:  \n  - Contract: \u201c2 Flush-mount Hall Call stations (upper & lower)\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n  - Invoice: \u201c2 Hall Call stations for bottom and upper landing\u201d [4][8][10][11][25][26][27][28][29]  \n  - Quantities align (2 vs 2); descriptions are semantically equivalent.\n\nThus, for this contract, all core items and quantities that appear on the invoice have corresponding terms in the contract, with some differences in wording and model naming.\n\n---\n\n### Q2 & Q6 \u2013 Discrepancies in amounts (invoiced vs contracted)\n\n**Total amounts**\n\n- Contract total price: **$29,900.00** [1][2][3][5][6][7][9][12][13][22][23][24]  \n- Invoice subtotal and total: **$29,900.00** [4][8][10][11][25][26][27][28][29]  \n\nThere is **no discrepancy** in the overall amount: the invoice total matches the contract total exactly [1][4].\n\n**Payment structure vs invoice**\n\n- Contract defines milestone payments of $20,000 (signing), $7,000 (delivery), and $2,900 (completion) [1][2][3][5][6][7][9][12][13][22][23][24].  \n- The invoice is labeled \u201cInitial payment in accordance with contract\u201d [4][8][10][11][25][26][27][28][29] but bills for the **full $29,900.00** [4][8][10][11][25][26][27][28][29].  \n\nSo while **line-item amounts sum to the contracted total**, the **timing/structure of the payment is inconsistent** with the contract milestones: the contract suggests $20,000 is due on signing, whereas the invoice demands the full $29,900.00 \u201cdue on contract signing\u201d [1][4].\n\n**Line-item pricing**\n\nThe contract does **not** break the $29,900.00 into per-item prices; it only states a lump sum [1][2][3][5][6][7][9][12][13][22][23][24]. The invoice assigns specific unit prices (e.g., $11,200 for the lift, $3,000 for power system, etc.) [4][8][10][11][25][26][27][28][29]. Because the contract does not specify per-item pricing, we cannot identify per-line amount discrepancies; we can only confirm that their **sum equals the contracted total** [1][4].\n\n---\n\n### Q3 & Q7 \u2013 Inconsistencies between invoiced and contracted line items\n\nAreas of (in)consistency:\n\n1. **Lift model mismatch**  \n   - Contract: \u201cVertical Platform Lift (AscendPro VPX200)\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n   - Invoice: \u201cVertical Platform Lift (Savaria V1504)\u201d [4][8][10][11][25][26][27][28][29]  \n   - Both are vertical platform lifts, but the **specific model names are different**. This is a **line\u2011item inconsistency** between the contracted and invoiced equipment.\n\n2. **Outdoor package vs outdoor fitting**  \n   - Contract: \u201cOutdoor configuration package\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n   - Invoice: \u201cOutdoor fitting\u201d [4][8][10][11][25][26][27][28][29]  \n   - Likely refers to the same functional feature, but the terminology changes. This is a **description mismatch**, though not a clear scope change from the text alone.\n\n3. **Door description elaboration**  \n   - Contract: \u201cAluminum door with plexi-glass inserts & automatic opener\u201d [1][2][3][5][6][7][9][12][13][22][23][24]  \n   - Invoice: \u201c80\" High low profile aluminum door with plexi-glass inserts, WR\u2011500 lock, automatic door operator\u201d [4][8][10][11][25][26][27][28][29]  \n   - Invoice adds specific features (height, low profile, WR\u2011500 lock). This is **more detailed but not contradictory**; no extra, uncontracted door item appears.\n\n4. **Terminology differences that are substantively aligned**  \n   - Power system vs \u201coperation parts\u201d with same voltage/frequency specs [1][4].  \n   - \u201cFlush-mount Hall Call stations (upper & lower)\u201d vs \u201cHall Call stations for bottom and upper landing\u201d [1][4].  \n   - \u201cCustom cab \u2026 with Type 3 90\u2011degree access\u201d vs \u201cSpecial Size \u2026 cab with 90 degree Type 3\u201d [1][4].  \n   These are minor wording differences that still align with the contracted scope.\n\nNo invoice line item appears that is entirely outside the contract\u2019s listed scope; every invoiced component has a clear analog in the contract\u2019s Scope of Work [1][4].\n\n---\n\n### Q4 & Q8 \u2013 Quantity-related inconsistencies\n\nComparing quantities:\n\n- Vertical platform lift: Contract 1 vs Invoice 1 \u2013 **no quantity discrepancy** [1][4].  \n- Power system / operation parts: Contract 1 vs Invoice 1 \u2013 **no discrepancy** [1][4].  \n- Cab: Contract 1 vs Invoice 1 \u2013 **no discrepancy** [1][4].  \n- Outdoor package/fitting: Contract 1 vs Invoice 1 \u2013 **no discrepancy** [1][4].  \n- Door: Contract 1 vs Invoice 1 \u2013 **no discrepancy** [1][4].  \n- Hall Call stations: Contract 2 vs Invoice 2 \u2013 **no discrepancy** [1][4].\n\nThus, **no quantity-related inconsistencies** appear between invoice and contract terms for this set of documents [1][4].\n\n---\n\n### Other documents\n\nThe \u201cBuilders Limited Warranty\u201d documents relate to residential construction warranties in Idaho and are between Contoso Ltd. and Fabrikam Inc. as builder and buyer for a home, with no invoiced line items or amounts attached in the provided excerpts [14][15][16][17][18][19][20][21]. They do not contain specific invoice-level amounts, quantities, or line items that can be compared to an invoice, so they do not introduce additional invoice\u2013contract inconsistencies in this context.\n\n## Key Connections\n\n- **Scope match, model mismatch:** For this Contoso\u2013Fabrikam lift contract, the **scope and quantities** on the invoice closely mirror those in the contract (same number of lift, cab, door, hall stations, etc.) [1][4]. The main scope inconsistency is the **lift model named** (AscendPro VPX200 vs Savaria V1504) [1][4].\n\n- **Total amount aligned, payment structure misaligned:** The **total price invoiced** ($29,900) matches the **contract price** ($29,900) [1][4]. However, the **contract requires staged payments**, whereas the invoice demands the full amount at signing under \u201cInitial payment in accordance with contract\u201d / \u201cDue on contract signing\u201d [1][4]. This is a structural inconsistency in how amounts are to be paid.\n\n- **Descriptions vs terms:** Several invoice descriptions are more detailed or slightly rephrased versions of the contract terms (e.g., door and cab), which suggests alignment in substance but potential ambiguity if strict wording is enforced [1][4].\n\n- **No quantity or per-item amount conflicts identifiable:** Quantities line up exactly; and because the contract doesn\u2019t allocate the lump sum price per line item, no explicit per-item price conflicts can be isolated\u2014only that the overall sum matches [1][4].\n\n## Conclusion\n\nFor the Contoso Lifts\u2013Fabrikam lift contract and its associated invoice, **no discrepancies exist in total amount or item quantities**; the invoice\u2019s subtotal and total ($29,900) match the contract\u2019s total price, and all invoiced item quantities correspond to the contract\u2019s specified quantities [1][4]. However:\n\n- There is a **line-item inconsistency** in the lift model: the contract specifies an AscendPro VPX200, while the invoice bills for a Savaria V1504 vertical platform lift [1][4].  \n- There is a **payment-term inconsistency**: the contract requires three milestone payments ($20,000 upon signing, $7,000 upon delivery, $2,900 upon completion), while the invoice seeks the full $29,900 \u201cdue on contract signing\u201d despite being labeled as the \u201cInitial payment in accordance with contract\u201d [1][4].  \n- Other line items are largely consistent in substance, with minor terminology and detail differences but no additional uncontracted items and no quantity mismatches [1][4].\n\nThese are the key inconsistencies between the invoice details (amount timing and a specific equipment model) and the contract terms for this transaction.",
+        "citations": 29,
+        "elapsed_seconds": 45.755476,
+        "response_length": 10931
+      },
+      "v1_key_findings": {
+        "payment_conflict": false,
+        "lift_model": false,
+        "door_hardware": false,
+        "contoso_mentioned": false,
+        "fabrikam_mentioned": false,
+        "specific_amounts": false
+      },
+      "v1_inconsistencies": 15,
+      "v2_key_findings": {
+        "payment_conflict": true,
+        "lift_model": true,
+        "door_hardware": true,
+        "contoso_mentioned": true,
+        "fabrikam_mentioned": true,
+        "specific_amounts": true
+      },
+      "v2_inconsistencies": 23,
+      "v1_keyword_score": {
+        "score": 37.5,
+        "found": [
+          "mismatch",
+          "invoice",
+          "contract"
+        ],
+        "missing": [
+          "payment",
+          "conflict",
+          "$20,000",
+          "$7,000",
+          "$2,900"
+        ],
+        "found_count": 3,
+        "total_keywords": 8
+      },
+      "v2_keyword_score": {
+        "score": 100.0,
+        "found": [
+          "payment",
+          "conflict",
+          "mismatch",
+          "invoice",
+          "contract",
+          "$20,000",
+          "$7,000",
+          "$2,900"
+        ],
+        "missing": [],
+        "found_count": 8,
+        "total_keywords": 8
+      }
+    },
+    {
+      "question_id": "Q-DR1",
+      "query": "Identify the vendor responsible for the vertical platform lift maintenance. Does their invoice's payment schedule match the terms in the original Purchase Agreement?",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000257,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000258,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR3",
+      "query": "A pipe burst in the kitchen (emergency) on a Sunday. If the homeowner notifies the Builder via certified mail the next day, is this considered valid notice under the Warranty terms?",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000254,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000228,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR5",
+      "query": "Compare the strictness of the 'financial penalties' for early termination in the Property Management Agreement versus the Holding Tank Servicing Contract.",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000217,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000239,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR7",
+      "query": "The Purchase Contract lists specific payment milestones. Do these match the line items or total on the Invoice #1256003?",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000213,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000248,
+        "response_length": 0
+      }
+    }
+  ]
+}

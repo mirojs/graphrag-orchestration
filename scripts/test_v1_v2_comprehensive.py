@@ -34,7 +34,7 @@ from neo4j import GraphDatabase
 from llama_index.embeddings.voyageai import VoyageEmbedding
 voyage_embed_client = VoyageEmbedding(
     voyage_api_key=os.getenv("VOYAGE_API_KEY"),
-    model_name="voyage-3"
+    model_name="voyage-context-3"
 )
 print(f"Voyage embedding client initialized: {voyage_embed_client.model_name}")
 
@@ -49,7 +49,7 @@ llm_client = LlamaIndexAzureOpenAI(
 )
 
 # Test groups
-V1_GROUP = "invoice-contract-verification"
+V1_GROUP = "test-5pdfs-1769071711867955961"
 V2_GROUP = "test-5pdfs-v2-enhanced-ex"  # VERIFIED: Re-indexed 2026-01-30 with embedding_v2 fix
 
 print(f"\n{'='*80}")

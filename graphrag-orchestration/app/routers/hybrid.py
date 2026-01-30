@@ -237,22 +237,41 @@ async def _get_or_create_pipeline(
         else:
             text_unit_store = HippoRAGTextUnitStore(hipporag_service)
 
-        # Use V2 Voyage embedder if enabled (2048D), otherwise V1 OpenAI (3072D)
-        # Must match the embedding dimensions used during indexing
+        # Auto-detect embedding version from group's data (V1 OpenAI 3072D vs V2 Voyage 2048D)
+        # This ensures the query embeddings match how the group was indexed
         embedding_client = llm_service.embed_model  # Default: V1 OpenAI
-        if settings.VOYAGE_V2_ENABLED and settings.VOYAGE_API_KEY:
+        embedding_version = "v1"
+        
+        if settings.VOYAGE_API_KEY:
             try:
-                from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-                voyage_service = VoyageEmbedService()
-                embedding_client = voyage_service.get_llama_index_model()
-                logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id)
+                from app.services.async_neo4j_service import AsyncNeo4jService
+                # Create temporary service to detect embedding version
+                async_service = AsyncNeo4jService(
+                    uri=settings.NEO4J_URI,
+                    username=settings.NEO4J_USERNAME,
+                    password=settings.NEO4J_PASSWORD,
+                )
+                await async_service.connect()
+                embedding_version = await async_service.detect_embedding_version(group_id)
+                await async_service.close()
+                
+                if embedding_version == "v2":
+                    from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                    voyage_service = VoyageEmbedService()
+                    embedding_client = voyage_service.get_llama_index_model()
+                    logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id, 
+                               reason="group has embedding_v2 data")
+                else:
+                    logger.info("hybrid_using_v1_openai_embedder", group_id=group_id,
+                               reason="group has v1 embedding data only")
             except Exception as e:
-                logger.warning("hybrid_v2_voyage_embedder_failed", error=str(e), group_id=group_id)
+                logger.warning("hybrid_embedding_detection_failed", error=str(e), group_id=group_id,
+                              fallback="v1_openai")
 
         pipeline = HybridPipeline(
             profile=profile,
             llm_client=llm_client,
-            embedding_client=embedding_client,  # V2 Voyage (2048D) or V1 OpenAI (3072D)
+            embedding_client=embedding_client,  # V2 Voyage (2048D) or V1 OpenAI (3072D) based on detection
             hipporag_instance=hipporag_instance,
             graph_store=graph_store,
             text_unit_store=text_unit_store,
@@ -264,7 +283,8 @@ async def _get_or_create_pipeline(
         
         # Initialize async resources (AsyncNeo4jService connection)
         await pipeline.initialize()
-        logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id)
+        logger.info("hybrid_pipeline_initialized_for_group", group_id=group_id, 
+                   embedding_version=embedding_version)
         
         _pipeline_cache[cache_key] = pipeline
     

@@ -1,0 +1,110 @@
+{
+  "timestamp": "20260130_150400",
+  "v1_group": "test-5pdfs-1769071711867955961",
+  "v2_group": "test-5pdfs-v2-enhanced-ex",
+  "v1_avg_score": 0,
+  "v2_avg_score": 0,
+  "diff": 0,
+  "results": [
+    {
+      "question_id": "CONSISTENCY_DEEP",
+      "query": "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000436,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000248,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR1",
+      "query": "Identify the vendor responsible for the vertical platform lift maintenance. Does their invoice's payment schedule match the terms in the original Purchase Agreement?",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000341,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000316,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR3",
+      "query": "A pipe burst in the kitchen (emergency) on a Sunday. If the homeowner notifies the Builder via certified mail the next day, is this considered valid notice under the Warranty terms?",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000223,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000239,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR5",
+      "query": "Compare the strictness of the 'financial penalties' for early termination in the Property Management Agreement versus the Holding Tank Servicing Contract.",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000268,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000251,
+        "response_length": 0
+      }
+    },
+    {
+      "question_id": "Q-DR7",
+      "query": "The Purchase Contract lists specific payment milestones. Do these match the line items or total on the Invoice #1256003?",
+      "v1": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.000306,
+        "response_length": 0
+      },
+      "v2": {
+        "success": false,
+        "error": "[Errno 32] Broken pipe",
+        "response": "",
+        "citations": 0,
+        "elapsed_seconds": 0.00022,
+        "response_length": 0
+      }
+    }
+  ]
+}

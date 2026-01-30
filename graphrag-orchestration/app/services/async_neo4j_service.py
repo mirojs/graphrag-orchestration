@@ -1389,3 +1389,35 @@ class AsyncNeo4jService:
             result = await session.run(query, **(params or {}))
             records = await result.data()
             return records
+
+    async def detect_embedding_version(self, group_id: str) -> str:
+        """
+        Detect which embedding version a group uses (V1 OpenAI or V2 Voyage).
+        
+        Checks if entities in the group have embedding_v2 property (V2 Voyage 2048D)
+        or only embedding property (V1 OpenAI 3072D).
+        
+        Args:
+            group_id: The group ID to check
+            
+        Returns:
+            "v2" if group has embedding_v2 properties, "v1" otherwise
+        """
+        query = """
+        MATCH (e:Entity {group_id: $group_id})
+        WHERE e.embedding_v2 IS NOT NULL
+        RETURN count(e) AS v2_count
+        LIMIT 1
+        """
+        try:
+            async with self._get_session() as session:
+                result = await session.run(query, group_id=group_id)
+                record = await result.single()
+                if record and record["v2_count"] > 0:
+                    logger.info("embedding_version_detected", group_id=group_id, version="v2")
+                    return "v2"
+                logger.info("embedding_version_detected", group_id=group_id, version="v1")
+                return "v1"
+        except Exception as e:
+            logger.warning("embedding_version_detection_failed", group_id=group_id, error=str(e))
+            return "v1"  # Default to V1 for safety

@@ -1873,10 +1873,11 @@ Output:
             min_entities_for_dedup=10,
         )
 
+        # Use embedding_v2 (V2/Voyage) if available, otherwise embedding (V1/OpenAI)
         entity_dicts = [
             {
                 "name": e.name,
-                "embedding": e.embedding,
+                "embedding": e.embedding_v2 if hasattr(e, 'embedding_v2') and e.embedding_v2 else e.embedding,
                 "type": e.type,
                 "description": e.description,
                 "properties": (e.metadata or {}),
@@ -1911,6 +1912,7 @@ Output:
             merged_type = "CONCEPT"
             merged_meta: Dict[str, Any] = {}
             merged_emb = None
+            merged_emb_v2 = None  # V2: Also track embedding_v2
 
             for m in members:
                 id_remap[m.id] = canon_id
@@ -1922,8 +1924,12 @@ Output:
                     merged_desc = m.description
                 merged_type = m.type or merged_type
                 merged_meta.update(m.metadata or {})
+                # V1: Copy embedding property
                 if merged_emb is None and m.embedding:
                     merged_emb = m.embedding
+                # V2: Copy embedding_v2 property (Voyage embeddings)
+                if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2:
+                    merged_emb_v2 = m.embedding_v2
 
             canonical_entities[canon_id] = Entity(
                 id=canon_id,
@@ -1931,6 +1937,7 @@ Output:
                 type=merged_type,
                 description=merged_desc,
                 embedding=merged_emb,
+                embedding_v2=merged_emb_v2,  # V2: Include Voyage embeddings
                 metadata=merged_meta,
                 text_unit_ids=sorted(merged_text_units),
                 aliases=sorted(merged_aliases),  # Include merged aliases

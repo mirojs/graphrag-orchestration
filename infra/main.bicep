@@ -64,6 +64,19 @@ module cosmosDb './core/database/cosmos-db.bicep' = {
   }
 }
 
+// Redis for async job queue
+module redis './core/cache/redis.bicep' = {
+  name: 'redis-cache'
+  scope: rg
+  params: {
+    cacheName: 'graphrag-redis-${uniqueString(rg.id)}'
+    location: location
+    tags: tags
+    sku: 'Basic'
+    capacity: 0
+  }
+}
+
 // GraphRAG Orchestration Container App
 module graphragApp './core/host/container-app.bicep' = {
   name: 'graphrag-app'
@@ -168,6 +181,22 @@ module graphragApp './core/host/container-app.bicep' = {
         value: cosmosDb.outputs.usageContainerName
       }
       {
+        name: 'REDIS_HOST'
+        value: redis.outputs.redisHostName
+      }
+      {
+        name: 'REDIS_PORT'
+        value: string(redis.outputs.redisSslPort)
+      }
+      {
+        name: 'REDIS_PASSWORD'
+        secretRef: 'redis-password'
+      }
+      {
+        name: 'REDIS_QUEUE_NAME'
+        value: 'graphrag_jobs'
+      }
+      {
         name: 'ENABLE_GROUP_ISOLATION'
         value: 'true'
       }
@@ -226,6 +255,10 @@ module graphragApp './core/host/container-app.bicep' = {
         name: 'neo4j-password'
         value: neo4jPassword
       }
+      {
+        name: 'redis-password'
+        value: redis.outputs.redisPrimaryKey
+      }
     ], !empty(voyageApiKey) ? [
       {
         name: 'voyage-api-key'
@@ -268,3 +301,5 @@ output GRAPHRAG_APP_URI string = graphragApp.outputs.uri
 output GRAPHRAG_APP_NAME string = graphragApp.outputs.name
 output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.cosmosAccountEndpoint
 output COSMOS_DB_DATABASE_NAME string = cosmosDb.outputs.databaseName
+output REDIS_HOST string = redis.outputs.redisHostName
+output REDIS_PORT int = redis.outputs.redisSslPort

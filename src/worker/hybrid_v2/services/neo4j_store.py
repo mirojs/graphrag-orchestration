@@ -321,6 +321,15 @@ class Neo4jStoreV3:
                 `vector.similarity_function`: 'cosine'
             }}
             """,
+            # V2: TextChunk embeddings with Voyage (2048-dim)
+            """
+            CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
+            FOR (t:TextChunk) ON (t.embedding_v2)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 2048,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
         ]
         
         with self.driver.session(database=self.database) as session:

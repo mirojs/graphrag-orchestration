@@ -8,20 +8,20 @@
   - **Solution:** `trace_semantic_beam()` re-aligns with query embedding at each hop using cosine similarity
   - **Configuration:** Stage 4.3 (beam_width=30, max_hops=3), Confidence loop (beam_width=15, max_hops=2), Discovery pass (beam_width=5, max_hops=2)
   - **Implementation:** Local `_get_query_embedding()` functions avoid circular imports (V1: OpenAI, V2: Voyage)
-  - Files modified: `app/hybrid/routes/route_4_drift.py`, `app/hybrid_v2/routes/route_4_drift.py`
+  - Files modified: `src/worker/hybrid/routes/route_4_drift.py`, `src/worker/hybrid_v2/routes/route_4_drift.py`
 - ✅ **6-Strategy Seed Resolution with Vector Fallback:** Complete entity disambiguation cascade for Routes 2, 3, 4
   - **Full Strategy Stack:** 1️⃣ Exact ID → 2️⃣ Alias → 3️⃣ KVP Key → 4️⃣ Substring → 5️⃣ Token Overlap → 6️⃣ Vector Similarity
   - **Strategy 6 (Vector):** Auto-selects correct index based on embedding dimension (2048d → `entity_embedding_v2`, 3072d → `entity_embedding`)
   - **Impact:** Generic seeds like "Invoice" now resolve via vector similarity when no exact/alias/substring match found
   - **AsyncNeo4jService Enhancement:** `get_entities_by_vector_similarity()` accepts `index_name` parameter for V1/V2 compatibility
-  - Files modified: `app/services/async_neo4j_service.py`, `app/hybrid/pipeline/tracing.py`, `app/hybrid_v2/pipeline/tracing.py`
+  - Files modified: `src/worker/services/async_neo4j_service.py`, `src/worker/hybrid/pipeline/tracing.py`, `src/worker/hybrid_v2/pipeline/tracing.py`
 - ✅ **Entity `embedding_v2` Property & Index:** V2 entities now store Voyage embeddings separately from V1 OpenAI embeddings
   - **Root Cause:** Entity dataclass lacked `embedding_v2` property, indexing pipeline stored Voyage embeddings in `embedding` (3072d index)
   - **Solution:** Added `embedding_v2: Optional[List[float]]` to Entity dataclass, created `entity_embedding_v2` vector index (2048d)
   - **Indexing Fix:** `_extract_with_lazy_index()` and `_extract_with_native_extractor()` now use `embedding_v2` when `use_v2_embedding_property=True`
   - **Strategy 6 Integration:** Vector similarity now matches query embedding dimension (2048d) to entity embedding dimension
   - **Status:** Index created, code deployed, **requires re-indexing** documents with V2 pipeline to populate `embedding_v2` on entities
-  - Files modified: `app/hybrid_v2/services/neo4j_store.py`, `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
+  - Files modified: `src/worker/hybrid_v2/services/neo4j_store.py`, `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`
 
 **Recent Updates (January 29, 2026):**
 - ✅ **HippoRAG Alias & KVP Resolution:** Enhanced seed-to-node resolution for Route 2/Local Search & Route 4/DRIFT
@@ -29,19 +29,19 @@
   - **Problem Solved:** Generic seeds like "Invoice" now resolve to entities via aliases (e.g., "Invoice #1256003" has alias "Invoice")
   - **KVP Support:** KeyValue node keys used for seed resolution (e.g., "payment date" matches key "Payment Due Date")
   - **Route 4 Impact:** PPR graph traversal now succeeds with generic query terms
-  - Files modified: `app/hybrid/retrievers/hipporag_retriever.py`, `app/hybrid_v2/retrievers/hipporag_retriever.py`, `app/hybrid_v2/hybrid/retrievers/hipporag_retriever.py`
+  - Files modified: `src/worker/hybrid/retrievers/hipporag_retriever.py`, `src/worker/hybrid_v2/retrievers/hipporag_retriever.py`, `src/worker/hybrid_v2/hybrid/retrievers/hipporag_retriever.py`
 - ✅ **V2 Generic Alias Generation:** Implemented `_generate_generic_aliases()` in V2 indexing pipeline
   - **Root Cause:** V2 lacked alias extraction that V1 had since Jan 19
   - **Solution:** Extracts first word + prefix patterns (e.g., "Invoice #1256003" → ["Invoice"], "Payment installment: $20k" → ["Payment"])
   - **Impact:** Invoice consistency queries resolve seeds → 15 evidence chunks (was 0 before)
   - **Result:** V2 now detects payment conflicts V1 missed (32 vs 20 inconsistencies found)
-  - Files modified: `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`, `app/hybrid_v2/hybrid/indexing/lazygraphrag_pipeline.py`
+  - Files modified: `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`, `src/worker/hybrid_v2/hybrid/indexing/lazygraphrag_pipeline.py`
 - ✅ **AsyncNeo4j Fail-Fast:** Removed dangerous vector-only fallback from Route 4 tracing service
   - **Problem:** Route 4 silently fell back to vector-only when AsyncNeo4j unavailable (no multi-hop reasoning)
   - **Solution:** Raise RuntimeError with clear message: "Route 4 DRIFT requires AsyncNeo4jService for PPR graph traversal"
   - **Root Cause Fix:** Test scripts now call `await pipeline.initialize()` to connect AsyncNeo4j before querying
   - **Impact:** Forces proper initialization, prevents silent quality degradation
-  - Files modified: `app/hybrid/pipeline/tracing.py`, `app/hybrid_v2/pipeline/tracing.py`, `app/hybrid_v2/hybrid/pipeline/tracing.py`, `scripts/test_knn_direct.py`
+  - Files modified: `src/worker/hybrid/pipeline/tracing.py`, `src/worker/hybrid_v2/pipeline/tracing.py`, `src/worker/hybrid_v2/hybrid/pipeline/tracing.py`, `scripts/test_knn_direct.py`
 - ✅ **V1 vs V2 Invoice Consistency Validation:** Comprehensive test proves V2 > V1 after alias fix
   - **Test Query:** "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"
   - **V2 WINS:** 32 vs 20 inconsistencies, detected payment conflict V1 missed
@@ -70,7 +70,7 @@
   - **Error Handling:** Fail-fast (stop on first document error, no partial results)
   - **Backend:** SimpleDocumentAnalysisService abstracts Azure Document Intelligence and Content Understanding
   - **Testing:** Validated with 64-page PDF extraction (tables, sections, metadata) using Azure DI West US
-  - Implementation: `app/routers/knowledge_map.py` (async API), `app/routers/document_analysis.py` (sync API), `app/services/simple_document_analysis_service.py` (backend abstraction)
+  - Implementation: `src/api_gateway/routers/knowledge_map.py` (async API), `src/api_gateway/routers/document_analysis.py` (sync API), `src/worker/services/simple_document_analysis_service.py` (backend abstraction)
 - 🚀 **SimpleDocumentAnalysisService:** Unified DI/CU backend abstraction at `/api/v1/document-analysis`
   - **Purpose:** Flexible document processing for internal use with automatic backend selection
   - **Backends:** Azure Document Intelligence (preferred), Azure Content Understanding (fallback)
@@ -80,7 +80,7 @@
   - **KNN (K-Nearest Neighbors):** Creates `SIMILAR_TO` edges (Figure/KVP → Entity) and `SEMANTICALLY_SIMILAR` edges (Entity ↔ Entity)
   - **Louvain Community Detection:** Assigns `community_id` property to all nodes for clustering
   - **PageRank:** Computes `pagerank` score for node importance ranking
-  - Implementation: `app/hybrid_v2/indexing/lazygraphrag_pipeline.py` (`_run_gds_graph_algorithms()`)
+  - Implementation: `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` (`_run_gds_graph_algorithms()`)
 - 🚀 **Azure DI Metadata → Graph Nodes:** FREE Azure DI add-ons now create proper graph entities
   - **Barcode nodes:** `:Barcode` with `FOUND_IN` edge to Document
   - **Figure nodes:** `:Figure` with caption, `embedding_v2`, and `SIMILAR_TO` edges to Entities
@@ -94,7 +94,7 @@
   - **Graph advantages:** MENTIONS_ENTITY, SHARES_ENTITY, RELATED_TO edges connect chunks across bins
   - **PPR Traversal:** Naturally hops across bins via entity paths
   - **Section Coverage Retained:** `get_coverage_chunks()` kept for coverage-style queries on large documents
-  - Implementation: `app/hybrid_v2/embeddings/voyage_embed.py` (bin-packing logic)
+  - Implementation: `src/worker/hybrid_v2/embeddings/voyage_embed.py` (bin-packing logic)
   - See Section 6.5.11 for detailed design
 
 **Recent Updates (January 25, 2026):**
@@ -1365,19 +1365,19 @@ DELETE /api/v1/knowledge-map/operations/{operation_id}
 
 **Components:**
 
-1. **`app/routers/knowledge_map.py`** (472 lines)
+1. **`src/api_gateway/routers/knowledge_map.py`** (472 lines)
    - Async API router with polling pattern
    - In-memory operation store with TTL management
    - Background task processing with `asyncio.create_task()`
    - Status transitions: `pending` → `running` → `succeeded`/`failed`
 
-2. **`app/services/simple_document_analysis_service.py`** (315 lines)
+2. **`src/worker/services/simple_document_analysis_service.py`** (315 lines)
    - Backend abstraction layer for DI/CU
    - Method: `analyze_documents(group_id, documents, options)`
    - Automatic backend selection (DI preferred, CU fallback)
    - Supports both URL and text content inputs
 
-3. **`app/routers/document_analysis.py`** (275 lines)
+3. **`src/api_gateway/routers/document_analysis.py`** (275 lines)
    - Synchronous DI/CU API for internal use
    - Endpoints: POST /analyze, GET /backend-info, POST /analyze-single
    - Direct access to backend capabilities without polling
@@ -1524,7 +1524,7 @@ AZURE_CONTENT_UNDERSTANDING_KEY=<key>
 **FastAPI Router Registration:**
 
 ```python
-# app/main.py
+# src/api_gateway/main.py
 from app.routers import knowledge_map, document_analysis
 
 app.include_router(knowledge_map.router, prefix="/api/v1/knowledge-map", tags=["knowledge-map"])
@@ -1877,11 +1877,11 @@ Query: "Summarize the main purpose of each document"
 
 | Component | Status | Location |
 |-----------|--------|----------|
-| `SectionNode` model | ✅ Complete | `app/hybrid/indexing/section_chunking/models.py` |
-| `SectionChunk` model | ✅ Complete | `app/hybrid/indexing/section_chunking/models.py` |
-| `SectionAwareChunker` | ✅ Complete | `app/hybrid/indexing/section_chunking/chunker.py` |
-| Integration helpers | ✅ Complete | `app/hybrid/indexing/section_chunking/integration.py` |
-| Unit tests | ✅ Complete | `app/hybrid/indexing/section_chunking/test_chunker.py` |
+| `SectionNode` model | ✅ Complete | `src/worker/hybrid/indexing/section_chunking/models.py` |
+| `SectionChunk` model | ✅ Complete | `src/worker/hybrid/indexing/section_chunking/models.py` |
+| `SectionAwareChunker` | ✅ Complete | `src/worker/hybrid/indexing/section_chunking/chunker.py` |
+| Integration helpers | ✅ Complete | `src/worker/hybrid/indexing/section_chunking/integration.py` |
+| Unit tests | ✅ Complete | `src/worker/hybrid/indexing/section_chunking/test_chunker.py` |
 | Pipeline integration | ✅ Complete | `lazygraphrag_pipeline._build_section_graph()` (auto-enabled) |
 | Section graph building | ✅ Complete | Steps 4.5-4.7 in indexing pipeline |
 | Re-ingestion script | ✅ Complete | `scripts/backfill_section_graph.py` for existing corpora |
@@ -1988,7 +1988,7 @@ config = SectionChunkConfig(
 **Implementation:**
 
 ```python
-# app/hybrid_v2/embeddings/voyage_embed.py
+# src/worker/hybrid_v2/embeddings/voyage_embed.py
 
 MAX_CONTEXT_TOKENS = 30000  # Leave 2K headroom from 32K limit
 
@@ -2026,7 +2026,7 @@ Even with graph edges providing cross-bin connections, we retain `get_coverage_c
 - Fallback when entity extraction misses connections
 
 ```python
-# app/hybrid_v2/pipeline/enhanced_graph_retriever.py
+# src/worker/hybrid_v2/pipeline/enhanced_graph_retriever.py
 
 # V2 mode: section diversification skipped (chunks ARE sections)
 # BUT: coverage methods retained for large bin-packed documents
@@ -2036,7 +2036,7 @@ if use_v2_mode:
 ```
 
 **References:**
-- Implementation: `app/hybrid_v2/embeddings/voyage_embed.py`
+- Implementation: `src/worker/hybrid_v2/embeddings/voyage_embed.py`
 - Design Document: `PROPOSED_NEO4J_DOC_TITLE_FIX_2026-01-26.md`
 - Voyage API Docs: https://docs.voyageai.com/docs/contextualized-chunk-embeddings
 
@@ -2255,8 +2255,8 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 
 **Current Indexing Setup (V2 - Voyage voyage-context-3):**
 
-- **V2 Pipeline Factory:** `app/hybrid/indexing/lazygraphrag_indexing_pipeline.py` (`get_lazygraphrag_indexing_pipeline_v2()`)
-- **V2 Pipeline Engine:** `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
+- **V2 Pipeline Factory:** `src/worker/hybrid/indexing/lazygraphrag_indexing_pipeline.py` (`get_lazygraphrag_indexing_pipeline_v2()`)
+- **V2 Pipeline Engine:** `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`
 - **V2 Test Script (RECOMMENDED):** `scripts/index_5pdfs_v2_cloud.py` (uses API server with V2 factory)
 - **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
 - **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
@@ -2268,7 +2268,7 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 
 The `/hybrid/index/documents` API endpoint now correctly uses the V2 factory when `VOYAGE_V2_ENABLED=true`. Previously it always used the V1 factory, causing chunks to have OpenAI embeddings in the `embedding` property instead of Voyage embeddings in the `embedding_v2` property. This resulted in vector search failures at query time.
 
-**Fix Applied:** `app/routers/hybrid.py` line 220 now checks `settings.VOYAGE_V2_ENABLED` and calls `get_lazygraphrag_indexing_pipeline_v2()` when true.
+**Fix Applied:** `src/api_gateway/routers/hybrid.py` line 220 now checks `settings.VOYAGE_V2_ENABLED` and calls `get_lazygraphrag_indexing_pipeline_v2()` when true.
 
 **If you have V2 groups indexed before Jan 26, 2026 18:30 UTC, they must be re-indexed!**
 
@@ -2660,12 +2660,12 @@ Sample entities with aliases:
 │ SERVER SIDE: Indexing Pipeline (runs in Azure Container)    │
 │                                                               │
 │ API Endpoint:                                                │
-│   app/routers/hybrid.py                                      │
+│   src/api_gateway/routers/hybrid.py                                      │
 │   POST /hybrid/index/documents                               │
 │   POST /hybrid/index/sync                                    │
 │                                                               │
 │ Core Pipeline Engine:                                        │
-│   app/hybrid/indexing/lazygraphrag_pipeline.py (~1600 lines)│
+│   src/worker/hybrid/indexing/lazygraphrag_pipeline.py (~1600 lines)│
 │   • LazyGraphRAGIndexingPipeline class                       │
 │   • extract_document_date() - Line 53                        │
 │   • _build_section_similarity_edges() - Line 1468           │
@@ -3519,8 +3519,8 @@ Based on the available models (`gpt-5.1`, `gpt-4.1`, `gpt-4o-mini`), we recommen
 | Route 1 (Vector RAG) | ✅ Complete | Existing implementation, no changes |
 | Route 2 (Local Search) | ✅ Complete | Entity extraction + LazyGraphRAG iterative deepening |
 | Route 3 (Global Search) | ✅ Complete | Community matcher + Hub extractor + HippoRAG PPR |
-| Route 3 (Community Matcher) | ✅ Complete | `app/hybrid/pipeline/community_matcher.py` |
-| Route 3 (Hub Extractor) | ✅ Complete | `app/hybrid/pipeline/hub_extractor.py` |
+| Route 3 (Community Matcher) | ✅ Complete | `src/worker/hybrid/pipeline/community_matcher.py` |
+| Route 3 (Hub Extractor) | ✅ Complete | `src/worker/hybrid/pipeline/hub_extractor.py` |
 | Route 4 (DRIFT) | ✅ Complete | LLM decomposition + HippoRAG PPR |
 | Profile Configuration | ✅ Complete | `GENERAL_ENTERPRISE`, `HIGH_ASSURANCE` |
 | **LlamaIndex HippoRAG Retriever** | ✅ **Complete** | Native Azure MI implementation |
@@ -3530,7 +3530,7 @@ Based on the available models (`gpt-5.1`, `gpt-4.1`, `gpt-4o-mini`), we recommen
 
 **Decision:** Built custom LlamaIndex retriever instead of using upstream `hipporag` package
 
-**Implementation:** `app/hybrid/retrievers/hipporag_retriever.py`
+**Implementation:** `src/worker/hybrid/retrievers/hipporag_retriever.py`
 
 **Key Features:**
 - Extends `BaseRetriever` from llama-index-core
@@ -3599,7 +3599,7 @@ results = await service.retrieve(query, seed_entities, top_k=15)
 ### 📝 Updated File Structure
 
 ```
-app/hybrid/
+src/worker/hybrid/
 ├── __init__.py                     # Exports HippoRAGRetriever
 ├── orchestrator.py                 # 4-route orchestration ✅
 ├── router/
@@ -4129,8 +4129,8 @@ Migrated all query-time vector similarity operations from GDS (`gds.similarity.c
 | `app/v3/services/neo4j_store.py` | `search_entities_hybrid()` | `gds.similarity.cosine` → `vector.similarity.cosine` |
 | `app/v3/services/neo4j_store.py` | `search_raptor_by_embedding()` | Same |
 | `app/v3/services/neo4j_store.py` | `search_text_chunks()` | Same |
-| `app/hybrid/services/neo4j_store.py` | `search_text_chunks()` | Same |
-| `app/hybrid/pipeline/enhanced_graph_retriever.py` | `search_entities_by_embedding()` | Same |
+| `src/worker/hybrid/services/neo4j_store.py` | `search_text_chunks()` | Same |
+| `src/worker/hybrid/pipeline/enhanced_graph_retriever.py` | `search_entities_by_embedding()` | Same |
 
 #### 14.5.3. GDS Now Fully Integrated (Jan 27, 2026)
 
@@ -4145,7 +4145,7 @@ AuraDB Professional includes GDS, and we now use it during indexing for:
 | **gds.louvain** | Community detection | `community_id` property | Cluster related nodes for retrieval |
 | **gds.pageRank** | Node importance | `pagerank` property | Rank nodes for retrieval priority |
 
-**Implementation:** `app/hybrid_v2/indexing/lazygraphrag_pipeline.py`
+**Implementation:** `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`
 - Method: `_run_gds_graph_algorithms()` (Step 8 in indexing pipeline)
 - Called automatically during `_process_di_metadata_to_graph()`
 - Creates single projection with unique job ID, runs all algorithms, cleans up
@@ -4569,7 +4569,7 @@ As part of the Neo4j driver v6.0+ upgrade and Cypher 25 adoption, we migrated ke
 
 #### What Changed
 
-**File:** `app/services/retrieval_service.py`
+**File:** `src/worker/services/retrieval_service.py`
 
 **Before (Custom Implementation):**
 ```python
@@ -4643,8 +4643,8 @@ Phase 1 retrieval migration **does not keep fallback code** because:
 #### What Changed
 
 **Files:** 
-- `app/services/indexing_service.py` (legacy V1/V2 indexing)
-- `app/hybrid/indexing/lazygraphrag_pipeline.py` (V3 production indexing)
+- `src/worker/services/indexing_service.py` (legacy V1/V2 indexing)
+- `src/worker/hybrid/indexing/lazygraphrag_pipeline.py` (V3 production indexing)
 
 **Before (Single Option):**
 ```python
@@ -4912,7 +4912,7 @@ This transforms Route 4 from a linear pipeline into a **reasoning engine**.
 
 #### Phase A: SEMANTICALLY_SIMILAR Edges ✅ COMPLETE
 
-**Location:** `app/hybrid/indexing/lazygraphrag_pipeline.py`
+**Location:** `src/worker/hybrid/indexing/lazygraphrag_pipeline.py`
 
 **Security Hardening (January 17, 2026):**
 - ✅ Group isolation enforced at edge **creation** time (both source and target nodes)
@@ -4971,7 +4971,7 @@ DELETE r
 
 #### Phase B: Route 4 Confidence Loop
 
-**Location:** `app/hybrid/orchestrator.py`
+**Location:** `src/worker/hybrid/orchestrator.py`
 
 **Modified Method:** `_execute_route_4_drift()`
 
@@ -5045,7 +5045,7 @@ def _compute_subgraph_confidence(
 
 > **Status:** Completed January 17, 2026. PPR now traverses both Entity graph AND Section graph via SEMANTICALLY_SIMILAR edges.
 
-**Location:** `app/services/async_neo4j_service.py`
+**Location:** `src/worker/services/async_neo4j_service.py`
 
 **Implementation:** Two helper methods added:
 - `_build_ppr_query_entity_only()` - Original Entity-only behavior
@@ -5088,18 +5088,18 @@ seed Entity -[:MENTIONS]-> Chunk -[:IN_SECTION]-> Section
 ---
 
 ```
-app/services/retrieval_service.py
+src/worker/services/retrieval_service.py
 ├── _get_native_retriever()           ← Phase 1: Always uses native
 ├── NativeRetrieverWrapper             ← Compatibility layer
 └── _get_or_create_query_engine()     ← Entry point
 
-app/services/indexing_service.py
+src/worker/services/indexing_service.py
 ├── index_documents()
 │   ├── extraction_mode="native"      ← Phase 2: Opt-in
 │   └── extraction_mode="schema"      ← Fallback (default)
 └── _index_with_native_extractor()    ← Phase 2 implementation
 
-app/hybrid/indexing/lazygraphrag_pipeline.py
+src/worker/hybrid/indexing/lazygraphrag_pipeline.py
 ├── LazyGraphRAGIndexingConfig
 │   └── use_native_extractor: bool = False  ← V3 config (defaults to fallback)
 ├── _extract_entities_and_relationships()
@@ -6368,10 +6368,10 @@ LIMIT 5
 
 | File | Changes |
 |------|---------|
-| `app/services/document_intelligence_service.py` | Added `KEY_VALUE_PAIRS` feature, `_extract_key_value_pairs()` method |
-| `app/hybrid/services/neo4j_store.py` | Added `KeyValue` dataclass, `_create_keyvalue_nodes()` method, schema constraints |
-| `app/hybrid/indexing/lazygraphrag_pipeline.py` | Added `_embed_keyvalue_keys()` method, stats tracking |
-| `app/hybrid/orchestrator.py` | Added `_extract_from_keyvalue_nodes()` method, updated Route 1 cascade |
+| `src/worker/services/document_intelligence_service.py` | Added `KEY_VALUE_PAIRS` feature, `_extract_key_value_pairs()` method |
+| `src/worker/hybrid/services/neo4j_store.py` | Added `KeyValue` dataclass, `_create_keyvalue_nodes()` method, schema constraints |
+| `src/worker/hybrid/indexing/lazygraphrag_pipeline.py` | Added `_embed_keyvalue_keys()` method, stats tracking |
+| `src/worker/hybrid/orchestrator.py` | Added `_extract_from_keyvalue_nodes()` method, updated Route 1 cascade |
 
 ### 20.6. Semantic Key Matching
 

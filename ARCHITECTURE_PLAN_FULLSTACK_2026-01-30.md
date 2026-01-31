@@ -15,12 +15,12 @@ A modular, enterprise-ready architecture for GraphRAG with a servable API (APIM-
 ## Phase 1: Foundation & Cleanup (Week 1-2)
 
 ### 1. Deprecate Route 1 Formally
-- Remove Route 1 endpoints from `app/routers/hybrid.py`
+- Remove Route 1 endpoints from `src/api_gateway/routers/hybrid.py`
 - Update router logic to reject `route_preference=1`
 - Add deprecation notices in API docs
 - Update `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` to reflect 3-route reality (Routes 2/3/4 only)
 
-### 2. Restructure Repo for Modularity
+### 2. Restructure Repo for Modularity ✅ COMPLETE (2026-01-31)
 Reorganize into clear boundaries:
 ```
 /
@@ -32,9 +32,10 @@ Reorganize into clear boundaries:
 ├── infra/              # Bicep: API container, Worker container, Redis, Cosmos
 └── scripts/            # Test, benchmark, migration scripts
 ```
+**Status:** Deployed to production, all imports migrated. See `RESTRUCTURE_COMPLETE_2026-01-31.md`.
 
 ### 3. Extract Shared Models to `src/core/`
-- Move Pydantic request/response models from `app/hybrid_v2/orchestrator.py` into shared module
+- Move Pydantic request/response models from `src/worker/hybrid_v2/orchestrator.py` into shared module
 - Ensure API Gateway and Worker use identical contracts
 
 ---
@@ -43,7 +44,7 @@ Reorganize into clear boundaries:
 
 ### 4. Implement Single Auth System (Entra ID + Easy Auth)
 - Configure Azure Container Apps Easy Auth in `infra/main.bicep` with Entra ID provider
-- Add JWT validation middleware to FastAPI in `app/main.py`
+- Add JWT validation middleware to FastAPI in `src/api_gateway/main.py`
 - Extract `oid`, `groups`, and map to `group_id` for multi-tenancy
 
 ### 5. Provision Cosmos DB for Chat History
@@ -54,7 +55,7 @@ Add Cosmos DB (Serverless) to `infra/` with:
 - TTL: 90 days (configurable)
 
 ### 6. Add Chat History API Endpoints
-Create `app/routers/chat_history.py` with:
+Create `src/api_gateway/routers/chat_history.py` with:
 - `GET /chat_history/sessions` — List user's conversations
 - `GET /chat_history/sessions/{id}` — Retrieve conversation
 - `POST /chat_history` — Save conversation
@@ -65,11 +66,11 @@ Create `app/routers/chat_history.py` with:
 ## Phase 3: Frontend Integration (Week 3-4)
 
 ### 7. Copy azure-search-openai-demo Frontend
-- Clone `app/frontend/` from the demo repo into `src/frontend/`
+- Clone `src/frontend/` from the demo repo into `src/frontend/`
 - Keep Vite config that builds to `backend/static/` for single-container deployment initially
 
 ### 8. Create FastAPI `/chat` Compat Router
-Add `app/routers/chat_compat.py` that:
+Add `src/api_gateway/routers/chat_compat.py` that:
 - Exposes `POST /chat` and `POST /chat/stream` matching demo's contract
 - Transforms `{messages, context, session_state}` → `{query, group_id, route_preference}`
 - Calls existing `HybridPipelineOrchestrator`
@@ -87,7 +88,7 @@ thoughts = [
 ```
 
 ### 10. Update CORS Configuration
-- Expand CORS in `app/main.py` from `localhost:3000` to include production domains and Azure Static Web Apps URL
+- Expand CORS in `src/api_gateway/main.py` from `localhost:3000` to include production domains and Azure Static Web Apps URL
 
 ### 11. Adapt Frontend Settings Panel
 Modify `src/frontend/src/components/Settings/` to expose GraphRAG options:
@@ -102,10 +103,10 @@ Modify `src/frontend/src/components/Settings/` to expose GraphRAG options:
 
 ### 12. Add Redis for Job Queue
 - Provision Azure Cache for Redis (Basic tier) in `infra/`
-- Configure connection in `app/core/config.py`
+- Configure connection in `src/core/config.py`
 
 ### 13. Implement Hybrid Sync/Async Pattern
-In `app/routers/chat_compat.py`:
+In `src/api_gateway/routers/chat_compat.py`:
 - **Route 2 (Local Search):** Synchronous — typically <5s, return immediately
 - **Routes 3/4 (Global/DRIFT):** Async with streaming thoughts:
   1. Return `202 Accepted` with `job_id` for non-streaming requests
@@ -194,6 +195,65 @@ API Container accepts:
 
 ## Phase 8: API Versioning & Algorithm Switching (Ongoing)
 
+### Version Isolation Strategy (Frozen Snapshots)
+
+**Design Principle:** Each algorithm version is a **frozen snapshot** - fully isolated code that never changes after release. This follows industry best practices (Stripe, AWS, Google APIs) for enterprise stability.
+
+#### Why Isolation Over Sharing
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **Shared Code** | DRY, single bug fix | Coupling risk - V3 change can break V2 |
+| **Isolated/Copied** | Zero regression, clean rollback | Duplication, patches need N copies |
+
+**Decision:** Isolated versions for algorithm code, shared infrastructure for connections/auth.
+
+#### Directory Structure
+
+```
+src/worker/
+├── hybrid/             # V1 - DEPRECATED, frozen, delete at sunset (2026-06)
+│   ├── orchestrator.py
+│   ├── routes/
+│   ├── pipeline/
+│   └── retrievers/
+├── hybrid_v2/          # V2 - STABLE, frozen when V3 ships to production
+│   ├── orchestrator.py
+│   ├── routes/
+│   ├── pipeline/
+│   └── retrievers/
+├── hybrid_v3/          # V3 - FUTURE, full copy of V2, then evolve
+│   ├── orchestrator.py  # Copied from v2, modified
+│   ├── routes/
+│   ├── pipeline/
+│   └── retrievers/
+└── services/           # SHARED - infrastructure only (DB connections, auth)
+
+src/core/               # SHARED - across all versions
+├── config.py           # DB connections, env vars
+├── auth.py             # JWT validation
+├── logging.py          # Structured logging
+├── models/             # Base Pydantic models (request/response contracts)
+└── db/
+    ├── neo4j.py        # Connection pool
+    └── cosmos.py       # Chat history
+```
+
+#### Version Creation Protocol
+
+When creating V(N+1):
+1. **Copy entire directory:** `cp -r src/worker/hybrid_vN/ src/worker/hybrid_v{N+1}/`
+2. **Update imports:** Change all `hybrid_vN` → `hybrid_v{N+1}` within copied files
+3. **Develop independently:** V(N+1) changes cannot affect V(N)
+4. **Freeze V(N):** Once V(N+1) is stable, V(N) code is frozen forever
+
+#### Migration Note (V1/V2 Current State)
+
+V1 and V2 currently share some code due to organic development. **Do not refactor** - V1 is deprecated and will be deleted at sunset. The isolation strategy applies from V3 onwards:
+- V1 → Leave as-is (deprecated, sunset 2026-06)
+- V2 → Freeze when V3 ships
+- V3+ → Full isolation from creation
+
 ### 24. Implement URL-based API Versioning
 Structure API routes with explicit versions:
 ```
@@ -268,7 +328,7 @@ ALGORITHM_V3_CANARY_PERCENT=0   # 0-100
 ```
 
 ### 28. Add Version Switching API for Admins
-Create `app/routers/admin.py`:
+Create `src/api_gateway/routers/admin.py`:
 ```
 GET  /admin/versions              → List all versions and status
 POST /admin/versions/default      → Set default version
@@ -638,6 +698,7 @@ echo "Rolled back to $PREVIOUS_REVISION"
 | **Container Strategy** | Same repo, separate containers | Independent scaling, no contract drift |
 | **API Pattern** | Hybrid sync/async | Fast queries sync, slow queries stream |
 | **Versioning** | URL + header-based | Explicit versions, graceful migration |
+| **Version Isolation** | Frozen snapshots (copy, not share) | Zero regression risk, clean rollback, enterprise stability |
 | **Upstream Sync** | Git subtree + overlays | Maintain upstream link, isolate changes |
 | **Route 1** | Deprecated | Removed from production, 3-route system |
 
@@ -683,7 +744,7 @@ echo "Rolled back to $PREVIOUS_REVISION"
 ### V2 Embedding Configuration
 
 ```python
-# app/core/config.py
+# src/core/config.py
 VOYAGE_MODEL_NAME: str = "voyage-context-3"  # NOT voyage-3 or voyage-3-large
 VOYAGE_EMBEDDING_DIM: int = 2048
 VOYAGE_V2_ENABLED: bool = True  # Set in .env
@@ -702,7 +763,7 @@ VOYAGE_V2_ENABLED: bool = True  # Set in .env
 
 1. **Missing Vector Index** (`entity_embedding_v2`)
    - **Symptom:** V2 semantic beam search returned 0 results
-   - **Root Cause:** `app/main.py` only called V1 `initialize_schema()`, not V2
+   - **Root Cause:** `src/api_gateway/main.py` only called V1 `initialize_schema()`, not V2
    - **Fix:** Added V2 schema initialization at app startup
    - **Commit:** `b2c6bd8`
 

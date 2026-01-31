@@ -70,10 +70,10 @@ Respond with JSON: {{"route": "<route_name>", "reasoning": "<brief explanation>"
 
 
 class QueryRoute(Enum):
-    """Available routing destinations (3 routes after Vector RAG removal)."""
-    LOCAL_SEARCH = "local_search"           # Route 1: Factual lookup & entity-focused (LazyGraphRAG)
-    GLOBAL_SEARCH = "global_search"         # Route 2: Thematic (LazyGraphRAG + HippoRAG)
-    DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 3: Iterative multi-hop reasoning
+    """Available routing destinations (3 routes)."""
+    LOCAL_SEARCH = "local_search"           # Route 2: Factual lookup & entity-focused (LazyGraphRAG)
+    GLOBAL_SEARCH = "global_search"         # Route 3: Thematic (LazyGraphRAG + HippoRAG)
+    DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 4: Iterative multi-hop reasoning
     # Legacy alias for backward compatibility
     VECTOR_RAG = "local_search"             # Deprecated: maps to LOCAL_SEARCH
 

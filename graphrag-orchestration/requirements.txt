@@ -35,7 +35,6 @@ networkx==3.4.2
 llama-parse>=0.6.0  # Layout-aware PDF parsing
 
 # Vector stores (Azure AI Search)
-azure-search-documents==11.6.0
 
 # Graph stores
 # neo4j driver v6.0+ required for native Vector type (Cypher 25)

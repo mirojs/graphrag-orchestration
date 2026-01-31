@@ -3,20 +3,21 @@
 Each route is a self-contained handler that inherits from BaseRouteHandler
 and implements a specific retrieval strategy:
 
-- Route 1 (VectorRAGHandler): Fast vector search for simple fact lookups
 - Route 2 (LocalSearchHandler): Entity-focused with LazyGraphRAG
 - Route 3 (GlobalSearchHandler): Thematic queries with HippoRAG PPR
 - Route 4 (DRIFTHandler): Multi-hop iterative reasoning
 
-Usage:
-    from src.worker.hybrid_v2.routes import VectorRAGHandler, RouteResult
+Note: Route 1 (Vector RAG) was deprecated after testing showed Route 2
+handles all Vector RAG cases with superior quality.
 
-    handler = VectorRAGHandler(pipeline)
+Usage:
+    from src.worker.hybrid_v2.routes import LocalSearchHandler, RouteResult
+
+    handler = LocalSearchHandler(pipeline)
     result = await handler.execute(query)
 """
 
 from .base import BaseRouteHandler, RouteResult, Citation
-from .route_1_vector import VectorRAGHandler
 from .route_2_local import LocalSearchHandler
 from .route_3_global import GlobalSearchHandler
 from .route_4_drift import DRIFTHandler
@@ -27,7 +28,6 @@ __all__ = [
     "RouteResult",
     "Citation",
     # Route handlers
-    "VectorRAGHandler",
     "LocalSearchHandler",
     "GlobalSearchHandler",
     "DRIFTHandler",

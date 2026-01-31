@@ -1,0 +1,1300 @@
+"""
+Azure Document Intelligence Ingestion Service
+
+Uses Azure Document Intelligence (formerly Form Recognizer) SDK to extract 
+structured layout from documents for GraphRAG PropertyGraphIndex.
+
+Advantages over Azure Content Understanding:
+- More mature and stable API
+- Better table structure extraction
+- Rich bounding box information
+- Native SDK support (no manual REST polling)
+- Managed identity support out-of-the-box
+
+Features:
+- **Batch Processing**: Analyze multiple documents in parallel
+- **Concurrent Uploads**: Configurable concurrency limit (default: 5)
+- **Error Resilience**: Individual failures don't stop the batch
+
+Returns LlamaIndex Documents with:
+- Clean markdown text with proper section hierarchy
+- Table structure metadata (headers, rows, cells)
+- Bounding box coordinates for spatial context
+- Page numbers and reading order
+
+API: https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/
+Model: prebuilt-layout (2024-11-30 API version)
+"""
+
+import asyncio
+import logging
+import base64
+import io
+import re
+from contextlib import asynccontextmanager
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
+from urllib.parse import unquote
+
+from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
+from azure.ai.documentintelligence.models import (
+    AnalyzeDocumentRequest,
+    AnalyzeResult,
+    DocumentAnalysisFeature,
+    DocumentContentFormat,
+    DocumentTable,
+    DocumentParagraph,
+    DocumentBarcode,
+    DocumentLanguage,
+)
+from azure.core.credentials import AzureKeyCredential
+from azure.identity.aio import DefaultAzureCredential
+from azure.storage.blob.aio import BlobClient
+from llama_index.core import Document
+
+from src.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentIntelligenceService:
+    """Extract layout-aware documents using Azure Document Intelligence SDK.
+    
+    Uses prebuilt-layout model which includes OCR capabilities for both
+    text-based and image-based PDFs.
+    
+    Reference: https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/prebuilt/layout
+    """
+
+    # Maximum concurrent document analyses (avoid rate limiting)
+    DEFAULT_CONCURRENCY = 5
+
+    def __init__(self, max_concurrency: int = DEFAULT_CONCURRENCY) -> None:
+        # Backwards-compatible aliasing:
+        # Some deployments historically set Azure Content Understanding env vars
+        # while using the Document Intelligence SDK. Prefer DI-specific vars, but
+        # fall back to CU vars to avoid production breakage.
+        self.endpoint: str = (
+            settings.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+            or settings.AZURE_CONTENT_UNDERSTANDING_ENDPOINT
+            or ""
+        )
+        self.api_key = settings.AZURE_DOCUMENT_INTELLIGENCE_KEY or settings.AZURE_CONTENT_UNDERSTANDING_API_KEY
+        self.api_version = settings.AZURE_DOC_INTELLIGENCE_API_VERSION
+        self.max_concurrency = max_concurrency
+        self._semaphore: Optional[asyncio.Semaphore] = None
+
+        if not self.endpoint:
+            raise RuntimeError(
+                "Document Intelligence endpoint not configured (set AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT "
+                "or AZURE_CONTENT_UNDERSTANDING_ENDPOINT)"
+            )
+
+        # Token authentication (Managed Identity / DefaultAzureCredential) requires the
+        # resource-specific custom subdomain endpoint. If the endpoint is the generic
+        # regional host (e.g., https://swedencentral.api.cognitive.microsoft.com/),
+        # Azure DI will reject token auth unless an API key is used.
+        if not self.api_key and ".api.cognitive.microsoft.com" in self.endpoint:
+            raise RuntimeError(
+                "AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT must be the resource custom subdomain "
+                "(https://<resource-name>.cognitiveservices.azure.com/) when using Managed Identity. "
+                "Either set the correct endpoint or configure AZURE_DOCUMENT_INTELLIGENCE_KEY."
+            )
+
+        logger.info(f"Document Intelligence Service Init - Endpoint: {self.endpoint}")
+        logger.info(f"Document Intelligence Service Init - Using API key: {bool(self.api_key)}")
+        logger.info(f"Document Intelligence Service Init - Max concurrency: {self.max_concurrency}")
+
+    @asynccontextmanager
+    async def _create_client(self) -> AsyncIterator[DocumentIntelligenceClient]:
+        """Create an async Document Intelligence client and ensure resources are closed.
+
+        Azure async credentials and clients use aiohttp under the hood. If they aren't
+        closed, the process can emit warnings like "Unclosed client session/connector".
+        """
+        if self.api_key:
+            logger.info("Document Intelligence: Using API key authentication")
+            credential = AzureKeyCredential(self.api_key)
+            async with DocumentIntelligenceClient(
+                endpoint=self.endpoint,
+                credential=credential,
+                api_version=self.api_version,
+            ) as client:
+                yield client
+        else:
+            logger.info("Document Intelligence: Using managed identity authentication")
+            async with DefaultAzureCredential() as credential:
+                async with DocumentIntelligenceClient(
+                    endpoint=self.endpoint,
+                    credential=credential,
+                    api_version=self.api_version,
+                ) as client:
+                    yield client
+
+    def _build_section_hierarchy(self, paragraphs: List[DocumentParagraph]) -> List[str]:
+        """Extract section hierarchy from paragraph roles."""
+        path = []
+        for para in paragraphs:
+            if not para.role:
+                continue
+            
+            content = para.content.strip() if para.content else ""
+            
+            if para.role == "title":
+                path = [content]  # Reset to document title
+            elif para.role == "sectionHeading":
+                # Handle subsections
+                if len(path) > 1:
+                    path[-1] = content
+                else:
+                    path.append(content)
+        
+        return path
+
+    def _extract_table_metadata(self, table: DocumentTable) -> Dict[str, Any]:
+        """
+        Extract structured table metadata for PropertyGraphIndex.
+        
+        Returns:
+            {
+                "row_count": int,
+                "column_count": int,
+                "headers": List[str],
+                "rows": List[Dict[str, str]]
+            }
+        """
+        if not table.cells:
+            return {
+                "row_count": table.row_count or 0,
+                "column_count": table.column_count or 0,
+                "headers": [],
+                "rows": [],
+            }
+
+        # Extract headers (row 0)
+        headers = [""] * (table.column_count or 0)
+        for cell in table.cells:
+            if cell.row_index == 0 and cell.column_index is not None:
+                headers[cell.column_index] = cell.content or ""
+
+        # Extract data rows
+        rows = []
+        for row_idx in range(1, table.row_count or 0):
+            row_data = {}
+            for cell in table.cells:
+                if cell.row_index == row_idx and cell.column_index is not None:
+                    col_idx = cell.column_index
+                    if col_idx < len(headers):
+                        row_data[headers[col_idx]] = cell.content or ""
+            
+            if row_data:
+                rows.append(row_data)
+
+        return {
+            "row_count": table.row_count or 0,
+            "column_count": table.column_count or 0,
+            "headers": headers,
+            "rows": rows,
+        }
+
+    def _extract_barcodes(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract barcodes/QR codes from document pages (FREE add-on).
+        
+        Barcode kinds: QRCode, Code39, Code128, UPC-A, UPC-E, EAN-8, EAN-13,
+                      ITF, Codabar, DataBar, PDF417, Aztec, DataMatrix
+        
+        Returns:
+            List of barcode dicts with kind, value, confidence, page_number
+        """
+        barcodes: List[Dict[str, Any]] = []
+        
+        for page in (getattr(result, "pages", None) or []):
+            page_num = getattr(page, "page_number", 1) or 1
+            page_barcodes = getattr(page, "barcodes", None) or []
+            
+            for bc in page_barcodes:
+                kind = getattr(bc, "kind", "") or ""
+                value = getattr(bc, "value", "") or ""
+                confidence = getattr(bc, "confidence", 0.0) or 0.0
+                
+                if value:  # Only include barcodes with decoded values
+                    # Infer entity type from barcode kind
+                    entity_type = self._infer_barcode_entity_type(kind, value)
+                    
+                    barcodes.append({
+                        "kind": kind,
+                        "value": value,
+                        "confidence": confidence,
+                        "page_number": page_num,
+                        "entity_type": entity_type,
+                    })
+        
+        if barcodes:
+            logger.info(
+                f"📊 Extracted {len(barcodes)} barcodes",
+                extra={"barcode_count": len(barcodes), "kinds": list(set(b["kind"] for b in barcodes))}
+            )
+        
+        return barcodes
+
+    def _infer_barcode_entity_type(self, kind: str, value: str) -> str:
+        """Infer entity type from barcode kind and value pattern."""
+        kind_lower = kind.lower()
+        
+        # UPC/EAN are product codes
+        if any(k in kind_lower for k in ["upc", "ean"]):
+            return "PRODUCT_CODE"
+        
+        # QR codes often contain URLs
+        if "qr" in kind_lower:
+            if value.startswith(("http://", "https://")):
+                return "URL"
+            return "QR_DATA"
+        
+        # Code128 with specific patterns
+        if "code128" in kind_lower or "code39" in kind_lower:
+            # UPS tracking: 1Z...
+            if value.startswith("1Z") and len(value) == 18:
+                return "TRACKING_NUMBER"
+            # FedEx tracking: 12-34 digits
+            if value.isdigit() and 12 <= len(value) <= 34:
+                return "TRACKING_NUMBER"
+        
+        # PDF417 often used for IDs
+        if "pdf417" in kind_lower:
+            return "DOCUMENT_ID"
+        
+        return "BARCODE"
+
+    def _extract_languages(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract detected languages from document (FREE add-on).
+        
+        Returns:
+            List of language dicts with locale, confidence, span_count
+        """
+        languages: List[Dict[str, Any]] = []
+        
+        for lang in (getattr(result, "languages", None) or []):
+            locale = getattr(lang, "locale", "") or ""
+            confidence = getattr(lang, "confidence", 0.0) or 0.0
+            spans = getattr(lang, "spans", None) or []
+            
+            if locale:
+                languages.append({
+                    "locale": locale,
+                    "confidence": confidence,
+                    "span_count": len(spans),
+                })
+        
+        if languages:
+            primary_lang = max(languages, key=lambda x: x.get("span_count", 0))
+            logger.info(
+                f"🌐 Detected {len(languages)} languages, primary: {primary_lang.get('locale')}",
+                extra={"languages": [l["locale"] for l in languages]}
+            )
+        
+        return languages
+
+    def _extract_figures(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract figures with cross-section element references.
+        
+        Figures can reference paragraphs/tables from different sections,
+        creating cross-section graph edges without LLM extraction.
+        
+        Returns:
+            List of figure dicts with id, caption, element_refs, footnotes
+        """
+        figures: List[Dict[str, Any]] = []
+        
+        for fig in (getattr(result, "figures", None) or []):
+            fig_id = getattr(fig, "id", "") or ""
+            elements = getattr(fig, "elements", None) or []
+            
+            # Extract caption
+            caption_obj = getattr(fig, "caption", None)
+            caption_text = ""
+            if caption_obj:
+                caption_text = getattr(caption_obj, "content", "") or ""
+            
+            # Extract footnotes
+            footnotes: List[str] = []
+            for fn in (getattr(fig, "footnotes", None) or []):
+                fn_content = getattr(fn, "content", "") or ""
+                if fn_content:
+                    footnotes.append(fn_content)
+            
+            # Parse element references (e.g., "/paragraphs/42", "/tables/5")
+            element_refs: List[Dict[str, Any]] = []
+            for el in elements:
+                parsed = self._parse_di_element_ref(el)
+                if parsed:
+                    kind, idx = parsed
+                    element_refs.append({"kind": kind, "index": idx, "ref": el})
+            
+            figures.append({
+                "id": fig_id,
+                "caption": caption_text,
+                "element_refs": element_refs,
+                "footnotes": footnotes,
+                "element_count": len(elements),
+            })
+        
+        if figures:
+            logger.info(
+                f"📈 Extracted {len(figures)} figures with {sum(len(f['element_refs']) for f in figures)} element references",
+                extra={"figure_count": len(figures)}
+            )
+        
+        return figures
+
+    def _extract_selection_marks(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
+        """Extract selection marks (checkboxes) from document.
+        
+        Returns:
+            List of selection mark dicts with state, confidence, page_number
+        """
+        marks: List[Dict[str, Any]] = []
+        
+        for page in (getattr(result, "pages", None) or []):
+            page_num = getattr(page, "page_number", 1) or 1
+            page_marks = getattr(page, "selection_marks", None) or []
+            
+            for mark in page_marks:
+                state = getattr(mark, "state", "") or ""
+                confidence = getattr(mark, "confidence", 0.0) or 0.0
+                
+                marks.append({
+                    "state": state,  # "selected" or "unselected"
+                    "confidence": confidence,
+                    "page_number": page_num,
+                })
+        
+        if marks:
+            selected_count = sum(1 for m in marks if m["state"] == "selected")
+            logger.info(
+                f"☑️ Extracted {len(marks)} selection marks ({selected_count} selected)",
+                extra={"total": len(marks), "selected": selected_count}
+            )
+        
+        return marks
+
+    def _extract_key_value_pairs(
+        self,
+        result: AnalyzeResult,
+        sections: List[Any],
+        content: str,
+    ) -> List[Dict[str, Any]]:
+        """Extract key-value pairs from DI result with section association.
+        
+        Associates each KVP to a section based on span offset overlap.
+        This enables section-scoped queries for deterministic field lookups.
+        
+        Args:
+            result: Document Intelligence AnalyzeResult
+            sections: List of section objects from result.sections
+            content: Full document content for span slicing
+            
+        Returns:
+            List of KVP dicts with section association:
+            {
+                "key": str,
+                "value": str,
+                "confidence": float,
+                "page_number": int,
+                "section_id": Optional[str],
+                "section_path": List[str],
+                "key_span": {"offset": int, "length": int},
+                "value_span": {"offset": int, "length": int},
+            }
+        """
+        kvps = getattr(result, "key_value_pairs", None) or []
+        if not kvps:
+            return []
+
+        extracted: List[Dict[str, Any]] = []
+        
+        # Build section span index for efficient lookup
+        section_spans: List[Tuple[int, int, int, str]] = []  # (start, end, section_idx, title)
+        for sec_idx, sec in enumerate(sections):
+            sec_spans = getattr(sec, "spans", None) or []
+            sec_title = self._infer_section_title_from_section(sec, result.paragraphs or [])
+            for span in sec_spans:
+                offset = getattr(span, "offset", None)
+                length = getattr(span, "length", None)
+                if offset is not None and length is not None:
+                    section_spans.append((offset, offset + length, sec_idx, sec_title))
+        
+        for kvp_idx, kvp in enumerate(kvps):
+            key_elem = getattr(kvp, "key", None)
+            value_elem = getattr(kvp, "value", None)
+            confidence = getattr(kvp, "confidence", None) or 0.0
+            
+            if not key_elem:
+                continue
+            
+            key_content = getattr(key_elem, "content", "") or ""
+            value_content = getattr(value_elem, "content", "") if value_elem else ""
+            
+            # Extract span info
+            key_spans = getattr(key_elem, "spans", None) or []
+            value_spans = getattr(value_elem, "spans", None) if value_elem else []
+            
+            key_span = None
+            value_span = None
+            if key_spans:
+                ks = key_spans[0]
+                key_span = {"offset": getattr(ks, "offset", 0), "length": getattr(ks, "length", 0)}
+            if value_spans:
+                vs = value_spans[0]
+                value_span = {"offset": getattr(vs, "offset", 0), "length": getattr(vs, "length", 0)}
+            
+            # Extract page number from bounding regions
+            page_number = 1
+            key_regions = getattr(key_elem, "bounding_regions", None) or []
+            if key_regions:
+                page_number = getattr(key_regions[0], "page_number", 1) or 1
+            
+            # Find section association based on key span offset
+            section_id = None
+            section_path: List[str] = []
+            if key_span:
+                kvp_offset = key_span["offset"]
+                for start, end, sec_idx, sec_title in section_spans:
+                    if start <= kvp_offset < end:
+                        section_id = f"section_{sec_idx}"
+                        section_path = [sec_title] if sec_title else []
+                        break
+            
+            extracted.append({
+                "key": key_content.strip(),
+                "value": value_content.strip(),
+                "confidence": confidence,
+                "page_number": page_number,
+                "section_id": section_id,
+                "section_path": section_path,
+                "key_span": key_span,
+                "value_span": value_span,
+            })
+        
+        logger.info(
+            f"📋 Extracted {len(extracted)} key-value pairs",
+            extra={"kvp_count": len(extracted), "with_section": sum(1 for k in extracted if k["section_id"])}
+        )
+        
+        return extracted
+
+    def _infer_section_title_from_section(
+        self,
+        section: Any,
+        paragraphs: List[DocumentParagraph],
+    ) -> str:
+        """Infer section title from section elements."""
+        elements = getattr(section, "elements", None) or []
+        for el in elements:
+            parsed = self._parse_di_element_ref(el)
+            if not parsed:
+                continue
+            kind, idx = parsed
+            if kind == "paragraphs" and 0 <= idx < len(paragraphs):
+                para = paragraphs[idx]
+                role = getattr(para, "role", None) or ""
+                if role in ("title", "sectionHeading"):
+                    return getattr(para, "content", "") or ""
+        return ""
+
+    def _build_markdown_from_result(self, result: AnalyzeResult) -> str:
+        """
+        Convert Document Intelligence result to clean markdown.
+        
+        Uses paragraph roles to create proper heading hierarchy.
+        Includes tables as markdown tables.
+        """
+        lines = []
+
+        if result.paragraphs:
+            for para in result.paragraphs:
+                if not para.content:
+                    continue
+
+                content = para.content.strip()
+                role = para.role or ""
+
+                # Skip headers/footers (noise)
+                if role in ("pageHeader", "pageFooter", "pageNumber"):
+                    continue
+
+                # Convert to markdown based on role
+                if role == "title":
+                    lines.append(f"# {content}")
+                elif role == "sectionHeading":
+                    lines.append(f"## {content}")
+                else:
+                    lines.append(content)
+
+        # Add tables as markdown
+        if result.tables:
+            for table in result.tables:
+                if not table.cells:
+                    continue
+
+                # Build markdown table
+                col_count = table.column_count or 0
+                headers = [""] * col_count
+
+                # Extract headers
+                for cell in table.cells:
+                    if cell.row_index == 0 and cell.column_index is not None:
+                        headers[cell.column_index] = cell.content or ""
+
+                # Table header
+                table_lines = [
+                    "| " + " | ".join(headers) + " |",
+                    "| " + " | ".join(["---"] * col_count) + " |",
+                ]
+
+                # Table rows
+                for row_idx in range(1, table.row_count or 0):
+                    row_cells = [""] * col_count
+                    for cell in table.cells:
+                        if cell.row_index == row_idx and cell.column_index is not None:
+                            row_cells[cell.column_index] = cell.content or ""
+                    table_lines.append("| " + " | ".join(row_cells) + " |")
+
+                lines.extend(table_lines)
+
+        return "\n\n".join(lines)
+
+    def _slice_content_by_spans(self, content: str, spans: Any) -> str:
+        if not content or not spans:
+            return ""
+
+        start: Optional[int] = None
+        end: Optional[int] = None
+
+        for span in spans:
+            if span is None:
+                continue
+
+            # DI span objects are typically {offset, length} with attributes.
+            offset = getattr(span, "offset", None)
+            length = getattr(span, "length", None)
+            if offset is None and isinstance(span, dict):
+                offset = span.get("offset")
+                length = span.get("length")
+
+            if offset is None or length is None:
+                continue
+
+            try:
+                offset_i = int(offset)
+                length_i = int(length)
+            except Exception:
+                continue
+
+            if start is None or offset_i < start:
+                start = offset_i
+            span_end = offset_i + length_i
+            if end is None or span_end > end:
+                end = span_end
+
+        if start is None or end is None or start >= end:
+            return ""
+
+        return content[start:end].strip()
+
+    _DI_ELEMENT_REF_RE = re.compile(r"^/(paragraphs|sections|tables)/(\d+)$")
+
+    def _parse_di_element_ref(self, ref: Any) -> Optional[Tuple[str, int]]:
+        if not isinstance(ref, str):
+            return None
+        m = self._DI_ELEMENT_REF_RE.match(ref.strip())
+        if not m:
+            return None
+        kind = m.group(1)
+        try:
+            idx = int(m.group(2))
+        except Exception:
+            return None
+        return (kind, idx)
+
+    def _collect_span_union(self, spans_list: List[Any]) -> List[Dict[str, int]]:
+        """Return a conservative union span as a list of {offset,length}.
+
+        We intentionally return a single merged span (min offset..max end)
+        to keep slicing simple and stable.
+        """
+        start: Optional[int] = None
+        end: Optional[int] = None
+
+        for spans in spans_list:
+            if not spans:
+                continue
+            for span in spans:
+                if span is None:
+                    continue
+                offset = getattr(span, "offset", None)
+                length = getattr(span, "length", None)
+                if offset is None and isinstance(span, dict):
+                    offset = span.get("offset")
+                    length = span.get("length")
+                if offset is None or length is None:
+                    continue
+                try:
+                    o = int(offset)
+                    l = int(length)
+                except Exception:
+                    continue
+                if l <= 0:
+                    continue
+                if start is None or o < start:
+                    start = o
+                e = o + l
+                if end is None or e > end:
+                    end = e
+
+        if start is None or end is None or start >= end:
+            return []
+        return [{"offset": start, "length": end - start}]
+
+    def _infer_section_title(self, paragraph_indices: List[int], paragraphs: List[DocumentParagraph], fallback: str) -> str:
+        for idx in paragraph_indices:
+            if idx < 0 or idx >= len(paragraphs):
+                continue
+            p = paragraphs[idx]
+            if not getattr(p, "content", None):
+                continue
+            role = getattr(p, "role", None) or ""
+            if role in ("title", "sectionHeading"):
+                return str(p.content).strip() or fallback
+        # fallback to first non-empty paragraph
+        for idx in paragraph_indices:
+            if idx < 0 or idx >= len(paragraphs):
+                continue
+            p = paragraphs[idx]
+            if getattr(p, "content", None):
+                return str(p.content).strip()[:120] or fallback
+        return fallback
+
+    def _build_markdown_from_paragraphs_and_tables(
+        self,
+        paragraphs: List[DocumentParagraph],
+        tables: List[DocumentTable],
+    ) -> str:
+        lines: List[str] = []
+        for para in paragraphs:
+            if not getattr(para, "content", None):
+                continue
+            role = getattr(para, "role", None) or ""
+            content = str(para.content).strip()
+            if role in ("pageHeader", "pageFooter", "pageNumber"):
+                continue
+            if role == "title":
+                lines.append(f"# {content}")
+            elif role == "sectionHeading":
+                lines.append(f"## {content}")
+            else:
+                lines.append(content)
+
+        for table in tables:
+            if not getattr(table, "cells", None):
+                continue
+            col_count = int(getattr(table, "column_count", 0) or 0)
+            if col_count <= 0:
+                continue
+            headers = [""] * col_count
+            for cell in table.cells:
+                if getattr(cell, "row_index", None) == 0 and getattr(cell, "column_index", None) is not None:
+                    headers[int(cell.column_index)] = cell.content or ""
+
+            table_md = [
+                "| " + " | ".join(headers) + " |",
+                "| " + " | ".join(["---"] * col_count) + " |",
+            ]
+            row_count = int(getattr(table, "row_count", 0) or 0)
+            for row_idx in range(1, row_count):
+                row_cells = [""] * col_count
+                for cell in table.cells:
+                    if getattr(cell, "row_index", None) == row_idx and getattr(cell, "column_index", None) is not None:
+                        row_cells[int(cell.column_index)] = cell.content or ""
+                table_md.append("| " + " | ".join(row_cells) + " |")
+            lines.extend(table_md)
+
+        return "\n\n".join(lines).strip()
+
+    def _build_section_aware_documents(self, result: AnalyzeResult, group_id: str, url: str) -> List[Document]:
+        """Create section/subsection chunks using `result.sections`.
+
+        This produces more semantically coherent chunks than per-page splitting and
+        makes downstream retrieval more precise.
+        
+        Also extracts:
+        - Key-value pairs associated with sections
+        - Barcodes/QR codes (FREE add-on)
+        - Language detection (FREE add-on)
+        - Figure cross-references
+        - Selection marks (checkboxes)
+        """
+        sections = list(getattr(result, "sections", None) or [])
+        if not sections:
+            return []
+
+        paragraphs: List[DocumentParagraph] = list(getattr(result, "paragraphs", None) or [])
+        tables: List[DocumentTable] = list(getattr(result, "tables", None) or [])
+
+        content = getattr(result, "content", None) or ""
+        
+        # Extract key-value pairs with section association
+        key_value_pairs = self._extract_key_value_pairs(result, sections, content)
+        
+        # Extract FREE add-on features
+        barcodes = self._extract_barcodes(result)
+        languages = self._extract_languages(result)
+        figures = self._extract_figures(result)
+        selection_marks = self._extract_selection_marks(result)
+        
+        # Build section_idx -> KVPs mapping for efficient lookup
+        kvps_by_section: Dict[int, List[Dict[str, Any]]] = {}
+        orphan_kvps: List[Dict[str, Any]] = []  # KVPs not associated with any section
+        for kvp in key_value_pairs:
+            section_id = kvp.get("section_id")
+            if section_id and section_id.startswith("section_"):
+                try:
+                    sec_idx = int(section_id.split("_")[1])
+                    kvps_by_section.setdefault(sec_idx, []).append(kvp)
+                except (ValueError, IndexError):
+                    orphan_kvps.append(kvp)
+            else:
+                orphan_kvps.append(kvp)
+
+        def _safe_get_paragraph(i: int) -> Optional[DocumentParagraph]:
+            if i < 0 or i >= len(paragraphs):
+                return None
+            return paragraphs[i]
+
+        def _safe_get_table(i: int) -> Optional[DocumentTable]:
+            if i < 0 or i >= len(tables):
+                return None
+            return tables[i]
+
+        # Build a conservative root set: if DI provides nested sections but doesn't
+        # provide explicit roots, treat all indices as roots.
+        # (We avoid attempting to infer parent pointers from elements to keep behavior stable.)
+        root_indices = list(range(len(sections)))
+
+        docs: List[Document] = []
+
+        def walk(section_idx: int, parent_titles: List[str], parent_ids: List[int]) -> None:
+            if section_idx < 0 or section_idx >= len(sections):
+                return
+            sec = sections[section_idx]
+            elements = list(getattr(sec, "elements", None) or [])
+
+            child_sections: List[int] = []
+            para_indices: List[int] = []
+            table_indices: List[int] = []
+
+            for el in elements:
+                parsed = self._parse_di_element_ref(el)
+                if not parsed:
+                    continue
+                kind, idx = parsed
+                if kind == "sections":
+                    child_sections.append(idx)
+                elif kind == "paragraphs":
+                    para_indices.append(idx)
+                elif kind == "tables":
+                    table_indices.append(idx)
+
+            title_fallback = f"section_{section_idx}"
+            title = self._infer_section_title(para_indices, paragraphs, title_fallback)
+            titles = [*parent_titles, title]
+            ids = [*parent_ids, section_idx]
+
+            # Prefer explicit spans on the section; otherwise aggregate paragraph spans.
+            section_spans = list(getattr(sec, "spans", None) or [])
+            direct_paras = [p for i in para_indices if (p := _safe_get_paragraph(i))]
+            direct_tables = [t for i in table_indices if (t := _safe_get_table(i))]
+
+            # If this section has children, we still may have direct content that isn't
+            # captured by child sections (common for an intro paragraph).
+            has_children = len(child_sections) > 0
+
+            def emit_chunk(*, part: str, spans: Any, paras: List[DocumentParagraph], tbls: List[DocumentTable]) -> None:
+                merged = self._collect_span_union([spans] if spans else [getattr(p, "spans", None) or [] for p in paras])
+                text = ""
+                if content and merged:
+                    text = self._slice_content_by_spans(content, merged)
+                if not text:
+                    text = self._build_markdown_from_paragraphs_and_tables(paras, tbls)
+                if not text:
+                    return
+
+                tables_metadata = [self._extract_table_metadata(t) for t in tbls]
+                
+                # Get KVPs associated with this section
+                section_kvps = kvps_by_section.get(section_idx, [])
+                # For first chunk of document, also include orphan KVPs
+                if section_idx == 0 and part == "direct":
+                    section_kvps = section_kvps + orphan_kvps
+
+                # Extract page number from first paragraph's bounding regions
+                page_number = None
+                for para in paras:
+                    bounding_regions = getattr(para, "bounding_regions", None) or []
+                    if bounding_regions:
+                        page_number = getattr(bounding_regions[0], "page_number", None)
+                        if page_number:
+                            break
+                # Fallback: try tables if no paragraph has bounding region
+                if page_number is None:
+                    for tbl in tbls:
+                        bounding_regions = getattr(tbl, "bounding_regions", None) or []
+                        if bounding_regions:
+                            page_number = getattr(bounding_regions[0], "page_number", None)
+                            if page_number:
+                                break
+                
+                # Extract character offsets from merged spans
+                start_offset = None
+                end_offset = None
+                if merged:
+                    first_span = merged[0]
+                    start_offset = first_span.get("offset")
+                    length = first_span.get("length")
+                    if start_offset is not None and length is not None:
+                        end_offset = start_offset + length
+
+                docs.append(
+                    Document(
+                        text=text,
+                        metadata={
+                            "group_id": group_id,
+                            "source": "document-intelligence",
+                            "url": url,
+                            "chunk_type": "section",
+                            "section_path": titles,
+                            "di_section_path": ids,
+                            "di_section_part": part,
+                            "tables": tables_metadata,
+                            "table_count": len(tbls),
+                            "paragraph_count": len(paras),
+                            "key_value_pairs": section_kvps,
+                            "kvp_count": len(section_kvps),
+                            # Location metadata for citation tracking
+                            **({"page_number": page_number} if page_number is not None else {}),
+                            **({"start_offset": start_offset} if start_offset is not None else {}),
+                            **({"end_offset": end_offset} if end_offset is not None else {}),
+                            # Document-level metadata (included in first chunk)
+                            **({"barcodes": barcodes} if section_idx == 0 and part == "direct" and barcodes else {}),
+                            **({"languages": languages} if section_idx == 0 and part == "direct" and languages else {}),
+                            **({"figures": figures} if section_idx == 0 and part == "direct" and figures else {}),
+                            **({"selection_marks": selection_marks} if section_idx == 0 and part == "direct" and selection_marks else {}),
+                        },
+                    )
+                )
+
+            # Emit direct content chunk (intro/body) if present.
+            if direct_paras or direct_tables:
+                emit_chunk(part="direct", spans=section_spans, paras=direct_paras, tbls=direct_tables)
+
+            # Recurse into child sections.
+            for child_idx in child_sections:
+                walk(child_idx, titles, ids)
+
+            # Leaf section with no direct content but with explicit spans: emit anyway.
+            if not has_children and not (direct_paras or direct_tables) and section_spans:
+                emit_chunk(part="spans", spans=section_spans, paras=[], tbls=[])
+
+        for idx in root_indices:
+            walk(idx, [], [])
+
+        # De-dup exact duplicates (can happen when roots include nested sections).
+        seen: set[tuple[str, str]] = set()
+        unique: List[Document] = []
+        for d in docs:
+            key = (str(d.metadata.get("url") or ""), str(d.metadata.get("di_section_path") or ""))
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(d)
+        return unique
+
+    def _select_model(self, url: str, default_model: str = "prebuilt-layout", explicit: Optional[str] = None) -> str:
+        """Select Document Intelligence model based on hints.
+
+        Priority:
+        1) explicit override (e.g., 'prebuilt-invoice')
+        2) filename/url heuristics
+        3) default model
+        """
+        if explicit:
+            return explicit
+
+        lower = url.lower()
+        # Simple heuristics: prefer invoice/receipt when filename hints exist
+        if any(k in lower for k in ["invoice", "inv_"]):
+            return "prebuilt-invoice"
+        if any(k in lower for k in ["receipt", "rcpt_"]):
+            return "prebuilt-receipt"
+        # Fallback
+        return default_model
+
+    async def _analyze_single_document(
+        self,
+        client: DocumentIntelligenceClient,
+        url: str,
+        group_id: str,
+        *,
+        default_model: str = "prebuilt-layout",
+        explicit_model: Optional[str] = None,
+    ) -> Tuple[str, List[Document], Optional[str]]:
+        """
+        Analyze a single document and return extracted Documents.
+        
+        Returns:
+            Tuple of (url, documents, error_message)
+            - If successful: (url, [Document, ...], None)
+            - If failed: (url, [], "error message")
+        """
+        # Use semaphore to limit concurrency
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self.max_concurrency)
+        
+        async with self._semaphore:
+            logger.info(f"Document Intelligence analyzing: {url[:80]}...")
+            
+            try:
+                # Decide model
+                selected_model = self._select_model(url, default_model=default_model, explicit=explicit_model)
+
+                # DI can access Azure blob storage directly using its own Managed Identity
+                # No need to download locally - just pass the URL (with SAS if present)
+                logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
+                # Enable add-on features for enhanced extraction (v4 API pricing)
+                # KEY_VALUE_PAIRS: FREE in v4 API - deterministic field lookups
+                # BARCODES: FREE - QR codes, UPC, tracking numbers
+                # LANGUAGES: FREE - per-span language detection
+                # Selection marks: Included in base prebuilt-layout (no add-on needed)
+                poller = await client.begin_analyze_document(
+                    selected_model,
+                    AnalyzeDocumentRequest(url_source=url),
+                    output_content_format=DocumentContentFormat.MARKDOWN,
+                    features=[
+                        DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # FREE in v4!
+                        DocumentAnalysisFeature.BARCODES,         # FREE!
+                        DocumentAnalysisFeature.LANGUAGES,        # FREE!
+                    ],
+                )
+
+                # Wait for completion with timeout (SDK handles polling automatically)
+                # Azure DI typically takes 2-10 seconds per document, can be slower under load
+                di_timeout = settings.AZURE_DI_TIMEOUT
+                try:
+                    result: AnalyzeResult = await asyncio.wait_for(
+                        poller.result(), 
+                        timeout=di_timeout
+                    )
+                    logger.info(f"✅ Document Intelligence analysis completed for {url[:80]}")
+                except asyncio.TimeoutError:
+                    logger.error(f"❌ Document Intelligence analysis timed out after {di_timeout}s for {url[:80]}")
+                    raise TimeoutError(f"Document Intelligence analysis timed out for {url}")
+
+                if not getattr(result, "pages", None):
+                    logger.warning(f"No pages extracted from {url}")
+                    return (url, [], None)
+
+                # Log Document Intelligence confidence scores
+                if result.paragraphs:
+                    confidences = [p.confidence for p in result.paragraphs if hasattr(p, 'confidence') and p.confidence is not None]
+                    if confidences:
+                        avg_confidence = sum(confidences) / len(confidences)
+                        min_confidence = min(confidences)
+                        logger.info(f"📊 DI Confidence: avg={avg_confidence:.3f}, min={min_confidence:.3f}, samples={len(confidences)}")
+
+                documents: List[Document] = []
+
+                # Prefer section-aware chunking when DI provides a sections tree.
+                # This produces higher-precision chunks and improves downstream retrieval.
+                if getattr(result, "sections", None) and getattr(result, "content", None):
+                    section_docs = self._build_section_aware_documents(result, group_id, url)
+                    if not section_docs:
+                        raise RuntimeError(
+                            "Document Intelligence returned a sections tree, but section-aware chunking produced 0 chunks"
+                        )
+                    logger.info(
+                        "✅ Extracted section-aware chunks",
+                        extra={
+                            "url": url,
+                            "chunks": len(section_docs),
+                            "sections": len(getattr(result, "sections", None) or []),
+                        },
+                    )
+                    return (url, section_docs, None)
+                
+                # Create one document per page (better for large docs)
+                for page in result.pages:
+                    page_num = page.page_number
+
+                    # Prefer DI-native content (markdown) when available.
+                    # We still compute structured metadata from paragraphs/tables.
+                    page_markdown = ""
+                    if getattr(result, "content", None):
+                        page_markdown = self._slice_content_by_spans(result.content, getattr(page, "spans", None))
+
+                    # Get paragraphs for this page
+                    page_paragraphs = [
+                        p for p in (result.paragraphs or [])
+                        if any(
+                            region.page_number == page_num 
+                            for region in (p.bounding_regions or [])
+                        )
+                    ]
+
+                    # Get tables for this page
+                    page_tables = [
+                        t for t in (result.tables or [])
+                        if any(
+                            region.page_number == page_num
+                            for region in (t.bounding_regions or [])
+                        )
+                    ]
+
+                    # Build markdown for this page
+                    markdown = page_markdown
+                    if not markdown:
+                        # Fallback: build a basic markdown representation from paragraphs/tables.
+                        page_lines = []
+                        for para in page_paragraphs:
+                            if not para.content:
+                                continue
+                            
+                            role = para.role or ""
+                            content = para.content.strip()
+
+                            if role in ("pageHeader", "pageFooter", "pageNumber"):
+                                continue
+                            elif role == "title":
+                                page_lines.append(f"# {content}")
+                            elif role == "sectionHeading":
+                                page_lines.append(f"## {content}")
+                            else:
+                                page_lines.append(content)
+
+                        # Add tables
+                        for table in page_tables:
+                            if not table.cells:
+                                continue
+
+                            col_count = table.column_count or 0
+                            headers = [""] * col_count
+
+                            for cell in table.cells:
+                                if cell.row_index == 0 and cell.column_index is not None:
+                                    headers[cell.column_index] = cell.content or ""
+
+                            table_md = [
+                                "| " + " | ".join(headers) + " |",
+                                "| " + " | ".join(["---"] * col_count) + " |",
+                            ]
+
+                            for row_idx in range(1, table.row_count or 0):
+                                row_cells = [""] * col_count
+                                for cell in table.cells:
+                                    if cell.row_index == row_idx and cell.column_index is not None:
+                                        row_cells[cell.column_index] = cell.content or ""
+                                table_md.append("| " + " | ".join(row_cells) + " |")
+
+                            page_lines.extend(table_md)
+
+                        markdown = "\n\n".join(page_lines)
+
+                    # Extract metadata
+                    section_path = self._build_section_hierarchy(page_paragraphs)
+                    tables_metadata = [
+                        self._extract_table_metadata(t) for t in page_tables
+                    ]
+
+                    # Create Document with structured table metadata for schema-aware extraction
+                    # The 'tables' metadata enables direct field mapping without LLM parsing
+                    logger.info(f"📄 Extracted page {page_num}: {len(markdown)} chars, {len(page_paragraphs)} paragraphs, {len(page_tables)} tables")
+                    if markdown.strip():
+                        doc = Document(
+                            text=markdown,
+                            metadata={
+                                "page_number": page_num,
+                                "group_id": group_id,
+                                "source": "document-intelligence",
+                                "url": url,
+                                "section_path": section_path,  # Hierarchical section info
+                                "tables": tables_metadata,  # Structured table data for direct extraction
+                                "table_count": len(page_tables),
+                                "paragraph_count": len(page_paragraphs),
+                            },
+                        )
+                        documents.append(doc)
+
+                logger.info(
+                    f"✅ Extracted {len(result.pages)} pages from {url[:50]}... "
+                    f"({len(result.paragraphs or [])} paragraphs, "
+                    f"{len(result.tables or [])} tables)"
+                )
+                
+                return (url, documents, None)
+
+            except Exception as e:
+                error_msg = f"Failed to analyze {url}: {e}"
+                logger.error(error_msg)
+                return (url, [], error_msg)
+
+    async def extract_documents(
+        self, 
+        group_id: str, 
+        input_items: List[Union[str, Dict[str, Any]]],
+        fail_fast: bool = False,
+        *,
+        model_strategy: str = "auto",  # 'auto' | 'layout' | 'invoice' | 'receipt'
+    ) -> List[Document]:
+        """
+        Extract structured Documents from files using Azure Document Intelligence.
+        
+        **Supports batch processing of multiple documents in parallel!**
+
+        Args:
+            group_id: Tenant ID for multi-tenancy
+            input_items: List of URLs, dicts with {url}, or raw text strings
+            fail_fast: If True, raise on first error. If False (default), continue and log errors.
+
+        Returns:
+            List of LlamaIndex Documents with layout-aware metadata:
+            - text: Markdown with proper headings and tables
+            - metadata: {
+                page_number, 
+                section_path, 
+                tables, 
+                bounding_regions,
+                group_id
+              }
+        """
+        logger.info(f"🔍 Document Intelligence extract_documents called with {len(input_items)} items for group '{group_id}'")
+        logger.info(f"   Items: {[str(item)[:100] for item in input_items]}")
+        
+        # Separate URLs from raw text
+        urls: List[str] = []
+        passthrough_texts: List[str] = []
+        # Optional per-item override: map URL->explicit model
+        per_item_model: Dict[str, str] = {}
+
+        for item in input_items:
+            if isinstance(item, dict):
+                if "text" in item:
+                    passthrough_texts.append(item["text"])
+                elif "url" in item:
+                    url = item["url"]
+                    urls.append(url)
+                    # Allow per-item explicit override via 'di_model' or 'doc_type'
+                    model = item.get("di_model") or None
+                    doc_type = (item.get("doc_type") or "").lower()
+                    if not model and doc_type:
+                        if doc_type in ("invoice", "ap-invoice"):
+                            model = "prebuilt-invoice"
+                        elif doc_type in ("receipt", "sales-receipt"):
+                            model = "prebuilt-receipt"
+                    if model:
+                        per_item_model[url] = model
+                else:
+                    raise ValueError("Dict must have 'text' or 'url'")
+            elif isinstance(item, str):
+                if item.startswith(("http://", "https://")):
+                    urls.append(item)
+                else:
+                    passthrough_texts.append(item)
+            else:
+                raise ValueError("Unsupported item type")
+
+        logger.info(f"   Parsed: {len(urls)} URLs, {len(passthrough_texts)} passthrough texts")
+        
+        documents: List[Document] = []
+
+        # Add passthrough texts as simple Documents
+        for text in passthrough_texts:
+            documents.append(
+                Document(
+                    text=text, 
+                    metadata={"group_id": group_id, "source": "passthrough"}
+                )
+            )
+
+        # Process URLs via Document Intelligence Batch API
+        if urls:
+            logger.info(f"📦 Batch processing {len(urls)} documents with 600s timeout")
+            
+            async with self._create_client() as client:
+                # Resolve default model from strategy
+                if model_strategy == "layout":
+                    default_model = "prebuilt-layout"
+                elif model_strategy == "invoice":
+                    default_model = "prebuilt-invoice"
+                elif model_strategy == "receipt":
+                    default_model = "prebuilt-receipt"
+                else:
+                    default_model = "prebuilt-layout"  # auto with layout fallback
+
+                # Create parallel tasks for all documents
+                tasks = []
+                for url in urls:
+                    tasks.append(
+                        self._analyze_single_document(
+                            client,
+                            url,
+                            group_id,
+                            default_model=default_model,
+                            explicit_model=per_item_model.get(url),
+                        )
+                    )
+                
+                # Run all in parallel with batch timeout
+                # Each document has 60s timeout internally; batch timeout should be generous
+                # for parallel processing (e.g., 5 docs @ 60s each = max 60s if truly parallel,
+                # but allow much longer for queueing/throttling in production)
+                try:
+                    results = await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True),
+                        timeout=600  # 600s (10min) for entire batch to handle throttling
+                    )
+                except asyncio.TimeoutError:
+                    logger.error("❌ Batch timeout after 600s")
+                    if fail_fast:
+                        raise RuntimeError("Batch processing timeout after 10 minutes")
+                    return documents
+                
+                # Process results
+                errors: List[str] = []
+                for raw_result in results:
+                    if isinstance(raw_result, Exception):
+                        errors.append(str(raw_result))
+                        if fail_fast:
+                            raise RuntimeError(f"Batch processing failed: {raw_result}")
+                        continue
+                    
+                    # Type narrowing: raw_result is now Tuple[str, List[Document], Optional[str]]
+                    url, docs, error = raw_result  # type: ignore
+                    if error:
+                        errors.append(error)
+                        if fail_fast:
+                            raise RuntimeError(error)
+                    else:
+                        documents.extend(docs)
+                
+                # Log summary
+                success_count = len(urls) - len(errors)
+                if errors:
+                    logger.warning(
+                        f"⚠️ Batch completed with {len(errors)} errors: "
+                        f"{success_count}/{len(urls)} documents processed successfully"
+                    )
+                    for err in errors[:5]:  # Log first 5 errors
+                        logger.warning(f"   - {err[:100]}")
+                else:
+                    logger.info(f"✅ Batch completed: {success_count}/{len(urls)} documents processed")
+
+        logger.info(f"📄 Total extracted: {len(documents)} document pages for group {group_id}")
+        return documents

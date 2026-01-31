@@ -15,12 +15,12 @@ This document tracks the implementation of Phase 2: Fullstack Restructure with R
 
 | Phase | Tasks | Completed | In Progress | Not Started |
 |-------|-------|-----------|-------------|-------------|
-| **Phase 1** | 5 tasks | 2 | 0 | 3 |
-| **Phase 2** | 5 tasks | 0 | 0 | 5 |
+| **Phase 1** | 7 tasks | 6 | 1 | 0 |
+| **Phase 2** | 5 tasks | 3 | 0 | 2 |
 | **Phase 3** | 3 tasks | 0 | 0 | 3 |
-| **Total** | 13 tasks | 2 | 0 | 11 |
+| **Total** | 15 tasks | 9 | 1 | 5 |
 
-**Overall Progress:** 15% (2/13 tasks)
+**Overall Progress:** 60% (9/15 tasks complete, 1 in progress)
 
 ---
 
@@ -63,206 +63,201 @@ This document tracks the implementation of Phase 2: Fullstack Restructure with R
 **Files Modified:**
 - `graphrag-orchestration/requirements.txt`
 
+---
+
+### Task 1c: Remove Azure Search from Infra
+**Status:** ✅ Complete  
+**Commit:** `bc42268`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Removed `azureSearchEndpoint` parameter from `infra/main.bicep`
+- Removed `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_INDEX_NAME`, `VECTOR_STORE_TYPE` environment variables
+- Removed Azure Search role assignment from `infra/core/security/role-assignments.bicep`
+
+**Files Modified:**
+- `infra/main.bicep`
+- `infra/core/security/role-assignments.bicep`
+
+---
+
+### Task 1d: Add Cosmos DB to Infra
+**Status:** ✅ Complete  
+**Commit:** `a9ebeb0`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `infra/core/database/cosmos-db.bicep` module
+- Provisioned serverless Cosmos DB account
+- Created `chat_history` container (partition: `/user_id`, TTL: 90 days)
+- Created `usage` container (partition: `/partition_id`, TTL: 90 days)
+- Added Cosmos DB connection to Container App environment
+- Added role assignments for Container App managed identity
+
+**Files Modified:**
+- `infra/core/database/cosmos-db.bicep` (new)
+- `infra/main.bicep`
+- `infra/core/security/role-assignments.bicep`
+
+---
+
+### Task 1e: Add Redis to Infra
+**Status:** ✅ Complete  
+**Commit:** `ef6a6f8`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `infra/core/cache/redis.bicep` module
+- Provisioned Azure Cache for Redis (Basic C0)
+- Added Redis connection to Container App environment
+- Configured for async job queue
+
+**Files Modified:**
+- `infra/core/cache/redis.bicep` (new)
+- `infra/main.bicep`
+
+---
+
+### Task 1f: Expand src/core/ Module
+**Status:** ✅ Complete  
+**Commit:** `5349360`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `src/core/models/` with usage.py, chat.py, folder.py
+- Created `src/core/services/` with cosmos_client.py
+- Created `src/core/logging/structured.py`
+
+**Files Created:**
+- `src/core/models/__init__.py`
+- `src/core/models/usage.py`
+- `src/core/models/chat.py`
+- `src/core/models/folder.py`
+- `src/core/services/__init__.py`
+- `src/core/services/cosmos_client.py`
+- `src/core/logging/__init__.py`
+- `src/core/logging/structured.py`
+
+---
+
+### Task 1g: Create UsageTracker Service
+**Status:** ✅ Complete  
+**Commit:** `5349360`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `UsageTracker` service with fire-and-forget pattern
+- Batch write support for Cosmos DB
+- Background task integration with FastAPI
+
+**Files Created:**
+- `src/core/services/usage_tracker.py`
+
 **Remaining Work:**
-- Remove Azure Search from infra/main.bicep
-- Remove Azure Search from infra/core/security/role-assignments.bicep
+- 🔄 Add instrumentation hooks to LLM/embedding calls (in progress)
+
+---
+
+### Task 2b: Runtime Config Endpoint
+**Status:** ✅ Complete  
+**Commit:** `c8e4de4`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `/config` endpoint returning authType, clientId, features
+- Supports both B2B and B2C configuration
+- Enables single frontend build for multiple deployments
+
+**Files Created:**
+- `src/api_gateway/routers/config.py`
+
+**Files Modified:**
+- `src/api_gateway/main.py`
+- `src/api_gateway/routers/__init__.py`
+
+---
+
+### Task 2d: JWT Validation Middleware
+**Status:** ✅ Complete  
+**Commit:** `942ba18`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `JWTAuthMiddleware` for Azure Easy Auth integration
+- Validates X-MS-TOKEN-AAD-ID-TOKEN and Authorization headers
+- Extracts tenant claims: groups[0] (B2B) or oid (B2C)
+- Added python-jose dependency for JWT decoding
+- Backward compatible with X-Group-ID header
+
+**Files Created:**
+- `src/api_gateway/middleware/auth.py`
+- `src/api_gateway/middleware/__init__.py`
+
+**Files Modified:**
+- `src/api_gateway/main.py`
+- `src/core/config.py` (AUTH_TYPE, REQUIRE_AUTH settings)
+- `graphrag-orchestration/requirements.txt`
+
+---
+
+### Task 2e: Folder Schema + CRUD Endpoints
+**Status:** ✅ Complete  
+**Commit:** `59e690e`  
+**Date:** January 31, 2026
+
+**Changes:**
+- Created `/folders` router with full CRUD operations
+- Hierarchical folder support (max depth: 2)
+- Neo4j SUBFOLDER_OF relationships
+- Document-folder linking via IN_FOLDER
+- Created schema initialization script
+
+**Files Created:**
+- `src/api_gateway/routers/folders.py`
+- `scripts/init_folder_schema.py`
+
+**Files Modified:**
+- `src/api_gateway/main.py`
+- `src/api_gateway/routers/__init__.py`
 
 ---
 
 ## In Progress Tasks 🔄
 
-None currently.
+### Task 1d (partial): Add LLM/Embedding Instrumentation Hooks
+**Status:** 🔄 In Progress  
+**Effort:** 1 day
+
+**Completed:**
+- ✅ UsageTracker service created
+- ✅ Cosmos DB usage container provisioned
+- ✅ Fire-and-forget pattern implemented
+
+**Remaining:**
+- 🔲 Hook into LLM service calls (token counting)
+- 🔲 Hook into embedding service calls
+- 🔲 Automatic usage logging on every LLM/embedding call
+
+**Files to Modify:**
+- `src/worker/services/llm_service.py`
+- `src/worker/services/graph_service.py` (embedding calls)
 
 ---
 
 ## Not Started Tasks ⏳
 
-### Task 1c: Remove Azure Search from Infra
+### Task 2a: Git Subtree Frontend from azure-search-openai-demo
 **Status:** ⏳ Not Started  
 **Effort:** 0.5 day
 
 **Required Changes:**
-- Remove `azureSearchEndpoint` parameter from `infra/main.bicep`
-- Remove `AZURE_SEARCH_ENDPOINT` environment variable
-- Remove `AZURE_SEARCH_INDEX_NAME` environment variable
-- Remove `VECTOR_STORE_TYPE=azure_search` environment variable
-- Remove `azureSearchName` parameter from `infra/core/security/role-assignments.bicep`
-- Remove Azure Search role assignment
-- Remove Azure Search service reference
-
-**Files to Modify:**
-- `infra/main.bicep` (lines 28, 130-139)
-- `infra/core/security/role-assignments.bicep` (lines 6, 28-30, 77-80)
+- Clone azure-search-openai-demo frontend
+- Adapt API contract to match our endpoints
+- Update environment configuration
 
 ---
 
-### Task 1d: Add Cosmos DB to Infra
-**Status:** ⏳ Not Started  
-**Effort:** 1 day
-
-**Required Changes:**
-- Create `infra/core/database/cosmos-db.bicep` module
-- Add Cosmos DB account (serverless)
-- Add `chat_history` container (partition key: `/user_id`, TTL: 90 days)
-- Add `usage` container (partition key: `/partition_id`, TTL: 90 days)
-- Add Cosmos DB connection string to Container App environment
-- Add role assignment for Container App managed identity
-
-**Environment Variables:**
-```
-COSMOS_DB_ENDPOINT=https://<account>.documents.azure.com
-COSMOS_DB_DATABASE_NAME=graphrag
-```
-
----
-
-### Task 1e: Add Redis to Infra
-**Status:** ⏳ Not Started  
-**Effort:** 1 day
-
-**Required Changes:**
-- Create `infra/core/cache/redis.bicep` module
-- Provision Azure Cache for Redis (Basic C0 tier)
-- Add Redis connection string to Container App environment
-- Configure Redis for async job queue
-
-**Environment Variables:**
-```
-REDIS_CONNECTION_STRING=<redis-connection>
-REDIS_QUEUE_NAME=graphrag_jobs
-```
-
----
-
-### Task 1f: Expand src/core/ Module
-**Status:** ⏳ Not Started  
-**Effort:** 1 day
-
-**Required Structure:**
-```
-src/core/
-├── __init__.py
-├── config.py              # ✅ Exists
-├── models/
-│   ├── __init__.py
-│   ├── usage.py          # UsageRecord, UsageType
-│   ├── chat.py           # ChatSession, ChatMessage
-│   └── folder.py         # Folder
-├── services/
-│   ├── __init__.py
-│   ├── usage_tracker.py  # UsageTracker
-│   └── cosmos_client.py  # CosmosDBClient
-└── logging/
-    ├── __init__.py
-    └── structured.py     # Structured logging setup
-```
-
----
-
-### Task 1g: Create UsageTracker Service
-**Status:** ⏳ Not Started  
-**Effort:** 2 days
-
-**Implementation:**
-- Fire-and-forget pattern using FastAPI `BackgroundTasks`
-- Batch writes to Cosmos DB (configurable interval)
-- Fallback to structlog if Cosmos unavailable
-- Support for LLM, embedding, and Document Intelligence usage types
-
-**Files to Create:**
-- `src/core/services/usage_tracker.py`
-- `src/core/models/usage.py`
-
----
-
-### Task 1h: Instrument LLM Calls
-**Status:** ⏳ Not Started  
-**Effort:** 1 day
-
-**Required Changes:**
-- Wrap `llm.acomplete()` in `src/worker/services/llm_service.py`
-- Extract `prompt_tokens`, `completion_tokens` from response
-- Call `usage_tracker.log_usage()` with fire-and-forget pattern
-
----
-
-### Task 1i: Instrument Embedding Calls
-**Status:** ⏳ Not Started  
-**Effort:** 1 day
-
-**Required Changes:**
-- Add tiktoken counting for OpenAI embeddings
-- Extract `total_tokens` from Voyage API response
-- Call `usage_tracker.log_usage()` for all embedding operations
-
-**Files to Modify:**
-- `src/worker/services/embedding_service.py`
-- `src/worker/hybrid_v2/embeddings/voyage_embed.py`
-
----
-
-### Task 2a: Add Runtime Config Endpoint
-**Status:** ⏳ Not Started  
-**Effort:** 0.5 day
-
-**Implementation:**
-```python
-@router.get("/config")
-async def get_config():
-    return {
-        "authType": os.getenv("AUTH_TYPE", "B2B"),
-        "clientId": os.getenv("CLIENT_ID"),
-        "authority": os.getenv("AUTHORITY"),
-        "features": {
-            "showAdminPanel": os.getenv("AUTH_TYPE") == "B2B",
-            "showFolders": True
-        }
-    }
-```
-
-**Files to Create:**
-- `src/api_gateway/routers/config.py`
-
----
-
-### Task 2b: Create Folder Schema
-**Status:** ⏳ Not Started  
-**Effort:** 2 days
-
-**Neo4j Schema:**
-```cypher
-CREATE CONSTRAINT folder_id IF NOT EXISTS FOR (f:Folder) REQUIRE f.id IS UNIQUE;
-CREATE INDEX folder_partition IF NOT EXISTS FOR (f:Folder) ON (f.group_id);
-(:Folder)-[:SUBFOLDER_OF]->(:Folder)
-(:Document)-[:IN_FOLDER]->(:Folder)
-```
-
-**API Endpoints:**
-- `POST /folders` - Create folder
-- `GET /folders` - List folders
-- `GET /folders/{id}` - Get folder details
-- `PUT /folders/{id}` - Update folder
-- `DELETE /folders/{id}` - Delete folder (cascade)
-
-**Files to Create:**
-- `src/api_gateway/routers/folders.py`
-- `src/core/models/folder.py`
-
----
-
-### Task 2c: Add JWT Validation Middleware
-**Status:** ⏳ Not Started  
-**Effort:** 1 day
-
-**Implementation:**
-- Validate JWT tokens from Easy Auth headers
-- Extract `group_id` from `groups[0]` (B2B) or `user_id` from `oid` (B2C)
-- Replace current `X-Group-ID` header trust with token-based claims
-- Add to `src/api_gateway/middleware/auth.py`
-
----
-
-### Task 2d: Create Chat Compatibility Router
+### Task 2c: Chat Compatibility Router
 **Status:** ⏳ Not Started  
 **Effort:** 2 days
 
@@ -274,6 +269,78 @@ CREATE INDEX folder_partition IF NOT EXISTS FOR (f:Folder) ON (f.group_id);
 
 **Files to Create:**
 - `src/api_gateway/routers/chat_compat.py`
+
+---
+
+### Task 3a: Split API/Worker Containers in Bicep
+**Status:** ⏳ Not Started  
+**Effort:** 1 day
+
+**Required Changes:**
+- Create separate Container Apps for API Gateway and Worker
+- API Gateway: FastAPI (routers only)
+- Worker: Background job processor (Redis consumer)
+- Update infra/main.bicep with dual container deployment
+
+---
+
+### Task 3b: Easy Auth Configuration (B2B + B2C)
+**Status:** ⏳ Not Started  
+**Effort:** 1 day
+
+**Required Changes:**
+- Configure Easy Auth on API Gateway Container App
+- B2B: Azure AD with group claims
+- B2C: Azure AD B2C with oid claims
+- Update infra templates with Easy Auth settings
+
+---
+
+### Task 3c: Dashboard UI (admin + user)
+**Status:** ⏳ Not Started  
+**Effort:** 3-5 days
+
+**Required Changes:**
+- Admin panel for usage monitoring
+- User panel for folder management
+- Integration with /config endpoint
+- JWT authentication flow
+
+---
+
+## Summary
+
+**Completed (9/15):**
+- ✅ Route 1 removed
+- ✅ Azure AI Search removed from dependencies
+- ✅ Azure Search removed from infrastructure
+- ✅ Cosmos DB provisioned
+- ✅ Redis provisioned
+- ✅ Core module structure expanded
+- ✅ UsageTracker service created
+- ✅ Runtime config endpoint
+- ✅ JWT validation middleware
+- ✅ Folder schema + CRUD endpoints
+
+**In Progress (1/15):**
+- 🔄 LLM/embedding instrumentation hooks
+
+**Not Started (5/15):**
+- ⏳ Git subtree frontend
+- ⏳ Chat compatibility router
+- ⏳ Split API/Worker containers
+- ⏳ Easy Auth configuration
+- ⏳ Dashboard UI
+
+---
+
+## Next Steps
+
+1. **Complete instrumentation** - Add usage tracking to LLM/embedding calls
+2. **Chat compatibility** - Create `/chat` router for frontend integration
+3. **Frontend integration** - Git subtree azure-search-openai-demo
+4. **Container split** - Separate API/Worker for scalability
+5. **Production hardening** - Enable Easy Auth, deploy and test
 
 ---
 

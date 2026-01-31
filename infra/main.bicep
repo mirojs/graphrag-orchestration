@@ -24,9 +24,6 @@ param voyageApiKey string = ''
 @description('Azure Document Intelligence Endpoint')
 param azureDocumentIntelligenceEndpoint string = 'https://doc-intel-graphrag.cognitiveservices.azure.com/'
 
-@description('Azure AI Search Endpoint')
-param azureSearchEndpoint string = 'https://graphrag-search.search.windows.net'
-
 // Tags for all resources
 var tags = {
   azd_env_name: environmentName
@@ -125,18 +122,6 @@ module graphragApp './core/host/container-app.bicep' = {
       {
         name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
         value: azureDocumentIntelligenceEndpoint
-      }
-      {
-        name: 'AZURE_SEARCH_ENDPOINT'
-        value: azureSearchEndpoint
-      }
-      {
-        name: 'AZURE_SEARCH_INDEX_NAME'
-        value: 'graphrag-raptor'
-      }
-      {
-        name: 'VECTOR_STORE_TYPE'
-        value: 'azure_search'
       }
       {
         name: 'NEO4J_URI'
@@ -242,7 +227,6 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     containerRegistryName: containerRegistry.name
     containerAppPrincipalId: graphragApp.outputs.identityPrincipalId
     azureOpenAiName: 'graphrag-openai-8476'
-    azureSearchName: 'graphrag-search'
   }
   dependsOn: [openAiModels] // Ensure models exist before assigning permissions
 }

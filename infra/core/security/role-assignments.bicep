@@ -3,7 +3,6 @@ param storageAccountName string
 param containerRegistryName string
 param containerAppPrincipalId string
 param azureOpenAiName string
-param azureSearchName string
 
 // Reference existing Document Intelligence resource
 resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
@@ -23,11 +22,6 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
 // Reference Azure OpenAI resource
 resource azureOpenAi 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
   name: azureOpenAiName
-}
-
-// Reference Azure AI Search service
-resource azureSearch 'Microsoft.Search/searchServices@2023-11-01' existing = {
-  name: azureSearchName
 }
 
 // Cognitive Services User role on Document Intelligence
@@ -75,12 +69,3 @@ resource azureOpenAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01
 }
 
 // Azure Search Index Data Contributor role on Azure AI Search
-resource azureSearchContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(azureSearch.id, containerAppPrincipalId, 'searchIndexContributor-v2')
-  scope: azureSearch
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '8ebe5a00-799e-43f5-93ac-243d3dce84a7')
-    principalId: containerAppPrincipalId
-    principalType: 'ServicePrincipal'
-  }
-}

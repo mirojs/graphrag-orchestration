@@ -10,19 +10,17 @@ param environmentName string
 param location string
 
 // CRITICAL: Ensure we never accidentally deploy hello-world images
+// azd generates parameter names as: service<ServiceName>ImageName
+// where ServiceName is PascalCase version of service name
 @description('API Gateway container image - handles HTTP requests')
 param serviceGraphragApiImageName string = ''
 
 @description('Worker container image - processes background jobs')
 param serviceGraphragWorkerImageName string = ''
 
-// Legacy parameter for backwards compatibility during transition
-@description('DEPRECATED: Use serviceGraphragApiImageName instead')
-param serviceGraphragImageName string = ''
-
-// Resolve image names - prefer new params, fallback to legacy
-var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : serviceGraphragImageName
-var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : serviceGraphragImageName
+// Resolve image names with explicit fallback to ensure correct images
+var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : 'graphrag-api-default:latest'
+var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : 'graphrag-worker-default:latest'
 
 @secure()
 @description('Neo4j Password')

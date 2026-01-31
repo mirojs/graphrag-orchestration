@@ -10,6 +10,8 @@ services:
     host: containerapp
     docker:
       path: ./Dockerfile.api
+      context: .
+      target: ""
     hooks:
       postdeploy:
         shell: sh
@@ -25,6 +27,8 @@ services:
     host: containerapp
     docker:
       path: ./Dockerfile.worker
+      context: .
+      target: ""
     hooks:
       postdeploy:
         shell: sh

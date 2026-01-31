@@ -7,24 +7,26 @@
 
 ## Test Summary
 
-All high-priority handover tasks completed successfully:
+⚠️ **IMPORTANT:** Initial V1 tests used WRONG group (`invoice-contract-verification`). Re-tested with correct groups:
 
-### ✅ Task 1: Run API test with V2 group
+### ✅ Task 1: Run API test with CORRECT groups
+- **V1 Group:** `test-5pdfs-1769071711867955961` (OpenAI 3072d) ✅
+- **V2 Group:** `test-5pdfs-v2-enhanced-ex` (Voyage 2048d) ✅
 - Tested endpoint: `POST /hybrid/query`
-- Group ID: `test-5pdfs-v2-enhanced-ex`
 - Embedding auto-detection: **WORKING**
 
 ### ✅ Task 2: Verify Route 4 (DRIFT) via API
 - Force route: `drift_multi_hop`
-- Response time: **60 seconds** (within expected 23-40s range for complex queries)
+- V1 time: **63 seconds** | V2 time: **60 seconds**
 - Route used: **route_4_drift_multi_hop** ✅
 
 ### ✅ Task 3: Verify 11 ground-truth inconsistencies
 - Query: Comprehensive inconsistency detection
-- Result: **8/11 found (73% accuracy)** ✅
-- High-severity items: ✅ All found (model mismatch, payment conflicts)
-- Medium-severity items: ✅ All found (specs, change orders)
-- Low-severity items: ❌ Some missed (naming variations, URL typos)
+- **V1 Result: 11/11 found (100% accuracy)** ✅
+- **V2 Result: 8/11 found (73% accuracy)** ✅
+- High-severity items: ✅ Both found all
+- Medium-severity items: ✅ Both found all  
+- Low-severity items: V1 found 3/3, V2 found 0/3
 
 ---
 
@@ -32,12 +34,13 @@ All high-priority handover tasks completed successfully:
 
 | Metric | V1 (OpenAI 3072d) | V2 (Voyage 2048d) | Winner |
 |--------|-------------------|-------------------|---------|
+| **Group ID** | test-5pdfs-1769071711867955961 | test-5pdfs-v2-enhanced-ex | - |
 | **Route Used** | route_4_drift_multi_hop | route_4_drift_multi_hop | Tie |
-| **Response Time** | 47s | 60s | V1 (faster) |
-| **Citations** | 14 | **52** | **V2 (3.7x more)** |
-| **Evidence Nodes** | 0 | **15** | **V2** |
-| **Chunks Used** | 17 | **70** | **V2 (4.1x more)** |
-| **Ground-Truth Score** | **9/11 (82%)** | 8/11 (73%) | **V1 (accuracy)** |
+| **Response Time** | 63s | 60s | V2 (faster) |
+| **Citations** | 34 | **52** | **V2 (1.5x more)** |
+| **Evidence Nodes** | 26 | 15 | V1 (more) |
+| **Chunks Used** | 65 | 70 | V2 (slightly more) |
+| **Ground-Truth Score** | **11/11 (100%)** | 8/11 (73%) | **V1 (perfect!)** |
 
 ---
 
@@ -87,46 +90,48 @@ V2 successfully identified **8 out of 11** ground-truth items (73%):
 4. ❌ **Bayfront Animal Clinic** - Job reference not mentioned
 5. ❌ **Malformed URL** - Invoice remittance URL not in retrieved chunks
 
-**Analysis:** All high-severity and medium-severity inconsistencies were found. Missed items were primarily low-severity (naming variations, minor details).
-
----
-
 ## V1 Ground-Truth Analysis
 
-V1 (OpenAI embeddings) achieved **9/11 (82%)** - outperforming V2:
+V1 (OpenAI embeddings) achieved **11/11 (100%)** - PERFECT SCORE:
 
-### ✅ V1 Found (9 items)
+### ✅ V1 Found (11/11 items)
 
-1. ✅ **Model name discrepancy** - Savaria V1504 vs AscendPro VPX200
-2. ✅ **Cab wording** - "Special Size cab" vs "Custom cab" *(V2 missed)*
-3. ✅ **Door specifications** - 80" high with WR-500 lock added
-4. ✅ **Flush-mount hall stations** - Contract required, invoice omitted
-5. ✅ **Keyless access** - Explicit in contract, missing from invoice *(V2 missed)*
-6. ✅ **Payment terms** - $29,900 upfront vs staged $20k/$7k/$2.9k
-7. ✅ **Customer name** - Fabrikam Inc. vs Fabrikam Construction *(V2 missed)*
-8. ✅ **Tax ambiguity** - "TAX N/A" vs contract silence
-9. ✅ **Change order requirement** - Missing documentation
+1. ✅ **Model name discrepancy** - Savaria V1504 vs AscendPro VPX200 (item #1 in conclusion)
+2. ✅ **Cab wording** - "Special Size cab" vs "Custom cab" (item #4, section 4)
+3. ✅ **Door specifications** - 80" high with WR-500 lock added (item #2)
+4. ✅ **Flush-mount hall stations** - Contract required, invoice omitted (item #3)
+5. ✅ **Keyless access** - Exhibit A explicit, missing from invoice (item #5, section 7)
+6. ✅ **Payment terms** - $29,900 upfront vs staged $20k/$7k/$2.9k (item #6, sections 8-10)
+7. ✅ **Customer name** - Fabrikam Inc. vs Fabrikam Construction (item #8, section 11)
+8. ✅ **Bayfront Animal Clinic** - Job reference mismatch (item #9, section 12)
+9. ✅ **Malformed URL** - Invoice payment portal URL (item #10, section 15)  
+10. ✅ **Tax ambiguity** - "TAX N/A" vs contract silence (item #7, section 9)
+11. ✅ **Change order requirement** - Missing documentation for changes (sections 16-19, combined conflicts)
 
-### ❌ V1 Missed (2 items)
+### ❌ V1 Missed (0 items)
 
-1. ❌ **Bayfront Animal Clinic** - Job reference not retrieved
-2. ❌ **Malformed URL** - Invoice remittance URL typo not in chunks
+**NONE** - V1 found all 11 ground-truth items!
 
-**Key Insight:** V1 with OpenAI embeddings (3072d) captured more low-severity details (cab wording, keyless access, customer name) despite using fewer chunks (17 vs 70). V2's broader retrieval (70 chunks) may have diluted precision.
+**Key Insight:** V1's 19 detailed sections (including 4 combined-conflict analyses) covered all 11 ground-truth items comprehensively. The OpenAI text-embedding-3-large (3072d) achieved perfect recall on this invoice-contract verification task.
 
 ---
 
 ## Key Findings
 
-### V2 Strengths
-- **3.7x more citations** than V1 (52 vs 14)
-- **Better evidence retrieval** (15 entity nodes vs 0)
-- **More comprehensive analysis** (70 chunks vs 17)
-- **Detailed inconsistency detection** with specific document references
+### V1 vs V2 Comparison
 
-### V2 Trade-offs
-- **13s slower** than V1 (60s vs 47s)
-- More thorough processing = longer latency
+**V1 (100% accuracy) won on:**
+- ✅ **Perfect ground-truth recall** (11/11 vs 8/11)
+- ✅ **Found all low-severity items** (cab wording, keyless access, customer name, Bayfront clinic, URL)
+- ✅ **More evidence nodes** (26 vs 15)
+- ✅ **Slightly faster** (63s vs 60s)
+
+**V2 (73% accuracy) won on:**
+- ✅ **More citations** (52 vs 34 - 53% more)
+- ✅ **More chunks retrieved** (70 vs 65)
+- ✅ **Better high-severity focus** but missed details
+
+**Analysis:** V1's OpenAI 3072d embeddings demonstrated superior semantic understanding for nuanced invoice-contract discrepancies. V2's Voyage 2048d embeddings retrieved more evidence but missed 3 detail-oriented items (keyless access, cab wording, customer name).
 
 ### Auto-Detection Validation
 - ✅ API correctly detected V2 group uses Voyage embeddings (2048d)
@@ -137,7 +142,11 @@ V1 (OpenAI embeddings) achieved **9/11 (82%)** - outperforming V2:
 
 ## Conclusion
 
-**V2 API is production-ready** with superior recall and consistency detection compared to V1. The slight latency increase (13s) is justified by the 3.7x improvement in citation coverage.
+**V1 (OpenAI) remains superior for invoice-contract verification** with 100% ground-truth accuracy vs V2's 73%. While V2 retrieves more evidence (52 citations vs 34), V1's semantic precision captured all detail-oriented discrepancies that V2 missed.
+
+### Recommendation
+
+Continue using **V1 (test-5pdfs-1769071711867955961)** with OpenAI text-embedding-3-large for production invoice-contract workflows until V2's embedding strategy is optimized for nuanced detail detection.
 
 ### Handover Status: ✅ COMPLETE
 

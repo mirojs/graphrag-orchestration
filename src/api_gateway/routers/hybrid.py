@@ -307,7 +307,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
     
     Use `force_route` to override the automatic decision.
     """
-    group_id = request.state.group_id
+    group_id = request.state.group_id or "default"
     
     logger.info("hybrid_query_received",
                group_id=group_id,
@@ -374,7 +374,7 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
     
     Recommended for: forensic accounting, legal discovery, compliance audits.
     """
-    group_id = request.state.group_id
+    group_id = request.state.group_id or "default"
     
     logger.info("audit_query_received",
                group_id=group_id,
@@ -428,7 +428,7 @@ async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
     
     Note: Will fall back to Route 2 if Vector RAG is unavailable.
     """
-    group_id = request.state.group_id
+    group_id = request.state.group_id or "default"
     
     logger.info("fast_query_received",
                group_id=group_id,
@@ -474,7 +474,7 @@ async def hybrid_query_drift(request: Request, body: HybridQueryRequest):
     - "What regulatory implications exist?" (no specific entity)
     - "How do ESG factors affect valuations?" (needs decomposition)
     """
-    group_id = request.state.group_id
+    group_id = request.state.group_id or "default"
     
     logger.info("drift_query_received",
                group_id=group_id,

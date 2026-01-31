@@ -3,16 +3,32 @@ metadata:
   template: graphrag-orchestration@1.0
 
 services:
-  graphrag:
+  # API Gateway - handles HTTP requests, chat endpoints, folder management
+  graphrag-api:
     project: .
     language: python
     host: containerapp
+    docker:
+      path: ./Dockerfile.api
     hooks:
       postdeploy:
         shell: sh
         run: |
-          echo "Cleaning up GraphRAG Docker images to free space..."
-          # Remove images matching the project name
-          docker images --format '{{.Repository}}:{{.Tag}}' | grep 'graphrag-orchestration' | xargs -r docker rmi || true
-          # Prune any dangling images
+          echo "API Gateway deployed successfully"
+          # Prune dangling images
+          docker image prune -f || true
+
+  # Worker - processes background jobs from Redis queue
+  graphrag-worker:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.worker
+    hooks:
+      postdeploy:
+        shell: sh
+        run: |
+          echo "Worker deployed successfully"
+          # Prune dangling images
           docker image prune -f || true

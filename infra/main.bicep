@@ -10,8 +10,19 @@ param environmentName string
 param location string
 
 // CRITICAL: Ensure we never accidentally deploy hello-world images
-@description('MUST use drift-mini-optimized or later - NEVER use placeholder/hello-world images')
-param serviceGraphragImageName string
+@description('API Gateway container image - handles HTTP requests')
+param serviceGraphragApiImageName string = ''
+
+@description('Worker container image - processes background jobs')
+param serviceGraphragWorkerImageName string = ''
+
+// Legacy parameter for backwards compatibility during transition
+@description('DEPRECATED: Use serviceGraphragApiImageName instead')
+param serviceGraphragImageName string = ''
+
+// Resolve image names - prefer new params, fallback to legacy
+var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : serviceGraphragImageName
+var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : serviceGraphragImageName
 
 @secure()
 @description('Neo4j Password')
@@ -77,24 +88,27 @@ module redis './core/cache/redis.bicep' = {
   }
 }
 
-// GraphRAG Orchestration Container App
-module graphragApp './core/host/container-app.bicep' = {
-  name: 'graphrag-app'
+// GraphRAG API Gateway Container App
+module graphragApi './core/host/container-app.bicep' = {
+  name: 'graphrag-api'
   scope: rg
   params: {
-    name: 'graphrag-orchestration'
+    name: 'graphrag-api'
     location: location
     tags: union(tags, {
-      'azd-service-name': 'graphrag'
+      'azd-service-name': 'graphrag-api'
     })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
-    containerName: 'graphrag-orchestration'
-    // CRITICAL REQUIREMENT: Must use drift-mini-optimized or later
-    // NEVER allow placeholder hello-world images to sneak back in
-    containerImage: serviceGraphragImageName
+    containerName: 'graphrag-api'
+    // API Gateway image - handles HTTP requests
+    containerImage: apiImageName
     targetPort: 8000
     env: concat([
+      {
+        name: 'SERVICE_ROLE'
+        value: 'api'
+      }
       {
         name: 'AZURE_OPENAI_ENDPOINT'
         value: 'https://graphrag-openai-8476.openai.azure.com/'
@@ -268,6 +282,203 @@ module graphragApp './core/host/container-app.bicep' = {
   }
 }
 
+// Shared environment variables for both API and Worker
+var sharedEnvVars = [
+  {
+    name: 'AZURE_OPENAI_ENDPOINT'
+    value: 'https://graphrag-openai-8476.openai.azure.com/'
+  }
+  {
+    name: 'AZURE_OPENAI_EMBEDDING_ENDPOINT'
+    value: 'https://graphrag-openai-8476.openai.azure.com/'
+  }
+  {
+    name: 'AZURE_TENANT_ID'
+    value: subscription().tenantId
+  }
+  {
+    name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
+    value: 'gpt-5.1'
+  }
+  {
+    name: 'AZURE_OPENAI_ROUTING_DEPLOYMENT'
+    value: 'gpt-4o-mini'
+  }
+  {
+    name: 'AZURE_OPENAI_INDEXING_DEPLOYMENT'
+    value: 'gpt-4.1'
+  }
+  {
+    name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
+    value: 'text-embedding-3-large'
+  }
+  {
+    name: 'AZURE_OPENAI_EMBEDDING_DIMENSIONS'
+    value: '3072'
+  }
+  {
+    name: 'AZURE_OPENAI_API_VERSION'
+    value: '2024-10-21'
+  }
+  {
+    name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
+    value: azureDocumentIntelligenceEndpoint
+  }
+  {
+    name: 'NEO4J_URI'
+    value: 'neo4j+s://a86dcf63.databases.neo4j.io'
+  }
+  {
+    name: 'NEO4J_USERNAME'
+    value: 'neo4j'
+  }
+  {
+    name: 'NEO4J_PASSWORD'
+    secretRef: 'neo4j-password'
+  }
+  {
+    name: 'NEO4J_DATABASE'
+    value: 'neo4j'
+  }
+  {
+    name: 'COSMOS_DB_ENDPOINT'
+    value: cosmosDb.outputs.cosmosAccountEndpoint
+  }
+  {
+    name: 'COSMOS_DB_DATABASE_NAME'
+    value: cosmosDb.outputs.databaseName
+  }
+  {
+    name: 'COSMOS_DB_CHAT_HISTORY_CONTAINER'
+    value: cosmosDb.outputs.chatHistoryContainerName
+  }
+  {
+    name: 'COSMOS_DB_USAGE_CONTAINER'
+    value: cosmosDb.outputs.usageContainerName
+  }
+  {
+    name: 'REDIS_HOST'
+    value: redis.outputs.redisHostName
+  }
+  {
+    name: 'REDIS_PORT'
+    value: string(redis.outputs.redisSslPort)
+  }
+  {
+    name: 'REDIS_PASSWORD'
+    secretRef: 'redis-password'
+  }
+  {
+    name: 'REDIS_QUEUE_NAME'
+    value: 'graphrag_jobs'
+  }
+  {
+    name: 'ENABLE_GROUP_ISOLATION'
+    value: 'true'
+  }
+  {
+    name: 'VOYAGE_V2_ENABLED'
+    value: 'true'
+  }
+  {
+    name: 'VOYAGE_EMBEDDING_MODEL'
+    value: 'voyage-context-3'
+  }
+  {
+    name: 'VOYAGE_EMBEDDING_DIM'
+    value: '2048'
+  }
+]
+
+var sharedSecrets = concat([
+  {
+    name: 'neo4j-password'
+    value: neo4jPassword
+  }
+  {
+    name: 'redis-password'
+    value: redis.outputs.redisPrimaryKey
+  }
+], !empty(voyageApiKey) ? [
+  {
+    name: 'voyage-api-key'
+    value: voyageApiKey
+  }
+] : [])
+
+// GraphRAG Worker Container App (background job processing)
+module graphragWorker './core/host/container-app-worker.bicep' = {
+  name: 'graphrag-worker'
+  scope: rg
+  params: {
+    name: 'graphrag-worker'
+    location: location
+    tags: union(tags, {
+      'azd-service-name': 'graphrag-worker'
+    })
+    containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
+    containerRegistryName: containerRegistry.name
+    containerName: 'graphrag-worker'
+    containerImage: workerImageName
+    cpuCores: '1.0'
+    memory: '2Gi'
+    minReplicas: 1
+    maxReplicas: 5
+    env: concat([
+      {
+        name: 'SERVICE_ROLE'
+        value: 'worker'
+      }
+      {
+        name: 'AZURE_OPENAI_REASONING_EFFORT'
+        value: 'high'
+      }
+      {
+        name: 'AZURE_OPENAI_ROUTING_REASONING_EFFORT'
+        value: 'medium'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_SELECTION'
+        value: 'true'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_MAX_DEPTH'
+        value: '2'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET'
+        value: '30'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL'
+        value: '12'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD'
+        value: '25'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE'
+        value: '8'
+      }
+      {
+        name: 'V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY'
+        value: 'true'
+      }
+      {
+        name: 'USE_SECTION_CHUNKING'
+        value: '1'
+      }
+    ], sharedEnvVars, !empty(voyageApiKey) ? [
+      {
+        name: 'VOYAGE_API_KEY'
+        secretRef: 'voyage-api-key'
+      }
+    ] : [])
+    secrets: sharedSecrets
+  }
+}
+
 // Deploy Azure OpenAI Models (Lean Engine Architecture)
 module openAiModels './core/ai/openai-models.bicep' = {
   name: 'openai-models'
@@ -278,7 +489,7 @@ module openAiModels './core/ai/openai-models.bicep' = {
   }
 }
 
-// Role Assignments for Container App Managed Identity
+// Role Assignments for Container App Managed Identities (API + Worker)
 module roleAssignments './core/security/role-assignments.bicep' = {
   name: 'role-assignments'
   scope: rg
@@ -286,19 +497,23 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     documentIntelligenceName: 'doc-intel-graphrag'
     storageAccountName: 'neo4jstorage21224'
     containerRegistryName: containerRegistry.name
-    containerAppPrincipalId: graphragApp.outputs.identityPrincipalId
+    containerAppPrincipalIds: [
+      graphragApi.outputs.identityPrincipalId
+      graphragWorker.outputs.identityPrincipalId
+    ]
     azureOpenAiName: 'graphrag-openai-8476'
     cosmosAccountName: cosmosDb.outputs.cosmosAccountName
   }
-  dependsOn: [openAiModels, cosmosDb] // Ensure resources exist before assigning permissions
+  dependsOn: [openAiModels, cosmosDb, graphragApi, graphragWorker] // Ensure resources exist before assigning permissions
 }
 
 // Outputs
 output AZURE_LOCATION string = location
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = '${containerRegistry.name}.azurecr.io'
 output AZURE_CONTAINER_REGISTRY_NAME string = containerRegistry.name
-output GRAPHRAG_APP_URI string = graphragApp.outputs.uri
-output GRAPHRAG_APP_NAME string = graphragApp.outputs.name
+output GRAPHRAG_API_URI string = graphragApi.outputs.uri
+output GRAPHRAG_API_NAME string = graphragApi.outputs.name
+output GRAPHRAG_WORKER_NAME string = graphragWorker.outputs.name
 output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.cosmosAccountEndpoint
 output COSMOS_DB_DATABASE_NAME string = cosmosDb.outputs.databaseName
 output REDIS_HOST string = redis.outputs.redisHostName

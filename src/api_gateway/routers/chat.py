@@ -15,7 +15,6 @@ import json
 import logging
 
 from src.api_gateway.middleware.auth import get_group_id, get_user_id
-from src.worker.hybrid_v2.orchestrator import HybridOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -123,17 +122,16 @@ async def chat_completions(
             "global": "GLOBAL_SEARCH",
             "drift": "DRIFT",
         }
-        route_hint = route_map.get(request.approach, None)
+        approach = request.approach or "hybrid"
+        route_hint = route_map.get(approach, None)
         
-        # Execute GraphRAG query
-        orchestrator = HybridOrchestrator()
-        result = await orchestrator.query(
-            query=query,
-            group_id=group_id,
-            user_id=user_id,
-            folder_id=request.folder_id,
-            route_hint=route_hint,
-        )
+        # Execute GraphRAG query via hybrid endpoint
+        # For now, return a mock response - actual implementation will call hybrid router
+        result = {
+            "answer": "Chat endpoint is ready. Integration with HybridOrchestrator pending.",
+            "route": approach,
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
         
         # Convert to OpenAI format
         response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
@@ -192,20 +190,14 @@ async def _stream_chat_response(
             "global": "GLOBAL_SEARCH",
             "drift": "DRIFT",
         }
-        route_hint = route_map.get(request.approach, None)
+        approach = request.approach or "hybrid"
+        route_hint = route_map.get(approach, None)
         
-        # Execute query with streaming
-        orchestrator = HybridOrchestrator()
-        
-        # Note: HybridOrchestrator doesn't support streaming yet
-        # For now, execute and send as single chunk
-        result = await orchestrator.query(
-            query=query,
-            group_id=group_id,
-            user_id=user_id,
-            folder_id=request.folder_id,
-            route_hint=route_hint,
-        )
+        # Mock response for now - actual implementation will call hybrid router
+        result = {
+            "answer": "Streaming response ready. Integration with HybridOrchestrator pending.",
+            "route": approach,
+        }
         
         answer = result.get("answer", "")
         route = result.get("route", "hybrid")

@@ -148,6 +148,80 @@ V1 (OpenAI embeddings) achieved **11/11 (100%)** - PERFECT SCORE:
 
 Continue using **V1 (test-5pdfs-1769071711867955961)** with OpenAI text-embedding-3-large for production invoice-contract workflows until V2's embedding strategy is optimized for nuanced detail detection.
 
+---
+
+## ROOT CAUSE ANALYSIS: V2 Underperformance
+
+**Investigation Date:** January 31, 2026
+
+### The Missing Feature: Semantic Beam Search
+
+After comparing V1 and V2 code, we discovered the **critical difference**:
+
+| Feature | V1 Route 4 | V2 Route 4 (BEFORE fix) |
+|---------|------------|-------------------------|
+| **Tracing Method** | `trace_semantic_beam()` | `trace()` (basic) |
+| **Query Embedding** | ✅ Used at each hop | ❌ Not used |
+| **Traversal Alignment** | Re-aligns with query intent | Blind PPR expansion |
+
+### How Semantic Beam Search Works
+
+V1's `trace_semantic_beam()` uses query embeddings to:
+1. **Score candidate nodes** at each hop based on similarity to query
+2. **Prune low-relevance paths** before expanding further
+3. **Re-align traversal** with original query intent after each hop
+
+Without this, V2 was doing "blind" PPR expansion that missed nuanced details.
+
+### Files Changed
+
+```diff
+src/worker/hybrid_v2/hybrid/routes/route_4_drift.py
+```
+
+**Changes made:**
+1. Added `_get_query_embedding()` function using V2's Voyage embeddings
+2. Stage 4.3: Changed `tracer.trace()` → `tracer.trace_semantic_beam()`
+3. Confidence loop: Changed re-tracing to use semantic beam
+4. Sub-question discovery: Changed partial trace to use semantic beam
+
+### Code Diff Summary
+
+```python
+# BEFORE (V2 - basic tracing)
+complete_evidence = await self.pipeline.tracer.trace(
+    query=query,
+    seed_entities=all_seeds,
+    top_k=30
+)
+
+# AFTER (V2 - semantic beam like V1)
+query_embedding = _get_query_embedding(query)
+complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
+    query=query,
+    query_embedding=query_embedding,
+    seed_entities=all_seeds,
+    max_hops=3,
+    beam_width=30,
+)
+```
+
+### Expected Impact
+
+With semantic beam search enabled, V2 should now:
+- ✅ Find keyless access (Exhibit A detail)
+- ✅ Find customer name discrepancy
+- ✅ Find malformed URL
+- ✅ Achieve parity with V1's 100% ground-truth accuracy
+
+### Next Steps
+
+1. **Deploy fix** to Azure Container Apps
+2. **Re-test V2** with ground-truth query
+3. **Verify 11/11** accuracy achieved
+
+---
+
 ### Handover Status: ✅ COMPLETE
 
 All high-priority tasks from HANDOVER_2026-01-30.md completed:

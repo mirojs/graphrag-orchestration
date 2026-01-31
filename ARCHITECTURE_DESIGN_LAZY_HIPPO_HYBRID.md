@@ -1,6 +1,31 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 30, 2026
+**Last Updated:** January 31, 2026
+
+**Recent Updates (January 31, 2026):**
+- ✅ **Chunk Embeddings V2 Vector Index:** Added `chunk_embeddings_v2` index for V2 section-aware chunking
+  - **Purpose:** Enable vector search on V2 text chunks (Voyage 2048d embeddings) for Route 1 compatibility
+  - **Index Spec:** 2048 dimensions, cosine similarity, Neo4j Vector Search
+  - **Schema Addition:** `CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS FOR (t:TextChunk) ON (t.embedding_v2)`
+  - **Pipeline Integration:** Added to `neo4j_store.py` schema initialization (runs during group setup)
+  - **Status:** Index created in pipeline, ready for V2 chunk embedding population
+  - Commit: 1674e3b, Files: `src/worker/hybrid_v2/services/neo4j_store.py`
+- ✅ **Group ID None Fallback Fix:** Fixed HTTP 500 error when authentication is disabled
+  - **Problem:** `request.state.group_id = None` when `REQUIRE_AUTH=False` → `Path(index_dir) / None` TypeError
+  - **Root Cause:** Auth middleware sets group_id to None for unauthenticated requests, HippoRAGService tried path division
+  - **Error:** `unsupported operand type(s) for /: 'PosixPath' and 'NoneType'` in deployed API
+  - **Solution:** Added `or "default"` fallback in all query endpoints: `group_id = request.state.group_id or "default"`
+  - **Impact:** API now works for single-tenant dev environments with auth disabled
+  - **Affected Endpoints:** `/hybrid/query`, `/hybrid/query/audit`, `/hybrid/query/fast`, `/hybrid/query/drift`
+  - **Testing:** Validated locally - path construction succeeds, no TypeError
+  - Commit: d9198fd, Files: `src/api_gateway/routers/hybrid.py` (lines 311, 377, 431, 477)
+- 🔬 **KNN Hyperparameter Testing:** Indexed 4 test groups with varying KNN configurations
+  - **Test Groups:** knn-disabled (0 edges, baseline), knn-1 (K=3, cutoff=0.80, 361 edges), knn-2 (K=5, cutoff=0.75, 613 edges), knn-3 (K=5, cutoff=0.85, 525 edges)
+  - **Data:** 5 PDFs per group (invoices + purchase orders) with V2 embeddings (Voyage 2048d)
+  - **Purpose:** Measure impact of entity-to-entity KNN edges on multi-hop reasoning accuracy
+  - **Status:** All groups indexed, awaiting Route 4 DRIFT benchmark testing and ground truth scoring
+  - **Next:** Compare KNN configurations to identify optimal K and similarity cutoff values
+  - Documentation: `HANDOVER_2026-01-31.md`, Scripts: `scripts/index_5pdfs_knn_test.py`
 
 **Recent Updates (January 30, 2026):**
 - 🚀 **Semantic Beam Search for Route 4 DRIFT:** Query-aligned traversal at each hop prevents drift after 2-3 hops

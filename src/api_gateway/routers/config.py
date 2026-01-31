@@ -25,11 +25,21 @@ async def get_config() -> Dict[str, Any]:
         Configuration object with auth settings and feature flags
     """
     auth_type = os.getenv("AUTH_TYPE", "B2B")
+    auth_client_id = os.getenv("AUTH_CLIENT_ID", os.getenv("CLIENT_ID", ""))
+    auth_tenant_id = os.getenv("AUTH_TENANT_ID", "")
+    require_auth = os.getenv("REQUIRE_AUTH", "false").lower() == "true"
+    
+    # Build authority URL for MSAL
+    if auth_tenant_id:
+        authority = f"https://login.microsoftonline.com/{auth_tenant_id}"
+    else:
+        authority = os.getenv("AUTHORITY", "")
     
     config = {
         "authType": auth_type,
-        "clientId": os.getenv("CLIENT_ID", ""),
-        "authority": os.getenv("AUTHORITY", ""),
+        "clientId": auth_client_id,
+        "authority": authority,
+        "requireAuth": require_auth,
         "features": {
             "showAdminPanel": auth_type == "B2B",
             "showFolders": os.getenv("ENABLE_FOLDERS", "true").lower() == "true",

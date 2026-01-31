@@ -35,6 +35,17 @@ param voyageApiKey string = ''
 @description('Azure Document Intelligence Endpoint')
 param azureDocumentIntelligenceEndpoint string = 'https://doc-intel-graphrag.cognitiveservices.azure.com/'
 
+// Easy Auth parameters
+@description('Enable Easy Auth (Microsoft Entra ID authentication)')
+param enableAuth bool = false
+
+@description('Entra ID (Azure AD) Client ID for authentication')
+param authClientId string = ''
+
+@description('Authentication mode: B2B (groups claim) or B2C (oid claim)')
+@allowed(['B2B', 'B2C'])
+param authType string = 'B2B'
+
 // Tags for all resources
 var tags = {
   azd_env_name: environmentName
@@ -104,10 +115,27 @@ module graphragApi './core/host/container-app.bicep' = {
     // API Gateway image - handles HTTP requests
     containerImage: apiImageName
     targetPort: 8000
+    // Easy Auth configuration
+    enableAuth: enableAuth
+    authClientId: authClientId
+    authTenantId: subscription().tenantId
+    authType: authType
     env: concat([
       {
         name: 'SERVICE_ROLE'
         value: 'api'
+      }
+      {
+        name: 'AUTH_TYPE'
+        value: authType
+      }
+      {
+        name: 'REQUIRE_AUTH'
+        value: enableAuth ? 'true' : 'false'
+      }
+      {
+        name: 'AUTH_CLIENT_ID'
+        value: authClientId
       }
       {
         name: 'AZURE_OPENAI_ENDPOINT'

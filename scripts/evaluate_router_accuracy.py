@@ -29,7 +29,7 @@ if env_path.exists():
     load_dotenv(env_path)
     print(f"Loaded environment from: {env_path}")
 
-from app.hybrid.router.main import HybridRouter, DeploymentProfile, QueryRoute
+from src.worker.hybrid.router.main import HybridRouter, DeploymentProfile, QueryRoute
 
 
 class QuestionBankParser:

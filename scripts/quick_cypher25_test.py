@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 env_path = os.path.join(os.path.dirname(__file__), '..', 'graphrag-orchestration', '.env')
 load_dotenv(env_path)
 
-from app.services.async_neo4j_service import AsyncNeo4jService, USE_CYPHER_25
+from src.worker.services.async_neo4j_service import AsyncNeo4jService, USE_CYPHER_25
 import asyncio
 
 async def main():

@@ -29,7 +29,7 @@ pkg_dir = os.path.join(root, 'graphrag-orchestration')
 if os.path.isdir(pkg_dir):
     sys.path.insert(0, pkg_dir)
 
-from app.services.graph_service import GraphService
+from src.worker.services.graph_service import GraphService
 
 
 def restore_part_of_relationships(session, group_id, dry_run=False):

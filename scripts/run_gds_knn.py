@@ -23,9 +23,9 @@ project_root = os.path.dirname(script_dir)
 app_root = os.path.join(project_root, "graphrag-orchestration")
 sys.path.insert(0, app_root)
 
-from app.core.config import settings
-from app.hybrid_v2.services.neo4j_store import Neo4jStoreV3
-from app.hybrid_v2.indexing.lazygraphrag_pipeline import LazyGraphRAGIndexingPipeline
+from src.core.config import settings
+from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import LazyGraphRAGIndexingPipeline
 
 # Test groups with their KNN configurations
 TEST_GROUPS = [

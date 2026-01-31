@@ -31,7 +31,7 @@ load_dotenv(env_path)
 async def test_seed_resolution(group_id: str):
     """Test all seed resolution strategies."""
     
-    from app.services.async_neo4j_service import AsyncNeo4jService
+    from src.worker.services.async_neo4j_service import AsyncNeo4jService
     
     # Initialize service
     service = AsyncNeo4jService.from_settings()

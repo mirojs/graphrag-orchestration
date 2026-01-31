@@ -259,7 +259,7 @@ def main():
             print("  MATCH (n:Entity) RETURN n")
             print()
             print("Or use the helper function:")
-            print("  from app.services.async_neo4j_service import cypher25_query")
+            print("  from src.worker.services.async_neo4j_service import cypher25_query")
             print("  query = cypher25_query('MATCH (n) RETURN n')")
             print()
             

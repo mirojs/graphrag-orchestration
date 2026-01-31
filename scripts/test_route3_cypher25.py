@@ -22,9 +22,9 @@ load_dotenv(os.path.join(graphrag_dir, ".env"))
 # Enable Cypher 25 hybrid RRF
 os.environ["ROUTE3_CYPHER25_HYBRID_RRF"] = "1"
 
-from app.hybrid.orchestrator import HybridPipeline
-from app.services.graph_service import GraphService
-from app.services.llm_service import LLMService
+from src.worker.hybrid.orchestrator import HybridPipeline
+from src.worker.services.graph_service import GraphService
+from src.worker.services.llm_service import LLMService
 
 
 async def test_route3_hybrid():

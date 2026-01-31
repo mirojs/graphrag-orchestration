@@ -20,14 +20,14 @@ project_root = os.path.dirname(script_dir)
 app_root = os.path.join(project_root, "graphrag-orchestration")
 sys.path.insert(0, app_root)
 
-from app.core.config import settings
-from app.hybrid_v2.indexing.lazygraphrag_pipeline import (
+from src.core.config import settings
+from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (
     LazyGraphRAGIndexingPipeline,
     LazyGraphRAGIndexingConfig,
 )
-from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-from app.hybrid_v2.services.neo4j_store import Neo4jStoreV3
-from app.services.llm_service import LLMService
+from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+from src.worker.services.llm_service import LLMService
 
 # 5 Test PDFs
 PDF_URLS = [

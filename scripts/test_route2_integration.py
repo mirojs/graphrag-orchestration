@@ -17,7 +17,7 @@ from typing import List, Tuple
 # Add the app to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'graphrag-orchestration'))
 
-from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+from src.worker.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from neo4j import GraphDatabase
 
 

@@ -19,9 +19,9 @@ os.chdir(app_root)
 # Load env
 load_dotenv(os.path.join(app_root, '.env'))
 
-from app.core.config import settings
-from app.hybrid_v2.orchestrator import HybridPipeline, DeploymentProfile
-from app.hybrid_v2.router.main import QueryRoute
+from src.core.config import settings
+from src.worker.hybrid_v2.orchestrator import HybridPipeline, DeploymentProfile
+from src.worker.hybrid_v2.router.main import QueryRoute
 import structlog
 logger = structlog.get_logger(__name__)
 
@@ -48,8 +48,8 @@ def count_inconsistencies(response_text):
 
 async def create_pipeline(group_id: str) -> HybridPipeline:
     """Create a properly initialized pipeline for the group."""
-    from app.services import GraphService, LLMService
-    from app.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
+    from src.worker.services import GraphService, LLMService
+    from src.worker.hybrid_v2.indexing.text_store import Neo4jTextUnitStore
     
     # LLM service
     llm_service = LLMService()
@@ -69,7 +69,7 @@ async def create_pipeline(group_id: str) -> HybridPipeline:
     embedding_client = None
     if settings.VOYAGE_V2_ENABLED and settings.VOYAGE_API_KEY:
         try:
-            from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+            from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
             voyage_service = VoyageEmbedService()
             embedding_client = voyage_service.get_llama_index_model()
         except Exception as e:

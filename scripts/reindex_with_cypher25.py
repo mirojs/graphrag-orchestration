@@ -37,8 +37,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import after path setup
-from app.services.graph_service import GraphService
-from app.services.async_neo4j_service import USE_CYPHER_25
+from src.worker.services.graph_service import GraphService
+from src.worker.services.async_neo4j_service import USE_CYPHER_25
 
 
 async def cleanup_old_group(group_id: str):
@@ -67,7 +67,7 @@ async def validate_indexed_data(group_id: str):
     logger.info(f"Validating indexed data for group: {group_id}")
     
     from neo4j import AsyncGraphDatabase
-    from app.core.config import settings
+    from src.core.config import settings
     
     if not settings.NEO4J_URI or not settings.NEO4J_USERNAME or not settings.NEO4J_PASSWORD:
         logger.error("Neo4j credentials not configured")
@@ -190,7 +190,7 @@ async def test_cypher25_queries(group_id: str):
     """Test Cypher 25 queries on freshly indexed data."""
     logger.info(f"Testing Cypher 25 queries on group: {group_id}")
     
-    from app.services.async_neo4j_service import AsyncNeo4jService
+    from src.worker.services.async_neo4j_service import AsyncNeo4jService
     
     async with AsyncNeo4jService.from_settings() as service:
         # Test entity retrieval

@@ -40,7 +40,7 @@ project_root = os.path.dirname(script_dir)  # /graphrag-orchestration
 app_root = os.path.join(project_root, "graphrag-orchestration")  # /graphrag-orchestration/graphrag-orchestration
 sys.path.insert(0, app_root)
 
-from app.core.config import settings
+from src.core.config import settings
 
 # Verify V2 is configured
 def check_v2_config():
@@ -117,13 +117,13 @@ def persist_group_id(group_id: str) -> None:
 
 async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
     """Run V2 indexing with Voyage embeddings."""
-    from app.hybrid_v2.indexing.lazygraphrag_pipeline import (
+    from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (
         LazyGraphRAGIndexingPipeline,
         LazyGraphRAGIndexingConfig,
     )
-    from app.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-    from app.hybrid_v2.services.neo4j_store import Neo4jStoreV3
-    from app.services.llm_service import LLMService
+    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+    from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+    from src.worker.services.llm_service import LLMService
     
     # Verify V2 mode
     if not settings.VOYAGE_V2_ENABLED or not settings.VOYAGE_API_KEY:

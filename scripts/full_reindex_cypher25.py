@@ -36,13 +36,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import after path setup
-from app.hybrid.indexing.lazygraphrag_pipeline import (
+from src.worker.hybrid.indexing.lazygraphrag_pipeline import (
     LazyGraphRAGIndexingPipeline,
     LazyGraphRAGIndexingConfig
 )
-from app.hybrid.services.neo4j_store import Neo4jStoreV3
-from app.services.llm_service import LLMService
-from app.core.config import settings
+from src.worker.hybrid.services.neo4j_store import Neo4jStoreV3
+from src.worker.services.llm_service import LLMService
+from src.core.config import settings
 
 
 async def load_test_documents():
@@ -101,7 +101,7 @@ async def load_test_documents():
 
 async def validate_indexing(group_id: str):
     """Validate that indexing created expected nodes."""
-    from app.services.graph_service import GraphService
+    from src.worker.services.graph_service import GraphService
     
     graph_service = GraphService()
 
@@ -166,7 +166,7 @@ async def validate_indexing(group_id: str):
 
 async def test_cypher25_queries(group_id: str):
     """Test Cypher 25 queries work correctly."""
-    from app.services.async_neo4j_service import AsyncNeo4jService
+    from src.worker.services.async_neo4j_service import AsyncNeo4jService
     
     logger.info("=" * 70)
     logger.info("Testing Cypher 25 Queries:")

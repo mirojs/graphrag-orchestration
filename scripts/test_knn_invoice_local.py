@@ -20,9 +20,9 @@ project_root = os.path.dirname(script_dir)
 app_root = os.path.join(project_root, "graphrag-orchestration")
 sys.path.insert(0, app_root)
 
-from app.core.config import settings
-from app.hybrid_v2.services.neo4j_store import Neo4jStoreV3
-from app.hybrid_v2.routes.route_4_drift import DRIFTHandler
+from src.core.config import settings
+from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+from src.worker.hybrid_v2.routes.route_4_drift import DRIFTHandler
 
 # Test groups
 TEST_GROUPS = [

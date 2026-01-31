@@ -8,7 +8,7 @@ import sys
 # Add the app to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'graphrag-orchestration'))
 
-from app.services.async_neo4j_service import AsyncNeo4jService
+from src.worker.services.async_neo4j_service import AsyncNeo4jService
 
 GROUP_ID = "test-5pdfs-1768557493369886422"
 

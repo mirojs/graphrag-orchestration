@@ -35,13 +35,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import ONLY from hybrid directory (no V3 imports)
-from app.hybrid.indexing.lazygraphrag_pipeline import (
+from src.worker.hybrid.indexing.lazygraphrag_pipeline import (
     LazyGraphRAGIndexingPipeline,
     LazyGraphRAGIndexingConfig
 )
-from app.hybrid.services.neo4j_store import Neo4jStoreV3
-from app.services.llm_service import LLMService
-from app.core.config import settings
+from src.worker.hybrid.services.neo4j_store import Neo4jStoreV3
+from src.worker.services.llm_service import LLMService
+from src.core.config import settings
 
 
 def load_pdf_text(pdf_path: Path) -> str:
@@ -202,7 +202,7 @@ async def main():
         
         # Step 4: Verify with quick query
         logger.info("Verifying indexed data...")
-        from app.services.graph_service import GraphService
+        from src.worker.services.graph_service import GraphService
         
         graph_service = GraphService()
         

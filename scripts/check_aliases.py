@@ -9,8 +9,8 @@ repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 app_dir = os.path.join(repo_root, 'graphrag-orchestration')
 sys.path.insert(0, app_dir)
 
-from app.config import get_settings
-from app.neo4j_store import Neo4jStore
+from src.core.config import get_settings
+from src.worker.hybrid.services.neo4j_store import Neo4jStore
 
 async def check_aliases():
     settings = get_settings()

@@ -11,7 +11,7 @@ import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'graphrag-orchestration'))
 
-from app.services.async_neo4j_service import AsyncNeo4jService
+from src.worker.services.async_neo4j_service import AsyncNeo4jService
 
 GROUP_ID = "test-5pdfs-1768557493369886422"
 Q_D3_QUERY = 'Compare "time windows" across the set: list all explicit day-based timeframes.'

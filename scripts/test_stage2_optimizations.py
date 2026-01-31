@@ -24,7 +24,7 @@ env_path = os.path.join(os.path.dirname(__file__), '..', 'graphrag-orchestration
 load_dotenv(env_path)
 
 # Test with Cypher 25 enabled
-from app.services.async_neo4j_service import AsyncNeo4jService, USE_CYPHER_25
+from src.worker.services.async_neo4j_service import AsyncNeo4jService, USE_CYPHER_25
 
 print("=" * 70)
 print("Stage 2 Cypher 25 Test - CASE Expression Optimization")
@@ -41,7 +41,7 @@ async def test_keyword_matching():
     print("=" * 70)
     
     from neo4j import GraphDatabase
-    from app.core.config import settings
+    from src.core.config import settings
     
     driver = GraphDatabase.driver(
         settings.NEO4J_URI,
@@ -62,7 +62,7 @@ async def test_keyword_matching():
     LIMIT 10
     """
     
-    from app.services.async_neo4j_service import cypher25_query
+    from src.worker.services.async_neo4j_service import cypher25_query
     query_with_c25 = cypher25_query(query)
     
     keywords = ["payment", "invoice", "contract"]
@@ -112,7 +112,7 @@ async def test_rrf_fusion():
     print("=" * 70)
     
     from neo4j import GraphDatabase
-    from app.core.config import settings
+    from src.core.config import settings
     
     driver = GraphDatabase.driver(
         settings.NEO4J_URI,
@@ -134,7 +134,7 @@ async def test_rrf_fusion():
     ORDER BY rrfScore DESC
     """
     
-    from app.services.async_neo4j_service import cypher25_query
+    from src.worker.services.async_neo4j_service import cypher25_query
     query_with_c25 = cypher25_query(query)
     
     try:
@@ -173,7 +173,7 @@ async def test_lexical_matching():
     print("=" * 70)
     
     from neo4j import GraphDatabase
-    from app.core.config import settings
+    from src.core.config import settings
     
     driver = GraphDatabase.driver(
         settings.NEO4J_URI,
@@ -199,7 +199,7 @@ async def test_lexical_matching():
     LIMIT 5
     """
     
-    from app.services.async_neo4j_service import cypher25_query
+    from src.worker.services.async_neo4j_service import cypher25_query
     query_with_c25 = cypher25_query(query)
     
     keywords = ["payment", "contract"]

@@ -18,9 +18,9 @@ os.chdir(app_root)
 # Load env
 load_dotenv(os.path.join(app_root, '.env'))
 
-from app.core.config import settings
-from app.hybrid_v2.orchestrator import HybridPipeline, DeploymentProfile
-from app.hybrid_v2.router.main import QueryRoute
+from src.core.config import settings
+from src.worker.hybrid_v2.orchestrator import HybridPipeline, DeploymentProfile
+from src.worker.hybrid_v2.router.main import QueryRoute
 
 # Initialize LlamaIndex Azure OpenAI LLM
 from llama_index.llms.azure_openai import AzureOpenAI as LlamaIndexAzureOpenAI

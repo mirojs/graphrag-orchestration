@@ -36,7 +36,7 @@ async def test_get_sections_for_entities():
     print("TEST: get_sections_for_entities")
     print("="*60)
     
-    from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+    from src.worker.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
     
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
     retriever = EnhancedGraphRetriever(neo4j_driver=driver, group_id=GROUP_ID)
@@ -75,7 +75,7 @@ async def test_get_documents_for_entities():
     print("TEST: get_documents_for_entities")
     print("="*60)
     
-    from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+    from src.worker.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
     
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
     retriever = EnhancedGraphRetriever(neo4j_driver=driver, group_id=GROUP_ID)
@@ -115,7 +115,7 @@ async def test_get_hub_entities_for_sections():
     print("TEST: get_hub_entities_for_sections (LazyGraphRAG → HippoRAG bridge)")
     print("="*60)
     
-    from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+    from src.worker.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
     
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
     retriever = EnhancedGraphRetriever(neo4j_driver=driver, group_id=GROUP_ID)
@@ -168,7 +168,7 @@ async def test_get_entity_cross_doc_summary():
     print("TEST: get_entity_cross_doc_summary (O(1) cross-doc stats)")
     print("="*60)
     
-    from app.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
+    from src.worker.hybrid.pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
     
     driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
     retriever = EnhancedGraphRetriever(neo4j_driver=driver, group_id=GROUP_ID)

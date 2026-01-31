@@ -79,7 +79,7 @@ resource cosmosDataContributorRole 'Microsoft.Authorization/roleAssignments@2022
   name: guid(cosmosAccount.id, containerAppPrincipalId, 'cosmosDataContributor-v1')
   scope: cosmosAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00000000-0000-0000-0000-000000000002')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')
     principalId: containerAppPrincipalId
     principalType: 'ServicePrincipal'
   }

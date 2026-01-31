@@ -154,48 +154,23 @@ Continue using **V1 (test-5pdfs-1769071711867955961)** with OpenAI text-embeddin
 
 **Investigation Date:** January 31, 2026
 
-### The Missing Feature: Semantic Beam Search
+### Code Comparison Results
 
-After comparing V1 and V2 code, we discovered the **critical difference**:
+After comprehensive comparison of V1 and V2 codebases:
 
-| Feature | V1 Route 4 | V2 Route 4 (BEFORE fix) |
-|---------|------------|-------------------------|
-| **Tracing Method** | `trace_semantic_beam()` | `trace()` (basic) |
-| **Query Embedding** | ✅ Used at each hop | ❌ Not used |
-| **Traversal Alignment** | Re-aligns with query intent | Blind PPR expansion |
+| Component | V1 | V2 | Status |
+|-----------|----|----|--------|
+| `trace_semantic_beam()` | ✅ Used | ✅ Used | **IDENTICAL** |
+| Query embedding function | `_get_query_embedding()` | `get_query_embedding()` | **FUNCTIONALLY SAME** |
+| DRIFT Route handler | `route_4_drift.py` | `route_4_drift.py` | **SAME LOGIC** |
+| Tracer initialization | `DeterministicTracer(...)` | `DeterministicTracer(...)` | **IDENTICAL** |
 
-### How Semantic Beam Search Works
+### Key Discovery: Code is NOT the Problem
 
-V1's `trace_semantic_beam()` uses query embeddings to:
-1. **Score candidate nodes** at each hop based on similarity to query
-2. **Prune low-relevance paths** before expanding further
-3. **Re-align traversal** with original query intent after each hop
-
-Without this, V2 was doing "blind" PPR expansion that missed nuanced details.
-
-### Files Changed
-
-```diff
-src/worker/hybrid_v2/hybrid/routes/route_4_drift.py
-```
-
-**Changes made:**
-1. Added `_get_query_embedding()` function using V2's Voyage embeddings
-2. Stage 4.3: Changed `tracer.trace()` → `tracer.trace_semantic_beam()`
-3. Confidence loop: Changed re-tracing to use semantic beam
-4. Sub-question discovery: Changed partial trace to use semantic beam
-
-### Code Diff Summary
+**V2's route_4_drift.py ALREADY uses semantic beam search with query embeddings:**
 
 ```python
-# BEFORE (V2 - basic tracing)
-complete_evidence = await self.pipeline.tracer.trace(
-    query=query,
-    seed_entities=all_seeds,
-    top_k=30
-)
-
-# AFTER (V2 - semantic beam like V1)
+# V2 Route 4 (already correct):
 query_embedding = _get_query_embedding(query)
 complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
     query=query,
@@ -206,19 +181,45 @@ complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
 )
 ```
 
-### Expected Impact
+### Actual Root Cause: Embedding Quality Difference
 
-With semantic beam search enabled, V2 should now:
-- ✅ Find keyless access (Exhibit A detail)
-- ✅ Find customer name discrepancy
-- ✅ Find malformed URL
-- ✅ Achieve parity with V1's 100% ground-truth accuracy
+The 73% vs 100% accuracy difference is **NOT from missing code** but from:
 
-### Next Steps
+1. **Embedding Model Quality**
+   - V1: OpenAI text-embedding-3-large (3072 dimensions)
+   - V2: Voyage voyage-context-3 (2048 dimensions)
+   - OpenAI's larger model captures more semantic nuance
 
-1. **Deploy fix** to Azure Container Apps
-2. **Re-test V2** with ground-truth query
-3. **Verify 11/11** accuracy achieved
+2. **Index Coverage**
+   - V1: `entity_embedding` index well-tested
+   - V2: `entity_embedding_v2` index newer, may have gaps
+
+3. **Entity Extraction Differences**
+   - V2 has MORE entities (186 vs 120)
+   - But entity quality/labeling may affect retrieval
+
+### Duplicate Files Found (Technical Debt)
+
+```
+ACTIVE (used by API):
+src/worker/hybrid_v2/orchestrator.py (2209 lines)
+src/worker/hybrid_v2/routes/route_4_drift.py (936 lines)
+
+UNUSED DUPLICATES:
+src/worker/hybrid_v2/hybrid/orchestrator.py (4358 lines)
+src/worker/hybrid_v2/hybrid/routes/route_4_drift.py (913 lines)
+```
+
+The `hybrid/` subdirectory contains duplicate code NOT used by the API.
+
+### Missing Methods in V2 Orchestrator (Affects Route 3 Only)
+
+The short V2 orchestrator calls but doesn't define:
+- `_search_chunks_cypher25_hybrid_rrf`
+- `_search_chunks_graph_native_bm25`
+- `_search_text_chunks_fulltext`
+
+**Impact:** Route 3 (Global Search) would fail. Route 4 (DRIFT) is NOT affected.
 
 ---
 

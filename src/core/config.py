@@ -108,6 +108,10 @@ class Settings(BaseSettings):
     # Multi-tenancy
     ENABLE_GROUP_ISOLATION: bool = True
     
+    # Authentication & Security
+    AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)
+    REQUIRE_AUTH: bool = False  # Set to True in production with Easy Auth enabled
+    
     # Performance & Rate Limiting
     # Set to 1 for serial processing (10K TPM), 4 for parallel (50K+ TPM)
     GRAPHRAG_NUM_WORKERS: int = 1

@@ -5,6 +5,7 @@ import structlog
 from src.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from src.api_gateway.middleware.group_isolation import GroupIsolationMiddleware
+from src.api_gateway.middleware.auth import JWTAuthMiddleware
 from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map, config, folders
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
@@ -133,6 +134,13 @@ app.add_middleware(
 )
 
 # Custom Middleware
+# JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
+# Set require_auth=False for development without Easy Auth
+app.add_middleware(
+    JWTAuthMiddleware,
+    auth_type=settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B",
+    require_auth=settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
+)
 app.add_middleware(GroupIsolationMiddleware)
 
 # Include Routers

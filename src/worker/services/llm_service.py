@@ -9,6 +9,8 @@ import logging
 import os
 
 from src.core.config import settings
+from src.core.services.usage_tracker import UsageTracker
+from src.core.models.usage import UsageType
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +178,7 @@ class LLMService:
                 }
                 # text-embedding-3-* models support dimensions parameter, ada-002 does not
                 if "embedding-3" in settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT:
-                    embed_kwargs["dimensions"] = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
+                    embed_kwargs["dimensions"] = str(settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS)
                 
                 self._embed_model = AzureOpenAIEmbedding(**embed_kwargs)
             
@@ -261,24 +263,86 @@ class LLMService:
             
         return AzureOpenAI(**llm_kwargs)
 
-    def generate(self, prompt: str, **kwargs) -> str:
-        """Generate a response from the LLM."""
+    def generate(self, prompt: str, group_id: Optional[str] = None, user_id: Optional[str] = None, **kwargs) -> str:
+        """Generate a response from the LLM with usage tracking."""
         if not self._llm:
             raise RuntimeError("LLM not initialized")
         response = self._llm.complete(prompt, **kwargs)
+        
+        # Track usage if metadata available
+        if hasattr(response, 'raw') and response.raw:
+            usage = response.raw.get('usage', {})
+            if usage and (group_id or user_id):
+                # Fire-and-forget: schedule async task but don't await
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    loop.create_task(UsageTracker().log_llm_usage(
+                        partition_id=group_id or "unknown",
+                        user_id=user_id,
+                        model=settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+                        prompt_tokens=usage.get('prompt_tokens', 0),
+                        completion_tokens=usage.get('completion_tokens', 0)
+                    ))
+                except Exception:
+                    pass  # Fire-and-forget: ignore failures
+        
         return str(response)
 
-    def embed(self, text: str) -> list:
-        """Generate embeddings for text."""
+    def embed(self, text: str, group_id: Optional[str] = None, user_id: Optional[str] = None) -> list:
+        """Generate embeddings for text with usage tracking."""
         if not self._embed_model:
             raise RuntimeError("Embedding model not initialized")
-        return self._embed_model.get_text_embedding(text)
+        
+        # Estimate tokens (rough approximation: 1 token ≈ 4 chars)
+        estimated_tokens = len(text) // 4
+        
+        result = self._embed_model.get_text_embedding(text)
+        
+        # Track usage
+        if group_id or user_id:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(UsageTracker().log_embedding_usage(
+                    partition_id=group_id or "unknown",
+                    user_id=user_id,
+                    model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                    total_tokens=estimated_tokens,
+                    dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
+                ))
+            except Exception:
+                pass  # Fire-and-forget: ignore failures
+        
+        return result
 
-    def embed_batch(self, texts: list) -> list:
-        """Generate embeddings for a batch of texts."""
+    def embed_batch(self, texts: list, group_id: Optional[str] = None, user_id: Optional[str] = None) -> list:
+        """Generate embeddings for a batch of texts with usage tracking."""
         if not self._embed_model:
             raise RuntimeError("Embedding model not initialized")
-        return self._embed_model.get_text_embedding_batch(texts)
+        
+        # Estimate tokens for batch
+        estimated_tokens = sum(len(text) // 4 for text in texts)
+        
+        result = self._embed_model.get_text_embedding_batch(texts)
+        
+        # Track usage
+        if group_id or user_id:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(UsageTracker().log_embedding_usage(
+                    partition_id=group_id or "unknown",
+                    user_id=user_id,
+                    model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
+                    total_tokens=estimated_tokens,
+                    dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,
+                    chunk_count=len(texts)
+                ))
+            except Exception:
+                pass  # Fire-and-forget: ignore failures
+        
+        return result
 
     def health_check(self) -> Dict[str, Any]:
         """Check LLM connectivity."""

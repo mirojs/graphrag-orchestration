@@ -30,6 +30,8 @@ import logging
 from typing import List, Optional
 
 from src.core.config import settings
+from src.core.services.usage_tracker import UsageTracker
+from src.core.models.usage import UsageType
 
 logger = logging.getLogger(__name__)
 
@@ -314,15 +316,17 @@ class VoyageEmbedService:
             result = self.embed_documents_contextualized([texts])
             return result[0]
     
-    def embed_query(self, query: str) -> List[float]:
+    def embed_query(self, query: str, group_id: Optional[str] = None, user_id: Optional[str] = None) -> List[float]:
         """
-        Embed a query string using contextualized_embed.
+        Embed a query string using contextualized_embed with usage tracking.
         
         Uses voyage-context-3 with input_type="query" for asymmetric search.
         Query is treated as a single-chunk document.
         
         Args:
             query: The search query to embed
+            group_id: Optional group ID for usage tracking
+            user_id: Optional user ID for usage tracking
             
         Returns:
             Embedding vector (2048 dimensions)
@@ -333,17 +337,31 @@ class VoyageEmbedService:
             input_type="query",
             output_dimension=settings.VOYAGE_EMBEDDING_DIM,
         )
+        
+        # Track usage (Voyage API returns usage in result)
+        if hasattr(result, 'usage') and result.usage and (group_id or user_id):
+            UsageTracker().log_usage(
+                usage_type=UsageType.EMBEDDING,
+                model_name=self.model_name,
+                prompt_tokens=result.usage.total_tokens,
+                completion_tokens=0,
+                group_id=group_id,
+                user_id=user_id,
+            )
+        
         return result.results[0].embeddings[0]
     
-    def embed_query_batch(self, queries: List[str]) -> List[List[float]]:
+    def embed_query_batch(self, queries: List[str], group_id: Optional[str] = None, user_id: Optional[str] = None) -> List[List[float]]:
         """
-        Embed multiple queries in a batch.
+        Embed multiple queries in a batch with usage tracking.
         
         Uses voyage-context-3 with input_type="query" for asymmetric search.
         Each query is treated as a single-chunk document.
         
         Args:
             queries: List of search queries to embed
+            group_id: Optional group ID for usage tracking
+            user_id: Optional user ID for usage tracking
             
         Returns:
             List of embedding vectors (2048 dimensions each)
@@ -356,6 +374,18 @@ class VoyageEmbedService:
             input_type="query",
             output_dimension=settings.VOYAGE_EMBEDDING_DIM,
         )
+        
+        # Track usage
+        if hasattr(result, 'usage') and result.usage and (group_id or user_id):
+            UsageTracker().log_usage(
+                usage_type=UsageType.EMBEDDING,
+                model_name=self.model_name,
+                prompt_tokens=result.usage.total_tokens,
+                completion_tokens=0,
+                group_id=group_id,
+                user_id=user_id,
+            )
+        
         return [doc.embeddings[0] for doc in result.results]
     
     async def aget_text_embedding_batch(

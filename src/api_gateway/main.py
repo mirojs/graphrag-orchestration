@@ -5,7 +5,7 @@ import structlog
 from src.core.config import settings
 # Force rebuild - fixed embedder None check and DRIFT API key requirement
 from src.api_gateway.middleware.group_isolation import GroupIsolationMiddleware
-from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map
+from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map, config
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
 
@@ -137,6 +137,7 @@ app.add_middleware(GroupIsolationMiddleware)
 
 # Include Routers
 app.include_router(health.router, tags=["health"])
+app.include_router(config.router, tags=["config"])
 
 # ============================================================================
 # DEPRECATED V1/V2 Endpoints - Use Hybrid Pipeline or V3 instead

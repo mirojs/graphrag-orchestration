@@ -6,6 +6,20 @@ from pydantic import BaseModel, Field
 import uuid
 
 
+class FolderCreate(BaseModel):
+    """Request model for creating a folder."""
+    
+    name: str = Field(..., description="Folder name")
+    parent_folder_id: Optional[str] = Field(None, description="Parent folder ID (null for root)")
+
+
+class FolderUpdate(BaseModel):
+    """Request model for updating a folder."""
+    
+    name: Optional[str] = Field(None, description="New folder name")
+    parent_folder_id: Optional[str] = Field(None, description="New parent folder ID")
+
+
 class Folder(BaseModel):
     """Folder for organizing documents in hierarchical structure."""
     

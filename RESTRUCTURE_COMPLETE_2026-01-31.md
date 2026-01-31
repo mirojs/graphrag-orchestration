@@ -257,3 +257,236 @@ docker build -t graphrag-restructured .
 *Restructuring completed: January 31, 2026 04:55 UTC*  
 *Scripts migrated: January 31, 2026 05:15 UTC*  
 *Production validated: January 31, 2026 05:15 UTC*
+
+---
+
+# Phase 2: Fullstack Implementation Plan (v2)
+
+**Updated:** January 31, 2026  
+**Status:** 🔲 Planning Complete — Ready for Implementation
+
+**TL;DR:** Merge the azure-search-openai-demo frontend, remove Route 1 and Azure AI Search, consolidate on existing resources, add Cosmos DB for chat history + usage tracking, support dual auth (B2B/B2C) with hierarchical folder isolation, and instrument token consumption from day one.
+
+---
+
+## Resources Summary
+
+| Resource | Action | Notes |
+|----------|--------|-------|
+| `neo4jstorage21224` | ✅ Keep | Blob storage (shared) |
+| `graphrag-openai-8476` | ✅ Keep | LLM + embeddings |
+| Neo4j Aura | ✅ Keep | Graph + vector (Routes 2/3/4) |
+| `graphragacr12153` | ✅ Keep | Container images |
+| `graphrag-search` | ❌ **Remove** | Unused — RAPTOR deprecated |
+| `azure-search-documents` | ❌ **Remove** | Remove from requirements.txt |
+| Cosmos DB Serverless | ➕ Add | Chat history + usage tracking |
+| Redis Basic | ➕ Add | Async job queue |
+
+---
+
+## Route Deprecation
+
+| Route | Status | Action |
+|-------|--------|--------|
+| Route 1 (Vector RAG) | ❌ **Deprecated** | Remove from code: endpoints, router, orchestrator references |
+| Route 2 (Local Search) | ✅ Active | Keep — LazyGraphRAG iterative deepening |
+| Route 3 (Global Search) | ✅ Active | Keep — Community + HippoRAG PPR |
+| Route 4 (DRIFT) | ✅ Active | Keep — Multi-hop iterative reasoning |
+
+**Code changes required:**
+- Remove Route 1 from `src/api_gateway/routers/`
+- Update route orchestrator to 3-way routing (2/3/4)
+- Remove RAPTOR service references
+- Update route selection logic and documentation
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────┐     ┌─────────────────────────┐
+│   B2B Frontend          │     │   B2C Frontend          │
+│   (Organization)        │     │   (Personal)            │
+└───────────┬─────────────┘     └───────────┬─────────────┘
+            │  Same React build             │
+            │  (runtime config)             │
+            ▼                               ▼
+┌─────────────────────────┐     ┌─────────────────────────┐
+│ Container App (B2B)     │     │ Container App (B2C)     │
+│ AUTH_TYPE=B2B           │     │ AUTH_TYPE=B2C           │
+│ partition=group_id      │     │ partition=user_id       │
+└───────────┬─────────────┘     └───────────┬─────────────┘
+            │                               │
+            └───────────────┬───────────────┘
+                            ▼
+              ┌───────────────────────────┐
+              │      Shared Backend       │
+              │  ┌─────────┐ ┌─────────┐  │
+              │  │   API   │ │ Worker  │  │
+              │  │Container│ │Container│  │
+              │  └────┬────┘ └────┬────┘  │
+              └───────┼───────────┼───────┘
+                      ▼           ▼
+        ┌─────────────────────────────────────┐
+        │         Shared Resources            │
+        │  • Neo4j Aura (graph + vectors)     │
+        │  • Azure OpenAI (LLM)               │
+        │  • Cosmos DB (history + usage)      │
+        │  • Redis (job queue)                │
+        │  • Blob Storage (files)             │
+        └─────────────────────────────────────┘
+```
+
+---
+
+## Security: Current Gap & Required Fix
+
+| Current State | Risk | Required Fix |
+|---------------|------|--------------|
+| `X-Group-ID` header is caller-controlled | ⚠️ **High** — Any caller can impersonate any group | Add JWT validation middleware |
+| No token verification | ⚠️ **High** — No proof of identity | Extract `group_id` from `token.groups[0]` (B2B) or `user_id` from `token.oid` (B2C) |
+| Easy Auth not configured | ⚠️ **Medium** — No IdP integration | Configure Entra ID / External ID on Container Apps |
+
+**Note:** Current system is suitable for internal/dev use only. JWT validation is a **blocker for production deployment**.
+
+---
+
+## Runtime Config for Dual Frontend
+
+**Endpoint:** `GET /config`
+
+```json
+{
+  "authType": "B2B",
+  "clientId": "xxx-xxx-xxx",
+  "authority": "https://login.microsoftonline.com/{tenant}",
+  "features": {
+    "showAdminPanel": true,
+    "showFolders": true
+  }
+}
+```
+
+- Frontend fetches `/config` on app init before MSAL setup
+- Single Docker image works for both B2B and B2C deployments
+- Container App env vars drive the response
+
+---
+
+## Folder Hierarchy
+
+**Schema:**
+```cypher
+CREATE CONSTRAINT folder_id IF NOT EXISTS FOR (f:Folder) REQUIRE f.id IS UNIQUE
+CREATE INDEX folder_partition IF NOT EXISTS FOR (f:Folder) ON (f.group_id)
+
+(:Folder)-[:SUBFOLDER_OF]->(:Folder)
+(:Document)-[:IN_FOLDER]->(:Folder)
+```
+
+**Backward compatibility:**
+- `folder_id = null` → "Root" / "Unfiled" in UI
+- No migration needed
+- Max depth = 2 (enforced in API)
+
+---
+
+## Usage Tracking (Fire-and-Forget)
+
+**Pattern:**
+```python
+@router.post("/chat")
+async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
+    response = await process_query(request)
+    
+    # Fire-and-forget: doesn't block response
+    background_tasks.add_task(log_usage, UsageRecord(...))
+    
+    return response
+```
+
+**Cosmos containers:**
+
+| Container | Partition Key | TTL | Purpose |
+|-----------|---------------|-----|---------|
+| `chat_history` | `/user_id` | 90 days | Sessions, messages |
+| `usage` | `/partition_id` | 90 days | Tokens, pages, costs |
+
+**Usage record schema:**
+```json
+{
+  "id": "uuid",
+  "partition_id": "group-123",
+  "user_id": "user-456",
+  "timestamp": "2026-01-31T10:30:00Z",
+  "usage_type": "llm_completion",
+  "model": "gpt-4o",
+  "prompt_tokens": 1500,
+  "completion_tokens": 350,
+  "total_tokens": 1850,
+  "route": "route_2",
+  "cost_estimate_usd": 0.0285,
+  "ttl": 7776000
+}
+```
+
+---
+
+## Implementation Phases
+
+| Phase | Task | Status | Effort |
+|-------|------|--------|--------|
+| **1a** | Remove Route 1 from code | 🔲 Pending | 1 day |
+| **1b** | Remove Azure AI Search from infra + deps | 🔲 Pending | 0.5 day |
+| **1c** | Add Cosmos DB + Redis to infra | 🔲 Pending | 1 day |
+| **1d** | Instrumentation hooks (fire-and-forget) | 🔲 Pending | 2 days |
+| **1e** | Create `src/core/` module structure | 🔲 Pending | 1 day |
+| **2a** | Git subtree frontend from azure-search-openai-demo | 🔲 Pending | 0.5 day |
+| **2b** | Runtime config endpoint (`/config`) | 🔲 Pending | 0.5 day |
+| **2c** | Chat compat router (`/chat`, `/chat/stream`) | 🔲 Pending | 2 days |
+| **2d** | JWT validation middleware | 🔲 Pending | 1 day |
+| **2e** | Folder schema + CRUD endpoints | 🔲 Pending | 2 days |
+| **3a** | Split API/Worker containers in Bicep | 🔲 Pending | 1 day |
+| **3b** | Easy Auth configuration (B2B + B2C) | 🔲 Pending | 1 day |
+| **3c** | Dashboard UI (admin + user) | 🔲 Pending | 3-5 days |
+
+---
+
+## Cleanup Checklist
+
+| Item | File(s) | Action |
+|------|---------|--------|
+| Route 1 endpoints | `src/api_gateway/routers/` | Delete route_1 router |
+| Route 1 orchestrator | `src/api_gateway/orchestrator.py` | Remove Route 1 case |
+| RAPTOR service | `src/worker/services/raptor_service.py` | Delete or archive |
+| RAPTOR types | `src/worker/models/` | Remove RAPTOR-related models |
+| Azure AI Search config | `infra/main.bicep` | Remove `graphrag-search` resource |
+| Azure AI Search deps | `requirements.txt` | Remove `azure-search-documents` |
+| Route selection docs | `ARCHITECTURE_*.md` | Update to 3-route system |
+| Routing logic | Query classifier | Update to route 2/3/4 only |
+
+---
+
+## Final Checklist
+
+| Item | Status |
+|------|--------|
+| Route 1 deprecated in code | ✅ Planned |
+| Azure AI Search removed from infra | ✅ Planned |
+| RAPTOR fully deprecated | ✅ Planned |
+| Reuse existing storage account | ✅ |
+| Neo4j as sole retrieval DB | ✅ |
+| Cosmos DB for chat history | ✅ |
+| Cosmos DB for usage tracking | ✅ |
+| Fire-and-forget usage logging | ✅ |
+| Dual frontend (B2B/B2C) | ✅ |
+| Runtime config endpoint | ✅ |
+| Folder hierarchy | ✅ |
+| Max folder depth constraint | ✅ |
+| JWT validation (security gap noted) | ✅ |
+| `src/core/` module gap noted | ✅ |
+| Dashboard UI deferred to Phase 3 | ✅ |
+
+---
+
+*Phase 2 plan finalized: January 31, 2026*

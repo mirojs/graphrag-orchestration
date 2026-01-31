@@ -3,6 +3,7 @@ param storageAccountName string
 param containerRegistryName string
 param containerAppPrincipalId string
 param azureOpenAiName string
+param cosmosAccountName string
 
 // Reference existing Document Intelligence resource
 resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
@@ -22,6 +23,11 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
 // Reference Azure OpenAI resource
 resource azureOpenAi 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
   name: azureOpenAiName
+}
+
+// Reference Cosmos DB account
+resource cosmosAccount 'Microsoft.DocumentDB/databaseAccounts@2024-05-15' existing = {
+  name: cosmosAccountName
 }
 
 // Cognitive Services User role on Document Intelligence
@@ -68,4 +74,13 @@ resource azureOpenAiUserRole 'Microsoft.Authorization/roleAssignments@2022-04-01
   }
 }
 
-// Azure Search Index Data Contributor role on Azure AI Search
+// Cosmos DB Data Contributor role on Cosmos DB
+resource cosmosDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(cosmosAccount.id, containerAppPrincipalId, 'cosmosDataContributor-v1')
+  scope: cosmosAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '00000000-0000-0000-0000-000000000002')
+    principalId: containerAppPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}

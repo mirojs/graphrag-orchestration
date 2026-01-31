@@ -52,6 +52,18 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
   scope: rg
 }
 
+// Cosmos DB for chat history and usage tracking
+module cosmosDb './core/database/cosmos-db.bicep' = {
+  name: 'cosmos-db'
+  scope: rg
+  params: {
+    accountName: 'graphrag-cosmos-${uniqueString(rg.id)}'
+    location: location
+    tags: tags
+    databaseName: 'graphrag'
+  }
+}
+
 // GraphRAG Orchestration Container App
 module graphragApp './core/host/container-app.bicep' = {
   name: 'graphrag-app'
@@ -138,6 +150,22 @@ module graphragApp './core/host/container-app.bicep' = {
       {
         name: 'NEO4J_DATABASE'
         value: 'neo4j'
+      }
+      {
+        name: 'COSMOS_DB_ENDPOINT'
+        value: cosmosDb.outputs.cosmosAccountEndpoint
+      }
+      {
+        name: 'COSMOS_DB_DATABASE_NAME'
+        value: cosmosDb.outputs.databaseName
+      }
+      {
+        name: 'COSMOS_DB_CHAT_HISTORY_CONTAINER'
+        value: cosmosDb.outputs.chatHistoryContainerName
+      }
+      {
+        name: 'COSMOS_DB_USAGE_CONTAINER'
+        value: cosmosDb.outputs.usageContainerName
       }
       {
         name: 'ENABLE_GROUP_ISOLATION'
@@ -227,8 +255,9 @@ module roleAssignments './core/security/role-assignments.bicep' = {
     containerRegistryName: containerRegistry.name
     containerAppPrincipalId: graphragApp.outputs.identityPrincipalId
     azureOpenAiName: 'graphrag-openai-8476'
+    cosmosAccountName: cosmosDb.outputs.cosmosAccountName
   }
-  dependsOn: [openAiModels] // Ensure models exist before assigning permissions
+  dependsOn: [openAiModels, cosmosDb] // Ensure resources exist before assigning permissions
 }
 
 // Outputs
@@ -237,3 +266,5 @@ output AZURE_CONTAINER_REGISTRY_ENDPOINT string = '${containerRegistry.name}.azu
 output AZURE_CONTAINER_REGISTRY_NAME string = containerRegistry.name
 output GRAPHRAG_APP_URI string = graphragApp.outputs.uri
 output GRAPHRAG_APP_NAME string = graphragApp.outputs.name
+output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.cosmosAccountEndpoint
+output COSMOS_DB_DATABASE_NAME string = cosmosDb.outputs.databaseName

@@ -121,7 +121,13 @@ class SectionAwareChunker:
         di_units: Sequence[Any],
         doc_id: str,
     ) -> List[SectionNode]:
-        """Extract section structure from DI LlamaDocuments."""
+        """Extract section structure from DI LlamaDocuments.
+        
+        Captures location metadata from Azure Document Intelligence:
+        - page_number: From bounding_regions in DI output
+        - start_offset/end_offset: Character offsets from DI spans
+        - url: Document source URL for citation linking
+        """
         sections: List[SectionNode] = []
         
         for unit_idx, unit in enumerate(di_units):
@@ -154,6 +160,12 @@ class SectionAwareChunker:
                 parent_path = section_path[:-1]
                 parent_id = self._generate_section_id(doc_id, parent_path, -1)
             
+            # Extract location metadata from Azure DI (critical for citation tracking)
+            page_number = meta.get("page_number")  # From DI bounding_regions
+            start_offset = meta.get("start_offset")  # Character offset from DI spans
+            end_offset = meta.get("end_offset")  # End character offset from DI spans
+            url = meta.get("url", "")  # Document source URL
+            
             sections.append(
                 SectionNode(
                     id=section_id,
@@ -165,6 +177,11 @@ class SectionAwareChunker:
                     table_count=meta.get("table_count", 0),
                     tables=list(meta.get("tables", []) or []),
                     key_value_pairs=list(meta.get("key_value_pairs", []) or []),
+                    # Location metadata for citation tracking
+                    page_number=page_number,
+                    start_offset=start_offset,
+                    end_offset=end_offset,
+                    url=url,
                 )
             )
         
@@ -244,7 +261,11 @@ class SectionAwareChunker:
         doc_title: str,
         doc_language: Optional[str] = None,
     ) -> List[SectionChunk]:
-        """Convert sections to chunks, splitting large sections as needed."""
+        """Convert sections to chunks, splitting large sections as needed.
+        
+        Propagates location metadata (page_number, start_offset, end_offset, url)
+        from SectionNode to SectionChunk for citation tracking.
+        """
         chunks: List[SectionChunk] = []
         global_chunk_idx = 0
         
@@ -270,8 +291,13 @@ class SectionAwareChunker:
                         is_section_start=True,
                         is_summary_section=is_summary,
                         language=doc_language,
+                        # Location metadata from Azure DI for citation tracking
+                        page_number=section.page_number,
+                        start_offset=section.start_offset,
+                        end_offset=section.end_offset,
                         metadata={
                             "source": doc_source,
+                            "url": section.url or doc_source,  # Preserve document URL
                             "title": doc_title,
                             "paragraph_count": section.paragraph_count,
                             "table_count": section.table_count,
@@ -293,6 +319,11 @@ class SectionAwareChunker:
                     start_chunk_idx=global_chunk_idx,
                     is_summary=is_summary,
                     doc_language=doc_language,
+                    # Pass location metadata for split chunks
+                    page_number=section.page_number,
+                    start_offset=section.start_offset,
+                    end_offset=section.end_offset,
+                    url=section.url,
                 )
                 chunks.extend(sub_chunks)
                 global_chunk_idx += len(sub_chunks)
@@ -327,8 +358,18 @@ class SectionAwareChunker:
         start_chunk_idx: int,
         is_summary: bool,
         doc_language: Optional[str] = None,
+        # Location metadata for citation tracking
+        page_number: Optional[int] = None,
+        start_offset: Optional[int] = None,
+        end_offset: Optional[int] = None,
+        url: Optional[str] = None,
     ) -> List[SectionChunk]:
-        """Split a large section into smaller chunks at paragraph boundaries."""
+        """Split a large section into smaller chunks at paragraph boundaries.
+        
+        Location metadata (page_number, start_offset, end_offset, url) is
+        applied to the first chunk. Subsequent chunks inherit page_number
+        but not character offsets (which become imprecise after splitting).
+        """
         content = section.content
         max_tokens = self.config.max_tokens
         overlap = self.config.overlap_tokens
@@ -363,6 +404,8 @@ class SectionAwareChunker:
             else:
                 # Current chunk is full, emit it
                 if current_text:
+                    # First chunk gets precise offsets; later chunks only get page_number
+                    is_first_chunk = (chunk_idx_in_section == 0)
                     chunks.append(
                         SectionChunk(
                             id=f"{doc_id}_chunk_{start_chunk_idx + len(chunks)}",
@@ -376,16 +419,21 @@ class SectionAwareChunker:
                             section_chunk_index=chunk_idx_in_section,
                             section_chunk_total=-1,  # Will update after
                             tokens=current_tokens,
-                            is_section_start=(chunk_idx_in_section == 0),
+                            is_section_start=is_first_chunk,
                             is_summary_section=is_summary,
                             language=doc_language,
+                            # Location metadata (precise offsets only for first chunk)
+                            page_number=page_number,
+                            start_offset=start_offset if is_first_chunk else None,
+                            end_offset=end_offset if is_first_chunk else None,
                             metadata={
                                 "source": doc_source,
+                                "url": url or doc_source,
                                 "title": doc_title,
                                 "table_count": section.table_count,
-                                "tables": section.tables if include_tables and chunk_idx_in_section == 0 else [],
-                                "key_value_pairs": section.key_value_pairs if chunk_idx_in_section == 0 else [],
-                                "kvp_count": len(section.key_value_pairs) if chunk_idx_in_section == 0 else 0,
+                                "tables": section.tables if include_tables and is_first_chunk else [],
+                                "key_value_pairs": section.key_value_pairs if is_first_chunk else [],
+                                "kvp_count": len(section.key_value_pairs) if is_first_chunk else 0,
                             },
                         )
                     )
@@ -404,6 +452,7 @@ class SectionAwareChunker:
         
         # Emit final chunk
         if current_text:
+            is_first_chunk = (chunk_idx_in_section == 0)
             chunks.append(
                 SectionChunk(
                     id=f"{doc_id}_chunk_{start_chunk_idx + len(chunks)}",
@@ -417,16 +466,21 @@ class SectionAwareChunker:
                     section_chunk_index=chunk_idx_in_section,
                     section_chunk_total=-1,
                     tokens=current_tokens,
-                    is_section_start=(chunk_idx_in_section == 0),
+                    is_section_start=is_first_chunk,
                     is_summary_section=is_summary,
                     language=doc_language,
+                    # Location metadata (precise offsets only for first chunk)
+                    page_number=page_number,
+                    start_offset=start_offset if is_first_chunk else None,
+                    end_offset=end_offset if is_first_chunk else None,
                     metadata={
                         "source": doc_source,
+                        "url": url or doc_source,
                         "title": doc_title,
                         "table_count": section.table_count,
-                        "tables": section.tables if include_tables and chunk_idx_in_section == 0 else [],
-                        "key_value_pairs": section.key_value_pairs if chunk_idx_in_section == 0 else [],
-                        "kvp_count": len(section.key_value_pairs) if chunk_idx_in_section == 0 else 0,
+                        "tables": section.tables if include_tables and is_first_chunk else [],
+                        "key_value_pairs": section.key_value_pairs if is_first_chunk else [],
+                        "kvp_count": len(section.key_value_pairs) if is_first_chunk else 0,
                     },
                 )
             )

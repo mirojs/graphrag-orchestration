@@ -1,0 +1,354 @@
+{
+  "response": "## Analysis\n\n### Q1. What needs to be checked for inconsistencies?\n\nTo detect inconsistencies between the invoice and the contract, we must compare, for each billed item:\n\n1. **Line items / descriptions** \u2013 whether the goods/services invoiced match what the contract says will be furnished and installed.  \n2. **Quantities** \u2013 number of units invoiced vs. number of units in the contract.  \n3. **Amounts** \u2013 unit prices and extended totals vs. the contract\u2019s total price and any implied per\u2011item pricing.\n\nThe relevant documents are:\n\n- **Invoice**: Contoso Lifts LLC \u2192 Fabrikam Construction, Invoice #1256003, dated 12/17/2015, total $29,900.00, described as \u201cInitial payment in accordance with contract.\u201d[1]  \n- **Purchase Contract**: Contoso Lifts LLC \u2194 Fabrikam Inc., total contract price $29,900.00, with a defined scope of work and payment terms.[2][3][5][6][7][8][9][10][12][13][14][16][19][20][56][61]\n\nThese two documents are clearly intended to relate to the same project: same contractor (Contoso Lifts LLC), same customer (Fabrikam), same address, and same total price $29,900.00.[1][2]\n\n---\n\n### Q2. Contract terms defining expected amounts, line items, and quantities\n\n**Scope of Work (contract line items and quantities)**  \nThe purchase contract\u2019s Scope of Work lists the items and quantities Contoso must furnish and install:[2][3][5][6][7][8][9][10][12][13][14][16][19][20][56][61]\n\n- 1 Vertical Platform Lift (**AscendPro VPX200**)  \n- 1 Power system: **110 VAC 60 Hz up, 12 VAC down**  \n- 1 **Custom cab 42\" x 62\" with Type 3 90-degree access**  \n- 1 **Outdoor configuration package**  \n- 1 **Aluminum door with plexi-glass inserts & automatic opener**  \n- 2 **Flush-mount Hall Call stations (upper & lower)**  \n\nAll quantities are explicitly \u201c1\u201d for each major component, except the hall call stations, which are \u201c2\u201d.[2]\n\n**Contract price and payment structure**\n\n- Total contract price: **$29,900.00**.[2]  \n- Payment terms:  \n  - $20,000.00 upon signing  \n  - $7,000.00 upon delivery  \n  - $2,900.00 upon completion[2]\n\nThe contract does **not** break down the $29,900.00 into per\u2011line\u2011item prices; it only gives the total and the milestone payments.[2]\n\nThese contract terms are the reference for:\n\n- Which items should appear on the invoice (descriptions and counts).  \n- The overall total amount that should be invoiced across all milestones ($29,900.00).  \n- The specific milestone amount that should be invoiced at this stage (likely $20,000.00 \u201cupon signing,\u201d depending on what this invoice is intended to represent).\n\n---\n\n### Q3. Comparison of invoiced amounts vs. contract amounts\n\n**Invoice line items and amounts**\n\nThe invoice lists the following items and prices:[1][4][11][21][29][35][67][68][72][73]\n\n1. 1 \u00d7 Vertical Platform Lift (**Savaria V1504**) \u2013 Unit price $11,200.00, Total $11,200.00  \n2. 1 \u00d7 110 VAC 60 Hz up, 12 VAC down operation parts \u2013 Unit price $3,000.00, Total $3,000.00  \n3. 1 \u00d7 Special Size 42\" x 62\" cab with 90 degree Type 3 \u2013 Unit price $5,800.00, Total $5,800.00  \n4. 1 \u00d7 Outdoor fitting \u2013 Unit price $2,000.00, Total $2,000.00  \n5. 1 \u00d7 80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator \u2013 Unit price $5,000.00, Total $5,000.00  \n6. 2 \u00d7 Hall Call stations for bottom and upper landing \u2013 Unit price $1,450.00, Total $2,900.00  \n\nSubtotal: $29,900.00; Tax: N/A; Total: $29,900.00; Amount Due: $29,900.00.[1]\n\n**Consistency of total amount**\n\n- The invoice total **$29,900.00** exactly matches the **total contract price** of $29,900.00.[1][2]  \n- However, the contract\u2019s payment terms say the customer should pay in **three installments** ($20,000 + $7,000 + $2,900).[2]  \n- The invoice is labeled \u201cInitial payment in accordance with contract\u201d and \u201cDue on contract signing,\u201d yet it bills the **full contract amount** of $29,900.00 as \u201cAmount Due.\u201d[1]\n\n**Amount inconsistency**\n\n- For an \u201cinitial payment\u201d at contract signing, the contract expects **$20,000.00**, not $29,900.00.[2]  \n- Therefore, the invoice\u2019s **amount due is inconsistent with the contract\u2019s payment schedule**: it accelerates the entire contract price into the first invoice instead of billing only the $20,000 signing installment.\n\nThere is no explicit per\u2011item pricing in the contract, so we cannot say that any individual unit price (e.g., $11,200 for the lift) conflicts with a contract unit price; the only clear numerical inconsistency is the **timing and amount of the payment** relative to the installment terms.\n\n---\n\n### Q4. Comparison of invoiced quantities vs. contract quantities\n\n**Quantities on the invoice**[1]\n\n- Vertical Platform Lift (Savaria V1504): 1  \n- Power system (110 VAC 60 Hz up, 12 VAC down operation parts): 1  \n- Custom cab 42\" x 62\" with Type 3 90-degree access: 1  \n- Outdoor fitting: 1  \n- Aluminum door with plexi-glass inserts & automatic operator: 1  \n- Hall Call stations (bottom and upper landing): 2  \n\n**Quantities in the contract**[2]\n\n- Vertical Platform Lift (AscendPro VPX200): 1  \n- Power system: 1  \n- Custom cab 42\" x 62\" with Type 3 90-degree access: 1  \n- Outdoor configuration package: 1  \n- Aluminum door with plexi-glass inserts & automatic opener: 1  \n- Flush-mount Hall Call stations (upper & lower): 2  \n\n**Quantity consistency**\n\n- For each functional component, the **quantities match exactly**: 1 lift, 1 power system, 1 cab, 1 outdoor package/fitting, 1 door, 2 hall call stations.[1][2]  \n- There is **no discrepancy in quantities** between the invoice and the contract.\n\n---\n\n### Q5. Comparison of invoice line items vs. contract line items (description/identity)\n\nHere we look at whether the **items themselves** match what the contract specifies.\n\n**Lift model**\n\n- Contract: \u201c1 Vertical Platform Lift (**AscendPro VPX200**).\u201d[2]  \n- Invoice: \u201c1 Vertical Platform Lift (**Savaria V1504**).\u201d[1]\n\nThis is a clear **model mismatch**: the contract calls for an AscendPro VPX200, but the invoice bills for a Savaria V1504. There is no written change order in the contract excerpt authorizing a different model.[2][3] Under the contract\u2019s \u201cChanges\u201d clause, any changes must be agreed to in writing.[2] Thus, **the invoiced lift model is inconsistent with the contract terms**.\n\n**Outdoor package**\n\n- Contract: \u201c1 Outdoor configuration package.\u201d[2]  \n- Invoice: \u201c1 Outdoor fitting.\u201d[1]\n\nThese likely refer to the same general concept (outdoor use), but the wording differs. The contract\u2019s \u201cconfiguration package\u201d suggests a defined package of components; \u201cOutdoor fitting\u201d is less specific. Without a detailed spec, this is a **potential scope/description mismatch**, though functionally it may be intended to correspond.\n\n**Door**\n\n- Contract: \u201c1 Aluminum door with plexi-glass inserts & automatic opener.\u201d[2]  \n- Invoice: \u201c1 80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator.\u201d[1]\n\nThe invoice door description is **more detailed** but consistent in substance: aluminum door, plexi-glass inserts, automatic operator. The added details (80\" high, low profile, WR\u2011500 lock) are enhancements or specifications, not contradictions. No clear inconsistency here; if anything, the invoice item is a more specific version of the contract item.\n\n**Hall call stations**\n\n- Contract: \u201c2 Flush-mount Hall Call stations (upper & lower).\u201d[2]  \n- Invoice: \u201c2 Hall Call stations for bottom and upper landing.\u201d[1]\n\nDescriptions are functionally equivalent (upper/lower vs. bottom/upper landing). No inconsistency in line item identity.\n\n**Power system and cab**\n\n- Contract:  \n  - \u201c1 Power system: 110 VAC 60 Hz up, 12 VAC down.\u201d  \n  - \u201c1 Custom cab 42\" x 62\" with Type 3 90-degree access.\u201d[2]  \n- Invoice:  \n  - \u201c1 110 VAC 60 Hz up, 12 VAC down operation parts.\u201d  \n  - \u201c1 Special Size 42\" x 62\" cab with 90 degree Type 3.\u201d[1]\n\nThese descriptions align closely; wording differences (\u201coperation parts\u201d vs. \u201cpower system,\u201d \u201cspecial size\u201d vs. \u201ccustom cab\u201d) do not change the substance. No material inconsistency.\n\n**Summary of line\u2011item identity inconsistencies**\n\n- **Major inconsistency**: Lift model \u2013 AscendPro VPX200 (contract) vs. Savaria V1504 (invoice).[2][1]  \n- **Minor/ambiguous**: \u201cOutdoor configuration package\u201d vs. \u201cOutdoor fitting\u201d \u2013 likely intended to match but not identically described.[2][1]  \n- Other items (power system, cab, door, hall call stations) are substantively consistent.\n\n---\n\n## Key Connections\n\n- **Scope and quantities**: The invoice covers the same functional components and quantities as the contract (1 lift, 1 power system, 1 cab, 1 outdoor package, 1 door, 2 hall call stations).[1][2] This suggests the invoice is for the full contracted system.\n\n- **Total price**: The invoice subtotal and total ($29,900.00) exactly match the contract\u2019s total price ($29,900.00).[1][2] So at the aggregate level, the amount is consistent.\n\n- **Payment timing**: Despite matching the total, the invoice is labeled as the \u201cInitial payment\u201d due on contract signing but bills the **entire** $29,900.00, conflicting with the contract\u2019s three\u2011installment schedule (initial payment should be $20,000.00).[1][2] This is a **payment\u2011terms inconsistency**, not a price inconsistency.\n\n- **Product identity**: The biggest substantive mismatch is the **lift model**: the contract obligates Contoso to provide an AscendPro VPX200, but the invoice charges for a Savaria V1504.[2][1] Unless there is a written change order (required by the contract\u2019s Changes clause), this is a clear inconsistency between what was contracted and what is being billed.\n\n- **Other descriptions**: Differences in wording (e.g., \u201coutdoor configuration package\u201d vs. \u201coutdoor fitting\u201d) are minor and likely refer to the same scope, but they are less precise matches than the other items.\n\nTogether, these show that while the **overall dollar amount and quantities** align, there are **material inconsistencies in the product model and in the payment schedule**.\n\n---\n\n## Conclusion\n\nComparing the invoice to the purchase contract:\n\n1. **Amounts**  \n   - The invoice total of **$29,900.00** matches the contract\u2019s total price of **$29,900.00**.[1][2]  \n   - However, the contract requires payment in **three installments** ($20,000 upon signing, $7,000 upon delivery, $2,900 upon completion), whereas the invoice\u2014marked \u201cInitial payment in accordance with contract\u201d and due on contract signing\u2014demands the **full $29,900.00** as \u201cAmount Due.\u201d[1][2]  \n   - This is an inconsistency: the invoice\u2019s **amount due and timing** do not comply with the contract\u2019s payment terms.\n\n2. **Quantities**  \n   - For each component (lift, power system, cab, outdoor package, door, hall call stations), the **quantities on the invoice match the contract quantities** (1 each, except 2 hall call stations).[1][2]  \n   - There are **no quantity inconsistencies**.\n\n3. **Line items / product identity**  \n   - The contract specifies a **Vertical Platform Lift (AscendPro VPX200)**, but the invoice bills for a **Vertical Platform Lift (Savaria V1504)**.[2][1] This is a clear inconsistency in the core product being supplied.  \n   - Other items (power system, cab, door, hall call stations) are substantively consistent, though the \u201coutdoor configuration package\u201d vs. \u201coutdoor fitting\u201d wording is not identical.[2][1]\n\nOverall, the main inconsistencies between the invoice and the contract are:\n\n- **Lift model mismatch**: AscendPro VPX200 (contract) vs. Savaria V1504 (invoice).[2][1]  \n- **Payment schedule mismatch**: Contract calls for a $20,000 initial payment, but the invoice, labeled as the initial payment, demands the full $29,900.[1][2]\n\nThese are the key discrepancies that should be addressed or documented via a written change order to bring the invoice into alignment with the contract terms.",
+  "route_used": "route_4_drift_multi_hop",
+  "citations": [
+    {
+      "index": 1,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 2,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 3,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 4,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 5,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 6,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 7,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 8,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 9,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 10,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 11,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 12,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 13,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 14,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 15,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 16,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 17,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 18,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 19,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 20,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 21,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 22,
+      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_2",
+      "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l..."
+    },
+    {
+      "index": 23,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 24,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 25,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    },
+    {
+      "index": 26,
+      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West,..."
+    }
+  ],
+  "evidence_path": [
+    "Contoso Lifts LLC",
+    "61 S 34th Street, Dayton, FL 33155",
+    "Purchase Contract",
+    "Permitting",
+    "P.O. Box 123567 Key West, FL. 33304-0708",
+    "Warranty",
+    "Risk of Loss",
+    "INVOICE # 1256003",
+    "warranty period (term)",
+    "air conditioner",
+    "terms hereof including specific provisions for other features of the home and appliances",
+    "Term",
+    "John Doe",
+    "Builder's Limited Warranty",
+    "Fabrikam Construction",
+    "State of Idaho",
+    "Arbitration Program",
+    "Dispute",
+    "Fabrikam Inc.",
+    "appliances and equipment",
+    "Due on contract signing",
+    "Special Size 42\" x 62\" cab with 90 degree Type 3",
+    "Invalidity",
+    "https://ww.contosolifts.com/portal/pay",
+    "Vertical Platform Lift (Savaria V1504)",
+    "Outdoor fitting",
+    "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+    "Jim Contoso",
+    "Initial payment in accordance with contract",
+    "110 VAC 60 Hz up, 12 VAC down operation parts"
+  ],
+  "metadata": {
+    "sub_questions": [
+      "that need to be checked for inconsistencies against the corresponding contract terms?",
+      "What are the contract terms that define the expected amounts, line items, and quantities, which will be used as the reference for detecting inconsistencies with the invoice details?",
+      "For each line item on the invoice, how do the invoiced amounts compare to the corresponding amounts specified in the contract terms, and where do any inconsistencies between invoice amounts and contract amounts appear?",
+      "For each line item on the invoice, how do the invoiced quantities compare to the corresponding quantities specified in the contract terms, and where do any inconsistencies between invoice quantities and contract quantities appear?",
+      ", and where do any inconsistencies between invoice line items and contract line items appear?"
+    ],
+    "refined_sub_questions": [],
+    "confidence_score": 0.7069230769230769,
+    "confidence_loop_triggered": false,
+    "all_seeds_discovered": [
+      "Invoice",
+      "Contract Terms",
+      "Expected Amounts",
+      "Invoice Line Items",
+      "Quantities",
+      "Line Item",
+      "Contract Line Items",
+      "Invoice Details",
+      "Line Items"
+    ],
+    "intermediate_results": [
+      {
+        "question": "that need to be checked for inconsistencies against the corresponding contract terms?",
+        "entities": [],
+        "evidence_count": 0
+      },
+      {
+        "question": "What are the contract terms that define the expected amounts, line items, and quantities, which will be used as the reference for detecting inconsistencies with the invoice details?",
+        "entities": [
+          "Contract Terms",
+          "Expected Amounts",
+          "Line Items",
+          "Quantities",
+          "Invoice Details"
+        ],
+        "evidence_count": 5
+      },
+      {
+        "question": "For each line item on the invoice, how do the invoiced amounts compare to the corresponding amounts specified in the contract terms, and where do any inconsistencies between invoice amounts and contract amounts appear?",
+        "entities": [
+          "Invoice",
+          "Contract Terms",
+          "Line Item"
+        ],
+        "evidence_count": 5
+      },
+      {
+        "question": "For each line item on the invoice, how do the invoiced quantities compare to the corresponding quantities specified in the contract terms, and where do any inconsistencies between invoice quantities and contract quantities appear?",
+        "entities": [
+          "Invoice",
+          "Contract Terms",
+          "Line Item"
+        ],
+        "evidence_count": 5
+      },
+      {
+        "question": ", and where do any inconsistencies between invoice line items and contract line items appear?",
+        "entities": [
+          "Invoice Line Items",
+          "Contract Line Items"
+        ],
+        "evidence_count": 5
+      }
+    ],
+    "num_evidence_nodes": 30,
+    "text_chunks_used": 73,
+    "latency_estimate": "thorough",
+    "precision_level": "maximum",
+    "route_description": "DRIFT iterative multi-hop with confidence loop",
+    "coverage_retrieval": {
+      "applied": false,
+      "strategy": "semantic",
+      "is_comprehensive_query": false,
+      "chunks_per_doc": 1,
+      "chunks_added": 0,
+      "docs_added": 0,
+      "docs_from_entity_retrieval": 0,
+      "total_docs_in_corpus": 5
+    }
+  }
+}

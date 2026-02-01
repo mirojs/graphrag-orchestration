@@ -171,9 +171,9 @@ class RouteEnum(str, Enum):
 class HybridQueryRequest(BaseModel):
     """Request model for hybrid pipeline queries."""
     query: str = Field(..., description="The natural language query to execute")
-    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit", "nlp_connected"] = Field(
+    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit", "nlp_connected", "comprehensive"] = Field(
         default="detailed_report",
-        description="Type of response to generate (nlp_audit = deterministic extraction, no LLM; nlp_connected = deterministic + rephrasing)"
+        description="Type of response to generate. Options: detailed_report, summary, audit_trail, nlp_audit (deterministic extraction), nlp_connected (deterministic + rephrasing), comprehensive (2-pass extraction for 100% fact coverage)"
     )
     force_route: Optional[RouteEnum] = Field(
         default=None,
@@ -197,7 +197,7 @@ class HybridQueryResponse(BaseModel):
     route_used: str = Field(..., description="Which route was taken (route_1/route_2/route_3)")
     citations: List[Dict[str, Any]] = Field(
         default_factory=list,
-        description="Source citations with text and metadata"
+        description="Source citations with text and metadata (includes document_url, page_number, section_path, start_offset, end_offset when available)"
     )
     evidence_path: List[Any] = Field(
         default_factory=list,
@@ -206,6 +206,10 @@ class HybridQueryResponse(BaseModel):
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Additional execution metadata"
+    )
+    raw_extractions: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Structured JSON extractions per document (only populated for response_type='comprehensive')"
     )
 
 
@@ -445,10 +449,11 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
             result = await pipeline.force_route(
                 query=body.query,
                 route=forced_route,
-                response_type=body.response_type
+                response_type=body.response_type,
+                knn_config=body.knn_config,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config)
         
         return HybridQueryResponse(**result)
 
@@ -944,6 +949,10 @@ class HybridIndexDocumentsRequest(BaseModel):
         default=0.60,
         description="Minimum similarity threshold for KNN edges (default: 0.60)",
     )
+    knn_config: Optional[str] = Field(
+        default=None,
+        description="Optional tag for KNN edges (e.g., 'knn-1', 'knn-2') to enable A/B testing of KNN parameters",
+    )
 
 
 class HybridIndexDocumentsResponse(BaseModel):
@@ -977,6 +986,7 @@ async def _run_indexing_job(
     knn_enabled: bool = True,
     knn_top_k: int = 5,
     knn_similarity_cutoff: float = 0.60,
+    knn_config: Optional[str] = None,
 ):
     """Background task to run indexing."""
     await _indexing_jobs.update(job_id, status="running", progress="Starting indexing pipeline...")
@@ -1001,6 +1011,7 @@ async def _run_indexing_job(
             knn_enabled=knn_enabled,
             knn_top_k=knn_top_k,
             knn_similarity_cutoff=knn_similarity_cutoff,
+            knn_config=knn_config,
         )
         
         await _indexing_jobs.update(
@@ -1094,6 +1105,7 @@ async def hybrid_index_documents(
         body.knn_enabled,
         body.knn_top_k,
         body.knn_similarity_cutoff,
+        body.knn_config,
     )
     
     logger.info(

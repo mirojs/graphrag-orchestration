@@ -189,7 +189,7 @@ async def run_query(pipeline, pipeline_name: str, query: str, question_id: str, 
         result = await pipeline.force_route(
             query=query,
             route=route,
-            response_type="summary"
+            response_type="comprehensive"  # 2-pass NLP extraction for 100% fact coverage
         )
         
         elapsed = (datetime.now() - start_time).total_seconds()

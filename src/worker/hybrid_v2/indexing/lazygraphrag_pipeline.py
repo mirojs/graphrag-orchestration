@@ -177,6 +177,7 @@ class LazyGraphRAGIndexingPipeline:
         knn_enabled: bool = True,
         knn_top_k: int = 5,
         knn_similarity_cutoff: float = 0.60,
+        knn_config: Optional[str] = None,  # Tag for KNN edges (e.g., "knn-1", "knn-2") for A/B testing
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -336,11 +337,12 @@ class LazyGraphRAGIndexingPipeline:
         # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
         try:
             if knn_enabled:
-                logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, Louvain, PageRank)...")
+                logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, Louvain, PageRank)...")
                 gds_stats = await self._run_gds_graph_algorithms(
                     group_id=group_id,
                     knn_top_k=knn_top_k,
                     knn_similarity_cutoff=knn_similarity_cutoff,
+                    knn_config=knn_config,
                 )
             else:
                 logger.info("🔬 KNN disabled - running Louvain and PageRank only...")
@@ -348,6 +350,7 @@ class LazyGraphRAGIndexingPipeline:
                     group_id=group_id,
                     knn_top_k=0,  # Signal to skip KNN
                     knn_similarity_cutoff=1.0,  # No edges will pass this threshold
+                    knn_config=None,
                 )
             stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
             stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
@@ -357,6 +360,7 @@ class LazyGraphRAGIndexingPipeline:
                 "enabled": knn_enabled,
                 "top_k": knn_top_k if knn_enabled else 0,
                 "similarity_cutoff": knn_similarity_cutoff if knn_enabled else None,
+                "config_tag": knn_config,
             }
             logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities, {stats['gds_pagerank_nodes']} nodes scored")
         except Exception as e:
@@ -1613,6 +1617,7 @@ Output:
         group_id: str,
         knn_top_k: int = 5,
         knn_similarity_cutoff: float = 0.60,
+        knn_config: Optional[str] = None,
     ) -> Dict[str, int]:
         """Run GDS algorithms to enhance the graph with computed properties.
         
@@ -1630,6 +1635,7 @@ Output:
             group_id: Group identifier for multi-tenancy
             knn_top_k: Number of nearest neighbors for KNN (default: 5)
             knn_similarity_cutoff: Minimum similarity for KNN edges (default: 0.60)
+            knn_config: Optional tag for KNN edges (e.g., "knn-1") for A/B testing
             
         Returns:
             Statistics dictionary with algorithm results
@@ -1780,20 +1786,36 @@ Output:
                     # Create SEMANTICALLY_SIMILAR edge for all node type combinations
                     # Only create edge if node1 < node2 (avoids A→B and B→A duplicates)
                     # Similarity is symmetric, so one edge per pair is sufficient
-                    result = session.run("""
-                        MATCH (n1), (n2) 
-                        WHERE id(n1) = $node1 AND id(n2) = $node2
-                          AND id(n1) < id(n2)
-                        MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                        SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, r.created_at = datetime()
-                        RETURN count(r) AS cnt
-                    """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id)
+                    # Include knn_config tag if provided (enables A/B testing of KNN parameters)
+                    if knn_config:
+                        result = session.run("""
+                            MATCH (n1), (n2) 
+                            WHERE id(n1) = $node1 AND id(n2) = $node2
+                              AND id(n1) < id(n2)
+                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
+                            SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, 
+                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
+                            RETURN count(r) AS cnt
+                        """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id,
+                            knn_config=knn_config, knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                    else:
+                        result = session.run("""
+                            MATCH (n1), (n2) 
+                            WHERE id(n1) = $node1 AND id(n2) = $node2
+                              AND id(n1) < id(n2)
+                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                            SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id,
+                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
+                            RETURN count(r) AS cnt
+                        """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id,
+                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
                     rec = result.single()
                     if rec and rec["cnt"] > 0:
                         edges_created += rec["cnt"]
                 
                 stats["knn_edges"] = edges_created
-                logger.info(f"🔗 GDS KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges created")
+                config_msg = f" (config={knn_config})" if knn_config else ""
+                logger.info(f"🔗 GDS KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges created{config_msg}")
             
             # 4. Run Louvain community detection
             logger.info(f"🏘️ Running GDS Louvain community detection...")

@@ -1,0 +1,387 @@
+{
+  "timestamp": "2026-02-01T10:58:31.025733",
+  "api_url": "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query",
+  "query": "Analyze the invoice and contract documents to find all inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms. Organize findings by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies.",
+  "results": [
+    {
+      "group_id": "test-5pdfs-v2-enhanced-ex",
+      "name": "Baseline (No KNN)",
+      "k": 0,
+      "cutoff": 1.0,
+      "edges": 0,
+      "ground_truth_count": 11,
+      "ground_truth_percentage": 68.75,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C6_no_change_order",
+        "C7_invoice_number"
+      ],
+      "total_citations": 2,
+      "response_length": 16737,
+      "route": "route_4_drift_multi_hop",
+      "metadata": {
+        "sub_questions": [
+          "and the corresponding contract terms that relate to these same amounts, line items, quantities, and payment terms, in order to prepare for analyzing all inconsistencies between the invoice and contract documents.",
+          ", and what evidence from the invoice and contract documents supports each identified payment schedule conflict?",
+          "and the corresponding contract line item specifications, specifically focusing on line item specification mismatches (such as missing items, extra items, changed descriptions, or altered pricing or quantities), and how does each mismatch manifest in both the invoice and contract documents?",
+          ", specifically focusing on billing or administrative discrepancies, and what evidence from the invoice and contract documents supports each identified discrepancy?"
+        ],
+        "refined_sub_questions": [],
+        "confidence_score": 0.5857142857142857,
+        "confidence_loop_triggered": false,
+        "all_seeds_discovered": [
+          "Invoice",
+          "Contract Terms",
+          "Contract",
+          "Payment Terms",
+          "Line Items"
+        ],
+        "intermediate_results": [
+          {
+            "question": "and the corresponding contract terms that relate to these same amounts, line items, quantities, and payment terms, in order to prepare for analyzing all inconsistencies between the invoice and contract documents.",
+            "entities": [
+              "Invoice",
+              "Contract",
+              "Contract Terms",
+              "Line Items",
+              "Payment Terms"
+            ],
+            "evidence_count": 5
+          },
+          {
+            "question": ", and what evidence from the invoice and contract documents supports each identified payment schedule conflict?",
+            "entities": [
+              "Invoice",
+              "Contract"
+            ],
+            "evidence_count": 5
+          },
+          {
+            "question": "and the corresponding contract line item specifications, specifically focusing on line item specification mismatches (such as missing items, extra items, changed descriptions, or altered pricing or quantities), and how does each mismatch manifest in both the invoice and contract documents?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": ", specifically focusing on billing or administrative discrepancies, and what evidence from the invoice and contract documents supports each identified discrepancy?",
+            "entities": [],
+            "evidence_count": 0
+          }
+        ],
+        "num_evidence_nodes": 30,
+        "text_chunks_used": 75,
+        "latency_estimate": "thorough",
+        "precision_level": "maximum",
+        "route_description": "DRIFT iterative multi-hop with confidence loop",
+        "coverage_retrieval": {
+          "applied": true,
+          "strategy": "section_based_hybrid_reranked",
+          "is_comprehensive_query": true,
+          "chunks_per_doc": 5,
+          "chunks_added": 17,
+          "docs_added": 5,
+          "docs_from_entity_retrieval": 0,
+          "total_docs_in_corpus": 5
+        }
+      },
+      "response_preview": "## Analysis\n\n### 1. Relevant invoice vs. contract terms (amounts, line items, quantities, payment terms)\n\n**Invoice basics**\n\n- Vendor / Customer: Contoso Lifts LLC invoices Fabrikam Construction (John Doe) for a lift installation at 61 S 34th Street, Dayton, FL 33155.[1]  \n- Invoice date & number: 12/17/2015, Invoice #1256003.[1]  \n- Comment: \u201cInitial payment in accordance with contract.\u201d[1]  \n- Terms / Due date fields:  \n  - DUE DATE: \u201cDue on contract signing\u201d[1]  \n  - TERMS: blank (no net\u201130,..."
+    },
+    {
+      "group_id": "test-5pdfs-v2-knn-1",
+      "name": "KNN-1 (Conservative)",
+      "k": 3,
+      "cutoff": 0.8,
+      "edges": 408,
+      "ground_truth_count": 11,
+      "ground_truth_percentage": 68.75,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C4_bayfront_site",
+        "C6_no_change_order"
+      ],
+      "total_citations": 5,
+      "response_length": 15969,
+      "route": "route_4_drift_multi_hop",
+      "metadata": {
+        "sub_questions": [
+          "and the corresponding contract terms that define or govern those same amounts, line items, quantities, and payment terms, so that all subsequent inconsistencies between the invoice details and the contract terms can be analyzed and organized by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies.",
+          ", and how can these inconsistencies be organized and documented with concrete evidence under category (1) payment schedule conflicts with evidence, while still distinguishing them from (2) line item specification mismatches and (3) billing or administrative discrepancies?",
+          "with the corresponding contract terms that define or govern those same line items, what specific mismatches or inconsistencies can be found in specifications, scope, unit pricing, or quantities, and how can these be organized under category (2) line item specification mismatches, clearly separated from (1) payment schedule conflicts with evidence and (3) billing or administrative discrepancies?",
+          "against the corresponding contract terms that define or govern those same billing and administrative elements, what specific inconsistencies or irregularities can be identified, and how can these be organized under category (3) billing or administrative discrepancies, ensuring they are distinguished from (1) payment schedule conflicts with evidence and (2) line item specification mismatches?"
+        ],
+        "refined_sub_questions": [
+          "payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies?",
+          "payment schedule conflicts, what concrete evidence supports each of these payment schedule conflicts, and how can these inconsistencies be organized and documented under category (1) payment schedule conflicts with evidence, while still clearly distinguishing them from category (2) line item specification mismatches and category (3) billing or administrative discrepancies?",
+          "line item specification mismatches, clearly separated from category (1) payment schedule conflicts with evidence and category (3) billing or administrative discrepancies?",
+          "identified in sub-question 1, and the corresponding contract terms that define or govern those same billing and administrative elements, what specific inconsistencies or irregularities can be identified, and how can these be organized and documented under category (3) billing or administrative discrepancies, ensuring they are clearly distinguished from category (1) payment schedule conflicts with evidence and category (2) line item specification mismatches?"
+        ],
+        "confidence_score": 0.4,
+        "confidence_loop_triggered": true,
+        "all_seeds_discovered": [],
+        "intermediate_results": [
+          {
+            "question": "and the corresponding contract terms that define or govern those same amounts, line items, quantities, and payment terms, so that all subsequent inconsistencies between the invoice details and the contract terms can be analyzed and organized by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies.",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": ", and how can these inconsistencies be organized and documented with concrete evidence under category (1) payment schedule conflicts with evidence, while still distinguishing them from (2) line item specification mismatches and (3) billing or administrative discrepancies?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "with the corresponding contract terms that define or govern those same line items, what specific mismatches or inconsistencies can be found in specifications, scope, unit pricing, or quantities, and how can these be organized under category (2) line item specification mismatches, clearly separated from (1) payment schedule conflicts with evidence and (3) billing or administrative discrepancies?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "against the corresponding contract terms that define or govern those same billing and administrative elements, what specific inconsistencies or irregularities can be identified, and how can these be organized under category (3) billing or administrative discrepancies, ensuring they are distinguished from (1) payment schedule conflicts with evidence and (2) line item specification mismatches?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "payment schedule conflicts, what concrete evidence supports each of these payment schedule conflicts, and how can these inconsistencies be organized and documented under category (1) payment schedule conflicts with evidence, while still clearly distinguishing them from category (2) line item specification mismatches and category (3) billing or administrative discrepancies?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "line item specification mismatches, clearly separated from category (1) payment schedule conflicts with evidence and category (3) billing or administrative discrepancies?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "identified in sub-question 1, and the corresponding contract terms that define or govern those same billing and administrative elements, what specific inconsistencies or irregularities can be identified, and how can these be organized and documented under category (3) billing or administrative discrepancies, ensuring they are clearly distinguished from category (1) payment schedule conflicts with evidence and category (2) line item specification mismatches?",
+            "entities": [],
+            "evidence_count": 0
+          }
+        ],
+        "num_evidence_nodes": 0,
+        "text_chunks_used": 17,
+        "latency_estimate": "thorough",
+        "precision_level": "maximum",
+        "route_description": "DRIFT iterative multi-hop with confidence loop",
+        "coverage_retrieval": {
+          "applied": true,
+          "strategy": "section_based_hybrid_reranked",
+          "is_comprehensive_query": true,
+          "chunks_per_doc": 5,
+          "chunks_added": 17,
+          "docs_added": 5,
+          "docs_from_entity_retrieval": 0,
+          "total_docs_in_corpus": 5
+        }
+      },
+      "response_preview": "## Analysis\n\nBelow, I compare the **Contoso Lifts invoice** to the **purchase contract** (and its Exhibit A) and then organize all inconsistencies into the three requested categories. Other documents in the corpus (Property Management Agreement, Builder\u2019s Limited Warranty, Holding Tank Servicing Contract) involve different parties/subjects and do not govern this elevator purchase, so they are not used for inconsistency analysis.\n\n---\n\n### 1. Context: Matching Invoice to Contract\n\n**Invoice (Cont..."
+    },
+    {
+      "group_id": "test-5pdfs-v2-knn-2",
+      "name": "KNN-2 (Relaxed)",
+      "k": 5,
+      "cutoff": 0.75,
+      "edges": 679,
+      "ground_truth_count": 11,
+      "ground_truth_percentage": 68.75,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C6_no_change_order",
+        "C7_invoice_number"
+      ],
+      "total_citations": 31,
+      "response_length": 17083,
+      "route": "route_4_drift_multi_hop",
+      "metadata": {
+        "sub_questions": [
+          "and the corresponding contract terms they relate to, in order to establish a basis for analyzing all inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms, to later organize findings by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies.",
+          "and their corresponding contract terms, what inconsistencies exist specifically in the payment schedule (such as due dates, milestones, installment structures, or timing of payments), and what concrete evidence from both the invoice and contract documents supports each identified payment schedule conflict, so that these can be organized under category (1) payment schedule conflicts with evidence?",
+          "with the corresponding contract terms, what mismatches or inconsistencies can be found in line item specifications (such as scope, description, unit price, quantity, or included services/products), ensuring that all such inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms are captured and can be organized under category (2) line item specification mismatches?",
+          "and the corresponding contract terms, so these can be organized under category (3) billing or administrative discrepancies?"
+        ],
+        "refined_sub_questions": [],
+        "confidence_score": 0.55,
+        "confidence_loop_triggered": false,
+        "all_seeds_discovered": [
+          "Invoice",
+          "Contract",
+          "Line Item",
+          "Payment Terms",
+          "Category (2) Line Item Specification Mismatches"
+        ],
+        "intermediate_results": [
+          {
+            "question": "and the corresponding contract terms they relate to, in order to establish a basis for analyzing all inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms, to later organize findings by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies.",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "and their corresponding contract terms, what inconsistencies exist specifically in the payment schedule (such as due dates, milestones, installment structures, or timing of payments), and what concrete evidence from both the invoice and contract documents supports each identified payment schedule conflict, so that these can be organized under category (1) payment schedule conflicts with evidence?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "with the corresponding contract terms, what mismatches or inconsistencies can be found in line item specifications (such as scope, description, unit price, quantity, or included services/products), ensuring that all such inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms are captured and can be organized under category (2) line item specification mismatches?",
+            "entities": [
+              "Invoice",
+              "Contract",
+              "Line Item",
+              "Payment Terms",
+              "Category (2) Line Item Specification Mismatches"
+            ],
+            "evidence_count": 5
+          },
+          {
+            "question": "and the corresponding contract terms, so these can be organized under category (3) billing or administrative discrepancies?",
+            "entities": [],
+            "evidence_count": 0
+          }
+        ],
+        "num_evidence_nodes": 30,
+        "text_chunks_used": 71,
+        "latency_estimate": "thorough",
+        "precision_level": "maximum",
+        "route_description": "DRIFT iterative multi-hop with confidence loop",
+        "coverage_retrieval": {
+          "applied": true,
+          "strategy": "section_based_hybrid_reranked",
+          "is_comprehensive_query": true,
+          "chunks_per_doc": 5,
+          "chunks_added": 17,
+          "docs_added": 5,
+          "docs_from_entity_retrieval": 0,
+          "total_docs_in_corpus": 5
+        }
+      },
+      "response_preview": "## Analysis\n\nBelow, I compare the Contoso Lifts invoice to the elevator purchase contract (including Exhibit A where relevant) and then organize all inconsistencies into the three requested categories.\n\n---\n\n### Q1 \u2013 Mapping invoice details to corresponding contract terms (basis for analysis)\n\n**Relevant documents**\n\n- Invoice: \u201cContoso Lifts LLC \u2013 INVOICE #1256003\u201d dated 12/17/2015, to Fabrikam Construction / John Doe, for a vertical platform lift and related components, total $29,900.00, marke..."
+    },
+    {
+      "group_id": "test-5pdfs-v2-knn-3",
+      "name": "KNN-3 (Strict)",
+      "k": 5,
+      "cutoff": 0.85,
+      "edges": 590,
+      "ground_truth_count": 12,
+      "ground_truth_percentage": 75.0,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C4_bayfront_site",
+        "C5_keyless_access",
+        "C6_no_change_order"
+      ],
+      "total_citations": 3,
+      "response_length": 11942,
+      "route": "route_4_drift_multi_hop",
+      "metadata": {
+        "sub_questions": [
+          "and the corresponding contract terms that define or govern those same amounts, line items, quantities, and payment terms, in order to establish a basis for finding all inconsistencies between the invoice and the contract documents.",
+          ", and what specific evidence from both the invoice and the contract documents supports each identified payment schedule conflict?",
+          "with the corresponding contract terms that specify those items, what line item specification mismatches exist between the invoice details and the contract documents, and how does each mismatch deviate from the contract\u2019s specified scope, pricing, or quantity?",
+          "against the corresponding contract terms, what billing or administrative discrepancies can be identified\u2014such as incorrect tax application, missing or extra charges, misapplied discounts, incorrect client or project identifiers, or non-compliance with contractual invoicing procedures\u2014and how does each discrepancy conflict with the relevant contract provisions?",
+          "and the corresponding contract terms be categorized into: (1) payment schedule conflicts with supporting evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies, ensuring that each inconsistency is clearly assigned to the appropriate category with references to the specific invoice and contract clauses involved?"
+        ],
+        "refined_sub_questions": [],
+        "confidence_score": 0.56,
+        "confidence_loop_triggered": false,
+        "all_seeds_discovered": [
+          "Invoice",
+          "Pricing",
+          "Contract Terms",
+          "Payment Terms",
+          "Invoice Details",
+          "Scope",
+          "Line Items",
+          "Contract Documents"
+        ],
+        "intermediate_results": [
+          {
+            "question": "and the corresponding contract terms that define or govern those same amounts, line items, quantities, and payment terms, in order to establish a basis for finding all inconsistencies between the invoice and the contract documents.",
+            "entities": [
+              "Invoice",
+              "Contract Documents",
+              "Contract Terms",
+              "Line Items",
+              "Payment Terms"
+            ],
+            "evidence_count": 5
+          },
+          {
+            "question": ", and what specific evidence from both the invoice and the contract documents supports each identified payment schedule conflict?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "with the corresponding contract terms that specify those items, what line item specification mismatches exist between the invoice details and the contract documents, and how does each mismatch deviate from the contract\u2019s specified scope, pricing, or quantity?",
+            "entities": [
+              "Invoice Details",
+              "Contract Documents",
+              "Contract Terms",
+              "Scope",
+              "Pricing"
+            ],
+            "evidence_count": 5
+          },
+          {
+            "question": "against the corresponding contract terms, what billing or administrative discrepancies can be identified\u2014such as incorrect tax application, missing or extra charges, misapplied discounts, incorrect client or project identifiers, or non-compliance with contractual invoicing procedures\u2014and how does each discrepancy conflict with the relevant contract provisions?",
+            "entities": [],
+            "evidence_count": 0
+          },
+          {
+            "question": "and the corresponding contract terms be categorized into: (1) payment schedule conflicts with supporting evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies, ensuring that each inconsistency is clearly assigned to the appropriate category with references to the specific invoice and contract clauses involved?",
+            "entities": [],
+            "evidence_count": 0
+          }
+        ],
+        "num_evidence_nodes": 30,
+        "text_chunks_used": 71,
+        "latency_estimate": "thorough",
+        "precision_level": "maximum",
+        "route_description": "DRIFT iterative multi-hop with confidence loop",
+        "coverage_retrieval": {
+          "applied": true,
+          "strategy": "section_based_hybrid_reranked",
+          "is_comprehensive_query": true,
+          "chunks_per_doc": 5,
+          "chunks_added": 17,
+          "docs_added": 5,
+          "docs_from_entity_retrieval": 0,
+          "total_docs_in_corpus": 5
+        }
+      },
+      "response_preview": "## Analysis\n\nBelow, I compare the Contoso Lifts invoice to the purchase contract (and its Exhibit A) and organize all inconsistencies into the three requested categories. I ignore the unrelated warranty, property management, and holding tank contracts, as they do not govern this elevator purchase.\n\n---\n\n### 1. Payment Schedule Conflicts (with supporting evidence)\n\n**1.1. Invoice demands full contract price \u201cupon signing\u201d vs. contract\u2019s 3\u2011installment schedule**\n\n- **Invoice terms:**  \n  - Comment..."
+    }
+  ]
+}

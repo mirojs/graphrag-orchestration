@@ -17,8 +17,7 @@ import time
 # Add project root to path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)
-app_root = os.path.join(project_root, "graphrag-orchestration")
-sys.path.insert(0, app_root)
+sys.path.insert(0, project_root)
 
 from src.core.config import settings
 from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import (

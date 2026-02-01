@@ -103,9 +103,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     headers={"WWW-Authenticate": "Bearer"}
                 )
             else:
-                # Auth not required, proceed with no claims
-                request.state.group_id = None
-                request.state.user_id = None
+                # Auth not required, proceed without token claims
+                # Only set to None if GroupIsolation middleware hasn't already set a value
+                if not getattr(request.state, "group_id", None):
+                    request.state.group_id = None
+                if not getattr(request.state, "user_id", None):
+                    request.state.user_id = None
                 
         except HTTPException:
             raise

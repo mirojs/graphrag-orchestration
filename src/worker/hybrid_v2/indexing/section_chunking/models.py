@@ -22,9 +22,15 @@ class SectionNode:
     parent_id: Optional[str] = None
     children_ids: List[str] = field(default_factory=list)
     
-    # Span info from Azure DI
-    start_offset: int = 0
-    end_offset: int = 0
+    # Span info from Azure DI (character offsets)
+    start_offset: Optional[int] = None
+    end_offset: Optional[int] = None
+    
+    # Page number from Azure DI bounding regions
+    page_number: Optional[int] = None
+    
+    # URL from document metadata (for citation tracking)
+    url: Optional[str] = None
     
     # Paragraph/table counts for diagnostics
     paragraph_count: int = 0

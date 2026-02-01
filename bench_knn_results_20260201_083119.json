@@ -1,0 +1,109 @@
+{
+  "timestamp": "2026-02-01T08:31:19.670111",
+  "api_url": "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query",
+  "query": "Analyze the invoice and contract documents to find all inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms. Organize findings by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies.",
+  "results": [
+    {
+      "group_id": "test-5pdfs-v2-enhanced-ex",
+      "name": "Baseline (No KNN)",
+      "k": 0,
+      "cutoff": 1.0,
+      "edges": 0,
+      "ground_truth_count": 11,
+      "ground_truth_percentage": 68.75,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C6_no_change_order",
+        "C7_invoice_number"
+      ],
+      "total_citations": 2,
+      "response_length": 17677,
+      "route": "route_4_drift_multi_hop",
+      "response_preview": "## Analysis\n\nBelow, I compare the Contoso Lifts invoice to the elevator purchase contract, organized by the requested structure and explicitly citing supporting text.\n\n---\n\n### 1. Mapping Invoice Entries to Contract Terms\n\n**Invoice document (Contoso Lifts LLC, Invoice #1256003)**\n\nInvoice header and context:  \n- Seller: Contoso Lifts LLC; Customer: Fabrikam Construction / John Doe, address 61 S 34th Street, Dayton, FL 33155 [1].  \n- Date: 12/17/2015 [1].  \n- Comments: \u201cInitial payment in accord..."
+    },
+    {
+      "group_id": "test-5pdfs-v2-knn-1",
+      "name": "KNN-1 (Conservative)",
+      "k": 3,
+      "cutoff": 0.8,
+      "edges": 408,
+      "ground_truth_count": 11,
+      "ground_truth_percentage": 68.75,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C6_no_change_order",
+        "C7_invoice_number"
+      ],
+      "total_citations": 2,
+      "response_length": 20191,
+      "route": "route_4_drift_multi_hop",
+      "response_preview": "## Analysis\n\n### 1. Mapping invoice entries to corresponding contract terms (roles/appearances of \u201cinvoice\u201d)\n\n**Invoice document (Contoso Lifts invoice #1256003)**  \nKey commercial fields:  \n- Seller: Contoso Lifts LLC, P.O. Box 123567 Key West, FL 33304-0708 [1]  \n- Buyer: Fabrikam Construction / John Doe, 61 S 34th Street, Dayton, FL 33155 [1]  \n- Date: 12/17/2015 [1]  \n- Comment: \u201cInitial payment in accordance with contract\u201d [1]  \n- Terms: \u201cDue on contract signing\u201d [1]  \n- Line items (all qua..."
+    },
+    {
+      "group_id": "test-5pdfs-v2-knn-2",
+      "name": "KNN-2 (Relaxed)",
+      "k": 5,
+      "cutoff": 0.75,
+      "edges": 679,
+      "ground_truth_count": 11,
+      "ground_truth_percentage": 68.75,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "A3_customer_mismatch",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C2_john_doe",
+        "C6_no_change_order",
+        "C7_invoice_number"
+      ],
+      "total_citations": 3,
+      "response_length": 16444,
+      "route": "route_4_drift_multi_hop",
+      "response_preview": "## Analysis\n\nBelow, I walk through the issues in the order of the sub\u2011questions and map each invoice element to the governing contract terms, then identify inconsistencies.\n\n---\n\n### Q1 & Q8 \u2013 Mapping invoice elements to contract terms\n\n**Relevant documents**\n\n- Invoice: Contoso Lifts LLC \u2192 Fabrikam Construction, INVOICE #1256003, dated 12/17/2015, total $29,900.00, \u201cInitial payment in accordance with contract,\u201d terms \u201cDue on contract signing.\u201d[1]  \n- Contract: PURCHASE CONTRACT between Contoso ..."
+    },
+    {
+      "group_id": "test-5pdfs-v2-knn-3",
+      "name": "KNN-3 (Strict)",
+      "k": 5,
+      "cutoff": 0.85,
+      "edges": 590,
+      "ground_truth_count": 9,
+      "ground_truth_percentage": 56.25,
+      "ground_truth_items": [
+        "A1_model_mismatch",
+        "A2_payment_conflict",
+        "B1_hall_call_gap",
+        "B2_door_height",
+        "B3_lock_added",
+        "B4_outdoor_term",
+        "B5_invoice_contradiction",
+        "C6_no_change_order",
+        "C7_invoice_number"
+      ],
+      "total_citations": 2,
+      "response_length": 14220,
+      "route": "route_4_drift_multi_hop",
+      "response_preview": "## Analysis\n\n### 1. Basis for comparison: what the invoice and contract each say (Q1)\n\n**Invoice details (Contoso Lifts invoice #1256003)**\n\n- Total amount due: **$29,900.00** (subtotal, tax N/A, total, and amount due all $29,900.00).[1]  \n- Line items, quantities, and unit prices:[1]  \n  - 1 \u00d7 Vertical Platform Lift (**Savaria V1504**) \u2013 $11,200.00 (total $11,200.00).  \n  - 1 \u00d7 110 VAC 60 Hz up, 12 VAC down operation parts \u2013 $3,000.00 (total $3,000.00).  \n  - 1 \u00d7 Special Size 42\" x 62\" cab with..."
+    }
+  ]
+}

@@ -29,7 +29,11 @@ TEST_GROUPS = [
 # Single comprehensive query for ground truth scoring
 # This is the "3 deep questions" query from ANALYSIS_ROUTE4_V1_VS_V2_INVOICE_CONSISTENCY_2026-01-29.md
 # Route 4 DRIFT automatically decomposes this into sub-questions (Q1, Q2, Q3) and formats responses with numbered points
-QUERY_GROUND_TRUTH = """List all areas of inconsistency identified in the invoice, organized by: (1) all inconsistencies with corresponding evidence, (2) inconsistencies in goods or services sold including detailed specifications for every line item, and (3) inconsistencies regarding billing logistics and administrative or legal issues."""
+#
+# IMPORTANT: Query must explicitly mention document types (invoice, contract) for
+# entity extraction to work. Generic queries like "all inconsistencies" fail to
+# extract seed entities, causing the pipeline to fall back to sparse retrieval.
+QUERY_GROUND_TRUTH = """Analyze the invoice and contract documents to find all inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms. Organize findings by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies."""
 
 
 def count_ground_truth_items(response_text):
@@ -101,7 +105,8 @@ def count_ground_truth_items(response_text):
        ("substitut" in text_lower or "product" in text_lower or "modification" in text_lower):
         found_items.append("C6_no_change_order")
     
-    if "invoice #" in text_lower or "invoice number" in text_lower or "#45239" in text_norm or "invoice 45239" in text_lower:
+    # C7 - Invoice number #1256003 (corrected from invalid #45239)
+    if "#1256003" in text_norm or "1256003" in text_lower or "invoice number" in text_lower:
         found_items.append("C7_invoice_number")
     
     if ("8-10 week" in text_lower or "8 to 10 week" in text_lower or "delivery" in text_lower and "timeline" in text_lower):
@@ -167,10 +172,18 @@ async def test_group(group_id: str, group_name: str, k: int, cutoff: float, edge
             "error": str(e)
         }
     
+    # Extract metadata for analysis
+    metadata = result.get("metadata", {})
+    all_seeds = metadata.get("all_seeds_discovered", [])
+    text_chunks_used = metadata.get("text_chunks_used", 0)
+    num_evidence = metadata.get("num_evidence_nodes", 0)
+    
     print(f"\n{'='*80}")
     print(f"📊 {group_name} SUMMARY")
     print(f"{'='*80}")
     print(f"  Ground Truth (16 items):   {gt_count}/16 ({100*gt_count/16:.1f}%)")
+    print(f"  Seeds Discovered:          {len(all_seeds)}")
+    print(f"  Text Chunks Used:          {text_chunks_used}")
     print(f"  Items Found: {', '.join(gt_items[:8])}")
     if len(gt_items) > 8:
         print(f"               {', '.join(gt_items[8:])}")
@@ -187,7 +200,8 @@ async def test_group(group_id: str, group_name: str, k: int, cutoff: float, edge
         "total_citations": total_citations,
         "response_length": len(answer),
         "route": route,
-        "response": answer  # Store full response for later analysis
+        "response": answer,  # Store full response for later analysis
+        "metadata": metadata  # Store full metadata for debugging
     }
 
 

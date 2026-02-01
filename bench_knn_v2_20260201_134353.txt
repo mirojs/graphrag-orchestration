@@ -1,0 +1,85 @@
+KNN Benchmark v2 Results
+Date: 2026-02-01T13:43:53.423954
+Group: test-5pdfs-v2-enhanced-ex
+
+[
+  {
+    "config": "Baseline (No KNN)",
+    "knn_config": null,
+    "gt_score": "10/16",
+    "gt_percentage": "62.5%",
+    "gt_items": [
+      "A1_model_mismatch",
+      "A2_payment_conflict",
+      "B1_hall_call_gap",
+      "B2_door_height",
+      "B3_lock_added",
+      "B4_outdoor_term",
+      "C4_bayfront_exhibit",
+      "C5_keyless_access",
+      "C6_no_change_order",
+      "C7_invoice_number"
+    ],
+    "citations": 24,
+    "seeds": 13
+  },
+  {
+    "config": "KNN-1 (K=3, cutoff=0.80)",
+    "knn_config": "knn-1",
+    "gt_score": "11/16",
+    "gt_percentage": "68.8%",
+    "gt_items": [
+      "A1_model_mismatch",
+      "A2_payment_conflict",
+      "A3_customer_mismatch",
+      "B1_hall_call_gap",
+      "B2_door_height",
+      "B3_lock_added",
+      "B4_outdoor_term",
+      "C2_john_doe",
+      "C4_bayfront_exhibit",
+      "C5_keyless_access",
+      "C7_invoice_number"
+    ],
+    "citations": 4,
+    "seeds": 5
+  },
+  {
+    "config": "KNN-2 (K=5, cutoff=0.75)",
+    "knn_config": "knn-2",
+    "gt_score": "9/16",
+    "gt_percentage": "56.2%",
+    "gt_items": [
+      "A1_model_mismatch",
+      "A2_payment_conflict",
+      "A3_customer_mismatch",
+      "B1_hall_call_gap",
+      "B2_door_height",
+      "B3_lock_added",
+      "B4_outdoor_term",
+      "C6_no_change_order",
+      "C7_invoice_number"
+    ],
+    "citations": 19,
+    "seeds": 6
+  },
+  {
+    "config": "KNN-3 (K=5, cutoff=0.85)",
+    "knn_config": "knn-3",
+    "gt_score": "9/16",
+    "gt_percentage": "56.2%",
+    "gt_items": [
+      "A1_model_mismatch",
+      "A2_payment_conflict",
+      "A3_customer_mismatch",
+      "B1_hall_call_gap",
+      "B2_door_height",
+      "B3_lock_added",
+      "B4_outdoor_term",
+      "C2_john_doe",
+      "C4_bayfront_exhibit"
+    ],
+    "citations": 44,
+    "seeds": 12
+  }
+]

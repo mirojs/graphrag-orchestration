@@ -1,0 +1,138 @@
+================================================================================
+🧪 KNN Benchmark Test - Invoice/Contract Inconsistency Detection
+================================================================================
+Started: 2026-02-01 08:48:16
+API: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query
+Route: DRIFT Multi-Hop (Route 4)
+Query: Single comprehensive query (DRIFT auto-decomposes into sub-questions)
+Groups: 4
+
+
+================================================================================
+🔬 Testing: Baseline (No KNN)
+================================================================================
+  Group ID:         test-5pdfs-v2-enhanced-ex
+  K (neighbors):    0
+  Similarity Cutoff: 1.0
+  KNN Edges:        0
+
+
+📝 Running Ground Truth Query...
+   Query: Analyze the invoice and contract documents to find all inconsistencies...
+   ✅ Route: route_4_drift_multi_hop
+   ✅ Ground Truth: 11/16 items detected
+   📚 Citations: 68
+   📄 Response length: 15770 chars
+
+================================================================================
+📊 Baseline (No KNN) SUMMARY
+================================================================================
+  Ground Truth (16 items):   11/16 (68.8%)
+  Seeds Discovered:          9
+  Text Chunks Used:          90
+  Items Found: A1_model_mismatch, A2_payment_conflict, A3_customer_mismatch, B1_hall_call_gap, B2_door_height, B3_lock_added, B4_outdoor_term, B5_invoice_contradiction
+               C2_john_doe, C4_bayfront_site, C7_invoice_number
+
+================================================================================
+🔬 Testing: KNN-1 (Conservative)
+================================================================================
+  Group ID:         test-5pdfs-v2-knn-1
+  K (neighbors):    3
+  Similarity Cutoff: 0.8
+  KNN Edges:        408
+
+
+📝 Running Ground Truth Query...
+   Query: Analyze the invoice and contract documents to find all inconsistencies...
+   ✅ Route: route_4_drift_multi_hop
+   ✅ Ground Truth: 10/16 items detected
+   📚 Citations: 23
+   📄 Response length: 16976 chars
+
+================================================================================
+📊 KNN-1 (Conservative) SUMMARY
+================================================================================
+  Ground Truth (16 items):   10/16 (62.5%)
+  Seeds Discovered:          15
+  Text Chunks Used:          70
+  Items Found: A1_model_mismatch, A2_payment_conflict, B1_hall_call_gap, B2_door_height, B3_lock_added, B4_outdoor_term, B5_invoice_contradiction, C4_bayfront_site
+               C6_no_change_order, C7_invoice_number
+
+================================================================================
+🔬 Testing: KNN-2 (Relaxed)
+================================================================================
+  Group ID:         test-5pdfs-v2-knn-2
+  K (neighbors):    5
+  Similarity Cutoff: 0.75
+  KNN Edges:        679
+
+
+📝 Running Ground Truth Query...
+   Query: Analyze the invoice and contract documents to find all inconsistencies...
+   ✅ Route: route_4_drift_multi_hop
+   ✅ Ground Truth: 12/16 items detected
+   📚 Citations: 2
+   📄 Response length: 17166 chars
+
+================================================================================
+📊 KNN-2 (Relaxed) SUMMARY
+================================================================================
+  Ground Truth (16 items):   12/16 (75.0%)
+  Seeds Discovered:          8
+  Text Chunks Used:          64
+  Items Found: A1_model_mismatch, A2_payment_conflict, A3_customer_mismatch, B1_hall_call_gap, B2_door_height, B3_lock_added, B4_outdoor_term, B5_invoice_contradiction
+               C1_url_malformed, C2_john_doe, C6_no_change_order, C7_invoice_number
+
+================================================================================
+🔬 Testing: KNN-3 (Strict)
+================================================================================
+  Group ID:         test-5pdfs-v2-knn-3
+  K (neighbors):    5
+  Similarity Cutoff: 0.85
+  KNN Edges:        590
+
+
+📝 Running Ground Truth Query...
+   Query: Analyze the invoice and contract documents to find all inconsistencies...
+   ✅ Route: route_4_drift_multi_hop
+   ✅ Ground Truth: 10/16 items detected
+   📚 Citations: 25
+   📄 Response length: 14951 chars
+
+================================================================================
+📊 KNN-3 (Strict) SUMMARY
+================================================================================
+  Ground Truth (16 items):   10/16 (62.5%)
+  Seeds Discovered:          8
+  Text Chunks Used:          77
+  Items Found: A1_model_mismatch, A2_payment_conflict, A3_customer_mismatch, B1_hall_call_gap, B2_door_height, B3_lock_added, B4_outdoor_term, B5_invoice_contradiction
+               C2_john_doe, C6_no_change_order
+
+================================================================================
+📊 BENCHMARK RESULTS SUMMARY
+================================================================================
+Configuration             | Edges | GT/16 |   GT% | Cites
+--------------------------------------------------------------------------------
+Baseline (No KNN)         |     0 |    11 |   69% |    68
+KNN-1 (Conservative)      |   408 |    10 |   62% |    23
+KNN-2 (Relaxed)           |   679 |    12 |   75% |     2
+KNN-3 (Strict)            |   590 |    10 |   62% |    25
+================================================================================
+
+📈 ANALYSIS
+--------------------------------------------------------------------------------
+Best Ground Truth Coverage: KNN-2 (Relaxed) (12/16 = 75.0%)
+
+Baseline (V2 No KNN):       GT=11/16 (68.8%)
+  vs KNN-1 (Conservative): GT -1 (10/16)
+  vs KNN-2 (Relaxed)     : GT +1 (12/16)
+  vs KNN-3 (Strict)      : GT -1 (10/16)
+
+🎯 RECOMMENDATION
+--------------------------------------------------------------------------------
+KNN HELPS: KNN-2 (Relaxed) improves ground truth by 1 items over baseline
+  → Use K=5, cutoff=0.75
+
+💾 Results saved to: bench_knn_results_20260201_085219.json
+Completed: 2026-02-01 08:52:19
+================================================================================

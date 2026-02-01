@@ -398,6 +398,70 @@ class Neo4jTextUnitStore:
         
         return results
 
+    async def get_all_chunks_for_comprehensive(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieve all text chunks for the group - used by comprehensive mode fallback.
+        
+        This provides a robust fallback when keyword-based query retrieval returns empty.
+        Returns chunks grouped by document for comprehensive extraction.
+        """
+        return await asyncio.to_thread(self._get_all_chunks_sync, int(limit))
+
+    def _get_all_chunks_sync(self, limit: int) -> List[Dict[str, Any]]:
+        """Sync implementation: fetch all chunks for the group."""
+        query = """
+        MATCH (c)
+        WHERE c.group_id = $group_id AND (c:TextChunk OR c:Chunk OR c:`__Node__`)
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        WITH c, d
+        ORDER BY coalesce(d.title, d.source, '') ASC, coalesce(c.chunk_index, 0) ASC
+        RETURN c AS chunk, d AS doc
+        LIMIT $limit
+        """
+        
+        rows: List[Dict[str, Any]] = []
+        try:
+            with self._driver.session() as session:
+                result = session.run(query, group_id=self._group_id, limit=limit)
+                for record in result:
+                    c = record.get("chunk")
+                    d = record.get("doc")
+                    if not c:
+                        continue
+                    
+                    raw_meta = c.get("metadata")
+                    meta: Dict[str, Any] = {}
+                    if raw_meta:
+                        if isinstance(raw_meta, str):
+                            try:
+                                meta = json.loads(raw_meta)
+                            except Exception:
+                                meta = {}
+                        elif isinstance(raw_meta, dict):
+                            meta = dict(raw_meta)
+                    
+                    doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
+                    doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
+                    doc_id = (d.get("id") if d else "") or meta.get("document_id") or ""
+                    
+                    rows.append({
+                        "id": str(c.get("id") or ""),
+                        "source": doc_title or doc_source or "unknown",
+                        "text": str(c.get("text") or ""),
+                        "entity": "__comprehensive__",
+                        "metadata": {
+                            **meta,
+                            "document_id": str(doc_id),
+                            "document_title": str(doc_title),
+                            "document_source": str(doc_source),
+                        }
+                    })
+            
+            logger.info("get_all_chunks_comprehensive", num_chunks=len(rows), group_id=self._group_id)
+        except Exception as e:
+            logger.error("get_all_chunks_comprehensive_failed", error=str(e), group_id=self._group_id)
+        
+        return rows
+
     async def get_workspace_document_overviews(self, *, limit: int = 50) -> List[Dict[str, Any]]:
         """Retrieve high-level overview of all documents in the workspace.
         

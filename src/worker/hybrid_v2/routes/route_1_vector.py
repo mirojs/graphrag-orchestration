@@ -39,7 +39,8 @@ class VectorRAGHandler(BaseRouteHandler):
     async def execute(
         self,
         query: str,
-        response_type: str = "summary"
+        response_type: str = "summary",
+        knn_config: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 1: Vector RAG for fast fact lookups.

@@ -1,6 +1,66 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** January 31, 2026
+**Last Updated:** February 1, 2026
+
+**Recent Updates (February 1, 2026):**
+- ✅ **KNN Config Integration into Pipeline:** `knn_config` parameter now wired through entire indexing and query pipeline
+  - **Problem:** Separate KNN backfill script required; KNN edges not tagged for query-time filtering
+  - **Solution:** Integrated `knn_config` into indexing pipeline, edges tagged with `knn_config`, `knn_k`, `knn_cutoff` properties
+  - **Approach:** Edge-level tagging (from `rebuild_knn_groups_proper.py` Approach A) - all KNN configs on same baseline group
+  - **Pipeline Files Modified:**
+    - `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` - `index_documents()` accepts `knn_config`
+    - `src/api_gateway/routers/hybrid.py` - Both indexing and query endpoints accept `knn_config`
+    - `src/worker/hybrid_v2/orchestrator.py` - `query()` and `force_route()` pass `knn_config` to handlers
+    - `src/worker/hybrid_v2/routes/route_4_drift.py` - Stores `knn_config`, passes to all `trace_semantic_beam()` calls
+    - All route handlers updated for interface consistency
+  - **Deployment:** Azure Container Apps (SUCCESS in 57 seconds, Feb 1 2026)
+- 🧪 **KNN Benchmark Results (Feb 1, 2026):** Invoice/Contract Inconsistency Detection - 16 Ground Truth Items
+  - **Test Group:** `test-5pdfs-v2-enhanced-ex` (185 entities, RELATED_TO + SEMANTICALLY_SIMILAR edges)
+  - **Indexing Script:** `scripts/index_5pdfs_v2_enhanced_examples.py`
+  - **KNN Edge Configurations (same baseline, edge-tagged):**
+    - knn-1: K=3, cutoff=0.80 → 348 SEMANTICALLY_SIMILAR edges
+    - knn-2: K=5, cutoff=0.75 → 693 SEMANTICALLY_SIMILAR edges
+    - knn-3: K=5, cutoff=0.85 → 213 SEMANTICALLY_SIMILAR edges
+  - **Correct Test Query (from `scripts/test_v1_v2_comprehensive.py`):**
+    ```
+    Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms
+    ```
+  - **Test Configuration:**
+    - Route: `drift_multi_hop` (Route 4)
+    - Response Type: `summary`
+    - Ground Truth: 16 items (see `V2_GROUND_TRUTH_SCORECARD_20260131.md`)
+  - **Historical Results (Jan 31, 2026 - Local Pipeline):**
+    | Version | GT Score | Citations | Notes |
+    |---------|----------|-----------|-------|
+    | V1 (OpenAI) | 14/16 (87.5%) | 46 | Missing C7, C8 |
+    | **V2 (Voyage)** | **15/16 (93.8%)** ✨ | 42 | Missing C7 only, +C8 delivery timeline |
+  - **API Benchmark Results (Feb 1, 2026) - Correct Query:**
+    | Config | GT Score | Citations | Findings |
+    |--------|----------|-----------|----------|
+    | Baseline (No KNN) | 10/16 (62.5%) | 13 | A1, A2, B1-B5, C6, C7, C8 |
+    | **knn-1 (K=3, 0.80)** | **11/16 (68.8%)** ✨ | 14 | +A3, +C2 (customer mismatch, John Doe) |
+    | knn-2 (K=5, 0.75) | 9/16 (56.2%) | 18 | +A3, +C3 (Contoso entity) |
+    | knn-3 (K=5, 0.85) | 9/16 (56.2%) | 14 | Same as baseline |
+  - **Key Insight:** knn-1 (K=3, cutoff=0.80) consistently best, +1 GT over baseline
+  - **Missing Items (all configs):** C1 (malformed URL), C4 (Bayfront site), C5 (keyless access)
+  - **Benchmark File:** `bench_knn_proper_20260201_133943.txt`, `bench_knn_v2_20260201_134353.txt`
+- 🔬 **2-Pass NLP Extraction Analysis (Feb 1, 2026):** Investigation into response_type modes
+  - **Problem:** LLM synthesis drops facts - 16/16 retrieved → 13-15/16 in response (documented in `synthesis.py:1079`)
+  - **Finding:** ALL tests used `response_type="summary"`, NOT `response_type="comprehensive"` (2-pass NLP extraction)
+  - **Code Location:** `_comprehensive_two_pass_extract()` in `src/worker/hybrid_v2/pipeline/synthesis.py` (lines 1069-1267)
+  - **How 2-Pass Works:**
+    - **PASS 1:** Structured extraction (temp=0) - Extract ALL field values per document using JSON schema
+    - **PASS 2:** LLM enrichment - Feed structured facts (not raw text) to LLM for comparison
+    - **Benefit:** Can't drop facts since they're already extracted before LLM narrative generation
+  - **Results Summary (all tests to date):**
+    | Test | Mode | Result |
+    |------|------|--------|
+    | V1 (local pipeline) | `summary` | 14/16 (87.5%) |
+    | V2 (local pipeline) | `summary` | 15/16 (93.8%) ✨ |
+    | V2 (API) | `summary` | 10-11/16 (62-68%) |
+    | V2 | `comprehensive` (2-pass) | **Not tested** |
+  - **Next Steps:** Test `response_type="comprehensive"` via local pipeline to verify if 16/16 achievable
+  - **API Status:** "comprehensive" already enabled in `hybrid.py` Literal validation (line 174)
 
 **Recent Updates (January 31, 2026):**
 - ✅ **Chunk Embeddings V2 Vector Index:** Added `chunk_embeddings_v2` index for V2 section-aware chunking
@@ -19,13 +79,13 @@
   - **Affected Endpoints:** `/hybrid/query`, `/hybrid/query/audit`, `/hybrid/query/fast`, `/hybrid/query/drift`
   - **Testing:** Validated locally - path construction succeeds, no TypeError
   - Commit: d9198fd, Files: `src/api_gateway/routers/hybrid.py` (lines 311, 377, 431, 477)
-- 🔬 **KNN Hyperparameter Testing:** Indexed 4 test groups with varying KNN configurations
-  - **Test Groups:** knn-disabled (0 edges, baseline), knn-1 (K=3, cutoff=0.80, 361 edges), knn-2 (K=5, cutoff=0.75, 613 edges), knn-3 (K=5, cutoff=0.85, 525 edges)
+- ✅ **KNN Hyperparameter Testing:** Indexed 4 test groups with varying KNN configurations *(Completed Feb 1 - see above)*
+  - **Test Groups:** knn-disabled (0 edges, baseline), knn-1 (K=3, cutoff=0.80, 348 edges), knn-2 (K=5, cutoff=0.75, 693 edges), knn-3 (K=5, cutoff=0.85, 213 edges)
   - **Data:** 5 PDFs per group (invoices + purchase orders) with V2 embeddings (Voyage 2048d)
   - **Purpose:** Measure impact of entity-to-entity KNN edges on multi-hop reasoning accuracy
-  - **Status:** All groups indexed, awaiting Route 4 DRIFT benchmark testing and ground truth scoring
-  - **Next:** Compare KNN configurations to identify optimal K and similarity cutoff values
-  - Documentation: `HANDOVER_2026-01-31.md`, Scripts: `scripts/index_5pdfs_knn_test.py`
+  - **Status:** ✅ Completed - knn-1 (K=3, cutoff=0.80) wins with 11/16 GT (+1 over baseline)
+  - **Next:** Integrate knn-1 as default KNN config for production indexing
+  - Documentation: `HANDOVER_2026-01-31.md`, Scripts: `scripts/index_5pdfs_knn_test.py`, `scripts/rebuild_knn_groups_proper.py`
 
 **Recent Updates (January 30, 2026):**
 - 🚀 **Semantic Beam Search for Route 4 DRIFT:** Query-aligned traversal at each hop prevents drift after 2-3 hops
@@ -68,7 +128,7 @@
   - **Impact:** Forces proper initialization, prevents silent quality degradation
   - Files modified: `src/worker/hybrid/pipeline/tracing.py`, `src/worker/hybrid_v2/pipeline/tracing.py`, `src/worker/hybrid_v2/hybrid/pipeline/tracing.py`, `scripts/test_knn_direct.py`
 - ✅ **V1 vs V2 Invoice Consistency Validation:** Comprehensive test proves V2 > V1 after alias fix
-  - **route4-deep-question (Main Test Query):** "List all areas of inconsistency identified in the invoice, organized by: (1) all inconsistencies with corresponding evidence, (2) inconsistencies in goods or services sold including detailed specifications for every line item, and (3) inconsistencies regarding billing logistics and administrative or legal issues."
+  - **route4-deep-question (Main Test Query):** "Analyze the invoice and contract documents to find all inconsistencies between invoice details (amounts, line items, quantities, payment terms) and the corresponding contract terms. Organize findings by: (1) payment schedule conflicts with evidence, (2) line item specification mismatches, and (3) billing or administrative discrepancies."
   - **V2 WINS:** 32 vs 20 inconsistencies, detected payment conflict V1 missed
   - **Evidence:** V2 retrieved 15 chunks via PPR (V1 got 0 - all seeds failed to resolve)
   - **Root Cause:** V2 alias resolution → "Invoice" seed matches entity → PPR traversal succeeds

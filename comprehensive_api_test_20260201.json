@@ -1,0 +1,1 @@
+{"detail":[{"type":"literal_error","loc":["body","response_type"],"msg":"Input should be 'detailed_report', 'summary', 'audit_trail', 'nlp_audit' or 'nlp_connected'","input":"comprehensive","ctx":{"expected":"'detailed_report', 'summary', 'audit_trail', 'nlp_audit' or 'nlp_connected'"}}]}

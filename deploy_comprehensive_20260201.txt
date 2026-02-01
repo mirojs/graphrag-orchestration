@@ -1,0 +1,26 @@
+
+Deploying services (azd deploy)
+
+Deploying service graphrag-api
+Packaging service graphrag-api (Tagging container image)
+Publishing service graphrag-api (Tagging container image)
+Publishing service graphrag-api (Logging into container registry)
+Publishing service graphrag-api (Pushing container image)
+Deploying service graphrag-api (Updating container app revision)
+Deploying service graphrag-api (Fetching endpoints for container app service)
+  (✓) Done: Deploying service graphrag-api
+  - Endpoint: https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/ 
+
+Deploying service graphrag-worker
+Packaging service graphrag-worker (Tagging container image)
+Publishing service graphrag-worker (Tagging container image)
+Publishing service graphrag-worker (Logging into container registry)
+Publishing service graphrag-worker (Pushing container image)
+Deploying service graphrag-worker (Updating container app revision)
+Deploying service graphrag-worker (Fetching endpoints for container app service)
+  (✓) Done: Deploying service graphrag-worker
+
+
+SUCCESS: Your application was deployed to Azure in 53 seconds.
+You can view the resources created under the resource group rg-graphrag-feature in Azure Portal:
+https://portal.azure.com/#@/resource/subscriptions/3adfbe7c-9922-40ed-b461-ec798989a3fa/resourceGroups/rg-graphrag-feature/overview

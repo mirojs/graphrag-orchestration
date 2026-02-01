@@ -59,7 +59,8 @@ class DRIFTHandler(BaseRouteHandler):
     async def execute(
         self,
         query: str,
-        response_type: str = "summary"
+        response_type: str = "summary",
+        knn_config: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 4: DRIFT for complex multi-hop queries.
@@ -80,10 +81,14 @@ class DRIFTHandler(BaseRouteHandler):
         Args:
             query: The user's natural language query
             response_type: Response format ("summary", "detailed_report", etc.)
+            knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
             
         Returns:
             RouteResult with response, citations, and metadata
         """
+        # Store knn_config for use in tracing
+        self._knn_config = knn_config
+        
         # ==================================================================
         # WORKFLOW MODE: Use LlamaIndex Workflow for parallel sub-questions
         # ==================================================================
@@ -157,7 +162,7 @@ class DRIFTHandler(BaseRouteHandler):
         
         # Stage 4.3: Consolidated HippoRAG PPR Tracing with Semantic Beam Search
         # Uses query embedding at each hop to re-align traversal with query intent
-        logger.info("stage_4.3_consolidated_tracing_semantic_beam")
+        logger.info("stage_4.3_consolidated_tracing_semantic_beam", knn_config=knn_config)
         query_embedding = _get_query_embedding(query)
         complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
             query=query,
@@ -165,6 +170,7 @@ class DRIFTHandler(BaseRouteHandler):
             seed_entities=all_seeds,
             max_hops=3,
             beam_width=30,
+            knn_config=knn_config,
         )
         logger.info("stage_4.3_complete", num_evidence=len(complete_evidence))
         
@@ -239,6 +245,7 @@ class DRIFTHandler(BaseRouteHandler):
                             seed_entities=additional_seeds,
                             max_hops=2,  # Shorter for refinement pass
                             beam_width=15,
+                            knn_config=knn_config,
                         )
                         
                         # Deduplicate
@@ -472,6 +479,7 @@ Sub-questions:"""
                     seed_entities=sub_entities,
                     max_hops=2,  # Shorter for sub-question context
                     beam_width=5,
+                    knn_config=getattr(self, '_knn_config', None),
                 )
                 evidence_count = len(partial_evidence)
             

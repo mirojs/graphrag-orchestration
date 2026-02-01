@@ -112,7 +112,7 @@ class BaseRouteHandler:
     All shared retrieval methods are defined here.
     
     Subclasses must implement:
-        async def execute(self, query: str, response_type: str = "summary") -> RouteResult
+        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None) -> RouteResult
     """
 
     # Route identifier (override in subclasses)
@@ -134,12 +134,13 @@ class BaseRouteHandler:
         self._executor = pipeline._executor
         self._async_neo4j = pipeline._async_neo4j
 
-    async def execute(self, query: str, response_type: str = "summary") -> RouteResult:
+    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None) -> RouteResult:
         """Execute the route on a query.
         
         Args:
             query: The user's natural language query
             response_type: Response format ("summary", "detailed_report", etc.)
+            knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
             
         Returns:
             RouteResult with response, citations, and metadata

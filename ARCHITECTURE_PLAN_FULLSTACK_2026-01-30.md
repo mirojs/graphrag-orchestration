@@ -719,6 +719,229 @@ echo "Rolled back to $PREVIOUS_REVISION"
 
 ---
 
+## Implementation Status (Updated 2026-02-01)
+
+### ✅ Completed Phases
+
+| Phase | Status | Commit | Key Files |
+|-------|--------|--------|-----------|
+| **Phase 1: Redis Backbone** | ✅ Complete | - | `src/core/services/redis_service.py` |
+| **Phase 2: JWT Security** | ✅ Complete | - | `src/api_gateway/middleware/auth.py` |
+| **Phase 3: Observability** | ✅ Complete | - | X-Correlation-ID headers |
+| **Phase 4: Async/Streaming** | ✅ Complete | `1087b0a` | `src/api_gateway/routers/chat.py` |
+| **Phase 5: Container Separation** | ✅ Complete | - | `graphrag-api` + `graphrag-worker` |
+| **Phase 6/8: Algorithm Versioning** | ✅ Complete | `b46dc7d` | `src/core/algorithm_registry.py` |
+| **Phase 9: Upstream Sync** | ✅ Complete | `8393f0e` | `frontend/UPSTREAM_VERSION.md` |
+| **Phase 10: CI/CD Pipeline** | ✅ Complete | `e890624` | `.github/workflows/deploy.yml` |
+
+### ⬜ Pending Phases
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| **Phase 7: APIM** | ⬜ When Needed | For external API clients requiring rate limiting |
+
+---
+
+## Production Architecture (Current State)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         Production                                   │
+│                                                                      │
+│  ┌───────────────────┐        ┌─────────────────────────────────┐   │
+│  │   graphrag-api    │───────▶│      graphrag-worker            │   │
+│  │  (external ingress)│        │     (internal only)             │   │
+│  │                    │        │                                 │   │
+│  │  - /chat           │  Redis │  - HybridPipeline               │   │
+│  │  - /chat/stream    │◀──────▶│  - Routes 2/3/4                 │   │
+│  │  - /chat/status    │  Queue │  - DEFAULT_ALGORITHM_VERSION=v2 │   │
+│  │  - /health         │        │                                 │   │
+│  └───────────────────┘        └─────────────────────────────────┘   │
+│           │                                                          │
+│           │ (Optional: for v3 testing)                              │
+│           │                                                          │
+│           │                    ┌─────────────────────────────────┐   │
+│           └──────────────────▶│  graphrag-worker-preview        │   │
+│             X-Algorithm-       │  (internal only)                │   │
+│             Version: v3        │  DEFAULT_ALGORITHM_VERSION=v3   │   │
+│                                └─────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Container Details
+
+| Container | URL | Algorithm | Replicas |
+|-----------|-----|-----------|----------|
+| graphrag-api | `https://graphrag-api.salmonhill-*.swedencentral.azurecontainerapps.io` | - | 1 |
+| graphrag-worker | Internal only | v2 (default) | 1 |
+| graphrag-worker-preview | Internal only | v3 (optional) | 0-1 |
+
+---
+
+## Operations Guide
+
+### Daily Operations
+
+#### Check System Health
+```bash
+# API health
+curl https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/health
+
+# Check version headers
+curl -I https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/health | grep -i x-
+```
+
+#### View Container Logs
+```bash
+# API logs
+az containerapp logs show \
+  --name graphrag-api \
+  --resource-group rg-graphrag-feature \
+  --follow
+
+# Worker logs
+az containerapp logs show \
+  --name graphrag-worker \
+  --resource-group rg-graphrag-feature \
+  --follow
+```
+
+#### Check Worker Status
+```bash
+./scripts/preview-worker.sh status
+```
+
+### Deployment Operations
+
+#### Deploy via GitHub Actions
+1. Push to `main` branch (auto-deploys)
+2. Or manually trigger: **Actions → Build & Deploy → Run workflow**
+   - Choose algorithm version (v1/v2/v3)
+   - Optionally enable `deploy_preview` for v3 testing
+
+#### Manual Deployment
+```bash
+# Build and push images
+az acr login --name graphragacr12153
+docker build -t graphragacr12153.azurecr.io/graphrag-api:latest -f Dockerfile.api .
+docker build -t graphragacr12153.azurecr.io/graphrag-worker:latest -f Dockerfile.worker .
+docker push graphragacr12153.azurecr.io/graphrag-api:latest
+docker push graphragacr12153.azurecr.io/graphrag-worker:latest
+
+# Update containers
+az containerapp update --name graphrag-api --resource-group rg-graphrag-feature \
+  --image graphragacr12153.azurecr.io/graphrag-api:latest
+
+az containerapp update --name graphrag-worker --resource-group rg-graphrag-feature \
+  --image graphragacr12153.azurecr.io/graphrag-worker:latest
+```
+
+#### Rollback
+```bash
+# List available revisions
+./scripts/rollback.sh --list
+
+# Rollback to previous
+./scripts/rollback.sh
+
+# Rollback to specific revision
+./scripts/rollback.sh graphrag-api--abc123
+```
+
+### Algorithm Version Testing
+
+#### Testing v3 Before Production
+
+**Step 1: Create Preview Worker**
+```bash
+./scripts/preview-worker.sh create v3
+```
+
+**Step 2: Enable API Routing to Preview**
+```bash
+# Set on API container
+az containerapp update --name graphrag-api --resource-group rg-graphrag-feature \
+  --set-env-vars "WORKER_PREVIEW_URL=http://graphrag-worker-preview" \
+                 "ALGORITHM_V3_PREVIEW_ENABLED=true"
+```
+
+**Step 3: Test v3**
+```bash
+# Explicit v3 request
+curl -X POST https://graphrag-api.../chat \
+  -H "X-Algorithm-Version: v3" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "test query"}]}'
+```
+
+**Step 4: After Testing**
+```bash
+# Option A: Promote v3 to production
+./scripts/preview-worker.sh promote
+
+# Option B: Delete preview (v3 not ready)
+./scripts/preview-worker.sh delete
+```
+
+### Version Header Reference
+
+| Header | Direction | Values | Description |
+|--------|-----------|--------|-------------|
+| `X-Algorithm-Version` | Request | `v1`, `v2`, `v3` | Request specific version |
+| `X-API-Version` | Request | `2024-01-30` | Request API version (date-based) |
+| `X-Algorithm-Version-Used` | Response | `v1`, `v2`, `v3` | Actual version used |
+| `X-API-Version-Used` | Response | `v2` | Actual API version |
+
+### Environment Variables
+
+#### API Container
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_ALGORITHM_VERSION` | `v2` | Default when client doesn't specify |
+| `ALGORITHM_V1_ENABLED` | `true` | Allow v1 requests |
+| `ALGORITHM_V2_ENABLED` | `true` | Allow v2 requests |
+| `ALGORITHM_V3_PREVIEW_ENABLED` | `false` | Allow v3 requests |
+| `WORKER_PREVIEW_URL` | `null` | URL for preview worker (v3 testing) |
+
+#### Worker Container
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_ALGORITHM_VERSION` | `v2` | Algorithm version this worker runs |
+| `VOYAGE_V2_ENABLED` | `true` | Use Voyage embeddings |
+| `VOYAGE_API_KEY` | - | Voyage AI API key |
+
+---
+
+## Key Files Reference
+
+### Core Implementation
+
+| File | Purpose |
+|------|---------|
+| [src/api_gateway/routers/chat.py](src/api_gateway/routers/chat.py) | OpenAI-compatible chat endpoint, NDJSON streaming |
+| [src/api_gateway/middleware/version.py](src/api_gateway/middleware/version.py) | X-API-Version and X-Algorithm-Version headers |
+| [src/core/algorithm_registry.py](src/core/algorithm_registry.py) | Version definitions, feature flags, handler mapping |
+| [src/core/config.py](src/core/config.py) | All configuration settings |
+| [src/worker/hybrid_v2/orchestrator.py](src/worker/hybrid_v2/orchestrator.py) | HybridPipeline (v2 algorithm) |
+
+### CI/CD & Operations
+
+| File | Purpose |
+|------|---------|
+| [.github/workflows/deploy.yml](.github/workflows/deploy.yml) | Build & deploy pipeline |
+| [.github/workflows/upstream-check.yml](.github/workflows/upstream-check.yml) | Weekly upstream monitoring |
+| [scripts/preview-worker.sh](scripts/preview-worker.sh) | Manage preview workers |
+| [scripts/rollback.sh](scripts/rollback.sh) | Instant rollback |
+| [scripts/sync_upstream.sh](scripts/sync_upstream.sh) | Sync frontend from upstream |
+
+### Documentation
+
+| File | Purpose |
+|------|---------|
+| [frontend/UPSTREAM_VERSION.md](frontend/UPSTREAM_VERSION.md) | Track upstream azure-search-openai-demo |
+
+---
+
 *Document generated: January 30, 2026*
 
 ---

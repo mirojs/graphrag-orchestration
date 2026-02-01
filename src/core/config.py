@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     ALGORITHM_V3_PREVIEW_ENABLED: bool = False  # Preview/beta features
     ALGORITHM_V3_CANARY_PERCENT: int = 0  # Canary rollout percentage (0-100)
     
+    # Preview Worker (for testing v3 before production)
+    # When set, X-Algorithm-Version: v3 requests route to this worker
+    # Set to "http://graphrag-worker-preview" when preview worker is deployed
+    WORKER_PREVIEW_URL: Optional[str] = None  # None = use same process (no HTTP routing)
+    
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)
     # Note: Neo4j is still used for entity/relationship storage and hybrid search on KG

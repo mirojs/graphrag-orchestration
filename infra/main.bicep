@@ -135,11 +135,15 @@ module graphragApi './core/host/container-app.bicep' = {
       }
       {
         name: 'REQUIRE_AUTH'
-        value: enableAuth ? 'true' : 'false'
+        value: 'true'
       }
       {
         name: 'AUTH_CLIENT_ID'
         value: authClientId
+      }
+      {
+        name: 'ALLOW_LEGACY_GROUP_HEADER'
+        value: 'false'
       }
       {
         name: 'AZURE_OPENAI_ENDPOINT'

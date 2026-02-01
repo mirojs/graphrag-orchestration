@@ -185,6 +185,10 @@ class HybridQueryRequest(BaseModel):
         le=1.0,
         description="Override relevance budget (0.0=fast, 1.0=thorough)"
     )
+    knn_config: Optional[str] = Field(
+        default=None,
+        description="KNN configuration to use for SEMANTICALLY_SIMILAR edge traversal. Options: 'knn-1', 'knn-2', 'knn-3'. If None, no KNN edges are traversed (baseline)."
+    )
 
 
 class HybridQueryResponse(BaseModel):

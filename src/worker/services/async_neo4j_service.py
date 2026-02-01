@@ -1185,6 +1185,7 @@ class AsyncNeo4jService:
         beam_width: int = 10,
         damping: float = 0.85,
         seed_names: Optional[Dict[str, str]] = None,
+        knn_config: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """
         Semantic-guided multi-hop expansion using beam search + vector similarity.
@@ -1202,29 +1203,62 @@ class AsyncNeo4jService:
             max_hops: Number of expansion rounds (default 3).
             beam_width: How many candidates to keep per hop (default 10).
             damping: Decay applied per hop to accumulator score.
+            knn_config: Optional KNN configuration filter for SEMANTICALLY_SIMILAR edges.
+                        If None, no SEMANTICALLY_SIMILAR edges are traversed (baseline).
+                        If set (e.g., 'knn-1', 'knn-2', 'knn-3'), only traverse 
+                        SEMANTICALLY_SIMILAR edges with matching knn_config property.
 
         Returns:
             List of (entity_name, score) sorted descending by accumulated score.
         """
         # Query uses native vector.similarity.cosine (available in Neo4j 5.18+/Aura)
         # Runs a single hop at a time; Python loop controls iteration.
-        hop_query = cypher25_query("""
-        UNWIND $current_ids AS eid
-        MATCH (src)-[r]-(neighbor)
-        WHERE (src:Entity OR src:`__Entity__`)
-          AND (neighbor:Entity OR neighbor:`__Entity__`)
-          AND src.id = eid
-          AND neighbor.group_id = $group_id
-          AND type(r) <> 'MENTIONS'
-          AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
-        WITH DISTINCT neighbor,
-             vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
-        ORDER BY sim DESC
-        LIMIT $beam_width
-        RETURN neighbor.id AS id,
-               neighbor.name AS name,
-               sim AS similarity
-        """)
+        #
+        # KNN config filtering:
+        # - If knn_config is None: exclude all SEMANTICALLY_SIMILAR edges (baseline)
+        # - If knn_config is set: include SEMANTICALLY_SIMILAR edges matching that config
+        if knn_config:
+            hop_query = cypher25_query("""
+            UNWIND $current_ids AS eid
+            MATCH (src)-[r]-(neighbor)
+            WHERE (src:Entity OR src:`__Entity__`)
+              AND (neighbor:Entity OR neighbor:`__Entity__`)
+              AND src.id = eid
+              AND neighbor.group_id = $group_id
+              AND type(r) <> 'MENTIONS'
+              AND (
+                  type(r) <> 'SEMANTICALLY_SIMILAR' 
+                  OR r.knn_config = $knn_config
+              )
+              AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
+            WITH DISTINCT neighbor,
+                 vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
+            ORDER BY sim DESC
+            LIMIT $beam_width
+            RETURN neighbor.id AS id,
+                   neighbor.name AS name,
+                   sim AS similarity
+            """)
+        else:
+            # Baseline: exclude all SEMANTICALLY_SIMILAR edges
+            hop_query = cypher25_query("""
+            UNWIND $current_ids AS eid
+            MATCH (src)-[r]-(neighbor)
+            WHERE (src:Entity OR src:`__Entity__`)
+              AND (neighbor:Entity OR neighbor:`__Entity__`)
+              AND src.id = eid
+              AND neighbor.group_id = $group_id
+              AND type(r) <> 'MENTIONS'
+              AND type(r) <> 'SEMANTICALLY_SIMILAR'
+              AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
+            WITH DISTINCT neighbor,
+                 vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
+            ORDER BY sim DESC
+            LIMIT $beam_width
+            RETURN neighbor.id AS id,
+                   neighbor.name AS name,
+                   sim AS similarity
+            """)
         
         # Vector expansion query (hop 0) - finds semantically similar entities
         # regardless of relationship edges. Critical for isolated entities like
@@ -1291,13 +1325,17 @@ class AsyncNeo4jService:
                 break
 
             async with self._get_session() as session:
-                result = await session.run(
-                    hop_query,
-                    current_ids=current_ids,
-                    group_id=group_id,
-                    query_embedding=query_embedding,
-                    beam_width=beam_width,
-                )
+                # Pass knn_config only if the query uses it (not baseline)
+                params = {
+                    "current_ids": current_ids,
+                    "group_id": group_id,
+                    "query_embedding": query_embedding,
+                    "beam_width": beam_width,
+                }
+                if knn_config:
+                    params["knn_config"] = knn_config
+                    
+                result = await session.run(hop_query, **params)
                 records = await result.data()
 
             if not records:
@@ -1327,6 +1365,7 @@ class AsyncNeo4jService:
             beam_width=beam_width,
             results=len(scores),
             duration_ms=dt_ms,
+            knn_config=knn_config or "baseline",
         )
 
         # Return sorted by accumulated score

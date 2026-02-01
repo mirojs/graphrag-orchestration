@@ -282,6 +282,7 @@ class DeterministicTracer:
         seed_entities: List[str],
         max_hops: int = 3,
         beam_width: int = 10,
+        knn_config: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """
         Semantic-guided multi-hop using beam search + native vector similarity.
@@ -300,6 +301,8 @@ class DeterministicTracer:
             seed_entities: Starting entity names.
             max_hops: Number of hops (default 3).
             beam_width: Candidates per hop (default 10).
+            knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
+                        If None, no KNN edges are traversed (baseline mode).
 
         Returns:
             List of (entity_name, accumulated_score) sorted descending.
@@ -329,6 +332,7 @@ class DeterministicTracer:
                 max_hops=max_hops,
                 beam_width=beam_width,
                 seed_names=seed_names,
+                knn_config=knn_config,
             )
 
             logger.info(
@@ -336,6 +340,7 @@ class DeterministicTracer:
                 query=query[:50],
                 seeds=len(seed_ids),
                 results=len(ranked),
+                knn_config=knn_config or "baseline",
             )
             return ranked
 

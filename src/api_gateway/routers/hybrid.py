@@ -13,6 +13,10 @@ Endpoints:
 - POST /hybrid/query/drift - Force Route 3 (multi-hop)
 - GET /hybrid/health - Health check for hybrid components
 - POST /hybrid/configure - Configure pipeline settings
+
+Multi-instance Notes:
+- Pipeline cache is process-local (stateless, recreatable)
+- Indexing jobs tracked in Redis for cross-instance visibility
 """
 
 from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
@@ -28,15 +32,122 @@ from src.worker.hybrid_v2.orchestrator import HybridPipeline, HighQualityError
 from src.worker.hybrid_v2.router.main import DeploymentProfile, QueryRoute
 from src.worker.hybrid_v2.indexing import DualIndexService, get_hipporag_service
 from src.core.config import settings
+from src.core.services.redis_service import (
+    get_redis_service,
+    RedisService,
+    OperationStatus,
+)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
 
-# Pipeline instance cache per group
+# Pipeline instance cache per group (process-local, stateless)
+# Note: Pipelines are stateless and can be recreated on any instance.
+# This cache is an optimization, not a correctness requirement.
 _pipeline_cache: Dict[str, HybridPipeline] = {}
 
-# Indexing job tracking
-_indexing_jobs: Dict[str, Dict[str, Any]] = {}
+
+# ============================================================================
+# Redis-backed Indexing Job Tracker
+# ============================================================================
+
+class IndexingJobTracker:
+    """
+    Redis-backed tracker for indexing jobs.
+    
+    Replaces in-memory _indexing_jobs dict to enable multi-instance scaling.
+    Job status is visible from any API instance.
+    """
+    
+    def __init__(self):
+        self._redis_service: Optional[RedisService] = None
+    
+    async def _get_store(self):
+        """Lazy-init Redis connection."""
+        if self._redis_service is None:
+            self._redis_service = await get_redis_service()
+        return self._redis_service.operations
+    
+    async def create(self, job_id: str, group_id: str, num_documents: int) -> None:
+        """Create a new indexing job."""
+        store = await self._get_store()
+        await store.create(
+            operation_id=job_id,
+            tenant_id=group_id,
+            operation_type="indexing",
+            metadata={
+                "group_id": group_id,
+                "documents": num_documents,
+                "started_at": time.time(),
+                "progress": "Queued",
+            }
+        )
+    
+    async def update(
+        self,
+        job_id: str,
+        status: str,
+        progress: Optional[str] = None,
+        stats: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Update job status."""
+        store = await self._get_store()
+        
+        # Map string status to OperationStatus enum
+        status_map = {
+            "pending": OperationStatus.PENDING,
+            "running": OperationStatus.IN_PROGRESS,
+            "completed": OperationStatus.COMPLETED,
+            "failed": OperationStatus.FAILED,
+        }
+        
+        metadata_update = {}
+        if progress:
+            metadata_update["progress"] = progress
+        if stats:
+            metadata_update["stats"] = stats
+        if status in ("completed", "failed"):
+            metadata_update["completed_at"] = time.time()
+        
+        await store.update(
+            operation_id=job_id,
+            status=status_map.get(status, OperationStatus.IN_PROGRESS),
+            error=error,
+            metadata_update=metadata_update,
+        )
+    
+    async def get(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """Get job by ID."""
+        store = await self._get_store()
+        op = await store.get(job_id)
+        
+        if not op:
+            return None
+        
+        # Convert to expected format
+        status_map = {
+            OperationStatus.PENDING: "pending",
+            OperationStatus.IN_PROGRESS: "running",
+            OperationStatus.COMPLETED: "completed",
+            OperationStatus.FAILED: "failed",
+        }
+        
+        return {
+            "status": status_map.get(op.status, "pending"),
+            "group_id": op.metadata.get("group_id", op.tenant_id),
+            "job_id": op.id,
+            "documents": op.metadata.get("documents", 0),
+            "started_at": op.metadata.get("started_at"),
+            "completed_at": op.metadata.get("completed_at"),
+            "progress": op.metadata.get("progress"),
+            "stats": op.metadata.get("stats"),
+            "error": op.error,
+        }
+
+
+# Global job tracker (Redis-backed)
+_indexing_jobs = IndexingJobTracker()
 
 
 # ============================================================================
@@ -864,8 +975,7 @@ async def _run_indexing_job(
     knn_similarity_cutoff: float = 0.60,
 ):
     """Background task to run indexing."""
-    _indexing_jobs[job_id]["status"] = "running"
-    _indexing_jobs[job_id]["progress"] = "Starting indexing pipeline..."
+    await _indexing_jobs.update(job_id, status="running", progress="Starting indexing pipeline...")
     
     try:
         from src.core.config import settings
@@ -876,7 +986,7 @@ async def _run_indexing_job(
         # Use V2 pipeline (with embedding_v2 property) when Voyage V2 is enabled
         pipeline = get_lazygraphrag_indexing_pipeline_v2()
         
-        _indexing_jobs[job_id]["progress"] = "Indexing documents..."
+        await _indexing_jobs.update(job_id, status="running", progress="Indexing documents...")
         stats = await pipeline.index_documents(
             group_id=group_id,
             documents=docs_for_pipeline,
@@ -889,17 +999,21 @@ async def _run_indexing_job(
             knn_similarity_cutoff=knn_similarity_cutoff,
         )
         
-        _indexing_jobs[job_id]["status"] = "completed"
-        _indexing_jobs[job_id]["stats"] = stats
-        _indexing_jobs[job_id]["completed_at"] = time.time()
-        _indexing_jobs[job_id]["progress"] = "Indexing complete"
+        await _indexing_jobs.update(
+            job_id,
+            status="completed",
+            progress="Indexing complete",
+            stats=stats,
+        )
         
         logger.info("hybrid_index_documents_complete", group_id=group_id, job_id=job_id, stats=stats)
         
     except Exception as e:
-        _indexing_jobs[job_id]["status"] = "failed"
-        _indexing_jobs[job_id]["error"] = str(e)
-        _indexing_jobs[job_id]["completed_at"] = time.time()
+        await _indexing_jobs.update(
+            job_id,
+            status="failed",
+            error=str(e),
+        )
         logger.exception(
             "hybrid_index_documents_failed",
             extra={"group_id": group_id, "job_id": job_id, "error": str(e)},
@@ -959,16 +1073,9 @@ async def hybrid_index_documents(
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported document type: {type(doc)}")
 
-    # Create job ID and track it
+    # Create job ID and track it in Redis
     job_id = f"{group_id}_{int(time.time() * 1000)}"
-    _indexing_jobs[job_id] = {
-        "status": "pending",
-        "group_id": group_id,
-        "job_id": job_id,
-        "documents": len(docs_for_pipeline),
-        "started_at": time.time(),
-        "progress": "Queued",
-    }
+    await _indexing_jobs.create(job_id, group_id, len(docs_for_pipeline))
     
     # Start background indexing
     background_tasks.add_task(
@@ -1008,10 +1115,10 @@ async def hybrid_index_documents(
 async def get_indexing_status(request: Request, job_id: str):
     """Check the status of an indexing job."""
     
-    if job_id not in _indexing_jobs:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    job = await _indexing_jobs.get(job_id)
     
-    job = _indexing_jobs[job_id]
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
     
     return IndexingStatusResponse(
         status=job["status"],
@@ -1023,6 +1130,48 @@ async def get_indexing_status(request: Request, job_id: str):
         started_at=job.get("started_at"),
         completed_at=job.get("completed_at"),
     )
+
+
+class JobResultResponse(BaseModel):
+    """Response containing async job result."""
+    job_id: str
+    status: Literal["pending", "completed", "failed"]
+    result: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+    duration_ms: Optional[float] = None
+
+
+@router.get("/job/{job_id}/result", response_model=JobResultResponse)
+async def get_job_result(request: Request, job_id: str):
+    """
+    Retrieve the result of an async job.
+    
+    Workers store results in Redis after processing.
+    Results have a 1-hour TTL.
+    """
+    redis_service = await get_redis_service()
+    result = await redis_service.results.get(job_id)
+    
+    if not result:
+        # Check if job exists but hasn't completed
+        job = await _indexing_jobs.get(job_id)
+        if job:
+            return JobResultResponse(
+                job_id=job_id,
+                status=job["status"],
+                result=None,
+                error=job.get("error"),
+            )
+        raise HTTPException(status_code=404, detail=f"Job {job_id} result not found or expired")
+    
+    return JobResultResponse(
+        job_id=job_id,
+        status=result.get("status", "completed"),
+        result=result.get("result"),
+        error=result.get("error"),
+        duration_ms=result.get("duration_ms"),
+    )
+
 
 class SyncIndexRequest(BaseModel):
     """Request to sync HippoRAG index from Neo4j."""

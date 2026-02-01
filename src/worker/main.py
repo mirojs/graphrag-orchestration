@@ -3,6 +3,11 @@ GraphRAG Worker - Background Job Processor
 
 Consumes jobs from Redis queue and processes them using the HybridOrchestrator.
 Runs as a separate container from the API Gateway for independent scaling.
+
+Multi-instance Notes:
+- Uses BRPOPLPUSH for DLQ-safe job consumption
+- Stores results in RedisResultStore for cross-instance visibility
+- Implements distributed locking for indexing operations
 """
 import asyncio
 import json
@@ -17,6 +22,13 @@ import redis.asyncio as aioredis
 
 from src.worker.hybrid_v2 import HybridPipeline
 from src.core.services.usage_tracker import UsageTracker
+from src.core.services.redis_service import (
+    get_redis_service,
+    RedisService,
+    RedisJobQueue,
+    Job,
+    LockAcquisitionError,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -30,34 +42,17 @@ class Worker:
     """Background worker that processes jobs from Redis queue."""
     
     def __init__(self):
-        self.redis_client: Optional[aioredis.Redis] = None
+        self.redis_service: Optional[RedisService] = None
         self.orchestrator: Optional[HybridPipeline] = None
         self.usage_tracker: Optional[UsageTracker] = None
         self.running = True
-        self.queue_name = os.getenv('REDIS_QUEUE_NAME', 'graphrag_jobs')
+        self.worker_id = f"worker-{os.getpid()}-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
         
     async def connect(self):
         """Initialize connections to Redis and other services."""
-        # Redis connection
-        redis_host = os.getenv('REDIS_HOST')
-        redis_port = int(os.getenv('REDIS_PORT', '6380'))
-        redis_password = os.getenv('REDIS_PASSWORD')
-        
-        if not redis_host or not redis_password:
-            logger.error("REDIS_HOST and REDIS_PASSWORD environment variables are required")
-            sys.exit(1)
-            
-        self.redis_client = aioredis.from_url(
-            f"rediss://{redis_host}:{redis_port}",
-            password=redis_password,
-            decode_responses=True,
-            ssl_cert_reqs=None  # Azure Redis uses managed certs
-        )
-        
-        # Test connection
-        if self.redis_client:
-            await self.redis_client.ping()
-            logger.info(f"Connected to Redis at {redis_host}:{redis_port}")
+        # Use RedisService for unified state management
+        self.redis_service = await get_redis_service()
+        logger.info(f"Worker {self.worker_id} connected to Redis")
         
         # Initialize orchestrator
         self.orchestrator = HybridPipeline()
@@ -69,31 +64,37 @@ class Worker:
             
     async def disconnect(self):
         """Clean up connections."""
-        if self.redis_client:
-            await self.redis_client.close()
+        if self.redis_service:
+            await self.redis_service.close()
             logger.info("Redis connection closed")
             
     async def process_job(self, job_data: dict) -> dict:
         """
         Process a single job from the queue.
         
-        Expected job format:
+        Supports both legacy format and new Job dataclass format:
+        
+        Legacy format:
         {
             "job_id": "uuid",
             "type": "query|index|reindex",
             "group_id": "tenant-group-id",
-            "user_id": "user-id", 
-            "payload": {
-                "query": "...",  # for query type
-                "document_id": "...",  # for index/reindex
-                ...
-            },
-            "created_at": "ISO timestamp"
+            ...
+        }
+        
+        New Job format (from RedisJobQueue):
+        {
+            "id": "uuid",
+            "job_type": "query|index|reindex",
+            "tenant_id": "tenant-group-id",
+            "payload": {...},
+            ...
         }
         """
-        job_id = job_data.get('job_id', 'unknown')
-        job_type = job_data.get('type', 'query')
-        group_id = job_data.get('group_id', '')
+        # Handle both old and new formats
+        job_id = job_data.get('id') or job_data.get('job_id', 'unknown')
+        job_type = job_data.get('job_type') or job_data.get('type', 'query')
+        group_id = job_data.get('tenant_id') or job_data.get('group_id', '')
         user_id = job_data.get('user_id', '')
         payload = job_data.get('payload', {})
         
@@ -165,63 +166,64 @@ class Worker:
             
     async def store_result(self, job_id: str, result: dict):
         """Store job result in Redis for retrieval by API."""
-        if not self.redis_client:
+        if not self.redis_service:
             logger.warning(f"Cannot store result for job {job_id}: Redis not connected")
             return
             
-        result_key = f"job_result:{job_id}"
-        await self.redis_client.setex(
-            result_key,
-            3600,  # 1 hour TTL
-            json.dumps(result)
-        )
+        await self.redis_service.results.store(job_id, result)
         logger.debug(f"Stored result for job {job_id}")
         
     async def run(self):
-        """Main worker loop - consume and process jobs."""
-        logger.info(f"Worker started, listening on queue: {self.queue_name}")
+        """Main worker loop - consume and process jobs with DLQ support."""
+        logger.info(f"Worker {self.worker_id} started, listening for jobs...")
         
-        if not self.redis_client:
+        if not self.redis_service:
             logger.error("Cannot run worker: Redis not connected")
             return
         
+        queue = self.redis_service.queue
+        
         while self.running:
             try:
-                # BLPOP blocks until a job is available (5 second timeout)
-                result = await self.redis_client.blpop(self.queue_name, timeout=5)
+                # Dequeue with BRPOPLPUSH (DLQ-safe)
+                job = await queue.dequeue(timeout=5)
                 
-                if result is None:
+                if job is None:
                     # Timeout - no jobs available, continue loop
                     continue
-                    
-                _, job_json = result
                 
-                try:
-                    job_data = json.loads(job_json)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Invalid job JSON: {e}")
-                    continue
-                    
-                # Process the job
-                job_result = await self.process_job(job_data)
+                logger.info(f"Processing job {job.id} (type={job.job_type}, tenant={job.tenant_id})")
                 
-                # Store result for retrieval
-                job_id = job_data.get('job_id', 'unknown')
-                await self.store_result(job_id, job_result)
-                
-            except aioredis.ConnectionError as e:
-                logger.error(f"Redis connection error: {e}")
-                await asyncio.sleep(5)  # Wait before reconnecting
-                try:
-                    await self.connect()
-                except Exception:
-                    pass
+                # Check if indexing job needs a lock
+                if job.job_type == 'index' and job.payload.get('graph_id'):
+                    graph_id = job.payload['graph_id']
+                    lock_key = f"lock:{job.tenant_id}:{graph_id}:write"
                     
+                    try:
+                        async with self.redis_service.lock(lock_key, ttl_seconds=300):
+                            job_result = await self.process_job(job.__dict__)
+                    except LockAcquisitionError:
+                        # Another worker is indexing this graph - NACK and retry later
+                        logger.info(f"Graph {graph_id} locked, re-queuing job {job.id}")
+                        await queue.nack(job, requeue=True)
+                        continue
+                else:
+                    # Query jobs don't need locks
+                    job_result = await self.process_job(job.__dict__)
+                
+                # Store result for retrieval by API
+                await self.store_result(job.id, job_result)
+                
+                # Acknowledge job completion
+                await queue.ack(job)
+                
             except Exception as e:
-                logger.exception(f"Unexpected error in worker loop: {e}")
+                logger.exception(f"Error processing job: {e}")
+                if 'job' in locals() and job:
+                    await queue.nack(job, requeue=True)
                 await asyncio.sleep(1)
                 
-        logger.info("Worker stopped")
+        logger.info(f"Worker {self.worker_id} stopped")
         
     def handle_signal(self, signum, frame):
         """Handle shutdown signals gracefully."""

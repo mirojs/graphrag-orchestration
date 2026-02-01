@@ -36,7 +36,7 @@ router = APIRouter(
 
 
 # ============================================================================
-# Operation Store (in-memory with TTL)
+# Operation Status (local enum that maps to Redis)
 # ============================================================================
 
 class OperationStatus(str, Enum):
@@ -47,49 +47,72 @@ class OperationStatus(str, Enum):
     FAILED = "failed"
 
 
-class OperationStore:
+# Status mapping between local and Redis enums
+_STATUS_TO_REDIS = {
+    OperationStatus.PENDING: RedisOperationStatus.PENDING,
+    OperationStatus.RUNNING: RedisOperationStatus.IN_PROGRESS,
+    OperationStatus.SUCCEEDED: RedisOperationStatus.COMPLETED,
+    OperationStatus.FAILED: RedisOperationStatus.FAILED,
+}
+
+_STATUS_FROM_REDIS = {
+    RedisOperationStatus.PENDING: OperationStatus.PENDING,
+    RedisOperationStatus.IN_PROGRESS: OperationStatus.RUNNING,
+    RedisOperationStatus.COMPLETED: OperationStatus.SUCCEEDED,
+    RedisOperationStatus.FAILED: OperationStatus.FAILED,
+}
+
+
+# ============================================================================
+# Redis-backed Operation Store Wrapper
+# ============================================================================
+
+class OperationStoreAdapter:
     """
-    In-memory store for async operations with 60s TTL after terminal state.
+    Adapter that wraps RedisOperationStore with knowledge_map's expected interface.
     
-    Thread-safe for concurrent access. Operations are cleaned up
-    when they expire or on periodic cleanup.
+    Multi-instance safe: All state stored in Redis.
     """
-    
-    TTL_SECONDS = 60  # Time to keep completed operations
     
     def __init__(self):
-        self._operations: Dict[str, Dict[str, Any]] = {}
-        self._lock = asyncio.Lock()
+        self._redis_service: Optional[RedisService] = None
+    
+    async def _get_store(self):
+        """Lazy-init Redis connection."""
+        if self._redis_service is None:
+            self._redis_service = await get_redis_service()
+        return self._redis_service.operations
     
     async def create(self, operation_id: str, request: Dict[str, Any]) -> None:
         """Create a new pending operation."""
-        async with self._lock:
-            self._operations[operation_id] = {
-                "id": operation_id,
-                "status": OperationStatus.PENDING,
-                "request": request,
-                "result": None,
-                "error": None,
-                "created_at": datetime.utcnow().isoformat(),
-                "completed_at": None,
-                "expires_at": None,
-            }
+        store = await self._get_store()
+        tenant_id = request.get("tenant_id", "default")
+        
+        await store.create(
+            operation_id=operation_id,
+            tenant_id=tenant_id,
+            operation_type="knowledge_map_process",
+            metadata={"request": request}
+        )
     
     async def get(self, operation_id: str) -> Optional[Dict[str, Any]]:
-        """Get operation by ID, returns None if not found or expired."""
-        async with self._lock:
-            op = self._operations.get(operation_id)
-            if not op:
-                return None
-            
-            # Check if expired
-            if op.get("expires_at"):
-                expires = datetime.fromisoformat(op["expires_at"])
-                if datetime.utcnow() > expires:
-                    del self._operations[operation_id]
-                    return None
-            
-            return op.copy()
+        """Get operation by ID, returns None if not found."""
+        store = await self._get_store()
+        op = await store.get(operation_id)
+        
+        if not op:
+            return None
+        
+        # Convert to expected format
+        return {
+            "id": op.id,
+            "status": _STATUS_FROM_REDIS.get(op.status, OperationStatus.PENDING),
+            "request": op.metadata.get("request", {}),
+            "result": op.result,
+            "error": op.error,
+            "created_at": op.created_at,
+            "completed_at": op.updated_at if op.status in (RedisOperationStatus.COMPLETED, RedisOperationStatus.FAILED) else None,
+        }
     
     async def update(
         self,
@@ -98,40 +121,19 @@ class OperationStore:
         result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> None:
-        """Update operation status and set TTL if terminal."""
-        async with self._lock:
-            if operation_id not in self._operations:
-                return
-            
-            op = self._operations[operation_id]
-            op["status"] = status
-            
-            if result is not None:
-                op["result"] = result
-            if error is not None:
-                op["error"] = error
-            
-            # Set expiry on terminal states
-            if status in (OperationStatus.SUCCEEDED, OperationStatus.FAILED):
-                op["completed_at"] = datetime.utcnow().isoformat()
-                expires = datetime.utcnow() + timedelta(seconds=self.TTL_SECONDS)
-                op["expires_at"] = expires.isoformat()
-    
-    async def cleanup_expired(self) -> int:
-        """Remove expired operations. Returns count of removed."""
-        async with self._lock:
-            now = datetime.utcnow()
-            expired = [
-                oid for oid, op in self._operations.items()
-                if op.get("expires_at") and datetime.fromisoformat(op["expires_at"]) < now
-            ]
-            for oid in expired:
-                del self._operations[oid]
-            return len(expired)
+        """Update operation status."""
+        store = await self._get_store()
+        
+        await store.update(
+            operation_id=operation_id,
+            status=_STATUS_TO_REDIS.get(status),
+            result=result,
+            error=error,
+        )
 
 
-# Global operation store
-_operation_store = OperationStore()
+# Global operation store (Redis-backed)
+_operation_store = OperationStoreAdapter()
 
 
 # ============================================================================

@@ -68,12 +68,12 @@
   - **Impact:** Forces proper initialization, prevents silent quality degradation
   - Files modified: `src/worker/hybrid/pipeline/tracing.py`, `src/worker/hybrid_v2/pipeline/tracing.py`, `src/worker/hybrid_v2/hybrid/pipeline/tracing.py`, `scripts/test_knn_direct.py`
 - ✅ **V1 vs V2 Invoice Consistency Validation:** Comprehensive test proves V2 > V1 after alias fix
-  - **Test Query:** "Find inconsistencies between invoice details (amounts, line items, quantities) and contract terms"
+  - **route4-deep-question (Main Test Query):** "List all areas of inconsistency identified in the invoice, organized by: (1) all inconsistencies with corresponding evidence, (2) inconsistencies in goods or services sold including detailed specifications for every line item, and (3) inconsistencies regarding billing logistics and administrative or legal issues."
   - **V2 WINS:** 32 vs 20 inconsistencies, detected payment conflict V1 missed
   - **Evidence:** V2 retrieved 15 chunks via PPR (V1 got 0 - all seeds failed to resolve)
   - **Root Cause:** V2 alias resolution → "Invoice" seed matches entity → PPR traversal succeeds
   - Documentation: `ANALYSIS_ROUTE4_V1_VS_V2_INVOICE_CONSISTENCY_2026-01-29.md` (Sections 9-12)
-  - Test script: `scripts/test_invoice_consistency_v1_v2.py`
+  - Test script: `scripts/test_knn_benchmark.py` (KNN configuration testing with route4-deep-question)
 
 **Recent Updates (January 28, 2026):**
 - 🚀 **Pre-Indexing OCR QA Workflow Design:** Enterprise-grade document quality assurance using Azure DI confidence scores

@@ -731,14 +731,13 @@ echo "Rolled back to $PREVIOUS_REVISION"
 | **Phase 4: Async/Streaming** | ✅ Complete | `1087b0a` | `src/api_gateway/routers/chat.py` |
 | **Phase 5: Container Separation** | ✅ Complete | - | `graphrag-api` + `graphrag-worker` |
 | **Phase 6/8: Algorithm Versioning** | ✅ Complete | `b46dc7d` | `src/core/algorithm_registry.py` |
+| **Phase 7: APIM & Admin API** | ✅ Complete | `e38eaa0` | `src/api_gateway/routers/admin.py`, `infra/core/gateway/apim.bicep` |
 | **Phase 9: Upstream Sync** | ✅ Complete | `8393f0e` | `frontend/UPSTREAM_VERSION.md` |
 | **Phase 10: CI/CD Pipeline** | ✅ Complete | `e890624` | `.github/workflows/deploy.yml` |
 
 ### ⬜ Pending Phases
 
-| Phase | Status | Notes |
-|-------|--------|-------|
-| **Phase 7: APIM** | ⬜ When Needed | For external API clients requiring rate limiting |
+All phases complete! 🎉
 
 ---
 
@@ -883,6 +882,102 @@ curl -X POST https://graphrag-api.../chat \
 ./scripts/preview-worker.sh delete
 ```
 
+### Admin API - Version Management
+
+The Admin API provides endpoints to manage algorithm versions without redeployment.
+
+#### Authentication
+Requires `X-Admin-Key` header matching `ADMIN_API_KEY` environment variable.
+
+#### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/admin/versions` | List all algorithm versions |
+| `POST` | `/admin/versions/default` | Set default version |
+| `POST` | `/admin/versions/{v}/enable` | Enable/disable a version |
+| `POST` | `/admin/versions/{v}/canary` | Set canary traffic % |
+| `POST` | `/admin/promote/{from}/{to}` | Promote version |
+| `GET` | `/admin/config` | Get system configuration |
+| `GET` | `/admin/health/detailed` | Detailed health check |
+
+#### Switch Default Version (v2 → v3)
+
+**Option 1: Via Admin API (immediate, runtime only)**
+```bash
+# Check current versions
+curl -H "X-Admin-Key: $ADMIN_KEY" https://graphrag-api.../admin/versions
+
+# Enable v3
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  https://graphrag-api.../admin/versions/v3/enable \
+  -d '{"enabled": true}'
+
+# Set v3 as default
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  https://graphrag-api.../admin/versions/default \
+  -d '{"version": "v3"}'
+
+# Or use promote endpoint (enables + sets default in one call)
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+  https://graphrag-api.../admin/promote/v2/v3
+```
+
+**Option 2: Via Environment Variable (persistent, requires restart)**
+```bash
+az containerapp update --name graphrag-worker --resource-group rg-graphrag-feature \
+  --set-env-vars "DEFAULT_ALGORITHM_VERSION=v3" "ALGORITHM_V3_PREVIEW_ENABLED=true"
+```
+
+#### Canary Deployment
+
+Gradually roll out v3 to a percentage of traffic:
+```bash
+# Start with 5% canary
+curl -X POST -H "X-Admin-Key: $ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  https://graphrag-api.../admin/versions/v3/canary \
+  -d '{"percent": 5}'
+
+# Monitor for 24h, then increase
+# 5% → 25% → 50% → 100%
+```
+
+### APIM - External API Access
+
+APIM is optional and only needed when external clients require:
+- Rate limiting (100 req/min per subscription)
+- API key management  
+- Request/response logging
+- Developer portal
+
+#### Enable APIM
+
+```bash
+# Set parameters
+az deployment sub create \
+  --location swedencentral \
+  --template-file infra/main.bicep \
+  --parameters enableApim=true \
+               apimPublisherEmail=admin@example.com
+
+# Get APIM gateway URL
+az apim show --name graphrag-apim-xxx --resource-group rg-graphrag-feature \
+  --query "gatewayUrl" -o tsv
+```
+
+#### External Client Access
+
+External clients use APIM with subscription key:
+```bash
+curl -X POST https://graphrag-apim-xxx.azure-api.net/graphrag/chat \
+  -H "Ocp-Apim-Subscription-Key: YOUR_SUBSCRIPTION_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "query"}]}'
+```
+
 ### Version Header Reference
 
 | Header | Direction | Values | Description |
@@ -919,10 +1014,18 @@ curl -X POST https://graphrag-api.../chat \
 | File | Purpose |
 |------|---------|
 | [src/api_gateway/routers/chat.py](src/api_gateway/routers/chat.py) | OpenAI-compatible chat endpoint, NDJSON streaming |
+| [src/api_gateway/routers/admin.py](src/api_gateway/routers/admin.py) | Admin API for version management |
 | [src/api_gateway/middleware/version.py](src/api_gateway/middleware/version.py) | X-API-Version and X-Algorithm-Version headers |
 | [src/core/algorithm_registry.py](src/core/algorithm_registry.py) | Version definitions, feature flags, handler mapping |
 | [src/core/config.py](src/core/config.py) | All configuration settings |
 | [src/worker/hybrid_v2/orchestrator.py](src/worker/hybrid_v2/orchestrator.py) | HybridPipeline (v2 algorithm) |
+
+### Infrastructure
+
+| File | Purpose |
+|------|---------|
+| [infra/main.bicep](infra/main.bicep) | Main infrastructure (Container Apps, Redis, Cosmos) |
+| [infra/core/gateway/apim.bicep](infra/core/gateway/apim.bicep) | Azure API Management (optional) |
 
 ### CI/CD & Operations
 

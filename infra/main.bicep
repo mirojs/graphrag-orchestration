@@ -50,6 +50,17 @@ param authClientId string = ''
 @allowed(['B2B', 'B2C'])
 param authType string = 'B2B'
 
+// APIM parameters
+@description('Enable Azure API Management for external API access')
+param enableApim bool = false
+
+@description('Publisher email for APIM (required if enableApim=true)')
+param apimPublisherEmail string = ''
+
+@description('Admin API key for version management endpoints')
+@secure()
+param adminApiKey string = ''
+
 // Tags for all resources
 var tags = {
   azd_env_name: environmentName
@@ -294,10 +305,31 @@ module graphragApi './core/host/container-app.bicep' = {
         name: 'VOYAGE_EMBEDDING_DIM'
         value: '2048'
       }
+      {
+        name: 'DEFAULT_ALGORITHM_VERSION'
+        value: 'v2'
+      }
+      {
+        name: 'ALGORITHM_V1_ENABLED'
+        value: 'true'
+      }
+      {
+        name: 'ALGORITHM_V2_ENABLED'
+        value: 'true'
+      }
+      {
+        name: 'ALGORITHM_V3_PREVIEW_ENABLED'
+        value: 'false'
+      }
     ], !empty(voyageApiKey) ? [
       {
         name: 'VOYAGE_API_KEY'
         secretRef: 'voyage-api-key'
+      }
+    ] : [], !empty(adminApiKey) ? [
+      {
+        name: 'ADMIN_API_KEY'
+        secretRef: 'admin-api-key'
       }
     ] : [])
     secrets: concat([
@@ -313,6 +345,11 @@ module graphragApi './core/host/container-app.bicep' = {
       {
         name: 'voyage-api-key'
         value: voyageApiKey
+      }
+    ] : [], !empty(adminApiKey) ? [
+      {
+        name: 'admin-api-key'
+        value: adminApiKey
       }
     ] : [])
   }
@@ -543,6 +580,25 @@ module roleAssignments './core/security/role-assignments.bicep' = {
   dependsOn: [openAiModels, cosmosDb, graphragApi, graphragWorker] // Ensure resources exist before assigning permissions
 }
 
+// ============================================================================
+// APIM - Azure API Management (Optional)
+// Enable for external API clients requiring rate limiting and API key management
+// ============================================================================
+module apim './core/gateway/apim.bicep' = if (enableApim) {
+  name: 'api-management'
+  scope: rg
+  params: {
+    apimName: 'graphrag-apim-${uniqueString(rg.id)}'
+    location: location
+    tags: tags
+    publisherEmail: apimPublisherEmail
+    publisherName: 'GraphRAG Team'
+    backendUrl: graphragApi.outputs.uri
+    enableDevPortal: false
+  }
+  dependsOn: [graphragApi]
+}
+
 // Outputs
 output AZURE_LOCATION string = location
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = '${containerRegistry.name}.azurecr.io'
@@ -554,3 +610,5 @@ output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.cosmosAccountEndpoint
 output COSMOS_DB_DATABASE_NAME string = cosmosDb.outputs.databaseName
 output REDIS_HOST string = redis.outputs.redisHostName
 output REDIS_PORT int = redis.outputs.redisSslPort
+output APIM_GATEWAY_URL string = enableApim ? apim.outputs.apimGatewayUrl : ''
+output APIM_NAME string = enableApim ? apim.outputs.apimName : ''

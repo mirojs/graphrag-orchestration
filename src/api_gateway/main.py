@@ -8,6 +8,7 @@ from src.api_gateway.middleware.auth import JWTAuthMiddleware
 from src.api_gateway.middleware.correlation import CorrelationIdMiddleware
 from src.api_gateway.middleware.version import VersionHeaderMiddleware
 from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map, config, folders, chat
+from src.api_gateway.routers.admin import router as admin_router
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
 
@@ -195,6 +196,12 @@ app.include_router(knowledge_map.router, tags=["knowledge-map"])
 app.include_router(document_lifecycle_router, prefix="/lifecycle", tags=["document-lifecycle"])
 # Maintenance jobs: GC orphans, stale edges, GDS recompute, health checks
 app.include_router(maintenance_router, prefix="/maintenance", tags=["maintenance"])
+
+# ============================================================================
+# Admin API - Version Management & Configuration
+# ============================================================================
+# Requires X-Admin-Key header or admin role in JWT
+app.include_router(admin_router, tags=["admin"])
 
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation

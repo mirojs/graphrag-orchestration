@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # Set to "http://graphrag-worker-preview" when preview worker is deployed
     WORKER_PREVIEW_URL: Optional[str] = None  # None = use same process (no HTTP routing)
     
+    # Admin API Key (for version management endpoints)
+    ADMIN_API_KEY: Optional[str] = None  # Set to enable /admin/* endpoints
+    
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)
     # Note: Neo4j is still used for entity/relationship storage and hybrid search on KG

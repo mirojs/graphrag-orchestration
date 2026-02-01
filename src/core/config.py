@@ -111,6 +111,7 @@ class Settings(BaseSettings):
     # Authentication & Security
     AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)
     REQUIRE_AUTH: bool = False  # Set to True in production with Easy Auth enabled
+    ALLOW_LEGACY_GROUP_HEADER: bool = True  # Allow X-Group-ID header (deprecated, disable in production)
     
     # Performance & Rate Limiting
     # Set to 1 for serial processing (10K TPM), 4 for parallel (50K+ TPM)

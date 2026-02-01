@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
 from src.core.config import settings
-# Force rebuild - fixed embedder None check and DRIFT API key requirement
 from src.api_gateway.middleware.group_isolation import GroupIsolationMiddleware
 from src.api_gateway.middleware.auth import JWTAuthMiddleware
+from src.api_gateway.middleware.correlation import CorrelationIdMiddleware
 from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map, config, folders, chat, chat
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
@@ -14,9 +14,10 @@ from src.worker.hybrid_v2.routers.maintenance import router as maintenance_route
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
 from src.worker.services import GraphService, LLMService
 
-# Configure structured logging
+# Configure structured logging with context variables support
 structlog.configure(
     processors=[
+        structlog.contextvars.merge_contextvars,  # Merge correlation_id, group_id from context
         structlog.processors.TimeStamper(fmt="iso"),
         structlog.processors.JSONRenderer()
     ]
@@ -133,14 +134,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Custom Middleware
-# JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
+# Custom Middleware (order matters: first added = last executed)
+# 1. Correlation ID - generates/propagates trace ID for all requests
+app.add_middleware(CorrelationIdMiddleware)
+
+# 2. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
 # Set require_auth=False for development without Easy Auth
 app.add_middleware(
     JWTAuthMiddleware,
     auth_type=settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B",
     require_auth=settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
 )
+
+# 3. Group Isolation - enforces tenant isolation using JWT or legacy headers
 app.add_middleware(GroupIsolationMiddleware)
 
 # Include Routers

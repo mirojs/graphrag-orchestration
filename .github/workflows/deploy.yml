@@ -1,0 +1,424 @@
+# GraphRAG Orchestration - Build & Deploy Pipeline
+#
+# Deploys API and Worker containers to Azure Container Apps with:
+# - Staging → Production promotion
+# - Algorithm version selection (v1, v2, v3)
+# - Canary deployment support
+# - Automatic rollback on failure
+
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'infra/**'
+      - 'Dockerfile*'
+      - 'azure.yaml'
+  workflow_dispatch:
+    inputs:
+      algorithm_version:
+        description: 'Algorithm version to deploy'
+        required: true
+        default: 'v2'
+        type: choice
+        options:
+          - v1
+          - v2
+          - v3
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+      skip_staging:
+        description: 'Skip staging (emergency hotfix only)'
+        required: false
+        default: false
+        type: boolean
+
+# Federated credentials for Azure login
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+env:
+  AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+  AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+  ACR_NAME: ${{ vars.ACR_NAME }}
+  # Container App names
+  API_APP_NAME: graphrag-api
+  WORKER_APP_NAME: graphrag-worker
+
+jobs:
+  # ============================================================================
+  # Build Jobs - Run in parallel
+  # ============================================================================
+  
+  build-api:
+    name: Build API Container
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+      image_name: ${{ steps.build.outputs.image }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ACR_NAME }}.azurecr.io/graphrag-api
+          tags: |
+            type=sha,prefix=
+            type=raw,value=${{ github.run_number }}-${{ github.run_attempt }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      
+      - name: Build and push API image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.api
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            GIT_SHA=${{ github.sha }}
+      
+      - name: Output image name
+        run: |
+          echo "image=${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ github.sha }}" >> $GITHUB_OUTPUT
+
+  build-worker:
+    name: Build Worker Container
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+      image_name: ${{ steps.build.outputs.image }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      
+      - name: Determine algorithm version
+        id: algo
+        run: |
+          VERSION="${{ github.event.inputs.algorithm_version || 'v2' }}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Algorithm version: $VERSION"
+      
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.ACR_NAME }}.azurecr.io/graphrag-worker
+          tags: |
+            type=sha,prefix=
+            type=raw,value=${{ steps.algo.outputs.version }}-${{ github.run_number }}
+            type=raw,value=${{ steps.algo.outputs.version }}-latest,enable=${{ github.ref == 'refs/heads/main' }}
+      
+      - name: Build and push Worker image
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.worker
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_NUMBER=${{ github.run_number }}
+            GIT_SHA=${{ github.sha }}
+            ALGORITHM_VERSION=${{ steps.algo.outputs.version }}
+
+  # ============================================================================
+  # Deploy to Staging
+  # ============================================================================
+  
+  deploy-staging:
+    name: Deploy to Staging
+    needs: [build-api, build-worker]
+    runs-on: ubuntu-latest
+    environment: staging
+    if: github.event.inputs.skip_staging != 'true'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Install Azure CLI extensions
+        run: |
+          az extension add --name containerapp --upgrade
+      
+      - name: Deploy API to staging
+        run: |
+          az containerapp update \
+            --name ${{ env.API_APP_NAME }}-staging \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ github.sha }}
+      
+      - name: Deploy Worker to staging
+        run: |
+          ALGO_VERSION="${{ github.event.inputs.algorithm_version || 'v2' }}"
+          az containerapp update \
+            --name ${{ env.WORKER_APP_NAME }}-staging \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/graphrag-worker:${{ github.sha }} \
+            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO_VERSION"
+      
+      - name: Wait for deployment
+        run: sleep 30
+      
+      - name: Run smoke tests
+        run: |
+          STAGING_URL=$(az containerapp show \
+            --name ${{ env.API_APP_NAME }}-staging \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          
+          echo "Testing staging at: https://$STAGING_URL"
+          
+          # Health check
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$STAGING_URL/health")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Health check failed: HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "✅ Health check passed"
+          
+          # Check version headers
+          HEADERS=$(curl -s -I "https://$STAGING_URL/health" | grep -i "x-api-version")
+          echo "Version headers: $HEADERS"
+      
+      - name: Staging deployment summary
+        run: |
+          echo "## Staging Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Image |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`graphrag-api:${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Worker | \`graphrag-worker:${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Algorithm | \`${{ github.event.inputs.algorithm_version || 'v2' }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Deploy to Production
+  # ============================================================================
+  
+  deploy-production:
+    name: Deploy to Production
+    needs: [build-api, build-worker, deploy-staging]
+    runs-on: ubuntu-latest
+    environment: production
+    if: |
+      always() && 
+      (needs.deploy-staging.result == 'success' || github.event.inputs.skip_staging == 'true') &&
+      (github.event.inputs.environment == 'production' || github.ref == 'refs/heads/main')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Install Azure CLI extensions
+        run: |
+          az extension add --name containerapp --upgrade
+      
+      - name: Get current revision (for rollback)
+        id: current
+        run: |
+          CURRENT_API=$(az containerapp revision list \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "[?properties.active].name | [0]" -o tsv)
+          echo "api_revision=$CURRENT_API" >> $GITHUB_OUTPUT
+          echo "Current API revision: $CURRENT_API"
+      
+      - name: Deploy API to production
+        id: deploy-api
+        run: |
+          az containerapp update \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ github.sha }} \
+            --revision-suffix "build-${{ github.run_number }}"
+      
+      - name: Deploy Worker to production
+        id: deploy-worker
+        run: |
+          ALGO_VERSION="${{ github.event.inputs.algorithm_version || 'v2' }}"
+          az containerapp update \
+            --name ${{ env.WORKER_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/graphrag-worker:${{ github.sha }} \
+            --revision-suffix "build-${{ github.run_number }}" \
+            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO_VERSION"
+      
+      - name: Wait for deployment
+        run: sleep 30
+      
+      - name: Production health check
+        id: health
+        run: |
+          PROD_URL=$(az containerapp show \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          
+          echo "Testing production at: https://$PROD_URL"
+          
+          # Health check with retries
+          for i in {1..5}; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "https://$PROD_URL/health")
+            if [ "$HTTP_CODE" == "200" ]; then
+              echo "✅ Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: HTTP $HTTP_CODE, retrying..."
+            sleep 10
+          done
+          
+          echo "❌ Health check failed after 5 attempts"
+          exit 1
+      
+      - name: Rollback on failure
+        if: failure() && steps.health.outcome == 'failure'
+        run: |
+          echo "🔄 Rolling back to previous revision..."
+          
+          PREVIOUS_REVISION="${{ steps.current.outputs.api_revision }}"
+          if [ -n "$PREVIOUS_REVISION" ]; then
+            az containerapp ingress traffic set \
+              --name ${{ env.API_APP_NAME }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --revision-weight "$PREVIOUS_REVISION=100"
+            echo "✅ Rolled back to $PREVIOUS_REVISION"
+          else
+            echo "⚠️ No previous revision found for rollback"
+          fi
+      
+      - name: Production deployment summary
+        if: success()
+        run: |
+          PROD_URL=$(az containerapp show \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          
+          echo "## 🚀 Production Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**URL:** https://$PROD_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Image | Revision |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|----------|" >> $GITHUB_STEP_SUMMARY
+          echo "| API | \`graphrag-api:${{ github.sha }}\` | build-${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Worker | \`graphrag-worker:${{ github.sha }}\` | build-${{ github.run_number }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Algorithm | \`${{ github.event.inputs.algorithm_version || 'v2' }}\` | - |" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================================
+  # Canary Deployment (Optional)
+  # ============================================================================
+  
+  canary-rollout:
+    name: Canary Rollout
+    needs: [deploy-production]
+    runs-on: ubuntu-latest
+    if: github.event.inputs.algorithm_version == 'v3'
+    environment: canary
+    
+    steps:
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+      
+      - name: Set canary traffic split (5%)
+        run: |
+          # Get the new revision name
+          NEW_REVISION=$(az containerapp revision list \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "[?contains(name, 'build-${{ github.run_number }}')].name | [0]" -o tsv)
+          
+          # Get the stable revision
+          STABLE_REVISION=$(az containerapp revision list \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "[?properties.trafficWeight > \`0\` && !contains(name, 'build-${{ github.run_number }}')].name | [0]" -o tsv)
+          
+          echo "New revision: $NEW_REVISION"
+          echo "Stable revision: $STABLE_REVISION"
+          
+          # Set 5% canary traffic
+          az containerapp ingress traffic set \
+            --name ${{ env.API_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --revision-weight "$STABLE_REVISION=95" "$NEW_REVISION=5"
+          
+          echo "✅ Canary traffic split: 95% stable, 5% new"
+      
+      - name: Canary summary
+        run: |
+          echo "## 🐤 Canary Deployment Active" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Traffic split:" >> $GITHUB_STEP_SUMMARY
+          echo "- **95%** → Stable (v2)" >> $GITHUB_STEP_SUMMARY
+          echo "- **5%** → Canary (v3)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Monitor for 48h before promoting." >> $GITHUB_STEP_SUMMARY

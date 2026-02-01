@@ -18,9 +18,15 @@ param serviceGraphragApiImageName string = ''
 @description('Worker container image - processes background jobs')
 param serviceGraphragWorkerImageName string = ''
 
+@description('API Gateway image name from azd env (fallback)')
+param SERVICE_GRAPHRAG_API_IMAGE_NAME string = ''
+
+@description('Worker image name from azd env (fallback)')
+param SERVICE_GRAPHRAG_WORKER_IMAGE_NAME string = ''
+
 // Resolve image names with explicit fallback to ensure correct images
-var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : 'graphrag-api-default:latest'
-var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : 'graphrag-worker-default:latest'
+var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : (!empty(SERVICE_GRAPHRAG_API_IMAGE_NAME) ? SERVICE_GRAPHRAG_API_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-api-default:latest')
+var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : (!empty(SERVICE_GRAPHRAG_WORKER_IMAGE_NAME) ? SERVICE_GRAPHRAG_WORKER_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-worker-default:latest')
 
 @secure()
 @description('Neo4j Password')

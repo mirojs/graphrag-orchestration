@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, HTTPException, Response, status
 
+from src.core.services import redis_service
 from src.worker.services.simple_document_analysis_service import (
     SimpleDocumentAnalysisService,
     DocumentAnalysisBackend,
@@ -49,17 +50,17 @@ class OperationStatus(str, Enum):
 
 # Status mapping between local and Redis enums
 _STATUS_TO_REDIS = {
-    OperationStatus.PENDING: RedisOperationStatus.PENDING,
-    OperationStatus.RUNNING: RedisOperationStatus.IN_PROGRESS,
-    OperationStatus.SUCCEEDED: RedisOperationStatus.COMPLETED,
-    OperationStatus.FAILED: RedisOperationStatus.FAILED,
+    OperationStatus.PENDING: redis_service.OperationStatus.PENDING,
+    OperationStatus.RUNNING: redis_service.OperationStatus.IN_PROGRESS,
+    OperationStatus.SUCCEEDED: redis_service.OperationStatus.COMPLETED,
+    OperationStatus.FAILED: redis_service.OperationStatus.FAILED,
 }
 
 _STATUS_FROM_REDIS = {
-    RedisOperationStatus.PENDING: OperationStatus.PENDING,
-    RedisOperationStatus.IN_PROGRESS: OperationStatus.RUNNING,
-    RedisOperationStatus.COMPLETED: OperationStatus.SUCCEEDED,
-    RedisOperationStatus.FAILED: OperationStatus.FAILED,
+    redis_service.OperationStatus.PENDING: OperationStatus.PENDING,
+    redis_service.OperationStatus.IN_PROGRESS: OperationStatus.RUNNING,
+    redis_service.OperationStatus.COMPLETED: OperationStatus.SUCCEEDED,
+    redis_service.OperationStatus.FAILED: OperationStatus.FAILED,
 }
 
 
@@ -75,12 +76,12 @@ class OperationStoreAdapter:
     """
     
     def __init__(self):
-        self._redis_service: Optional[RedisService] = None
+        self._redis_service: Optional[redis_service.RedisService] = None
     
     async def _get_store(self):
         """Lazy-init Redis connection."""
         if self._redis_service is None:
-            self._redis_service = await get_redis_service()
+            self._redis_service = await redis_service.get_redis_service()
         return self._redis_service.operations
     
     async def create(self, operation_id: str, request: Dict[str, Any]) -> None:
@@ -111,7 +112,7 @@ class OperationStoreAdapter:
             "result": op.result,
             "error": op.error,
             "created_at": op.created_at,
-            "completed_at": op.updated_at if op.status in (RedisOperationStatus.COMPLETED, RedisOperationStatus.FAILED) else None,
+            "completed_at": op.updated_at if op.status in (redis_service.OperationStatus.COMPLETED, redis_service.OperationStatus.FAILED) else None,
         }
     
     async def update(

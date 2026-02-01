@@ -6,7 +6,8 @@ from src.core.config import settings
 from src.api_gateway.middleware.group_isolation import GroupIsolationMiddleware
 from src.api_gateway.middleware.auth import JWTAuthMiddleware
 from src.api_gateway.middleware.correlation import CorrelationIdMiddleware
-from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map, config, folders, chat, chat
+from src.api_gateway.middleware.version import VersionHeaderMiddleware
+from src.api_gateway.routers import health, graphrag, orchestration, hybrid, document_analysis, knowledge_map, config, folders, chat
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
 
@@ -135,10 +136,15 @@ app.add_middleware(
 )
 
 # Custom Middleware (order matters: first added = last executed)
+# Execution order: CORS → Correlation → Version → JWT → GroupIsolation → Handler
+
 # 1. Correlation ID - generates/propagates trace ID for all requests
 app.add_middleware(CorrelationIdMiddleware)
 
-# 2. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
+# 2. Version Header - resolves API/algorithm version from request headers
+app.add_middleware(VersionHeaderMiddleware)
+
+# 3. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
 # Set require_auth=False for development without Easy Auth
 app.add_middleware(
     JWTAuthMiddleware,
@@ -146,14 +152,13 @@ app.add_middleware(
     require_auth=settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
 )
 
-# 3. Group Isolation - enforces tenant isolation using JWT or legacy headers
+# 4. Group Isolation - enforces tenant isolation using JWT or legacy headers
 app.add_middleware(GroupIsolationMiddleware)
 
 # Include Routers
 app.include_router(health.router, tags=["health"])
 app.include_router(config.router, tags=["config"])
 app.include_router(folders.router, tags=["folders"])
-app.include_router(chat.router, tags=["chat"])  # OpenAI-compatible chat API
 app.include_router(chat.router, tags=["chat"])  # OpenAI-compatible chat API
 
 # ============================================================================

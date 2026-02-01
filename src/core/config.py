@@ -55,6 +55,16 @@ class Settings(BaseSettings):
     VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-context-3 with output_dimension=2048
     VOYAGE_V2_SIMILARITY_THRESHOLD: float = 0.87  # SIMILAR_TO edge threshold (raised from 0.85 for V2)
     
+    # ========================================================================
+    # Algorithm Version Control
+    # See ARCHITECTURE_PLAN_FULLSTACK_2026-01-30.md Phase 8 for details
+    # ========================================================================
+    DEFAULT_ALGORITHM_VERSION: str = "v2"  # Default when client doesn't specify
+    ALGORITHM_V1_ENABLED: bool = True   # Deprecated but available for backward compat
+    ALGORITHM_V2_ENABLED: bool = True   # Current stable version
+    ALGORITHM_V3_PREVIEW_ENABLED: bool = False  # Preview/beta features
+    ALGORITHM_V3_CANARY_PERCENT: int = 0  # Canary rollout percentage (0-100)
+    
     # Vector Store for RAPTOR nodes
     # Options: azure_search (recommended for RAPTOR), lancedb (local dev), neo4j (legacy)
     # Note: Neo4j is still used for entity/relationship storage and hybrid search on KG

@@ -89,7 +89,7 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
   scope: rg
 }
 
-var acrCredentials = listCredentials(containerRegistry.id)
+var acrCredentials = listCredentials(containerRegistry.id, '2023-01-01-preview')
 var acrUsername = acrCredentials.username
 var acrPassword = acrCredentials.passwords[0].value
 
@@ -346,6 +346,10 @@ module graphragApi './core/host/container-app.bicep' = {
       {
         name: 'redis-password'
         value: redis.outputs.redisPrimaryKey
+      }
+      {
+        name: 'acr-password'
+        value: acrPassword
       }
     ], !empty(voyageApiKey) ? [
       {

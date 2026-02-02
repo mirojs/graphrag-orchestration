@@ -172,6 +172,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 return principal.get("access_token") or principal.get("id_token")
             except Exception as e:
                 logger.warning(f"Failed to parse X-MS-CLIENT-PRINCIPAL: {e}")
+                # Fallback: treat header as raw JWT if it looks like one
+                if client_principal.count(".") >= 2:
+                    return client_principal
         
         # 3. Forwarded/Original Authorization headers (some proxies strip Authorization)
         auth_header = (

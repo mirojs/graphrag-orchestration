@@ -672,3 +672,4 @@ class Neo4jTextUnitStore:
             logger.error("get_workspace_document_overviews_failed", error=str(e))
         
         return docs
+# Force rebuild Mon Feb  2 11:05:12 UTC 2026

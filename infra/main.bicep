@@ -50,6 +50,9 @@ param authClientId string = ''
 @allowed(['B2B', 'B2C'])
 param authType string = 'B2B'
 
+@description('Skip role assignments if they already exist')
+param skipRoleAssignments bool = false
+
 // APIM parameters
 @description('Enable Azure API Management for external API access')
 param enableApim bool = false
@@ -92,6 +95,7 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
 var acrCredentials = listCredentials(containerRegistry.id, '2023-01-01-preview')
 var acrUsername = acrCredentials.username
 var acrPassword = acrCredentials.passwords[0].value
+var useAcrPassword = !empty(acrPassword)
 
 // Cosmos DB for chat history and usage tracking
 module cosmosDb './core/database/cosmos-db.bicep' = {
@@ -130,8 +134,8 @@ module graphragApi './core/host/container-app.bicep' = {
     })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
-    registryUsername: acrUsername
-    registryPasswordSecretName: 'acr-password'
+    registryUsername: useAcrPassword ? acrUsername : ''
+    registryPasswordSecretName: useAcrPassword ? 'acr-password' : ''
     containerName: 'graphrag-api'
     // API Gateway image - handles HTTP requests
     containerImage: apiImageName
@@ -347,11 +351,12 @@ module graphragApi './core/host/container-app.bicep' = {
         name: 'redis-password'
         value: redis.outputs.redisPrimaryKey
       }
+    ], useAcrPassword ? [
       {
         name: 'acr-password'
         value: acrPassword
       }
-    ], !empty(voyageApiKey) ? [
+    ] : [], !empty(voyageApiKey) ? [
       {
         name: 'voyage-api-key'
         value: voyageApiKey
@@ -482,11 +487,12 @@ var sharedSecrets = concat([
     name: 'redis-password'
     value: redis.outputs.redisPrimaryKey
   }
+], useAcrPassword ? [
   {
     name: 'acr-password'
     value: acrPassword
   }
-], !empty(voyageApiKey) ? [
+] : [], !empty(voyageApiKey) ? [
   {
     name: 'voyage-api-key'
     value: voyageApiKey
@@ -505,8 +511,8 @@ module graphragWorker './core/host/container-app-worker.bicep' = {
     })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
-    registryUsername: acrUsername
-    registryPasswordSecretName: 'acr-password'
+    registryUsername: useAcrPassword ? acrUsername : ''
+    registryPasswordSecretName: useAcrPassword ? 'acr-password' : ''
     containerName: 'graphrag-worker'
     containerImage: workerImageName
     cpuCores: '1.0'
@@ -579,7 +585,7 @@ module openAiModels './core/ai/openai-models.bicep' = {
 }
 
 // Role Assignments for Container App Managed Identities (API + Worker)
-module roleAssignments './core/security/role-assignments.bicep' = {
+module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleAssignments) {
   name: 'role-assignments'
   scope: rg
   params: {

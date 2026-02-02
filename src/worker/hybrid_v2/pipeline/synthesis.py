@@ -1425,29 +1425,40 @@ BEGIN ANALYSIS:"""
                         kvps_by_section[section_key] = []
                     kvps_by_section[section_key].append(kvp)
             
-            # Show each section with its KVPs
-            for section_key, section_kvps in list(kvps_by_section.items())[:5]:  # Limit to 5 sections
-                if section_key in sections_shown:
-                    continue
-                sections_shown.add(section_key)
-                
-                parts.append(f"\n**Section: {section_key}**")
-                
-                # Show section context if available
-                if section_key in section_to_chunks:
-                    context_text = section_to_chunks[section_key][0]
-                    # Truncate long sections
-                    if len(context_text) > 500:
-                        context_text = context_text[:500] + "..."
-                    parts.append(f"Context: {context_text}")
-                    parts.append("")
-                
-                # Show KVPs from this section
-                parts.append("Fields extracted:")
-                for kvp in section_kvps[:10]:  # Limit to 10 KVPs per section
-                    key = kvp.get("key", "")
-                    value = kvp.get("value", "")
-                    parts.append(f"  • {key}: {value}")
+            # If no KVPs grouped by section, show raw chunks
+            if not kvps_by_section:
+                chunks = doc.get("chunks", [])
+                if chunks:
+                    parts.append("\n**Document Content (no KVPs found):**")
+                    for i, chunk in enumerate(chunks[:3], 1):  # Show first 3 chunks
+                        chunk_text = chunk.get("text", "")
+                        if len(chunk_text) > 400:
+                            chunk_text = chunk_text[:400] + "..."
+                        parts.append(f"\nChunk {i}: {chunk_text}")
+            else:
+                # Show each section with its KVPs
+                for section_key, section_kvps in list(kvps_by_section.items())[:5]:  # Limit to 5 sections
+                    if section_key in sections_shown:
+                        continue
+                    sections_shown.add(section_key)
+                    
+                    parts.append(f"\n**Section: {section_key}**")
+                    
+                    # Show section context if available
+                    if section_key in section_to_chunks:
+                        context_text = section_to_chunks[section_key][0]
+                        # Truncate long sections
+                        if len(context_text) > 500:
+                            context_text = context_text[:500] + "..."
+                        parts.append(f"Context: {context_text}")
+                        parts.append("")
+                    
+                    # Show KVPs from this section
+                    parts.append("Fields extracted:")
+                    for kvp in section_kvps[:10]:  # Limit to 10 KVPs per section
+                        key = kvp.get("key", "")
+                        value = kvp.get("value", "")
+                        parts.append(f"  • {key}: {value}")
             
             # Show tables for this document (if any)
             tables = doc.get("tables", [])

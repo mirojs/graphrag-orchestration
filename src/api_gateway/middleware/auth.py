@@ -174,6 +174,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             or request.headers.get("Authorization")
         )
         if auth_header:
+            auth_header = auth_header.strip()
             if auth_header.lower().startswith("bearer "):
                 return auth_header.split(" ", 1)[1]
             logger.warning(

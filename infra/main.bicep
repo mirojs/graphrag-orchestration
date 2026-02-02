@@ -163,6 +163,10 @@ module graphragApi './core/host/container-app.bicep' = {
         value: authClientId
       }
       {
+        name: 'GROUP_ID_OVERRIDE'
+        value: 'test-5pdfs-v2-fix2'
+      }
+      {
         name: 'ALLOW_LEGACY_GROUP_HEADER'
         value: 'false'
       }

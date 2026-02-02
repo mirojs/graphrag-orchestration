@@ -1363,13 +1363,22 @@ BEGIN REPORT:"""
             extraction["dates"].append({"value": value, "context": context})
             extraction["all_fields"].append({"field": f"date_{len(extraction['dates'])}", "value": value, "context": context})
         
-        # Invoice/PO/Contract numbers
-        id_pattern = r'(?:Invoice|INV|PO|Purchase Order|Contract|Order)\s*#?\s*:?\s*([A-Z0-9\-]+)'
-        for match in re.finditer(id_pattern, text, re.IGNORECASE):
-            value = match.group(1).strip() if match.groups() else match.group().strip()
-            context = match.group()
-            extraction["identifiers"].append({"value": value, "context": context})
-            extraction["all_fields"].append({"field": f"identifier_{len(extraction['identifiers'])}", "value": value, "context": context})
+        # Invoice/PO/Contract numbers - require specific format with at least one digit
+        id_patterns = [
+            r'(?:Invoice|INV)\s*(?:#|No\.?|Number)?\s*:?\s*([A-Z0-9][A-Z0-9\-]+\d[A-Z0-9\-]*)',
+            r'(?:PO|Purchase\s+Order)\s*(?:#|No\.?|Number)?\s*:?\s*([A-Z0-9][A-Z0-9\-]+\d[A-Z0-9\-]*)',
+            r'(?:Contract)\s*(?:#|No\.?|Number)?\s*:?\s*([A-Z0-9][A-Z0-9\-]+\d[A-Z0-9\-]*)',
+            r'(?:Order)\s*(?:#|No\.?|Number)?\s*:?\s*([A-Z0-9][A-Z0-9\-]+\d[A-Z0-9\-]*)',
+        ]
+        seen_ids = set()
+        for pattern in id_patterns:
+            for match in re.finditer(pattern, text, re.IGNORECASE):
+                value = match.group(1).strip() if match.groups() else match.group().strip()
+                if value and len(value) >= 3 and value.lower() not in seen_ids:
+                    seen_ids.add(value.lower())
+                    context = match.group()
+                    extraction["identifiers"].append({"value": value, "context": context})
+                    extraction["all_fields"].append({"field": f"identifier_{len(extraction['identifiers'])}", "value": value, "context": context})
         
         # Party names (look for common patterns)
         party_patterns = [
@@ -1438,55 +1447,187 @@ BEGIN REPORT:"""
         
         return extraction
 
-    def _build_field_comparison_pairs(self, extractions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Build pairs of fields to compare across documents."""
+    def _build_field_comparison_pairs(self, extractions: List[Dict[str, Any]], max_pairs: int = 100) -> List[Dict[str, Any]]:
+        """Build pairs of fields to compare across documents.
+        
+        Smart filtering to avoid combinatorial explosion:
+        1. Focus on invoice/contract documents
+        2. Compare only related field types 
+        3. Use deterministic rules for obvious matches
+        4. Limit LLM comparisons to ambiguous pairs
+        """
         if len(extractions) < 2:
             return []
         
         pairs = []
+        deterministic_results = []
         
-        # For each pair of documents
-        for i in range(len(extractions)):
-            for j in range(i + 1, len(extractions)):
-                doc1 = extractions[i]
-                doc2 = extractions[j]
+        # Priority document matching - invoice vs contract is most valuable
+        doc_types = {}
+        for ext in extractions:
+            title = ext.get("_document_title", "").lower()
+            if "invoice" in title:
+                doc_types.setdefault("invoice", []).append(ext)
+            elif "contract" in title or "purchase" in title:
+                doc_types.setdefault("contract", []).append(ext)
+            else:
+                doc_types.setdefault("other", []).append(ext)
+        
+        # Prioritize invoice-vs-contract comparisons
+        doc_pairs_to_compare = []
+        if doc_types.get("invoice") and doc_types.get("contract"):
+            for inv in doc_types["invoice"]:
+                for con in doc_types["contract"]:
+                    doc_pairs_to_compare.append((inv, con))
+        
+        # Fall back to all pairs if no invoice/contract found
+        if not doc_pairs_to_compare:
+            for i in range(len(extractions)):
+                for j in range(i + 1, len(extractions)):
+                    doc_pairs_to_compare.append((extractions[i], extractions[j]))
+        
+        # Key field types to compare (ignore noisy identifiers)
+        important_field_types = {"amount", "party", "date", "url", "percentage", "model", "term", "line_item"}
+        
+        for doc1, doc2 in doc_pairs_to_compare:
+            doc1_by_type = {}
+            doc2_by_type = {}
+            
+            for f in doc1.get("all_fields", []):
+                field_type = f["field"].rsplit("_", 1)[0]
+                if field_type in important_field_types:
+                    doc1_by_type.setdefault(field_type, []).append(f)
+            
+            for f in doc2.get("all_fields", []):
+                field_type = f["field"].rsplit("_", 1)[0]
+                if field_type in important_field_types:
+                    doc2_by_type.setdefault(field_type, []).append(f)
+            
+            all_types = set(doc1_by_type.keys()) | set(doc2_by_type.keys())
+            
+            for field_type in all_types:
+                doc1_vals = doc1_by_type.get(field_type, [])
+                doc2_vals = doc2_by_type.get(field_type, [])
                 
-                doc1_fields = {f["field"]: f for f in doc1.get("all_fields", [])}
-                doc2_fields = {f["field"]: f for f in doc2.get("all_fields", [])}
-                
-                all_field_types = set()
-                for f in doc1.get("all_fields", []):
-                    # Extract field type (amount, date, party, etc.)
-                    field_type = f["field"].rsplit("_", 1)[0]
-                    all_field_types.add(field_type)
-                for f in doc2.get("all_fields", []):
-                    field_type = f["field"].rsplit("_", 1)[0]
-                    all_field_types.add(field_type)
-                
-                # Group fields by type and compare
-                for field_type in all_field_types:
-                    doc1_values = [f for f in doc1.get("all_fields", []) if f["field"].startswith(field_type)]
-                    doc2_values = [f for f in doc2.get("all_fields", []) if f["field"].startswith(field_type)]
+                # For amounts and percentages - compare all combinations (they might appear in different order)
+                if field_type in ("amount", "percentage"):
+                    doc1_set = {v.get("value", "").strip() for v in doc1_vals}
+                    doc2_set = {v.get("value", "").strip() for v in doc2_vals}
                     
-                    # Simple pairing - compare first values of each type
-                    max_vals = max(len(doc1_values), len(doc2_values))
-                    for k in range(max_vals):
-                        v1 = doc1_values[k] if k < len(doc1_values) else {"field": f"{field_type}_missing", "value": "NOT FOUND"}
-                        v2 = doc2_values[k] if k < len(doc2_values) else {"field": f"{field_type}_missing", "value": "NOT FOUND"}
-                        
+                    # Only flag if there are values unique to one doc
+                    only_in_doc1 = doc1_set - doc2_set
+                    only_in_doc2 = doc2_set - doc1_set
+                    
+                    if only_in_doc1 or only_in_doc2:
                         pairs.append({
-                            "field": f"{field_type}_{k+1}",
+                            "field": f"{field_type}_comparison",
                             "doc1_id": doc1.get("_document_id"),
                             "doc1_title": doc1.get("_document_title", "Doc1")[:30],
-                            "doc1_value": str(v1.get("value", ""))[:100],
+                            "doc1_value": ", ".join(sorted(only_in_doc1)[:5]) if only_in_doc1 else "N/A",
                             "doc1_citation": f"[{doc1.get('_citation_idx', '?')}]",
                             "doc2_id": doc2.get("_document_id"),
                             "doc2_title": doc2.get("_document_title", "Doc2")[:30],
-                            "doc2_value": str(v2.get("value", ""))[:100],
+                            "doc2_value": ", ".join(sorted(only_in_doc2)[:5]) if only_in_doc2 else "N/A",
                             "doc2_citation": f"[{doc2.get('_citation_idx', '?')}]",
+                            "notes": f"Values unique to each document"
                         })
+                
+                # For parties - compare names
+                elif field_type == "party":
+                    doc1_names = {v.get("value", "").strip().lower() for v in doc1_vals}
+                    doc2_names = {v.get("value", "").strip().lower() for v in doc2_vals}
+                    
+                    # Compare each pair of party names
+                    for v1 in doc1_vals[:5]:  # Limit to first 5
+                        for v2 in doc2_vals[:5]:
+                            name1 = v1.get("value", "").strip()
+                            name2 = v2.get("value", "").strip()
+                            # Skip obvious matches
+                            if name1.lower() == name2.lower():
+                                continue
+                            # Check for potential variants (e.g., "Contoso Ltd" vs "Contoso LLC")
+                            if self._might_be_same_entity(name1, name2):
+                                pairs.append({
+                                    "field": "party_variant",
+                                    "doc1_id": doc1.get("_document_id"),
+                                    "doc1_title": doc1.get("_document_title", "Doc1")[:30],
+                                    "doc1_value": name1[:100],
+                                    "doc1_citation": f"[{doc1.get('_citation_idx', '?')}]",
+                                    "doc2_id": doc2.get("_document_id"),
+                                    "doc2_title": doc2.get("_document_title", "Doc2")[:30],
+                                    "doc2_value": name2[:100],
+                                    "doc2_citation": f"[{doc2.get('_citation_idx', '?')}]",
+                                    "notes": "Potential entity name variant"
+                                })
+                
+                # For URLs - direct comparison
+                elif field_type == "url":
+                    for v1 in doc1_vals:
+                        for v2 in doc2_vals:
+                            url1 = v1.get("value", "").strip()
+                            url2 = v2.get("value", "").strip()
+                            if url1 != url2:
+                                pairs.append({
+                                    "field": "url_difference",
+                                    "doc1_id": doc1.get("_document_id"),
+                                    "doc1_title": doc1.get("_document_title", "Doc1")[:30],
+                                    "doc1_value": url1[:100],
+                                    "doc1_citation": f"[{doc1.get('_citation_idx', '?')}]",
+                                    "doc2_id": doc2.get("_document_id"),
+                                    "doc2_title": doc2.get("_document_title", "Doc2")[:30],
+                                    "doc2_value": url2[:100],
+                                    "doc2_citation": f"[{doc2.get('_citation_idx', '?')}]",
+                                })
+                
+                # For line items - compare descriptions
+                elif field_type == "line_item":
+                    for k, v1 in enumerate(doc1_vals[:10]):
+                        v2 = doc2_vals[k] if k < len(doc2_vals) else {"value": "NOT FOUND"}
+                        if v1.get("value") != v2.get("value"):
+                            pairs.append({
+                                "field": f"line_item_{k+1}",
+                                "doc1_id": doc1.get("_document_id"),
+                                "doc1_title": doc1.get("_document_title", "Doc1")[:30],
+                                "doc1_value": str(v1.get("value", ""))[:100],
+                                "doc1_citation": f"[{doc1.get('_citation_idx', '?')}]",
+                                "doc2_id": doc2.get("_document_id"),
+                                "doc2_title": doc2.get("_document_title", "Doc2")[:30],
+                                "doc2_value": str(v2.get("value", ""))[:100],
+                                "doc2_citation": f"[{doc2.get('_citation_idx', '?')}]",
+                            })
+            
+            # Stop if we have enough pairs
+            if len(pairs) >= max_pairs:
+                break
         
-        return pairs
+        logger.info("field_comparison_pairs_built", total_pairs=len(pairs))
+        return pairs[:max_pairs]
+
+    def _might_be_same_entity(self, name1: str, name2: str) -> bool:
+        """Check if two names might refer to the same entity (e.g., Contoso Ltd vs Contoso LLC)."""
+        # Normalize: lowercase, remove common suffixes
+        suffixes = ["inc", "inc.", "llc", "ltd", "ltd.", "corp", "corp.", "company", "co", "co."]
+        
+        def normalize(name):
+            n = name.lower().strip()
+            for suffix in suffixes:
+                if n.endswith(" " + suffix):
+                    n = n[:-len(suffix)-1].strip()
+            return n
+        
+        n1 = normalize(name1)
+        n2 = normalize(name2)
+        
+        # If base names match, they might be variants
+        if n1 == n2:
+            return True
+        
+        # Check if one is substring of other
+        if len(n1) > 3 and len(n2) > 3:
+            if n1 in n2 or n2 in n1:
+                return True
+        
+        return False
 
     def _parse_comparison_results(self, comparison_text: str, field_pairs: List[Dict]) -> List[Dict]:
         """Parse LLM comparison output into structured results."""

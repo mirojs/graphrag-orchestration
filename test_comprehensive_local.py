@@ -30,21 +30,22 @@ def load_azure_env():
     env_file = os.path.join(os.path.dirname(__file__), ".azure", "default", ".env")
     if os.path.exists(env_file):
         with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and "=" in line and not line.startswith("#"):
-                    key, val = line.split("=", 1)
-                    # Remove quotes
-                    val = val.strip().strip('"').strip("'")
-                    if key and val and key not in os.environ:
-                        os.environ[key] = val
-                    # Handle lowercase keys
-                    if key == "azureOpenAiApiKey" and "AZURE_OPENAI_API_KEY" not in os.environ:
-                        os.environ["AZURE_OPENAI_API_KEY"] = val
-                    if key == "neo4jPassword" and "NEO4J_PASSWORD" not in os.environ:
-                        os.environ["NEO4J_PASSWORD"] = val
-                    if key == "voyageApiKey" and "VOYAGE_API_KEY" not in os.environ:
-                        os.environ["VOYAGE_API_KEY"] = val
+            content = f.read()
+            # Parse key=value pairs, handling multi-line values in quotes
+            import re
+            for match in re.finditer(r'^([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"', content, re.MULTILINE):
+                key, val = match.groups()
+                # Remove escaped newlines (\n literal) and actual newlines
+                val = val.replace('\\n', '').replace('\n', '').strip()
+                if key and val and key not in os.environ:
+                    os.environ[key] = val
+                # Handle lowercase keys
+                if key == "azureOpenAiApiKey" and "AZURE_OPENAI_API_KEY" not in os.environ:
+                    os.environ["AZURE_OPENAI_API_KEY"] = val
+                if key == "neo4jPassword" and "NEO4J_PASSWORD" not in os.environ:
+                    os.environ["NEO4J_PASSWORD"] = val
+                if key == "voyageApiKey" and "VOYAGE_API_KEY" not in os.environ:
+                    os.environ["VOYAGE_API_KEY"] = val
 
 load_azure_env()
 

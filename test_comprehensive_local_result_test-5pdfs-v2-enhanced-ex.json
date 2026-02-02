@@ -1,2505 +1,1002 @@
 {
-  "response": "## Analysis Complete\n\nNo inconsistencies found between the documents.",
+  "response": "## Extraction Complete (Comparison Failed)\n\n### Document [1]: HOLDING%20TANK%20SERVICING%20CONTRACT\n- KVP Amounts: 0 found\n- KVP Parties: 0 found\n- Tables: 0 found\n\n### Document [2]: purchase_contract\n- KVP Amounts: 0 found\n- KVP Parties: 0 found\n- Tables: 0 found\n\n### Document [3]: PROPERTY%20MANAGEMENT%20AGREEMENT\n- KVP Amounts: 0 found\n- KVP Parties: 0 found\n- Tables: 0 found\n\n### Document [4]: contoso_lifts_invoice\n- KVP Amounts: 0 found\n- KVP Parties: 0 found\n- Tables: 0 found\n\n### Document [5]: BUILDERS%20LIMITED%20WARRANTY\n- KVP Amounts: 0 found\n- KVP Parties: 0 found\n- Tables: 0 found\n\n",
   "raw_extractions": [
     {
       "document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT",
-      "amounts": [],
-      "dates": [
-        {
-          "value": "2024-06-15",
-          "context": "CING CONTRACT  Contract Date: 2024-06-15  This contract is made betwee"
-        }
-      ],
-      "identifiers": [],
-      "parties": [
-        {
-          "value": "HOLDING TANK SERVICING CONTRACT\n\nCo"
-        },
-        {
-          "value": "Contoso Ltd."
-        },
-        {
-          "value": "Fabrikam Inc."
-        },
-        {
-          "value": "Washburn Co"
-        },
-        {
-          "value": "The owner agrees to file a copy of this contract with the Co"
-        },
-        {
-          "value": "WI\nCo"
-        },
-        {
-          "value": "The pumper agrees to submit to the Co"
-        }
-      ],
-      "percentages": [],
-      "urls": [],
-      "line_items": [
-        {
-          "quantity": "5",
-          "description": "Section",
-          "price": "12"
-        },
-        {
-          "quantity": "081",
-          "description": "-0-10 -",
-          "price": "11"
-        },
-        {
-          "quantity": "12",
-          "description": "-1-13 -",
-          "price": "123"
-        },
-        {
-          "quantity": "123456",
-          "description": "Tax ID#",
-          "price": "0098765"
-        }
-      ],
-      "terms": [],
-      "all_fields": [
-        {
-          "field": "date_1",
-          "value": "2024-06-15",
-          "context": "CING CONTRACT  Contract Date: 2024-06-15  This contract is made betwee"
-        },
-        {
-          "field": "party_1",
-          "value": "HOLDING TANK SERVICING CONTRACT\n\nCo"
-        },
-        {
-          "field": "party_2",
-          "value": "Contoso Ltd."
-        },
-        {
-          "field": "party_3",
-          "value": "Fabrikam Inc."
-        },
-        {
-          "field": "party_4",
-          "value": "Washburn Co"
-        },
-        {
-          "field": "party_5",
-          "value": "The owner agrees to file a copy of this contract with the Co"
-        },
-        {
-          "field": "party_6",
-          "value": "WI\nCo"
-        },
-        {
-          "field": "party_7",
-          "value": "The pumper agrees to submit to the Co"
-        },
-        {
-          "field": "line_item_1",
-          "value": "5x Section @ $12"
-        },
-        {
-          "field": "line_item_2",
-          "value": "081x -0-10 - @ $11"
-        },
-        {
-          "field": "line_item_3",
-          "value": "12x -1-13 - @ $123"
-        },
-        {
-          "field": "line_item_4",
-          "value": "123456x Tax ID# @ $0098765"
-        }
-      ],
       "_document_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
       "_document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT",
-      "_citation_idx": 1
+      "_citation_idx": 1,
+      "_source": "graph",
+      "kvp_amounts": [],
+      "kvp_parties": [],
+      "kvp_dates": [],
+      "kvp_identifiers": [],
+      "kvp_other": [],
+      "tables": [],
+      "regex_amounts": [],
+      "regex_parties": [
+        {
+          "value": "HOLDING TANK SERVICING CONTRACT\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Contoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Washburn Co",
+          "source": "regex"
+        },
+        {
+          "value": "The owner agrees to file a copy of this contract with the Co",
+          "source": "regex"
+        },
+        {
+          "value": "WI\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "The pumper agrees to submit to the Co",
+          "source": "regex"
+        }
+      ],
+      "regex_dates": [
+        {
+          "value": "2024-06-15",
+          "context": "CING CONTRACT  Contract Date: 2024-06-15  This contract is made betwee",
+          "source": "regex"
+        }
+      ],
+      "all_fields": [
+        {
+          "value": "HOLDING TANK SERVICING CONTRACT\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Contoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Washburn Co",
+          "source": "regex"
+        },
+        {
+          "value": "The owner agrees to file a copy of this contract with the Co",
+          "source": "regex"
+        },
+        {
+          "value": "WI\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "The pumper agrees to submit to the Co",
+          "source": "regex"
+        },
+        {
+          "value": "2024-06-15",
+          "context": "CING CONTRACT  Contract Date: 2024-06-15  This contract is made betwee",
+          "source": "regex"
+        }
+      ]
     },
     {
       "document_title": "purchase_contract",
-      "amounts": [
+      "_document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "_document_title": "purchase_contract",
+      "_citation_idx": 2,
+      "_source": "graph",
+      "kvp_amounts": [],
+      "kvp_parties": [],
+      "kvp_dates": [],
+      "kvp_identifiers": [],
+      "kvp_other": [],
+      "tables": [],
+      "regex_amounts": [
         {
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang",
+          "source": "regex"
         },
         {
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change",
+          "source": "regex"
         },
         {
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang",
+          "source": "regex"
         },
         {
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change",
+          "source": "regex"
         },
         {
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change",
+          "source": "regex"
         }
       ],
-      "dates": [
+      "regex_parties": [
+        {
+          "value": "Default",
+          "source": "regex"
+        },
+        {
+          "value": "PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC.",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Scope of Work\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Legal fees are recoverable by Co",
+          "source": "regex"
+        },
+        {
+          "value": "Risk of Loss\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Permitting\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Bayfront Animal Clinic\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Authorized Representative\nContoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Authorized Representative\nFabrikam Inc.",
+          "source": "regex"
+        }
+      ],
+      "regex_dates": [
         {
           "value": "04/30/2025",
-          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C"
+          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C",
+          "source": "regex"
         },
         {
           "value": "04/30/2025",
-          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C"
-        }
-      ],
-      "identifiers": [],
-      "parties": [
-        {
-          "value": "Default"
-        },
-        {
-          "value": "PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC."
-        },
-        {
-          "value": "Fabrikam Inc."
-        },
-        {
-          "value": "Scope of Work\n\nCo"
-        },
-        {
-          "value": "Legal fees are recoverable by Co"
-        },
-        {
-          "value": "Risk of Loss\n\nCo"
-        },
-        {
-          "value": "Permitting\n\nCo"
-        },
-        {
-          "value": "Bayfront Animal Clinic\nCo"
-        },
-        {
-          "value": "Authorized Representative\nContoso Ltd."
-        },
-        {
-          "value": "Authorized Representative\nFabrikam Inc."
-        }
-      ],
-      "percentages": [],
-      "urls": [],
-      "line_items": [
-        {
-          "quantity": "123567",
-          "description": "Key West, FL.",
-          "price": "33304"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        },
-        {
-          "quantity": "811",
-          "description": "Ocean Drive, Suite",
-          "price": "405,"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        },
-        {
-          "quantity": "123567",
-          "description": "Key West, FL.",
-          "price": "33304"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        },
-        {
-          "quantity": "811",
-          "description": "Ocean Drive, Suite",
-          "price": "405,"
-        },
-        {
-          "quantity": "1",
-          "description": "Power system:",
-          "price": "110"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "1",
-          "description": "Custom cab",
-          "price": "42"
-        }
-      ],
-      "terms": [
-        {
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "value": "3 installments:"
-        },
-        {
-          "value": "3 installments:"
-        },
-        {
-          "value": "3 installments:"
-        },
-        {
-          "value": "3 installments:"
-        },
-        {
-          "value": "3 installments:"
+          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C",
+          "source": "regex"
         }
       ],
       "all_fields": [
         {
-          "field": "amount_1",
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
-          "field": "amount_2",
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
-          "field": "amount_3",
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
-          "field": "amount_4",
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang",
+          "source": "regex"
         },
         {
-          "field": "amount_5",
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
-          "field": "amount_6",
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
-          "field": "amount_7",
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
-          "field": "amount_8",
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change",
+          "source": "regex"
         },
         {
-          "field": "amount_9",
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
-          "field": "amount_10",
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
-          "field": "amount_11",
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
-          "field": "amount_12",
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion   ## 3. Chang",
+          "source": "regex"
         },
         {
-          "field": "amount_13",
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
-          "field": "amount_14",
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
-          "field": "amount_15",
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
-          "field": "amount_16",
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change",
+          "source": "regex"
         },
         {
-          "field": "amount_17",
           "value": "$29,900.00",
-          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:"
+          "context": "erms  Total contract price is $29,900.00, payable in 3 installments:",
+          "source": "regex"
         },
         {
-          "field": "amount_18",
           "value": "$20,000.00",
-          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo"
+          "context": "payable in 3 installments:  \u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upo",
+          "source": "regex"
         },
         {
-          "field": "amount_19",
           "value": "$7,000.00",
-          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up"
+          "context": "\u00b7 $20,000.00 upon signing  \u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 up",
+          "source": "regex"
         },
         {
-          "field": "amount_20",
           "value": "$2,900.00",
-          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change"
+          "context": "\u00b7 $7,000.00 upon delivery  \u00b7 $2,900.00 upon completion  ## 3. Change",
+          "source": "regex"
         },
         {
-          "field": "date_1",
+          "value": "Default",
+          "source": "regex"
+        },
+        {
+          "value": "PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC.",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Scope of Work\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Legal fees are recoverable by Co",
+          "source": "regex"
+        },
+        {
+          "value": "Risk of Loss\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Permitting\n\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Bayfront Animal Clinic\nCo",
+          "source": "regex"
+        },
+        {
+          "value": "Authorized Representative\nContoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Authorized Representative\nFabrikam Inc.",
+          "source": "regex"
+        },
+        {
           "value": "04/30/2025",
-          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C"
+          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C",
+          "source": "regex"
         },
         {
-          "field": "date_2",
           "value": "04/30/2025",
-          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C"
-        },
-        {
-          "field": "party_1",
-          "value": "Default"
-        },
-        {
-          "field": "party_2",
-          "value": "PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC."
-        },
-        {
-          "field": "party_3",
-          "value": "Fabrikam Inc."
-        },
-        {
-          "field": "party_4",
-          "value": "Scope of Work\n\nCo"
-        },
-        {
-          "field": "party_5",
-          "value": "Legal fees are recoverable by Co"
-        },
-        {
-          "field": "party_6",
-          "value": "Risk of Loss\n\nCo"
-        },
-        {
-          "field": "party_7",
-          "value": "Permitting\n\nCo"
-        },
-        {
-          "field": "party_8",
-          "value": "Bayfront Animal Clinic\nCo"
-        },
-        {
-          "field": "party_9",
-          "value": "Authorized Representative\nContoso Ltd."
-        },
-        {
-          "field": "party_10",
-          "value": "Authorized Representative\nFabrikam Inc."
-        },
-        {
-          "field": "model_0",
-          "value": "y"
-        },
-        {
-          "field": "model_1",
-          "value": "y"
-        },
-        {
-          "field": "model_2",
-          "value": "y"
-        },
-        {
-          "field": "model_3",
-          "value": "y"
-        },
-        {
-          "field": "model_4",
-          "value": "y"
-        },
-        {
-          "field": "line_item_1",
-          "value": "123567x Key West, FL. @ $33304"
-        },
-        {
-          "field": "line_item_2",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_3",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_4",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "line_item_5",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_6",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_7",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "line_item_8",
-          "value": "811x Ocean Drive, Suite @ $405,"
-        },
-        {
-          "field": "line_item_9",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_10",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_11",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "line_item_12",
-          "value": "123567x Key West, FL. @ $33304"
-        },
-        {
-          "field": "line_item_13",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_14",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_15",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "line_item_16",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_17",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_18",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "line_item_19",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_20",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_21",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "line_item_22",
-          "value": "811x Ocean Drive, Suite @ $405,"
-        },
-        {
-          "field": "line_item_23",
-          "value": "1x Power system: @ $110"
-        },
-        {
-          "field": "line_item_24",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_25",
-          "value": "1x Custom cab @ $42"
-        },
-        {
-          "field": "term_1",
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "field": "term_2",
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "field": "term_3",
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "field": "term_4",
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "field": "term_5",
-          "value": "Total contract price is $29,900.00, payable in 3 installments:"
-        },
-        {
-          "field": "term_6",
-          "value": "3 installments:"
-        },
-        {
-          "field": "term_7",
-          "value": "3 installments:"
-        },
-        {
-          "field": "term_8",
-          "value": "3 installments:"
-        },
-        {
-          "field": "term_9",
-          "value": "3 installments:"
-        },
-        {
-          "field": "term_10",
-          "value": "3 installments:"
+          "context": "te pad, hoistway  Signed this 04/30/2025:  Authorized Representative C",
+          "source": "regex"
         }
-      ],
-      "_document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "_document_title": "purchase_contract",
-      "_citation_idx": 2
+      ]
     },
     {
       "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT",
-      "amounts": [
-        {
-          "value": "$300.00",
-          "context": "ess of Three Hundred Dollars ($300.00) except for what the Agent sh"
-        },
-        {
-          "value": "$300,000",
-          "context": "operty with minimum limits of $300,000 for bodily injury and $25,000"
-        },
-        {
-          "value": "$25,000",
-          "context": "300,000 for bodily injury and $25,000 for property damage to others"
-        },
-        {
-          "value": "$75.00",
-          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge"
-        },
-        {
-          "value": "$50.00",
-          "context": "nistration and accounting, at $50.00/month (not to include tax pre"
-        },
-        {
-          "value": "$35",
-          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg"
-        },
-        {
-          "value": "$250.00",
-          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund"
-        },
-        {
-          "value": "$75.00",
-          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge"
-        },
-        {
-          "value": "$50.00",
-          "context": "nistration and accounting, at $50.00/month (not to include tax pre"
-        },
-        {
-          "value": "$35",
-          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg"
-        },
-        {
-          "value": "$250.00",
-          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund"
-        },
-        {
-          "value": "$75.00",
-          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge"
-        },
-        {
-          "value": "$50.00",
-          "context": "nistration and accounting, at $50.00/month (not to include tax pre"
-        },
-        {
-          "value": "$35",
-          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg"
-        },
-        {
-          "value": "$250.00",
-          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund"
-        }
-      ],
-      "dates": [
-        {
-          "value": "2010-06-15",
-          "context": "f twelve months beginning on: 2010-06-15 and shall be automatically re"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "er  Date:  2010-06-15  Date:  2010-06-15"
-        }
-      ],
-      "identifiers": [],
-      "parties": [
-        {
-          "value": "Contoso Ltd."
-        },
-        {
-          "value": "Fabrikam Inc."
-        }
-      ],
-      "percentages": [
-        {
-          "value": "25%",
-          "context": "ssion of twenty five percent (25%) of the gross revenues for ma"
-        },
-        {
-          "value": "10%",
-          "context": "ee/commission of ten percent (10%) of the gross revenues for ma"
-        },
-        {
-          "value": "10%",
-          "context": ").  (f) A fee of ten percent (10%) on the total charge for repa"
-        },
-        {
-          "value": "4.712%",
-          "context": "ross Excise tax (currently at 4.712%) on all the above fees, commi"
-        },
-        {
-          "value": "25%",
-          "context": "ssion of twenty five percent (25%) of the gross revenues for ma"
-        },
-        {
-          "value": "10%",
-          "context": "ee/commission of ten percent (10%) of the gross revenues for ma"
-        },
-        {
-          "value": "10%",
-          "context": ").  (f) A fee of ten percent (10%) on the total charge for repa"
-        },
-        {
-          "value": "4.712%",
-          "context": "ross Excise tax (currently at 4.712%) on all the above fees, commi"
-        },
-        {
-          "value": "25%",
-          "context": "ssion of twenty five percent (25%) of the gross revenues for ma"
-        },
-        {
-          "value": "10%",
-          "context": "ee/commission of ten percent (10%) of the gross revenues for ma"
-        },
-        {
-          "value": "10%",
-          "context": ").  (f) A fee of ten percent (10%) on the total charge for repa"
-        },
-        {
-          "value": "4.712%",
-          "context": "ross Excise tax (currently at 4.712%) on all the above fees, commi"
-        }
-      ],
-      "urls": [],
-      "line_items": [
-        {
-          "quantity": "456",
-          "description": "Palm Tree Avenue, Honolulu, HI",
-          "price": "96815"
-        },
-        {
-          "quantity": "202",
-          "description": "TERM. This agreement shall be for an initial period of twelve months beginning on:",
-          "price": "2010"
-        }
-      ],
-      "terms": [],
-      "all_fields": [
-        {
-          "field": "amount_1",
-          "value": "$300.00",
-          "context": "ess of Three Hundred Dollars ($300.00) except for what the Agent sh"
-        },
-        {
-          "field": "amount_2",
-          "value": "$300,000",
-          "context": "operty with minimum limits of $300,000 for bodily injury and $25,000"
-        },
-        {
-          "field": "amount_3",
-          "value": "$25,000",
-          "context": "300,000 for bodily injury and $25,000 for property damage to others"
-        },
-        {
-          "field": "amount_4",
-          "value": "$75.00",
-          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge"
-        },
-        {
-          "field": "amount_5",
-          "value": "$50.00",
-          "context": "nistration and accounting, at $50.00/month (not to include tax pre"
-        },
-        {
-          "field": "amount_6",
-          "value": "$35",
-          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg"
-        },
-        {
-          "field": "amount_7",
-          "value": "$250.00",
-          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund"
-        },
-        {
-          "field": "amount_8",
-          "value": "$75.00",
-          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge"
-        },
-        {
-          "field": "amount_9",
-          "value": "$50.00",
-          "context": "nistration and accounting, at $50.00/month (not to include tax pre"
-        },
-        {
-          "field": "amount_10",
-          "value": "$35",
-          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg"
-        },
-        {
-          "field": "amount_11",
-          "value": "$250.00",
-          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund"
-        },
-        {
-          "field": "amount_12",
-          "value": "$75.00",
-          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge"
-        },
-        {
-          "field": "amount_13",
-          "value": "$50.00",
-          "context": "nistration and accounting, at $50.00/month (not to include tax pre"
-        },
-        {
-          "field": "amount_14",
-          "value": "$35",
-          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg"
-        },
-        {
-          "field": "amount_15",
-          "value": "$250.00",
-          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund"
-        },
-        {
-          "field": "date_1",
-          "value": "2010-06-15",
-          "context": "f twelve months beginning on: 2010-06-15 and shall be automatically re"
-        },
-        {
-          "field": "date_2",
-          "value": "2010-06-15",
-          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER"
-        },
-        {
-          "field": "date_3",
-          "value": "2010-06-15",
-          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE"
-        },
-        {
-          "field": "date_4",
-          "value": "2010-06-15",
-          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER"
-        },
-        {
-          "field": "date_5",
-          "value": "2010-06-15",
-          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE"
-        },
-        {
-          "field": "date_6",
-          "value": "2010-06-15",
-          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15"
-        },
-        {
-          "field": "date_7",
-          "value": "2010-06-15",
-          "context": "er  Date:  2010-06-15  Date:  2010-06-15"
-        },
-        {
-          "field": "party_1",
-          "value": "Contoso Ltd."
-        },
-        {
-          "field": "party_2",
-          "value": "Fabrikam Inc."
-        },
-        {
-          "field": "percentage_1",
-          "value": "25%",
-          "context": "ssion of twenty five percent (25%) of the gross revenues for ma"
-        },
-        {
-          "field": "percentage_2",
-          "value": "10%",
-          "context": "ee/commission of ten percent (10%) of the gross revenues for ma"
-        },
-        {
-          "field": "percentage_3",
-          "value": "10%",
-          "context": ").  (f) A fee of ten percent (10%) on the total charge for repa"
-        },
-        {
-          "field": "percentage_4",
-          "value": "4.712%",
-          "context": "ross Excise tax (currently at 4.712%) on all the above fees, commi"
-        },
-        {
-          "field": "percentage_5",
-          "value": "25%",
-          "context": "ssion of twenty five percent (25%) of the gross revenues for ma"
-        },
-        {
-          "field": "percentage_6",
-          "value": "10%",
-          "context": "ee/commission of ten percent (10%) of the gross revenues for ma"
-        },
-        {
-          "field": "percentage_7",
-          "value": "10%",
-          "context": ").  (f) A fee of ten percent (10%) on the total charge for repa"
-        },
-        {
-          "field": "percentage_8",
-          "value": "4.712%",
-          "context": "ross Excise tax (currently at 4.712%) on all the above fees, commi"
-        },
-        {
-          "field": "percentage_9",
-          "value": "25%",
-          "context": "ssion of twenty five percent (25%) of the gross revenues for ma"
-        },
-        {
-          "field": "percentage_10",
-          "value": "10%",
-          "context": "ee/commission of ten percent (10%) of the gross revenues for ma"
-        },
-        {
-          "field": "percentage_11",
-          "value": "10%",
-          "context": ").  (f) A fee of ten percent (10%) on the total charge for repa"
-        },
-        {
-          "field": "percentage_12",
-          "value": "4.712%",
-          "context": "ross Excise tax (currently at 4.712%) on all the above fees, commi"
-        },
-        {
-          "field": "model_0",
-          "value": "ies"
-        },
-        {
-          "field": "model_1",
-          "value": "y"
-        },
-        {
-          "field": "model_2",
-          "value": "ies"
-        },
-        {
-          "field": "model_3",
-          "value": "ies"
-        },
-        {
-          "field": "model_4",
-          "value": "ies"
-        },
-        {
-          "field": "model_5",
-          "value": "ies"
-        },
-        {
-          "field": "model_6",
-          "value": "ies"
-        },
-        {
-          "field": "model_7",
-          "value": "ies"
-        },
-        {
-          "field": "line_item_1",
-          "value": "456x Palm Tree Avenue, Honolulu, HI @ $96815"
-        },
-        {
-          "field": "line_item_2",
-          "value": "202x TERM. This agreement shall be for an initial period of twelve months beginning on: @ $2010"
-        }
-      ],
       "_document_id": "doc_657dee67210c43f2af2649c7d71d8c8c",
       "_document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT",
-      "_citation_idx": 3
+      "_citation_idx": 3,
+      "_source": "graph",
+      "kvp_amounts": [],
+      "kvp_parties": [],
+      "kvp_dates": [],
+      "kvp_identifiers": [],
+      "kvp_other": [],
+      "tables": [],
+      "regex_amounts": [
+        {
+          "value": "$300.00",
+          "context": "ess of Three Hundred Dollars ($300.00) except for what the Agent sh",
+          "source": "regex"
+        },
+        {
+          "value": "$300,000",
+          "context": "operty with minimum limits of $300,000 for bodily injury and $25,000",
+          "source": "regex"
+        },
+        {
+          "value": "$25,000",
+          "context": "300,000 for bodily injury and $25,000 for property damage to others",
+          "source": "regex"
+        },
+        {
+          "value": "$75.00",
+          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge",
+          "source": "regex"
+        },
+        {
+          "value": "$50.00",
+          "context": "nistration and accounting, at $50.00/month (not to include tax pre",
+          "source": "regex"
+        },
+        {
+          "value": "$35",
+          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg",
+          "source": "regex"
+        },
+        {
+          "value": "$250.00",
+          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund",
+          "source": "regex"
+        },
+        {
+          "value": "$75.00",
+          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge",
+          "source": "regex"
+        },
+        {
+          "value": "$50.00",
+          "context": "nistration and accounting, at $50.00/month (not to include tax pre",
+          "source": "regex"
+        },
+        {
+          "value": "$35",
+          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg",
+          "source": "regex"
+        },
+        {
+          "value": "$250.00",
+          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund",
+          "source": "regex"
+        },
+        {
+          "value": "$75.00",
+          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge",
+          "source": "regex"
+        },
+        {
+          "value": "$50.00",
+          "context": "nistration and accounting, at $50.00/month (not to include tax pre",
+          "source": "regex"
+        },
+        {
+          "value": "$35",
+          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg",
+          "source": "regex"
+        },
+        {
+          "value": "$250.00",
+          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund",
+          "source": "regex"
+        }
+      ],
+      "regex_parties": [
+        {
+          "value": "Contoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        }
+      ],
+      "regex_dates": [
+        {
+          "value": "2010-06-15",
+          "context": "f twelve months beginning on: 2010-06-15 and shall be automatically re",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "er  Date:  2010-06-15  Date:  2010-06-15",
+          "source": "regex"
+        }
+      ],
+      "all_fields": [
+        {
+          "value": "$300.00",
+          "context": "ess of Three Hundred Dollars ($300.00) except for what the Agent sh",
+          "source": "regex"
+        },
+        {
+          "value": "$300,000",
+          "context": "operty with minimum limits of $300,000 for bodily injury and $25,000",
+          "source": "regex"
+        },
+        {
+          "value": "$25,000",
+          "context": "300,000 for bodily injury and $25,000 for property damage to others",
+          "source": "regex"
+        },
+        {
+          "value": "$75.00",
+          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge",
+          "source": "regex"
+        },
+        {
+          "value": "$50.00",
+          "context": "nistration and accounting, at $50.00/month (not to include tax pre",
+          "source": "regex"
+        },
+        {
+          "value": "$35",
+          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg",
+          "source": "regex"
+        },
+        {
+          "value": "$250.00",
+          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund",
+          "source": "regex"
+        },
+        {
+          "value": "$75.00",
+          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge",
+          "source": "regex"
+        },
+        {
+          "value": "$50.00",
+          "context": "nistration and accounting, at $50.00/month (not to include tax pre",
+          "source": "regex"
+        },
+        {
+          "value": "$35",
+          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg",
+          "source": "regex"
+        },
+        {
+          "value": "$250.00",
+          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund",
+          "source": "regex"
+        },
+        {
+          "value": "$75.00",
+          "context": "t-term (vacation rentals), at $75.00/month.  (e) A minimum charge",
+          "source": "regex"
+        },
+        {
+          "value": "$50.00",
+          "context": "nistration and accounting, at $50.00/month (not to include tax pre",
+          "source": "regex"
+        },
+        {
+          "value": "$35",
+          "context": "renovations.  (g) A charge of $35/hour to schedule repairs, upg",
+          "source": "regex"
+        },
+        {
+          "value": "$250.00",
+          "context": "ay two hundred fifty dollars ($250.00) to the Agent as a non-refund",
+          "source": "regex"
+        },
+        {
+          "value": "Contoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "f twelve months beginning on: 2010-06-15 and shall be automatically re",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15  ## PROPER",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "er  Date:  2010-06-15  Date:  2010-06-15  ## PROPERTY MANAGEMENT AGREE",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "It's Principal Broker  Date:  2010-06-15  Date:  2010-06-15",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "er  Date:  2010-06-15  Date:  2010-06-15",
+          "source": "regex"
+        }
+      ]
     },
     {
       "document_title": "contoso_lifts_invoice",
-      "amounts": [],
-      "dates": [
+      "_document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "_document_title": "contoso_lifts_invoice",
+      "_citation_idx": 4,
+      "_source": "graph",
+      "kvp_amounts": [],
+      "kvp_parties": [],
+      "kvp_dates": [],
+      "kvp_identifiers": [],
+      "kvp_other": [],
+      "tables": [],
+      "regex_amounts": [],
+      "regex_parties": [
+        {
+          "value": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC",
+          "source": "regex"
+        },
+        {
+          "value": "John Doe\nJohn Doe\nFabrikam Construction\nFabrikam Co",
+          "source": "regex"
+        },
+        {
+          "value": "NUMBER\nREQUISITIONER\nSHIPPED VIA\nDUE DATE\nTERMS\nJim Co",
+          "source": "regex"
+        },
+        {
+          "value": "Make all checks payable to Contoso Lifts LLC",
+          "source": "regex"
+        },
+        {
+          "value": "Jim Co",
+          "source": "regex"
+        }
+      ],
+      "regex_dates": [
         {
           "value": "12/17/2015",
-          "context": "CUSTOMER ID #: 4905201 DATE: 12/17/2015 TO: SHIP TO: John Doe John Do"
+          "context": "CUSTOMER ID #: 4905201 DATE: 12/17/2015 TO: SHIP TO: John Doe John Do",
+          "source": "regex"
         },
         {
           "value": "12/17/2015",
-          "context": "TE TERMS Jim Contoso 30060204 12/17/2015 Due on contract signing QUANT"
-        }
-      ],
-      "identifiers": [
-        {
-          "value": "1256003",
-          "context": "INVOICE # 1256003"
-        }
-      ],
-      "parties": [
-        {
-          "value": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC"
-        },
-        {
-          "value": "John Doe\nJohn Doe\nFabrikam Construction\nFabrikam Co"
-        },
-        {
-          "value": "NUMBER\nREQUISITIONER\nSHIPPED VIA\nDUE DATE\nTERMS\nJim Co"
-        },
-        {
-          "value": "Make all checks payable to Contoso Lifts LLC"
-        },
-        {
-          "value": "Jim Co"
-        }
-      ],
-      "percentages": [],
-      "urls": [
-        {
-          "value": "https://ww.contosolifts.com/portal/pay"
-        }
-      ],
-      "line_items": [
-        {
-          "quantity": "123567",
-          "description": "Key West, FL.",
-          "price": "33304"
-        },
-        {
-          "quantity": "0708",
-          "description": "INVOICE #",
-          "price": "1256003"
-        },
-        {
-          "quantity": "5111",
-          "description": "Fax: (561)",
-          "price": "211"
-        },
-        {
-          "quantity": "7333",
-          "description": "CUSTOMER ID #:",
-          "price": "4905201"
-        },
-        {
-          "quantity": "33155",
-          "description": "Dayton, FL",
-          "price": "33155"
-        },
-        {
-          "quantity": "5237",
-          "description": "Phone: (305)",
-          "price": "490"
-        },
-        {
-          "quantity": "1",
-          "description": "Vertical Platform Lift (Savaria V1504)",
-          "price": "11200.00"
-        },
-        {
-          "quantity": "60",
-          "description": "Hz up,",
-          "price": "12"
-        },
-        {
-          "quantity": "00",
-          "description": "3000.00",
-          "price": "1"
-        },
-        {
-          "quantity": "90",
-          "description": "degree Type",
-          "price": "3"
-        },
-        {
-          "quantity": "00",
-          "description": "5800.00",
-          "price": "1"
-        },
-        {
-          "quantity": "00",
-          "description": "2000.00",
-          "price": "1"
-        },
-        {
-          "quantity": "500",
-          "description": "lock, automatic door operator",
-          "price": "5000.00"
-        },
-        {
-          "quantity": "2",
-          "description": "Hall Call stations for bottom and upper landing",
-          "price": "1450.00"
-        },
-        {
-          "quantity": "00",
-          "description": "SUBTOTAL",
-          "price": "29900.00"
-        },
-        {
-          "quantity": "00",
-          "description": "AMOUNT DUE",
-          "price": "29900.00"
-        }
-      ],
-      "terms": [
-        {
-          "value": "contract"
+          "context": "TE TERMS Jim Contoso 30060204 12/17/2015 Due on contract signing QUANT",
+          "source": "regex"
         }
       ],
       "all_fields": [
         {
-          "field": "date_1",
+          "value": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC",
+          "source": "regex"
+        },
+        {
+          "value": "John Doe\nJohn Doe\nFabrikam Construction\nFabrikam Co",
+          "source": "regex"
+        },
+        {
+          "value": "NUMBER\nREQUISITIONER\nSHIPPED VIA\nDUE DATE\nTERMS\nJim Co",
+          "source": "regex"
+        },
+        {
+          "value": "Make all checks payable to Contoso Lifts LLC",
+          "source": "regex"
+        },
+        {
+          "value": "Jim Co",
+          "source": "regex"
+        },
+        {
           "value": "12/17/2015",
-          "context": "CUSTOMER ID #: 4905201 DATE: 12/17/2015 TO: SHIP TO: John Doe John Do"
+          "context": "CUSTOMER ID #: 4905201 DATE: 12/17/2015 TO: SHIP TO: John Doe John Do",
+          "source": "regex"
         },
         {
-          "field": "date_2",
           "value": "12/17/2015",
-          "context": "TE TERMS Jim Contoso 30060204 12/17/2015 Due on contract signing QUANT"
-        },
-        {
-          "field": "identifier_1",
-          "value": "1256003",
-          "context": "INVOICE # 1256003"
-        },
-        {
-          "field": "party_1",
-          "value": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC"
-        },
-        {
-          "field": "party_2",
-          "value": "John Doe\nJohn Doe\nFabrikam Construction\nFabrikam Co"
-        },
-        {
-          "field": "party_3",
-          "value": "NUMBER\nREQUISITIONER\nSHIPPED VIA\nDUE DATE\nTERMS\nJim Co"
-        },
-        {
-          "field": "party_4",
-          "value": "Make all checks payable to Contoso Lifts LLC"
-        },
-        {
-          "field": "party_5",
-          "value": "Jim Co"
-        },
-        {
-          "field": "url_1",
-          "value": "https://ww.contosolifts.com/portal/pay"
-        },
-        {
-          "field": "model_0",
-          "value": "s"
-        },
-        {
-          "field": "line_item_1",
-          "value": "123567x Key West, FL. @ $33304"
-        },
-        {
-          "field": "line_item_2",
-          "value": "0708x INVOICE # @ $1256003"
-        },
-        {
-          "field": "line_item_3",
-          "value": "5111x Fax: (561) @ $211"
-        },
-        {
-          "field": "line_item_4",
-          "value": "7333x CUSTOMER ID #: @ $4905201"
-        },
-        {
-          "field": "line_item_5",
-          "value": "33155x Dayton, FL @ $33155"
-        },
-        {
-          "field": "line_item_6",
-          "value": "5237x Phone: (305) @ $490"
-        },
-        {
-          "field": "line_item_7",
-          "value": "1x Vertical Platform Lift (Savaria V1504) @ $11200.00"
-        },
-        {
-          "field": "line_item_8",
-          "value": "60x Hz up, @ $12"
-        },
-        {
-          "field": "line_item_9",
-          "value": "00x 3000.00 @ $1"
-        },
-        {
-          "field": "line_item_10",
-          "value": "90x degree Type @ $3"
-        },
-        {
-          "field": "line_item_11",
-          "value": "00x 5800.00 @ $1"
-        },
-        {
-          "field": "line_item_12",
-          "value": "00x 2000.00 @ $1"
-        },
-        {
-          "field": "line_item_13",
-          "value": "500x lock, automatic door operator @ $5000.00"
-        },
-        {
-          "field": "line_item_14",
-          "value": "2x Hall Call stations for bottom and upper landing @ $1450.00"
-        },
-        {
-          "field": "line_item_15",
-          "value": "00x SUBTOTAL @ $29900.00"
-        },
-        {
-          "field": "line_item_16",
-          "value": "00x AMOUNT DUE @ $29900.00"
-        },
-        {
-          "field": "term_1",
-          "value": "contract"
+          "context": "TE TERMS Jim Contoso 30060204 12/17/2015 Due on contract signing QUANT",
+          "source": "regex"
         }
-      ],
-      "_document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "_document_title": "contoso_lifts_invoice",
-      "_citation_idx": 4
+      ]
     },
     {
       "document_title": "BUILDERS%20LIMITED%20WARRANTY",
-      "amounts": [
-        {
-          "value": "$3,000",
-          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or"
-        },
-        {
-          "value": "$3,000",
-          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or"
-        },
-        {
-          "value": "$3,000",
-          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or"
-        }
-      ],
-      "dates": [
-        {
-          "value": "2010-06-15",
-          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D"
-        },
-        {
-          "value": "2010-06-15",
-          "context": "Representative  Date  Title  2010-06-15  Date"
-        }
-      ],
-      "identifiers": [],
-      "parties": [
-        {
-          "value": "Limited Warranty Agreement is extended by Fabrikam Inc."
-        },
-        {
-          "value": "Contoso Ltd."
-        },
-        {
-          "value": "Exclusions from Co"
-        },
-        {
-          "value": "Warranted Co"
-        },
-        {
-          "value": "Representative John Smith\nCompany Fabrikam Inc."
-        },
-        {
-          "value": "Small Claims Co"
-        },
-        {
-          "value": "Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Co"
-        },
-        {
-          "value": "Fabrikam Inc."
-        },
-        {
-          "value": "Builder\n\nContoso Ltd."
-        },
-        {
-          "value": "By\nFabrikam Inc."
-        }
-      ],
-      "percentages": [],
-      "urls": [],
-      "line_items": [
-        {
-          "quantity": "1820",
-          "description": "Summit Ridge Dr., Pocatello, ID",
-          "price": "83201"
-        },
-        {
-          "quantity": "480",
-          "description": "Willow Glen Drive, Chubbuck, ID",
-          "price": "83202"
-        },
-        {
-          "quantity": "15",
-          "description": "U.S.C. Sec.",
-          "price": "2301"
-        },
-        {
-          "quantity": "83201",
-          "description": "Emergency Number (",
-          "price": "208"
-        },
-        {
-          "quantity": "2005",
-          "description": "BUILDRS LIMITED WARRANTY PAGE -",
-          "price": "1"
-        },
-        {
-          "quantity": "15",
-          "description": "U.S.C. Sec.",
-          "price": "2301"
-        },
-        {
-          "quantity": "83201",
-          "description": "Emergency Number (",
-          "price": "208"
-        },
-        {
-          "quantity": "2005",
-          "description": "BUILDRS LIMITED WARRANTY PAGE -",
-          "price": "1"
-        },
-        {
-          "quantity": "15",
-          "description": "U.S.C. Sec.",
-          "price": "2301"
-        },
-        {
-          "quantity": "83201",
-          "description": "Emergency Number (",
-          "price": "208"
-        },
-        {
-          "quantity": "2005",
-          "description": "BUILDRS LIMITED WARRANTY PAGE -",
-          "price": "1"
-        }
-      ],
-      "terms": [],
-      "all_fields": [
-        {
-          "field": "amount_1",
-          "value": "$3,000",
-          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or"
-        },
-        {
-          "field": "amount_2",
-          "value": "$3,000",
-          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or"
-        },
-        {
-          "field": "amount_3",
-          "value": "$3,000",
-          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or"
-        },
-        {
-          "field": "date_1",
-          "value": "2010-06-15",
-          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D"
-        },
-        {
-          "field": "date_2",
-          "value": "2010-06-15",
-          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite"
-        },
-        {
-          "field": "date_3",
-          "value": "2010-06-15",
-          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D"
-        },
-        {
-          "field": "date_4",
-          "value": "2010-06-15",
-          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite"
-        },
-        {
-          "field": "date_5",
-          "value": "2010-06-15",
-          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D"
-        },
-        {
-          "field": "date_6",
-          "value": "2010-06-15",
-          "context": "Representative  Date  Title  2010-06-15  Date"
-        },
-        {
-          "field": "party_1",
-          "value": "Limited Warranty Agreement is extended by Fabrikam Inc."
-        },
-        {
-          "field": "party_2",
-          "value": "Contoso Ltd."
-        },
-        {
-          "field": "party_3",
-          "value": "Exclusions from Co"
-        },
-        {
-          "field": "party_4",
-          "value": "Warranted Co"
-        },
-        {
-          "field": "party_5",
-          "value": "Representative John Smith\nCompany Fabrikam Inc."
-        },
-        {
-          "field": "party_6",
-          "value": "Small Claims Co"
-        },
-        {
-          "field": "party_7",
-          "value": "Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Co"
-        },
-        {
-          "field": "party_8",
-          "value": "Fabrikam Inc."
-        },
-        {
-          "field": "party_9",
-          "value": "Builder\n\nContoso Ltd."
-        },
-        {
-          "field": "party_10",
-          "value": "By\nFabrikam Inc."
-        },
-        {
-          "field": "model_0",
-          "value": "s"
-        },
-        {
-          "field": "model_1",
-          "value": "s"
-        },
-        {
-          "field": "model_2",
-          "value": "s"
-        },
-        {
-          "field": "model_3",
-          "value": "s"
-        },
-        {
-          "field": "model_4",
-          "value": "for"
-        },
-        {
-          "field": "model_5",
-          "value": "s"
-        },
-        {
-          "field": "model_6",
-          "value": "which"
-        },
-        {
-          "field": "model_7",
-          "value": "of"
-        },
-        {
-          "field": "model_8",
-          "value": "y"
-        },
-        {
-          "field": "model_9",
-          "value": "of"
-        },
-        {
-          "field": "model_10",
-          "value": "listed"
-        },
-        {
-          "field": "model_11",
-          "value": "ICULAR"
-        },
-        {
-          "field": "model_12",
-          "value": "is"
-        },
-        {
-          "field": "model_13",
-          "value": "y"
-        },
-        {
-          "field": "model_14",
-          "value": "y"
-        },
-        {
-          "field": "model_15",
-          "value": "ies"
-        },
-        {
-          "field": "model_16",
-          "value": "y"
-        },
-        {
-          "field": "model_17",
-          "value": "y"
-        },
-        {
-          "field": "model_18",
-          "value": "y"
-        },
-        {
-          "field": "model_19",
-          "value": "IES"
-        },
-        {
-          "field": "model_20",
-          "value": "IES"
-        },
-        {
-          "field": "model_21",
-          "value": "ies"
-        },
-        {
-          "field": "model_22",
-          "value": "y"
-        },
-        {
-          "field": "model_23",
-          "value": "ment"
-        },
-        {
-          "field": "model_24",
-          "value": "y"
-        },
-        {
-          "field": "model_25",
-          "value": "ies"
-        },
-        {
-          "field": "model_26",
-          "value": "ies"
-        },
-        {
-          "field": "model_27",
-          "value": "ies"
-        },
-        {
-          "field": "model_28",
-          "value": "y"
-        },
-        {
-          "field": "model_29",
-          "value": "y"
-        },
-        {
-          "field": "model_30",
-          "value": "ies"
-        },
-        {
-          "field": "model_31",
-          "value": "y"
-        },
-        {
-          "field": "model_32",
-          "value": "ies"
-        },
-        {
-          "field": "model_33",
-          "value": "y"
-        },
-        {
-          "field": "model_34",
-          "value": "ies"
-        },
-        {
-          "field": "model_35",
-          "value": "y"
-        },
-        {
-          "field": "model_36",
-          "value": "ies"
-        },
-        {
-          "field": "model_37",
-          "value": "ies"
-        },
-        {
-          "field": "model_38",
-          "value": "y"
-        },
-        {
-          "field": "model_39",
-          "value": "y"
-        },
-        {
-          "field": "model_40",
-          "value": "ies"
-        },
-        {
-          "field": "model_41",
-          "value": "ies"
-        },
-        {
-          "field": "model_42",
-          "value": "s"
-        },
-        {
-          "field": "model_43",
-          "value": "s"
-        },
-        {
-          "field": "model_44",
-          "value": "s"
-        },
-        {
-          "field": "model_45",
-          "value": "s"
-        },
-        {
-          "field": "model_46",
-          "value": "for"
-        },
-        {
-          "field": "model_47",
-          "value": "s"
-        },
-        {
-          "field": "model_48",
-          "value": "which"
-        },
-        {
-          "field": "model_49",
-          "value": "of"
-        },
-        {
-          "field": "model_50",
-          "value": "y"
-        },
-        {
-          "field": "model_51",
-          "value": "of"
-        },
-        {
-          "field": "model_52",
-          "value": "listed"
-        },
-        {
-          "field": "model_53",
-          "value": "ICULAR"
-        },
-        {
-          "field": "model_54",
-          "value": "is"
-        },
-        {
-          "field": "model_55",
-          "value": "y"
-        },
-        {
-          "field": "model_56",
-          "value": "y"
-        },
-        {
-          "field": "model_57",
-          "value": "ies"
-        },
-        {
-          "field": "model_58",
-          "value": "y"
-        },
-        {
-          "field": "model_59",
-          "value": "y"
-        },
-        {
-          "field": "model_60",
-          "value": "y"
-        },
-        {
-          "field": "model_61",
-          "value": "IES"
-        },
-        {
-          "field": "model_62",
-          "value": "ies"
-        },
-        {
-          "field": "model_63",
-          "value": "ies"
-        },
-        {
-          "field": "model_64",
-          "value": "y"
-        },
-        {
-          "field": "model_65",
-          "value": "ment"
-        },
-        {
-          "field": "model_66",
-          "value": "y"
-        },
-        {
-          "field": "model_67",
-          "value": "ies"
-        },
-        {
-          "field": "model_68",
-          "value": "ies"
-        },
-        {
-          "field": "model_69",
-          "value": "ies"
-        },
-        {
-          "field": "model_70",
-          "value": "y"
-        },
-        {
-          "field": "model_71",
-          "value": "y"
-        },
-        {
-          "field": "model_72",
-          "value": "ies"
-        },
-        {
-          "field": "model_73",
-          "value": "y"
-        },
-        {
-          "field": "model_74",
-          "value": "ies"
-        },
-        {
-          "field": "model_75",
-          "value": "y"
-        },
-        {
-          "field": "model_76",
-          "value": "ies"
-        },
-        {
-          "field": "model_77",
-          "value": "y"
-        },
-        {
-          "field": "model_78",
-          "value": "ies"
-        },
-        {
-          "field": "model_79",
-          "value": "ies"
-        },
-        {
-          "field": "model_80",
-          "value": "y"
-        },
-        {
-          "field": "model_81",
-          "value": "y"
-        },
-        {
-          "field": "model_82",
-          "value": "ies"
-        },
-        {
-          "field": "model_83",
-          "value": "ies"
-        },
-        {
-          "field": "model_84",
-          "value": "s"
-        },
-        {
-          "field": "model_85",
-          "value": "s"
-        },
-        {
-          "field": "model_86",
-          "value": "s"
-        },
-        {
-          "field": "model_87",
-          "value": "s"
-        },
-        {
-          "field": "model_88",
-          "value": "for"
-        },
-        {
-          "field": "model_89",
-          "value": "s"
-        },
-        {
-          "field": "model_90",
-          "value": "which"
-        },
-        {
-          "field": "model_91",
-          "value": "of"
-        },
-        {
-          "field": "model_92",
-          "value": "y"
-        },
-        {
-          "field": "model_93",
-          "value": "of"
-        },
-        {
-          "field": "model_94",
-          "value": "listed"
-        },
-        {
-          "field": "model_95",
-          "value": "ICULAR"
-        },
-        {
-          "field": "model_96",
-          "value": "is"
-        },
-        {
-          "field": "model_97",
-          "value": "y"
-        },
-        {
-          "field": "model_98",
-          "value": "y"
-        },
-        {
-          "field": "model_99",
-          "value": "ies"
-        },
-        {
-          "field": "model_100",
-          "value": "y"
-        },
-        {
-          "field": "model_101",
-          "value": "y"
-        },
-        {
-          "field": "model_102",
-          "value": "y"
-        },
-        {
-          "field": "model_103",
-          "value": "IES"
-        },
-        {
-          "field": "model_104",
-          "value": "ies"
-        },
-        {
-          "field": "model_105",
-          "value": "ies"
-        },
-        {
-          "field": "model_106",
-          "value": "y"
-        },
-        {
-          "field": "model_107",
-          "value": "ment"
-        },
-        {
-          "field": "model_108",
-          "value": "y"
-        },
-        {
-          "field": "model_109",
-          "value": "ies"
-        },
-        {
-          "field": "model_110",
-          "value": "ies"
-        },
-        {
-          "field": "model_111",
-          "value": "ies"
-        },
-        {
-          "field": "model_112",
-          "value": "y"
-        },
-        {
-          "field": "model_113",
-          "value": "y"
-        },
-        {
-          "field": "model_114",
-          "value": "ies"
-        },
-        {
-          "field": "model_115",
-          "value": "y"
-        },
-        {
-          "field": "model_116",
-          "value": "ies"
-        },
-        {
-          "field": "model_117",
-          "value": "y"
-        },
-        {
-          "field": "model_118",
-          "value": "ies"
-        },
-        {
-          "field": "model_119",
-          "value": "y"
-        },
-        {
-          "field": "model_120",
-          "value": "ies"
-        },
-        {
-          "field": "model_121",
-          "value": "ies"
-        },
-        {
-          "field": "model_122",
-          "value": "y"
-        },
-        {
-          "field": "model_123",
-          "value": "y"
-        },
-        {
-          "field": "model_124",
-          "value": "ies"
-        },
-        {
-          "field": "model_125",
-          "value": "ies"
-        },
-        {
-          "field": "line_item_1",
-          "value": "1820x Summit Ridge Dr., Pocatello, ID @ $83201"
-        },
-        {
-          "field": "line_item_2",
-          "value": "480x Willow Glen Drive, Chubbuck, ID @ $83202"
-        },
-        {
-          "field": "line_item_3",
-          "value": "15x U.S.C. Sec. @ $2301"
-        },
-        {
-          "field": "line_item_4",
-          "value": "83201x Emergency Number ( @ $208"
-        },
-        {
-          "field": "line_item_5",
-          "value": "2005x BUILDRS LIMITED WARRANTY PAGE - @ $1"
-        },
-        {
-          "field": "line_item_6",
-          "value": "15x U.S.C. Sec. @ $2301"
-        },
-        {
-          "field": "line_item_7",
-          "value": "83201x Emergency Number ( @ $208"
-        },
-        {
-          "field": "line_item_8",
-          "value": "2005x BUILDRS LIMITED WARRANTY PAGE - @ $1"
-        },
-        {
-          "field": "line_item_9",
-          "value": "15x U.S.C. Sec. @ $2301"
-        },
-        {
-          "field": "line_item_10",
-          "value": "83201x Emergency Number ( @ $208"
-        },
-        {
-          "field": "line_item_11",
-          "value": "2005x BUILDRS LIMITED WARRANTY PAGE - @ $1"
-        }
-      ],
       "_document_id": "doc_8205bc1673724d689a86d302d72da287",
       "_document_title": "BUILDERS%20LIMITED%20WARRANTY",
-      "_citation_idx": 5
+      "_citation_idx": 5,
+      "_source": "graph",
+      "kvp_amounts": [],
+      "kvp_parties": [],
+      "kvp_dates": [],
+      "kvp_identifiers": [],
+      "kvp_other": [],
+      "tables": [],
+      "regex_amounts": [
+        {
+          "value": "$3,000",
+          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or",
+          "source": "regex"
+        },
+        {
+          "value": "$3,000",
+          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or",
+          "source": "regex"
+        },
+        {
+          "value": "$3,000",
+          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or",
+          "source": "regex"
+        }
+      ],
+      "regex_parties": [
+        {
+          "value": "Limited Warranty Agreement is extended by Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Contoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Exclusions from Co",
+          "source": "regex"
+        },
+        {
+          "value": "Warranted Co",
+          "source": "regex"
+        },
+        {
+          "value": "Representative John Smith\nCompany Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Small Claims Co",
+          "source": "regex"
+        },
+        {
+          "value": "Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Co",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Builder\n\nContoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "By\nFabrikam Inc.",
+          "source": "regex"
+        }
+      ],
+      "regex_dates": [
+        {
+          "value": "2010-06-15",
+          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Representative  Date  Title  2010-06-15  Date",
+          "source": "regex"
+        }
+      ],
+      "all_fields": [
+        {
+          "value": "$3,000",
+          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or",
+          "source": "regex"
+        },
+        {
+          "value": "$3,000",
+          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or",
+          "source": "regex"
+        },
+        {
+          "value": "$3,000",
+          "context": "for money which do not exceed $3,000; (2) pursue claims of lien or",
+          "source": "regex"
+        },
+        {
+          "value": "Limited Warranty Agreement is extended by Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Contoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "Exclusions from Co",
+          "source": "regex"
+        },
+        {
+          "value": "Warranted Co",
+          "source": "regex"
+        },
+        {
+          "value": "Representative John Smith\nCompany Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Small Claims Co",
+          "source": "regex"
+        },
+        {
+          "value": "Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Co",
+          "source": "regex"
+        },
+        {
+          "value": "Fabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "Builder\n\nContoso Ltd.",
+          "source": "regex"
+        },
+        {
+          "value": "By\nFabrikam Inc.",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Representative  Date  Title  2010-06-15  Date  ## 1. Builder's Limite",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Fabrikam Inc.  (Buyer/Owner)  2010-06-15  Authorized Representative  D",
+          "source": "regex"
+        },
+        {
+          "value": "2010-06-15",
+          "context": "Representative  Date  Title  2010-06-15  Date",
+          "source": "regex"
+        }
+      ]
     }
   ],
-  "field_comparisons": [
-    {
-      "field": "party_variant",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "Contoso Ltd.",
-      "doc2_citation": "[1]",
-      "notes": "Potential entity name variant",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "party_variant",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "John Doe\nJohn Doe\nFabrikam Construction\nFabrikam Co",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "Fabrikam Inc.",
-      "doc2_citation": "[1]",
-      "notes": "Potential entity name variant",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "party_variant",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "Make all checks payable to Contoso Lifts LLC",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "Contoso Ltd.",
-      "doc2_citation": "[1]",
-      "notes": "Potential entity name variant",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_1",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "123567x Key West, FL. @ $33304",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "5x Section @ $12",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_2",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "0708x INVOICE # @ $1256003",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "081x -0-10 - @ $11",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_3",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "5111x Fax: (561) @ $211",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "12x -1-13 - @ $123",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_4",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "7333x CUSTOMER ID #: @ $4905201",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "123456x Tax ID# @ $0098765",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_5",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "33155x Dayton, FL @ $33155",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "NOT FOUND",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_6",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "5237x Phone: (305) @ $490",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "NOT FOUND",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_7",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "1x Vertical Platform Lift (Savaria V1504) @ $11200.00",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "NOT FOUND",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_8",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "60x Hz up, @ $12",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "NOT FOUND",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_9",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "00x 3000.00 @ $1",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "NOT FOUND",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_10",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "90x degree Type @ $3",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
-      "doc2_title": "HOLDING%20TANK%20SERVICING%20C",
-      "doc2_value": "NOT FOUND",
-      "doc2_citation": "[1]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "amount_comparison",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "N/A",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "$2,900.00, $20,000.00, $29,900.00, $7,000.00",
-      "doc2_citation": "[2]",
-      "notes": "Values unique to each document",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "party_variant",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "John Doe\nJohn Doe\nFabrikam Construction\nFabrikam Co",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "Fabrikam Inc.",
-      "doc2_citation": "[2]",
-      "notes": "Potential entity name variant",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_2",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "0708x INVOICE # @ $1256003",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "1x Power system: @ $110",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_3",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "5111x Fax: (561) @ $211",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "60x Hz up, @ $12",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_4",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "7333x CUSTOMER ID #: @ $4905201",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "1x Custom cab @ $42",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_5",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "33155x Dayton, FL @ $33155",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "1x Power system: @ $110",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_6",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "5237x Phone: (305) @ $490",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "60x Hz up, @ $12",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_7",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "1x Vertical Platform Lift (Savaria V1504) @ $11200.00",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "1x Custom cab @ $42",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_8",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "60x Hz up, @ $12",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "811x Ocean Drive, Suite @ $405,",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_9",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "00x 3000.00 @ $1",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "1x Power system: @ $110",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    },
-    {
-      "field": "line_item_10",
-      "doc1_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
-      "doc1_title": "contoso_lifts_invoice",
-      "doc1_value": "90x degree Type @ $3",
-      "doc1_citation": "[4]",
-      "doc2_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
-      "doc2_title": "purchase_contract",
-      "doc2_value": "60x Hz up, @ $12",
-      "doc2_citation": "[2]",
-      "decision": "REVIEW",
-      "explanation": "Comparison failed: Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
-    }
-  ],
-  "mismatches": [],
   "citations": [
     {
       "citation": "[1]",
-      "chunk_id": "doc_2a26892fdba540b8af1e0afe1ddb544b_chunk_0",
+      "chunk_id": "",
       "document_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
       "document_title": "HOLDING%20TANK%20SERVICING%20CONTRACT",
       "document_url": "",
       "page_number": null,
       "section": "",
-      "text_preview": "# HOLDING TANK SERVICING CONTRACT\n\nContract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper.\n\n\n<figure>\n\nHolding Tank Owner(s) Name(s):\nContoso Ltd.\n\nPumper's Nam..."
+      "text_preview": "# HOLDING TANK SERVICING CONTRACT\n\nContract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper.\n\n\n<figure>\n\nHolding Tank Owner(s) Name(s):\nContoso Ltd.\n\nPumper's Nam...",
+      "kvp_count": 0,
+      "table_count": 0
     },
     {
       "citation": "[2]",
-      "chunk_id": "doc_5217f97593ee4f92ad493ae57a6e4157_chunk_0",
+      "chunk_id": "",
       "document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
       "document_title": "purchase_contract",
       "document_url": "",
       "page_number": null,
       "section": "",
-      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ..."
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S ...",
+      "kvp_count": 0,
+      "table_count": 0
     },
     {
       "citation": "[3]",
-      "chunk_id": "doc_657dee67210c43f2af2649c7d71d8c8c_chunk_0",
+      "chunk_id": "",
       "document_id": "doc_657dee67210c43f2af2649c7d71d8c8c",
       "document_title": "PROPERTY%20MANAGEMENT%20AGREEMENT",
       "document_url": "",
       "page_number": null,
       "section": "",
-      "text_preview": "# PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietors..."
+      "text_preview": "# PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietors...",
+      "kvp_count": 0,
+      "table_count": 0
     },
     {
       "citation": "[4]",
-      "chunk_id": "doc_6caa3b7a3af34f64b47a95a94653e70c_chunk_0",
+      "chunk_id": "",
       "document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
       "document_title": "contoso_lifts_invoice",
       "document_url": "",
       "page_number": null,
       "section": "",
-      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33304-0708\nINVOICE # 1256003\nPhone: (561) 353-5111 Fax: (561) 211-7333\nCUSTOMER ID #: 4905201\nD..."
+      "text_preview": "Contoso Lifts LLC\nINVOICE\nYour elevator and lift experts\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33304-0708\nINVOICE # 1256003\nPhone: (561) 353-5111 Fax: (561) 211-7333\nCUSTOMER ID #: 4905201\nD...",
+      "kvp_count": 0,
+      "table_count": 0
     },
     {
       "citation": "[5]",
-      "chunk_id": "doc_8205bc1673724d689a86d302d72da287_chunk_0",
+      "chunk_id": "",
       "document_id": "doc_8205bc1673724d689a86d302d72da287",
       "document_title": "BUILDERS%20LIMITED%20WARRANTY",
       "document_url": "",
       "page_number": null,
       "section": "",
-      "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ..."
+      "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended ...",
+      "kvp_count": 0,
+      "table_count": 0
     }
   ],
   "evidence_path": [
@@ -2510,8 +1007,6 @@
     "doc_5217f97593ee4f92ad493ae57a6e4157"
   ],
   "text_chunks_used": 17,
-  "processing_mode": "comprehensive_three_pass",
-  "pass1_method": "nlp_deterministic",
-  "pass2_method": "llm_constrained_comparison",
-  "pass3_method": "llm_narrative_formatting"
+  "processing_mode": "comprehensive_graph_aware",
+  "kvp_source": "azure_di"
 }

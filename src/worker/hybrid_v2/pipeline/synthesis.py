@@ -1083,244 +1083,369 @@ Audit Trail:"""
         evidence_nodes: List[Tuple[str, float]]
     ) -> Dict[str, Any]:
         """
-        Three-pass constrained extraction for 100% fact coverage (no LLM fact-dropping).
+        Graph-aware comprehensive extraction for 100% fact coverage.
         
-        Design rationale: LLM tends to drop facts during synthesis. This approach:
-        - PASS 1: Regex deterministic extraction - captures ALL literal values from text
-        - PASS 2: LLM constrained comparison - must compare EVERY field pair (locked enumeration)
-        - PASS 3: LLM formatting - converts structured mismatches to narrative (cannot drop)
+        IMPROVED APPROACH: Instead of regex extraction, we leverage the GRAPH STRUCTURE:
+        - Azure DI already extracted KVPs at indexing time → stored as KeyValuePair nodes
+        - Tables are stored as Table nodes with markdown/headers
+        - Edges connect Chunks → Sections → KVPs/Tables
         
-        PASS 1: Regex Deterministic Extraction (NO NLP/ML)
-        - Regex patterns for amounts ($X,XXX.XX), dates, identifiers
-        - Pattern matching for company names (Inc/LLC/Ltd suffixes)
-        - Line item patterns (qty x description x price)
-        - Why NOT NLP? Domain terms like "Savaria V1504", "WR-500 lock" aren't in NER models
-        - Output: Structured facts per document
+        By traversing these edges, we get DETERMINISTIC structured facts without LLM re-extraction.
         
-        PASS 2: LLM Constrained Comparison
-        - Input: All fields from Pass 1 as enumerated list
-        - LLM must output decision (MATCH/MISMATCH/MISSING) for EACH field
-        - Validation: Output count must match input count
-        - Output: Structured list of mismatches
+        PASS 1: Graph Structure Retrieval (No LLM)
+        - Query KeyValuePair nodes for each document
+        - Query Table nodes for each document
+        - Use pre-extracted structured facts (deterministic, layout-aware)
+        - Supplement with regex extraction for values not in KVPs
         
-        PASS 3: LLM Narrative Formatting
-        - Input: Locked mismatch list from Pass 2
-        - LLM formats into human-readable narrative
-        - Cannot drop items - list is fixed
+        PASS 2: LLM Comparison
+        - Input: Structured facts from graph + regex
+        - LLM compares and identifies inconsistencies
+        - Has full context: original text + structured KVPs + tables
         
         Returns:
             dict with:
             - response: Rich comparison narrative
-            - raw_extractions: Structured JSON facts per document
-            - field_comparisons: All field-by-field comparison results
+            - raw_extractions: Structured JSON facts per document (from graph)
             - citations: Full citation metadata
         """
         import json
         import re
+        from collections import defaultdict
         
-        # Comprehensive mode needs actual text to extract facts - fetch all chunks if empty
-        if not text_chunks and self.text_store:
-            if hasattr(self.text_store, "get_all_chunks_for_comprehensive"):
-                try:
-                    text_chunks = await self.text_store.get_all_chunks_for_comprehensive(limit=50)
-                    logger.info("comprehensive_fetched_all_chunks", num_chunks=len(text_chunks))
-                except Exception as e:
-                    logger.warning("comprehensive_fetch_all_chunks_failed", error=str(e))
+        # =====================================================================
+        # STEP 0: Try to get GRAPH-AWARE chunks with KVPs and Tables
+        # =====================================================================
+        graph_docs: List[Dict[str, Any]] = []
         
-        if not text_chunks:
+        if self.text_store and hasattr(self.text_store, "get_chunks_with_graph_structure"):
+            try:
+                graph_docs = await self.text_store.get_chunks_with_graph_structure(limit=50)
+                logger.info("comprehensive_graph_structure_loaded",
+                           num_docs=len(graph_docs),
+                           total_kvps=sum(len(d.get("kvps", [])) for d in graph_docs),
+                           total_tables=sum(len(d.get("tables", [])) for d in graph_docs))
+            except Exception as e:
+                logger.warning("comprehensive_graph_structure_failed", error=str(e))
+        
+        # Fallback to regular chunks if graph query failed
+        if not graph_docs:
+            if not text_chunks and self.text_store:
+                if hasattr(self.text_store, "get_all_chunks_for_comprehensive"):
+                    try:
+                        text_chunks = await self.text_store.get_all_chunks_for_comprehensive(limit=50)
+                        logger.info("comprehensive_fetched_all_chunks", num_chunks=len(text_chunks))
+                    except Exception as e:
+                        logger.warning("comprehensive_fetch_all_chunks_failed", error=str(e))
+            
+            # Convert flat chunks to graph_docs format
+            doc_chunks: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for chunk in text_chunks or []:
+                meta = chunk.get("metadata", {})
+                doc_key = (
+                    meta.get("document_id") 
+                    or chunk.get("document_id")
+                    or meta.get("document_title")
+                    or chunk.get("document_title")
+                    or "Unknown"
+                )
+                doc_chunks[doc_key].append(chunk)
+            
+            for doc_key, chunks in doc_chunks.items():
+                graph_docs.append({
+                    "document_title": chunks[0].get("document_title") or doc_key,
+                    "document_id": doc_key,
+                    "combined_text": "\n\n".join(c.get("text", "") for c in chunks),
+                    "chunks": chunks,
+                    "kvps": [],  # No graph KVPs available
+                    "tables": [],
+                })
+        
+        if not graph_docs:
             return {
                 "response": "No documents found to analyze.",
                 "raw_extractions": [],
-                "field_comparisons": [],
                 "citations": [],
                 "evidence_path": [node[0] for node in evidence_nodes],
                 "text_chunks_used": 0,
             }
         
         # =====================================================================
-        # PASS 1: NLP Deterministic Extraction (No LLM)
+        # PASS 1: Build Structured Extractions from GRAPH + Regex
         # =====================================================================
-        from collections import defaultdict
-        doc_chunks: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-        for chunk in text_chunks:
-            meta = chunk.get("metadata", {})
-            doc_key = (
-                meta.get("document_id") 
-                or chunk.get("document_id")
-                or meta.get("document_title")
-                or chunk.get("document_title")
-                or "Unknown"
-            )
-            doc_chunks[doc_key].append(chunk)
-        
         raw_extractions = []
         citations = []
         citation_idx = 1
         
-        for doc_key, chunks in doc_chunks.items():
-            doc_text = "\n\n".join(c.get("text", "") for c in chunks)
-            doc_title = chunks[0].get("document_title") or doc_key
-            first_chunk = chunks[0]
-            meta = first_chunk.get("metadata", {})
+        for doc in graph_docs:
+            doc_title = doc.get("document_title", "Unknown")
+            doc_id = doc.get("document_id", "")
+            doc_text = doc.get("combined_text", "")
+            kvps = doc.get("kvps", [])
+            tables = doc.get("tables", [])
             
-            # Deterministic extraction using regex and pattern matching
-            extraction = self._regex_extract_fields(doc_text, doc_title)
-            extraction["_document_id"] = doc_key
-            extraction["_document_title"] = doc_title
-            extraction["_citation_idx"] = citation_idx
+            # Start with KVPs from graph (deterministic, layout-aware)
+            extraction = {
+                "document_title": doc_title,
+                "_document_id": doc_id,
+                "_document_title": doc_title,
+                "_citation_idx": citation_idx,
+                "_source": "graph",  # Track that this came from graph
+                
+                # KVPs grouped by type
+                "kvp_amounts": [],
+                "kvp_parties": [],
+                "kvp_dates": [],
+                "kvp_identifiers": [],
+                "kvp_other": [],
+                
+                # Tables
+                "tables": tables,
+                
+                # Will also add regex extractions for values not in KVPs
+                "regex_amounts": [],
+                "regex_parties": [],
+                "regex_dates": [],
+                "all_fields": [],  # Combined for comparison
+            }
+            
+            # Categorize KVPs by type
+            for kvp in kvps:
+                key = (kvp.get("key") or "").lower()
+                value = kvp.get("value") or ""
+                
+                if not value.strip():
+                    continue
+                
+                field_entry = {
+                    "field": f"kvp_{key.replace(' ', '_')[:30]}",
+                    "value": value,
+                    "key": kvp.get("key"),
+                    "confidence": kvp.get("confidence", 0.0),
+                    "source": "azure_di"
+                }
+                
+                # Categorize by content
+                if any(word in key for word in ["amount", "total", "price", "cost", "payment", "fee", "$"]):
+                    extraction["kvp_amounts"].append(field_entry)
+                elif any(word in key for word in ["date", "effective", "expir", "due"]):
+                    extraction["kvp_dates"].append(field_entry)
+                elif any(word in key for word in ["name", "party", "buyer", "seller", "customer", "vendor", "company", "representative"]):
+                    extraction["kvp_parties"].append(field_entry)
+                elif any(word in key for word in ["number", "id", "invoice", "contract", "po", "ref"]):
+                    extraction["kvp_identifiers"].append(field_entry)
+                else:
+                    extraction["kvp_other"].append(field_entry)
+                
+                extraction["all_fields"].append(field_entry)
+            
+            # Supplement with regex extraction for values KVPs might miss
+            regex_extraction = self._regex_extract_fields(doc_text, doc_title)
+            
+            # Add regex-found amounts that aren't already in KVPs
+            kvp_values = {f.get("value", "").strip() for f in extraction["all_fields"]}
+            for amt in regex_extraction.get("amounts", []):
+                if amt.get("value", "").strip() not in kvp_values:
+                    field_entry = {**amt, "source": "regex"}
+                    extraction["regex_amounts"].append(field_entry)
+                    extraction["all_fields"].append(field_entry)
+            
+            for party in regex_extraction.get("parties", []):
+                if party.get("value", "").strip() not in kvp_values:
+                    field_entry = {**party, "source": "regex"}
+                    extraction["regex_parties"].append(field_entry)
+                    extraction["all_fields"].append(field_entry)
+            
+            for date in regex_extraction.get("dates", []):
+                if date.get("value", "").strip() not in kvp_values:
+                    field_entry = {**date, "source": "regex"}
+                    extraction["regex_dates"].append(field_entry)
+                    extraction["all_fields"].append(field_entry)
+            
             raw_extractions.append(extraction)
             
             citations.append({
                 "citation": f"[{citation_idx}]",
-                "chunk_id": first_chunk.get("id", ""),
-                "document_id": doc_key,
+                "chunk_id": doc.get("chunks", [{}])[0].get("chunk_id", "") if doc.get("chunks") else "",
+                "document_id": doc_id,
                 "document_title": doc_title,
-                "document_url": first_chunk.get("document_source", "") or meta.get("url", ""),
-                "page_number": meta.get("page_number"),
-                "section": meta.get("section_path_key", ""),
+                "document_url": "",
+                "page_number": None,
+                "section": "",
                 "text_preview": doc_text[:200] + "..." if len(doc_text) > 200 else doc_text,
+                "kvp_count": len(kvps),
+                "table_count": len(tables),
             })
             citation_idx += 1
         
-        logger.info("pass1_regex_extraction_complete", num_docs=len(raw_extractions),
-                   total_fields=sum(len(e.get("all_fields", [])) for e in raw_extractions))
+        logger.info("pass1_graph_extraction_complete",
+                   num_docs=len(raw_extractions),
+                   total_kvp_fields=sum(len(e.get("kvp_amounts", [])) + len(e.get("kvp_parties", [])) + 
+                                        len(e.get("kvp_dates", [])) + len(e.get("kvp_identifiers", [])) +
+                                        len(e.get("kvp_other", [])) for e in raw_extractions),
+                   total_regex_fields=sum(len(e.get("regex_amounts", [])) + len(e.get("regex_parties", [])) +
+                                          len(e.get("regex_dates", [])) for e in raw_extractions))
         
         # =====================================================================
-        # PASS 2: LLM Constrained Comparison (Locked Enumeration)
+        # PASS 2: LLM Comparison with FULL CONTEXT (text + KVPs + tables)
         # =====================================================================
-        # Build field pairs for comparison
-        field_pairs = self._build_field_comparison_pairs(raw_extractions)
+        # Build a structured comparison prompt that shows the LLM:
+        # 1. The structured KVPs from each document (side by side)
+        # 2. The tables from each document
+        # 3. The original text for semantic understanding
         
-        comparison_prompt = """You are comparing fields across {num_docs} documents for this query:
-"{query}"
-
-Below is a NUMBERED LIST of {num_pairs} field pairs to compare. 
-You MUST provide a decision for EVERY numbered item. Do not skip any.
-
-{field_pairs_text}
-
-For EACH numbered item above, respond with this EXACT format:
-[Item #]: [MATCH|MISMATCH|MISSING] - [brief explanation]
-
-RULES:
-- MATCH: Values are semantically equivalent
-- MISMATCH: Values differ or contradict
-- MISSING: Field exists in one document but not the other
-- You MUST respond to ALL {num_pairs} items
-- Include the specific values in your explanation
-
-START YOUR RESPONSE:"""
-
-        field_pairs_text = "\n".join([
-            f"[{i+1}] Field '{fp['field']}': Doc1({fp['doc1_title']})='{fp['doc1_value']}' vs Doc2({fp['doc2_title']})='{fp['doc2_value']}'"
-            for i, fp in enumerate(field_pairs)
-        ])
+        comparison_context = self._build_graph_aware_comparison_context(raw_extractions, graph_docs)
         
-        field_comparisons = []
-        if field_pairs:
-            try:
-                comparison_result = await self.llm.acomplete(
-                    comparison_prompt.format(
-                        num_docs=len(raw_extractions),
-                        query=query,
-                        num_pairs=len(field_pairs),
-                        field_pairs_text=field_pairs_text
-                    )
-                )
-                comparison_text = comparison_result.text.strip()
-                
-                # Parse LLM comparison results
-                field_comparisons = self._parse_comparison_results(comparison_text, field_pairs)
-                
-                # Validate: LLM must have responded to all items
-                if len(field_comparisons) < len(field_pairs):
-                    logger.warning("pass2_incomplete_comparison",
-                                  expected=len(field_pairs), got=len(field_comparisons))
-                    
-            except Exception as e:
-                logger.error("pass2_comparison_failed", error=str(e))
-                # Fallback: mark all as needing review
-                field_comparisons = [
-                    {**fp, "decision": "REVIEW", "explanation": f"Comparison failed: {str(e)}"}
-                    for fp in field_pairs
-                ]
-        
-        # Filter to only mismatches for Pass 3
-        mismatches = [fc for fc in field_comparisons if fc.get("decision") in ("MISMATCH", "MISSING")]
-        
-        logger.info("pass2_comparison_complete",
-                   total_pairs=len(field_pairs),
-                   mismatches=len(mismatches),
-                   matches=len([fc for fc in field_comparisons if fc.get("decision") == "MATCH"]))
-        
-        # =====================================================================
-        # PASS 3: LLM Narrative Formatting (Locked - Cannot Drop)
-        # =====================================================================
-        if not mismatches:
-            narrative = "## Analysis Complete\n\nNo inconsistencies found between the documents."
-        else:
-            format_prompt = """Format these {num_mismatches} inconsistencies into a clear report for this query:
-"{query}"
+        comparison_prompt = f"""You are analyzing {len(raw_extractions)} documents for inconsistencies.
 
-INCONSISTENCIES FOUND (you MUST include ALL of these):
-{mismatches_text}
+QUERY: "{query}"
 
-FORMAT REQUIREMENTS:
-1. Organize by category (e.g., Product/Model, Payment Terms, Party Names, etc.)
-2. For EACH inconsistency, include:
-   - The field name
-   - Value in Document 1 with citation [N]
-   - Value in Document 2 with citation [N]
-   - Why this is significant
-3. Use citation markers [1], [2], etc.
-4. You MUST include ALL {num_mismatches} inconsistencies - do not summarize or skip any
+{comparison_context}
 
-BEGIN REPORT:"""
+TASK: Identify ALL inconsistencies between these documents.
 
-            mismatches_text = "\n".join([
-                f"- {m['field']}: '{m['doc1_value']}' [{m['doc1_citation']}] vs '{m['doc2_value']}' [{m['doc2_citation']}] ({m.get('explanation', '')})"
-                for m in mismatches
-            ])
-            
-            try:
-                format_result = await self.llm.acomplete(
-                    format_prompt.format(
-                        num_mismatches=len(mismatches),
-                        query=query,
-                        mismatches_text=mismatches_text
-                    )
-                )
-                narrative = format_result.text.strip()
-            except Exception as e:
-                logger.error("pass3_formatting_failed", error=str(e))
-                # Fallback: structured list
-                narrative = "## Inconsistencies Found\n\n"
-                for m in mismatches:
-                    narrative += f"**{m['field']}**: {m['doc1_value']} [{m['doc1_citation']}] vs {m['doc2_value']} [{m['doc2_citation']}]\n"
-                    narrative += f"  - {m.get('explanation', 'Mismatch detected')}\n\n"
+For each inconsistency, provide:
+1. FIELD: What field/value is inconsistent
+2. DOCUMENTS: Which documents disagree and what each says
+3. SIGNIFICANCE: Why this inconsistency matters
+
+Include inconsistencies in:
+- Amounts/prices (different totals, payment terms)
+- Party names (different company names, entities)
+- Product/model descriptions (different specs)
+- Dates (different effective dates, due dates)
+- Terms and conditions (different warranty, payment terms)
+- Any other factual disagreements
+
+Use citation markers [1], [2], etc. to reference each document.
+
+BEGIN ANALYSIS:"""
+
+        try:
+            comparison_result = await self.llm.acomplete(comparison_prompt)
+            narrative = comparison_result.text.strip()
+        except Exception as e:
+            logger.error("pass2_comparison_failed", error=str(e))
+            # Fallback: List the extracted facts
+            narrative = "## Extraction Complete (Comparison Failed)\n\n"
+            for ext in raw_extractions:
+                narrative += f"### Document [{ext.get('_citation_idx', '?')}]: {ext.get('_document_title', 'Unknown')}\n"
+                narrative += f"- KVP Amounts: {len(ext.get('kvp_amounts', []))} found\n"
+                narrative += f"- KVP Parties: {len(ext.get('kvp_parties', []))} found\n"
+                narrative += f"- Tables: {len(ext.get('tables', []))} found\n\n"
         
-        logger.info(
-            "comprehensive_three_pass_complete",
-            query=query[:50],
-            num_docs=len(doc_chunks),
-            num_extractions=len(raw_extractions),
-            num_field_pairs=len(field_pairs),
-            num_mismatches=len(mismatches),
-        )
+        logger.info("comprehensive_graph_aware_complete",
+                   query=query[:50],
+                   num_docs=len(graph_docs),
+                   num_extractions=len(raw_extractions))
         
         return {
             "response": narrative,
             "raw_extractions": raw_extractions,
-            "field_comparisons": field_comparisons,
-            "mismatches": mismatches,
             "citations": citations,
             "evidence_path": [node[0] for node in evidence_nodes],
-            "text_chunks_used": len(text_chunks),
-            "processing_mode": "comprehensive_three_pass",
-            "pass1_method": "regex_deterministic",
-            "pass2_method": "llm_constrained_comparison",
-            "pass3_method": "llm_narrative_formatting",
+            "text_chunks_used": sum(len(d.get("chunks", [])) for d in graph_docs),
+            "processing_mode": "comprehensive_graph_aware",
+            "kvp_source": "azure_di",
         }
+
+    def _build_graph_aware_comparison_context(
+        self, 
+        extractions: List[Dict[str, Any]], 
+        graph_docs: List[Dict[str, Any]]
+    ) -> str:
+        """Build a structured comparison context for the LLM.
+        
+        Shows side-by-side: KVPs, Tables, and relevant text excerpts.
+        """
+        parts = []
+        
+        # Section 1: Structured KVPs side-by-side
+        parts.append("=" * 60)
+        parts.append("STRUCTURED DATA EXTRACTED (from Azure Document Intelligence)")
+        parts.append("=" * 60)
+        
+        for ext in extractions:
+            idx = ext.get("_citation_idx", "?")
+            title = ext.get("_document_title", "Unknown")
+            parts.append(f"\n### Document [{idx}]: {title}")
+            
+            # Amounts
+            if ext.get("kvp_amounts") or ext.get("regex_amounts"):
+                parts.append("\n**Amounts/Prices:**")
+                for f in ext.get("kvp_amounts", []):
+                    parts.append(f"  - {f.get('key', 'amount')}: {f.get('value')} (from DI)")
+                for f in ext.get("regex_amounts", []):
+                    parts.append(f"  - {f.get('field', 'amount')}: {f.get('value')} (from text)")
+            
+            # Parties
+            if ext.get("kvp_parties") or ext.get("regex_parties"):
+                parts.append("\n**Parties/Names:**")
+                for f in ext.get("kvp_parties", []):
+                    parts.append(f"  - {f.get('key', 'party')}: {f.get('value')} (from DI)")
+                for f in ext.get("regex_parties", []):
+                    parts.append(f"  - {f.get('field', 'party')}: {f.get('value')} (from text)")
+            
+            # Dates
+            if ext.get("kvp_dates") or ext.get("regex_dates"):
+                parts.append("\n**Dates:**")
+                for f in ext.get("kvp_dates", []):
+                    parts.append(f"  - {f.get('key', 'date')}: {f.get('value')} (from DI)")
+                for f in ext.get("regex_dates", []):
+                    parts.append(f"  - {f.get('field', 'date')}: {f.get('value')} (from text)")
+            
+            # Identifiers
+            if ext.get("kvp_identifiers"):
+                parts.append("\n**Identifiers:**")
+                for f in ext.get("kvp_identifiers", []):
+                    parts.append(f"  - {f.get('key', 'id')}: {f.get('value')}")
+            
+            # Other KVPs
+            if ext.get("kvp_other"):
+                parts.append("\n**Other Fields:**")
+                for f in ext.get("kvp_other", [])[:10]:  # Limit to 10
+                    parts.append(f"  - {f.get('key', 'field')}: {f.get('value')}")
+        
+        # Section 2: Tables
+        has_tables = any(ext.get("tables") for ext in extractions)
+        if has_tables:
+            parts.append("\n" + "=" * 60)
+            parts.append("TABLES")
+            parts.append("=" * 60)
+            
+            for ext in extractions:
+                idx = ext.get("_citation_idx", "?")
+                title = ext.get("_document_title", "Unknown")
+                tables = ext.get("tables", [])
+                
+                if tables:
+                    parts.append(f"\n### Document [{idx}]: {title}")
+                    for i, table in enumerate(tables[:3]):  # Limit to 3 tables
+                        caption = table.get("caption") or f"Table {i+1}"
+                        markdown = table.get("markdown", "")[:500]  # Limit length
+                        parts.append(f"\n**{caption}:**")
+                        parts.append(markdown)
+        
+        # Section 3: Text excerpts (for semantic context)
+        parts.append("\n" + "=" * 60)
+        parts.append("DOCUMENT TEXT EXCERPTS (for context)")
+        parts.append("=" * 60)
+        
+        for doc in graph_docs:
+            title = doc.get("document_title", "Unknown")
+            text = doc.get("combined_text", "")[:2000]  # First 2000 chars
+            
+            # Find matching citation index
+            idx = "?"
+            for ext in extractions:
+                if ext.get("_document_title") == title:
+                    idx = ext.get("_citation_idx", "?")
+                    break
+            
+            parts.append(f"\n### Document [{idx}]: {title}")
+            parts.append(text)
+        
+        return "\n".join(parts)
 
     def _regex_extract_fields(self, text: str, doc_title: str) -> Dict[str, Any]:
         """

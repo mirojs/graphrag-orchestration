@@ -473,6 +473,136 @@ class Neo4jTextUnitStore:
         """
         return await asyncio.to_thread(self._get_workspace_document_overviews_sync, int(limit))
 
+    async def get_chunks_with_graph_structure(self, *, limit: int = 50) -> List[Dict[str, Any]]:
+        """Retrieve chunks WITH related graph structure (KVPs, Tables, Entities).
+        
+        This is the KEY method for graph-aware comprehensive mode. Instead of just
+        returning flat text, we traverse edges to get:
+        - KVPs in the same section
+        - Tables in the same section  
+        - Entities mentioned in the chunk
+        
+        This gives the LLM STRUCTURED context for comparison instead of re-extracting.
+        """
+        return await asyncio.to_thread(self._get_chunks_with_graph_structure_sync, int(limit))
+
+    def _get_chunks_with_graph_structure_sync(self, limit: int) -> List[Dict[str, Any]]:
+        """Sync implementation: fetch chunks with graph context."""
+        
+        # Query 1: Get all chunks with document info
+        chunks_query = """
+        MATCH (c:TextChunk {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+        WITH c, d, s
+        ORDER BY coalesce(d.title, d.source, '') ASC, coalesce(c.chunk_index, 0) ASC
+        RETURN 
+            c.id AS chunk_id,
+            c.text AS text,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.id AS doc_id,
+            s.id AS section_id,
+            s.title AS section_title,
+            s.path AS section_path
+        LIMIT $limit
+        """
+        
+        # Query 2: Get all KVPs grouped by document
+        kvps_query = """
+        MATCH (kvp:KeyValuePair {group_id: $group_id})
+        OPTIONAL MATCH (kvp)-[:IN_DOCUMENT]->(d:Document)
+        RETURN 
+            kvp.key AS key,
+            kvp.value AS value,
+            kvp.confidence AS confidence,
+            kvp.section_id AS section_id,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.id AS doc_id
+        """
+        
+        # Query 3: Get all Tables grouped by document
+        tables_query = """
+        MATCH (t:Table {group_id: $group_id})
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+        RETURN 
+            t.id AS table_id,
+            t.caption AS caption,
+            t.markdown AS markdown,
+            t.headers AS headers,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.id AS doc_id
+        """
+        
+        chunks_by_doc: Dict[str, Dict[str, Any]] = {}
+        
+        try:
+            with self._driver.session() as session:
+                # Fetch chunks
+                result = session.run(chunks_query, group_id=self._group_id, limit=limit)
+                for record in result:
+                    doc_title = record.get("doc_title") or "Unknown"
+                    doc_id = record.get("doc_id") or ""
+                    
+                    if doc_title not in chunks_by_doc:
+                        chunks_by_doc[doc_title] = {
+                            "document_title": doc_title,
+                            "document_id": doc_id,
+                            "chunks": [],
+                            "kvps": [],
+                            "tables": [],
+                            "combined_text": ""
+                        }
+                    
+                    chunks_by_doc[doc_title]["chunks"].append({
+                        "chunk_id": record.get("chunk_id"),
+                        "text": record.get("text") or "",
+                        "section_id": record.get("section_id"),
+                        "section_title": record.get("section_title"),
+                        "section_path": record.get("section_path"),
+                    })
+                
+                # Fetch KVPs
+                result = session.run(kvps_query, group_id=self._group_id)
+                for record in result:
+                    doc_title = record.get("doc_title") or "Unknown"
+                    if doc_title in chunks_by_doc:
+                        chunks_by_doc[doc_title]["kvps"].append({
+                            "key": record.get("key") or "",
+                            "value": record.get("value") or "",
+                            "confidence": record.get("confidence") or 0.0,
+                            "section_id": record.get("section_id"),
+                        })
+                
+                # Fetch Tables
+                result = session.run(tables_query, group_id=self._group_id)
+                for record in result:
+                    doc_title = record.get("doc_title") or "Unknown"
+                    if doc_title in chunks_by_doc:
+                        chunks_by_doc[doc_title]["tables"].append({
+                            "table_id": record.get("table_id"),
+                            "caption": record.get("caption") or "",
+                            "markdown": record.get("markdown") or "",
+                            "headers": record.get("headers") or [],
+                        })
+            
+            # Combine text for each document
+            for doc_data in chunks_by_doc.values():
+                doc_data["combined_text"] = "\n\n".join(
+                    c.get("text", "") for c in doc_data["chunks"]
+                )
+            
+            logger.info("get_chunks_with_graph_structure",
+                       num_docs=len(chunks_by_doc),
+                       total_chunks=sum(len(d["chunks"]) for d in chunks_by_doc.values()),
+                       total_kvps=sum(len(d["kvps"]) for d in chunks_by_doc.values()),
+                       total_tables=sum(len(d["tables"]) for d in chunks_by_doc.values()),
+                       group_id=self._group_id)
+                       
+        except Exception as e:
+            logger.error("get_chunks_with_graph_structure_failed", error=str(e), group_id=self._group_id)
+        
+        return list(chunks_by_doc.values())
+
     def _get_workspace_document_overviews_sync(self, limit: int) -> List[Dict[str, Any]]:
         """Sync implementation of document overview retrieval."""
         query = """

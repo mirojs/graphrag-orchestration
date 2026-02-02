@@ -151,6 +151,12 @@ Modify `infra/main.bicep` to provision:
 - Shared Container Apps Environment
 - Redis connection shared via secrets
 
+**Deployment Note (2026-02-02):**
+- **Issue:** `RoleAssignmentExists` caused ARM deployment failures when re-running provision.
+- **Cause:** Role assignments are not idempotent with existing assignments in the resource group.
+- **Mitigation:** Add a `skipRoleAssignments` parameter (default `true` in `infra/main.parameters.json`) to bypass role assignment module during redeploys.
+- **Follow-up:** Re-enable role assignments when deploying to a clean environment or when changes to permissions are required.
+
 ---
 
 ## Phase 6: V2 Algorithm Enablement (Week 6-7)

@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/afh/projects/graphrag-orchestration/scripts/test_v1_v2_comprehensive.py", line 25, in <module>
+    from src.core.config import settings
+  File "/afh/projects/graphrag-orchestration/src/core/__init__.py", line 8, in <module>
+    from .services import UsageTracker, CosmosDBClient
+  File "/afh/projects/graphrag-orchestration/src/core/services/__init__.py", line 5, in <module>
+    from .redis_service import (
+  File "/afh/projects/graphrag-orchestration/src/core/services/redis_service.py", line 25, in <module>
+    import redis.asyncio as aioredis
+ModuleNotFoundError: No module named 'redis'

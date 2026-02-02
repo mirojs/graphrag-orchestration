@@ -1,6 +1,37 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 1, 2026
+**Last Updated:** February 2, 2026
+
+**Recent Updates (February 2, 2026):**
+- ✅ **Duplicate Container App Fixed:** Renamed service from `graphrag-api` to `graphrag-orchestration` in infrastructure
+  - **Problem:** Deployment created duplicate container app `graphrag-api` while existing `graphrag-orchestration` had all environment variables
+  - **Solution:** Updated `azure.yaml` and `infra/main.bicep` to use `graphrag-orchestration` service name
+  - **Actions:** Tagged existing container app with `azd-service-name=graphrag-orchestration`, deleted orphaned `graphrag-api`
+  - **Result:** `azd deploy` now targets the correct existing container app
+- ✅ **Comprehensive Mode Verified Working (Feb 2, 2026):** Invoice/Contract 3-Part Analysis Test
+  - **Test Question (from `ANALYSIS_ROUTE4_V1_VS_V2_INVOICE_CONSISTENCY_2026-01-29.md`):**
+    ```
+    List all areas of inconsistency identified in the invoice, organized by:
+    (1) all inconsistencies with corresponding evidence,
+    (2) inconsistencies in goods or services sold including detailed specifications for every line item, and
+    (3) inconsistencies regarding billing logistics and administrative or legal issues.
+    ```
+  - **Context:** "Analyze invoice to confirm total consistency with signed contract."
+  - **Individual Sub-Questions:**
+    1. "List all areas of inconsistency identified in the invoice with corresponding evidence."
+    2. "List all areas of inconsistency identified in the invoice in the goods or services sold (including detailed specifications for every line item)."
+    3. "List all areas of inconsistency identified in the invoice regarding billing logistics and administrative or legal issues."
+  - **Test Configuration:**
+    - Group: `test-5pdfs-v2-enhanced-ex` (185 entities, V2 Voyage embeddings)
+    - Response Type: `comprehensive` (2-pass NLP extraction)
+    - Route: Auto-selected (DRIFT multi-hop)
+  - **Results:**
+    - Response: 20,666 chars (vs 30 chars "No documents found" before fix)
+    - Text chunks: 17 (vs 0 before fix)
+    - All 3 parts correctly addressed: ✓ Part (1) evidence ✓ Part (2) specifications ✓ Part (3) billing/admin
+    - Key facts preserved: Payment amounts ($20k/$7k/$2.9k) ✓, Equipment (Savaria/platform) ✓, Vendor (Contoso) ✓
+  - **Fix Applied:** JWT middleware now preserves `group_id` from GroupIsolation middleware (auth.py lines 108-109)
+  - **Verification:** Logs confirm `"group_id": "test-5pdfs-v2-enhanced-ex"` throughout request pipeline
 
 **Recent Updates (February 1, 2026):**
 - ✅ **KNN Config Integration into Pipeline:** `knn_config` parameter now wired through entire indexing and query pipeline

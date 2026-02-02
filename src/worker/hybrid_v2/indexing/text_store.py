@@ -507,30 +507,33 @@ class Neo4jTextUnitStore:
         LIMIT $limit
         """
         
-        # Query 2: Get all KVPs grouped by document
+        # Query 2: Get all KVPs - join to Document by document_id property
+        # KVPs may have document_id property or IN_DOCUMENT relationship
         kvps_query = """
         MATCH (kvp:KeyValuePair {group_id: $group_id})
-        OPTIONAL MATCH (kvp)-[:IN_DOCUMENT]->(d:Document)
+        OPTIONAL MATCH (d:Document {group_id: $group_id})
+        WHERE d.id = kvp.document_id OR EXISTS((kvp)-[:IN_DOCUMENT]->(d))
         RETURN 
             kvp.key AS key,
             kvp.value AS value,
             kvp.confidence AS confidence,
             kvp.section_id AS section_id,
-            coalesce(d.title, d.source, 'Unknown') AS doc_title,
-            d.id AS doc_id
+            coalesce(d.title, d.source, kvp.document_id, 'Unknown') AS doc_title,
+            coalesce(d.id, kvp.document_id) AS doc_id
         """
         
-        # Query 3: Get all Tables grouped by document
+        # Query 3: Get all Tables - join to Document by document_id property
         tables_query = """
         MATCH (t:Table {group_id: $group_id})
-        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+        OPTIONAL MATCH (d:Document {group_id: $group_id})
+        WHERE d.id = t.document_id OR EXISTS((t)-[:IN_DOCUMENT]->(d))
         RETURN 
             t.id AS table_id,
             t.caption AS caption,
             t.markdown AS markdown,
             t.headers AS headers,
-            coalesce(d.title, d.source, 'Unknown') AS doc_title,
-            d.id AS doc_id
+            coalesce(d.title, d.source, t.document_id, 'Unknown') AS doc_title,
+            coalesce(d.id, t.document_id) AS doc_id
         """
         
         chunks_by_doc: Dict[str, Dict[str, Any]] = {}

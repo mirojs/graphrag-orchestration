@@ -1262,6 +1262,14 @@ Audit Trail:"""
                     extraction["regex_dates"].append(field_entry)
                     extraction["all_fields"].append(field_entry)
             
+            # Also add regex-found identifiers (invoice#, PO#, etc)
+            for identifier in regex_extraction.get("identifiers", []):
+                if identifier.get("value", "").strip() not in kvp_values:
+                    field_entry = {**identifier, "source": "regex"}
+                    # Add to kvp_identifiers (not a separate regex_identifiers list)
+                    extraction["kvp_identifiers"].append(field_entry)
+                    extraction["all_fields"].append(field_entry)
+            
             raw_extractions.append(extraction)
             
             citations.append({

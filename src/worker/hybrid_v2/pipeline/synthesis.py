@@ -1329,19 +1329,30 @@ Use citation markers [1], [2], etc. to reference each document.
 
 BEGIN ANALYSIS:"""
 
-        try:
-            comparison_result = await self.llm.acomplete(comparison_prompt)
-            narrative = comparison_result.text.strip()
-        except Exception as e:
-            logger.error("llm_comparison_failed", error=str(e))
-            # Fallback: List the extracted facts
-            narrative = "## Comparison Failed\n\n"
+        # Guard against None LLM
+        if not self.llm:
+            logger.error("llm_not_available", error="LLM is None")
+            narrative = "## Comparison Failed: LLM not available\n\n"
             for ext in raw_extractions:
                 narrative += f"### Document [{ext.get('_citation_idx', '?')}]: {ext.get('_document_title', 'Unknown')}\n"
                 if '_error' in ext:
                     narrative += f"- Error: {ext['_error']}\n\n"
                 else:
                     narrative += f"- Fields extracted: {len([k for k in ext.keys() if not k.startswith('_')])}\n\n"
+        else:
+            try:
+                comparison_result = await self.llm.acomplete(comparison_prompt)
+                narrative = comparison_result.text.strip()
+            except Exception as e:
+                logger.error("llm_comparison_failed", error=str(e))
+                # Fallback: List the extracted facts
+                narrative = "## Comparison Failed\n\n"
+                for ext in raw_extractions:
+                    narrative += f"### Document [{ext.get('_citation_idx', '?')}]: {ext.get('_document_title', 'Unknown')}\n"
+                    if '_error' in ext:
+                        narrative += f"- Error: {ext['_error']}\n\n"
+                    else:
+                        narrative += f"- Fields extracted: {len([k for k in ext.keys() if not k.startswith('_')])}\n\n"
         
         logger.info("comprehensive_graph_aware_complete",
                    query=query[:50],
@@ -1363,41 +1374,19 @@ BEGIN ANALYSIS:"""
         extractions: List[Dict[str, Any]], 
         graph_docs: List[Dict[str, Any]]
     ) -> str:
-        """Build section-level context for each KVP/Table using section_path.
+        """Build section-level context for retrieved KVPs/Tables using section_path.
         
-        SECTION-LEVEL PRECISION:
-        1. For each KVP, find its source section using section_path
-        2. Show only that section's text (not full document)
-        3. Group by section to avoid redundancy
-        4. This provides minimal context - just enough to understand each field
+        RETRIEVAL-BASED APPROACH:
+        1. Only show sections that contain retrieved KVPs/tables
+        2. Deduplicate sections across the document
+        3. No arbitrary limits - show everything retrieved
+        4. Group by section to show context once per section
         """
         parts = []
         
-        # Build section_path -> chunks mapping for quick lookup
-        section_to_chunks: Dict[str, List[str]] = {}
-        
-        for doc in graph_docs:
-            kvps = doc.get("kvps", [])
-            for kvp in kvps:
-                section_path = kvp.get("section_path", [])
-                if section_path:
-                    section_key = section_path[0]  # Use first element as key
-                    if section_key not in section_to_chunks:
-                        # Find chunk containing this section
-                        for chunk in doc.get("chunks", []):
-                            chunk_text = chunk.get("text", "")
-                            # Simple heuristic: if section title appears in chunk, it's likely the right one
-                            if section_key.lower() in chunk_text.lower()[:200]:  # Check first 200 chars
-                                section_to_chunks[section_key] = [chunk_text]
-                                break
-        
         parts.append("=" * 60)
-        parts.append("ENRICHED CONTEXT (Section-level)")
-        parts.append("Each field shown with its source section text")
-        parts.append("=" * 60)
-        parts.append("=" * 60)
-        parts.append("ENRICHED CONTEXT (Section-level)")
-        parts.append("Each field shown with its source section text")
+        parts.append("ENRICHED CONTEXT (Retrieval-based)")
+        parts.append("Showing only sections with retrieved structured data")
         parts.append("=" * 60)
         
         # Process each document's extractions
@@ -1413,9 +1402,8 @@ BEGIN ANALYSIS:"""
                 continue
             
             kvps = doc.get("kvps", [])
-            sections_shown = set()
             
-            # Group KVPs by section for efficiency
+            # Group KVPs by section for efficiency and deduplication
             kvps_by_section: Dict[str, List[Dict]] = {}
             for kvp in kvps:
                 section_path = kvp.get("section_path", [])
@@ -1430,55 +1418,62 @@ BEGIN ANALYSIS:"""
                 chunks = doc.get("chunks", [])
                 if chunks:
                     parts.append("\n**Document Content (no KVPs found):**")
-                    for i, chunk in enumerate(chunks[:3], 1):  # Show first 3 chunks
+                    # Show ALL retrieved chunks - no arbitrary limit
+                    for i, chunk in enumerate(chunks, 1):
                         chunk_text = chunk.get("text", "")
-                        if len(chunk_text) > 400:
-                            chunk_text = chunk_text[:400] + "..."
+                        # Only truncate if truly massive (>3000 chars)
+                        if len(chunk_text) > 3000:
+                            chunk_text = chunk_text[:3000] + "..."
                         parts.append(f"\nChunk {i}: {chunk_text}")
             else:
-                # Show each section with its KVPs
-                for section_key, section_kvps in list(kvps_by_section.items())[:5]:  # Limit to 5 sections
-                    if section_key in sections_shown:
-                        continue
-                    sections_shown.add(section_key)
-                    
+                # Build section context mapping once per document (deduplication)
+                section_to_context: Dict[str, str] = {}
+                for section_key in kvps_by_section.keys():
+                    # Find chunk containing this section
+                    for chunk in doc.get("chunks", []):
+                        chunk_text = chunk.get("text", "")
+                        # Simple heuristic: if section title appears in chunk, it's likely the right one
+                        if section_key.lower() in chunk_text.lower()[:500]:
+                            # Only truncate if truly massive (>3000 chars)
+                            if len(chunk_text) > 3000:
+                                chunk_text = chunk_text[:3000] + "..."
+                            section_to_context[section_key] = chunk_text
+                            break
+                
+                # Show ALL sections with retrieved KVPs - no arbitrary limit
+                for section_key, section_kvps in kvps_by_section.items():
                     parts.append(f"\n**Section: {section_key}**")
                     
                     # Show section context if available
-                    if section_key in section_to_chunks:
-                        context_text = section_to_chunks[section_key][0]
-                        # Truncate long sections
-                        if len(context_text) > 500:
-                            context_text = context_text[:500] + "..."
-                        parts.append(f"Context: {context_text}")
+                    if section_key in section_to_context:
+                        parts.append(f"Context: {section_to_context[section_key]}")
                         parts.append("")
                     
-                    # Show KVPs from this section
+                    # Show ALL KVPs from this section - no arbitrary limit
                     parts.append("Fields extracted:")
-                    for kvp in section_kvps[:10]:  # Limit to 10 KVPs per section
+                    for kvp in section_kvps:
                         key = kvp.get("key", "")
                         value = kvp.get("value", "")
                         parts.append(f"  • {key}: {value}")
             
-            # Show tables for this document (if any)
+            # Show ALL tables for this document - no arbitrary limit
             tables = doc.get("tables", [])
             if tables:
                 parts.append(f"\n**Tables in Document:**")
-                for i, table in enumerate(tables[:2], 1):  # Limit to 2 tables
+                for i, table in enumerate(tables, 1):
                     headers = table.get("headers", [])
                     rows = table.get("rows", [])
                     
                     if headers:
                         parts.append(f"\nTable {i} Headers: {', '.join(headers)}")
                     
-                    # Show first 5 rows
+                    # Show ALL rows - no arbitrary limit
                     if isinstance(rows, list):
-                        for j, row in enumerate(rows[:5], 1):
+                        for j, row in enumerate(rows, 1):
                             if isinstance(row, dict):
-                                row_str = ", ".join(f"{k}={v}" for k, v in list(row.items())[:4])
+                                # Show all columns in the row
+                                row_str = ", ".join(f"{k}={v}" for k, v in row.items())
                                 parts.append(f"  Row {j}: {row_str}")
-                        if len(rows) > 5:
-                            parts.append(f"  ... ({len(rows) - 5} more rows)")
         
         return "\n".join(parts)
 

@@ -152,12 +152,18 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         3. Authorization: Bearer <token>
         """
         # 1. Easy Auth primary header
-        easy_auth_token = request.headers.get("X-MS-TOKEN-AAD-ID-TOKEN")
+        easy_auth_token = (
+            request.headers.get("x-ms-token-aad-id-token")
+            or request.headers.get("X-MS-TOKEN-AAD-ID-TOKEN")
+        )
         if easy_auth_token:
             return easy_auth_token
         
         # 2. Easy Auth backup (base64-encoded claims)
-        client_principal = request.headers.get("X-MS-CLIENT-PRINCIPAL")
+        client_principal = (
+            request.headers.get("x-ms-client-principal")
+            or request.headers.get("X-MS-CLIENT-PRINCIPAL")
+        )
         if client_principal:
             try:
                 decoded = base64.b64decode(client_principal).decode("utf-8")
@@ -169,8 +175,11 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         
         # 3. Forwarded/Original Authorization headers (some proxies strip Authorization)
         auth_header = (
-            request.headers.get("X-Forwarded-Authorization")
+            request.headers.get("x-forwarded-authorization")
+            or request.headers.get("X-Forwarded-Authorization")
+            or request.headers.get("x-original-authorization")
             or request.headers.get("X-Original-Authorization")
+            or request.headers.get("authorization")
             or request.headers.get("Authorization")
         )
         if auth_header:

@@ -1383,20 +1383,17 @@ BEGIN ANALYSIS:"""
         """
         Sentence-level comprehensive extraction using Azure DI language spans.
         
-        This method provides fine-grained evidence retrieval by:
-        1. Taking HippoRAG evidence entities
-        2. Traversing graph to find related Documents
-        3. Using Azure DI language_spans to extract individual sentences
-        4. Feeding precise sentence-level context to LLM for comparison
+        Provides RAW evidence to LLM without pre-extracted interpretations:
+        1. Sentences (from Azure DI language_spans) - precise text boundaries
+        2. Tables (headers + rows) - raw structured data
+        3. Original HippoRAG chunks - the evidence PPR traversal found
         
-        ADVANTAGES over chunk-level:
-        - More precise: Sentences instead of 1000+ char chunks
-        - Less noise: Only relevant sentences from Azure DI boundaries
-        - Better citation: Each sentence has offset/length for exact sourcing
+        NO KVPs - they are pre-extracted interpretations that interfere with LLM judgment.
+        The LLM should work from raw evidence only.
         
         Args:
             query: User's comparison query
-            text_chunks: Fallback chunks (used if sentence extraction fails)
+            text_chunks: HippoRAG evidence chunks (original PPR output)
             evidence_nodes: List of (entity_id, ppr_score) from HippoRAG
             
         Returns:
@@ -1406,20 +1403,19 @@ BEGIN ANALYSIS:"""
         from collections import defaultdict
         
         # =====================================================================
-        # STEP 1: Get sentence-level context from documents
+        # STEP 1: Get sentence-level context from documents (via entity traversal)
         # =====================================================================
         sentence_docs: List[Dict[str, Any]] = []
         
         if self.text_store and hasattr(self.text_store, "get_sentence_level_context"):
             try:
-                # Extract entity IDs from evidence nodes
                 entity_ids = [node[0] for node in evidence_nodes] if evidence_nodes else []
                 
                 if entity_ids:
                     sentence_docs = await self.text_store.get_sentence_level_context(
                         entity_ids,
                         top_k_docs=10,
-                        max_sentences_per_doc=50,  # More sentences for comprehensive analysis
+                        max_sentences_per_doc=50,
                     )
                     logger.info(
                         "comprehensive_sentence_level_retrieved",
@@ -1431,177 +1427,200 @@ BEGIN ANALYSIS:"""
                 logger.warning("comprehensive_sentence_level_failed", error=str(e))
         
         # =====================================================================
-        # STEP 2: Also get KVPs/Tables for structured data
+        # STEP 2: Get Tables ONLY (no KVPs - they interfere with LLM judgment)
         # =====================================================================
-        graph_docs: List[Dict[str, Any]] = []
+        tables_by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         
         if self.text_store and hasattr(self.text_store, "get_chunks_with_graph_structure"):
             try:
                 graph_docs = await self.text_store.get_chunks_with_graph_structure(limit=50)
+                for graph_doc in graph_docs:
+                    doc_title = graph_doc.get("document_title", "Unknown")
+                    tables = graph_doc.get("tables", [])
+                    if tables:
+                        tables_by_doc[doc_title].extend(tables)
             except Exception as e:
-                logger.warning("comprehensive_graph_structure_failed", error=str(e))
+                logger.warning("comprehensive_tables_retrieval_failed", error=str(e))
         
         # =====================================================================
-        # STEP 3: Build combined context with sentences + KVPs
+        # STEP 3: Build RAW EVIDENCE context (sentences + tables + HippoRAG chunks)
         # =====================================================================
         combined_context_parts = []
-        combined_context_parts.append("=" * 60)
-        combined_context_parts.append("SENTENCE-LEVEL EVIDENCE (from Azure DI language spans)")
-        combined_context_parts.append("=" * 60)
-        
         citations = []
         citation_idx = 1
         
-        # Group sentences by document
-        for doc in sentence_docs:
-            doc_title = doc.get("document_title", "Unknown")
-            sentences = doc.get("sentences", [])
+        # --- SECTION A: Sentence-level evidence from Azure DI ---
+        if sentence_docs:
+            combined_context_parts.append("=" * 60)
+            combined_context_parts.append("SECTION A: SENTENCE-LEVEL EVIDENCE")
+            combined_context_parts.append("(Extracted using Azure Document Intelligence language spans)")
+            combined_context_parts.append("=" * 60)
             
-            if not sentences:
-                continue
-            
-            combined_context_parts.append(f"\n### Document [{citation_idx}]: {doc_title}")
-            combined_context_parts.append("-" * 40)
-            combined_context_parts.append(f"Extracted {len(sentences)} sentences from Azure DI language spans:\n")
-            
-            # Add sentences with their offsets for traceability
-            for i, sent in enumerate(sentences, 1):
-                text = sent.get("text", "").strip()
-                offset = sent.get("offset", 0)
-                length = sent.get("length", 0)
-                confidence = sent.get("confidence", 0.0)
+            for doc in sentence_docs:
+                doc_title = doc.get("document_title", "Unknown")
+                sentences = doc.get("sentences", [])
                 
-                # Skip very short sentences
-                if len(text) < 10:
+                if not sentences:
                     continue
                 
-                combined_context_parts.append(
-                    f"  [{i}] (offset={offset}, len={length}, conf={confidence:.2f}): {text}"
-                )
-            
-            # Add citation for this document
-            citations.append({
-                "citation": f"[{citation_idx}]",
-                "document_id": doc.get("document_id", ""),
-                "document_title": doc_title,
-                "document_url": "",
-                "sentence_count": len(sentences),
-                "text_preview": sentences[0].get("text", "")[:200] if sentences else "",
-            })
-            citation_idx += 1
-        
-        # Add KVPs from graph if available
-        for graph_doc in graph_docs:
-            doc_title = graph_doc.get("document_title", "Unknown")
-            kvps = graph_doc.get("kvps", [])
-            tables = graph_doc.get("tables", [])
-            
-            if not kvps and not tables:
-                continue
-            
-            # Find existing citation for this document
-            existing_citation = next(
-                (c for c in citations if c.get("document_title") == doc_title),
-                None
-            )
-            
-            if existing_citation:
-                citation_ref = existing_citation["citation"]
-            else:
-                citation_ref = f"[{citation_idx}]"
+                combined_context_parts.append(f"\n### Document [{citation_idx}]: {doc_title}")
+                combined_context_parts.append("-" * 40)
+                
+                for i, sent in enumerate(sentences, 1):
+                    text = sent.get("text", "").strip()
+                    if len(text) < 5:
+                        continue
+                    combined_context_parts.append(f"  S{i}: {text}")
+                
                 citations.append({
-                    "citation": citation_ref,
-                    "document_id": graph_doc.get("document_id", ""),
+                    "citation": f"[{citation_idx}]",
+                    "document_id": doc.get("document_id", ""),
                     "document_title": doc_title,
-                    "kvp_count": len(kvps),
-                    "table_count": len(tables),
+                    "sentence_count": len(sentences),
+                    "source": "azure_di_sentences",
                 })
                 citation_idx += 1
+        
+        # --- SECTION B: Table data (raw headers + rows) ---
+        if tables_by_doc:
+            combined_context_parts.append("\n" + "=" * 60)
+            combined_context_parts.append("SECTION B: TABLE DATA")
+            combined_context_parts.append("(Raw table headers and rows from documents)")
+            combined_context_parts.append("=" * 60)
             
-            combined_context_parts.append(f"\n### Structured Data {citation_ref}: {doc_title}")
-            combined_context_parts.append("-" * 40)
-            
-            if kvps:
-                combined_context_parts.append("Key-Value Pairs (from Azure DI):")
-                for kvp in kvps:
-                    key = kvp.get("key", "")
-                    value = kvp.get("value", "")
-                    if key and value:
-                        combined_context_parts.append(f"  • {key}: {value}")
-            
-            if tables:
-                combined_context_parts.append("\nTables:")
-                for i, table in enumerate(tables, 1):
+            for doc_title, tables in tables_by_doc.items():
+                # Find or create citation for this document
+                existing = next((c for c in citations if c.get("document_title") == doc_title), None)
+                if existing:
+                    cite_ref = existing["citation"]
+                else:
+                    cite_ref = f"[{citation_idx}]"
+                    citations.append({
+                        "citation": cite_ref,
+                        "document_id": "",
+                        "document_title": doc_title,
+                        "source": "tables",
+                    })
+                    citation_idx += 1
+                
+                combined_context_parts.append(f"\n### Tables from {cite_ref}: {doc_title}")
+                combined_context_parts.append("-" * 40)
+                
+                for t_idx, table in enumerate(tables, 1):
                     headers = table.get("headers", [])
                     rows = table.get("rows", [])
+                    
                     if headers:
-                        combined_context_parts.append(f"  Table {i} Headers: {', '.join(headers)}")
+                        combined_context_parts.append(f"\nTable {t_idx} Headers: | {' | '.join(str(h) for h in headers)} |")
+                    
                     if rows and isinstance(rows, list):
-                        for j, row in enumerate(rows[:5], 1):  # Limit rows
+                        for r_idx, row in enumerate(rows, 1):
                             if isinstance(row, dict):
-                                row_str = ", ".join(f"{k}={v}" for k, v in row.items())
-                                combined_context_parts.append(f"    Row {j}: {row_str}")
+                                row_vals = [str(row.get(h, "")) for h in headers] if headers else list(row.values())
+                                combined_context_parts.append(f"  Row {r_idx}: | {' | '.join(row_vals)} |")
+                            elif isinstance(row, list):
+                                combined_context_parts.append(f"  Row {r_idx}: | {' | '.join(str(v) for v in row)} |")
+        
+        # --- SECTION C: Original HippoRAG evidence chunks ---
+        if text_chunks:
+            combined_context_parts.append("\n" + "=" * 60)
+            combined_context_parts.append("SECTION C: HIPPORAG EVIDENCE CHUNKS")
+            combined_context_parts.append("(Original text chunks from graph traversal)")
+            combined_context_parts.append("=" * 60)
+            
+            # Group chunks by document
+            chunks_by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+            for chunk in text_chunks:
+                doc_title = chunk.get("document_title") or chunk.get("metadata", {}).get("document_title") or chunk.get("source", "Unknown")
+                chunks_by_doc[doc_title].append(chunk)
+            
+            for doc_title, chunks in chunks_by_doc.items():
+                # Find or create citation
+                existing = next((c for c in citations if c.get("document_title") == doc_title), None)
+                if existing:
+                    cite_ref = existing["citation"]
+                else:
+                    cite_ref = f"[{citation_idx}]"
+                    citations.append({
+                        "citation": cite_ref,
+                        "document_id": "",
+                        "document_title": doc_title,
+                        "source": "hipporag_chunks",
+                    })
+                    citation_idx += 1
+                
+                combined_context_parts.append(f"\n### Chunks from {cite_ref}: {doc_title}")
+                combined_context_parts.append("-" * 40)
+                
+                for c_idx, chunk in enumerate(chunks[:10], 1):  # Limit to 10 chunks per doc
+                    text = chunk.get("text", "")[:1500]  # Truncate very long chunks
+                    if text:
+                        combined_context_parts.append(f"\nChunk {c_idx}:\n{text}")
         
         combined_context = "\n".join(combined_context_parts)
         
         # =====================================================================
-        # STEP 4: LLM Analysis with sentence-level context
+        # STEP 4: Fallback if no evidence
         # =====================================================================
-        if not sentence_docs and not graph_docs:
-            # Fallback to regular comprehensive mode if no sentence data
+        if not sentence_docs and not tables_by_doc and not text_chunks:
             logger.warning("comprehensive_sentence_level_no_data_fallback")
             return await self._comprehensive_two_pass_extract(query, text_chunks, evidence_nodes)
         
-        comparison_prompt = f"""You are analyzing documents to find inconsistencies using SENTENCE-LEVEL evidence.
+        # =====================================================================
+        # STEP 5: LLM Analysis with RAW evidence only
+        # =====================================================================
+        comparison_prompt = f"""You are analyzing documents to find inconsistencies using RAW EVIDENCE.
 
 QUERY: "{query}"
 
 {combined_context}
 
-TASK: Using the sentence-level evidence above, identify ALL inconsistencies between documents.
+TASK: Using the raw evidence above, identify ALL inconsistencies between documents.
 
-IMPORTANT:
-- Each sentence has offset/length metadata showing its exact position in the original document
-- This is PRECISE evidence from Azure Document Intelligence
-- Reference specific sentences by their number [1], [2], etc.
+The evidence is organized in three sections:
+- SECTION A: Sentence-level text (most precise - from Azure DI)
+- SECTION B: Table data (headers and rows)
+- SECTION C: HippoRAG chunks (broader context from graph traversal)
 
-For each inconsistency found:
-1. FIELD: What field/value is inconsistent
-2. DOCUMENTS: Which documents disagree (use document citations [1], [2], etc.)
-3. EVIDENCE: Quote the specific sentence(s) that show the inconsistency
-4. SIGNIFICANCE: Why this matters
+For each inconsistency found, provide:
+1. FIELD: What field/value is inconsistent (e.g., "Total Amount", "Product Model")
+2. DOCUMENTS: Which documents disagree (use citations [1], [2], etc.)
+3. EVIDENCE: Quote the exact text from each document showing the discrepancy
+4. SIGNIFICANCE: Why this inconsistency matters
 
-Include ALL discrepancies in:
-- Amounts/prices
-- Party names
-- Dates
-- Terms and conditions
+Look for ALL discrepancies in:
+- Amounts, prices, totals
+- Product/service descriptions
+- Party names, addresses
+- Dates, terms, conditions
+- Quantities, specifications
 - Any other factual disagreements
 
-BEGIN SENTENCE-LEVEL ANALYSIS:"""
+BE THOROUGH - list every inconsistency you find, even minor ones.
+
+BEGIN ANALYSIS:"""
 
         if not self.llm:
             logger.error("llm_not_available")
-            narrative = "## Analysis Failed: LLM not available\n\nSentence-level context was retrieved but cannot be analyzed."
+            narrative = "## Analysis Failed: LLM not available\n\nRaw evidence was retrieved but cannot be analyzed."
         else:
             try:
                 comparison_result = await self.llm.acomplete(comparison_prompt)
                 narrative = comparison_result.text.strip()
             except Exception as e:
                 logger.error("llm_sentence_analysis_failed", error=str(e))
-                # Fallback: Show the extracted sentences
-                narrative = "## Analysis Failed\n\n### Extracted Sentences:\n\n"
-                for doc in sentence_docs:
-                    narrative += f"**{doc.get('document_title', 'Unknown')}:**\n"
-                    for sent in doc.get("sentences", [])[:10]:
-                        narrative += f"- {sent.get('text', '')}\n"
-                    narrative += "\n"
+                narrative = f"## Analysis Failed: {str(e)}\n\n### Raw Evidence Summary:\n"
+                narrative += f"- Sentences extracted: {sum(len(d.get('sentences', [])) for d in sentence_docs)}\n"
+                narrative += f"- Tables found: {sum(len(t) for t in tables_by_doc.values())}\n"
+                narrative += f"- HippoRAG chunks: {len(text_chunks)}\n"
         
         logger.info(
             "comprehensive_sentence_level_complete",
             query=query[:50],
-            num_docs=len(sentence_docs),
+            num_sentence_docs=len(sentence_docs),
             total_sentences=sum(len(d.get("sentences", [])) for d in sentence_docs),
+            total_tables=sum(len(t) for t in tables_by_doc.values()),
+            hipporag_chunks=len(text_chunks),
         )
         
         return {
@@ -1616,7 +1635,7 @@ BEGIN SENTENCE-LEVEL ANALYSIS:"""
             ],
             "citations": citations,
             "evidence_path": [node[0] for node in evidence_nodes],
-            "text_chunks_used": sum(len(d.get("sentences", [])) for d in sentence_docs),
+            "text_chunks_used": len(text_chunks) + sum(len(d.get("sentences", [])) for d in sentence_docs),
             "processing_mode": "comprehensive_sentence_level",
             "sentence_based": True,
         }

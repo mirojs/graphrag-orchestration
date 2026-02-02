@@ -36,3 +36,20 @@ services:
           echo "Worker deployed successfully"
           # Prune dangling images
           docker image prune -f || true
+
+  # API Gateway B2C - External ID (consumer-facing) authentication
+  graphrag-api-b2c:
+    project: .
+    language: python
+    host: containerapp
+    docker:
+      path: ./Dockerfile.api
+      context: .
+      target: ""
+    hooks:
+      postdeploy:
+        shell: sh
+        run: |
+          echo "API B2C Gateway deployed successfully"
+          # Prune dangling images
+          docker image prune -f || true

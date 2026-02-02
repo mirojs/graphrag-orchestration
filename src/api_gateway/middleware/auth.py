@@ -79,7 +79,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                                 user_id=request.state.user_id,
                                 message="No group claim found in token. Using GROUP_ID_OVERRIDE."
                             )
-                            return
+                            groups = [request.state.group_id]
                         raise HTTPException(
                             status_code=status.HTTP_403_FORBIDDEN,
                             detail="No group claim found in token. User must be assigned to an Azure AD group."

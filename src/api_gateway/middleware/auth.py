@@ -79,6 +79,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     groups = claims.get("groups", [])
                     if not groups:
                         if settings.GROUP_ID_OVERRIDE:
+                            # Use override when groups claim is missing
                             request.state.group_id = settings.GROUP_ID_OVERRIDE
                             request.state.user_id = claims.get("oid")
                             logger.warning(
@@ -86,13 +87,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                                 request.state.group_id,
                                 request.state.user_id,
                             )
-                            groups = [request.state.group_id]
-                        raise HTTPException(
-                            status_code=status.HTTP_403_FORBIDDEN,
-                            detail="No group claim found in token. User must be assigned to an Azure AD group."
-                        )
-                    request.state.group_id = groups[0]
-                    request.state.user_id = claims.get("oid")  # Optional user tracking
+                        else:
+                            raise HTTPException(
+                                status_code=status.HTTP_403_FORBIDDEN,
+                                detail="No group claim found in token. User must be assigned to an Azure AD group."
+                            )
+                    else:
+                        request.state.group_id = groups[0]
+                        request.state.user_id = claims.get("oid")  # Optional user tracking
                     
                 elif self.auth_type == "B2C":
                     # B2C: Use oid as user_id (individual tenant)

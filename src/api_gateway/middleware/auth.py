@@ -60,6 +60,14 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         try:
             # Extract token from Easy Auth headers or Authorization header
             token = self._extract_token(request)
+            if not token:
+                auth_value = request.headers.get("authorization") or request.headers.get("Authorization")
+                if auth_value:
+                    auth_value = auth_value.strip()
+                    if auth_value.lower().startswith("bearer "):
+                        token = auth_value.split(" ", 1)[1]
+                    else:
+                        token = auth_value
             
             if token:
                 # Validate and decode token

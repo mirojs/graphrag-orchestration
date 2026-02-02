@@ -26,6 +26,17 @@ param authTenantId string = ''
 @allowed(['B2B', 'B2C'])
 param authType string = 'B2B'
 
+@description('Use External ID (ciamlogin.com) issuer instead of standard Azure AD')
+param useExternalIdIssuer bool = false
+
+@description('External ID tenant name (e.g., graphragb2c) - required if useExternalIdIssuer is true')
+param externalIdTenantName string = ''
+
+// Calculate the OpenID issuer URL based on auth type
+var openIdIssuerUrl = useExternalIdIssuer && !empty(externalIdTenantName) 
+  ? 'https://${externalIdTenantName}.ciamlogin.com/${authTenantId}/v2.0'
+  : 'https://login.microsoftonline.com/${authTenantId}/v2.0'
+
 resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
   name: name
   location: location
@@ -94,7 +105,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
         enabled: true
         registration: {
           clientId: authClientId
-          openIdIssuer: 'https://login.microsoftonline.com/${authTenantId}/v2.0'
+          openIdIssuer: openIdIssuerUrl
         }
         validation: {
           allowedAudiences: [

@@ -23,6 +23,21 @@
     "authClientId": {
       "value": "b68b6881-80ba-4cec-b9dd-bd2232ec8817"
     },
+    "enableB2C": {
+      "value": "${ENABLE_B2C=false}"
+    },
+    "b2cTenantName": {
+      "value": "${B2C_TENANT_NAME}"
+    },
+    "b2cTenantId": {
+      "value": "${B2C_TENANT_ID}"
+    },
+    "b2cClientId": {
+      "value": "${B2C_CLIENT_ID}"
+    },
+    "b2cClientSecret": {
+      "value": "${B2C_CLIENT_SECRET}"
+    },
     "serviceGraphragImageName": {
       "value": "${SERVICE_GRAPHRAG_IMAGE_NAME}"
     }

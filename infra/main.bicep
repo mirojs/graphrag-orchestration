@@ -50,6 +50,23 @@ param authClientId string = ''
 @allowed(['B2B', 'B2C'])
 param authType string = 'B2B'
 
+// External ID (B2C) parameters for consumer-facing app
+@description('Enable External ID (B2C) consumer app deployment')
+param enableB2C bool = false
+
+@description('External ID tenant name (e.g., graphragb2c)')
+param b2cTenantName string = ''
+
+@description('External ID tenant ID')
+param b2cTenantId string = ''
+
+@description('External ID app client ID')
+param b2cClientId string = ''
+
+@secure()
+@description('External ID app client secret')
+param b2cClientSecret string = ''
+
 @description('Skip role assignments if they already exist')
 param skipRoleAssignments bool = false
 
@@ -503,6 +520,75 @@ var sharedSecrets = concat([
   }
 ] : [])
 
+// ============================================================================
+// GraphRAG API B2C (External ID) - Consumer-facing endpoint
+// ============================================================================
+// Deploys a separate container app for External ID (B2C) authentication
+// Uses oid (user object ID) as partition key instead of groups
+module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empty(b2cClientId)) {
+  name: 'graphrag-api-b2c'
+  scope: rg
+  params: {
+    name: 'graphrag-api-b2c'
+    location: location
+    tags: union(tags, {
+      'azd-service-name': 'graphrag-api-b2c'
+    })
+    containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
+    containerRegistryName: containerRegistry.name
+    registryUsername: useAcrPassword ? acrUsername : ''
+    registryPasswordSecretName: useAcrPassword ? 'acr-password' : ''
+    containerName: 'graphrag-api-b2c'
+    containerImage: apiImageName
+    targetPort: 8000
+    // External ID (B2C) auth configuration
+    enableAuth: true
+    authClientId: b2cClientId
+    authTenantId: b2cTenantId
+    authType: 'B2C'
+    useExternalIdIssuer: true
+    externalIdTenantName: b2cTenantName
+    env: concat([
+      {
+        name: 'SERVICE_ROLE'
+        value: 'api'
+      }
+      {
+        name: 'AUTH_TYPE'
+        value: 'B2C'
+      }
+      {
+        name: 'REQUIRE_AUTH'
+        value: 'true'
+      }
+      {
+        name: 'AUTH_CLIENT_ID'
+        value: b2cClientId
+      }
+      {
+        name: 'ALLOW_LEGACY_GROUP_HEADER'
+        value: 'false'
+      }
+    ], sharedEnvVars, !empty(voyageApiKey) ? [
+      {
+        name: 'VOYAGE_API_KEY'
+        secretRef: 'voyage-api-key'
+      }
+    ] : [], !empty(adminApiKey) ? [
+      {
+        name: 'ADMIN_API_KEY'
+        secretRef: 'admin-api-key'
+      }
+    ] : [])
+    secrets: concat(sharedSecrets, !empty(adminApiKey) ? [
+      {
+        name: 'admin-api-key'
+        value: adminApiKey
+      }
+    ] : [])
+  }
+}
+
 // GraphRAG Worker Container App (background job processing)
 module graphragWorker './core/host/container-app-worker.bicep' = {
   name: 'graphrag-worker'
@@ -631,6 +717,8 @@ output AZURE_CONTAINER_REGISTRY_ENDPOINT string = '${containerRegistry.name}.azu
 output AZURE_CONTAINER_REGISTRY_NAME string = containerRegistry.name
 output GRAPHRAG_API_URI string = graphragApi.outputs.uri
 output GRAPHRAG_API_NAME string = graphragApi.outputs.name
+output GRAPHRAG_API_B2C_URI string = enableB2C && !empty(b2cClientId) ? graphragApiB2C.outputs.uri : ''
+output GRAPHRAG_API_B2C_NAME string = enableB2C && !empty(b2cClientId) ? graphragApiB2C.outputs.name : ''
 output GRAPHRAG_WORKER_NAME string = graphragWorker.outputs.name
 output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.cosmosAccountEndpoint
 output COSMOS_DB_DATABASE_NAME string = cosmosDb.outputs.databaseName

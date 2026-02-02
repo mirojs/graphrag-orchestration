@@ -176,6 +176,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         if auth_header:
             if auth_header.lower().startswith("bearer "):
                 return auth_header.split(" ", 1)[1]
+            logger.warning(
+                "auth_header_unexpected_format: prefix=%s len=%s",
+                auth_header[:20],
+                len(auth_header)
+            )
+            return auth_header
         
         return None
     

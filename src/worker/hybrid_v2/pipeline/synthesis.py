@@ -1410,7 +1410,7 @@ BEGIN ANALYSIS:"""
             all_amounts = ext.get("kvp_amounts", []) + ext.get("regex_amounts", [])
             if all_amounts:
                 parts.append("\n**Key Amounts/Prices:**")
-                for f in all_amounts[:10]:  # Limit display
+                for f in all_amounts[:30]:  # Show more fields
                     src = f.get("source", "DI")
                     key_label = f.get("key") or f.get("field", "amount")
                     parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
@@ -1419,7 +1419,7 @@ BEGIN ANALYSIS:"""
             all_parties = ext.get("kvp_parties", []) + ext.get("regex_parties", [])
             if all_parties:
                 parts.append("\n**Key Parties/Names:**")
-                for f in all_parties[:10]:
+                for f in all_parties[:30]:  # Show more fields
                     src = f.get("source", "DI")
                     key_label = f.get("key") or f.get("field", "party")
                     parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
@@ -1428,7 +1428,7 @@ BEGIN ANALYSIS:"""
             all_dates = ext.get("kvp_dates", []) + ext.get("regex_dates", [])
             if all_dates:
                 parts.append("\n**Key Dates:**")
-                for f in all_dates[:10]:
+                for f in all_dates[:30]:  # Show more fields
                     src = f.get("source", "DI")
                     key_label = f.get("key") or f.get("field", "date")
                     parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
@@ -1436,8 +1436,17 @@ BEGIN ANALYSIS:"""
             # Identifiers
             if ext.get("kvp_identifiers"):
                 parts.append("\n**Key Identifiers:**")
-                for f in ext.get("kvp_identifiers", [])[:10]:
+                for f in ext.get("kvp_identifiers", [])[:30]:  # Show more fields
                     parts.append(f"  - {f.get('key', 'id')}: {f.get('value')}")
+            
+            # Other KVPs (miscellaneous fields that don't fit above categories)
+            kvp_other = ext.get("kvp_other", [])
+            if kvp_other:
+                parts.append("\n**Other Key Fields:**")
+                for f in kvp_other[:30]:  # Show more fields
+                    src = f.get("source", "DI")
+                    key_label = f.get("key") or f.get("field", "field")
+                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
         
         # Section 3: Tables PER DOCUMENT (important for structured data)
         has_tables = any(doc.get("tables") for doc in graph_docs)
@@ -1473,7 +1482,7 @@ BEGIN ANALYSIS:"""
                     
                     # Rows may be JSON parsed or list of dicts
                     if isinstance(rows, list):
-                        for j, row in enumerate(rows[:5]):  # Limit to 5 rows
+                        for j, row in enumerate(rows[:15]):  # Show more table rows
                             if isinstance(row, dict):
                                 parts.append(f"  Row {j+1}: {row}")
                             else:

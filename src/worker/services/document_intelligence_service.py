@@ -269,27 +269,39 @@ class DocumentIntelligenceService:
         """Extract detected languages from document (FREE add-on).
         
         Returns:
-            List of language dicts with locale, confidence, span_count
+            List of language dicts with locale, confidence, span_count, and spans
+            (spans contain offset/length for sentence-level boundaries)
         """
         languages: List[Dict[str, Any]] = []
         
         for lang in (getattr(result, "languages", None) or []):
             locale = getattr(lang, "locale", "") or ""
             confidence = getattr(lang, "confidence", 0.0) or 0.0
-            spans = getattr(lang, "spans", None) or []
+            raw_spans = getattr(lang, "spans", None) or []
+            
+            # Preserve span offsets for sentence-level context extraction
+            # Each span represents a text segment (often sentence/block level)
+            spans_data = []
+            for span in raw_spans:
+                offset = getattr(span, "offset", 0) or 0
+                length = getattr(span, "length", 0) or 0
+                if length > 0:
+                    spans_data.append({"offset": offset, "length": length})
             
             if locale:
                 languages.append({
                     "locale": locale,
                     "confidence": confidence,
-                    "span_count": len(spans),
+                    "span_count": len(spans_data),
+                    "spans": spans_data,  # Preserved for sentence-level extraction
                 })
         
         if languages:
             primary_lang = max(languages, key=lambda x: x.get("span_count", 0))
+            total_spans = sum(l.get("span_count", 0) for l in languages)
             logger.info(
-                f"🌐 Detected {len(languages)} languages, primary: {primary_lang.get('locale')}",
-                extra={"languages": [l["locale"] for l in languages]}
+                f"🌐 Detected {len(languages)} languages, primary: {primary_lang.get('locale')}, total spans: {total_spans}",
+                extra={"languages": [l["locale"] for l in languages], "total_spans": total_spans}
             )
         
         return languages

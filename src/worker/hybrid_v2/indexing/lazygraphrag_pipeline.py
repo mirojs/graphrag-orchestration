@@ -25,6 +25,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple, cast
+from urllib.parse import unquote
 
 from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
 from llama_index.core.node_parser import SentenceSplitter
@@ -406,6 +407,10 @@ class LazyGraphRAGIndexingPipeline:
             )
             if isinstance(title, str) and title.lower().endswith(".pdf"):
                 title = title[:-4]
+            # URL-decode title to fix KVP section_path matching
+            # (e.g., "BUILDERS%20LIMITED%20WARRANTY" -> "BUILDERS LIMITED WARRANTY")
+            if isinstance(title, str):
+                title = unquote(title)
 
             # If content is itself a URL, treat it as source.
             if isinstance(content, str) and content.strip().startswith(("http://", "https://")):
@@ -1396,17 +1401,21 @@ Output:
                     
                     logger.info(f"📈 Created {count} Figure nodes with {len(ref_edges)} element references for {doc_id}")
                 
-                # 3. Update Document nodes with detected languages
+                # 3. Update Document nodes with detected languages (including spans for sentence-level extraction)
                 if languages:
+                    import json as json_module
                     # Find primary language (most spans)
                     primary_lang = max(languages, key=lambda x: x.get("span_count", 0))
                     all_locales = [lang.get("locale", "") for lang in languages if lang.get("locale")]
+                    # Store full language data with spans for sentence-level context extraction
+                    language_spans_json = json_module.dumps(languages)
                     
                     result = session.run(
                         """
                         MATCH (d:Document {id: $doc_id, group_id: $group_id})
                         SET d.primary_language = $primary_lang,
                             d.detected_languages = $all_langs,
+                            d.language_spans = $language_spans,
                             d.language_updated_at = datetime()
                         RETURN count(d) AS count
                         """,
@@ -1414,9 +1423,11 @@ Output:
                         group_id=group_id,
                         primary_lang=primary_lang.get("locale", ""),
                         all_langs=all_locales,
+                        language_spans=language_spans_json,
                     )
                     stats["languages_updated"] += result.single()["count"]
-                    logger.info(f"🌐 Updated language metadata for {doc_id}: primary={primary_lang.get('locale')}, all={all_locales}")
+                    total_spans = sum(lang.get("span_count", 0) for lang in languages)
+                    logger.info(f"🌐 Updated language metadata for {doc_id}: primary={primary_lang.get('locale')}, locales={all_locales}, total_spans={total_spans}")
                 
                 # 4. Log selection marks for future enhancement
                 if selection_marks:

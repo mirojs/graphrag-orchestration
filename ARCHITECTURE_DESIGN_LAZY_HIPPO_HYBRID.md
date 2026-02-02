@@ -3,6 +3,30 @@
 **Last Updated:** February 2, 2026
 
 **Recent Updates (February 2, 2026):**
+- ✅ **V2 Indexing Fixes & New Test Groups:** 4 new groups indexed with critical fixes
+  - **Fixes Applied:**
+    1. **URL-decoded Document titles:** `unquote(title)` in `lazygraphrag_pipeline.py` - fixes `BUILDERS%20LIMITED%20WARRANTY` → `BUILDERS LIMITED WARRANTY`
+    2. **Azure DI language spans preserved:** `document_intelligence_service.py` now stores `{offset, length}` per sentence/block
+    3. **Language spans in Neo4j:** `d.language_spans` JSON property on Document nodes (enables sentence-level context extraction)
+    4. **KVP→Document matching fixed:** Bidirectional CONTAINS query in `text_store.py` - 100% match rate (was 28.9%)
+  - **New Test Groups:**
+    | Group ID | Description | KNN Config | KNN Edges |
+    |----------|-------------|------------|-----------|
+    | `test-5pdfs-v2-fix1` | Baseline fix (URL decode + language spans) | Disabled | 9 |
+    | `test-5pdfs-v2-fix2` | Fix + KNN default (K=5, cutoff=0.60) | default | 548 |
+    | `test-5pdfs-v2-fix3` | Fix + KNN optimal (K=3, cutoff=0.80) | knn-1 | TBD |
+    | `test-5pdfs-v2-fix4` | Reserved for sentence-level synthesis | N/A | TBD |
+  - **Verified Results (test-5pdfs-v2-fix2):**
+    - ✅ Language spans: 127 total with offset/length (e.g., `{'offset': 2, 'length': 25}`)
+    - ✅ KNN edges: 548 SEMANTICALLY_SIMILAR
+    - ✅ Tables: 4/4 linked to Documents
+    - ✅ KVP→Document: 38/38 (100%) matched
+    - ✅ 17 chunks with embedding_v2 (2048 dim)
+  - **Indexing Script:** `scripts/index_4_new_groups_v2.py`
+  - **Files Modified:**
+    - `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` - URL decode, language spans storage
+    - `src/worker/services/document_intelligence_service.py` - Preserve span offsets
+    - `src/worker/hybrid_v2/indexing/text_store.py` - Improved KVP matching query
 - ✅ **Duplicate Container App Fixed:** Renamed service from `graphrag-api` to `graphrag-orchestration` in infrastructure
   - **Problem:** Deployment created duplicate container app `graphrag-api` while existing `graphrag-orchestration` had all environment variables
   - **Solution:** Updated `azure.yaml` and `infra/main.bicep` to use `graphrag-orchestration` service name
@@ -2373,7 +2397,9 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 
 - **V2 Pipeline Factory:** `src/worker/hybrid/indexing/lazygraphrag_indexing_pipeline.py` (`get_lazygraphrag_indexing_pipeline_v2()`)
 - **V2 Pipeline Engine:** `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`
-- **V2 Test Script (RECOMMENDED):** `scripts/index_5pdfs_v2_cloud.py` (uses API server with V2 factory)
+- **V2 Fixed Test Script (RECOMMENDED):** `scripts/index_4_new_groups_v2.py` (Feb 2, 2026 - includes URL decode, language spans, improved KVP matching)
+- **V2 Test Script (Legacy):** `scripts/index_5pdfs_v2_cloud.py` (uses API server with V2 factory)
+- **V2 Enhanced Script:** `scripts/index_5pdfs_v2_enhanced_examples.py` (enhanced entity extraction examples)
 - **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
 - **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
 - **Verification Script:** `check_edges.py` (compares graph structure between groups)

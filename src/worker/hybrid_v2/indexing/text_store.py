@@ -510,20 +510,23 @@ class Neo4jTextUnitStore:
         # Query 2: Get all KVPs - join to Document via section_path[0] fuzzy match
         # Note: KVPs don't have document_id populated, but section_path[0] contains
         # the document title (e.g. "BUILDERS LIMITED WARRANTY WITH ARBITRATION")
-        # which we fuzzy-match to Document.title (URL-encoded, e.g. "BUILDERS%20LIMITED%20WARRANTY")
+        # which we fuzzy-match to Document.title (URL-decoded, e.g. "BUILDERS LIMITED WARRANTY")
+        # Use bidirectional CONTAINS: either doc.title contains section start OR section contains doc.title
         kvps_query = """
         MATCH (kvp:KeyValuePair {group_id: $group_id})
         WHERE kvp.section_path IS NOT NULL AND size(kvp.section_path) > 0
-        WITH kvp, kvp.section_path[0] AS doc_section
+        WITH kvp, toUpper(kvp.section_path[0]) AS doc_section_upper
         OPTIONAL MATCH (d:Document {group_id: $group_id})
-        WHERE toUpper(replace(d.title, '%20', ' ')) CONTAINS toUpper(substring(doc_section, 0, 15))
+        WITH kvp, doc_section_upper, d, toUpper(d.title) AS doc_title_upper
+        WHERE doc_title_upper CONTAINS substring(doc_section_upper, 0, 20)
+           OR doc_section_upper CONTAINS doc_title_upper
         RETURN 
             kvp.key AS key,
             kvp.value AS value,
             kvp.confidence AS confidence,
             kvp.section_path AS section_path,
             kvp.page_number AS page_number,
-            coalesce(d.title, doc_section, 'Unknown') AS doc_title,
+            coalesce(d.title, kvp.section_path[0], 'Unknown') AS doc_title,
             d.id AS doc_id
         """
         

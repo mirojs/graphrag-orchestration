@@ -4,7 +4,7 @@ metadata:
 
 services:
   # API Gateway - handles HTTP requests, chat endpoints, folder management
-  graphrag-api:
+  graphrag-orchestration:
     project: .
     language: python
     host: containerapp

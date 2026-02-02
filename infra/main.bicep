@@ -13,19 +13,19 @@ param location string
 // azd generates parameter names as: service<ServiceName>ImageName
 // where ServiceName is PascalCase version of service name
 @description('API Gateway container image - handles HTTP requests')
-param serviceGraphragApiImageName string = ''
+param serviceGraphragOrchestrationImageName string = ''
 
 @description('Worker container image - processes background jobs')
 param serviceGraphragWorkerImageName string = ''
 
 @description('API Gateway image name from azd env (fallback)')
-param SERVICE_GRAPHRAG_API_IMAGE_NAME string = ''
+param SERVICE_GRAPHRAG_ORCHESTRATION_IMAGE_NAME string = ''
 
 @description('Worker image name from azd env (fallback)')
 param SERVICE_GRAPHRAG_WORKER_IMAGE_NAME string = ''
 
 // Resolve image names with explicit fallback to ensure correct images
-var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : (!empty(SERVICE_GRAPHRAG_API_IMAGE_NAME) ? SERVICE_GRAPHRAG_API_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-api-default:latest')
+var apiImageName = !empty(serviceGraphragOrchestrationImageName) ? serviceGraphragOrchestrationImageName : (!empty(SERVICE_GRAPHRAG_ORCHESTRATION_IMAGE_NAME) ? SERVICE_GRAPHRAG_ORCHESTRATION_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-orchestration-default:latest')
 var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : (!empty(SERVICE_GRAPHRAG_WORKER_IMAGE_NAME) ? SERVICE_GRAPHRAG_WORKER_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-worker-default:latest')
 
 @secure()
@@ -116,17 +116,17 @@ module redis './core/cache/redis.bicep' = {
 
 // GraphRAG API Gateway Container App
 module graphragApi './core/host/container-app.bicep' = {
-  name: 'graphrag-api'
+  name: 'graphrag-orchestration'
   scope: rg
   params: {
-    name: 'graphrag-api'
+    name: 'graphrag-orchestration'
     location: location
     tags: union(tags, {
-      'azd-service-name': 'graphrag-api'
+      'azd-service-name': 'graphrag-orchestration'
     })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
-    containerName: 'graphrag-api'
+    containerName: 'graphrag-orchestration'
     // API Gateway image - handles HTTP requests
     containerImage: apiImageName
     targetPort: 8000

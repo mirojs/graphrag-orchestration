@@ -65,8 +65,8 @@ TEST_QUERY = """List all areas of inconsistency identified in the invoice, organ
 TEST_GROUP_ID = "test-5pdfs-v2-enhanced-ex"
 
 
-async def get_test_chunks_from_neo4j(group_id: str, limit: int = 30) -> list:
-    """Fetch text chunks from Neo4j for the test group."""
+async def get_test_chunks_from_neo4j(group_id: str, limit: int = 50) -> list:
+    """Fetch ALL text chunks from Neo4j for the test group (for comprehensive mode)."""
     from src.core.config import settings
     
     neo4j_store = Neo4jStore(
@@ -75,14 +75,14 @@ async def get_test_chunks_from_neo4j(group_id: str, limit: int = 30) -> list:
         password=settings.NEO4J_PASSWORD,
     )
     
-    # Query for text chunks (using actual Chunk properties from V2 schema)
+    # Query for ALL text chunks (comprehensive mode needs all data)
     query = """
     MATCH (c:TextChunk)
     WHERE c.group_id = $group_id
-      AND (c.text CONTAINS 'invoice' OR c.text CONTAINS 'contract' OR c.text CONTAINS 'payment' OR c.text CONTAINS 'equipment')
     RETURN c.id AS id, 
            c.text AS text, 
            c.document_id AS document_id
+    ORDER BY c.document_id, c.id
     LIMIT $limit
     """
     

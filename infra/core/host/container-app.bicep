@@ -3,6 +3,8 @@ param location string = resourceGroup().location
 param tags object = {}
 param containerAppsEnvironmentId string
 param containerRegistryName string
+param registryUsername string = ''
+param registryPasswordSecretName string = ''
 param containerName string
 param containerImage string
 param userAssignedIdentityId string = ''
@@ -38,7 +40,11 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
         transport: 'http'
       }
       registries: [
-        {
+        !empty(registryUsername) ? {
+          server: '${containerRegistryName}.azurecr.io'
+          username: registryUsername
+          passwordSecretRef: registryPasswordSecretName
+        } : {
           server: '${containerRegistryName}.azurecr.io'
           identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
         }

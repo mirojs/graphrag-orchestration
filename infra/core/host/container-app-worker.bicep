@@ -13,6 +13,12 @@ param containerAppsEnvironmentId string
 @description('Container Registry Name')
 param containerRegistryName string
 
+@description('Container Registry Username (optional)')
+param registryUsername string = ''
+
+@description('Container Registry Password secret name (optional)')
+param registryPasswordSecretName string = ''
+
 @description('Container name within the app')
 param containerName string
 
@@ -51,7 +57,11 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
       // No ingress - worker is internal only, communicates via Redis queue
       ingress: null
       registries: [
-        {
+        !empty(registryUsername) ? {
+          server: '${containerRegistryName}.azurecr.io'
+          username: registryUsername
+          passwordSecretRef: registryPasswordSecretName
+        } : {
           server: '${containerRegistryName}.azurecr.io'
           identity: empty(userAssignedIdentityId) ? 'system' : userAssignedIdentityId
         }

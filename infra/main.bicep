@@ -89,6 +89,10 @@ resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-pr
   scope: rg
 }
 
+var acrCredentials = listCredentials(containerRegistry.id)
+var acrUsername = acrCredentials.username
+var acrPassword = acrCredentials.passwords[0].value
+
 // Cosmos DB for chat history and usage tracking
 module cosmosDb './core/database/cosmos-db.bicep' = {
   name: 'cosmos-db'
@@ -126,6 +130,8 @@ module graphragApi './core/host/container-app.bicep' = {
     })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
+    registryUsername: acrUsername
+    registryPasswordSecretName: 'acr-password'
     containerName: 'graphrag-api'
     // API Gateway image - handles HTTP requests
     containerImage: apiImageName
@@ -472,6 +478,10 @@ var sharedSecrets = concat([
     name: 'redis-password'
     value: redis.outputs.redisPrimaryKey
   }
+  {
+    name: 'acr-password'
+    value: acrPassword
+  }
 ], !empty(voyageApiKey) ? [
   {
     name: 'voyage-api-key'
@@ -491,6 +501,8 @@ module graphragWorker './core/host/container-app-worker.bicep' = {
     })
     containerAppsEnvironmentId: containerAppsEnvironment.outputs.id
     containerRegistryName: containerRegistry.name
+    registryUsername: acrUsername
+    registryPasswordSecretName: 'acr-password'
     containerName: 'graphrag-worker'
     containerImage: workerImageName
     cpuCores: '1.0'

@@ -108,9 +108,13 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 
             elif self.require_auth:
                 # No token found and auth is required
+                auth_value = request.headers.get("authorization")
                 logger.warning(
-                    "auth_no_token_headers: %s",
-                    list(request.headers.keys())
+                    "auth_no_token_headers: headers=%s auth_present=%s auth_prefix=%s auth_len=%s",
+                    list(request.headers.keys()),
+                    bool(auth_value),
+                    (auth_value[:20] if auth_value else None),
+                    (len(auth_value) if auth_value else 0)
                 )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
@@ -169,8 +173,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             or request.headers.get("X-Original-Authorization")
             or request.headers.get("Authorization")
         )
-        if auth_header and auth_header.startswith("Bearer "):
-            return auth_header[7:]  # Remove "Bearer " prefix
+        if auth_header:
+            if auth_header.lower().startswith("bearer "):
+                return auth_header.split(" ", 1)[1]
         
         return None
     

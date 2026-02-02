@@ -1,0 +1,40 @@
+{
+  "response": "## Extracted Data\n\n### Document [1]: Unknown\n{\n  \"_document_id\": \"doc_8205bc1673724d689a86d302d72da287\",\n  \"_citation_idx\": 1,\n  \"error\": \"Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}\"\n}\n\n### Document [2]: Unknown\n{\n  \"_document_id\": \"doc_2a26892fdba540b8af1e0afe1ddb544b\",\n  \"_citation_idx\": 2,\n  \"error\": \"Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}\"\n}\n\n### Document [3]: Unknown\n{\n  \"_document_id\": \"doc_657dee67210c43f2af2649c7d71d8c8c\",\n  \"_citation_idx\": 3,\n  \"error\": \"Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}\"\n}\n\n### Document [4]: Unknown\n{\n  \"_document_id\": \"doc_6caa3b7a3af34f64b47a95a94653e70c\",\n  \"_citation_idx\": 4,\n  \"error\": \"Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}\"\n}\n\n### Document [5]: Unknown\n{\n  \"_document_id\": \"doc_5217f97593ee4f92ad493ae57a6e4157\",\n  \"_citation_idx\": 5,\n  \"error\": \"Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}\"\n}\n\n",
+  "raw_extractions": [
+    {
+      "_document_id": "doc_8205bc1673724d689a86d302d72da287",
+      "_citation_idx": 1,
+      "error": "Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
+    },
+    {
+      "_document_id": "doc_2a26892fdba540b8af1e0afe1ddb544b",
+      "_citation_idx": 2,
+      "error": "Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
+    },
+    {
+      "_document_id": "doc_657dee67210c43f2af2649c7d71d8c8c",
+      "_citation_idx": 3,
+      "error": "Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
+    },
+    {
+      "_document_id": "doc_6caa3b7a3af34f64b47a95a94653e70c",
+      "_citation_idx": 4,
+      "error": "Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
+    },
+    {
+      "_document_id": "doc_5217f97593ee4f92ad493ae57a6e4157",
+      "_citation_idx": 5,
+      "error": "Error code: 401 - {'error': {'code': '401', 'message': 'Access denied due to invalid subscription key or wrong API endpoint. Make sure to provide a valid key for an active subscription and use a correct regional API endpoint for your resource.'}}"
+    }
+  ],
+  "citations": [],
+  "evidence_path": [
+    "doc_8205bc1673724d689a86d302d72da287",
+    "doc_8205bc1673724d689a86d302d72da287",
+    "doc_8205bc1673724d689a86d302d72da287",
+    "doc_8205bc1673724d689a86d302d72da287",
+    "doc_8205bc1673724d689a86d302d72da287"
+  ],
+  "text_chunks_used": 13,
+  "processing_mode": "comprehensive_two_pass"
+}

@@ -1,0 +1,83 @@
+COMPREHENSIVE MODE EVALUATION - 16 GROUND TRUTH ITEMS
+=====================================================
+Date: 2026-02-02
+Test: Invoice/Contract Inconsistency Analysis
+Mode: comprehensive (2-pass extraction)
+Route: route_3_global_search
+Processing: comprehensive_two_pass
+
+METRICS:
+--------
+Response Length: 24,022 characters
+Raw Extractions: 5 documents
+Text Chunks Used: 17
+Hub Entities: 10
+
+EVALUATION AGAINST 16 GROUND TRUTH ITEMS:
+==========================================
+
+CATEGORY A - MAJOR (3 items):
+------------------------------
+✓ A1: Lift model mismatch (Savaria V1504 vs AscendPro VPX200)
+   - Found: "The invoice bills for a **Savaria V1504** lift [4], while the contract obligates Contoso Lifts LLC to provide an **AscendPro VPX200** lift [5]"
+
+✓ A2: Payment structure conflict (Full $29,900 vs 3-stage)
+   - Found: "Invoice demands **full 29,900.00 "Due on contract signing"** [4]. Contract requires only **$20,000.00 upon signing**, with **$7,000.00 upon delivery** and **$2,900.00 upon completion** [5]"
+
+✓ A3: Customer entity mismatch (Fabrikam Construction vs Fabrikam Inc.)
+   - Found: "The **legal customer name** differs ("Fabrikam Construction" vs "Fabrikam Inc.") even though the address is identical [4][5]"
+
+CATEGORY B - MEDIUM (5 items):
+-------------------------------
+✓ B1: Hall call spec gap ("Hall Call stations" vs "Flush-mount Hall Call stations")
+   - Found: "The contract requires **flush‑mount** stations [5], but the invoice does not specify flush‑mount [4]"
+
+✓ B2: Door height added ("80" High" specified vs not specified)
+   - Found: "Invoice adds: "80\" High" [4]... Contract only states: "Aluminum door with plexi-glass inserts & automatic opener" [5]"
+
+✓ B3: WR-500 lock added ("WR-500 lock" vs not specified)
+   - Found: "Invoice adds: "WR-500 lock" [4]... the contract does not confirm these exact features"
+
+✓ B4: Outdoor terminology ("Outdoor fitting" vs "Outdoor configuration package")
+   - Found: "Invoice: "Outdoor fitting". [4] Contract: "Outdoor configuration package". [5]"
+
+✓ B5: Invoice self-contradiction ("Initial payment" but demands full $29,900)
+   - Found: "Comments: "Initial payment in accordance with contract" [4]... Invoice demands **full 29,900.00 "Due on contract signing"**"
+
+CATEGORY C - MINOR (8 items):
+------------------------------
+? C1: URL malformed (ww.contosolifts.com vs no URL)
+   - NEED TO CHECK: Not visible in summary output
+
+? C2: John Doe contact (listed vs not in contract)
+   - Found in raw_extractions: parties.buyer includes "John Doe"
+   - Need to check if comparison notes the discrepancy
+
+? C3: Contoso Ltd vs LLC (Exhibit A vs Contract)
+   - NEED TO CHECK: Not visible in summary output
+
+? C4: Bayfront site mismatch (61 S 34th Street vs Bayfront Animal Clinic)
+   - NEED TO CHECK: Not visible in summary output
+
+? C5: Keyless access (not mentioned vs Exhibit A mentions)
+   - NEED TO CHECK: Not visible in summary output
+
+? C6: No change order (substituted product vs requires written changes)
+   - Possibly covered: "The contract has a formal change clause [5]; the invoice does not"
+
+✓ C7: Invoice number (#45239 vs not in contract)
+   - NEED TO CHECK: Should be in raw_extractions
+
+✓ C8: Delivery timeline (no dates vs "8-10 weeks after drawing approval")
+   - Found: "the contract specifies **8–10 weeks after drawing approval** with specified delay causes [5], while the invoice provides **no delivery timing or shipping method** [4]"
+
+PRELIMINARY SCORE (from visible output):
+=========================================
+Confirmed Found: 9/16 (A1-A3, B1-B5, C8)
+Need Full Response Check: 7/16 (C1-C7)
+
+The comprehensive mode response is 24,022 characters - much longer than summary mode's typical output. It provides extensive structured extractions and detailed comparisons.
+
+TO GET FINAL SCORE:
+===================
+Need to check full response for the 7 minor items (C1-C7).

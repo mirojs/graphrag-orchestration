@@ -183,6 +183,11 @@ class LocalSearchHandler(BaseRouteHandler):
                 "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
                 "latency_estimate": "moderate",
                 "precision_level": "high",
-                "route_description": "Entity-focused with LazyGraphRAG iterative deepening"
+                "route_description": "Entity-focused with LazyGraphRAG iterative deepening",
+                # Pass through raw_extractions from comprehensive mode (2-pass extraction)
+                **({
+                    "raw_extractions": synthesis_result["raw_extractions"],
+                    "processing_mode": synthesis_result.get("processing_mode")
+                } if synthesis_result.get("raw_extractions") else {}),
             }
         )

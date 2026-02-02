@@ -290,10 +290,10 @@ class EvidenceSynthesizer:
         Returns:
             Dictionary with response, citations, and evidence path.
         """
-        # nlp_audit mode: deterministic extraction only, no LLM synthesis.
+        # Special response types that need custom handling
         # IMPORTANT: Route 3 uses synthesize_with_graph_context(), so we must
-        # handle this here (not only in synthesize()).
-        if response_type in {"nlp_audit", "nlp_connected"}:
+        # handle these here (not only in synthesize()).
+        if response_type in {"nlp_audit", "nlp_connected", "comprehensive"}:
             text_chunks: List[Dict[str, Any]] = []
             for i, chunk in enumerate(graph_context.source_chunks or []):
                 section_str = " > ".join(chunk.section_path) if chunk.section_path else "General"
@@ -305,13 +305,23 @@ class EvidenceSynthesizer:
                         "section": section_str,
                         "entity": chunk.entity_name,
                         "text": chunk.text or "",
+                        "document_id": chunk.document_id or "",
+                        "document_title": chunk.document_title or "Unknown",
+                        "document_source": chunk.document_source or "",
+                        "metadata": {
+                            "document_id": chunk.document_id or "",
+                            "document_title": chunk.document_title or "Unknown",
+                            "section_path_key": section_str,
+                        }
                     }
                 )
 
             if response_type == "nlp_audit":
                 result = await self._nlp_audit_extract(query, text_chunks, evidence_nodes)
-            else:
+            elif response_type == "nlp_connected":
                 result = await self._nlp_connected_extract(query, text_chunks, evidence_nodes)
+            elif response_type == "comprehensive":
+                result = await self._comprehensive_two_pass_extract(query, text_chunks, evidence_nodes)
 
             # Preserve graph context flags for downstream consumers.
             result.setdefault("graph_context_used", True)

@@ -291,6 +291,11 @@ class GlobalSearchHandler(BaseRouteHandler):
             "route_description": "LazyGraphRAG + HippoRAG thematic search",
         }
         
+        # Pass through raw_extractions from comprehensive mode (2-pass extraction)
+        if synthesis_result.get("raw_extractions"):
+            metadata["raw_extractions"] = synthesis_result["raw_extractions"]
+            metadata["processing_mode"] = synthesis_result.get("processing_mode")
+        
         if enable_timings:
             metadata["timings_ms"] = timings_ms
         

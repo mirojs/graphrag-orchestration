@@ -92,13 +92,17 @@ class RouteResult:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
-        return {
+        result = {
             "response": self.response,
             "route_used": self.route_used,
             "citations": [c.to_dict() for c in self.citations],
             "evidence_path": self.evidence_path,
             "metadata": self.metadata,
         }
+        # Extract raw_extractions to top-level for comprehensive mode (API expects it there)
+        if self.metadata.get("raw_extractions"):
+            result["raw_extractions"] = self.metadata["raw_extractions"]
+        return result
 
 
 # =============================================================================

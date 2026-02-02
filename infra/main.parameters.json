@@ -17,6 +17,12 @@
     "skipRoleAssignments": {
       "value": true
     },
+    "enableAuth": {
+      "value": true
+    },
+    "authClientId": {
+      "value": "b68b6881-80ba-4cec-b9dd-bd2232ec8817"
+    },
     "serviceGraphragImageName": {
       "value": "${SERVICE_GRAPHRAG_IMAGE_NAME}"
     }

@@ -108,6 +108,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 
             elif self.require_auth:
                 # No token found and auth is required
+                logger.warning(
+                    "auth_no_token_headers",
+                    headers=list(request.headers.keys())
+                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Authentication required. No valid token found.",

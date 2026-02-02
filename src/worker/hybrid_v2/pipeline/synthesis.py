@@ -1356,84 +1356,22 @@ BEGIN ANALYSIS:"""
     ) -> str:
         """Build a structured comparison context for the LLM.
         
-        Shows side-by-side: KVPs, Tables, and relevant text excerpts.
+        Key principle: KVPs/Tables are SUPPLEMENTAL HINTS, not replacements.
+        We provide:
+        1. Full document text (LLM can see everything)
+        2. Pre-extracted KVPs/Tables as HINTS for key fields
+        3. Sentences containing regex matches for focus areas
         """
         parts = []
         
-        # Section 1: Structured KVPs side-by-side
+        # Section 1: FULL DOCUMENT TEXT (primary source for LLM)
         parts.append("=" * 60)
-        parts.append("STRUCTURED DATA EXTRACTED (from Azure Document Intelligence)")
-        parts.append("=" * 60)
-        
-        for ext in extractions:
-            idx = ext.get("_citation_idx", "?")
-            title = ext.get("_document_title", "Unknown")
-            parts.append(f"\n### Document [{idx}]: {title}")
-            
-            # Amounts
-            if ext.get("kvp_amounts") or ext.get("regex_amounts"):
-                parts.append("\n**Amounts/Prices:**")
-                for f in ext.get("kvp_amounts", []):
-                    parts.append(f"  - {f.get('key', 'amount')}: {f.get('value')} (from DI)")
-                for f in ext.get("regex_amounts", []):
-                    parts.append(f"  - {f.get('field', 'amount')}: {f.get('value')} (from text)")
-            
-            # Parties
-            if ext.get("kvp_parties") or ext.get("regex_parties"):
-                parts.append("\n**Parties/Names:**")
-                for f in ext.get("kvp_parties", []):
-                    parts.append(f"  - {f.get('key', 'party')}: {f.get('value')} (from DI)")
-                for f in ext.get("regex_parties", []):
-                    parts.append(f"  - {f.get('field', 'party')}: {f.get('value')} (from text)")
-            
-            # Dates
-            if ext.get("kvp_dates") or ext.get("regex_dates"):
-                parts.append("\n**Dates:**")
-                for f in ext.get("kvp_dates", []):
-                    parts.append(f"  - {f.get('key', 'date')}: {f.get('value')} (from DI)")
-                for f in ext.get("regex_dates", []):
-                    parts.append(f"  - {f.get('field', 'date')}: {f.get('value')} (from text)")
-            
-            # Identifiers
-            if ext.get("kvp_identifiers"):
-                parts.append("\n**Identifiers:**")
-                for f in ext.get("kvp_identifiers", []):
-                    parts.append(f"  - {f.get('key', 'id')}: {f.get('value')}")
-            
-            # Other KVPs
-            if ext.get("kvp_other"):
-                parts.append("\n**Other Fields:**")
-                for f in ext.get("kvp_other", [])[:10]:  # Limit to 10
-                    parts.append(f"  - {f.get('key', 'field')}: {f.get('value')}")
-        
-        # Section 2: Tables
-        has_tables = any(ext.get("tables") for ext in extractions)
-        if has_tables:
-            parts.append("\n" + "=" * 60)
-            parts.append("TABLES")
-            parts.append("=" * 60)
-            
-            for ext in extractions:
-                idx = ext.get("_citation_idx", "?")
-                title = ext.get("_document_title", "Unknown")
-                tables = ext.get("tables", [])
-                
-                if tables:
-                    parts.append(f"\n### Document [{idx}]: {title}")
-                    for i, table in enumerate(tables[:3]):  # Limit to 3 tables
-                        caption = table.get("caption") or f"Table {i+1}"
-                        markdown = table.get("markdown", "")[:500]  # Limit length
-                        parts.append(f"\n**{caption}:**")
-                        parts.append(markdown)
-        
-        # Section 3: Text excerpts (for semantic context)
-        parts.append("\n" + "=" * 60)
-        parts.append("DOCUMENT TEXT EXCERPTS (for context)")
+        parts.append("FULL DOCUMENT CONTENTS")
         parts.append("=" * 60)
         
         for doc in graph_docs:
             title = doc.get("document_title", "Unknown")
-            text = doc.get("combined_text", "")[:2000]  # First 2000 chars
+            text = doc.get("combined_text", "")  # FULL text, no truncation!
             
             # Find matching citation index
             idx = "?"
@@ -1443,7 +1381,97 @@ BEGIN ANALYSIS:"""
                     break
             
             parts.append(f"\n### Document [{idx}]: {title}")
+            parts.append("-" * 40)
             parts.append(text)
+            parts.append("")
+        
+        # Section 2: PRE-EXTRACTED HINTS (from Azure DI + regex)
+        # These help LLM focus on key fields without re-extracting everything
+        parts.append("\n" + "=" * 60)
+        parts.append("PRE-EXTRACTED KEY FIELDS (hints for comparison)")
+        parts.append("These are structured extractions from Azure Document Intelligence")
+        parts.append("Use these as hints - verify against full text above")
+        parts.append("=" * 60)
+        
+        for ext in extractions:
+            idx = ext.get("_citation_idx", "?")
+            title = ext.get("_document_title", "Unknown")
+            parts.append(f"\n### Document [{idx}]: {title}")
+            
+            # Amounts
+            all_amounts = ext.get("kvp_amounts", []) + ext.get("regex_amounts", [])
+            if all_amounts:
+                parts.append("\n**Key Amounts/Prices:**")
+                for f in all_amounts[:10]:  # Limit display
+                    src = f.get("source", "DI")
+                    key_label = f.get("key") or f.get("field", "amount")
+                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
+            
+            # Parties
+            all_parties = ext.get("kvp_parties", []) + ext.get("regex_parties", [])
+            if all_parties:
+                parts.append("\n**Key Parties/Names:**")
+                for f in all_parties[:10]:
+                    src = f.get("source", "DI")
+                    key_label = f.get("key") or f.get("field", "party")
+                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
+            
+            # Dates
+            all_dates = ext.get("kvp_dates", []) + ext.get("regex_dates", [])
+            if all_dates:
+                parts.append("\n**Key Dates:**")
+                for f in all_dates[:10]:
+                    src = f.get("source", "DI")
+                    key_label = f.get("key") or f.get("field", "date")
+                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
+            
+            # Identifiers
+            if ext.get("kvp_identifiers"):
+                parts.append("\n**Key Identifiers:**")
+                for f in ext.get("kvp_identifiers", [])[:10]:
+                    parts.append(f"  - {f.get('key', 'id')}: {f.get('value')}")
+        
+        # Section 3: Tables PER DOCUMENT (important for structured data)
+        has_tables = any(doc.get("tables") for doc in graph_docs)
+        
+        if has_tables:
+            parts.append("\n" + "=" * 60)
+            parts.append("TABLES BY DOCUMENT (extracted from Azure Document Intelligence)")
+            parts.append("=" * 60)
+            
+            for doc in graph_docs:
+                title = doc.get("document_title", "Unknown")
+                tables = doc.get("tables", [])
+                
+                if not tables:
+                    continue
+                
+                # Find matching citation index
+                idx = "?"
+                for ext in extractions:
+                    if ext.get("_document_title") == title:
+                        idx = ext.get("_citation_idx", "?")
+                        break
+                
+                parts.append(f"\n### Document [{idx}]: {title}")
+                
+                for i, table in enumerate(tables[:5]):  # Limit to 5 tables per doc
+                    headers = table.get("headers", [])
+                    rows = table.get("rows", [])
+                    
+                    parts.append(f"\n**Table {i+1}:**")
+                    if headers:
+                        parts.append(f"  Headers: {headers}")
+                    
+                    # Rows may be JSON parsed or list of dicts
+                    if isinstance(rows, list):
+                        for j, row in enumerate(rows[:5]):  # Limit to 5 rows
+                            if isinstance(row, dict):
+                                parts.append(f"  Row {j+1}: {row}")
+                            else:
+                                parts.append(f"  Row {j+1}: {row}")
+                        if len(rows) > 5:
+                            parts.append(f"  ... ({len(rows) - 5} more rows)")
         
         return "\n".join(parts)
 

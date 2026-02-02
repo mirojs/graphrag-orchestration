@@ -507,33 +507,38 @@ class Neo4jTextUnitStore:
         LIMIT $limit
         """
         
-        # Query 2: Get all KVPs - join to Document by document_id property
-        # KVPs may have document_id property or IN_DOCUMENT relationship
+        # Query 2: Get all KVPs - join to Document via section_path[0] fuzzy match
+        # Note: KVPs don't have document_id populated, but section_path[0] contains
+        # the document title (e.g. "BUILDERS LIMITED WARRANTY WITH ARBITRATION")
+        # which we fuzzy-match to Document.title (URL-encoded, e.g. "BUILDERS%20LIMITED%20WARRANTY")
         kvps_query = """
         MATCH (kvp:KeyValuePair {group_id: $group_id})
+        WHERE kvp.section_path IS NOT NULL AND size(kvp.section_path) > 0
+        WITH kvp, kvp.section_path[0] AS doc_section
         OPTIONAL MATCH (d:Document {group_id: $group_id})
-        WHERE d.id = kvp.document_id OR EXISTS((kvp)-[:IN_DOCUMENT]->(d))
+        WHERE toUpper(replace(d.title, '%20', ' ')) CONTAINS toUpper(substring(doc_section, 0, 15))
         RETURN 
             kvp.key AS key,
             kvp.value AS value,
             kvp.confidence AS confidence,
-            kvp.section_id AS section_id,
-            coalesce(d.title, d.source, kvp.document_id, 'Unknown') AS doc_title,
-            coalesce(d.id, kvp.document_id) AS doc_id
+            kvp.section_path AS section_path,
+            kvp.page_number AS page_number,
+            coalesce(d.title, doc_section, 'Unknown') AS doc_title,
+            d.id AS doc_id
         """
         
-        # Query 3: Get all Tables - join to Document by document_id property
+        # Query 3: Get Tables WITH document association via IN_DOCUMENT edge
+        # Tables have structured data (headers + JSON rows) linked to documents
         tables_query = """
-        MATCH (t:Table {group_id: $group_id})
-        OPTIONAL MATCH (d:Document {group_id: $group_id})
-        WHERE d.id = t.document_id OR EXISTS((t)-[:IN_DOCUMENT]->(d))
+        MATCH (t:Table {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         RETURN 
             t.id AS table_id,
-            t.caption AS caption,
-            t.markdown AS markdown,
             t.headers AS headers,
-            coalesce(d.title, d.source, t.document_id, 'Unknown') AS doc_title,
-            coalesce(d.id, t.document_id) AS doc_id
+            t.rows AS rows,
+            t.row_count AS row_count,
+            t.column_count AS column_count,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.id AS doc_id
         """
         
         chunks_by_doc: Dict[str, Dict[str, Any]] = {}
@@ -564,7 +569,7 @@ class Neo4jTextUnitStore:
                         "section_path": record.get("section_path"),
                     })
                 
-                # Fetch KVPs
+                # Fetch KVPs - using fuzzy-matched doc_title from section_path
                 result = session.run(kvps_query, group_id=self._group_id)
                 for record in result:
                     doc_title = record.get("doc_title") or "Unknown"
@@ -573,20 +578,43 @@ class Neo4jTextUnitStore:
                             "key": record.get("key") or "",
                             "value": record.get("value") or "",
                             "confidence": record.get("confidence") or 0.0,
-                            "section_id": record.get("section_id"),
+                            "section_path": record.get("section_path"),
+                            "page_number": record.get("page_number"),
                         })
                 
-                # Fetch Tables
+                # Fetch Tables WITH document association via IN_DOCUMENT edge
                 result = session.run(tables_query, group_id=self._group_id)
                 for record in result:
                     doc_title = record.get("doc_title") or "Unknown"
+                    rows_raw = record.get("rows") or "[]"
+                    
+                    # Parse rows - stored as JSON string
+                    import json
+                    try:
+                        rows = json.loads(rows_raw) if isinstance(rows_raw, str) else rows_raw
+                    except (json.JSONDecodeError, TypeError):
+                        rows = []
+                    
+                    table_data = {
+                        "table_id": record.get("table_id"),
+                        "headers": record.get("headers") or [],
+                        "rows": rows,
+                        "row_count": record.get("row_count") or 0,
+                    }
+                    
+                    # Associate table with its document
                     if doc_title in chunks_by_doc:
-                        chunks_by_doc[doc_title]["tables"].append({
-                            "table_id": record.get("table_id"),
-                            "caption": record.get("caption") or "",
-                            "markdown": record.get("markdown") or "",
-                            "headers": record.get("headers") or [],
-                        })
+                        chunks_by_doc[doc_title]["tables"].append(table_data)
+                    else:
+                        # Create doc entry if not exists (table-only doc)
+                        chunks_by_doc[doc_title] = {
+                            "document_title": doc_title,
+                            "document_id": record.get("doc_id") or "",
+                            "chunks": [],
+                            "kvps": [],
+                            "tables": [table_data],
+                            "combined_text": ""
+                        }
             
             # Combine text for each document
             for doc_data in chunks_by_doc.values():

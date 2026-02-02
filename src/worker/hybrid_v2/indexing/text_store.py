@@ -541,6 +541,19 @@ class Neo4jTextUnitStore:
             d.id AS doc_id
         """
         
+        # Query 4: Get Entities linked to documents
+        # Entities use APPEARS_IN_DOCUMENT relationship (direct) or MENTIONS->TextChunk->IN_DOCUMENT (indirect)
+        entities_query = """
+        MATCH (e:Entity {group_id: $group_id})-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        RETURN 
+            e.id AS entity_id,
+            e.name AS name,
+            e.type AS type,
+            e.description AS description,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.id AS doc_id
+        """
+        
         chunks_by_doc: Dict[str, Dict[str, Any]] = {}
         
         try:
@@ -558,6 +571,7 @@ class Neo4jTextUnitStore:
                             "chunks": [],
                             "kvps": [],
                             "tables": [],
+                            "entities": [],
                             "combined_text": ""
                         }
                     
@@ -613,8 +627,21 @@ class Neo4jTextUnitStore:
                             "chunks": [],
                             "kvps": [],
                             "tables": [table_data],
+                            "entities": [],
                             "combined_text": ""
                         }
+                
+                # Fetch Entities - linked via TextChunk -> Document
+                result = session.run(entities_query, group_id=self._group_id)
+                for record in result:
+                    doc_title = record.get("doc_title") or "Unknown"
+                    if doc_title in chunks_by_doc:
+                        chunks_by_doc[doc_title]["entities"].append({
+                            "entity_id": record.get("entity_id"),
+                            "name": record.get("name") or "",
+                            "type": record.get("type") or "",
+                            "description": record.get("description") or "",
+                        })
             
             # Combine text for each document
             for doc_data in chunks_by_doc.values():
@@ -627,6 +654,7 @@ class Neo4jTextUnitStore:
                        total_chunks=sum(len(d["chunks"]) for d in chunks_by_doc.values()),
                        total_kvps=sum(len(d["kvps"]) for d in chunks_by_doc.values()),
                        total_tables=sum(len(d["tables"]) for d in chunks_by_doc.values()),
+                       total_entities=sum(len(d["entities"]) for d in chunks_by_doc.values()),
                        group_id=self._group_id)
                        
         except Exception as e:

@@ -1124,7 +1124,8 @@ Audit Trail:"""
                 logger.info("comprehensive_graph_structure_loaded",
                            num_docs=len(graph_docs),
                            total_kvps=sum(len(d.get("kvps", [])) for d in graph_docs),
-                           total_tables=sum(len(d.get("tables", [])) for d in graph_docs))
+                           total_tables=sum(len(d.get("tables", [])) for d in graph_docs),
+                           total_entities=sum(len(d.get("entities", [])) for d in graph_docs))
             except Exception as e:
                 logger.warning("comprehensive_graph_structure_failed", error=str(e))
         
@@ -1183,6 +1184,7 @@ Audit Trail:"""
             doc_text = doc.get("combined_text", "")
             kvps = doc.get("kvps", [])
             tables = doc.get("tables", [])
+            entities = doc.get("entities", [])
             
             # Start with KVPs from graph (deterministic, layout-aware)
             extraction = {
@@ -1201,6 +1203,9 @@ Audit Trail:"""
                 
                 # Tables
                 "tables": tables,
+                
+                # Entities from graph
+                "entities": entities,
                 
                 # Will also add regex extractions for values not in KVPs
                 "regex_amounts": [],
@@ -1489,6 +1494,51 @@ BEGIN ANALYSIS:"""
                                 parts.append(f"  Row {j+1}: {row}")
                         if len(rows) > 5:
                             parts.append(f"  ... ({len(rows) - 5} more rows)")
+        
+        # Section 4: Entities per document (from GraphRAG community detection)
+        has_entities = any(doc.get("entities") for doc in graph_docs)
+        
+        if has_entities:
+            parts.append("\n" + "=" * 60)
+            parts.append("ENTITIES BY DOCUMENT (from GraphRAG)")
+            parts.append("Named entities, dates, organizations, etc. extracted from text")
+            parts.append("=" * 60)
+            
+            for doc in graph_docs:
+                title = doc.get("document_title", "Unknown")
+                entities = doc.get("entities", [])
+                
+                if not entities:
+                    continue
+                
+                # Find matching citation index
+                idx = "?"
+                for ext in extractions:
+                    if ext.get("_document_title") == title:
+                        idx = ext.get("_citation_idx", "?")
+                        break
+                
+                parts.append(f"\n### Document [{idx}]: {title}")
+                
+                # Group entities by type
+                entities_by_type = {}
+                for entity in entities[:50]:  # Limit to 50 entities per doc
+                    etype = entity.get("type", "OTHER")
+                    if etype not in entities_by_type:
+                        entities_by_type[etype] = []
+                    entities_by_type[etype].append(entity)
+                
+                for etype, elist in sorted(entities_by_type.items()):
+                    parts.append(f"\n**{etype}:**")
+                    for e in elist[:15]:  # Show up to 15 per type
+                        name = e.get("name", "")
+                        desc = e.get("description", "")
+                        if desc:
+                            parts.append(f"  - {name}: {desc}")
+                        else:
+                            parts.append(f"  - {name}")
+                    if len(elist) > 15:
+                        parts.append(f"  ... ({len(elist) - 15} more)")
         
         return "\n".join(parts)
 

@@ -82,10 +82,9 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                             request.state.group_id = settings.GROUP_ID_OVERRIDE
                             request.state.user_id = claims.get("oid")
                             logger.warning(
-                                "auth_group_override_used",
-                                group_id=request.state.group_id,
-                                user_id=request.state.user_id,
-                                message="No group claim found in token. Using GROUP_ID_OVERRIDE."
+                                "auth_group_override_used: group_id=%s user_id=%s",
+                                request.state.group_id,
+                                request.state.user_id,
                             )
                             groups = [request.state.group_id]
                         raise HTTPException(

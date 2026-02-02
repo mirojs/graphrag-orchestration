@@ -164,7 +164,7 @@ module graphragApi './core/host/container-app.bicep' = {
       }
       {
         name: 'ALLOW_LEGACY_GROUP_HEADER'
-        value: 'false'
+        value: 'true'
       }
       {
         name: 'AZURE_OPENAI_ENDPOINT'

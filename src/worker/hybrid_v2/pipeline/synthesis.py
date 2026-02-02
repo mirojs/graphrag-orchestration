@@ -1086,15 +1086,15 @@ Audit Trail:"""
         Three-pass constrained extraction for 100% fact coverage (no LLM fact-dropping).
         
         Design rationale: LLM tends to drop facts during synthesis. This approach:
-        - PASS 1: NLP deterministic extraction - captures ALL facts from text
+        - PASS 1: Regex deterministic extraction - captures ALL literal values from text
         - PASS 2: LLM constrained comparison - must compare EVERY field pair (locked enumeration)
         - PASS 3: LLM formatting - converts structured mismatches to narrative (cannot drop)
         
-        PASS 1: NLP Deterministic Extraction
-        - Regex patterns for amounts, dates, identifiers
-        - spaCy NER for names, organizations
-        - Azure DI KVP results if available
-        - Graph entity data
+        PASS 1: Regex Deterministic Extraction (NO NLP/ML)
+        - Regex patterns for amounts ($X,XXX.XX), dates, identifiers
+        - Pattern matching for company names (Inc/LLC/Ltd suffixes)
+        - Line item patterns (qty x description x price)
+        - Why NOT NLP? Domain terms like "Savaria V1504", "WR-500 lock" aren't in NER models
         - Output: Structured facts per document
         
         PASS 2: LLM Constrained Comparison
@@ -1163,8 +1163,8 @@ Audit Trail:"""
             first_chunk = chunks[0]
             meta = first_chunk.get("metadata", {})
             
-            # NLP extraction using regex and pattern matching
-            extraction = self._nlp_extract_fields(doc_text, doc_title)
+            # Deterministic extraction using regex and pattern matching
+            extraction = self._regex_extract_fields(doc_text, doc_title)
             extraction["_document_id"] = doc_key
             extraction["_document_title"] = doc_title
             extraction["_citation_idx"] = citation_idx
@@ -1182,7 +1182,7 @@ Audit Trail:"""
             })
             citation_idx += 1
         
-        logger.info("pass1_nlp_extraction_complete", num_docs=len(raw_extractions),
+        logger.info("pass1_regex_extraction_complete", num_docs=len(raw_extractions),
                    total_fields=sum(len(e.get("all_fields", [])) for e in raw_extractions))
         
         # =====================================================================
@@ -1317,15 +1317,27 @@ BEGIN REPORT:"""
             "evidence_path": [node[0] for node in evidence_nodes],
             "text_chunks_used": len(text_chunks),
             "processing_mode": "comprehensive_three_pass",
-            "pass1_method": "nlp_deterministic",
+            "pass1_method": "regex_deterministic",
             "pass2_method": "llm_constrained_comparison",
             "pass3_method": "llm_narrative_formatting",
         }
 
-    def _nlp_extract_fields(self, text: str, doc_title: str) -> Dict[str, Any]:
+    def _regex_extract_fields(self, text: str, doc_title: str) -> Dict[str, Any]:
         """
-        PASS 1: NLP deterministic extraction using regex and patterns.
-        No LLM involved - 100% reproducible.
+        PASS 1: Deterministic field extraction using regex patterns.
+        
+        This is NOT NLP - it's pure pattern matching for:
+        - Amounts: $X,XXX.XX patterns
+        - Dates: MM/DD/YYYY, YYYY-MM-DD, Month DD, YYYY
+        - Identifiers: Invoice #, PO #, Contract #
+        - Parties: Company names with Inc/LLC/Ltd suffixes
+        - URLs, percentages, line items
+        
+        Why regex instead of NLP?
+        - Domain-specific terms (Savaria V1504, WR-500 lock) aren't in NER models
+        - We need exact literal values, not semantic labels
+        - 100% reproducible - same input always gives same output
+        - Fast, no model loading required
         """
         import re
         

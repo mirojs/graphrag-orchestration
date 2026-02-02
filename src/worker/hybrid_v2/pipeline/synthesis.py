@@ -1300,16 +1300,11 @@ Audit Trail:"""
                                           len(e.get("regex_dates", [])) for e in raw_extractions))
         
         # =====================================================================
-        # PASS 2: LLM Comparison with FULL CONTEXT (text + KVPs + tables)
+        # PASS 2: LLM COMPARISON (with reduced context - only HippoRAG output)
         # =====================================================================
-        # Build a structured comparison prompt that shows the LLM:
-        # 1. The structured KVPs from each document (side by side)
-        # 2. The tables from each document
-        # 3. The original text for semantic understanding
-        
         comparison_context = self._build_graph_aware_comparison_context(raw_extractions, graph_docs)
         
-        comparison_prompt = f"""You are analyzing {len(raw_extractions)} documents for inconsistencies.
+        comparison_prompt = f"""You are comparing documents to identify inconsistencies.
 
 QUERY: "{query}"
 
@@ -1322,7 +1317,7 @@ For each inconsistency, provide:
 2. DOCUMENTS: Which documents disagree and what each says
 3. SIGNIFICANCE: Why this inconsistency matters
 
-Include inconsistencies in:
+Include ALL discrepancies:
 - Amounts/prices (different totals, payment terms)
 - Party names (different company names, entities)
 - Product/model descriptions (different specs)
@@ -1338,14 +1333,15 @@ BEGIN ANALYSIS:"""
             comparison_result = await self.llm.acomplete(comparison_prompt)
             narrative = comparison_result.text.strip()
         except Exception as e:
-            logger.error("pass2_comparison_failed", error=str(e))
+            logger.error("llm_comparison_failed", error=str(e))
             # Fallback: List the extracted facts
-            narrative = "## Extraction Complete (Comparison Failed)\n\n"
+            narrative = "## Comparison Failed\n\n"
             for ext in raw_extractions:
                 narrative += f"### Document [{ext.get('_citation_idx', '?')}]: {ext.get('_document_title', 'Unknown')}\n"
-                narrative += f"- KVP Amounts: {len(ext.get('kvp_amounts', []))} found\n"
-                narrative += f"- KVP Parties: {len(ext.get('kvp_parties', []))} found\n"
-                narrative += f"- Tables: {len(ext.get('tables', []))} found\n\n"
+                if '_error' in ext:
+                    narrative += f"- Error: {ext['_error']}\n\n"
+                else:
+                    narrative += f"- Fields extracted: {len([k for k in ext.keys() if not k.startswith('_')])}\n\n"
         
         logger.info("comprehensive_graph_aware_complete",
                    query=query[:50],
@@ -1358,7 +1354,7 @@ BEGIN ANALYSIS:"""
             "citations": citations,
             "evidence_path": [node[0] for node in evidence_nodes],
             "text_chunks_used": sum(len(d.get("chunks", [])) for d in graph_docs),
-            "processing_mode": "comprehensive_graph_aware",
+            "processing_mode": "comprehensive_graph_aware_reduced_context",
             "kvp_source": "azure_di",
         }
 
@@ -1367,178 +1363,111 @@ BEGIN ANALYSIS:"""
         extractions: List[Dict[str, Any]], 
         graph_docs: List[Dict[str, Any]]
     ) -> str:
-        """Build a structured comparison context for the LLM.
+        """Build section-level context for each KVP/Table using section_path.
         
-        Key principle: KVPs/Tables are SUPPLEMENTAL HINTS, not replacements.
-        We provide:
-        1. Full document text (LLM can see everything)
-        2. Pre-extracted KVPs/Tables as HINTS for key fields
-        3. Sentences containing regex matches for focus areas
+        SECTION-LEVEL PRECISION:
+        1. For each KVP, find its source section using section_path
+        2. Show only that section's text (not full document)
+        3. Group by section to avoid redundancy
+        4. This provides minimal context - just enough to understand each field
         """
         parts = []
         
-        # Section 1: FULL DOCUMENT TEXT (primary source for LLM)
-        parts.append("=" * 60)
-        parts.append("FULL DOCUMENT CONTENTS")
-        parts.append("=" * 60)
+        # Build section_path -> chunks mapping for quick lookup
+        section_to_chunks: Dict[str, List[str]] = {}
         
         for doc in graph_docs:
-            title = doc.get("document_title", "Unknown")
-            text = doc.get("combined_text", "")  # FULL text, no truncation!
-            
-            # Find matching citation index
-            idx = "?"
-            for ext in extractions:
-                if ext.get("_document_title") == title:
-                    idx = ext.get("_citation_idx", "?")
-                    break
-            
-            parts.append(f"\n### Document [{idx}]: {title}")
-            parts.append("-" * 40)
-            parts.append(text)
-            parts.append("")
+            kvps = doc.get("kvps", [])
+            for kvp in kvps:
+                section_path = kvp.get("section_path", [])
+                if section_path:
+                    section_key = section_path[0]  # Use first element as key
+                    if section_key not in section_to_chunks:
+                        # Find chunk containing this section
+                        for chunk in doc.get("chunks", []):
+                            chunk_text = chunk.get("text", "")
+                            # Simple heuristic: if section title appears in chunk, it's likely the right one
+                            if section_key.lower() in chunk_text.lower()[:200]:  # Check first 200 chars
+                                section_to_chunks[section_key] = [chunk_text]
+                                break
         
-        # Section 2: PRE-EXTRACTED HINTS (from Azure DI + regex)
-        # These help LLM focus on key fields without re-extracting everything
-        parts.append("\n" + "=" * 60)
-        parts.append("PRE-EXTRACTED KEY FIELDS (hints for comparison)")
-        parts.append("These are structured extractions from Azure Document Intelligence")
-        parts.append("Use these as hints - verify against full text above")
+        parts.append("=" * 60)
+        parts.append("ENRICHED CONTEXT (Section-level)")
+        parts.append("Each field shown with its source section text")
+        parts.append("=" * 60)
+        parts.append("=" * 60)
+        parts.append("ENRICHED CONTEXT (Section-level)")
+        parts.append("Each field shown with its source section text")
         parts.append("=" * 60)
         
+        # Process each document's extractions
         for ext in extractions:
             idx = ext.get("_citation_idx", "?")
             title = ext.get("_document_title", "Unknown")
             parts.append(f"\n### Document [{idx}]: {title}")
+            parts.append("-" * 40)
             
-            # Amounts
-            all_amounts = ext.get("kvp_amounts", []) + ext.get("regex_amounts", [])
-            if all_amounts:
-                parts.append("\n**Key Amounts/Prices:**")
-                for f in all_amounts[:30]:  # Show more fields
-                    src = f.get("source", "DI")
-                    key_label = f.get("key") or f.get("field", "amount")
-                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
+            # Get the document's KVPs and group by section
+            doc = next((d for d in graph_docs if d.get("document_title") == title), None)
+            if not doc:
+                continue
             
-            # Parties
-            all_parties = ext.get("kvp_parties", []) + ext.get("regex_parties", [])
-            if all_parties:
-                parts.append("\n**Key Parties/Names:**")
-                for f in all_parties[:30]:  # Show more fields
-                    src = f.get("source", "DI")
-                    key_label = f.get("key") or f.get("field", "party")
-                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
+            kvps = doc.get("kvps", [])
+            sections_shown = set()
             
-            # Dates
-            all_dates = ext.get("kvp_dates", []) + ext.get("regex_dates", [])
-            if all_dates:
-                parts.append("\n**Key Dates:**")
-                for f in all_dates[:30]:  # Show more fields
-                    src = f.get("source", "DI")
-                    key_label = f.get("key") or f.get("field", "date")
-                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
+            # Group KVPs by section for efficiency
+            kvps_by_section: Dict[str, List[Dict]] = {}
+            for kvp in kvps:
+                section_path = kvp.get("section_path", [])
+                if section_path:
+                    section_key = section_path[0]
+                    if section_key not in kvps_by_section:
+                        kvps_by_section[section_key] = []
+                    kvps_by_section[section_key].append(kvp)
             
-            # Identifiers
-            if ext.get("kvp_identifiers"):
-                parts.append("\n**Key Identifiers:**")
-                for f in ext.get("kvp_identifiers", [])[:30]:  # Show more fields
-                    parts.append(f"  - {f.get('key', 'id')}: {f.get('value')}")
-            
-            # Other KVPs (miscellaneous fields that don't fit above categories)
-            kvp_other = ext.get("kvp_other", [])
-            if kvp_other:
-                parts.append("\n**Other Key Fields:**")
-                for f in kvp_other[:30]:  # Show more fields
-                    src = f.get("source", "DI")
-                    key_label = f.get("key") or f.get("field", "field")
-                    parts.append(f"  - {key_label}: {f.get('value')} [{src}]")
-        
-        # Section 3: Tables PER DOCUMENT (important for structured data)
-        has_tables = any(doc.get("tables") for doc in graph_docs)
-        
-        if has_tables:
-            parts.append("\n" + "=" * 60)
-            parts.append("TABLES BY DOCUMENT (extracted from Azure Document Intelligence)")
-            parts.append("=" * 60)
-            
-            for doc in graph_docs:
-                title = doc.get("document_title", "Unknown")
-                tables = doc.get("tables", [])
-                
-                if not tables:
+            # Show each section with its KVPs
+            for section_key, section_kvps in list(kvps_by_section.items())[:5]:  # Limit to 5 sections
+                if section_key in sections_shown:
                     continue
+                sections_shown.add(section_key)
                 
-                # Find matching citation index
-                idx = "?"
-                for ext in extractions:
-                    if ext.get("_document_title") == title:
-                        idx = ext.get("_citation_idx", "?")
-                        break
+                parts.append(f"\n**Section: {section_key}**")
                 
-                parts.append(f"\n### Document [{idx}]: {title}")
+                # Show section context if available
+                if section_key in section_to_chunks:
+                    context_text = section_to_chunks[section_key][0]
+                    # Truncate long sections
+                    if len(context_text) > 500:
+                        context_text = context_text[:500] + "..."
+                    parts.append(f"Context: {context_text}")
+                    parts.append("")
                 
-                for i, table in enumerate(tables[:5]):  # Limit to 5 tables per doc
+                # Show KVPs from this section
+                parts.append("Fields extracted:")
+                for kvp in section_kvps[:10]:  # Limit to 10 KVPs per section
+                    key = kvp.get("key", "")
+                    value = kvp.get("value", "")
+                    parts.append(f"  • {key}: {value}")
+            
+            # Show tables for this document (if any)
+            tables = doc.get("tables", [])
+            if tables:
+                parts.append(f"\n**Tables in Document:**")
+                for i, table in enumerate(tables[:2], 1):  # Limit to 2 tables
                     headers = table.get("headers", [])
                     rows = table.get("rows", [])
                     
-                    parts.append(f"\n**Table {i+1}:**")
                     if headers:
-                        parts.append(f"  Headers: {headers}")
+                        parts.append(f"\nTable {i} Headers: {', '.join(headers)}")
                     
-                    # Rows may be JSON parsed or list of dicts
+                    # Show first 5 rows
                     if isinstance(rows, list):
-                        for j, row in enumerate(rows[:15]):  # Show more table rows
+                        for j, row in enumerate(rows[:5], 1):
                             if isinstance(row, dict):
-                                parts.append(f"  Row {j+1}: {row}")
-                            else:
-                                parts.append(f"  Row {j+1}: {row}")
+                                row_str = ", ".join(f"{k}={v}" for k, v in list(row.items())[:4])
+                                parts.append(f"  Row {j}: {row_str}")
                         if len(rows) > 5:
                             parts.append(f"  ... ({len(rows) - 5} more rows)")
-        
-        # Section 4: Entities per document (from GraphRAG community detection)
-        has_entities = any(doc.get("entities") for doc in graph_docs)
-        
-        if has_entities:
-            parts.append("\n" + "=" * 60)
-            parts.append("ENTITIES BY DOCUMENT (from GraphRAG)")
-            parts.append("Named entities, dates, organizations, etc. extracted from text")
-            parts.append("=" * 60)
-            
-            for doc in graph_docs:
-                title = doc.get("document_title", "Unknown")
-                entities = doc.get("entities", [])
-                
-                if not entities:
-                    continue
-                
-                # Find matching citation index
-                idx = "?"
-                for ext in extractions:
-                    if ext.get("_document_title") == title:
-                        idx = ext.get("_citation_idx", "?")
-                        break
-                
-                parts.append(f"\n### Document [{idx}]: {title}")
-                
-                # Group entities by type
-                entities_by_type = {}
-                for entity in entities[:50]:  # Limit to 50 entities per doc
-                    etype = entity.get("type", "OTHER")
-                    if etype not in entities_by_type:
-                        entities_by_type[etype] = []
-                    entities_by_type[etype].append(entity)
-                
-                for etype, elist in sorted(entities_by_type.items()):
-                    parts.append(f"\n**{etype}:**")
-                    for e in elist[:15]:  # Show up to 15 per type
-                        name = e.get("name", "")
-                        desc = e.get("description", "")
-                        if desc:
-                            parts.append(f"  - {name}: {desc}")
-                        else:
-                            parts.append(f"  - {name}")
-                    if len(elist) > 15:
-                        parts.append(f"  ... ({len(elist) - 15} more)")
         
         return "\n".join(parts)
 

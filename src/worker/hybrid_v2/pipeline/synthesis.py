@@ -1462,41 +1462,22 @@ BEGIN REPORT:"""
     def _build_field_comparison_pairs(self, extractions: List[Dict[str, Any]], max_pairs: int = 100) -> List[Dict[str, Any]]:
         """Build pairs of fields to compare across documents.
         
-        Smart filtering to avoid combinatorial explosion:
-        1. Focus on invoice/contract documents
-        2. Compare only related field types 
-        3. Use deterministic rules for obvious matches
-        4. Limit LLM comparisons to ambiguous pairs
+        Compares ALL document pairs - lets LLM decide relevance in Pass 2.
+        No document-type filtering to avoid domain-specific assumptions.
         """
         if len(extractions) < 2:
             return []
         
         pairs = []
-        deterministic_results = []
         
-        # Priority document matching - invoice vs contract is most valuable
-        doc_types = {}
-        for ext in extractions:
-            title = ext.get("_document_title", "").lower()
-            if "invoice" in title:
-                doc_types.setdefault("invoice", []).append(ext)
-            elif "contract" in title or "purchase" in title:
-                doc_types.setdefault("contract", []).append(ext)
-            else:
-                doc_types.setdefault("other", []).append(ext)
-        
-        # Prioritize invoice-vs-contract comparisons
+        # Compare ALL document pairs - no smart filtering
         doc_pairs_to_compare = []
-        if doc_types.get("invoice") and doc_types.get("contract"):
-            for inv in doc_types["invoice"]:
-                for con in doc_types["contract"]:
-                    doc_pairs_to_compare.append((inv, con))
+        for i in range(len(extractions)):
+            for j in range(i + 1, len(extractions)):
+                doc_pairs_to_compare.append((extractions[i], extractions[j]))
         
-        # Fall back to all pairs if no invoice/contract found
-        if not doc_pairs_to_compare:
-            for i in range(len(extractions)):
-                for j in range(i + 1, len(extractions)):
-                    doc_pairs_to_compare.append((extractions[i], extractions[j]))
+        logger.info("document_pairs_to_compare", num_pairs=len(doc_pairs_to_compare),
+                   doc_titles=[e.get("_document_title", "")[:30] for e in extractions])
         
         # Key field types to compare (ignore noisy identifiers)
         important_field_types = {"amount", "party", "date", "url", "percentage", "model", "term", "line_item"}

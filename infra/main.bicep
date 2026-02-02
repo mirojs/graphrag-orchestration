@@ -156,7 +156,7 @@ module graphragApi './core/host/container-app.bicep' = {
       }
       {
         name: 'REQUIRE_AUTH'
-        value: 'false'
+        value: 'true'
       }
       {
         name: 'AUTH_CLIENT_ID'

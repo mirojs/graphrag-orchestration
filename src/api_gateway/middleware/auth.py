@@ -159,8 +159,12 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
             except Exception as e:
                 logger.warning(f"Failed to parse X-MS-CLIENT-PRINCIPAL: {e}")
         
-        # 3. Standard Authorization header
-        auth_header = request.headers.get("Authorization")
+        # 3. Forwarded/Original Authorization headers (some proxies strip Authorization)
+        auth_header = (
+            request.headers.get("X-Forwarded-Authorization")
+            or request.headers.get("X-Original-Authorization")
+            or request.headers.get("Authorization")
+        )
         if auth_header and auth_header.startswith("Bearer "):
             return auth_header[7:]  # Remove "Bearer " prefix
         

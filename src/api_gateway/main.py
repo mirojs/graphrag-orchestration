@@ -145,16 +145,16 @@ app.add_middleware(CorrelationIdMiddleware)
 # 2. Version Header - resolves API/algorithm version from request headers
 app.add_middleware(VersionHeaderMiddleware)
 
-# 3. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
+# 3. Group Isolation - enforces tenant isolation using JWT or legacy headers
+app.add_middleware(GroupIsolationMiddleware)
+
+# 4. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
 # Set require_auth=False for development without Easy Auth
 app.add_middleware(
     JWTAuthMiddleware,
     auth_type=settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B",
     require_auth=settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
 )
-
-# 4. Group Isolation - enforces tenant isolation using JWT or legacy headers
-app.add_middleware(GroupIsolationMiddleware)
 
 # Include Routers
 app.include_router(health.router, tags=["health"])

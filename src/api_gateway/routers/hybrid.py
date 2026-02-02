@@ -171,9 +171,9 @@ class RouteEnum(str, Enum):
 class HybridQueryRequest(BaseModel):
     """Request model for hybrid pipeline queries."""
     query: str = Field(..., description="The natural language query to execute")
-    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit", "nlp_connected", "comprehensive"] = Field(
+    response_type: Literal["detailed_report", "summary", "audit_trail", "nlp_audit", "nlp_connected", "comprehensive", "comprehensive_sentence"] = Field(
         default="detailed_report",
-        description="Type of response to generate. Options: detailed_report, summary, audit_trail, nlp_audit (deterministic extraction), nlp_connected (deterministic + rephrasing), comprehensive (2-pass extraction for 100% fact coverage)"
+        description="Type of response to generate. Options: detailed_report, summary, audit_trail, nlp_audit (deterministic extraction), nlp_connected (deterministic + rephrasing), comprehensive (2-pass extraction for 100% fact coverage), comprehensive_sentence (sentence-level extraction using Azure DI spans)"
     )
     force_route: Optional[RouteEnum] = Field(
         default=None,

@@ -665,6 +665,213 @@ class Neo4jTextUnitStore:
         
         return list(chunks_by_doc.values())
 
+    async def get_sentence_level_context(
+        self,
+        entity_ids: List[str],
+        *,
+        top_k_docs: int = 5,
+        max_sentences_per_doc: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get sentence-level context from documents using Azure DI language spans.
+        
+        This is the KEY method for sentence-level retrieval. Instead of returning
+        full chunks, we use Azure DI's language_spans (sentence boundaries) to
+        extract individual sentences from documents.
+        
+        Traversal path:
+        1. Entity (from HippoRAG evidence) → APPEARS_IN_DOCUMENT → Document
+        2. Document has language_spans (JSON with {locale, confidence, spans: [{offset, length}]})
+        3. Reconstruct full document content from TextChunks (ordered by chunk_index)
+        4. Extract sentences using span offsets/lengths
+        
+        Args:
+            entity_ids: List of Entity node IDs from HippoRAG PPR
+            top_k_docs: Max number of documents to process
+            max_sentences_per_doc: Max sentences to extract per document
+            
+        Returns:
+            List of dicts with:
+            - document_title: Document title
+            - document_id: Document ID
+            - sentences: List of {text, offset, length, confidence, locale}
+            - full_content: Reconstructed full document content (for reference)
+        """
+        return await asyncio.to_thread(
+            self._get_sentence_level_context_sync,
+            entity_ids,
+            top_k_docs,
+            max_sentences_per_doc,
+        )
+
+    def _get_sentence_level_context_sync(
+        self,
+        entity_ids: List[str],
+        top_k_docs: int,
+        max_sentences_per_doc: int,
+    ) -> List[Dict[str, Any]]:
+        """Sync implementation of sentence-level context retrieval."""
+        if not entity_ids:
+            return []
+        
+        # Step 1: Find documents linked to these entities via APPEARS_IN_DOCUMENT
+        # Also get language_spans from Document nodes
+        doc_query = """
+        UNWIND $entity_ids AS entity_id
+        MATCH (e:Entity {group_id: $group_id})-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        WHERE e.id = entity_id OR e.name = entity_id
+        WITH DISTINCT d
+        LIMIT $top_k_docs
+        RETURN 
+            d.id AS doc_id,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.language_spans AS language_spans
+        """
+        
+        docs_with_spans: List[Dict[str, Any]] = []
+        
+        try:
+            with self._driver.session() as session:
+                result = session.run(
+                    doc_query,
+                    group_id=self._group_id,
+                    entity_ids=entity_ids,
+                    top_k_docs=top_k_docs,
+                )
+                for record in result:
+                    docs_with_spans.append({
+                        "doc_id": record.get("doc_id") or "",
+                        "doc_title": record.get("doc_title") or "Unknown",
+                        "language_spans": record.get("language_spans") or "[]",
+                    })
+                
+                if not docs_with_spans:
+                    logger.debug(
+                        "sentence_level_no_docs_from_entities",
+                        entity_ids=entity_ids[:5],
+                        group_id=self._group_id,
+                    )
+                    return []
+                
+                # Step 2: For each document, get full content from TextChunks
+                results: List[Dict[str, Any]] = []
+                
+                for doc_info in docs_with_spans:
+                    doc_id = doc_info["doc_id"]
+                    doc_title = doc_info["doc_title"]
+                    spans_json = doc_info["language_spans"]
+                    
+                    # Parse language spans
+                    try:
+                        all_spans = json.loads(spans_json) if spans_json else []
+                    except (json.JSONDecodeError, TypeError):
+                        all_spans = []
+                    
+                    if not all_spans:
+                        continue
+                    
+                    # Get all chunks for this document, ordered by chunk_index
+                    chunks_query = """
+                    MATCH (tc:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+                    WHERE d.id = $doc_id
+                    RETURN tc.text AS text, tc.chunk_index AS idx
+                    ORDER BY coalesce(tc.chunk_index, 0) ASC
+                    """
+                    
+                    chunks_result = session.run(
+                        chunks_query,
+                        group_id=self._group_id,
+                        doc_id=doc_id,
+                    )
+                    
+                    # Reconstruct full document content
+                    # Note: We concatenate chunks without newlines to match Azure DI's
+                    # original span offsets which are relative to the full document
+                    full_content_parts = []
+                    for chunk_record in chunks_result:
+                        text = chunk_record.get("text") or ""
+                        full_content_parts.append(text)
+                    
+                    # Azure DI spans are relative to original document content
+                    # The chunks were created from that content, so concatenating
+                    # should restore the original offsets
+                    full_content = "".join(full_content_parts)
+                    
+                    if not full_content:
+                        continue
+                    
+                    # Step 3: Extract sentences using language spans
+                    sentences: List[Dict[str, Any]] = []
+                    
+                    # Sort all language groups by confidence (highest first)
+                    sorted_langs = sorted(
+                        all_spans,
+                        key=lambda x: x.get("confidence", 0.0),
+                        reverse=True,
+                    )
+                    
+                    # Extract sentences from highest-confidence language spans
+                    for lang_group in sorted_langs:
+                        locale = lang_group.get("locale", "")
+                        confidence = lang_group.get("confidence", 0.0)
+                        spans = lang_group.get("spans", [])
+                        
+                        for span in spans:
+                            if len(sentences) >= max_sentences_per_doc:
+                                break
+                            
+                            offset = span.get("offset", 0)
+                            length = span.get("length", 0)
+                            
+                            # Extract sentence text using offset/length
+                            if offset >= 0 and length > 0 and offset + length <= len(full_content):
+                                sentence_text = full_content[offset:offset + length]
+                                
+                                # Skip very short or empty sentences
+                                if len(sentence_text.strip()) < 3:
+                                    continue
+                                
+                                sentences.append({
+                                    "text": sentence_text,
+                                    "offset": offset,
+                                    "length": length,
+                                    "confidence": confidence,
+                                    "locale": locale,
+                                })
+                        
+                        if len(sentences) >= max_sentences_per_doc:
+                            break
+                    
+                    if sentences:
+                        results.append({
+                            "document_title": doc_title,
+                            "document_id": doc_id,
+                            "sentences": sentences,
+                            "full_content": full_content,
+                            "total_spans": sum(
+                                len(lg.get("spans", [])) for lg in all_spans
+                            ),
+                        })
+                
+                logger.info(
+                    "sentence_level_context_retrieved",
+                    num_entities=len(entity_ids),
+                    num_docs_processed=len(results),
+                    total_sentences=sum(len(r["sentences"]) for r in results),
+                    group_id=self._group_id,
+                )
+                
+                return results
+                
+        except Exception as e:
+            logger.error(
+                "sentence_level_context_failed",
+                error=str(e),
+                entity_ids=entity_ids[:5],
+                group_id=self._group_id,
+            )
+            return []
+
     def _get_workspace_document_overviews_sync(self, limit: int) -> List[Dict[str, Any]]:
         """Sync implementation of document overview retrieval."""
         query = """

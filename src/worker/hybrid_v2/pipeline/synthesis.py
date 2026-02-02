@@ -217,6 +217,11 @@ class EvidenceSynthesizer:
         if response_type == "comprehensive":
             return await self._comprehensive_two_pass_extract(query, text_chunks, evidence_nodes)
         
+        # comprehensive_sentence mode: sentence-level extraction using Azure DI language spans
+        # This provides more precise context by traversing graph to extract individual sentences
+        if response_type == "comprehensive_sentence":
+            return await self._comprehensive_sentence_level_extract(query, text_chunks, evidence_nodes)
+        
         # Step 2: Build context with citations (now groups by document for better reasoning)
         context, citation_map = self._build_cited_context(text_chunks)
         context, citation_map = self._build_cited_context(text_chunks)
@@ -1367,6 +1372,253 @@ BEGIN ANALYSIS:"""
             "text_chunks_used": sum(len(d.get("chunks", [])) for d in graph_docs),
             "processing_mode": "comprehensive_graph_aware_reduced_context",
             "kvp_source": "azure_di",
+        }
+
+    async def _comprehensive_sentence_level_extract(
+        self,
+        query: str,
+        text_chunks: List[Dict[str, Any]],
+        evidence_nodes: List[Tuple[str, float]],
+    ) -> Dict[str, Any]:
+        """
+        Sentence-level comprehensive extraction using Azure DI language spans.
+        
+        This method provides fine-grained evidence retrieval by:
+        1. Taking HippoRAG evidence entities
+        2. Traversing graph to find related Documents
+        3. Using Azure DI language_spans to extract individual sentences
+        4. Feeding precise sentence-level context to LLM for comparison
+        
+        ADVANTAGES over chunk-level:
+        - More precise: Sentences instead of 1000+ char chunks
+        - Less noise: Only relevant sentences from Azure DI boundaries
+        - Better citation: Each sentence has offset/length for exact sourcing
+        
+        Args:
+            query: User's comparison query
+            text_chunks: Fallback chunks (used if sentence extraction fails)
+            evidence_nodes: List of (entity_id, ppr_score) from HippoRAG
+            
+        Returns:
+            Dict with response, raw_extractions, citations, etc.
+        """
+        import json
+        from collections import defaultdict
+        
+        # =====================================================================
+        # STEP 1: Get sentence-level context from documents
+        # =====================================================================
+        sentence_docs: List[Dict[str, Any]] = []
+        
+        if self.text_store and hasattr(self.text_store, "get_sentence_level_context"):
+            try:
+                # Extract entity IDs from evidence nodes
+                entity_ids = [node[0] for node in evidence_nodes] if evidence_nodes else []
+                
+                if entity_ids:
+                    sentence_docs = await self.text_store.get_sentence_level_context(
+                        entity_ids,
+                        top_k_docs=10,
+                        max_sentences_per_doc=50,  # More sentences for comprehensive analysis
+                    )
+                    logger.info(
+                        "comprehensive_sentence_level_retrieved",
+                        num_entities=len(entity_ids),
+                        num_docs=len(sentence_docs),
+                        total_sentences=sum(len(d.get("sentences", [])) for d in sentence_docs),
+                    )
+            except Exception as e:
+                logger.warning("comprehensive_sentence_level_failed", error=str(e))
+        
+        # =====================================================================
+        # STEP 2: Also get KVPs/Tables for structured data
+        # =====================================================================
+        graph_docs: List[Dict[str, Any]] = []
+        
+        if self.text_store and hasattr(self.text_store, "get_chunks_with_graph_structure"):
+            try:
+                graph_docs = await self.text_store.get_chunks_with_graph_structure(limit=50)
+            except Exception as e:
+                logger.warning("comprehensive_graph_structure_failed", error=str(e))
+        
+        # =====================================================================
+        # STEP 3: Build combined context with sentences + KVPs
+        # =====================================================================
+        combined_context_parts = []
+        combined_context_parts.append("=" * 60)
+        combined_context_parts.append("SENTENCE-LEVEL EVIDENCE (from Azure DI language spans)")
+        combined_context_parts.append("=" * 60)
+        
+        citations = []
+        citation_idx = 1
+        
+        # Group sentences by document
+        for doc in sentence_docs:
+            doc_title = doc.get("document_title", "Unknown")
+            sentences = doc.get("sentences", [])
+            
+            if not sentences:
+                continue
+            
+            combined_context_parts.append(f"\n### Document [{citation_idx}]: {doc_title}")
+            combined_context_parts.append("-" * 40)
+            combined_context_parts.append(f"Extracted {len(sentences)} sentences from Azure DI language spans:\n")
+            
+            # Add sentences with their offsets for traceability
+            for i, sent in enumerate(sentences, 1):
+                text = sent.get("text", "").strip()
+                offset = sent.get("offset", 0)
+                length = sent.get("length", 0)
+                confidence = sent.get("confidence", 0.0)
+                
+                # Skip very short sentences
+                if len(text) < 10:
+                    continue
+                
+                combined_context_parts.append(
+                    f"  [{i}] (offset={offset}, len={length}, conf={confidence:.2f}): {text}"
+                )
+            
+            # Add citation for this document
+            citations.append({
+                "citation": f"[{citation_idx}]",
+                "document_id": doc.get("document_id", ""),
+                "document_title": doc_title,
+                "document_url": "",
+                "sentence_count": len(sentences),
+                "text_preview": sentences[0].get("text", "")[:200] if sentences else "",
+            })
+            citation_idx += 1
+        
+        # Add KVPs from graph if available
+        for graph_doc in graph_docs:
+            doc_title = graph_doc.get("document_title", "Unknown")
+            kvps = graph_doc.get("kvps", [])
+            tables = graph_doc.get("tables", [])
+            
+            if not kvps and not tables:
+                continue
+            
+            # Find existing citation for this document
+            existing_citation = next(
+                (c for c in citations if c.get("document_title") == doc_title),
+                None
+            )
+            
+            if existing_citation:
+                citation_ref = existing_citation["citation"]
+            else:
+                citation_ref = f"[{citation_idx}]"
+                citations.append({
+                    "citation": citation_ref,
+                    "document_id": graph_doc.get("document_id", ""),
+                    "document_title": doc_title,
+                    "kvp_count": len(kvps),
+                    "table_count": len(tables),
+                })
+                citation_idx += 1
+            
+            combined_context_parts.append(f"\n### Structured Data {citation_ref}: {doc_title}")
+            combined_context_parts.append("-" * 40)
+            
+            if kvps:
+                combined_context_parts.append("Key-Value Pairs (from Azure DI):")
+                for kvp in kvps:
+                    key = kvp.get("key", "")
+                    value = kvp.get("value", "")
+                    if key and value:
+                        combined_context_parts.append(f"  • {key}: {value}")
+            
+            if tables:
+                combined_context_parts.append("\nTables:")
+                for i, table in enumerate(tables, 1):
+                    headers = table.get("headers", [])
+                    rows = table.get("rows", [])
+                    if headers:
+                        combined_context_parts.append(f"  Table {i} Headers: {', '.join(headers)}")
+                    if rows and isinstance(rows, list):
+                        for j, row in enumerate(rows[:5], 1):  # Limit rows
+                            if isinstance(row, dict):
+                                row_str = ", ".join(f"{k}={v}" for k, v in row.items())
+                                combined_context_parts.append(f"    Row {j}: {row_str}")
+        
+        combined_context = "\n".join(combined_context_parts)
+        
+        # =====================================================================
+        # STEP 4: LLM Analysis with sentence-level context
+        # =====================================================================
+        if not sentence_docs and not graph_docs:
+            # Fallback to regular comprehensive mode if no sentence data
+            logger.warning("comprehensive_sentence_level_no_data_fallback")
+            return await self._comprehensive_two_pass_extract(query, text_chunks, evidence_nodes)
+        
+        comparison_prompt = f"""You are analyzing documents to find inconsistencies using SENTENCE-LEVEL evidence.
+
+QUERY: "{query}"
+
+{combined_context}
+
+TASK: Using the sentence-level evidence above, identify ALL inconsistencies between documents.
+
+IMPORTANT:
+- Each sentence has offset/length metadata showing its exact position in the original document
+- This is PRECISE evidence from Azure Document Intelligence
+- Reference specific sentences by their number [1], [2], etc.
+
+For each inconsistency found:
+1. FIELD: What field/value is inconsistent
+2. DOCUMENTS: Which documents disagree (use document citations [1], [2], etc.)
+3. EVIDENCE: Quote the specific sentence(s) that show the inconsistency
+4. SIGNIFICANCE: Why this matters
+
+Include ALL discrepancies in:
+- Amounts/prices
+- Party names
+- Dates
+- Terms and conditions
+- Any other factual disagreements
+
+BEGIN SENTENCE-LEVEL ANALYSIS:"""
+
+        if not self.llm:
+            logger.error("llm_not_available")
+            narrative = "## Analysis Failed: LLM not available\n\nSentence-level context was retrieved but cannot be analyzed."
+        else:
+            try:
+                comparison_result = await self.llm.acomplete(comparison_prompt)
+                narrative = comparison_result.text.strip()
+            except Exception as e:
+                logger.error("llm_sentence_analysis_failed", error=str(e))
+                # Fallback: Show the extracted sentences
+                narrative = "## Analysis Failed\n\n### Extracted Sentences:\n\n"
+                for doc in sentence_docs:
+                    narrative += f"**{doc.get('document_title', 'Unknown')}:**\n"
+                    for sent in doc.get("sentences", [])[:10]:
+                        narrative += f"- {sent.get('text', '')}\n"
+                    narrative += "\n"
+        
+        logger.info(
+            "comprehensive_sentence_level_complete",
+            query=query[:50],
+            num_docs=len(sentence_docs),
+            total_sentences=sum(len(d.get("sentences", [])) for d in sentence_docs),
+        )
+        
+        return {
+            "response": narrative,
+            "raw_extractions": [
+                {
+                    "document_title": d.get("document_title"),
+                    "sentences": d.get("sentences", []),
+                    "total_spans": d.get("total_spans", 0),
+                }
+                for d in sentence_docs
+            ],
+            "citations": citations,
+            "evidence_path": [node[0] for node in evidence_nodes],
+            "text_chunks_used": sum(len(d.get("sentences", [])) for d in sentence_docs),
+            "processing_mode": "comprehensive_sentence_level",
+            "sentence_based": True,
         }
 
     def _build_graph_aware_comparison_context(

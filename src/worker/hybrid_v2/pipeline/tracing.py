@@ -41,6 +41,7 @@ class DeterministicTracer:
         graph_store: Optional[Any] = None,
         async_neo4j: Optional["AsyncNeo4jService"] = None,
         group_id: Optional[str] = None,
+        folder_id: Optional[str] = None,
         embed_model: Optional[Any] = None,
     ):
         """
@@ -49,6 +50,7 @@ class DeterministicTracer:
             graph_store: Fallback graph store if HippoRAG is not available.
             async_neo4j: AsyncNeo4jService for native async Neo4j queries (preferred).
             group_id: Tenant ID for multi-tenant isolation.
+            folder_id: Optional folder ID for scoped search (None = all folders).
             embed_model: Embedding model for Strategy 6 vector fallback.
                         Should have get_query_embedding(text) or embed_query(text) method.
         """
@@ -56,6 +58,7 @@ class DeterministicTracer:
         self.graph_store = graph_store
         self.async_neo4j = async_neo4j
         self.group_id = group_id
+        self.folder_id = folder_id
         self.embed_model = embed_model
         self._use_hipporag = hipporag_instance is not None
         self._use_async_neo4j = async_neo4j is not None

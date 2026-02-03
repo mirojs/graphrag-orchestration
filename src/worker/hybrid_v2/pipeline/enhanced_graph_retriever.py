@@ -130,16 +130,33 @@ class EnhancedGraphRetriever:
     4. Semantic entity search: Find entities by embedding similarity
     """
     
-    def __init__(self, neo4j_driver, group_id: str):
+    def __init__(self, neo4j_driver, group_id: str, folder_id: Optional[str] = None):
         """
         Initialize the enhanced retriever.
         
         Args:
             neo4j_driver: Neo4j driver instance
             group_id: Document group ID for filtering
+            folder_id: Optional folder ID for scoped search (None = all folders)
         """
         self.driver = neo4j_driver
         self.group_id = group_id
+        self.folder_id = folder_id
+    
+    def _get_folder_filter_clause(self, doc_alias: str = "d") -> str:
+        """Build Cypher WHERE clause for folder filtering.
+        
+        Returns empty string if folder_id is None (no filter).
+        """
+        if self.folder_id is None:
+            return ""
+        return f"AND ({doc_alias})-[:IN_FOLDER]->(:Folder {{id: $folder_id, group_id: $group_id}})"
+    
+    def _get_folder_params(self) -> dict:
+        """Get folder_id parameter dict for Cypher queries."""
+        if self.folder_id is not None:
+            return {"folder_id": self.folder_id}
+        return {}
 
     @staticmethod
     def _sanitize_query_for_fulltext(query: str) -> str:
@@ -387,8 +404,10 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return []
         
+        folder_filter = self._get_folder_filter_clause("d")
+        
         if use_new_edges:
-            query = """
+            query = f"""
             UNWIND $entity_names AS entity_name
             // Find entity first (uses entity_name index, with alias support)
             MATCH (e:Entity)
@@ -398,6 +417,7 @@ class EnhancedGraphRetriever:
             // Then traverse to documents via APPEARS_IN_DOCUMENT
             MATCH (e)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
             WHERE r.group_id = $group_id
+            {folder_filter}
             RETURN 
                 entity_name,
                 d.id AS doc_id,
@@ -409,12 +429,13 @@ class EnhancedGraphRetriever:
             """
         else:
             # Fallback to 3-hop traversal
-            query = """
+            query = f"""
             UNWIND $entity_names AS entity_name
             MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_DOCUMENT]->(d:Document)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND c.group_id = $group_id
+            {folder_filter}
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, d, count(DISTINCT c) AS mention_count, count(DISTINCT s) AS section_count
             RETURN 
@@ -429,14 +450,12 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {"entity_names": entity_names, "group_id": self.group_id}
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        entity_names=entity_names,
-                        group_id=self.group_id,
-                    )
+                    result = session.run(query, **params)
                     return [dict(record) for record in result]
             
             records = await loop.run_in_executor(None, _run_query)
@@ -533,12 +552,15 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return {}
         
-        query = """
+        folder_filter = self._get_folder_filter_clause("d")
+        
+        query = f"""
         UNWIND $entity_names AS entity_name
         MATCH (e:Entity)-[r:APPEARS_IN_DOCUMENT]->(d:Document)
         WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
           AND r.group_id = $group_id
+        {folder_filter}
         WITH entity_name, 
              count(d) AS doc_count,
              sum(r.section_count) AS section_count,
@@ -549,14 +571,12 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {"entity_names": entity_names, "group_id": self.group_id}
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        entity_names=entity_names,
-                        group_id=self.group_id,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -610,6 +630,11 @@ class EnhancedGraphRetriever:
         # Build filter for cross-doc vs any
         cross_doc_filter = "AND s1.doc_id <> s2.doc_id" if cross_doc_only else ""
         
+        # Build folder filter for related document - only allow sections from same folder
+        folder_filter_clause = ""
+        if self.folder_id:
+            folder_filter_clause = "WHERE d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})"
+        
         query = f"""
         UNWIND $section_ids AS source_section_id
         MATCH (s1:Section {{id: source_section_id, group_id: $group_id}})
@@ -629,6 +654,7 @@ class EnhancedGraphRetriever:
              }})[0..$max_per_section] AS related_sections
         UNWIND related_sections AS rel
         OPTIONAL MATCH (d:Document {{id: rel.related_doc_id, group_id: $group_id}})
+        {folder_filter_clause}
         RETURN 
             source_section_id,
             rel.related_section_id AS related_section_id,
@@ -641,16 +667,17 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {
+                "section_ids": section_ids,
+                "group_id": self.group_id,
+                "min_shared_count": min_shared_count,
+                "max_per_section": max_per_section,
+            }
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        section_ids=section_ids,
-                        group_id=self.group_id,
-                        min_shared_count=min_shared_count,
-                        max_per_section=max_per_section,
-                    )
+                    result = session.run(query, **params)
                     return [dict(record) for record in result]
             
             records = await loop.run_in_executor(None, _run_query)
@@ -813,8 +840,13 @@ class EnhancedGraphRetriever:
         if not entity_names:
             return []
         
+        # Build folder filter for document optional match
+        folder_filter_clause = ""
+        if self.folder_id:
+            folder_filter_clause = "WHERE d IS NULL OR (d.group_id = $group_id AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
+        
         # Query: Use new 1-hop edges to get sections, then fetch chunks from those sections
-        query = """
+        query = f"""
                 UNWIND $entity_names AS entity_name
                 MATCH (e:Entity)
                 WHERE (toLower(e.name) = toLower(entity_name)
@@ -828,11 +860,12 @@ class EnhancedGraphRetriever:
                 WHERE c.group_id = $group_id
                 // Get document info
                 OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
+                {folder_filter_clause}
                 WITH entity_name, c, s, d, 
                      // Prioritize chunks that mention the entity (if MENTIONS edge exists)
                      CASE WHEN exists((e)-[:MENTIONS]->(c)) THEN 1.0 ELSE 0.5 END AS score
                 ORDER BY score DESC, coalesce(c.chunk_index, 0)
-                WITH entity_name, collect({
+                WITH entity_name, collect({{
                     chunk_id: c.id,
                     text: c.text,
                     metadata: c.metadata,
@@ -843,7 +876,7 @@ class EnhancedGraphRetriever:
                     doc_title: d.title,
                     doc_source: d.source,
                     score: score
-                })[0..$max_per_entity] AS chunks
+                }})[0..$max_per_entity] AS chunks
                 UNWIND chunks AS chunk
                 RETURN
                     entity_name,
@@ -860,15 +893,16 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {
+                "entity_names": entity_names,
+                "group_id": self.group_id,
+                "max_per_entity": max_per_entity,
+            }
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        entity_names=entity_names,
-                        group_id=self.group_id,
-                        max_per_entity=max_per_entity,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -938,9 +972,15 @@ class EnhancedGraphRetriever:
         """
         if not entity_names or not self.driver:
             return []
+        
+        # Build folder filter for document optional match
+        folder_filter_clause = ""
+        if self.folder_id:
+            folder_filter_clause = "WHERE d IS NULL OR (d.group_id = $group_id AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
+        
         # Simplified query for current hybrid pipeline schema
         # Includes alias support for flexible entity matching
-        query = """
+        query = f"""
                 UNWIND $entity_names AS entity_name
                 MATCH (t:TextChunk)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
@@ -950,9 +990,10 @@ class EnhancedGraphRetriever:
                     AND e.group_id = $group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+                {folder_filter_clause}
                 WITH entity_name, t, s, d
                 ORDER BY coalesce(t.chunk_index, 0)
-                WITH entity_name, collect({
+                WITH entity_name, collect({{
                         chunk_id: t.id,
                         text: t.text,
                         metadata: t.metadata,
@@ -962,7 +1003,7 @@ class EnhancedGraphRetriever:
                         doc_id: d.id,
                         doc_title: d.title,
                         doc_source: d.source
-                })[0..$max_per_entity] AS chunks
+                }})[0..$max_per_entity] AS chunks
                 UNWIND chunks AS chunk
                 RETURN
                         entity_name,
@@ -976,14 +1017,22 @@ class EnhancedGraphRetriever:
                         chunk.doc_source AS doc_source
                 """
 
-        fallback_query = """
+        # Build folder filter for fallback query
+        fallback_folder_filter = "WHERE d IS NULL OR (d.group_id = $group_id"
+        if self.folder_id:
+            fallback_folder_filter += " AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
+        else:
+            fallback_folder_filter += ")"
+        
+        fallback_query = f"""
                 UNWIND $entity_names AS entity_name
                 WITH entity_name, $group_id AS group_id, $max_per_entity AS max_per_entity, $probe_limit AS probe_limit
-                CALL db.index.fulltext.queryNodes('textchunk_fulltext', entity_name, {limit: probe_limit})
+                CALL db.index.fulltext.queryNodes('textchunk_fulltext', entity_name, {{limit: probe_limit}})
                     YIELD node AS t, score
                 WHERE t.group_id = group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+                {fallback_folder_filter}
                 WITH
                     entity_name,
                     max_per_entity,
@@ -1019,15 +1068,16 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {
+                "entity_names": entity_names,
+                "group_id": self.group_id,
+                "max_per_entity": max_per_entity,
+            }
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        entity_names=entity_names,
-                        group_id=self.group_id,
-                        max_per_entity=max_per_entity,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -1071,14 +1121,15 @@ class EnhancedGraphRetriever:
                     probe_limit = min(max_per_entity * 50, 500)
 
                     def _run_fallback():
+                        fallback_params = {
+                            "entity_names": sanitized,
+                            "group_id": self.group_id,
+                            "max_per_entity": max_per_entity,
+                            "probe_limit": probe_limit,
+                        }
+                        fallback_params.update(self._get_folder_params())
                         with self.driver.session() as session:
-                            result = session.run(
-                                fallback_query,
-                                entity_names=sanitized,
-                                group_id=self.group_id,
-                                max_per_entity=max_per_entity,
-                                probe_limit=probe_limit,
-                            )
+                            result = session.run(fallback_query, **fallback_params)
                             return list(result)
 
                     records = await loop.run_in_executor(None, _run_fallback)
@@ -1331,6 +1382,7 @@ class EnhancedGraphRetriever:
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
             t.id AS chunk_id,
             t.text AS text,
@@ -1355,13 +1407,14 @@ class EnhancedGraphRetriever:
 
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        keyword_needles=keyword_needles,
-                        min_matches=min_matches,
-                        candidate_limit=candidate_limit,
-                    )
+                    params = {
+                        "group_id": self.group_id,
+                        "keyword_needles": keyword_needles,
+                        "min_matches": min_matches,
+                        "candidate_limit": candidate_limit,
+                        "folder_id": self.folder_id,
+                    }
+                    result = session.run(query, **params)
                     return list(result)
 
             records = await loop.run_in_executor(None, _run_query)
@@ -1448,11 +1501,14 @@ class EnhancedGraphRetriever:
         if max_total <= 0:
             return []
 
-        query = """
+        folder_filter = self._get_folder_filter_clause("d")
+
+        query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.chunk_index IN $chunk_indexes
+        {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         RETURN
             t.id AS chunk_id,
@@ -1469,14 +1525,15 @@ class EnhancedGraphRetriever:
 
         try:
             loop = asyncio.get_event_loop()
+            params = {
+                "group_id": self.group_id,
+                "chunk_indexes": candidate_chunk_indexes,
+            }
+            params.update(self._get_folder_params())
 
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        chunk_indexes=candidate_chunk_indexes,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
 
             records = await loop.run_in_executor(None, _run_query)
@@ -1586,6 +1643,7 @@ class EnhancedGraphRetriever:
              ) AS match_count
         WHERE match_count >= $min_matches
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
             t.id AS chunk_id,
             t.text AS text,
@@ -1612,6 +1670,7 @@ class EnhancedGraphRetriever:
                         section_keywords=lowered,
                         min_matches=min_matches,
                         candidate_limit=candidate_limit,
+                        folder_id=self.folder_id,
                     )
                     return list(result)
 
@@ -1710,6 +1769,7 @@ class EnhancedGraphRetriever:
           AND s.group_id = $group_id
           AND s.id IN $section_ids
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
             t.id AS chunk_id,
             t.text AS text,
@@ -1734,6 +1794,7 @@ class EnhancedGraphRetriever:
                         group_id=self.group_id,
                         section_ids=normalized,
                         candidate_limit=candidate_limit,
+                        folder_id=self.folder_id,
                     )
                     return list(result)
 
@@ -2129,9 +2190,12 @@ class EnhancedGraphRetriever:
         if not self.driver:
             return []
         
-        query = """
+        folder_filter = self._get_folder_filter_clause("d")
+        
+        query = f"""
         MATCH (d:Document)
         WHERE d.group_id = $group_id
+        {folder_filter}
         RETURN 
             d.id AS doc_id,
             d.title AS doc_title,
@@ -2142,14 +2206,12 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {"group_id": self.group_id, "max_docs": max_docs}
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        max_docs=max_docs,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2196,10 +2258,12 @@ class EnhancedGraphRetriever:
             return []
         
         order_clause = "DESC" if order.lower() == "desc" else "ASC"
+        folder_filter = self._get_folder_filter_clause("d")
         
         query = f"""
         MATCH (d:Document)
         WHERE d.group_id = $group_id AND d.date IS NOT NULL
+        {folder_filter}
         RETURN 
             d.id AS doc_id,
             d.title AS doc_title,
@@ -2211,14 +2275,12 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {"group_id": self.group_id, "limit": limit}
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        limit=limit,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2318,14 +2380,16 @@ class EnhancedGraphRetriever:
         try:
             loop = asyncio.get_event_loop()
             
+            params = {
+                "group_id": self.group_id,
+                "max_per_document": max_per_document,
+                "prefer_early_chunks": prefer_early_chunks,
+            }
+            params.update(self._get_folder_params())
+            
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        max_per_document=max_per_document,
-                        prefer_early_chunks=prefer_early_chunks,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2433,16 +2497,19 @@ class EnhancedGraphRetriever:
         if not self.driver or not query_embedding:
             return []
         
+        folder_filter = self._get_folder_filter_clause("d")
+        
         # Use native vector similarity to find the best chunk per document
-        query = """
+        query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.embedding IS NOT NULL
+        {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         WITH d, t, s, vector.similarity.cosine(t.embedding, $query_embedding) AS score
         ORDER BY d.id, score DESC
-        WITH d, collect({
+        WITH d, collect({{
             chunk_id: t.id,
             text: t.text,
             metadata: t.metadata,
@@ -2453,7 +2520,7 @@ class EnhancedGraphRetriever:
             doc_title: d.title,
             doc_source: d.source,
             similarity_score: score
-        })[0..$max_per_document] AS chunks
+        }})[0..$max_per_document] AS chunks
         UNWIND chunks AS chunk
         RETURN
             chunk.chunk_id AS chunk_id,
@@ -2470,15 +2537,16 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
+            params = {
+                "group_id": self.group_id,
+                "query_embedding": query_embedding,
+                "max_per_document": max_per_document,
+            }
+            params.update(self._get_folder_params())
             
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        query_embedding=query_embedding,
-                        max_per_document=max_per_document,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2581,15 +2649,18 @@ class EnhancedGraphRetriever:
         if not self.driver:
             return []
         
+        folder_filter = self._get_folder_filter_clause("d")
+        
         # Different queries based on whether we want all chunks or sampling
         if max_per_section is None:
             # COMPREHENSIVE: Return ALL chunks from all sections
             # No slicing - just collect and unwind all chunks per section
-            query = """
+            query = f"""
             MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
             WHERE t.group_id = $group_id
               AND s.group_id = $group_id
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+            WHERE d IS NULL OR (d.group_id = $group_id {folder_filter.replace('AND ', 'AND ')})
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             RETURN
@@ -2606,14 +2677,15 @@ class EnhancedGraphRetriever:
             """
         else:
             # SAMPLING: Return max_per_section chunks from each section
-            query = """
+            query = f"""
             MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
             WHERE t.group_id = $group_id
               AND s.group_id = $group_id
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+            WHERE d IS NULL OR (d.group_id = $group_id {folder_filter.replace('AND ', 'AND ')})
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
-            WITH s, collect({
+            WITH s, collect({{
                 chunk_id: t.id,
                 text: t.text,
                 metadata: t.metadata,
@@ -2624,7 +2696,7 @@ class EnhancedGraphRetriever:
                 doc_id: coalesce(d.id, ''),
                 doc_title: coalesce(d.title, ''),
                 doc_source: coalesce(d.source, '')
-            })[0..$max_per_section] AS section_chunks
+            }})[0..$max_per_section] AS section_chunks
             UNWIND section_chunks AS chunk
             RETURN
                 chunk.chunk_id AS chunk_id,
@@ -2646,6 +2718,7 @@ class EnhancedGraphRetriever:
                 with self.driver.session() as session:
                     # Only pass max_per_section when using sampling mode
                     params = {"group_id": self.group_id}
+                    params.update(self._get_folder_params())
                     if max_per_section is not None:
                         params["max_per_section"] = max_per_section
                     
@@ -2735,12 +2808,17 @@ class EnhancedGraphRetriever:
             logger.warning("search_sections_by_vector_no_driver")
             return []
         
-        query = """
-        MATCH (s:Section {group_id: $group_id})
+        # Build folder filter for document join
+        folder_filter_clause = ""
+        if self.folder_id:
+            folder_filter_clause = "AND (d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
+        
+        query = f"""
+        MATCH (s:Section {{group_id: $group_id}})
         WHERE s.embedding IS NOT NULL
         OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:TextChunk)-[:IN_DOCUMENT]->(d:Document)
         WITH s, d, vector.similarity.cosine(s.embedding, $query_embedding) AS score
-        WHERE score >= $score_threshold
+        WHERE score >= $score_threshold {folder_filter_clause}
         WITH s, d, score
         ORDER BY score DESC
         LIMIT $top_k
@@ -2757,15 +2835,17 @@ class EnhancedGraphRetriever:
         try:
             loop = asyncio.get_event_loop()
             
+            params = {
+                "group_id": self.group_id,
+                "query_embedding": query_embedding,
+                "top_k": top_k,
+                "score_threshold": score_threshold,
+            }
+            params.update(self._get_folder_params())
+            
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        query_embedding=query_embedding,
-                        top_k=top_k,
-                        score_threshold=score_threshold,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2815,22 +2895,9 @@ class EnhancedGraphRetriever:
             return []
 
         max_per_document = max(0, max_per_document)
+        folder_filter = self._get_folder_filter_clause("d")
 
-        query = """
-        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
-        WHERE d.group_id = $group_id
-          AND t.group_id = $group_id
-          AND t.metadata IS NOT NULL
-        WITH d, t, apoc.convert.fromJsonMap(t.metadata) AS meta
-        WHERE coalesce(meta.is_summary_section, false) = true OR t.chunk_index = 0
-        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-        WITH d, t, meta, s
-        ORDER BY d.id,
-                 CASE WHEN coalesce(meta.is_summary_section, false) = true THEN 0 ELSE 1 END ASC,
-                 t.chunk_index ASC
-        WITH d, collect({
-            chunk_id: t.id,
-            text: t.text,
+        query = f\"\"\"\n        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)\n        WHERE d.group_id = $group_id\n          AND t.group_id = $group_id\n          AND t.metadata IS NOT NULL\n        {folder_filter}\n        WITH d, t, apoc.convert.fromJsonMap(t.metadata) AS meta\n        WHERE coalesce(meta.is_summary_section, false) = true OR t.chunk_index = 0\n        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)\n        WITH d, t, meta, s\n        ORDER BY d.id,\n                 CASE WHEN coalesce(meta.is_summary_section, false) = true THEN 0 ELSE 1 END ASC,\n                 t.chunk_index ASC\n        WITH d, collect({{\n            chunk_id: t.id,\n            text: t.text,
             metadata: t.metadata,
             chunk_index: t.chunk_index,
             section_id: s.id,
@@ -2854,14 +2921,15 @@ class EnhancedGraphRetriever:
 
         try:
             loop = asyncio.get_event_loop()
+            params = {
+                "group_id": self.group_id,
+                "max_per_document": max_per_document,
+            }
+            params.update(self._get_folder_params())
 
             def _run_query():
                 with self.driver.session() as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        max_per_document=max_per_document,
-                    )
+                    result = session.run(query, **params)
                     return list(result)
 
             records = await loop.run_in_executor(None, _run_query)

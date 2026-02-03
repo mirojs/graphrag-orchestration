@@ -66,6 +66,7 @@ class ChatJobTracker:
         user_id: str,
         query: str,
         approach: str,
+        folder_id: Optional[str] = None,
     ) -> None:
         """Create a new chat job."""
         store = await self._get_store()
@@ -77,6 +78,7 @@ class ChatJobTracker:
                 "user_id": user_id,
                 "query": query,
                 "approach": approach,
+                "folder_id": folder_id,
                 "created_at": time.time(),
                 "thoughts": [],  # Progressive updates
             }
@@ -264,8 +266,8 @@ class ChatJobStatusResponse(BaseModel):
 # Pipeline Integration
 # ============================================================================
 
-async def _get_hybrid_pipeline(group_id: str):
-    """Get or create HybridPipeline instance for the given group."""
+async def _get_hybrid_pipeline(group_id: str, folder_id: Optional[str] = None):
+    """Get or create HybridPipeline instance for the given group and folder."""
     # Import here to avoid circular imports
     from src.worker.hybrid_v2.orchestrator import HybridPipeline
     from src.worker.hybrid_v2.router.main import DeploymentProfile
@@ -273,6 +275,7 @@ async def _get_hybrid_pipeline(group_id: str):
     # Simple singleton pattern - pipelines are stateless
     pipeline = HybridPipeline(
         group_id=group_id,
+        folder_id=folder_id,  # Optional folder scope
         profile=DeploymentProfile.GENERAL_ENTERPRISE,
     )
     return pipeline
@@ -282,6 +285,7 @@ async def _execute_query(
     query: str,
     approach: str,
     group_id: str,
+    folder_id: Optional[str] = None,
     response_type: str = "detailed_report",
 ) -> Dict[str, Any]:
     """
@@ -291,7 +295,7 @@ async def _execute_query(
     """
     from src.worker.hybrid_v2.router.main import QueryRoute
     
-    pipeline = await _get_hybrid_pipeline(group_id)
+    pipeline = await _get_hybrid_pipeline(group_id, folder_id)
     
     # Map approach to route
     route_map = {
@@ -481,11 +485,11 @@ async def chat_completions(
     # Non-streaming: check if route should be async
     if approach in ASYNC_ROUTES:
         # Routes 3/4 (Global/DRIFT) - use async pattern
-        return await _submit_async_job(query, approach, group_id, user_id, request)
+        return await _submit_async_job(query, approach, group_id, user_id, request, body.folder_id)
     
     # Sync route (local/hybrid) - execute immediately
     try:
-        result = await _execute_query(query, approach, group_id)
+        result = await _execute_query(query, approach, group_id, body.folder_id)
         
         response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
         return ChatResponse(
@@ -515,6 +519,7 @@ async def _submit_async_job(
     group_id: str,
     user_id: str,
     request: Request,
+    folder_id: Optional[str] = None,
 ) -> JSONResponse:
     """
     Submit an async job for long-running queries (Routes 3/4).
@@ -530,10 +535,11 @@ async def _submit_async_job(
         user_id=user_id,
         query=query,
         approach=approach,
+        folder_id=folder_id,
     )
     
     # Start background execution
-    asyncio.create_task(_execute_async_job(job_id, query, approach, group_id))
+    asyncio.create_task(_execute_async_job(job_id, query, approach, group_id, folder_id))
     
     # Build poll URL
     base_url = str(request.base_url).rstrip("/")
@@ -561,6 +567,7 @@ async def _execute_async_job(
     query: str,
     approach: str,
     group_id: str,
+    folder_id: Optional[str] = None,
 ) -> None:
     """
     Background task to execute async job.
@@ -576,7 +583,7 @@ async def _execute_async_job(
         })
         
         # Execute query
-        result = await _execute_query(query, approach, group_id)
+        result = await _execute_query(query, approach, group_id, folder_id)
         
         # Update with results
         await _chat_jobs.update(
@@ -645,9 +652,9 @@ async def _stream_chat_response(
         thoughts = initial_thoughts + [{"title": "Route Selection", "description": f"Using {approach} route"}]
         yield _format_stream_chunk(response_id, created, approach, "", thoughts)
         
-        # Execute the actual query
+        # Execute the actual query (with optional folder scope)
         try:
-            result = await _execute_query(query, approach, group_id)
+            result = await _execute_query(query, approach, group_id, request.folder_id)
             
             # Add result thoughts
             thoughts = result.get("thoughts", [])

@@ -47,20 +47,24 @@ class HubExtractor:
         graph_store: Optional[Any] = None,
         neo4j_driver: Optional[Any] = None,
         group_id: str = "default",
+        folder_id: Optional[str] = None,
     ):
         """
         Args:
             graph_store: LlamaIndex graph store.
             neo4j_driver: Neo4j driver for direct queries.
+            folder_id: Optional folder ID for scoped search (None = all folders).
         """
         self.graph_store = graph_store
         self.neo4j_driver = neo4j_driver
         self.group_id = group_id
+        self.folder_id = folder_id
         
         logger.info("hub_extractor_created",
                    has_graph_store=graph_store is not None,
                    has_neo4j=neo4j_driver is not None,
-                   group_id=group_id)
+                   group_id=group_id,
+                   folder_id=folder_id)
     
     async def extract_hub_entities(
         self,
@@ -283,22 +287,29 @@ class HubExtractor:
             import asyncio
             loop = asyncio.get_event_loop()
             
+            # Build folder filter if folder_id is set
+            folder_filter = ""
+            if self.folder_id:
+                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})"
+            
             # Query Neo4j to get document source for each entity
             # Support both Entity and __Entity__ labels for compatibility
             # Includes alias support for flexible entity matching
             def _sync_query():
                 with self.neo4j_driver.session() as session:
-                    result = session.run("""
+                    result = session.run(f\"\"\"
                         UNWIND $entity_names AS entity_name
                         MATCH (c:TextChunk)-[:MENTIONS]->(e)
                         WHERE (e:Entity OR e:`__Entity__`)
                           AND c.group_id = $group_id AND e.group_id = $group_id
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+                        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
+                        WHERE d IS NULL OR (d.group_id = $group_id {folder_filter})
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
                         RETURN entity_name, meta.url AS doc_url
                         LIMIT 100
-                                        """, entity_names=entity_names, group_id=self.group_id)
+                                        \"\"\", entity_names=entity_names, group_id=self.group_id, folder_id=self.folder_id)
                     return [(r["entity_name"], r["doc_url"]) for r in result if r.get("doc_url")]
             
             entity_docs = await loop.run_in_executor(None, _sync_query)

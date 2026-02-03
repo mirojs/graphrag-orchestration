@@ -134,9 +134,38 @@ class BaseRouteHandler:
         self.llm = pipeline.llm
         self.neo4j_driver = pipeline.neo4j_driver
         self.group_id = pipeline.group_id
+        self.folder_id = pipeline.folder_id  # Optional folder scope (None = all)
         self.synthesizer = pipeline.synthesizer
         self._executor = pipeline._executor
         self._async_neo4j = pipeline._async_neo4j
+
+    def _build_folder_filter(self, node_alias: str = "node", doc_alias: str = "d") -> str:
+        """Build Cypher WHERE clause for optional folder filtering.
+        
+        If folder_id is None, returns empty string (no filter).
+        If folder_id is set, returns a WHERE clause that filters documents in that folder.
+        
+        Args:
+            node_alias: Alias for the chunk/node being filtered
+            doc_alias: Alias for the document node
+            
+        Returns:
+            Cypher WHERE clause string (empty if no folder filter)
+        """
+        if self.folder_id is None:
+            return ""
+        # Filter documents that are in the specified folder
+        return f"AND ({doc_alias})-[:IN_FOLDER]->(:Folder {{id: $folder_id, group_id: $group_id}})"
+    
+    def _get_folder_params(self) -> dict:
+        """Get folder_id parameter dict for Cypher queries.
+        
+        Returns:
+            Dict with folder_id if set, empty dict otherwise
+        """
+        if self.folder_id is not None:
+            return {"folder_id": self.folder_id}
+        return {}
 
     async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None) -> RouteResult:
         """Execute the route on a query.
@@ -337,6 +366,8 @@ class BaseRouteHandler:
         Returns chunks with section metadata for integration with Route 3's
         section-aware evidence collection.
         
+        Supports optional folder filtering via self.folder_id.
+        
         Args:
             query_text: The user query to search for.
             top_k: Maximum number of results to return.
@@ -350,6 +381,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
+        folder_id = self.folder_id
         driver = self.neo4j_driver  # Local ref for closure
         
         if use_phrase_boost:
@@ -361,11 +393,18 @@ class BaseRouteHandler:
             return []
 
         def _run_sync():
-            q = """
-            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $query_text, {limit: $top_k})
+            # Build folder filter clause - applied after document join
+            folder_filter = ""
+            if folder_id:
+                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+            
+            q = f"""
+            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $query_text, {{limit: $candidate_k}})
             YIELD node, score
             WHERE node.group_id = $group_id
-            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+            WITH node, d, score
+            WHERE d IS NULL OR d IS NOT NULL {folder_filter}
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
             RETURN node.id AS id,
                    node.text AS text,
@@ -380,8 +419,17 @@ class BaseRouteHandler:
             LIMIT $top_k
             """
             rows = []
+            params = {
+                "query_text": search_query,
+                "group_id": group_id,
+                "top_k": top_k,
+                "candidate_k": top_k * 5,  # Oversample for folder filtering
+            }
+            if folder_id:
+                params["folder_id"] = folder_id
+                
             with driver.session() as session:
-                for r in session.run(q, query_text=search_query, group_id=group_id, top_k=top_k):
+                for r in session.run(q, **params):
                     chunk = {
                         "id": r["id"],
                         "text": r["text"],
@@ -411,6 +459,8 @@ class BaseRouteHandler:
         3. Follow MENTIONS edges to get TextChunks
         4. Use IN_SECTION to get sibling chunks for context
         
+        Supports optional folder filtering via self.folder_id.
+        
         Args:
             query: User query string
             top_k: Maximum chunks to return
@@ -439,17 +489,25 @@ class BaseRouteHandler:
         
         term_pattern = '|'.join(re.escape(t) for t in search_terms)
         group_id = self.group_id
+        folder_id = self.folder_id
         driver = self.neo4j_driver  # Local ref for closure
         
         def _run_sync():
-            cypher = """
+            # Build folder filter clause
+            folder_filter = ""
+            if folder_id:
+                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+            
+            cypher = f"""
             CYPHER 25
-            MATCH (e:Entity {group_id: $group_id})
+            MATCH (e:Entity {{group_id: $group_id}})
             WHERE e.name =~ $pattern
                OR any(a IN coalesce(e.aliases, []) WHERE a =~ $pattern)
             
-            MATCH (t:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
-            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            MATCH (t:TextChunk {{group_id: $group_id}})-[:MENTIONS]->(e)
+            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+            WITH t, d, e
+            WHERE d IS NULL OR d IS NOT NULL {folder_filter}
             OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
             
             WITH t, d, s, count(DISTINCT e) AS entityMatches
@@ -472,12 +530,15 @@ class BaseRouteHandler:
                 with driver.session() as session:
                     regex_pattern = f'(?i).*({term_pattern}).*'
                     
-                    result = session.run(
-                        cypher,
-                        group_id=group_id,
-                        pattern=regex_pattern,
-                        top_k=top_k,
-                    )
+                    params = {
+                        "group_id": group_id,
+                        "pattern": regex_pattern,
+                        "top_k": top_k,
+                    }
+                    if folder_id:
+                        params["folder_id"] = folder_id
+                    
+                    result = session.run(cypher, **params)
                     
                     for r in result:
                         chunk = {
@@ -496,7 +557,8 @@ class BaseRouteHandler:
                     logger.info("entity_graph_search_complete",
                                query=query[:50],
                                search_terms=search_terms[:5],
-                               num_results=len(rows))
+                               num_results=len(rows),
+                               folder_id=folder_id)
                                
             except Exception as e:
                 logger.error("entity_graph_search_failed",

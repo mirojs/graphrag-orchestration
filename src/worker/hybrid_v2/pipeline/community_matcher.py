@@ -33,7 +33,8 @@ class CommunityMatcher:
         embedding_client: Optional[Any] = None,
         communities_path: Optional[str] = None,
         group_id: str = "default",
-        neo4j_service: Optional[Any] = None
+        neo4j_service: Optional[Any] = None,
+        folder_id: Optional[str] = None,
     ):
         """
         Args:
@@ -41,9 +42,11 @@ class CommunityMatcher:
             communities_path: Path to pre-computed community data.
             group_id: Tenant identifier.
             neo4j_service: Neo4j service for validating dynamic communities.
+            folder_id: Optional folder ID for scoped search (None = all folders).
         """
         self.embedding_client = embedding_client
         self.group_id = group_id
+        self.folder_id = folder_id
         self.communities_path = Path(communities_path) if communities_path else None
         self.neo4j_service = neo4j_service
         
@@ -53,6 +56,7 @@ class CommunityMatcher:
         
         logger.info("community_matcher_created",
                    group_id=group_id,
+                   folder_id=folder_id,
                    has_embedding_client=embedding_client is not None,
                    has_neo4j_service=neo4j_service is not None)
     

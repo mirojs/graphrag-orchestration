@@ -294,3 +294,300 @@ async def delete_folder(
     logger.info("folder_deleted", folder_id=folder_id, partition_id=partition_id, cascade=cascade)
     
     return {"status": "deleted", "folder_id": folder_id}
+
+
+# =============================================================================
+# Document-Folder Assignment Endpoints
+# =============================================================================
+
+class DocumentFolderAssignment(BaseModel):
+    """Request model for assigning a document to a folder."""
+    document_id: str
+    folder_id: Optional[str] = None  # None to unassign (move to root/unfiled)
+
+
+class BulkDocumentFolderAssignment(BaseModel):
+    """Request model for bulk document-folder assignment."""
+    document_ids: List[str]
+    folder_id: Optional[str] = None
+
+
+@router.post("/{folder_id}/documents")
+async def assign_document_to_folder(
+    folder_id: str,
+    assignment: DocumentFolderAssignment,
+    partition_id: str = Depends(get_partition_id)
+):
+    """
+    Assign a document to a folder.
+    
+    Creates an IN_FOLDER relationship between the document and folder.
+    Removes any existing folder assignment first (document can only be in one folder).
+    
+    Args:
+        folder_id: Target folder ID
+        assignment: Document ID to assign
+        partition_id: Group/user ID from auth middleware
+    
+    Returns:
+        Assignment result
+    """
+    driver = get_graph_driver()
+    
+    # Verify folder exists and belongs to this partition
+    verify_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.id as id
+    """
+    with driver.session() as session:
+        result = session.run(verify_query, folder_id=folder_id, partition_id=partition_id)
+        if not result.single():
+            raise HTTPException(status_code=404, detail="Folder not found")
+    
+    # Assign document to folder (remove existing assignment first)
+    assign_query = """
+    MATCH (d:Document {id: $document_id, group_id: $partition_id})
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    
+    // Remove existing folder assignment if any
+    OPTIONAL MATCH (d)-[old:IN_FOLDER]->(:Folder)
+    DELETE old
+    
+    // Create new assignment
+    CREATE (d)-[:IN_FOLDER]->(f)
+    SET d.folder_id = $folder_id
+    
+    RETURN d.id as document_id, f.id as folder_id, f.name as folder_name
+    """
+    
+    with driver.session() as session:
+        result = session.run(assign_query,
+                           document_id=assignment.document_id,
+                           folder_id=folder_id,
+                           partition_id=partition_id)
+        record = result.single()
+        
+        if not record:
+            raise HTTPException(status_code=404, detail="Document not found")
+    
+    logger.info("document_assigned_to_folder",
+                document_id=assignment.document_id,
+                folder_id=folder_id,
+                partition_id=partition_id)
+    
+    return {
+        "status": "assigned",
+        "document_id": record["document_id"],
+        "folder_id": record["folder_id"],
+        "folder_name": record["folder_name"]
+    }
+
+
+@router.delete("/{folder_id}/documents/{document_id}")
+async def unassign_document_from_folder(
+    folder_id: str,
+    document_id: str,
+    partition_id: str = Depends(get_partition_id)
+):
+    """
+    Remove a document from a folder (move to unfiled/root).
+    
+    Args:
+        folder_id: Folder ID to remove from
+        document_id: Document ID to unassign
+        partition_id: Group/user ID from auth middleware
+    
+    Returns:
+        Unassignment result
+    """
+    driver = get_graph_driver()
+    
+    unassign_query = """
+    MATCH (d:Document {id: $document_id, group_id: $partition_id})-[r:IN_FOLDER]->(f:Folder {id: $folder_id})
+    DELETE r
+    SET d.folder_id = null
+    RETURN d.id as document_id
+    """
+    
+    with driver.session() as session:
+        result = session.run(unassign_query,
+                           document_id=document_id,
+                           folder_id=folder_id,
+                           partition_id=partition_id)
+        record = result.single()
+        
+        if not record:
+            raise HTTPException(status_code=404, detail="Document not in this folder")
+    
+    logger.info("document_unassigned_from_folder",
+                document_id=document_id,
+                folder_id=folder_id,
+                partition_id=partition_id)
+    
+    return {"status": "unassigned", "document_id": document_id}
+
+
+@router.post("/{folder_id}/documents/bulk")
+async def bulk_assign_documents_to_folder(
+    folder_id: str,
+    assignment: BulkDocumentFolderAssignment,
+    partition_id: str = Depends(get_partition_id)
+):
+    """
+    Assign multiple documents to a folder in one operation.
+    
+    Args:
+        folder_id: Target folder ID
+        assignment: List of document IDs to assign
+        partition_id: Group/user ID from auth middleware
+    
+    Returns:
+        Bulk assignment result with success/failure counts
+    """
+    driver = get_graph_driver()
+    
+    # Verify folder exists
+    verify_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.id as id
+    """
+    with driver.session() as session:
+        result = session.run(verify_query, folder_id=folder_id, partition_id=partition_id)
+        if not result.single():
+            raise HTTPException(status_code=404, detail="Folder not found")
+    
+    # Bulk assign documents
+    bulk_query = """
+    UNWIND $document_ids AS doc_id
+    MATCH (d:Document {id: doc_id, group_id: $partition_id})
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    
+    // Remove existing folder assignment
+    OPTIONAL MATCH (d)-[old:IN_FOLDER]->(:Folder)
+    DELETE old
+    
+    // Create new assignment
+    CREATE (d)-[:IN_FOLDER]->(f)
+    SET d.folder_id = $folder_id
+    
+    RETURN doc_id
+    """
+    
+    assigned_ids = []
+    with driver.session() as session:
+        result = session.run(bulk_query,
+                           document_ids=assignment.document_ids,
+                           folder_id=folder_id,
+                           partition_id=partition_id)
+        assigned_ids = [r["doc_id"] for r in result]
+    
+    failed_ids = [d for d in assignment.document_ids if d not in assigned_ids]
+    
+    logger.info("bulk_documents_assigned_to_folder",
+                folder_id=folder_id,
+                assigned_count=len(assigned_ids),
+                failed_count=len(failed_ids),
+                partition_id=partition_id)
+    
+    return {
+        "status": "completed",
+        "folder_id": folder_id,
+        "assigned_count": len(assigned_ids),
+        "assigned_ids": assigned_ids,
+        "failed_count": len(failed_ids),
+        "failed_ids": failed_ids
+    }
+
+
+@router.get("/{folder_id}/documents")
+async def list_documents_in_folder(
+    folder_id: str,
+    partition_id: str = Depends(get_partition_id),
+    include_subfolders: bool = False
+):
+    """
+    List all documents in a folder.
+    
+    Args:
+        folder_id: Folder ID to list documents from
+        partition_id: Group/user ID from auth middleware
+        include_subfolders: If True, include documents from subfolders
+    
+    Returns:
+        List of documents in the folder
+    """
+    driver = get_graph_driver()
+    
+    if include_subfolders:
+        query = """
+        MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+        OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+        WITH collect(f) + collect(sub) AS folders
+        UNWIND folders AS folder
+        MATCH (d:Document {group_id: $partition_id})-[:IN_FOLDER]->(folder)
+        RETURN DISTINCT d.id as id, d.title as title, d.source as source,
+               d.folder_id as folder_id, d.created_at as created_at
+        ORDER BY d.title
+        """
+    else:
+        query = """
+        MATCH (d:Document {group_id: $partition_id})-[:IN_FOLDER]->(f:Folder {id: $folder_id})
+        RETURN d.id as id, d.title as title, d.source as source,
+               d.folder_id as folder_id, d.created_at as created_at
+        ORDER BY d.title
+        """
+    
+    with driver.session() as session:
+        result = session.run(query, folder_id=folder_id, partition_id=partition_id)
+        documents = [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "source": r["source"],
+                "folder_id": r["folder_id"],
+                "created_at": str(r["created_at"]) if r["created_at"] else None
+            }
+            for r in result
+        ]
+    
+    return {"folder_id": folder_id, "documents": documents, "count": len(documents)}
+
+
+@router.get("/unfiled/documents")
+async def list_unfiled_documents(
+    partition_id: str = Depends(get_partition_id)
+):
+    """
+    List all documents not assigned to any folder (unfiled/root documents).
+    
+    Args:
+        partition_id: Group/user ID from auth middleware
+    
+    Returns:
+        List of unfiled documents
+    """
+    driver = get_graph_driver()
+    
+    query = """
+    MATCH (d:Document {group_id: $partition_id})
+    WHERE NOT (d)-[:IN_FOLDER]->(:Folder)
+    RETURN d.id as id, d.title as title, d.source as source,
+           d.created_at as created_at
+    ORDER BY d.title
+    """
+    
+    with driver.session() as session:
+        result = session.run(query, partition_id=partition_id)
+        documents = [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "source": r["source"],
+                "folder_id": None,
+                "created_at": str(r["created_at"]) if r["created_at"] else None
+            }
+            for r in result
+        ]
+    
+    return {"folder_id": None, "documents": documents, "count": len(documents)}
+

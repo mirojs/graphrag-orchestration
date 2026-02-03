@@ -173,7 +173,8 @@ class HybridPipeline:
         graph_communities: Optional[list] = None,
         communities_path: Optional[str] = None,
         relevance_budget: float = 0.8,
-        group_id: str = "default"
+        group_id: str = "default",
+        folder_id: Optional[str] = None
     ):
         """
         Initialize the hybrid pipeline.
@@ -190,12 +191,14 @@ class HybridPipeline:
             communities_path: Path to community data file.
             relevance_budget: 0.0-1.0, controls thoroughness vs speed.
             group_id: Tenant identifier.
+            folder_id: Optional folder ID for scoped search (None = all folders).
         """
         self.profile = profile
         self.llm = llm_client
         self.relevance_budget = relevance_budget
         self.graph_communities = graph_communities
         self.group_id = group_id
+        self.folder_id = folder_id  # None means search all folders
         self.neo4j_driver = neo4j_driver
 
         # Route 1 (Vector RAG) was deprecated - capability flag kept for backward compatibility
@@ -234,7 +237,8 @@ class HybridPipeline:
             embedding_client=embedding_client,
             communities_path=communities_path,
             group_id=group_id,
-            neo4j_service=self._async_neo4j
+            neo4j_service=self._async_neo4j,
+            folder_id=folder_id,
         )
         
         # Route 3: Hub extraction (for seeding HippoRAG)
@@ -242,12 +246,14 @@ class HybridPipeline:
             graph_store=graph_store,
             neo4j_driver=neo4j_driver,
             group_id=group_id,
+            folder_id=folder_id,
         )
         
         # Route 3: Enhanced graph retriever (for citations via MENTIONS & relationships)
         self.enhanced_retriever = EnhancedGraphRetriever(
             neo4j_driver=neo4j_driver,
-            group_id=group_id
+            group_id=group_id,
+            folder_id=folder_id,
         )
         
         # Routes 3 & 4: Deterministic tracing
@@ -257,6 +263,7 @@ class HybridPipeline:
             graph_store=graph_store,
             async_neo4j=self._async_neo4j,
             group_id=group_id,
+            folder_id=folder_id,
             embed_model=embedding_client,  # For Strategy 6 vector fallback
         )
         

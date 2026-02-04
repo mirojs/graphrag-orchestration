@@ -31,13 +31,16 @@ SCOPES = ["https://graph.microsoft.com/Policy.ReadWrite.AuthenticationMethod"]
 # This is a common approach for admin scripts
 CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"  # Microsoft Graph PowerShell
 
+# Your tenant ID - use specific tenant to avoid account confusion
+TENANT_ID = "ecaa729a-f04c-4558-a31a-ab714740ee8b"  # Default Directory
+
 
 def get_access_token():
     """Get access token using interactive browser authentication."""
     
     app = msal.PublicClientApplication(
         CLIENT_ID,
-        authority="https://login.microsoftonline.com/organizations"
+        authority=f"https://login.microsoftonline.com/{TENANT_ID}"
     )
     
     # Try to get token from cache first

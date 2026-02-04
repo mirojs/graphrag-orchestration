@@ -962,14 +962,32 @@ class Neo4jTextUnitStore:
                     sentences = []
                     try:
                         spans_data = json.loads(language_spans_raw) if isinstance(language_spans_raw, str) else language_spans_raw
-                        if isinstance(spans_data, dict):
+                        
+                        # Handle various formats:
+                        # 1. List with single dict: [{"locale": "en", "spans": [...]}]
+                        # 2. Direct dict: {"locale": "en", "spans": [...]}
+                        # 3. Direct list of spans: [{"offset": 0, "length": 10}, ...]
+                        if isinstance(spans_data, list) and len(spans_data) > 0:
+                            first_item = spans_data[0]
+                            if isinstance(first_item, dict) and "spans" in first_item:
+                                # Format 1: List with single dict containing spans
+                                spans_list = first_item.get("spans", [])
+                                locale = first_item.get("locale", "en")
+                                confidence = first_item.get("confidence", 1.0)
+                            elif isinstance(first_item, dict) and "offset" in first_item:
+                                # Format 3: Direct list of span objects
+                                spans_list = spans_data
+                                locale = "en"
+                                confidence = 1.0
+                            else:
+                                spans_list = []
+                                locale = "en"
+                                confidence = 1.0
+                        elif isinstance(spans_data, dict):
+                            # Format 2: Direct dict with spans
                             spans_list = spans_data.get("spans", [])
                             locale = spans_data.get("locale", "en")
                             confidence = spans_data.get("confidence", 1.0)
-                        elif isinstance(spans_data, list):
-                            spans_list = spans_data
-                            locale = "en"
-                            confidence = 1.0
                         else:
                             spans_list = []
                             locale = "en"

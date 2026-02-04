@@ -436,19 +436,45 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 
 | Phase | Task | Status | Effort |
 |-------|------|--------|--------|
-| **1a** | Remove Route 1 from code | 🔲 Pending | 1 day |
-| **1b** | Remove Azure AI Search from infra + deps | 🔲 Pending | 0.5 day |
-| **1c** | Add Cosmos DB + Redis to infra | 🔲 Pending | 1 day |
-| **1d** | Instrumentation hooks (fire-and-forget) | 🔲 Pending | 2 days |
-| **1e** | Create `src/core/` module structure | 🔲 Pending | 1 day |
+| **1a** | Remove Route 1 from code | ✅ Done | 1 day |
+| **1b** | Remove Azure AI Search from infra + deps | ✅ Done (was never in main.bicep) | 0.5 day |
+| **1c** | Add Cosmos DB + Redis to infra | ✅ Done (already in `infra/core/`) | 1 day |
+| **1d** | Instrumentation hooks (fire-and-forget) | ✅ Done | 2 days |
+| **1e** | Create `src/core/` module structure | ✅ Done (restructure) | 1 day |
 | **2a** | Git subtree frontend from azure-search-openai-demo | 🔲 Pending | 0.5 day |
-| **2b** | Runtime config endpoint (`/config`) | 🔲 Pending | 0.5 day |
+| **2b** | Runtime config endpoint (`/config`) | ✅ Done (already existed) | 0.5 day |
 | **2c** | Chat compat router (`/chat`, `/chat/stream`) | 🔲 Pending | 2 days |
 | **2d** | JWT validation middleware | 🔲 Pending | 1 day |
 | **2e** | Folder schema + CRUD endpoints | 🔲 Pending | 2 days |
 | **3a** | Split API/Worker containers in Bicep | 🔲 Pending | 1 day |
 | **3b** | Easy Auth configuration (B2B + B2C) | 🔲 Pending | 1 day |
 | **3c** | Dashboard UI (admin + user) | 🔲 Pending | 3-5 days |
+
+### Phase 1 Completion Notes (Feb 1, 2026)
+
+**1a - Route 1 Deprecated:**
+- `src/api_gateway/routers/hybrid.py` now returns 410 Gone for `force_route=vector_rag`
+- Default profile changed to `HIGH_ASSURANCE` (Routes 2-4 only)
+- Commit: `6c7e86c` (deprecate Route 1)
+
+**1b - Azure AI Search:**
+- Never existed in `infra/main.bicep` (only in unused `frontend/infra/`)
+- No action needed - already clean
+
+**1c - Cosmos DB + Redis:**
+- `infra/core/database/cosmos-db.bicep` - Serverless with `chat_history` and `usage` containers
+- `infra/core/cache/redis.bicep` - Basic SKU with TLS 1.2
+- Both already deployed and active
+
+**1d - Instrumentation:**
+- Created `src/core/instrumentation/` module with fire-and-forget hooks
+- `InstrumentationHooks` class with `track_query()`, `track_error()`, `track_llm_usage()`, etc.
+- Integrated into `/hybrid/query` endpoint in `hybrid.py`
+- Pattern: Uses `asyncio.create_task()` for non-blocking telemetry
+
+**2b - Runtime Config:**
+- `src/api_gateway/routers/config.py` - `/config` endpoint already complete
+- Returns: `authType`, `clientId`, `authority`, `requireAuth`, `features`, `routes`, `apiVersion`
 
 ---
 

@@ -2897,7 +2897,22 @@ class EnhancedGraphRetriever:
         max_per_document = max(0, max_per_document)
         folder_filter = self._get_folder_filter_clause("d")
 
-        query = f\"\"\"\n        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)\n        WHERE d.group_id = $group_id\n          AND t.group_id = $group_id\n          AND t.metadata IS NOT NULL\n        {folder_filter}\n        WITH d, t, apoc.convert.fromJsonMap(t.metadata) AS meta\n        WHERE coalesce(meta.is_summary_section, false) = true OR t.chunk_index = 0\n        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)\n        WITH d, t, meta, s\n        ORDER BY d.id,\n                 CASE WHEN coalesce(meta.is_summary_section, false) = true THEN 0 ELSE 1 END ASC,\n                 t.chunk_index ASC\n        WITH d, collect({{\n            chunk_id: t.id,\n            text: t.text,
+        query = f"""
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
+        WHERE d.group_id = $group_id
+          AND t.group_id = $group_id
+          AND t.metadata IS NOT NULL
+        {folder_filter}
+        WITH d, t, apoc.convert.fromJsonMap(t.metadata) AS meta
+        WHERE coalesce(meta.is_summary_section, false) = true OR t.chunk_index = 0
+        OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
+        WITH d, t, meta, s
+        ORDER BY d.id,
+                 CASE WHEN coalesce(meta.is_summary_section, false) = true THEN 0 ELSE 1 END ASC,
+                 t.chunk_index ASC
+        WITH d, collect({{
+            chunk_id: t.id,
+            text: t.text,
             metadata: t.metadata,
             chunk_index: t.chunk_index,
             section_id: s.id,
@@ -2905,7 +2920,7 @@ class EnhancedGraphRetriever:
             doc_id: d.id,
             doc_title: d.title,
             doc_source: d.source
-        })[0..$max_per_document] AS chunks
+        }})[0..$max_per_document] AS chunks
         UNWIND chunks AS chunk
         RETURN
             chunk.chunk_id AS chunk_id,

@@ -297,7 +297,7 @@ class HubExtractor:
             # Includes alias support for flexible entity matching
             def _sync_query():
                 with self.neo4j_driver.session() as session:
-                    result = session.run(f\"\"\"
+                    result = session.run(f"""
                         UNWIND $entity_names AS entity_name
                         MATCH (c:TextChunk)-[:MENTIONS]->(e)
                         WHERE (e:Entity OR e:`__Entity__`)
@@ -309,7 +309,7 @@ class HubExtractor:
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta
                         RETURN entity_name, meta.url AS doc_url
                         LIMIT 100
-                                        \"\"\", entity_names=entity_names, group_id=self.group_id, folder_id=self.folder_id)
+                                        """, entity_names=entity_names, group_id=self.group_id, folder_id=self.folder_id)
                     return [(r["entity_name"], r["doc_url"]) for r in result if r.get("doc_url")]
             
             entity_docs = await loop.run_in_executor(None, _sync_query)

@@ -39,6 +39,11 @@ from src.core.services.redis_service import (
     RedisService,
     OperationStatus,
 )
+from src.core.instrumentation import (
+    get_instrumentation,
+    track_query,
+    track_error,
+)
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -431,6 +436,9 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
     
     Use `force_route` to override the automatic decision.
     """
+    import time
+    start_time = time.time()
+    
     group_id = request.state.group_id or "default"
     
     logger.info("hybrid_query_received",
@@ -481,9 +489,33 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
         else:
             result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config)
         
+        # Fire-and-forget instrumentation tracking
+        latency_ms = (time.time() - start_time) * 1000
+        track_query(
+            query=body.query,
+            route=result.get("route_used", "unknown"),
+            latency_ms=latency_ms,
+            tokens_used=result.get("usage", {}).get("total_tokens", 0),
+            success=True,
+            group_id=group_id,
+            metadata={
+                "response_type": body.response_type,
+                "forced": body.force_route is not None,
+                "confidence": result.get("confidence"),
+            },
+        )
+        
         return HybridQueryResponse(**result)
 
     except HighQualityError as e:
+        latency_ms = (time.time() - start_time) * 1000
+        track_error(
+            error_type="HighQualityError",
+            error_message=str(e),
+            route=body.force_route.value if body.force_route else "auto",
+            group_id=group_id,
+            metadata={"code": getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY")},
+        )
         logger.warning(
             "hybrid_query_strict_high_quality_failed",
             group_id=group_id,
@@ -502,6 +534,13 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
         )
         
     except Exception as e:
+        latency_ms = (time.time() - start_time) * 1000
+        track_error(
+            error_type=type(e).__name__,
+            error_message=str(e),
+            route=body.force_route.value if body.force_route else "auto",
+            group_id=group_id,
+        )
         logger.error("hybrid_query_failed",
                     group_id=group_id,
                     error=str(e))

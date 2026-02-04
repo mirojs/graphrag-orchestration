@@ -1123,6 +1123,14 @@ Audit Trail:"""
         # =====================================================================
         graph_docs: List[Dict[str, Any]] = []
         
+        # Debug: log text_store state
+        logger.info(
+            "comprehensive_text_store_state",
+            text_store_type=type(self.text_store).__name__ if self.text_store else None,
+            text_store_group_id=getattr(self.text_store, '_group_id', None) if self.text_store else None,
+            has_method=hasattr(self.text_store, "get_chunks_with_graph_structure") if self.text_store else False,
+        )
+        
         if self.text_store and hasattr(self.text_store, "get_chunks_with_graph_structure"):
             try:
                 graph_docs = await self.text_store.get_chunks_with_graph_structure(limit=50)
@@ -1134,40 +1142,15 @@ Audit Trail:"""
             except Exception as e:
                 logger.warning("comprehensive_graph_structure_failed", error=str(e))
         
-        # Fallback to regular chunks if graph query failed
+        # NO FALLBACK - require graph structure or fail explicitly
         if not graph_docs:
-            if not text_chunks and self.text_store:
-                if hasattr(self.text_store, "get_all_chunks_for_comprehensive"):
-                    try:
-                        text_chunks = await self.text_store.get_all_chunks_for_comprehensive(limit=50)
-                        logger.info("comprehensive_fetched_all_chunks", num_chunks=len(text_chunks))
-                    except Exception as e:
-                        logger.warning("comprehensive_fetch_all_chunks_failed", error=str(e))
-            
-            # Convert flat chunks to graph_docs format
-            doc_chunks: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
-            for chunk in text_chunks or []:
-                meta = chunk.get("metadata", {})
-                doc_key = (
-                    meta.get("document_id") 
-                    or chunk.get("document_id")
-                    or meta.get("document_title")
-                    or chunk.get("document_title")
-                    or "Unknown"
-                )
-                doc_chunks[doc_key].append(chunk)
-            
-            for doc_key, chunks in doc_chunks.items():
-                graph_docs.append({
-                    "document_title": chunks[0].get("document_title") or doc_key,
-                    "document_id": doc_key,
-                    "combined_text": "\n\n".join(c.get("text", "") for c in chunks),
-                    "chunks": chunks,
-                    "kvps": [],  # No graph KVPs available
-                    "tables": [],
-                })
-        
-        if not graph_docs:
+            logger.error(
+                "comprehensive_no_graph_docs",
+                text_store_type=type(self.text_store).__name__ if self.text_store else None,
+                text_store_group_id=getattr(self.text_store, '_group_id', None) if self.text_store else None,
+                has_get_chunks_method=hasattr(self.text_store, "get_chunks_with_graph_structure") if self.text_store else False,
+                evidence_nodes_count=len(evidence_nodes),
+            )
             return {
                 "response": "No documents found to analyze.",
                 "raw_extractions": [],

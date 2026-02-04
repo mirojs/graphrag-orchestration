@@ -13,10 +13,11 @@ import json
 import time
 import urllib.request
 import urllib.error
+import subprocess
 from typing import Any, Dict, List, Tuple
 
 # Cloud API configuration
-CLOUD_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+CLOUD_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "test-5pdfs-v2-fix2"  # Indexed on Feb 2, 2026 at 14:11
 
 # Invoice/Contract inconsistency query
@@ -58,6 +59,27 @@ GROUND_TRUTH = {
 
 def make_request(query: str, group_id: str, response_type: str, force_route: str) -> Tuple[int, Any, float, str]:
     """Make HTTP POST request to cloud API."""
+    try:
+        result = subprocess.run(
+            [
+                "az",
+                "account",
+                "get-access-token",
+                "--scope",
+                "api://b68b6881-80ba-4cec-b9dd-bd2232ec8817/.default",
+                "--query",
+                "accessToken",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        token = result.stdout.strip()
+    except Exception as e:
+        return 0, {"error": f"Failed to get AAD token: {e}"}, 0.0, ""
+
     url = f"{CLOUD_URL}/hybrid/query"
     payload = {
         "query": query,
@@ -69,6 +91,7 @@ def make_request(query: str, group_id: str, response_type: str, force_route: str
         "Content-Type": "application/json",
         "Accept": "application/json",
         "X-Group-ID": group_id,
+        "Authorization": f"Bearer {token}",
     }
     
     req = urllib.request.Request(
@@ -172,14 +195,19 @@ def main():
         print("ERROR:", json.dumps(data, indent=2))
         return
     
+    # Debug: print raw response
+    print("DEBUG - Raw response keys:", list(data.keys()) if isinstance(data, dict) else type(data))
+    print("DEBUG - Raw response:", json.dumps(data, indent=2)[:500])
+    print()
+    
     # Extract response details
-    response_text = data.get("response", "")
-    raw_extractions = data.get("raw_extractions", [])
-    citations = data.get("citations", [])
-    evidence_path = data.get("evidence_path", [])
-    text_chunks_used = data.get("text_chunks_used", 0)
-    processing_mode = data.get("processing_mode", "")
-    sentence_based = data.get("sentence_based", False)
+    response_text = data.get("response", "") if isinstance(data, dict) else ""
+    raw_extractions = data.get("raw_extractions", []) if isinstance(data, dict) else []
+    citations = data.get("citations", []) if isinstance(data, dict) else []
+    evidence_path = data.get("evidence_path", []) if isinstance(data, dict) else []
+    text_chunks_used = data.get("text_chunks_used", 0) if isinstance(data, dict) else 0
+    processing_mode = data.get("processing_mode", "") if isinstance(data, dict) else ""
+    sentence_based = data.get("sentence_based", False) if isinstance(data, dict) else False
     
     print("RESPONSE METADATA:")
     print(f"  Response length: {len(response_text):,} characters")

@@ -208,6 +208,8 @@ class GraphRAGClient:
         messages: List[Dict[str, str]],
         route: Optional[int] = None,
         folder_id: Optional[str] = None,
+        response_type: str = "detailed_report",
+        force_route: Optional[str] = None,
         **kwargs,
     ) -> GraphRAGQueryResult:
         """
@@ -216,23 +218,46 @@ class GraphRAGClient:
         Args:
             group_id: Tenant/user identifier
             messages: Conversation history in OpenAI format
-            route: Specific route to use (2/3/4), or None for auto-routing
+            route: Specific route to use (2/3/4), or None for auto-routing (DEPRECATED - use force_route)
             folder_id: Optional folder to scope search to
+            response_type: Type of response - "detailed_report", "summary", "audit_trail", 
+                          "comprehensive", "comprehensive_sentence"
+            force_route: Force specific route - "local_search", "global_search", "drift_multi_hop"
             
         Returns:
             GraphRAGQueryResult with answer and citations
         """
         client = await self._get_client()
         
+        # Extract the last user message as the query
+        user_messages = [msg for msg in messages if msg.get("role") == "user"]
+        if not user_messages:
+            raise ValueError("No user message found in messages array")
+        query = user_messages[-1].get("content", "")
+        
+        # Build payload matching backend API contract
         payload = {
-            "messages": messages,
-            "route": route or self.config.default_route,
+            "query": query,
+            "response_type": response_type,
         }
+        
+        # Handle routing (prefer force_route over deprecated route parameter)
+        if force_route:
+            payload["force_route"] = force_route
+        elif route:
+            # Map old numeric route to new string-based force_route
+            route_map = {
+                2: "local_search",
+                3: "global_search",
+                4: "drift_multi_hop",
+            }
+            if route in route_map:
+                payload["force_route"] = route_map[route]
         
         if folder_id:
             payload["folder_id"] = folder_id
         
-        # Merge any additional kwargs
+        # Merge any additional kwargs (e.g., knn_config, relevance_budget)
         payload.update(kwargs)
         
         try:
@@ -245,7 +270,7 @@ class GraphRAGClient:
             data = response.json()
             
             return GraphRAGQueryResult(
-                answer=data.get("answer", ""),
+                answer=data.get("response", data.get("answer", "")),  # Backend uses "response"
                 citations=data.get("citations", []),
                 route_used=data.get("route_used"),
                 confidence=data.get("confidence"),
@@ -264,6 +289,8 @@ class GraphRAGClient:
         messages: List[Dict[str, str]],
         route: Optional[int] = None,
         folder_id: Optional[str] = None,
+        response_type: str = "detailed_report",
+        force_route: Optional[str] = None,
         **kwargs,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -272,19 +299,42 @@ class GraphRAGClient:
         Args:
             group_id: Tenant/user identifier
             messages: Conversation history in OpenAI format
-            route: Specific route to use (2/3/4), or None for auto-routing
+            route: Specific route to use (2/3/4), or None for auto-routing (DEPRECATED - use force_route)
             folder_id: Optional folder to scope search to
+            response_type: Type of response - "detailed_report", "summary", "audit_trail", 
+                          "comprehensive", "comprehensive_sentence"
+            force_route: Force specific route - "local_search", "global_search", "drift_multi_hop"
             
         Yields:
             Streaming response chunks
         """
         client = await self._get_client()
         
+        # Extract the last user message as the query
+        user_messages = [msg for msg in messages if msg.get("role") == "user"]
+        if not user_messages:
+            raise ValueError("No user message found in messages array")
+        query = user_messages[-1].get("content", "")
+        
+        # Build payload matching backend API contract
         payload = {
-            "messages": messages,
-            "route": route or self.config.default_route,
+            "query": query,
+            "response_type": response_type,
             "stream": True,
         }
+        
+        # Handle routing (prefer force_route over deprecated route parameter)
+        if force_route:
+            payload["force_route"] = force_route
+        elif route:
+            # Map old numeric route to new string-based force_route
+            route_map = {
+                2: "local_search",
+                3: "global_search",
+                4: "drift_multi_hop",
+            }
+            if route in route_map:
+                payload["force_route"] = route_map[route]
         
         if folder_id:
             payload["folder_id"] = folder_id

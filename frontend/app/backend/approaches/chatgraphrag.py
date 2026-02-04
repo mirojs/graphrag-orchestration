@@ -85,12 +85,18 @@ class ChatGraphRAGApproach(Approach):
         folder_id = overrides.get("folder_id")
         route = overrides.get("route", self.default_route)
         
+        # Get response type (supports comprehensive_sentence mode)
+        response_type = overrides.get("response_type", "detailed_report")
+        force_route = overrides.get("force_route")  # e.g., "drift_multi_hop"
+        
         # Call GraphRAG backend
         result = await self.graphrag_client.chat(
             group_id=group_id,
             messages=messages,
             route=route,
             folder_id=folder_id,
+            response_type=response_type,
+            force_route=force_route,
         )
         
         # Convert citations to the expected format
@@ -151,6 +157,10 @@ class ChatGraphRAGApproach(Approach):
         folder_id = overrides.get("folder_id")
         route = overrides.get("route", self.default_route)
         
+        # Get response type (supports comprehensive_sentence mode)
+        response_type = overrides.get("response_type", "detailed_report")
+        force_route = overrides.get("force_route")  # e.g., "drift_multi_hop"
+        
         accumulated_content = ""
         citations = []
         thoughts = []
@@ -161,6 +171,8 @@ class ChatGraphRAGApproach(Approach):
                 messages=messages,
                 route=route,
                 folder_id=folder_id,
+                response_type=response_type,
+                force_route=force_route,
             ):
                 # Handle different chunk types
                 if "content" in chunk:

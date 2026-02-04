@@ -77,21 +77,22 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 if self.auth_type == "B2B":
                     # B2B: Use groups[0] as group_id
                     groups = claims.get("groups", [])
-                    if not groups:
-                        if settings.GROUP_ID_OVERRIDE:
-                            # Use override when groups claim is missing
-                            request.state.group_id = settings.GROUP_ID_OVERRIDE
-                            request.state.user_id = claims.get("oid")
-                            logger.warning(
-                                "auth_group_override_used: group_id=%s user_id=%s",
-                                request.state.group_id,
-                                request.state.user_id,
-                            )
-                        else:
-                            raise HTTPException(
-                                status_code=status.HTTP_403_FORBIDDEN,
-                                detail="No group claim found in token. User must be assigned to an Azure AD group."
-                            )
+                    
+                    # GROUP_ID_OVERRIDE takes precedence over JWT groups (for testing)
+                    if settings.GROUP_ID_OVERRIDE:
+                        request.state.group_id = settings.GROUP_ID_OVERRIDE
+                        request.state.user_id = claims.get("oid")
+                        logger.warning(
+                            "auth_group_override_forced: group_id=%s user_id=%s jwt_groups=%s",
+                            request.state.group_id,
+                            request.state.user_id,
+                            groups,
+                        )
+                    elif not groups:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="No group claim found in token. User must be assigned to an Azure AD group."
+                        )
                     else:
                         request.state.group_id = groups[0]
                         request.state.user_id = claims.get("oid")  # Optional user tracking

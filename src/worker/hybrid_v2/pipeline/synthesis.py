@@ -1550,11 +1550,31 @@ BEGIN ANALYSIS:"""
         combined_context = "\n".join(combined_context_parts)
         
         # =====================================================================
-        # STEP 4: Fallback if no evidence
+        # STEP 4: NO FALLBACK - fail explicitly if no evidence
         # =====================================================================
         if not sentence_docs and not tables_by_doc and not text_chunks:
-            logger.warning("comprehensive_sentence_level_no_data_fallback")
-            return await self._comprehensive_two_pass_extract(query, text_chunks, evidence_nodes)
+            logger.error(
+                "comprehensive_sentence_level_no_data",
+                sentence_docs_count=len(sentence_docs),
+                tables_count=len(tables_by_doc),
+                text_chunks_count=len(text_chunks),
+                text_store_type=type(self.text_store).__name__ if self.text_store else None,
+                text_store_group_id=getattr(self.text_store, '_group_id', None) if self.text_store else None,
+            )
+            return {
+                "response": "ERROR: comprehensive_sentence found no data. Check text_store initialization and group_id.",
+                "raw_extractions": [],
+                "citations": [],
+                "evidence_path": [node[0] for node in evidence_nodes],
+                "text_chunks_used": 0,
+                "debug": {
+                    "sentence_docs": len(sentence_docs),
+                    "tables_by_doc": len(tables_by_doc),
+                    "text_chunks": len(text_chunks),
+                    "text_store_type": type(self.text_store).__name__ if self.text_store else None,
+                    "text_store_group_id": getattr(self.text_store, '_group_id', None) if self.text_store else None,
+                },
+            }
         
         # =====================================================================
         # STEP 5: LLM Analysis with RAW evidence only

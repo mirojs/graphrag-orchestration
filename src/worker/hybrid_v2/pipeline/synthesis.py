@@ -1393,6 +1393,15 @@ BEGIN ANALYSIS:"""
         # =====================================================================
         sentence_docs: List[Dict[str, Any]] = []
         
+        # Debug logging for text_store
+        logger.info(
+            "comprehensive_sentence_text_store_debug",
+            has_text_store=self.text_store is not None,
+            text_store_type=type(self.text_store).__name__ if self.text_store else None,
+            has_get_all_docs_method=hasattr(self.text_store, "get_all_documents_with_sentences") if self.text_store else False,
+            text_store_group_id=getattr(self.text_store, '_group_id', None) if self.text_store else None,
+        )
+        
         if self.text_store and hasattr(self.text_store, "get_all_documents_with_sentences"):
             try:
                 sentence_docs = await self.text_store.get_all_documents_with_sentences(

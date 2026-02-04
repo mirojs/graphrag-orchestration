@@ -188,12 +188,13 @@ jobs:
             --query "properties.configuration.ingress.fqdn" -o tsv)
           
           echo "Testing: https://$URL"
+          TOKEN=$(az account get-access-token --resource api://b68b6881-80ba-4cec-b9dd-bd2232ec8817 --query accessToken -o tsv)
           
           for i in {1..5}; do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$URL/health" --max-time 10)
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$URL/health" --max-time 10 -H "Authorization: Bearer $TOKEN")
             if [ "$HTTP" == "200" ]; then
               echo "✅ Health check passed"
-              curl -s -I "https://$URL/health" | grep -i "x-" || true
+              curl -s -I "https://$URL/health" -H "Authorization: Bearer $TOKEN" | grep -i "x-" || true
               exit 0
             fi
             echo "Attempt $i: HTTP $HTTP, retrying..."

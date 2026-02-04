@@ -188,7 +188,7 @@ jobs:
             --query "properties.configuration.ingress.fqdn" -o tsv)
           
           echo "Testing: https://$URL"
-          TOKEN=$(az account get-access-token --resource api://b68b6881-80ba-4cec-b9dd-bd2232ec8817 --query accessToken -o tsv)
+          TOKEN=$(az account get-access-token --scope api://b68b6881-80ba-4cec-b9dd-bd2232ec8817/.default --query accessToken -o tsv)
           
           for i in {1..5}; do
             HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$URL/health" --max-time 10 -H "Authorization: Bearer $TOKEN")

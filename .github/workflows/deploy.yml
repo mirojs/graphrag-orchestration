@@ -161,7 +161,7 @@ jobs:
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
-            --revision-suffix "r${{ github.run_number }}"
+            --revision-suffix "r${{ github.run_id }}"
       
       - name: Deploy Worker
         run: |
@@ -173,7 +173,7 @@ jobs:
             --name ${{ env.WORKER_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
-            --revision-suffix "r${{ github.run_number }}" \
+            --revision-suffix "r${{ github.run_id }}" \
             --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO"
       
       - name: Wait for startup

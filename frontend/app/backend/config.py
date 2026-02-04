@@ -40,3 +40,10 @@ CONFIG_RAG_SEND_TEXT_SOURCES = "rag_send_text_sources"
 CONFIG_RAG_SEND_IMAGE_SOURCES = "rag_send_image_sources"
 CONFIG_WEB_SOURCE_ENABLED = "web_source_enabled"
 CONFIG_SHAREPOINT_SOURCE_ENABLED = "sharepoint_source_enabled"
+
+# GraphRAG Integration
+CONFIG_GRAPHRAG_ENABLED = "graphrag_enabled"
+CONFIG_GRAPHRAG_CLIENT = "graphrag_client"
+CONFIG_GRAPHRAG_API_URL = "graphrag_api_url"
+CONFIG_GRAPHRAG_DEFAULT_ROUTE = "graphrag_default_route"
+

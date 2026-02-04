@@ -161,6 +161,7 @@ class UploadUserFileStrategy:
         image_embeddings: Optional[ImageEmbeddings] = None,
         enforce_access_control: bool = False,
         figure_processor: Optional[FigureProcessor] = None,
+        graphrag_client: Optional["GraphRAGClient"] = None,  # Optional GraphRAG integration
     ):
         self.file_processors = file_processors
         self.embeddings = embeddings
@@ -168,6 +169,7 @@ class UploadUserFileStrategy:
         self.search_info = search_info
         self.blob_manager = blob_manager
         self.figure_processor = figure_processor
+        self.graphrag_client = graphrag_client  # For Neo4j integration
         self.search_manager = SearchManager(
             search_info=self.search_info,
             search_analyzer_name=None,
@@ -180,7 +182,15 @@ class UploadUserFileStrategy:
         )
         self.search_field_name_embedding = search_field_name_embedding
 
-    async def add_file(self, file: File, user_oid: str):
+    async def add_file(self, file: File, user_oid: str, folder_id: Optional[str] = None):
+        """
+        Add a file to the search index and optionally notify GraphRAG.
+        
+        Args:
+            file: File object with content and metadata
+            user_oid: User OID for access control
+            folder_id: Optional folder ID for GraphRAG organization
+        """
         sections = await parse_file(
             file,
             self.file_processors,
@@ -192,9 +202,57 @@ class UploadUserFileStrategy:
         )
         if sections:
             await self.search_manager.update_content(sections, url=file.url)
+        
+        # Notify GraphRAG backend if configured
+        if self.graphrag_client:
+            try:
+                from graphrag.client import GraphRAGDocument
+                doc = GraphRAGDocument(
+                    id=file.filename(),
+                    title=file.filename(),
+                    source=file.url or "",
+                    metadata={"user_oid": user_oid},
+                )
+                await self.graphrag_client.notify_document_uploaded(
+                    group_id=user_oid,  # Use user OID as group_id for B2C
+                    document=doc,
+                    folder_id=folder_id,
+                    trigger_indexing=True,
+                )
+                logger.info(f"Notified GraphRAG of document upload: {file.filename()}")
+            except Exception as e:
+                logger.warning(f"Failed to notify GraphRAG of upload: {e}")
+                # Don't fail the upload if GraphRAG notification fails
 
     async def remove_file(self, filename: str, oid: str):
+        """
+        Remove a file from the search index and optionally from GraphRAG.
+        
+        Args:
+            filename: Name of the file to remove
+            oid: User OID
+        """
         if filename is None or filename == "":
             logging.warning("Filename is required to remove a file")
             return
         await self.search_manager.remove_content(filename, oid)
+        
+        # Notify GraphRAG backend if configured
+        if self.graphrag_client:
+            try:
+                await self.graphrag_client.delete_document(
+                    group_id=oid,  # Use user OID as group_id for B2C
+                    document_id=filename,
+                    hard_delete=True,  # Permanently remove from Neo4j
+                )
+                logger.info(f"Deleted document from GraphRAG: {filename}")
+            except Exception as e:
+                logger.warning(f"Failed to delete document from GraphRAG: {e}")
+                # Don't fail the removal if GraphRAG deletion fails
+
+
+# Type hint for optional import
+try:
+    from graphrag.client import GraphRAGClient
+except ImportError:
+    GraphRAGClient = None  # type: ignore

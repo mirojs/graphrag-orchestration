@@ -872,6 +872,144 @@ class Neo4jTextUnitStore:
             )
             return []
 
+    async def get_all_documents_with_sentences(
+        self,
+        *,
+        top_k_docs: int = 10,
+        max_sentences_per_doc: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get ALL documents with sentence-level context (no entity filtering).
+        
+        This is a FALLBACK when entity-based traversal fails (e.g., when evidence_nodes
+        contains generic terms like "Contract" that don't match real Entity.name values).
+        
+        Args:
+            top_k_docs: Max number of documents to process
+            max_sentences_per_doc: Max sentences to extract per document
+            
+        Returns:
+            List of dicts with document_title, document_id, sentences, full_content
+        """
+        return await asyncio.to_thread(
+            self._get_all_documents_with_sentences_sync,
+            top_k_docs,
+            max_sentences_per_doc,
+        )
+
+    def _get_all_documents_with_sentences_sync(
+        self,
+        top_k_docs: int,
+        max_sentences_per_doc: int,
+    ) -> List[Dict[str, Any]]:
+        """Sync implementation: get all documents with sentence spans."""
+        import json
+        
+        # Get all documents with language_spans
+        doc_query = """
+        MATCH (d:Document {group_id: $group_id})
+        WHERE d.language_spans IS NOT NULL
+        RETURN 
+            d.id AS doc_id,
+            coalesce(d.title, d.source, 'Unknown') AS doc_title,
+            d.language_spans AS language_spans
+        LIMIT $top_k_docs
+        """
+        
+        results: List[Dict[str, Any]] = []
+        
+        try:
+            with self._driver.session() as session:
+                doc_result = session.run(
+                    doc_query,
+                    group_id=self._group_id,
+                    top_k_docs=top_k_docs,
+                )
+                docs_with_spans = list(doc_result)
+                
+                if not docs_with_spans:
+                    logger.debug(
+                        "get_all_documents_no_language_spans",
+                        group_id=self._group_id,
+                    )
+                    return []
+                
+                for doc_record in docs_with_spans:
+                    doc_id = doc_record.get("doc_id") or ""
+                    doc_title = doc_record.get("doc_title") or "Unknown"
+                    language_spans_raw = doc_record.get("language_spans") or "[]"
+                    
+                    # Get full content from TextChunks
+                    content_query = """
+                    MATCH (c:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {id: $doc_id, group_id: $group_id})
+                    RETURN c.text AS text, c.chunk_index AS idx
+                    ORDER BY coalesce(c.chunk_index, 0) ASC
+                    """
+                    content_result = session.run(
+                        content_query,
+                        group_id=self._group_id,
+                        doc_id=doc_id,
+                    )
+                    
+                    full_content = "\n".join(
+                        r.get("text") or "" for r in content_result
+                    )
+                    
+                    if not full_content.strip():
+                        continue
+                    
+                    # Parse language spans
+                    sentences = []
+                    try:
+                        spans_data = json.loads(language_spans_raw) if isinstance(language_spans_raw, str) else language_spans_raw
+                        if isinstance(spans_data, dict):
+                            spans_list = spans_data.get("spans", [])
+                            locale = spans_data.get("locale", "en")
+                            confidence = spans_data.get("confidence", 1.0)
+                        elif isinstance(spans_data, list):
+                            spans_list = spans_data
+                            locale = "en"
+                            confidence = 1.0
+                        else:
+                            spans_list = []
+                            locale = "en"
+                            confidence = 1.0
+                        
+                        for span in spans_list[:max_sentences_per_doc]:
+                            offset = span.get("offset", 0)
+                            length = span.get("length", 0)
+                            
+                            if offset >= 0 and length > 0 and offset + length <= len(full_content):
+                                text = full_content[offset:offset + length]
+                                sentences.append({
+                                    "text": text,
+                                    "offset": offset,
+                                    "length": length,
+                                    "confidence": confidence,
+                                    "locale": locale,
+                                })
+                    except (json.JSONDecodeError, TypeError) as e:
+                        logger.debug("language_spans_parse_error", doc_id=doc_id, error=str(e))
+                    
+                    results.append({
+                        "document_title": doc_title,
+                        "document_id": doc_id,
+                        "sentences": sentences,
+                        "full_content": full_content[:5000],  # Truncate for memory
+                    })
+                
+                logger.info(
+                    "get_all_documents_with_sentences",
+                    num_docs=len(results),
+                    total_sentences=sum(len(d.get("sentences", [])) for d in results),
+                    group_id=self._group_id,
+                )
+                
+        except Exception as e:
+            logger.error("get_all_documents_with_sentences_failed", error=str(e), group_id=self._group_id)
+        
+        return results
+
     def _get_workspace_document_overviews_sync(self, limit: int) -> List[Dict[str, Any]]:
         """Sync implementation of document overview retrieval."""
         query = """

@@ -1386,26 +1386,24 @@ BEGIN ANALYSIS:"""
         from collections import defaultdict
         
         # =====================================================================
-        # STEP 1: Get sentence-level context from documents (via entity traversal)
+        # STEP 1: Get sentence-level context from ALL documents directly
+        # NOTE: We do NOT use entity traversal here because Route 4's entity
+        # resolution often returns generic terms (e.g., "Contract") that don't
+        # exist as Entity nodes. Instead, query all documents with sentences.
         # =====================================================================
         sentence_docs: List[Dict[str, Any]] = []
         
-        if self.text_store and hasattr(self.text_store, "get_sentence_level_context"):
+        if self.text_store and hasattr(self.text_store, "get_all_documents_with_sentences"):
             try:
-                entity_ids = [node[0] for node in evidence_nodes] if evidence_nodes else []
-                
-                if entity_ids:
-                    sentence_docs = await self.text_store.get_sentence_level_context(
-                        entity_ids,
-                        top_k_docs=10,
-                        max_sentences_per_doc=50,
-                    )
-                    logger.info(
-                        "comprehensive_sentence_level_retrieved",
-                        num_entities=len(entity_ids),
-                        num_docs=len(sentence_docs),
-                        total_sentences=sum(len(d.get("sentences", [])) for d in sentence_docs),
-                    )
+                sentence_docs = await self.text_store.get_all_documents_with_sentences(
+                    top_k_docs=10,
+                    max_sentences_per_doc=50,
+                )
+                logger.info(
+                    "comprehensive_sentence_level_all_docs",
+                    num_docs=len(sentence_docs),
+                    total_sentences=sum(len(d.get("sentences", [])) for d in sentence_docs),
+                )
             except Exception as e:
                 logger.warning("comprehensive_sentence_level_failed", error=str(e))
         

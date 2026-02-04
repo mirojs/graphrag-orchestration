@@ -51,6 +51,89 @@
   - **Files Modified & Committed:** Git commit `3bfb116b` (Feb 4, 2026)
   - **Note:** Mock data files (Seattle real estate) deleted as they confused ground truth. Original ground truth had 16 items but 2 (C6: zip 98101/98104, C7: phone 9870/9877) were from mock data not in the actual 5 PDFs.
 
+- ✅ **Enhanced Citation Structure with Span Data (February 4, 2026):** Frontend-Ready Document Navigation & Highlighting
+  - **Motivation:** Enable rich user experience - users should see LLM analysis WITH clickable citations that jump to exact locations in source documents
+  - **Complete Traceability Chain:**
+    ```
+    LLM Finding → Sentence Citation → Document Span (offset/length) → PDF Viewer Highlight → Source Document
+    ```
+  - **Response Data Structure:**
+    ```json
+    {
+      "response": "Full LLM output with all 19 inconsistencies...",
+      "citations": [
+        {
+          "citation": "[1]",
+          "document_id": "doc-uuid",
+          "document_title": "contoso_lifts_invoice.pdf",
+          "sentence_count": 42,
+          "source": "azure_di_sentences",
+          "sentences": [
+            {
+              "text": "The lift model specified is Savaria V1504.",
+              "offset": 245,
+              "length": 42,
+              "confidence": 0.99,
+              "locale": "en",
+              "sentence_index": 1
+            }
+          ],
+          "referenced_in_findings": [
+            {
+              "type": "llm_finding",
+              "context": "Referenced in comprehensive analysis"
+            }
+          ]
+        }
+      ],
+      "metadata": {
+        "sentence_extraction": "azure_di_language_spans",
+        "total_documents": 5,
+        "total_sentences": 127,
+        "total_tables": 4,
+        "citation_strategy": "sentence_level_with_spans"
+      }
+    }
+    ```
+  - **Frontend Display Components:**
+    | Component | Purpose | Implementation |
+    |-----------|---------|----------------|
+    | **Main Panel** | Show full LLM analysis with clickable citation markers | Markdown renderer with `[1]` → click handler |
+    | **Citation Sidebar** | List all cited documents with sentence previews | Collapsible accordion per document |
+    | **Document Viewer** | PDF viewer with sentence highlighting | PDF.js + polygon overlay at (offset, length) |
+    | **Navigation** | "View in Document" button → scroll to span | Scroll + highlight API |
+  - **User Interaction Flow:**
+    1. User sees: *"[A1] Invoice specifies Savaria V1504 but contract specifies... **[1]***"
+    2. Clicks `[1]` → Citation sidebar expands showing "contoso_lifts_invoice.pdf"
+    3. Clicks "View in Document" → PDF opens with sentence highlighted in yellow
+    4. User can verify the exact source text used by the LLM
+  - **Azure DI Span Data (Available):**
+    - **Text Spans:** `{offset: 245, length: 42}` - character positions in full document text
+    - **Confidence:** `0.99` - OCR confidence score from Azure DI
+    - **Locale:** `"en"` - detected language
+    - **Future Enhancement:** Add `boundingRegions` with `{page, polygon}` for pixel-level highlighting
+  - **Key Benefits:**
+    1. **Audit Trail:** Complete chain from finding → sentence → document
+    2. **Transparency:** Users see exactly what evidence the LLM used
+    3. **Verification:** Users can validate LLM conclusions against source
+    4. **Navigation:** Direct jump to relevant sections in large documents
+    5. **Compliance:** Regulatory requirements for evidence traceability
+  - **Implementation Status:**
+    - ✅ Backend: Enhanced citation structure with spans (`src/worker/hybrid_v2/pipeline/synthesis.py`)
+    - ✅ API: Response includes full citation data with sentence spans
+    - ✅ Frontend Client: Updated to handle `citations` array (`frontend/app/backend/graphrag/client.py`)
+    - 🔲 Frontend UI: PDF viewer with span highlighting (pending)
+    - 🔲 Citation Sidebar: Collapsible document tree (pending)
+  - **Files Modified:** Git commit `1928b4f4` (Feb 4, 2026)
+    - `frontend/app/backend/graphrag/client.py` - Added `response_type`, `force_route` parameters
+    - `frontend/app/backend/approaches/chatgraphrag.py` - Pass overrides to API
+    - `src/worker/hybrid_v2/pipeline/synthesis.py` - Enhanced citations with `sentences` array containing spans
+  - **Future Enhancements:**
+    1. **Page-Level Bounding Boxes:** Add `boundingRegions` from Azure DI for pixel coordinates
+    2. **Multi-Highlight:** Highlight multiple sentences from same document simultaneously
+    3. **Finding-to-Citation Mapping:** Parse LLM output to link each finding to specific citations
+    4. **Interactive Editing:** Allow users to add/remove citations, regenerate analysis
+
 **Recent Updates (February 2, 2026):**
 - ✅ **V2 Indexing Fixes & New Test Groups:** 4 new groups indexed with critical fixes
   - **Fixes Applied:**

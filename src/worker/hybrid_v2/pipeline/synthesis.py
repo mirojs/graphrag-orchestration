@@ -1456,11 +1456,23 @@ BEGIN ANALYSIS:"""
                 combined_context_parts.append(f"\n### Document [{citation_idx}]: {doc_title}")
                 combined_context_parts.append("-" * 40)
                 
+                # Collect sentence data with spans for citations
+                sentence_spans = []
                 for i, sent in enumerate(sentences, 1):
                     text = sent.get("text", "").strip()
                     if len(text) < 5:
                         continue
                     combined_context_parts.append(f"  S{i}: {text}")
+                    
+                    # Store span metadata for this sentence
+                    sentence_spans.append({
+                        "text": text,
+                        "offset": sent.get("offset", 0),
+                        "length": sent.get("length", len(text)),
+                        "confidence": sent.get("confidence", 1.0),
+                        "locale": sent.get("locale", "en"),
+                        "sentence_index": i,
+                    })
                 
                 citations.append({
                     "citation": f"[{citation_idx}]",
@@ -1468,6 +1480,7 @@ BEGIN ANALYSIS:"""
                     "document_title": doc_title,
                     "sentence_count": len(sentences),
                     "source": "azure_di_sentences",
+                    "sentences": sentence_spans,  # Add detailed span data for frontend
                 })
                 citation_idx += 1
         
@@ -1633,8 +1646,27 @@ BEGIN ANALYSIS:"""
             hipporag_chunks=len(text_chunks),
         )
         
+        # Build enhanced citations with reference tracking
+        enhanced_citations = []
+        for cite in citations:
+            # Track which findings reference this citation
+            cite_ref = cite.get("citation", "")
+            referenced_in = []
+            
+            # Simple heuristic: check if citation appears in narrative
+            if cite_ref in narrative:
+                referenced_in.append({
+                    "type": "llm_finding",
+                    "context": "Referenced in comprehensive analysis",
+                })
+            
+            enhanced_citations.append({
+                **cite,  # Preserve all original data including sentences with spans
+                "referenced_in_findings": referenced_in,
+            })
+        
         return {
-            "response": narrative,
+            "response": narrative,  # Full LLM output with all inconsistencies
             "raw_extractions": [
                 {
                     "document_title": d.get("document_title"),
@@ -1643,11 +1675,19 @@ BEGIN ANALYSIS:"""
                 }
                 for d in sentence_docs
             ],
-            "citations": citations,
+            "citations": enhanced_citations,  # Enhanced with span data for highlighting
             "evidence_path": [node[0] for node in evidence_nodes],
             "text_chunks_used": len(text_chunks) + sum(len(d.get("sentences", [])) for d in sentence_docs),
             "processing_mode": "comprehensive_sentence_level",
             "sentence_based": True,
+            "metadata": {
+                "sentence_extraction": "azure_di_language_spans",
+                "total_documents": len(sentence_docs),
+                "total_sentences": sum(len(d.get("sentences", [])) for d in sentence_docs),
+                "total_tables": sum(len(tables) for tables in tables_by_doc.values()),
+                "hipporag_chunks": len(text_chunks),
+                "citation_strategy": "sentence_level_with_spans",
+            },
         }
 
     def _build_graph_aware_comparison_context(

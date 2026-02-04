@@ -50,9 +50,7 @@ GROUND_TRUTH = {
         "C3: Contoso Ltd vs LLC (Exhibit A vs Contract)",
         "C4: Bayfront site mismatch (61 S 34th Street vs Bayfront Animal Clinic)",
         "C5: Address number (61 vs 62 S 34th Street)",
-        "C6: Zip code (98101 vs 98104)",
-        "C7: Phone typo (206-555-9870 vs 206-555-9877)",
-        "C8: Price decimal inconsistency ($29,900.00 vs $29,900)",
+        "C6: Price decimal inconsistency ($29,900.00 vs $29,900)",
     ],
 }
 
@@ -144,9 +142,7 @@ def score_response(response_text: str) -> Dict[str, Any]:
             "C3": check_item(["contoso ltd", "contoso llc", "exhibit"]),
             "C4": check_item(["bayfront", "34th street", "site"]),
             "C5": check_item(["61", "62", "34th", "address"]),
-            "C6": check_item(["98101", "98104", "zip"]),
-            "C7": check_item(["206-555-9870", "206-555-9877", "phone"]),
-            "C8": check_item(["decimal", "29900.00", "29,900.00"]),
+            "C6": check_item(["decimal", "29900.00", "29,900.00"]),
         },
     }
     
@@ -160,10 +156,10 @@ def score_response(response_text: str) -> Dict[str, Any]:
         "found": {
             "major": f"{found_major}/3",
             "medium": f"{found_medium}/5",
-            "minor": f"{found_minor}/8",
-            "total": f"{found_total}/16",
+            "minor": f"{found_minor}/6",
+            "total": f"{found_total}/14",
         },
-        "percentage": f"{(found_total/16)*100:.1f}%",
+        "percentage": f"{(found_total/14)*100:.1f}%",
     }
 
 

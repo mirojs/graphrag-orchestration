@@ -1,16 +1,18 @@
 """
 Hybrid Pipeline API Router
 
-Exposes the 3-way routing system via REST endpoints:
-- Route 1: Vector RAG (fast lane for simple queries)
-- Route 2: Local/Global equivalent (entity-focused with HippoRAG 2)
-- Route 3: DRIFT equivalent (multi-hop iterative reasoning)
+Exposes the 3-route query processing system via REST endpoints:
+- Route 2: Local Search (entity-focused with LazyGraphRAG)
+- Route 3: Global Search (thematic with HippoRAG 2)
+- Route 4: DRIFT Multi-Hop (iterative reasoning for complex queries)
+
+Note: Route 1 (Vector RAG) was deprecated on 2026-02-04. Sunset date: 2026-06-01.
 
 Endpoints:
 - POST /hybrid/query - Auto-route to appropriate handler
 - POST /hybrid/query/audit - Force Route 2/3 with audit trail
-- POST /hybrid/query/fast - Force Route 1 (Vector RAG)
-- POST /hybrid/query/drift - Force Route 3 (multi-hop)
+- POST /hybrid/query/fast - DEPRECATED (returns 410 Gone)
+- POST /hybrid/query/drift - Force Route 4 (multi-hop)
 - GET /hybrid/health - Health check for hybrid components
 - POST /hybrid/configure - Configure pipeline settings
 
@@ -162,7 +164,7 @@ class DeploymentProfileEnum(str, Enum):
 
 class RouteEnum(str, Enum):
     """Available query routes."""
-    VECTOR_RAG = "vector_rag"           # Route 1: Fast lane
+    VECTOR_RAG = "vector_rag"           # Route 1: DEPRECATED - removed 2026-02-04
     LOCAL_SEARCH = "local_search"       # Route 2: Entity-focused (LazyGraphRAG)
     GLOBAL_SEARCH = "global_search"     # Route 3: Thematic (LazyGraphRAG + HippoRAG)
     DRIFT_MULTI_HOP = "drift_multi_hop" # Route 4: Multi-hop iterative
@@ -216,7 +218,7 @@ class HybridQueryResponse(BaseModel):
 class PipelineConfigRequest(BaseModel):
     """Request to configure the hybrid pipeline."""
     profile: DeploymentProfileEnum = Field(
-        default=DeploymentProfileEnum.GENERAL_ENTERPRISE,
+        default=DeploymentProfileEnum.HIGH_ASSURANCE,  # Changed: default to Routes 2-4 only
         description="Deployment profile to use"
     )
     relevance_budget: float = Field(
@@ -226,12 +228,13 @@ class PipelineConfigRequest(BaseModel):
         description="Thoroughness vs speed tradeoff"
     )
     enable_vector_rag: bool = Field(
-        default=True,
-        description="Enable Route 1 (Vector RAG)"
+        default=False,  # Changed: Route 1 deprecated
+        description="DEPRECATED: Route 1 (Vector RAG) is no longer supported",
+        deprecated=True,
     )
     enable_drift: bool = Field(
         default=True,
-        description="Enable Route 3 (DRIFT multi-hop)"
+        description="Enable Route 4 (DRIFT multi-hop)"
     )
 
 
@@ -417,12 +420,14 @@ async def _get_or_create_pipeline(
 @router.post("/query", response_model=HybridQueryResponse)
 async def hybrid_query(request: Request, body: HybridQueryRequest):
     """
-    Execute a query through the 3-way routing hybrid pipeline.
+    Execute a query through the hybrid pipeline with auto-routing.
     
     The router automatically decides between:
-    - Route 1: Vector RAG for simple fact lookups
-    - Route 2: Local/Global (LazyGraphRAG + HippoRAG 2) for entity-focused queries
-    - Route 3: DRIFT multi-hop for ambiguous/complex queries
+    - Route 2: Local Search (entity-focused queries, fast fact lookups)
+    - Route 3: Global Search (thematic queries with HippoRAG)
+    - Route 4: DRIFT multi-hop (complex reasoning, ambiguous queries)
+    
+    Note: Route 1 (Vector RAG) is deprecated and will be rejected if force_route=vector_rag.
     
     Use `force_route` to override the automatic decision.
     """
@@ -435,12 +440,33 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                force_route=body.force_route.value if body.force_route else None)
     
     try:
+        # Reject deprecated Route 1 (Vector RAG)
+        if body.force_route == RouteEnum.VECTOR_RAG:
+            logger.warning(
+                "deprecated_route1_force_route_rejected",
+                group_id=group_id,
+                query_preview=body.query[:50],
+            )
+            return JSONResponse(
+                status_code=410,  # 410 Gone
+                content={
+                    "error": {
+                        "code": "ROUTE1_DEPRECATED",
+                        "message": "Route 1 (Vector RAG) has been deprecated. Use auto-routing or force_route=local_search instead.",
+                        "details": {
+                            "sunset_date": "2026-06-01",
+                            "alternative": "local_search",
+                            "migration_guide": "Route 2 (Local Search) now handles fast fact lookups with improved accuracy.",
+                        },
+                    }
+                },
+            )
+        
         pipeline = await _get_or_create_pipeline(group_id)
         
-        # Handle forced routing
+        # Handle forced routing (Routes 2, 3, 4 only)
         if body.force_route:
             route_map: Dict[RouteEnum, QueryRoute] = {
-                RouteEnum.VECTOR_RAG: QueryRoute.VECTOR_RAG,
                 RouteEnum.LOCAL_SEARCH: QueryRoute.LOCAL_SEARCH,
                 RouteEnum.GLOBAL_SEARCH: QueryRoute.GLOBAL_SEARCH,
                 RouteEnum.DRIFT_MULTI_HOP: QueryRoute.DRIFT_MULTI_HOP,
@@ -536,42 +562,38 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/query/fast", response_model=HybridQueryResponse)
+@router.post("/query/fast", response_model=HybridQueryResponse, deprecated=True)
 async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
     """
-    Execute a query via Route 1 (Vector RAG) only.
+    DEPRECATED: Route 1 (Vector RAG) has been removed.
     
-    This is a convenience endpoint that:
-    - Always uses Vector RAG (Route 1)
-    - Optimized for sub-second latency (<500ms)
-    - Best for simple fact lookups
+    This endpoint is no longer functional. Use /query with auto-routing instead:
+    - Route 2 (Local Search) handles fast fact lookups
+    - Route 3 (Global Search) handles thematic queries
+    - Route 4 (DRIFT) handles multi-hop reasoning
     
-    Note: Will fall back to Route 2 if Vector RAG is unavailable.
+    Sunset date: 2026-06-01
     """
-    group_id = request.state.group_id or "default"
+    logger.warning(
+        "deprecated_route1_fast_endpoint_called",
+        group_id=request.state.group_id or "default",
+        query_preview=body.query[:50],
+    )
     
-    logger.info("fast_query_received",
-               group_id=group_id,
-               query_preview=body.query[:50])
-    
-    try:
-        pipeline = await _get_or_create_pipeline(
-            group_id,
-            relevance_budget=0.5  # Speed over thoroughness
-        )
-        
-        result = await pipeline.force_route(
-            query=body.query,
-            route=QueryRoute.VECTOR_RAG,
-            response_type=body.response_type
-        )
-        return HybridQueryResponse(**result)
-        
-    except Exception as e:
-        logger.error("fast_query_failed",
-                    group_id=group_id,
-                    error=str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    return JSONResponse(
+        status_code=410,  # 410 Gone
+        content={
+            "error": {
+                "code": "ROUTE1_DEPRECATED",
+                "message": "Route 1 (Vector RAG) has been deprecated. Use /hybrid/query with auto-routing instead.",
+                "details": {
+                    "sunset_date": "2026-06-01",
+                    "alternative": "/hybrid/query",
+                    "migration_guide": "Route 2 (Local Search) now handles fast fact lookups with improved accuracy.",
+                },
+            }
+        },
+    )
 
 
 @router.post("/query/drift", response_model=HybridQueryResponse)

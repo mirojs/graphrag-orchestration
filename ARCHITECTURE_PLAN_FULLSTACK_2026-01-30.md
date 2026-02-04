@@ -725,7 +725,7 @@ echo "Rolled back to $PREVIOUS_REVISION"
 
 ---
 
-## Implementation Status (Updated 2026-02-01)
+## Implementation Status (Updated 2026-02-04)
 
 ### ✅ Completed Phases
 
@@ -740,10 +740,33 @@ echo "Rolled back to $PREVIOUS_REVISION"
 | **Phase 7: APIM & Admin API** | ✅ Complete | `e38eaa0` | `src/api_gateway/routers/admin.py`, `infra/core/gateway/apim.bicep` |
 | **Phase 9: Upstream Sync** | ✅ Complete | `8393f0e` | `frontend/UPSTREAM_VERSION.md` |
 | **Phase 10: CI/CD Pipeline** | ✅ Complete | `e890624` | `.github/workflows/deploy.yml` |
+| **Phase 3: Frontend GraphRAG Integration** | ✅ Complete | `fcd2c91` | `frontend/app/backend/graphrag/`, `frontend/app/backend/approaches/chatgraphrag.py` |
 
-### ⬜ Pending Phases
+### ⬜ Pending Tasks (Phase 2 Cleanup)
 
-All phases complete! 🎉
+| Task | Priority | Status | Description |
+|------|----------|--------|-------------|
+| Remove Route 1 Code | P1 | ⬜ Pending | Delete deprecated vector RAG code from `src/worker/hybrid/` |
+| Remove Azure AI Search | P1 | ⬜ Pending | Update Bicep, remove from requirements.txt |
+| JWT Validation Middleware | P0 | ⬜ Pending | Security blocker - validate JWTs in FastAPI |
+| Cosmos DB Chat History | P2 | ⬜ Pending | Add chat history persistence |
+| Runtime Config Endpoint | P2 | ⬜ Pending | `/config` endpoint for B2B/B2C settings |
+| Dashboard UI | P3 | ⬜ Pending | Admin dashboard (3-5 days effort) |
+
+### 🎉 Frontend GraphRAG Integration Complete (2026-02-04)
+
+The frontend now uses Neo4j-based GraphRAG instead of Azure AI Search:
+
+**New Files:**
+- `frontend/app/backend/graphrag/__init__.py` - Module exports
+- `frontend/app/backend/graphrag/client.py` - Async HTTP client for GraphRAG API
+- `frontend/app/backend/graphrag/config.py` - Configuration from environment
+- `frontend/app/backend/approaches/chatgraphrag.py` - Chat approach using GraphRAG
+
+**Updated Files:**
+- `frontend/app/backend/config.py` - Added GraphRAG config constants
+- `frontend/app/backend/prepdocslib/filestrategy.py` - GraphRAG notification on upload/delete
+- `src/worker/hybrid_v2/services/document_lifecycle.py` - folder_unlinked tracking, cascade delete for Tables/Figures/KVPs
 
 ---
 

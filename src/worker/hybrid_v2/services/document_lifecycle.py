@@ -58,8 +58,8 @@ class DeletionResult:
     sections_deleted: int
     entities_orphaned: int
     edges_deleted: int
-    folder_unlinked: bool = False  # True if IN_FOLDER relationship was removed
     vectors_removed: int
+    folder_unlinked: bool = False  # True if IN_FOLDER relationship was removed
     errors: List[str] = field(default_factory=list)
 
 

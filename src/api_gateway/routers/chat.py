@@ -796,3 +796,310 @@ async def list_models():
             },
         ],
     }
+
+
+# ============================================================================
+# azure-search-openai-demo Compatible Endpoints
+# ============================================================================
+
+class FrontendChatOverrides(BaseModel):
+    """Override options from frontend context."""
+    retrieval_mode: Optional[str] = None
+    semantic_ranker: Optional[bool] = None
+    semantic_captions: Optional[bool] = None
+    query_rewriting: Optional[bool] = None
+    reasoning_effort: Optional[str] = None
+    temperature: Optional[float] = None
+    top: Optional[int] = None
+    suggest_followup_questions: Optional[bool] = True
+    send_text_sources: Optional[bool] = True
+    send_image_sources: Optional[bool] = False
+    search_text_embeddings: Optional[bool] = True
+    search_image_embeddings: Optional[bool] = False
+    language: Optional[str] = "en"
+    use_agentic_knowledgebase: Optional[bool] = False
+
+
+class FrontendChatContext(BaseModel):
+    """Context from frontend request."""
+    overrides: Optional[FrontendChatOverrides] = None
+
+
+class FrontendChatRequest(BaseModel):
+    """
+    Request model matching azure-search-openai-demo frontend.
+    
+    Example:
+    {
+        "messages": [{"role": "user", "content": "What is..."}],
+        "context": {"overrides": {"retrieval_mode": "hybrid"}},
+        "session_state": null
+    }
+    """
+    messages: List[ChatMessage]
+    context: Optional[FrontendChatContext] = None
+    session_state: Optional[Any] = None
+
+
+class FrontendDataPoints(BaseModel):
+    """Data points in response context."""
+    text: List[str] = Field(default_factory=list)
+    images: List[str] = Field(default_factory=list)
+    citations: List[str] = Field(default_factory=list)
+
+
+class FrontendThought(BaseModel):
+    """Thought item for frontend display."""
+    title: str
+    description: Any  # Can be string or object
+    props: Optional[Dict[str, Any]] = None
+
+
+class FrontendResponseContext(BaseModel):
+    """Context in response matching frontend expectations."""
+    data_points: FrontendDataPoints = Field(default_factory=FrontendDataPoints)
+    followup_questions: Optional[List[str]] = None
+    thoughts: List[FrontendThought] = Field(default_factory=list)
+
+
+class FrontendChatResponse(BaseModel):
+    """
+    Response model matching azure-search-openai-demo frontend.
+    
+    Used for non-streaming /chat endpoint.
+    """
+    message: ChatMessage
+    context: FrontendResponseContext
+    session_state: Optional[Any] = None
+
+
+@router.post("", response_model=FrontendChatResponse)
+async def frontend_chat(
+    request: Request,
+    body: FrontendChatRequest,
+    group_id: str = Depends(get_group_id),
+    user_id: str = Depends(get_user_id),
+):
+    """
+    Non-streaming chat endpoint for azure-search-openai-demo frontend.
+    
+    POST /chat
+    
+    Maps frontend request to GraphRAG hybrid query and returns
+    response in frontend-expected format.
+    """
+    # Extract user query
+    user_messages = [msg for msg in body.messages if msg.role == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="No user message found")
+    
+    query = user_messages[-1].content
+    
+    # Map frontend overrides to approach
+    overrides = body.context.overrides if body.context else None
+    approach = "hybrid"  # Default
+    if overrides and overrides.retrieval_mode:
+        mode_map = {"vectors": "local", "text": "global", "hybrid": "hybrid"}
+        approach = mode_map.get(overrides.retrieval_mode, "hybrid")
+    
+    logger.info(
+        "frontend_chat_request",
+        group_id=group_id,
+        user_id=user_id,
+        approach=approach,
+        query_preview=query[:50],
+    )
+    
+    try:
+        result = await _execute_query(query, approach, group_id)
+        
+        # Build frontend-compatible response
+        thoughts = [
+            FrontendThought(title=t.get("title", ""), description=t.get("description", ""))
+            for t in result.get("thoughts", [])
+        ]
+        
+        # Extract citations from context
+        context_data = result.get("context", {})
+        chunks = context_data.get("chunks", [])
+        citations = []
+        text_points = []
+        for chunk in chunks[:10]:  # Limit to 10 citations
+            if isinstance(chunk, dict):
+                source = chunk.get("source", chunk.get("file_name", ""))
+                content = chunk.get("content", chunk.get("text", ""))
+                if source:
+                    citations.append(source)
+                if content:
+                    text_points.append(content[:500])  # Truncate long content
+        
+        # Generate followup questions if requested
+        followup_questions = None
+        if overrides and overrides.suggest_followup_questions:
+            # Simple followup generation based on route
+            route_used = result.get("route_used", "hybrid")
+            followup_questions = [
+                f"Can you elaborate on the key findings?",
+                f"What are the supporting documents for this answer?",
+                f"Are there any related topics I should explore?",
+            ]
+        
+        return FrontendChatResponse(
+            message=ChatMessage(
+                role="assistant",
+                content=result.get("answer", ""),
+            ),
+            context=FrontendResponseContext(
+                data_points=FrontendDataPoints(
+                    text=text_points,
+                    citations=citations,
+                ),
+                followup_questions=followup_questions,
+                thoughts=thoughts,
+            ),
+            session_state=body.session_state,
+        )
+        
+    except Exception as e:
+        logger.error("frontend_chat_failed", error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stream")
+async def frontend_chat_stream(
+    request: Request,
+    body: FrontendChatRequest,
+    group_id: str = Depends(get_group_id),
+    user_id: str = Depends(get_user_id),
+):
+    """
+    Streaming chat endpoint for azure-search-openai-demo frontend.
+    
+    POST /chat/stream
+    
+    Returns NDJSON stream with progressive updates:
+    - {"delta": {"role": "assistant"}, "context": {...}}
+    - {"delta": {"content": "partial"}, "context": {...}}
+    - {"delta": {"content": " answer"}, "context": {...}}
+    """
+    # Extract user query
+    user_messages = [msg for msg in body.messages if msg.role == "user"]
+    if not user_messages:
+        raise HTTPException(status_code=400, detail="No user message found")
+    
+    query = user_messages[-1].content
+    
+    # Map frontend overrides to approach
+    overrides = body.context.overrides if body.context else None
+    approach = "hybrid"
+    if overrides and overrides.retrieval_mode:
+        mode_map = {"vectors": "local", "text": "global", "hybrid": "hybrid"}
+        approach = mode_map.get(overrides.retrieval_mode, "hybrid")
+    
+    logger.info(
+        "frontend_chat_stream_request",
+        group_id=group_id,
+        user_id=user_id,
+        approach=approach,
+        query_preview=query[:50],
+    )
+    
+    return StreamingResponse(
+        _frontend_stream_response(query, approach, group_id, body.session_state, overrides),
+        media_type="application/x-ndjson",
+    )
+
+
+async def _frontend_stream_response(
+    query: str,
+    approach: str,
+    group_id: str,
+    session_state: Optional[Any],
+    overrides: Optional[FrontendChatOverrides],
+) -> AsyncGenerator[str, None]:
+    """
+    Generate streaming response in azure-search-openai-demo format.
+    
+    NDJSON format:
+    {"delta": {"role": "assistant"}, "context": {"thoughts": [...]}}
+    {"delta": {"content": "Hello"}, "context": {...}}
+    """
+    try:
+        # Initial chunk with role and starting thought
+        initial_thoughts = [
+            {"title": "Processing", "description": f"Analyzing query with {approach} approach..."}
+        ]
+        yield json.dumps({
+            "delta": {"role": "assistant"},
+            "context": {
+                "data_points": {"text": [], "images": [], "citations": []},
+                "thoughts": initial_thoughts,
+            },
+            "session_state": session_state,
+        }) + "\n"
+        
+        # Execute query
+        result = await _execute_query(query, approach, group_id)
+        
+        # Extract context data
+        thoughts = result.get("thoughts", [])
+        context_data = result.get("context", {})
+        chunks = context_data.get("chunks", [])
+        
+        # Build citations and text points
+        citations = []
+        text_points = []
+        for chunk in chunks[:10]:
+            if isinstance(chunk, dict):
+                source = chunk.get("source", chunk.get("file_name", ""))
+                content = chunk.get("content", chunk.get("text", ""))
+                if source:
+                    citations.append(source)
+                if content:
+                    text_points.append(content[:500])
+        
+        # Build context for streaming
+        stream_context = {
+            "data_points": {
+                "text": text_points,
+                "images": [],
+                "citations": citations,
+            },
+            "thoughts": thoughts,
+            "followup_questions": [
+                "Can you elaborate on the key findings?",
+                "What are the supporting documents for this answer?",
+            ] if overrides and overrides.suggest_followup_questions else None,
+        }
+        
+        # Stream answer progressively
+        answer = result.get("answer", "")
+        words = answer.split()
+        chunk_size = 3  # Words per chunk for natural feel
+        
+        for i in range(0, len(words), chunk_size):
+            chunk_words = words[i:i + chunk_size]
+            content = " ".join(chunk_words)
+            if i + chunk_size < len(words):
+                content += " "
+            
+            yield json.dumps({
+                "delta": {"content": content},
+                "context": stream_context,
+                "session_state": session_state,
+            }) + "\n"
+            
+            await asyncio.sleep(0.03)  # Natural typing feel
+        
+        # Final chunk
+        yield json.dumps({
+            "delta": {},
+            "context": stream_context,
+            "session_state": session_state,
+        }) + "\n"
+        
+    except Exception as e:
+        logger.error("frontend_stream_failed", error=str(e), exc_info=True)
+        yield json.dumps({
+            "error": str(e),
+        }) + "\n"

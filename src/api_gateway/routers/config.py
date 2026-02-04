@@ -3,6 +3,8 @@ Runtime Configuration Endpoint
 
 Provides dynamic configuration to the frontend based on environment variables.
 This allows a single frontend build to work for both B2B and B2C deployments.
+
+Matches azure-search-openai-demo frontend Config interface.
 """
 
 from fastapi import APIRouter
@@ -21,6 +23,8 @@ async def get_config() -> Dict[str, Any]:
     (B2B vs B2C, feature flags, etc.) so the frontend can adapt without
     rebuilding.
     
+    Matches azure-search-openai-demo frontend Config type.
+    
     Returns:
         Configuration object with auth settings and feature flags
     """
@@ -35,11 +39,43 @@ async def get_config() -> Dict[str, Any]:
     else:
         authority = os.getenv("AUTHORITY", "")
     
+    # Frontend Config interface fields (azure-search-openai-demo compatible)
     config = {
+        # Auth settings
         "authType": auth_type,
         "clientId": auth_client_id,
         "authority": authority,
         "requireAuth": require_auth,
+        
+        # Feature flags matching frontend Config interface
+        "showMultimodalOptions": os.getenv("ENABLE_MULTIMODAL", "false").lower() == "true",
+        "showSemanticRankerOption": False,  # Not used in GraphRAG
+        "showQueryRewritingOption": os.getenv("ENABLE_QUERY_REWRITING", "true").lower() == "true",
+        "showReasoningEffortOption": os.getenv("ENABLE_REASONING_EFFORT", "false").lower() == "true",
+        "streamingEnabled": os.getenv("ENABLE_STREAMING", "true").lower() == "true",
+        "defaultReasoningEffort": os.getenv("DEFAULT_REASONING_EFFORT", "medium"),
+        "defaultRetrievalReasoningEffort": os.getenv("DEFAULT_RETRIEVAL_REASONING_EFFORT", "medium"),
+        "showVectorOption": True,  # GraphRAG always uses vector search
+        "showUserUpload": os.getenv("ENABLE_USER_UPLOAD", "true").lower() == "true",
+        "showLanguagePicker": os.getenv("ENABLE_LANGUAGE_PICKER", "false").lower() == "true",
+        "showSpeechInput": os.getenv("ENABLE_SPEECH_INPUT", "false").lower() == "true",
+        "showSpeechOutputBrowser": os.getenv("ENABLE_SPEECH_OUTPUT_BROWSER", "false").lower() == "true",
+        "showSpeechOutputAzure": os.getenv("ENABLE_SPEECH_OUTPUT_AZURE", "false").lower() == "true",
+        "showChatHistoryBrowser": os.getenv("ENABLE_CHAT_HISTORY_BROWSER", "true").lower() == "true",
+        "showChatHistoryCosmos": os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "true").lower() == "true",
+        "showAgenticRetrievalOption": os.getenv("ENABLE_AGENTIC_RETRIEVAL", "false").lower() == "true",
+        
+        # RAG settings
+        "ragSearchTextEmbeddings": True,
+        "ragSearchImageEmbeddings": os.getenv("ENABLE_IMAGE_EMBEDDINGS", "false").lower() == "true",
+        "ragSendTextSources": True,
+        "ragSendImageSources": False,
+        
+        # Source options
+        "webSourceEnabled": os.getenv("ENABLE_WEB_SOURCE", "false").lower() == "true",
+        "sharepointSourceEnabled": os.getenv("ENABLE_SHAREPOINT_SOURCE", "false").lower() == "true",
+        
+        # GraphRAG-specific extensions
         "features": {
             "showAdminPanel": auth_type == "B2B",
             "showFolders": os.getenv("ENABLE_FOLDERS", "true").lower() == "true",

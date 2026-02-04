@@ -441,11 +441,11 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 | **1c** | Add Cosmos DB + Redis to infra | ✅ Done (already in `infra/core/`) | 1 day |
 | **1d** | Instrumentation hooks (fire-and-forget) | ✅ Done | 2 days |
 | **1e** | Create `src/core/` module structure | ✅ Done (restructure) | 1 day |
-| **2a** | Git subtree frontend from azure-search-openai-demo | 🔲 Pending | 0.5 day |
-| **2b** | Runtime config endpoint (`/config`) | ✅ Done (already existed) | 0.5 day |
-| **2c** | Chat compat router (`/chat`, `/chat/stream`) | 🔲 Pending | 2 days |
-| **2d** | JWT validation middleware | 🔲 Pending | 1 day |
-| **2e** | Folder schema + CRUD endpoints | 🔲 Pending | 2 days |
+| **2a** | Git subtree frontend from azure-search-openai-demo | ✅ Done (already in `/frontend`) | 0.5 day |
+| **2b** | Runtime config endpoint (`/config`) | ✅ Done (updated for frontend compat) | 0.5 day |
+| **2c** | Chat compat router (`/chat`, `/chat/stream`) | ✅ Done | 2 days |
+| **2d** | JWT validation middleware | ✅ Done (already in `middleware/auth.py`) | 1 day |
+| **2e** | Folder schema + CRUD endpoints | ✅ Done (already in `routers/folders.py`) | 2 days |
 | **3a** | Split API/Worker containers in Bicep | 🔲 Pending | 1 day |
 | **3b** | Easy Auth configuration (B2B + B2C) | 🔲 Pending | 1 day |
 | **3c** | Dashboard UI (admin + user) | 🔲 Pending | 3-5 days |
@@ -475,6 +475,37 @@ async def chat(request: ChatRequest, background_tasks: BackgroundTasks):
 **2b - Runtime Config:**
 - `src/api_gateway/routers/config.py` - `/config` endpoint already complete
 - Returns: `authType`, `clientId`, `authority`, `requireAuth`, `features`, `routes`, `apiVersion`
+
+### Phase 2 Completion Notes (Feb 4, 2026)
+
+**2a - Frontend:**
+- Already exists in `/frontend` directory (copied from azure-search-openai-demo)
+- Has its own backend in `frontend/app/backend/` (Quart-based)
+- Frontend React app in `frontend/app/frontend/`
+- Upstream tracking documented in `UPSTREAM_VERSION.md`
+
+**2c - Chat Compat Router:**
+- Added `/chat` (POST) - non-streaming endpoint matching frontend expectations
+- Added `/chat/stream` (POST) - streaming NDJSON endpoint for progressive updates
+- Maps frontend `ChatAppRequest` → GraphRAG hybrid query → `ChatAppResponse`
+- Supports `context.overrides.retrieval_mode` mapping to approaches (hybrid/local/global)
+- Returns `data_points`, `thoughts`, `followup_questions` in context
+
+**2d - JWT Validation Middleware:**
+- Already complete in `src/api_gateway/middleware/auth.py`
+- `JWTAuthMiddleware` class handles B2B (groups[0]) and B2C (oid) auth types
+- Extracts tokens from Easy Auth headers or Authorization: Bearer
+- Sets `request.state.group_id` and `request.state.user_id`
+- Skips auth for `/health`, `/config`, `/docs`, `/openapi.json`
+
+**2e - Folder CRUD:**
+- Already complete in `src/api_gateway/routers/folders.py`
+- Full CRUD: `POST /folders`, `GET /folders`, `GET /folders/{id}`, `PUT /folders/{id}`, `DELETE /folders/{id}`
+- Document assignment: `POST /folders/{id}/documents`, `DELETE /folders/{id}/documents/{doc_id}`
+- Bulk operations: `POST /folders/{id}/documents/bulk`
+- List operations: `GET /folders/{id}/documents`, `GET /folders/unfiled/documents`
+- Max depth enforcement (2 levels)
+- Partition isolation via `group_id` from JWT
 
 ---
 

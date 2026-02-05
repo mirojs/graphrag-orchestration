@@ -166,6 +166,10 @@ class SectionAwareChunker:
             end_offset = meta.get("end_offset")  # End character offset from DI spans
             url = meta.get("url", "")  # Document source URL
             
+            # Extract polygon geometry for pixel-accurate highlighting
+            sentences = list(meta.get("sentences", []) or [])  # Sentence-level polygons
+            page_dimensions = list(meta.get("page_dimensions", []) or [])  # Page width/height/angle
+            
             sections.append(
                 SectionNode(
                     id=section_id,
@@ -182,6 +186,9 @@ class SectionAwareChunker:
                     start_offset=start_offset,
                     end_offset=end_offset,
                     url=url,
+                    # Polygon geometry for pixel-accurate highlighting
+                    sentences=sentences,
+                    page_dimensions=page_dimensions,
                 )
             )
         
@@ -295,6 +302,9 @@ class SectionAwareChunker:
                         page_number=section.page_number,
                         start_offset=section.start_offset,
                         end_offset=section.end_offset,
+                        # Polygon geometry for pixel-accurate highlighting
+                        sentences=section.sentences,
+                        page_dimensions=section.page_dimensions,
                         metadata={
                             "source": doc_source,
                             "url": section.url or doc_source,  # Preserve document URL
@@ -324,6 +334,9 @@ class SectionAwareChunker:
                     start_offset=section.start_offset,
                     end_offset=section.end_offset,
                     url=section.url,
+                    # Polygon geometry for pixel-accurate highlighting
+                    sentences=section.sentences,
+                    page_dimensions=section.page_dimensions,
                 )
                 chunks.extend(sub_chunks)
                 global_chunk_idx += len(sub_chunks)
@@ -363,12 +376,18 @@ class SectionAwareChunker:
         start_offset: Optional[int] = None,
         end_offset: Optional[int] = None,
         url: Optional[str] = None,
+        # Polygon geometry for pixel-accurate highlighting
+        sentences: Optional[List[Dict[str, Any]]] = None,
+        page_dimensions: Optional[List[Dict[str, Any]]] = None,
     ) -> List[SectionChunk]:
         """Split a large section into smaller chunks at paragraph boundaries.
         
         Location metadata (page_number, start_offset, end_offset, url) is
         applied to the first chunk. Subsequent chunks inherit page_number
         but not character offsets (which become imprecise after splitting).
+        
+        Polygon geometry (sentences, page_dimensions) is applied to the first
+        chunk only. Split chunks would require re-computing sentence offsets.
         """
         content = section.content
         max_tokens = self.config.max_tokens
@@ -426,6 +445,9 @@ class SectionAwareChunker:
                             page_number=page_number,
                             start_offset=start_offset if is_first_chunk else None,
                             end_offset=end_offset if is_first_chunk else None,
+                            # Polygon geometry (only for first chunk)
+                            sentences=sentences if is_first_chunk else [],
+                            page_dimensions=page_dimensions if is_first_chunk else [],
                             metadata={
                                 "source": doc_source,
                                 "url": url or doc_source,
@@ -473,6 +495,9 @@ class SectionAwareChunker:
                     page_number=page_number,
                     start_offset=start_offset if is_first_chunk else None,
                     end_offset=end_offset if is_first_chunk else None,
+                    # Polygon geometry (only for first chunk)
+                    sentences=sentences if is_first_chunk else [],
+                    page_dimensions=page_dimensions if is_first_chunk else [],
                     metadata={
                         "source": doc_source,
                         "url": url or doc_source,

@@ -38,6 +38,10 @@ class SectionNode:
     tables: List[Dict[str, Any]] = field(default_factory=list)
     key_value_pairs: List[Dict[str, Any]] = field(default_factory=list)
     
+    # Polygon geometry for pixel-accurate highlighting
+    sentences: List[Dict[str, Any]] = field(default_factory=list)  # Sentence-level polygons
+    page_dimensions: List[Dict[str, Any]] = field(default_factory=list)  # Page width/height/angle
+    
     # Token count (computed during processing)
     token_count: int = 0
     
@@ -90,6 +94,10 @@ class SectionChunk:
     start_offset: Optional[int] = None  # Character offset in original document
     end_offset: Optional[int] = None  # End character offset in original document
     
+    # Polygon geometry for pixel-accurate highlighting
+    sentences: List[Dict[str, Any]] = field(default_factory=list)  # Sentence-level polygons
+    page_dimensions: List[Dict[str, Any]] = field(default_factory=list)  # Page width/height/angle
+    
     def to_text_chunk_dict(self) -> Dict[str, Any]:
         """Convert to TextChunk-compatible dict for Neo4j storage."""
         return {
@@ -116,6 +124,9 @@ class SectionChunk:
                 **(({"page_number": self.page_number}) if self.page_number is not None else {}),
                 **(({"start_offset": self.start_offset}) if self.start_offset is not None else {}),
                 **(({"end_offset": self.end_offset}) if self.end_offset is not None else {}),
+                # Polygon geometry for pixel-accurate highlighting
+                **({"sentences": self.sentences} if self.sentences else {}),
+                **({"page_dimensions": self.page_dimensions} if self.page_dimensions else {}),
             },
         }
 

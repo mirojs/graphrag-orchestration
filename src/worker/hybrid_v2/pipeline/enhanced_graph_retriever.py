@@ -1041,7 +1041,7 @@ class EnhancedGraphRetriever:
                     s,
                     d
                 ORDER BY score DESC
-                WITH entity_name, max_per_entity, collect({
+                WITH entity_name, max_per_entity, collect({{
                     chunk_id: t.id,
                     text: t.text,
                     metadata: t.metadata,
@@ -1051,7 +1051,7 @@ class EnhancedGraphRetriever:
                     doc_title: d.title,
                     doc_source: d.source,
                     score: score
-                })[0..max_per_entity] AS chunks
+                }})[0..max_per_entity] AS chunks
                 UNWIND chunks AS chunk
                 RETURN
                     entity_name,

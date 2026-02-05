@@ -248,9 +248,11 @@ class AsyncNeo4jService:
         if not unmatched_seeds or not use_extended_matching:
             logger.info(
                 "get_entities_by_names_result",
-                total_seeds=len(entity_names),
-                matched_exact=len(records),
-                unmatched=len(unmatched_seeds),
+                extra={
+                    "total_seeds": len(entity_names),
+                    "matched_exact": len(records),
+                    "unmatched": len(unmatched_seeds),
+                }
             )
             return records
         
@@ -285,9 +287,11 @@ class AsyncNeo4jService:
         if not unmatched_seeds:
             logger.info(
                 "get_entities_by_names_result",
-                total_seeds=len(entity_names),
-                matched_exact=len(records) - len(kvp_records),
-                matched_kvp=len(kvp_records),
+                extra={
+                    "total_seeds": len(entity_names),
+                    "matched_exact": len(records) - len(kvp_records),
+                    "matched_kvp": len(kvp_records),
+                }
             )
             return records
         
@@ -326,8 +330,10 @@ class AsyncNeo4jService:
         if not unmatched_seeds:
             logger.info(
                 "get_entities_by_names_result",
-                total_seeds=len(entity_names),
-                matched_substring=len(substring_records),
+                extra={
+                    "total_seeds": len(entity_names),
+                    "matched_substring": len(substring_records),
+                }
             )
             return records
         
@@ -370,10 +376,12 @@ class AsyncNeo4jService:
         
         logger.info(
             "get_entities_by_names_result",
-            total_seeds=len(entity_names),
-            total_matched=len(records),
-            strategies_used=list({r.get("match_strategy", "unknown") for r in records}),
-            unmatched_seeds=final_unmatched[:5] if final_unmatched else [],
+            extra={
+                "total_seeds": len(entity_names),
+                "total_matched": len(records),
+                "strategies_used": list({r.get("match_strategy", "unknown") for r in records}),
+                "unmatched_seeds": final_unmatched[:5] if final_unmatched else [],
+            }
         )
         
         if return_unmatched:
@@ -1453,10 +1461,10 @@ class AsyncNeo4jService:
                 result = await session.run(query, group_id=group_id)
                 record = await result.single()
                 if record and record["v2_count"] > 0:
-                    logger.info("embedding_version_detected", group_id=group_id, version="v2")
+                    logger.info("embedding_version_detected", extra={"group_id": group_id, "version": "v2"})
                     return "v2"
-                logger.info("embedding_version_detected", group_id=group_id, version="v1")
+                logger.info("embedding_version_detected", extra={"group_id": group_id, "version": "v1"})
                 return "v1"
         except Exception as e:
-            logger.warning("embedding_version_detection_failed", group_id=group_id, error=str(e))
+            logger.warning("embedding_version_detection_failed", extra={"group_id": group_id, "error": str(e)})
             return "v1"  # Default to V1 for safety

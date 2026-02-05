@@ -7,6 +7,10 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "GraphRAG Orchestration Service"
     
+    # Logging
+    LOG_LEVEL: str = Field(default="INFO", description="Log level: DEBUG, INFO, WARNING, ERROR")
+    LOG_REQUEST_BODY: bool = Field(default=False, description="Log full request body (verbose)")
+    
     # Azure OpenAI
     AZURE_OPENAI_ENDPOINT: Optional[str] = None
     AZURE_OPENAI_API_KEY: Optional[str] = None

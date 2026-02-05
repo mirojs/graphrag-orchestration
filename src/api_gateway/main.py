@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import structlog
+import logging
 from src.core.config import settings
 from src.api_gateway.middleware.group_isolation import GroupIsolationMiddleware
 from src.api_gateway.middleware.auth import JWTAuthMiddleware
@@ -15,6 +16,10 @@ from src.worker.hybrid_v2.routers.maintenance import router as maintenance_route
 # NOTE: GraphService and LLMService are core services used by V3
 # IndexingService and RetrievalService are legacy V1/V2 only (lazy-loaded in deprecated endpoints)
 from src.worker.services import GraphService, LLMService
+
+# Configure standard logging level
+log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+logging.basicConfig(level=log_level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
 # Configure structured logging with context variables support
 structlog.configure(

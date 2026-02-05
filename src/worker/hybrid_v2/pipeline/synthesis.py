@@ -1465,23 +1465,38 @@ BEGIN ANALYSIS:"""
                     combined_context_parts.append(f"  S{i}: {text}")
                     
                     # Store span metadata for this sentence
-                    sentence_spans.append({
+                    sentence_data = {
                         "text": text,
                         "offset": sent.get("offset", 0),
                         "length": sent.get("length", len(text)),
                         "confidence": sent.get("confidence", 1.0),
                         "locale": sent.get("locale", "en"),
                         "sentence_index": i,
-                    })
+                    }
+                    
+                    # Include polygon geometry for pixel-accurate highlighting (if available)
+                    if sent.get("page") is not None:
+                        sentence_data["page"] = sent["page"]
+                    if sent.get("polygons"):
+                        sentence_data["polygons"] = sent["polygons"]
+                    
+                    sentence_spans.append(sentence_data)
                 
-                citations.append({
+                # Build citation with page dimensions for coordinate transformation
+                citation_data = {
                     "citation": f"[{citation_idx}]",
                     "document_id": doc.get("document_id", ""),
                     "document_title": doc_title,
                     "sentence_count": len(sentences),
                     "source": "azure_di_sentences",
                     "sentences": sentence_spans,  # Add detailed span data for frontend
-                })
+                }
+                
+                # Include page dimensions from document metadata (for normalized→pixel conversion)
+                if doc.get("page_dimensions"):
+                    citation_data["page_dimensions"] = doc["page_dimensions"]
+                
+                citations.append(citation_data)
                 citation_idx += 1
         
         # --- SECTION B: Table data (raw headers + rows) ---

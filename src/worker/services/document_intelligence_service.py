@@ -31,7 +31,9 @@ import logging
 import base64
 import io
 import re
+from bisect import bisect_left, bisect_right
 from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 from urllib.parse import unquote
 
@@ -54,6 +56,261 @@ from llama_index.core import Document
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+# ========================================================================
+# Geometry Data Structures for Pixel-Accurate Highlighting
+# ========================================================================
+
+@dataclass
+class WordGeometry:
+    """Word-level geometry extracted from Azure Document Intelligence.
+    
+    Coordinates are normalized to [0, 1] relative to page dimensions.
+    """
+    content: str
+    offset: int  # Character offset in document content
+    length: int
+    page: int  # 1-indexed
+    confidence: float
+    polygon: List[float]  # [x1,y1,x2,y2,x3,y3,x4,y4] normalized to [0,1]
+    
+    @property
+    def end_offset(self) -> int:
+        return self.offset + self.length
+
+
+@dataclass
+class PageDimensions:
+    """Page size and orientation from Azure Document Intelligence.
+    
+    Used by frontend to convert normalized coordinates to pixels.
+    """
+    page_number: int  # 1-indexed
+    width: float  # Points (1/72 inch) or pixels depending on source
+    height: float
+    rotation: int = 0  # Degrees clockwise: 0, 90, 180, 270
+    unit: str = "inch"  # "inch", "pixel", or "point"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "page": self.page_number,
+            "width": self.width,
+            "height": self.height,
+            "rotation": self.rotation,
+            "unit": self.unit,
+        }
+
+
+class WordOffsetIndex:
+    """Interval tree for efficient offset-to-word lookups.
+    
+    Given a character offset range, find all words that overlap.
+    Uses sorted lists with binary search for O(log n) lookup.
+    """
+    
+    def __init__(self, words: List[WordGeometry]):
+        """Build index from word geometries.
+        
+        Args:
+            words: List of WordGeometry, must be sorted by offset
+        """
+        self._words = sorted(words, key=lambda w: w.offset)
+        # Build arrays for binary search
+        self._starts = [w.offset for w in self._words]
+        self._ends = [w.end_offset for w in self._words]
+    
+    def find_overlapping(self, start: int, end: int) -> List[WordGeometry]:
+        """Find all words that overlap with [start, end).
+        
+        A word overlaps if: word.offset < end AND word.end_offset > start
+        
+        Args:
+            start: Start offset (inclusive)
+            end: End offset (exclusive)
+            
+        Returns:
+            List of overlapping WordGeometry objects
+        """
+        if not self._words:
+            return []
+        
+        # Find candidate range using binary search
+        # Words starting before 'end' could overlap
+        right_bound = bisect_left(self._starts, end)
+        
+        result = []
+        for i in range(right_bound):
+            word = self._words[i]
+            # Check if this word's end is past our start (overlaps)
+            if word.end_offset > start:
+                result.append(word)
+        
+        return result
+    
+    def find_words_in_range(self, start: int, length: int) -> List[WordGeometry]:
+        """Convenience wrapper for find_overlapping."""
+        return self.find_overlapping(start, start + length)
+
+
+@dataclass
+class SentenceGeometry:
+    """Sentence-level geometry synthesized from word geometries.
+    
+    Used for pixel-accurate sentence highlighting in the frontend.
+    """
+    text: str
+    offset: int
+    length: int
+    page: int  # Primary page (first word's page)
+    confidence: float  # Length-weighted mean of word confidences
+    polygons: List[List[float]]  # Multi-polygon for line-wrapping
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to API response format."""
+        return {
+            "text": self.text,
+            "offset": self.offset,
+            "length": self.length,
+            "page": self.page,
+            "confidence": round(self.confidence, 3),
+            "polygons": [[round(x, 4) for x in poly] for poly in self.polygons],
+        }
+
+
+def synthesize_sentence_geometry(
+    sentence_text: str,
+    sentence_offset: int,
+    sentence_length: int,
+    word_index: WordOffsetIndex,
+    *,
+    line_gap_threshold: float = 0.015,  # 1.5% of page height = new line
+) -> Optional[SentenceGeometry]:
+    """Synthesize sentence geometry from word geometries.
+    
+    Given a sentence's character span, finds overlapping words and creates
+    multi-polygon highlights that handle line-wrapping.
+    
+    Args:
+        sentence_text: The sentence text
+        sentence_offset: Character offset in document content
+        sentence_length: Length of sentence in characters
+        word_index: WordOffsetIndex for efficient lookups
+        line_gap_threshold: Y-distance threshold for detecting new lines
+        
+    Returns:
+        SentenceGeometry or None if no words found
+    """
+    # Find words overlapping with the sentence span
+    words = word_index.find_overlapping(sentence_offset, sentence_offset + sentence_length)
+    
+    if not words:
+        return None
+    
+    # Group words by text line (detect line breaks via Y-coordinate gaps)
+    lines: List[List[WordGeometry]] = []
+    current_line: List[WordGeometry] = []
+    prev_y: Optional[float] = None
+    
+    # Sort words by page, then by Y, then by X
+    sorted_words = sorted(words, key=lambda w: (w.page, _get_word_y(w), _get_word_x(w)))
+    
+    for word in sorted_words:
+        word_y = _get_word_y(word)
+        
+        if prev_y is None:
+            current_line.append(word)
+        elif abs(word_y - prev_y) > line_gap_threshold or (current_line and word.page != current_line[-1].page):
+            # New line detected (Y gap or page change)
+            if current_line:
+                lines.append(current_line)
+            current_line = [word]
+        else:
+            current_line.append(word)
+        
+        prev_y = word_y
+    
+    if current_line:
+        lines.append(current_line)
+    
+    # Create multi-polygon (one polygon per line)
+    polygons: List[List[float]] = []
+    for line_words in lines:
+        if not line_words:
+            continue
+        polygon = _merge_line_polygons([w.polygon for w in line_words])
+        if polygon:
+            polygons.append(polygon)
+    
+    if not polygons:
+        return None
+    
+    # Compute length-weighted confidence
+    total_weight = 0
+    weighted_conf = 0.0
+    for word in words:
+        weight = word.length
+        weighted_conf += word.confidence * weight
+        total_weight += weight
+    
+    confidence = weighted_conf / total_weight if total_weight > 0 else 0.0
+    
+    # Primary page is the first word's page
+    page = sorted_words[0].page
+    
+    return SentenceGeometry(
+        text=sentence_text,
+        offset=sentence_offset,
+        length=sentence_length,
+        page=page,
+        confidence=confidence,
+        polygons=polygons,
+    )
+
+
+def _get_word_y(word: WordGeometry) -> float:
+    """Get the Y-coordinate of a word (top edge, normalized)."""
+    if len(word.polygon) >= 2:
+        # Average of top-left and top-right Y
+        return (word.polygon[1] + word.polygon[3]) / 2
+    return 0.0
+
+
+def _get_word_x(word: WordGeometry) -> float:
+    """Get the X-coordinate of a word (left edge, normalized)."""
+    if word.polygon:
+        return word.polygon[0]
+    return 0.0
+
+
+def _merge_line_polygons(polygons: List[List[float]]) -> Optional[List[float]]:
+    """Merge word polygons on the same line into a single bounding quad.
+    
+    Each polygon is [x1,y1,x2,y2,x3,y3,x4,y4] where:
+    - (x1,y1) = top-left
+    - (x2,y2) = top-right
+    - (x3,y3) = bottom-right
+    - (x4,y4) = bottom-left
+    
+    Returns:
+        Merged polygon [x1,y1,x2,y2,x3,y3,x4,y4] or None
+    """
+    if not polygons:
+        return None
+    
+    # Filter out invalid polygons
+    valid_polys = [p for p in polygons if len(p) >= 8]
+    if not valid_polys:
+        return None
+    
+    # Find bounding box
+    min_x = min(min(p[0], p[6]) for p in valid_polys)  # Left edge (x1, x4)
+    max_x = max(max(p[2], p[4]) for p in valid_polys)  # Right edge (x2, x3)
+    min_y = min(min(p[1], p[3]) for p in valid_polys)  # Top edge (y1, y2)
+    max_y = max(max(p[5], p[7]) for p in valid_polys)  # Bottom edge (y3, y4)
+    
+    # Return as quad: top-left, top-right, bottom-right, bottom-left
+    return [min_x, min_y, max_x, min_y, max_x, max_y, min_x, max_y]
 
 
 class DocumentIntelligenceService:
@@ -195,6 +452,167 @@ class DocumentIntelligenceService:
             "headers": headers,
             "rows": rows,
         }
+
+    # ========================================================================
+    # Word Geometry Extraction for Pixel-Accurate Highlighting
+    # ========================================================================
+
+    def _extract_page_dimensions(self, result: AnalyzeResult) -> List[PageDimensions]:
+        """Extract page dimensions from Azure DI result.
+        
+        Returns normalized page dimensions for coordinate transformation.
+        
+        Args:
+            result: AnalyzeResult from Document Intelligence
+            
+        Returns:
+            List of PageDimensions, one per page
+        """
+        dimensions: List[PageDimensions] = []
+        
+        for page in (getattr(result, "pages", None) or []):
+            page_num = getattr(page, "page_number", 1) or 1
+            width = getattr(page, "width", 0) or 0
+            height = getattr(page, "height", 0) or 0
+            angle = getattr(page, "angle", 0) or 0
+            unit = getattr(page, "unit", "inch") or "inch"
+            
+            # Normalize angle to standard rotation values
+            rotation = 0
+            if angle:
+                # Round to nearest 90 degrees
+                rotation = round(angle / 90) * 90 % 360
+            
+            dimensions.append(PageDimensions(
+                page_number=page_num,
+                width=width,
+                height=height,
+                rotation=rotation,
+                unit=unit,
+            ))
+        
+        if dimensions:
+            logger.debug(
+                f"📐 Extracted page dimensions for {len(dimensions)} pages",
+                extra={"page_count": len(dimensions)}
+            )
+        
+        return dimensions
+
+    def _extract_word_geometries(
+        self, 
+        result: AnalyzeResult,
+        page_dimensions: Optional[List[PageDimensions]] = None,
+    ) -> Tuple[List[WordGeometry], WordOffsetIndex]:
+        """Extract word-level geometry from Azure DI result.
+        
+        Words are accessed via page.words in the Azure DI response.
+        Coordinates are normalized to [0, 1] relative to page dimensions.
+        
+        Args:
+            result: AnalyzeResult from Document Intelligence
+            page_dimensions: Pre-extracted page dimensions for normalization
+            
+        Returns:
+            Tuple of (list of WordGeometry, WordOffsetIndex for lookups)
+        """
+        words: List[WordGeometry] = []
+        
+        # Build page dimension lookup
+        dim_by_page: Dict[int, PageDimensions] = {}
+        if page_dimensions:
+            dim_by_page = {d.page_number: d for d in page_dimensions}
+        
+        for page in (getattr(result, "pages", None) or []):
+            page_num = getattr(page, "page_number", 1) or 1
+            page_words = getattr(page, "words", None) or []
+            
+            # Get page dimensions for normalization
+            page_dim = dim_by_page.get(page_num)
+            page_width = page_dim.width if page_dim else (getattr(page, "width", 1) or 1)
+            page_height = page_dim.height if page_dim else (getattr(page, "height", 1) or 1)
+            
+            # Avoid division by zero
+            if page_width <= 0:
+                page_width = 1
+            if page_height <= 0:
+                page_height = 1
+            
+            for word in page_words:
+                content = getattr(word, "content", "") or ""
+                confidence = getattr(word, "confidence", 0.0) or 0.0
+                polygon = getattr(word, "polygon", None) or []
+                span = getattr(word, "span", None)
+                
+                # Extract offset and length from span
+                offset = 0
+                length = len(content)
+                if span:
+                    offset = getattr(span, "offset", 0) or 0
+                    length = getattr(span, "length", len(content)) or len(content)
+                
+                # Normalize polygon coordinates to [0, 1]
+                # Azure DI polygon format: [x1, y1, x2, y2, x3, y3, x4, y4]
+                normalized_polygon: List[float] = []
+                if polygon and len(polygon) >= 8:
+                    for i, coord in enumerate(polygon[:8]):
+                        if i % 2 == 0:  # x coordinate
+                            normalized_polygon.append(coord / page_width)
+                        else:  # y coordinate
+                            normalized_polygon.append(coord / page_height)
+                
+                if content and normalized_polygon:
+                    words.append(WordGeometry(
+                        content=content,
+                        offset=offset,
+                        length=length,
+                        page=page_num,
+                        confidence=confidence,
+                        polygon=normalized_polygon,
+                    ))
+        
+        # Build interval index for efficient lookups
+        word_index = WordOffsetIndex(words)
+        
+        if words:
+            avg_confidence = sum(w.confidence for w in words) / len(words)
+            logger.info(
+                f"📐 Extracted {len(words)} word geometries",
+                extra={
+                    "word_count": len(words),
+                    "avg_confidence": round(avg_confidence, 3),
+                    "pages": len(set(w.page for w in words)),
+                }
+            )
+        
+        return words, word_index
+
+    def _words_to_serializable(self, words: List[WordGeometry]) -> List[Dict[str, Any]]:
+        """Convert WordGeometry list to JSON-serializable format.
+        
+        For storage efficiency, only include essential fields.
+        The full geometry can be reconstructed from offset + polygon.
+        
+        Args:
+            words: List of WordGeometry objects
+            
+        Returns:
+            List of dicts with compact representation
+        """
+        return [
+            {
+                "o": w.offset,  # offset
+                "l": w.length,  # length
+                "p": w.page,    # page
+                "c": round(w.confidence, 3),  # confidence
+                "g": [round(x, 4) for x in w.polygon],  # geometry (polygon)
+            }
+            for w in words
+        ]
+
+    def _page_dimensions_to_serializable(self, dims: List[PageDimensions]) -> List[Dict[str, Any]]:
+        """Convert PageDimensions to JSON-serializable format."""
+        return [d.to_dict() for d in dims]
 
     def _extract_barcodes(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
         """Extract barcodes/QR codes from document pages (FREE add-on).
@@ -732,7 +1150,15 @@ class DocumentIntelligenceService:
 
         return "\n\n".join(lines).strip()
 
-    def _build_section_aware_documents(self, result: AnalyzeResult, group_id: str, url: str) -> List[Document]:
+    def _build_section_aware_documents(
+        self,
+        result: AnalyzeResult,
+        group_id: str,
+        url: str,
+        *,
+        word_index: Optional[WordOffsetIndex] = None,
+        geometry_metadata: Optional[Dict[str, Any]] = None,
+    ) -> List[Document]:
         """Create section/subsection chunks using `result.sections`.
 
         This produces more semantically coherent chunks than per-page splitting and
@@ -744,6 +1170,14 @@ class DocumentIntelligenceService:
         - Language detection (FREE add-on)
         - Figure cross-references
         - Selection marks (checkboxes)
+        - Word geometry for pixel-accurate highlighting (if word_index provided)
+        
+        Args:
+            result: Azure DI AnalyzeResult
+            group_id: Tenant isolation ID
+            url: Source document URL
+            word_index: Optional WordOffsetIndex for geometry lookups
+            geometry_metadata: Optional pre-computed geometry metadata
         """
         sections = list(getattr(result, "sections", None) or [])
         if not sections:
@@ -874,6 +1308,17 @@ class DocumentIntelligenceService:
                     length = first_span.get("length")
                     if start_offset is not None and length is not None:
                         end_offset = start_offset + length
+                
+                # Build geometry metadata for this chunk
+                chunk_geometry: Dict[str, Any] = {}
+                if geometry_metadata and section_idx == 0 and part == "direct":
+                    # First chunk gets full document geometry
+                    chunk_geometry["page_dimensions"] = geometry_metadata.get("page_dimensions", [])
+                    chunk_geometry["word_geometries"] = geometry_metadata.get("word_geometries", [])
+                elif word_index and start_offset is not None and end_offset is not None:
+                    # Other chunks get just their word range indices
+                    # Store offset range for sentence-level geometry reconstruction
+                    chunk_geometry["offset_range"] = [start_offset, end_offset]
 
                 docs.append(
                     Document(
@@ -895,6 +1340,8 @@ class DocumentIntelligenceService:
                             **({"page_number": page_number} if page_number is not None else {}),
                             **({"start_offset": start_offset} if start_offset is not None else {}),
                             **({"end_offset": end_offset} if end_offset is not None else {}),
+                            # Word geometry for pixel-accurate highlighting
+                            **(chunk_geometry if chunk_geometry else {}),
                             # Document-level metadata (included in first chunk)
                             **({"barcodes": barcodes} if section_idx == 0 and part == "direct" and barcodes else {}),
                             **({"languages": languages} if section_idx == 0 and part == "direct" and languages else {}),
@@ -1014,6 +1461,18 @@ class DocumentIntelligenceService:
                     logger.warning(f"No pages extracted from {url}")
                     return (url, [], None)
 
+                # ========================================================
+                # Extract word geometry for pixel-accurate highlighting
+                # ========================================================
+                page_dimensions = self._extract_page_dimensions(result)
+                word_geometries, word_index = self._extract_word_geometries(result, page_dimensions)
+                
+                # Serialize for storage (compact format)
+                geometry_metadata = {
+                    "page_dimensions": self._page_dimensions_to_serializable(page_dimensions),
+                    "word_geometries": self._words_to_serializable(word_geometries),
+                }
+
                 # Log Document Intelligence confidence scores
                 if result.paragraphs:
                     confidences = [p.confidence for p in result.paragraphs if hasattr(p, 'confidence') and p.confidence is not None]
@@ -1027,7 +1486,11 @@ class DocumentIntelligenceService:
                 # Prefer section-aware chunking when DI provides a sections tree.
                 # This produces higher-precision chunks and improves downstream retrieval.
                 if getattr(result, "sections", None) and getattr(result, "content", None):
-                    section_docs = self._build_section_aware_documents(result, group_id, url)
+                    section_docs = self._build_section_aware_documents(
+                        result, group_id, url,
+                        word_index=word_index,
+                        geometry_metadata=geometry_metadata,
+                    )
                     if not section_docs:
                         raise RuntimeError(
                             "Document Intelligence returned a sections tree, but section-aware chunking produced 0 chunks"
@@ -1125,6 +1588,13 @@ class DocumentIntelligenceService:
                         self._extract_table_metadata(t) for t in page_tables
                     ]
 
+                    # Build geometry metadata for this page
+                    page_geometry: Dict[str, Any] = {}
+                    if page_num == 1 and geometry_metadata:
+                        # First page gets full document geometry
+                        page_geometry["page_dimensions"] = geometry_metadata.get("page_dimensions", [])
+                        page_geometry["word_geometries"] = geometry_metadata.get("word_geometries", [])
+
                     # Create Document with structured table metadata for schema-aware extraction
                     # The 'tables' metadata enables direct field mapping without LLM parsing
                     logger.info(f"📄 Extracted page {page_num}: {len(markdown)} chars, {len(page_paragraphs)} paragraphs, {len(page_tables)} tables")
@@ -1140,6 +1610,8 @@ class DocumentIntelligenceService:
                                 "tables": tables_metadata,  # Structured table data for direct extraction
                                 "table_count": len(page_tables),
                                 "paragraph_count": len(page_paragraphs),
+                                # Word geometry for pixel-accurate highlighting
+                                **page_geometry,
                             },
                         )
                         documents.append(doc)

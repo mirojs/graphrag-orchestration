@@ -37,9 +37,14 @@ class Citation:
     - Document identification (id, title, url)
     - Location within document (page, section, character offsets)
     - Relevance scoring and text preview
+    - Pixel-accurate highlighting via polygon geometry (when available)
     
     Character offsets (start_offset, end_offset) are from Azure Document Intelligence
     and represent positions in the original document content.
+    
+    For pixel-accurate highlighting:
+    - sentences: List of sentence spans with polygons for frontend overlay
+    - page_dimensions: Page sizes for normalized→pixel coordinate transformation
     """
     index: int
     chunk_id: str
@@ -53,6 +58,9 @@ class Citation:
     section_path: str = ""  # Section hierarchy (e.g., "Terms > Payment")
     start_offset: Optional[int] = None  # Character offset in document (from DI spans)
     end_offset: Optional[int] = None  # End character offset in document
+    # Polygon geometry for pixel-accurate highlighting
+    sentences: Optional[List[Dict[str, Any]]] = None  # List of sentence spans with polygons
+    page_dimensions: Optional[List[Dict[str, Any]]] = None  # Page sizes for coordinate transformation
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -74,6 +82,11 @@ class Citation:
             result["start_offset"] = self.start_offset
         if self.end_offset is not None:
             result["end_offset"] = self.end_offset
+        # Include polygon geometry for pixel-accurate highlighting
+        if self.sentences:
+            result["sentences"] = self.sentences
+        if self.page_dimensions:
+            result["page_dimensions"] = self.page_dimensions
         return result
 
 
@@ -89,6 +102,9 @@ class RouteResult:
     citations: List[Citation] = field(default_factory=list)
     evidence_path: List[Any] = field(default_factory=list)  # Can be str or dict
     metadata: Dict[str, Any] = field(default_factory=dict)
+    # Top-level API fields for telemetry
+    usage: Optional[Dict[str, Any]] = None  # {prompt_tokens, completion_tokens, total_tokens, model}
+    timing: Optional[Dict[str, Any]] = None  # {retrieval_ms, synthesis_ms, total_ms}
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -102,6 +118,11 @@ class RouteResult:
         # Extract raw_extractions to top-level for comprehensive mode (API expects it there)
         if self.metadata.get("raw_extractions"):
             result["raw_extractions"] = self.metadata["raw_extractions"]
+        # Include telemetry fields if present
+        if self.usage:
+            result["usage"] = self.usage
+        if self.timing:
+            result["timing"] = self.timing
         return result
 
 

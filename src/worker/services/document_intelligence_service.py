@@ -702,6 +702,112 @@ class DocumentIntelligenceService:
         
         return sentences
 
+    def _extract_table_row_sentences(
+        self,
+        result: AnalyzeResult,
+    ) -> List[Dict[str, Any]]:
+        """Extract sentence-like structures from table rows.
+        
+        Tables often contain important line-item data (invoices, price lists, etc.)
+        that should be searchable as sentences. Each table row is converted to a
+        sentence with format: "HEADER1: value1 | HEADER2: value2 | ..."
+        
+        Args:
+            result: AnalyzeResult from Document Intelligence
+            
+        Returns:
+            List of sentence dicts with text, page, confidence, and polygons from cells
+        """
+        sentences: List[Dict[str, Any]] = []
+        tables = getattr(result, "tables", None) or []
+        
+        for table_idx, table in enumerate(tables):
+            if not table.cells:
+                continue
+            
+            # Extract headers (row 0)
+            num_cols = table.column_count or 0
+            headers = [""] * num_cols
+            for cell in table.cells:
+                if cell.row_index == 0 and cell.column_index is not None and cell.column_index < num_cols:
+                    headers[cell.column_index] = (cell.content or "").strip()
+            
+            # Process each data row (starting from row 1)
+            for row_idx in range(1, table.row_count or 0):
+                row_cells = [c for c in table.cells if c.row_index == row_idx]
+                if not row_cells:
+                    continue
+                
+                # Build sentence text from row data
+                text_parts = []
+                polygons = []
+                page_number = 1
+                confidences = []
+                
+                for cell in sorted(row_cells, key=lambda c: c.column_index or 0):
+                    col_idx = cell.column_index or 0
+                    content = (cell.content or "").strip()
+                    if not content:
+                        continue
+                    
+                    # Format: "HEADER: value"
+                    header = headers[col_idx] if col_idx < len(headers) else ""
+                    if header:
+                        text_parts.append(f"{header}: {content}")
+                    else:
+                        text_parts.append(content)
+                    
+                    # Extract polygon geometry from cell's bounding_regions
+                    cell_regions = getattr(cell, "bounding_regions", None) or []
+                    for region in cell_regions:
+                        region_page = getattr(region, "page_number", 1) or 1
+                        page_number = region_page  # Use last cell's page
+                        
+                        # Get polygon as list of floats
+                        region_polygon = getattr(region, "polygon", None)
+                        if region_polygon:
+                            # Convert to list if needed
+                            poly_list = list(region_polygon) if hasattr(region_polygon, "__iter__") else []
+                            if poly_list:
+                                polygons.append({
+                                    "page": region_page,
+                                    "polygon": poly_list,
+                                })
+                    
+                    # Track confidence if available
+                    cell_conf = getattr(cell, "confidence", None)
+                    if cell_conf is not None:
+                        confidences.append(cell_conf)
+                
+                if not text_parts:
+                    continue
+                
+                # Join cell values with " | " separator
+                row_text = " | ".join(text_parts)
+                
+                # Calculate average confidence
+                avg_confidence = sum(confidences) / len(confidences) if confidences else 0.9
+                
+                sentences.append({
+                    "text": row_text,
+                    "offset": -1,  # Table rows don't have content offsets
+                    "length": len(row_text),
+                    "page": page_number,
+                    "confidence": avg_confidence,
+                    "polygons": polygons,
+                    "source": "table",  # Mark as table-derived for debugging
+                    "table_index": table_idx,
+                    "row_index": row_idx,
+                })
+        
+        if sentences:
+            logger.info(
+                f"📊 Extracted {len(sentences)} table row sentences from {len(tables)} tables",
+                extra={"table_sentence_count": len(sentences), "table_count": len(tables)}
+            )
+        
+        return sentences
+
     def _page_dimensions_to_serializable(self, dims: List[PageDimensions]) -> List[Dict[str, Any]]:
         """Convert PageDimensions to JSON-serializable format."""
         return [d.to_dict() for d in dims]
@@ -1572,11 +1678,17 @@ class DocumentIntelligenceService:
                 content = getattr(result, "content", None) or ""
                 sentences_with_geometry = self._extract_sentences_with_geometry(result, word_index, content)
                 
+                # Extract sentence-like structures from table rows (invoices, price lists, etc.)
+                table_row_sentences = self._extract_table_row_sentences(result)
+                
+                # Merge paragraph sentences and table row sentences
+                all_sentences = sentences_with_geometry + table_row_sentences
+                
                 # Serialize for storage (compact format)
                 geometry_metadata = {
                     "page_dimensions": self._page_dimensions_to_serializable(page_dimensions),
                     "word_geometries": self._words_to_serializable(word_geometries),
-                    "sentences": sentences_with_geometry,  # Sentence-level polygons for highlighting
+                    "sentences": all_sentences,  # Sentence-level polygons for highlighting
                 }
 
                 # Log Document Intelligence confidence scores

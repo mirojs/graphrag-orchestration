@@ -1,0 +1,90 @@
+======================================================================
+V2 Configuration Check
+======================================================================
+✅ VOYAGE_V2_ENABLED: True
+✅ VOYAGE_API_KEY: **********...vULX
+✅ VOYAGE_MODEL_NAME: voyage-context-3
+✅ VOYAGE_EMBEDDING_DIM: 2048
+✅ NEO4J_URI: neo4j+s://a86dcf63.databases.neo4j.io
+
+✅ All V2 configuration verified!
+
+🧪 Indexing Group 2: Fix + KNN default (K=5, cutoff=0.60)
+2026-02-05 05:35:02 [info     ] upstream_hipporag_not_installed message='Using LlamaIndex-native implementation'
+/anaconda/envs/azureml_py38/lib/python3.10/site-packages/torch/cuda/__init__.py:789: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+
+======================================================================
+V2 INDEXING: test-5pdfs-v2-fix2
+======================================================================
+Group ID: test-5pdfs-v2-fix2
+Reindex: True
+Dry Run: False
+KNN Enabled: True
+KNN Config: default
+
+📦 Initializing V2 pipeline...
+   Pipeline: src.worker.hybrid_v2.indexing.lazygraphrag_pipeline
+   Embedder: VoyageEmbedService
+   use_v2_embedding_property: True
+   Dimensions: 2048
+
+📄 Documents to index:
+   [1/5] BUILDERS LIMITED WARRANTY.pdf
+   [2/5] HOLDING TANK SERVICING CONTRACT.pdf
+   [3/5] PROPERTY MANAGEMENT AGREEMENT.pdf
+   [4/5] contoso_lifts_invoice.pdf
+   [5/5] purchase_contract.pdf
+
+🚀 Starting V2 indexing...
+2026-02-05 05:36:59 [info     ] entity_dedup_starting          comparisons=24090 entity_count=220 group_id=test-5pdfs-v2-fix2
+2026-02-05 05:37:04 [info     ] entity_dedup_complete          embedding_merges=7 entities_merged=9 group_id=test-5pdfs-v2-fix2 merge_groups=9 rule_merges=2 total_entities=220 unique_after=211 unique_before=220
+🔍 ASYNC UPSERT CHECK: Storing 211 entities, 0 have embeddings
+   Sample entity_data: has embedding=False, has embedding_v2=True
+   embedding_v2 dim: 2048
+ Graph creation from Triplets:   0%|                  | 0.0/100 [00:00<?, ?%/s][#D7BA]  _: <CONNECTION> error: Failed to read from defunct connection IPv4Address(('p-a86dcf63-8cb7-0018.production-orch-1189.neo4j.io', 7687)) (ResolvedIPv4Address(('34.124.212.239', 7687))): OSError('No data')
+Transaction failed and will be retried in 0.9411723062761184s (Failed to read from defunct connection IPv4Address(('p-a86dcf63-8cb7-0018.production-orch-1189.neo4j.io', 7687)) (ResolvedIPv4Address(('34.124.212.239', 7687))))
+Transaction failed and will be retried in 1.7880031934394296s (Couldn't connect to p-a86dcf63-8cb7-0018.production-orch-1189.neo4j.io:7687 (resolved to ('34.124.212.239:7687',)):
+Connection to 34.124.212.239:7687 closed with incomplete handshake response)
+ Graph creation from Triplets:   0%|  | 0.0/100 [00:01<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:02<?, ?%/s, status: FAILED]Transaction failed and will be retried in 3.369795003318246s (Couldn't connect to p-a86dcf63-8cb7-0018.production-orch-1189.neo4j.io:7687 (resolved to ('34.124.212.239:7687',)):
+Connection to 34.124.212.239:7687 closed with incomplete handshake response)
+ Graph creation from Triplets:   0%|  | 0.0/100 [00:04<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:05<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:06<?, ?%/s, status: FAILED]Transaction failed and will be retried in 7.384555277519402s (Couldn't connect to p-a86dcf63-8cb7-0018.production-orch-1189.neo4j.io:7687 (resolved to ('34.124.212.239:7687',)):
+Connection to 34.124.212.239:7687 closed with incomplete handshake response)
+ Graph creation from Triplets:   0%|  | 0.0/100 [00:07<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:08<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:09<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:10<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:12<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:13<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:14<?, ?%/s, status: FAILED]Transaction failed and will be retried in 16.92959461495526s (Couldn't connect to p-a86dcf63-8cb7-0018.production-orch-1189.neo4j.io:7687 (resolved to ('34.124.212.239:7687',)):
+Connection to 34.124.212.239:7687 closed with incomplete handshake response)
+ Graph creation from Triplets:   0%|  | 0.0/100 [00:15<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:16<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:17<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:18<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:20<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:21<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:22<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:23<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:24<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:25<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:26<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:27<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:28<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:29<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:30<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:31<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:32<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:33<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:34<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:35<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:35<?, ?%/s, status: FAILED] Graph creation from Triplets:   0%|  | 0.0/100 [00:35<?, ?%/s, status: FAILED]
+⚠️  GDS graph algorithms failed: Failed to invoke procedure `gds.arrow.project.v3`: Caused by: org.apache.arrow.flight.FlightRuntimeException: INVALID_ARGUMENT: There's already a job running with jobId '15b64c06-b1d1-4ba1-b04a-76b9bf5f224b'. Existing Job: (desc: `Graph creation from Triplets`, status: `FAILED`)
+⚠️  Continuing indexing without GDS algorithms
+
+======================================================================
+📊 V2 Indexing Results
+======================================================================
+  Group ID:      test-5pdfs-v2-fix2
+  Documents:     5
+  Chunks:        17
+  Entities:      211
+  Relationships: 443
+  Sections:      12
+  Section Edges: 17
+  Semantic Sim:  9
+  DI Languages:  3
+  Elapsed:       235.2s
+======================================================================
+💾 Saved group ID to: last_test_group_id.txt
+
+======================================================================
+🔍 V2 Index Verification: test-5pdfs-v2-fix2
+======================================================================
+  Total chunks: 17
+  With embedding_v2: 17 (100.0%)
+  Document titles (should be URL-decoded):
+    ✅ BUILDERS LIMITED WARRANTY
+    ✅ HOLDING TANK SERVICING CONTRACT
+    ✅ PROPERTY MANAGEMENT AGREEMENT
+    ✅ contoso_lifts_invoice
+    ✅ purchase_contract
+  Tables: 4, Linked to Document: 4
+  ✅ KVPs: 190, Document match: 190 (100.0%)
+  ✅ Language data: primary=en, locales=['en', 'en', 'en', 'en', 'en', 'en', 'fr', 'it', 'en', 'en'], total_spans=127
+  ✅ V2 embedding dimension: 2048
+======================================================================

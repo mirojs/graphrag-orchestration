@@ -1,0 +1,18 @@
+================================================================================
+ROUTE 4 + COMPREHENSIVE_SENTENCE TEST
+================================================================================
+Cloud API: https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
+Group ID: test-5pdfs-v2-fix2
+Response Type: comprehensive_sentence
+Force Route: drift_multi_hop
+Query: Analyze the invoice and contract documents to find all inconsistencies, discrepancies, or conflicts ...
+================================================================================
+
+Sending request...
+Status: 500
+Latency: 94.67s
+
+ERROR: {
+  "error": "HTTP Error 500: Internal Server Error",
+  "body": "Internal Server Error"
+}

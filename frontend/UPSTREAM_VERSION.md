@@ -3,7 +3,8 @@
 **Repository:** Azure-Samples/azure-search-openai-demo  
 **URL:** https://github.com/Azure-Samples/azure-search-openai-demo  
 **Current Base:** Manual copy (pre-subtree)  
-**Last Sync:** 2026-01-30  
+**Last Sync:** 2026-02-05  
+**Last Cherry-picked Commit:** 8883e727 (Fix multimodal image download from non-default blob container)  
 
 ## Sync Strategy
 

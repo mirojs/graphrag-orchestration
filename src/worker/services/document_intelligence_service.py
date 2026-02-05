@@ -610,6 +610,98 @@ class DocumentIntelligenceService:
             for w in words
         ]
 
+    def _extract_sentences_with_geometry(
+        self,
+        result: AnalyzeResult,
+        word_index: WordOffsetIndex,
+        content: str,
+    ) -> List[Dict[str, Any]]:
+        """Extract sentence-level text with synthesized polygon geometry.
+        
+        Uses paragraph spans from Azure DI as sentence boundaries and
+        synthesizes multi-polygon geometry for each sentence.
+        
+        Args:
+            result: AnalyzeResult from Document Intelligence
+            word_index: Pre-built WordOffsetIndex for word lookups
+            content: Full document content string
+            
+        Returns:
+            List of sentence dicts with text, offset, length, page, confidence, polygons
+        """
+        sentences: List[Dict[str, Any]] = []
+        
+        paragraphs = getattr(result, "paragraphs", None) or []
+        
+        for para in paragraphs:
+            # Skip headers/footers
+            role = getattr(para, "role", "") or ""
+            if role in ("pageHeader", "pageFooter", "pageNumber"):
+                continue
+            
+            para_content = getattr(para, "content", "") or ""
+            if len(para_content.strip()) < 5:
+                continue
+            
+            # Get span information
+            spans = getattr(para, "spans", None) or []
+            if not spans:
+                continue
+            
+            # Use first span for offset/length
+            first_span = spans[0]
+            offset = getattr(first_span, "offset", 0) or 0
+            length = getattr(first_span, "length", len(para_content)) or len(para_content)
+            
+            # For long paragraphs, split into sentences
+            # Simple sentence detection: split on ". ", "? ", "! "
+            import re
+            sentence_pattern = r'(?<=[.!?])\s+'
+            sentence_texts = re.split(sentence_pattern, para_content)
+            
+            current_offset = offset
+            for sent_text in sentence_texts:
+                sent_text = sent_text.strip()
+                if len(sent_text) < 5:
+                    current_offset += len(sent_text) + 1  # +1 for space
+                    continue
+                
+                # Calculate this sentence's offset within the paragraph
+                sent_offset = current_offset
+                sent_length = len(sent_text)
+                
+                # Synthesize geometry for this sentence
+                geometry = synthesize_sentence_geometry(
+                    sentence_text=sent_text,
+                    sentence_offset=sent_offset,
+                    sentence_length=sent_length,
+                    word_index=word_index,
+                )
+                
+                if geometry:
+                    sentences.append(geometry.to_dict())
+                else:
+                    # Fallback: store sentence without geometry
+                    sentences.append({
+                        "text": sent_text,
+                        "offset": sent_offset,
+                        "length": sent_length,
+                        "page": 1,  # Unknown
+                        "confidence": 0.9,  # Default
+                        "polygons": [],
+                    })
+                
+                current_offset += sent_length + 2  # +2 for ". " or "? " or "! "
+        
+        if sentences:
+            with_geom = sum(1 for s in sentences if s.get("polygons"))
+            logger.info(
+                f"📝 Extracted {len(sentences)} sentences ({with_geom} with geometry)",
+                extra={"sentence_count": len(sentences), "with_geometry": with_geom}
+            )
+        
+        return sentences
+
     def _page_dimensions_to_serializable(self, dims: List[PageDimensions]) -> List[Dict[str, Any]]:
         """Convert PageDimensions to JSON-serializable format."""
         return [d.to_dict() for d in dims]
@@ -1310,14 +1402,23 @@ class DocumentIntelligenceService:
                         end_offset = start_offset + length
                 
                 # Build geometry metadata for this chunk
+                # Note: We store sentences (with polygons) but NOT word_geometries
+                # Word geometries are only used for synthesis; storing would bloat Neo4j
                 chunk_geometry: Dict[str, Any] = {}
                 if geometry_metadata and section_idx == 0 and part == "direct":
-                    # First chunk gets full document geometry
+                    # First chunk gets page dimensions and all sentences
                     chunk_geometry["page_dimensions"] = geometry_metadata.get("page_dimensions", [])
-                    chunk_geometry["word_geometries"] = geometry_metadata.get("word_geometries", [])
+                    chunk_geometry["sentences"] = geometry_metadata.get("sentences", [])
                 elif word_index and start_offset is not None and end_offset is not None:
-                    # Other chunks get just their word range indices
-                    # Store offset range for sentence-level geometry reconstruction
+                    # Other chunks get their relevant sentences (filter by offset range)
+                    if geometry_metadata and geometry_metadata.get("sentences"):
+                        chunk_sentences = [
+                            s for s in geometry_metadata["sentences"]
+                            if s.get("offset", 0) >= start_offset and s.get("offset", 0) < end_offset
+                        ]
+                        if chunk_sentences:
+                            chunk_geometry["sentences"] = chunk_sentences
+                    # Store offset range for fallback geometry reconstruction
                     chunk_geometry["offset_range"] = [start_offset, end_offset]
 
                 docs.append(
@@ -1467,10 +1568,15 @@ class DocumentIntelligenceService:
                 page_dimensions = self._extract_page_dimensions(result)
                 word_geometries, word_index = self._extract_word_geometries(result, page_dimensions)
                 
+                # Extract sentences with synthesized polygon geometry
+                content = getattr(result, "content", None) or ""
+                sentences_with_geometry = self._extract_sentences_with_geometry(result, word_index, content)
+                
                 # Serialize for storage (compact format)
                 geometry_metadata = {
                     "page_dimensions": self._page_dimensions_to_serializable(page_dimensions),
                     "word_geometries": self._words_to_serializable(word_geometries),
+                    "sentences": sentences_with_geometry,  # Sentence-level polygons for highlighting
                 }
 
                 # Log Document Intelligence confidence scores
@@ -1589,11 +1695,12 @@ class DocumentIntelligenceService:
                     ]
 
                     # Build geometry metadata for this page
+                    # Note: Store only page_dimensions and sentences, NOT word_geometries
                     page_geometry: Dict[str, Any] = {}
                     if page_num == 1 and geometry_metadata:
-                        # First page gets full document geometry
+                        # First page gets page dimensions and all sentences
                         page_geometry["page_dimensions"] = geometry_metadata.get("page_dimensions", [])
-                        page_geometry["word_geometries"] = geometry_metadata.get("word_geometries", [])
+                        page_geometry["sentences"] = geometry_metadata.get("sentences", [])
 
                     # Create Document with structured table metadata for schema-aware extraction
                     # The 'tables' metadata enables direct field mapping without LLM parsing

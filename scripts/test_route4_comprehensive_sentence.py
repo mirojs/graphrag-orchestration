@@ -6,7 +6,8 @@ Tests the newly deployed comprehensive_sentence mode which uses:
 - Azure Document Intelligence sentence spans for precise text boundaries
 - Raw evidence approach (sentences + tables + HippoRAG chunks)
 
-Evaluates against 16 ground truth items for invoice/contract inconsistency detection.
+Evaluates against 14 ground truth items for invoice/contract inconsistency detection.
+(Originally 16 items, but 2 were from deleted Seattle mock data not in actual 5 PDFs.)
 """
 
 import json
@@ -30,7 +31,8 @@ Look for differences in:
 
 Provide a detailed analysis with specific references to both documents."""
 
-# 16 Ground Truth Items (from comprehensive_mode_evaluation_20260202.txt)
+# 14 Ground Truth Items (reduced from 16 after Seattle mock data deletion)
+# See ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md for history
 GROUND_TRUTH = {
     "major": [
         "A1: Lift model mismatch (Savaria V1504 vs AscendPro VPX200)",
@@ -226,14 +228,14 @@ def main():
         print()
     
     # Score against ground truth
-    print("SCORING AGAINST 16 GROUND TRUTH ITEMS:")
+    print("SCORING AGAINST 14 GROUND TRUTH ITEMS:")
     print("-" * 80)
     scoring = score_response(response_text)
     
     print(f"\nRESULTS:")
     print(f"  Major (A1-A3): {scoring['found']['major']}")
     print(f"  Medium (B1-B5): {scoring['found']['medium']}")
-    print(f"  Minor (C1-C8): {scoring['found']['minor']}")
+    print(f"  Minor (C1-C6): {scoring['found']['minor']}")
     print(f"  TOTAL: {scoring['found']['total']} = {scoring['percentage']}")
     print()
     

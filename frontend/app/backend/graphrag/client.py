@@ -199,6 +199,57 @@ class GraphRAGClient:
         except Exception as e:
             logger.error(f"Failed to assign document to folder: {e}")
             raise
+
+    async def rename_document(
+        self,
+        group_id: str,
+        old_document_id: str,
+        new_document_id: str,
+        new_title: str,
+        new_source: str,
+        keep_alias: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Rename a document in Neo4j with alias mapping.
+        
+        This updates the document node and optionally keeps the old name as an alias
+        for backward compatibility (e.g., citations referencing old filename).
+        
+        Args:
+            group_id: Tenant/user identifier
+            old_document_id: Current document ID (filename)
+            new_document_id: New document ID (filename)
+            new_title: New display title
+            new_source: New blob URL
+            keep_alias: If True, store old name in aliases for mapping
+            
+        Returns:
+            Result with updated document info
+        """
+        client = await self._get_client()
+        
+        payload = {
+            "old_document_id": old_document_id,
+            "new_document_id": new_document_id,
+            "new_title": new_title,
+            "new_source": new_source,
+            "keep_alias": keep_alias,
+        }
+        
+        try:
+            response = await client.post(
+                f"/documents/rename",
+                json=payload,
+                headers={"X-Group-ID": group_id},
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to rename document: {e.response.text}")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to rename document: {e}")
+            raise
     
     # ==================== Query Operations ====================
     

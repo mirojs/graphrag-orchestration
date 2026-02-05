@@ -14,6 +14,7 @@ from typing import Any, Optional
 from openai import AsyncOpenAI
 
 from approaches.approach import Approach, DataPoints, ExtraInfo, ThoughtStep
+from core.authentication import get_group_id
 from graphrag.client import GraphRAGClient, GraphRAGConfig
 
 logger = logging.getLogger(__name__)
@@ -237,26 +238,20 @@ class ChatGraphRAGApproach(Approach):
         
         Priority:
         1. Override group_id (for testing/admin)
-        2. First group from auth claims (B2B)
-        3. User OID (B2C fallback)
-        4. Default "anonymous"
+        2. Shared get_group_id logic (B2B groups -> B2C oid)
+        3. Default "anonymous"
         """
         # Check overrides first (admin/testing)
         if "group_id" in overrides:
             return overrides["group_id"]
         
-        # B2B: Use first group from claims
-        groups = auth_claims.get("groups", [])
-        if groups:
-            return groups[0]
-        
-        # B2C: Use user OID
-        if "oid" in auth_claims:
-            return auth_claims["oid"]
-        
-        # Fallback
-        return "anonymous"
-    
+        # Use shared get_group_id for B2B/B2C logic
+        try:
+            return get_group_id(auth_claims)
+        except ValueError:
+            # Fallback for unauthenticated requests
+            return "anonymous"
+
     def _format_citations(self, citations: list[dict]) -> Optional[DataPoints]:
         """
         Format GraphRAG citations into DataPoints format.

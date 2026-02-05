@@ -540,3 +540,149 @@ class DocumentLifecycleService:
             if record:
                 return dict(record)
             return {"error": f"Document {document_id} not found"}
+
+    async def rename_document(
+        self,
+        group_id: str,
+        old_document_id: str,
+        new_document_id: str,
+        new_title: str,
+        new_source: str,
+        keep_alias: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Rename a document with alias mapping.
+        
+        Updates the document node's id, title, and source properties.
+        Optionally keeps the old name as an alias for backward compatibility.
+        Also updates references in child nodes (chunks, sections).
+        
+        Args:
+            group_id: Tenant identifier
+            old_document_id: Current document ID (filename)
+            new_document_id: New document ID (filename)
+            new_title: New display title
+            new_source: New blob URL
+            keep_alias: If True, store old name in aliases array
+            
+        Returns:
+            Dict with rename result and statistics
+        """
+        logger.info(f"Renaming document {old_document_id} to {new_document_id} in group {group_id}")
+        
+        errors = []
+        children_updated = 0
+        aliases = []
+        
+        try:
+            with self.driver.session(database=self.database) as session:
+                # Step 1: Update the document node
+                result = session.run(
+                    """
+                    MATCH (d:Document {id: $old_id, group_id: $group_id})
+                    
+                    // Get current aliases or initialize empty array
+                    WITH d, coalesce(d.aliases, []) AS current_aliases
+                    
+                    // Add old ID to aliases if keeping
+                    WITH d, 
+                         CASE WHEN $keep_alias AND NOT $old_id IN current_aliases 
+                              THEN current_aliases + [$old_id] 
+                              ELSE current_aliases 
+                         END AS new_aliases
+                    
+                    // Update the document
+                    SET d.id = $new_id,
+                        d.title = $new_title,
+                        d.source = $new_source,
+                        d.aliases = new_aliases,
+                        d.previous_id = $old_id,
+                        d.renamed_at = datetime(),
+                        d.updated_at = datetime()
+                    
+                    RETURN d.id AS document_id, 
+                           d.title AS title, 
+                           d.source AS source,
+                           d.aliases AS aliases,
+                           d.group_id AS group_id
+                    """,
+                    old_id=old_document_id,
+                    new_id=new_document_id,
+                    new_title=new_title,
+                    new_source=new_source,
+                    group_id=group_id,
+                    keep_alias=keep_alias,
+                )
+                
+                record = result.single()
+                if not record:
+                    return {
+                        "success": False,
+                        "document_id": old_document_id,
+                        "old_document_id": old_document_id,
+                        "group_id": group_id,
+                        "errors": [f"Document {old_document_id} not found"],
+                    }
+                
+                aliases = record["aliases"] or []
+                
+                # Step 2: Update references in chunks (document_id property)
+                chunk_result = session.run(
+                    """
+                    MATCH (c:TextChunk {document_id: $old_id, group_id: $group_id})
+                    SET c.document_id = $new_id,
+                        c.updated_at = datetime()
+                    RETURN count(c) AS updated_count
+                    """,
+                    old_id=old_document_id,
+                    new_id=new_document_id,
+                    group_id=group_id,
+                )
+                chunk_record = chunk_result.single()
+                children_updated += chunk_record["updated_count"] if chunk_record else 0
+                
+                # Step 3: Update references in sections (doc_id property)
+                section_result = session.run(
+                    """
+                    MATCH (s:Section {doc_id: $old_id, group_id: $group_id})
+                    SET s.doc_id = $new_id,
+                        s.updated_at = datetime()
+                    RETURN count(s) AS updated_count
+                    """,
+                    old_id=old_document_id,
+                    new_id=new_document_id,
+                    group_id=group_id,
+                )
+                section_record = section_result.single()
+                children_updated += section_record["updated_count"] if section_record else 0
+                
+                logger.info(
+                    f"Renamed document {old_document_id} -> {new_document_id}, "
+                    f"updated {children_updated} children"
+                )
+                
+                return {
+                    "success": True,
+                    "document_id": new_document_id,
+                    "old_document_id": old_document_id,
+                    "group_id": group_id,
+                    "title": new_title,
+                    "source": new_source,
+                    "aliases": aliases,
+                    "children_updated": children_updated,
+                    "errors": errors,
+                }
+                
+        except Exception as e:
+            logger.error(f"Error renaming document {old_document_id}: {e}")
+            return {
+                "success": False,
+                "document_id": old_document_id,
+                "old_document_id": old_document_id,
+                "group_id": group_id,
+                "title": "",
+                "source": "",
+                "aliases": [],
+                "children_updated": 0,
+                "errors": [str(e)],
+            }

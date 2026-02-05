@@ -277,3 +277,55 @@ class AuthenticationHelper:
             ) from jwt_claims_exc
         except Exception as exc:
             raise AuthError("Unable to parse authorization token.", 401) from exc
+
+
+def get_group_id(auth_claims: dict[str, Any], override: Optional[str] = None) -> str:
+    """
+    Extract group_id from auth claims for B2B/B2C scenarios.
+    
+    This is the standard function for determining tenant isolation.
+    All file operations, Neo4j queries, and Cosmos DB partitions should use this.
+    
+    Priority:
+    1. Explicit override (for testing/admin)
+    2. Explicit group_id claim (if set via header)
+    3. First group from Azure AD groups claim (B2B)
+    4. User OID (B2C fallback)
+    
+    For B2B:
+    - Multiple users in the same Azure AD group share the same group_id
+    - This enables collaboration with e-tag concurrency control
+    - Files are partitioned by group_id, not individual user
+    
+    For B2C:
+    - Each user has their own partition (user_oid = group_id)
+    - No cross-user file sharing
+    
+    Args:
+        auth_claims: JWT claims from authenticated request
+        override: Optional override for testing/admin
+        
+    Returns:
+        group_id string for tenant isolation
+        
+    Raises:
+        ValueError: If no valid group_id can be determined
+    """
+    # Priority 1: Explicit override
+    if override:
+        return override
+    
+    # Priority 2: Explicit group_id claim
+    if auth_claims.get("group_id"):
+        return str(auth_claims["group_id"])
+    
+    # Priority 3: B2B - First group from Azure AD groups claim
+    groups = auth_claims.get("groups", [])
+    if groups:
+        return str(groups[0])
+    
+    # Priority 4: B2C - User OID
+    if auth_claims.get("oid"):
+        return str(auth_claims["oid"])
+    
+    raise ValueError("No group_id, groups, or oid in auth claims")

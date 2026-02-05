@@ -383,6 +383,160 @@ class AdlsBlobManager(BaseBlobManager):
             # Return empty list for 404 (no directory) as this is expected for new users
         return files
 
+    async def rename_blob(self, old_filename: str, new_filename: str, user_oid: str) -> str:
+        """
+        Renames a file in the user's directory by copying to new name and deleting old.
+        Also renames any associated image directories.
+
+        Args:
+            old_filename: Current name of the file
+            new_filename: New name for the file
+            user_oid: The user's object ID
+
+        Returns:
+            str: The URL of the renamed file
+
+        Raises:
+            ResourceNotFoundError: If the source file does not exist
+            FileExistsError: If the destination file already exists
+        """
+        user_directory_client = await self._ensure_directory(directory_path=user_oid, user_oid=user_oid)
+        
+        # Check source exists
+        source_client = user_directory_client.get_file_client(old_filename)
+        try:
+            await source_client.get_file_properties()
+        except ResourceNotFoundError:
+            raise ResourceNotFoundError(f"Source file not found: {old_filename}")
+        
+        # Check destination doesn't exist
+        dest_client = user_directory_client.get_file_client(new_filename)
+        try:
+            await dest_client.get_file_properties()
+            raise FileExistsError(f"Destination file already exists: {new_filename}")
+        except ResourceNotFoundError:
+            pass  # Good - destination doesn't exist
+        
+        # Download and re-upload (ADLS Gen2 doesn't have native rename for files)
+        download_response = await source_client.download_file()
+        content = await download_response.readall()
+        await dest_client.upload_data(content, overwrite=False)
+        
+        # Delete old file
+        await source_client.delete_file()
+        
+        # Rename associated image directory if exists
+        old_image_path = self._get_image_directory_path(old_filename, user_oid)
+        new_image_path = self._get_image_directory_path(new_filename, user_oid)
+        try:
+            old_image_dir = self.file_system_client.get_directory_client(old_image_path)
+            await old_image_dir.get_directory_properties()
+            # Directory exists, rename it
+            await old_image_dir.rename_directory(new_name=f"{self.container}/{new_image_path}")
+            logger.info(f"Renamed image directory from {old_image_path} to {new_image_path}")
+        except ResourceNotFoundError:
+            pass  # No image directory to rename
+        
+        logger.info(f"Renamed file from {old_filename} to {new_filename} for user {user_oid}")
+        return unquote(dest_client.url)
+
+    async def move_blob(
+        self, 
+        filename: str, 
+        source_folder: str | None, 
+        dest_folder: str | None, 
+        user_oid: str
+    ) -> str:
+        """
+        Moves a file between folders within the user's directory.
+
+        Args:
+            filename: Name of the file to move
+            source_folder: Source folder path (None for root)
+            dest_folder: Destination folder path (None for root)
+            user_oid: The user's object ID
+
+        Returns:
+            str: The URL of the moved file
+
+        Raises:
+            ResourceNotFoundError: If the source file does not exist
+            FileExistsError: If the destination file already exists
+        """
+        # Build source and destination paths
+        source_path = f"{user_oid}/{source_folder}/{filename}" if source_folder else f"{user_oid}/{filename}"
+        dest_path = f"{user_oid}/{dest_folder}/{filename}" if dest_folder else f"{user_oid}/{filename}"
+        
+        if source_path == dest_path:
+            raise ValueError("Source and destination paths are the same")
+        
+        # Ensure destination folder exists
+        if dest_folder:
+            await self._ensure_directory(directory_path=f"{user_oid}/{dest_folder}", user_oid=user_oid)
+        
+        source_client = self.file_system_client.get_file_client(source_path)
+        dest_client = self.file_system_client.get_file_client(dest_path)
+        
+        # Check source exists
+        try:
+            await source_client.get_file_properties()
+        except ResourceNotFoundError:
+            raise ResourceNotFoundError(f"Source file not found: {source_path}")
+        
+        # Check destination doesn't exist
+        try:
+            await dest_client.get_file_properties()
+            raise FileExistsError(f"Destination file already exists: {dest_path}")
+        except ResourceNotFoundError:
+            pass
+        
+        # Download and re-upload
+        download_response = await source_client.download_file()
+        content = await download_response.readall()
+        await dest_client.upload_data(content, overwrite=False)
+        await source_client.delete_file()
+        
+        logger.info(f"Moved file {filename} from {source_folder or 'root'} to {dest_folder or 'root'}")
+        return unquote(dest_client.url)
+
+    async def copy_blob(self, filename: str, dest_filename: str, user_oid: str) -> str:
+        """
+        Copies a file within the user's directory.
+
+        Args:
+            filename: Source filename
+            dest_filename: Destination filename
+            user_oid: The user's object ID
+
+        Returns:
+            str: The URL of the copied file
+        """
+        user_directory_client = await self._ensure_directory(directory_path=user_oid, user_oid=user_oid)
+        
+        source_client = user_directory_client.get_file_client(filename)
+        dest_client = user_directory_client.get_file_client(dest_filename)
+        
+        # Check source exists
+        try:
+            await source_client.get_file_properties()
+        except ResourceNotFoundError:
+            raise ResourceNotFoundError(f"Source file not found: {filename}")
+        
+        # Check destination doesn't exist
+        try:
+            await dest_client.get_file_properties()
+            raise FileExistsError(f"Destination file already exists: {dest_filename}")
+        except ResourceNotFoundError:
+            pass
+        
+        # Download and re-upload (copy)
+        download_response = await source_client.download_file()
+        content = await download_response.readall()
+        await dest_client.upload_data(content, overwrite=False)
+        
+        logger.info(f"Copied file {filename} to {dest_filename} for user {user_oid}")
+        return unquote(dest_client.url)
+
 
 class BlobManager(BaseBlobManager):
     """

@@ -46,8 +46,12 @@ from quart_cors import cors
 
 from approaches.approach import Approach, DataPoints
 from approaches.chatreadretrieveread import ChatReadRetrieveReadApproach
+from approaches.chatgraphrag import ChatGraphRAGApproach
 from approaches.promptmanager import PromptyManager
 from chat_history.cosmosdb import chat_history_cosmosdb_bp
+from file_metadata.cosmos import file_metadata_bp
+from graphrag.client import GraphRAGClient
+from graphrag.config import GraphRAGConfig
 from config import (
     CONFIG_AGENTIC_KNOWLEDGEBASE_ENABLED,
     CONFIG_AUTH_CLIENT,
@@ -58,6 +62,8 @@ from config import (
     CONFIG_DEFAULT_REASONING_EFFORT,
     CONFIG_DEFAULT_RETRIEVAL_REASONING_EFFORT,
     CONFIG_GLOBAL_BLOB_MANAGER,
+    CONFIG_GRAPHRAG_CLIENT,
+    CONFIG_GRAPHRAG_ENABLED,
     CONFIG_INGESTER,
     CONFIG_KNOWLEDGEBASE_CLIENT,
     CONFIG_KNOWLEDGEBASE_CLIENT_WITH_SHAREPOINT,
@@ -88,7 +94,7 @@ from config import (
     CONFIG_VECTOR_SEARCH_ENABLED,
     CONFIG_WEB_SOURCE_ENABLED,
 )
-from core.authentication import AuthenticationHelper
+from core.authentication import AuthenticationHelper, get_group_id
 from core.sessionhelper import create_session_id
 from decorators import authenticated, authenticated_path
 from error import error_dict, error_response
@@ -348,26 +354,44 @@ async def speech():
 @bp.post("/upload")
 @authenticated
 async def upload(auth_claims: dict[str, Any]):
+    """Upload one or more files. Supports multi-file upload."""
     request_files = await request.files
     if "file" not in request_files:
         return jsonify({"message": "No file part in the request", "status": "failed"}), 400
 
     try:
         user_oid = auth_claims["oid"]
-        file = request_files.getlist("file")[0]
+        files = request_files.getlist("file")
         adls_manager: AdlsBlobManager = current_app.config[CONFIG_USER_BLOB_MANAGER]
-        file_url = await adls_manager.upload_blob(file, file.filename, user_oid)
         ingester: UploadUserFileStrategy = current_app.config[CONFIG_INGESTER]
-        await ingester.add_file(File(content=file, url=file_url, acls={"oids": [user_oid]}), user_oid=user_oid)
-        return jsonify({"message": "File uploaded successfully"}), 200
+        
+        results = []
+        for file in files:
+            try:
+                file_url = await adls_manager.upload_blob(file, file.filename, user_oid)
+                await ingester.add_file(File(content=file, url=file_url, acls={"oids": [user_oid]}), user_oid=user_oid)
+                results.append({"filename": file.filename, "status": "success"})
+            except Exception as file_error:
+                current_app.logger.error("Error uploading file %s: %s", file.filename, file_error)
+                results.append({"filename": file.filename, "status": "failed", "error": str(file_error)})
+        
+        # Determine overall status
+        success_count = sum(1 for r in results if r["status"] == "success")
+        if success_count == len(results):
+            return jsonify({"message": f"{len(results)} file(s) uploaded successfully", "results": results}), 200
+        elif success_count > 0:
+            return jsonify({"message": f"{success_count}/{len(results)} files uploaded", "results": results}), 207  # Multi-Status
+        else:
+            return jsonify({"message": "All files failed to upload", "results": results, "status": "failed"}), 500
     except Exception as error:
-        current_app.logger.error("Error uploading file: %s", error)
-        return jsonify({"message": "Error uploading file, check server logs for details.", "status": "failed"}), 500
+        current_app.logger.error("Error uploading files: %s", error)
+        return jsonify({"message": "Error uploading files, check server logs for details.", "status": "failed"}), 500
 
 
 @bp.post("/delete_uploaded")
 @authenticated
 async def delete_uploaded(auth_claims: dict[str, Any]):
+    """Delete a single file by filename."""
     request_json = await request.get_json()
     filename = request_json.get("filename")
     user_oid = auth_claims["oid"]
@@ -376,6 +400,39 @@ async def delete_uploaded(auth_claims: dict[str, Any]):
     ingester: UploadUserFileStrategy = current_app.config[CONFIG_INGESTER]
     await ingester.remove_file(filename, user_oid)
     return jsonify({"message": f"File {filename} deleted successfully"}), 200
+
+
+@bp.post("/delete_uploaded_bulk")
+@authenticated
+async def delete_uploaded_bulk(auth_claims: dict[str, Any]):
+    """Delete multiple files by filename list."""
+    request_json = await request.get_json()
+    filenames = request_json.get("filenames", [])
+    
+    if not filenames:
+        return jsonify({"message": "No filenames provided", "status": "failed"}), 400
+    
+    user_oid = auth_claims["oid"]
+    adls_manager: AdlsBlobManager = current_app.config[CONFIG_USER_BLOB_MANAGER]
+    ingester: UploadUserFileStrategy = current_app.config[CONFIG_INGESTER]
+    
+    results = []
+    for filename in filenames:
+        try:
+            await adls_manager.remove_blob(filename, user_oid)
+            await ingester.remove_file(filename, user_oid)
+            results.append({"filename": filename, "status": "success"})
+        except Exception as error:
+            current_app.logger.error("Error deleting file %s: %s", filename, error)
+            results.append({"filename": filename, "status": "failed", "error": str(error)})
+    
+    success_count = sum(1 for r in results if r["status"] == "success")
+    if success_count == len(results):
+        return jsonify({"message": f"{len(results)} file(s) deleted successfully", "results": results}), 200
+    elif success_count > 0:
+        return jsonify({"message": f"{success_count}/{len(results)} files deleted", "results": results}), 207
+    else:
+        return jsonify({"message": "All files failed to delete", "results": results, "status": "failed"}), 500
 
 
 @bp.get("/list_uploaded")
@@ -388,6 +445,132 @@ async def list_uploaded(auth_claims: dict[str, Any]):
     adls_manager: AdlsBlobManager = current_app.config[CONFIG_USER_BLOB_MANAGER]
     files = await adls_manager.list_blobs(user_oid)
     return jsonify(files), 200
+
+
+@bp.post("/rename_uploaded")
+@authenticated
+async def rename_uploaded(auth_claims: dict[str, Any]):
+    """Rename a file in the user's directory and update Neo4j with alias mapping."""
+    request_json = await request.get_json()
+    old_filename = request_json.get("old_filename")
+    new_filename = request_json.get("new_filename")
+    
+    if not old_filename or not new_filename:
+        return jsonify({"message": "Both old_filename and new_filename are required", "status": "failed"}), 400
+    
+    if old_filename == new_filename:
+        return jsonify({"message": "Old and new filenames are the same", "status": "failed"}), 400
+    
+    user_oid = auth_claims["oid"]
+    group_id = get_group_id(auth_claims)
+    adls_manager: AdlsBlobManager = current_app.config[CONFIG_USER_BLOB_MANAGER]
+    ingester: UploadUserFileStrategy = current_app.config[CONFIG_INGESTER]
+    
+    try:
+        # Step 1: Rename in ADLS
+        new_url = await adls_manager.rename_blob(old_filename, new_filename, user_oid)
+        
+        # Step 2: Update search index (legacy Azure AI Search)
+        await ingester.remove_file(old_filename, user_oid)
+        
+        # Step 3: Update Neo4j via GraphRAG (if enabled)
+        graphrag_result = None
+        if current_app.config.get(CONFIG_GRAPHRAG_ENABLED):
+            graphrag_client: GraphRAGClient = current_app.config[CONFIG_GRAPHRAG_CLIENT]
+            try:
+                graphrag_result = await graphrag_client.rename_document(
+                    group_id=group_id,
+                    old_document_id=old_filename,
+                    new_document_id=new_filename,
+                    new_title=new_filename,
+                    new_source=new_url,
+                    keep_alias=True,  # Keep old name as alias for backward compat
+                )
+                current_app.logger.info(
+                    f"Updated Neo4j: {old_filename} -> {new_filename}, "
+                    f"aliases: {graphrag_result.get('aliases', [])}"
+                )
+            except Exception as graphrag_error:
+                current_app.logger.warning(f"Failed to update Neo4j on rename: {graphrag_error}")
+                # Don't fail the request - ADLS rename succeeded
+        
+        return jsonify({
+            "message": f"File renamed from {old_filename} to {new_filename}",
+            "new_url": new_url,
+            "neo4j_updated": graphrag_result is not None and graphrag_result.get("success", False),
+            "aliases": graphrag_result.get("aliases", []) if graphrag_result else [],
+        }), 200
+    except FileNotFoundError:
+        return jsonify({"message": f"File not found: {old_filename}", "status": "failed"}), 404
+    except FileExistsError:
+        return jsonify({"message": f"Destination file already exists: {new_filename}", "status": "failed"}), 409
+    except Exception as error:
+        current_app.logger.error("Error renaming file: %s", error)
+        return jsonify({"message": "Error renaming file", "status": "failed"}), 500
+
+
+@bp.post("/move_uploaded")
+@authenticated
+async def move_uploaded(auth_claims: dict[str, Any]):
+    """Move a file to a different folder."""
+    request_json = await request.get_json()
+    filename = request_json.get("filename")
+    source_folder = request_json.get("source_folder")  # None for root
+    dest_folder = request_json.get("dest_folder")  # None for root
+    
+    if not filename:
+        return jsonify({"message": "filename is required", "status": "failed"}), 400
+    
+    user_oid = auth_claims["oid"]
+    adls_manager: AdlsBlobManager = current_app.config[CONFIG_USER_BLOB_MANAGER]
+    
+    try:
+        new_url = await adls_manager.move_blob(filename, source_folder, dest_folder, user_oid)
+        return jsonify({
+            "message": f"File {filename} moved to {dest_folder or 'root'}",
+            "new_url": new_url
+        }), 200
+    except FileNotFoundError:
+        return jsonify({"message": f"File not found: {filename}", "status": "failed"}), 404
+    except FileExistsError:
+        return jsonify({"message": f"File already exists in destination", "status": "failed"}), 409
+    except ValueError as e:
+        return jsonify({"message": str(e), "status": "failed"}), 400
+    except Exception as error:
+        current_app.logger.error("Error moving file: %s", error)
+        return jsonify({"message": "Error moving file", "status": "failed"}), 500
+
+
+@bp.post("/copy_uploaded")
+@authenticated
+async def copy_uploaded(auth_claims: dict[str, Any]):
+    """Copy a file within the user's directory."""
+    request_json = await request.get_json()
+    filename = request_json.get("filename")
+    dest_filename = request_json.get("dest_filename")
+    
+    if not filename or not dest_filename:
+        return jsonify({"message": "Both filename and dest_filename are required", "status": "failed"}), 400
+    
+    if filename == dest_filename:
+        return jsonify({"message": "Source and destination filenames are the same", "status": "failed"}), 400
+    
+    user_oid = auth_claims["oid"]
+    adls_manager: AdlsBlobManager = current_app.config[CONFIG_USER_BLOB_MANAGER]
+    
+    try:
+        new_url = await adls_manager.copy_blob(filename, dest_filename, user_oid)
+        return jsonify({
+            "message": f"File copied from {filename} to {dest_filename}",
+            "new_url": new_url
+        }), 200
+    except FileNotFoundError:
+        return jsonify({"message": f"File not found: {filename}", "status": "failed"}), 404
+    except FileExistsError:
+        return jsonify({"message": f"Destination file already exists: {dest_filename}", "status": "failed"}), 409
+    except Exception as error:
+        current_app.logger.error("Error copying file: %s", error)
+        return jsonify({"message": "Error copying file", "status": "failed"}), 500
 
 
 @bp.before_app_serving
@@ -467,6 +650,11 @@ async def setup_clients():
     USE_SHAREPOINT_SOURCE = os.getenv("USE_SHAREPOINT_SOURCE", "").lower() == "true"
     AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT = os.getenv("AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT", "low")
     USE_VECTORS = os.getenv("USE_VECTORS", "").lower() != "false"
+
+    # GraphRAG settings
+    USE_GRAPHRAG = os.getenv("USE_GRAPHRAG", "").lower() == "true"
+    GRAPHRAG_API_URL = os.getenv("GRAPHRAG_API_URL", "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io")
+    GRAPHRAG_DEFAULT_ROUTE = int(os.getenv("GRAPHRAG_DEFAULT_ROUTE", "2"))  # 2=Local, 3=Global, 4=DRIFT
 
     # WEBSITE_HOSTNAME is always set by App Service, RUNNING_IN_PRODUCTION is set in main.bicep
     RUNNING_ON_AZURE = os.getenv("WEBSITE_HOSTNAME") is not None or os.getenv("RUNNING_IN_PRODUCTION") is not None
@@ -702,37 +890,61 @@ async def setup_clients():
 
     prompt_manager = PromptyManager()
 
-    # ChatReadRetrieveReadApproach is used by /chat for multi-turn conversation
-    current_app.config[CONFIG_CHAT_APPROACH] = ChatReadRetrieveReadApproach(
-        search_client=search_client,
-        search_index_name=AZURE_SEARCH_INDEX,
-        knowledgebase_model=AZURE_OPENAI_KNOWLEDGEBASE_MODEL,
-        knowledgebase_deployment=AZURE_OPENAI_KNOWLEDGEBASE_DEPLOYMENT,
-        knowledgebase_client=knowledgebase_client,
-        knowledgebase_client_with_web=knowledgebase_client_with_web,
-        knowledgebase_client_with_sharepoint=knowledgebase_client_with_sharepoint,
-        knowledgebase_client_with_web_and_sharepoint=knowledgebase_client_with_web_and_sharepoint,
-        openai_client=openai_client,
-        chatgpt_model=OPENAI_CHATGPT_MODEL,
-        chatgpt_deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
-        embedding_model=OPENAI_EMB_MODEL,
-        embedding_deployment=AZURE_OPENAI_EMB_DEPLOYMENT,
-        embedding_dimensions=OPENAI_EMB_DIMENSIONS,
-        embedding_field=AZURE_SEARCH_FIELD_NAME_EMBEDDING,
-        sourcepage_field=KB_FIELDS_SOURCEPAGE,
-        content_field=KB_FIELDS_CONTENT,
-        query_language=AZURE_SEARCH_QUERY_LANGUAGE,
-        query_speller=AZURE_SEARCH_QUERY_SPELLER,
-        prompt_manager=prompt_manager,
-        reasoning_effort=OPENAI_REASONING_EFFORT,
-        multimodal_enabled=USE_MULTIMODAL,
-        image_embeddings_client=image_embeddings_client,
-        global_blob_manager=global_blob_manager,
-        user_blob_manager=user_blob_manager,
-        use_web_source=current_app.config[CONFIG_WEB_SOURCE_ENABLED],
-        use_sharepoint_source=current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED],
-        retrieval_reasoning_effort=AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT,
-    )
+    # Initialize GraphRAG client if enabled
+    graphrag_client = None
+    if USE_GRAPHRAG:
+        current_app.logger.info("GraphRAG enabled, initializing client for %s", GRAPHRAG_API_URL)
+        graphrag_config = GraphRAGConfig(
+            api_base_url=GRAPHRAG_API_URL,
+            default_route=GRAPHRAG_DEFAULT_ROUTE,
+        )
+        graphrag_client = GraphRAGClient(graphrag_config)
+        current_app.config[CONFIG_GRAPHRAG_CLIENT] = graphrag_client
+        current_app.config[CONFIG_GRAPHRAG_ENABLED] = True
+        
+        # Use ChatGraphRAGApproach when GraphRAG is enabled
+        current_app.config[CONFIG_CHAT_APPROACH] = ChatGraphRAGApproach(
+            graphrag_client=graphrag_client,
+            openai_client=openai_client,
+            chatgpt_model=OPENAI_CHATGPT_MODEL,
+            chatgpt_deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
+            default_route=GRAPHRAG_DEFAULT_ROUTE,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+        )
+        current_app.logger.info("Using ChatGraphRAGApproach with default route %d", GRAPHRAG_DEFAULT_ROUTE)
+    else:
+        current_app.config[CONFIG_GRAPHRAG_ENABLED] = False
+        # ChatReadRetrieveReadApproach is used by /chat for multi-turn conversation (legacy Azure AI Search)
+        current_app.config[CONFIG_CHAT_APPROACH] = ChatReadRetrieveReadApproach(
+            search_client=search_client,
+            search_index_name=AZURE_SEARCH_INDEX,
+            knowledgebase_model=AZURE_OPENAI_KNOWLEDGEBASE_MODEL,
+            knowledgebase_deployment=AZURE_OPENAI_KNOWLEDGEBASE_DEPLOYMENT,
+            knowledgebase_client=knowledgebase_client,
+            knowledgebase_client_with_web=knowledgebase_client_with_web,
+            knowledgebase_client_with_sharepoint=knowledgebase_client_with_sharepoint,
+            knowledgebase_client_with_web_and_sharepoint=knowledgebase_client_with_web_and_sharepoint,
+            openai_client=openai_client,
+            chatgpt_model=OPENAI_CHATGPT_MODEL,
+            chatgpt_deployment=AZURE_OPENAI_CHATGPT_DEPLOYMENT,
+            embedding_model=OPENAI_EMB_MODEL,
+            embedding_deployment=AZURE_OPENAI_EMB_DEPLOYMENT,
+            embedding_dimensions=OPENAI_EMB_DIMENSIONS,
+            embedding_field=AZURE_SEARCH_FIELD_NAME_EMBEDDING,
+            sourcepage_field=KB_FIELDS_SOURCEPAGE,
+            content_field=KB_FIELDS_CONTENT,
+            query_language=AZURE_SEARCH_QUERY_LANGUAGE,
+            query_speller=AZURE_SEARCH_QUERY_SPELLER,
+            prompt_manager=prompt_manager,
+            reasoning_effort=OPENAI_REASONING_EFFORT,
+            multimodal_enabled=USE_MULTIMODAL,
+            image_embeddings_client=image_embeddings_client,
+            global_blob_manager=global_blob_manager,
+            user_blob_manager=user_blob_manager,
+            use_web_source=current_app.config[CONFIG_WEB_SOURCE_ENABLED],
+            use_sharepoint_source=current_app.config[CONFIG_SHAREPOINT_SOURCE_ENABLED],
+            retrieval_reasoning_effort=AGENTIC_KNOWLEDGEBASE_REASONING_EFFORT,
+        )
 
 
 @bp.after_app_serving
@@ -741,6 +953,8 @@ async def close_clients():
     await current_app.config[CONFIG_GLOBAL_BLOB_MANAGER].close_clients()
     if user_blob_manager := current_app.config.get(CONFIG_USER_BLOB_MANAGER):
         await user_blob_manager.close_clients()
+    if graphrag_client := current_app.config.get(CONFIG_GRAPHRAG_CLIENT):
+        await graphrag_client.close()
     await current_app.config[CONFIG_CREDENTIAL].close()
 
 
@@ -748,6 +962,7 @@ def create_app():
     app = Quart(__name__)
     app.register_blueprint(bp)
     app.register_blueprint(chat_history_cosmosdb_bp)
+    app.register_blueprint(file_metadata_bp)
 
     if os.getenv("APPLICATIONINSIGHTS_CONNECTION_STRING"):
         app.logger.info("APPLICATIONINSIGHTS_CONNECTION_STRING is set, enabling Azure Monitor")

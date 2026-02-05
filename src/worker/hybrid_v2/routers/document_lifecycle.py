@@ -78,6 +78,28 @@ class ImpactResponse(BaseModel):
     """Response showing impact of deprecation/deletion."""
     document_id: str
     title: Optional[str]
+
+
+class RenameRequest(BaseModel):
+    """Request to rename a document."""
+    old_document_id: str = Field(..., description="Current document ID (filename)")
+    new_document_id: str = Field(..., description="New document ID (filename)")
+    new_title: str = Field(..., description="New display title")
+    new_source: str = Field(..., description="New blob URL")
+    keep_alias: bool = Field(True, description="Store old name as alias for mapping")
+
+
+class RenameResponse(BaseModel):
+    """Response from rename operation."""
+    document_id: str
+    old_document_id: str
+    group_id: str
+    success: bool
+    title: str
+    source: str
+    aliases: List[str]
+    children_updated: int
+    errors: List[str]
     is_deprecated: bool
     chunk_count: int
     section_count: int
@@ -303,4 +325,52 @@ async def get_document_impact(
         table_count=impact.get("table_count", 0),
         figure_count=impact.get("figure_count", 0),
         keyvalue_count=impact.get("keyvalue_count", 0),
+    )
+
+
+@router.post(
+    "/groups/{group_id}/documents/rename",
+    response_model=RenameResponse,
+    summary="Rename a document",
+    description="Rename a document in Neo4j, updating title/source and keeping old name as alias.",
+)
+async def rename_document(
+    group_id: str,
+    request: RenameRequest,
+):
+    """
+    Rename a document with alias mapping.
+    
+    This updates the document node and optionally keeps the old name as an alias
+    for backward compatibility (e.g., citations referencing old filename).
+    
+    The alias mapping allows:
+    - Queries using old filename still match the document
+    - Audit trail of previous names
+    - Backward compatibility for external references
+    """
+    service = get_lifecycle_service()
+    
+    result = await service.rename_document(
+        group_id=group_id,
+        old_document_id=request.old_document_id,
+        new_document_id=request.new_document_id,
+        new_title=request.new_title,
+        new_source=request.new_source,
+        keep_alias=request.keep_alias,
+    )
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=404, detail=result.get("errors", ["Document not found"]))
+    
+    return RenameResponse(
+        document_id=result["document_id"],
+        old_document_id=result["old_document_id"],
+        group_id=result["group_id"],
+        success=result["success"],
+        title=result["title"],
+        source=result["source"],
+        aliases=result.get("aliases", []),
+        children_updated=result.get("children_updated", 0),
+        errors=result.get("errors", []),
     )

@@ -1,0 +1,3 @@
+[DEBUG] Module loaded, checking __name__
+[DEBUG] __name__ == __main__, calling main()
+[DEBUG] main() started

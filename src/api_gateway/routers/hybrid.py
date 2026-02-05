@@ -510,10 +510,10 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
     except HighQualityError as e:
         latency_ms = (time.time() - start_time) * 1000
         track_error(
-            error_type="HighQualityError",
-            error_message=str(e),
-            route=body.force_route.value if body.force_route else "auto",
             group_id=group_id,
+            error_type="HighQualityError",
+            message=str(e),
+            route=body.force_route.value if body.force_route else "auto",
             metadata={"code": getattr(e, "code", "ROUTE3_STRICT_HIGH_QUALITY")},
         )
         logger.warning(
@@ -536,10 +536,10 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
     except Exception as e:
         latency_ms = (time.time() - start_time) * 1000
         track_error(
-            error_type=type(e).__name__,
-            error_message=str(e),
-            route=body.force_route.value if body.force_route else "auto",
             group_id=group_id,
+            error_type=type(e).__name__,
+            message=str(e),
+            route=body.force_route.value if body.force_route else "auto",
         )
         logger.error("hybrid_query_failed",
                     group_id=group_id,

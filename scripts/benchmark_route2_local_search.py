@@ -628,6 +628,10 @@ def _write_analysis_md(
 
 
 def main():
+    import sys
+    print("[DEBUG] main() started", flush=True)
+    sys.stdout.flush()
+    
     parser = argparse.ArgumentParser(
         description="Route 2 (Local Search) repeatability benchmark via Hybrid API."
     )
@@ -661,12 +665,16 @@ def main():
     )
 
     args = parser.parse_args()
+    print(f"[DEBUG] Parsed arguments. URL: {args.url}")
+    print(f"[DEBUG] Group ID: {args.group_id}")
 
     qbank_path: Path = args.qbank
+    print(f"[DEBUG] Question bank path: {qbank_path}")
     if not qbank_path.exists():
         raise FileNotFoundError(f"Question bank not found: {qbank_path}")
 
     # Read questions (positive Q-L + negative Q-N)
+    print(f"[DEBUG] Reading question bank...")
     questions = _read_question_bank(qbank_path, positive_prefix="Q-L", negative_prefix="Q-N")
     print(f"Loaded {len(questions)} questions from {qbank_path.name}")
     
@@ -733,5 +741,7 @@ def main():
     print(f"{'=' * 70}\n")
 
 
+print("[DEBUG] Module loaded, checking __name__", flush=True)
 if __name__ == "__main__":
+    print("[DEBUG] __name__ == __main__, calling main()", flush=True)
     main()

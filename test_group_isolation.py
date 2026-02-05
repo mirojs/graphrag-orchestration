@@ -4,7 +4,7 @@
 import httpx
 import json
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 # Two different groups with different documents
 GROUP_A = "test-5pdfs-1768557493369886422"

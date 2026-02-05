@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Test comprehensive mode on Azure endpoint
-API_URL="https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query"
+API_URL="https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query"
 
 QUERY="List all areas of inconsistency identified in the invoice, organized by:
 (1) all inconsistencies with corresponding evidence,

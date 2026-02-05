@@ -15,7 +15,7 @@ QUERY = """List all areas of inconsistency identified in the invoice, organized 
 (2) inconsistencies in goods or services sold including detailed specifications for every line item, and
 (3) inconsistencies regarding billing logistics and administrative or legal issues."""
 
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 
 async def test_api():

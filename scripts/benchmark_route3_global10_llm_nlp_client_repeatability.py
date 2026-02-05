@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
-    "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+    "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
 )
 
 DEFAULT_QUESTION_BANK = (

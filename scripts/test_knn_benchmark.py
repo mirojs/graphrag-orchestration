@@ -16,7 +16,7 @@ import json
 from datetime import datetime
 
 # API endpoint
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query"
+API_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query"
 
 # Test groups from handover (corrected to use enhanced-ex as baseline)
 TEST_GROUPS = [

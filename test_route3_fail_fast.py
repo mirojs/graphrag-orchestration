@@ -11,7 +11,7 @@ import json
 import requests
 import sys
 
-BASE_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+BASE_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 # Test groups
 GROUP_WITH_MENTIONS = "test-5pdfs-1767429340223041632"  # Has MENTIONS edges

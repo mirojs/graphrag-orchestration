@@ -15,7 +15,7 @@ import time
 import os
 from neo4j import GraphDatabase
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 

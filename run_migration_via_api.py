@@ -6,7 +6,7 @@ Quick test to run migration via the deployed service's Neo4j connection.
 import requests
 import json
 
-url = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+url = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 group_id = "test-cypher25-final-1768129960"
 
 # Use the graphrag/debug endpoint which has Neo4j access

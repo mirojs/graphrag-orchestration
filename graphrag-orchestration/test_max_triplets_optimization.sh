@@ -52,7 +52,7 @@ for TRIPLETS in 20 40 60; do
 import requests
 
 response = requests.post(
-    'https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/graphrag/v3/index',
+    'https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/graphrag/v3/index',
     headers={'x-group-id': '$GROUP_ID'},
     json={
         'documents': [

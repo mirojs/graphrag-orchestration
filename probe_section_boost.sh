@@ -4,7 +4,7 @@
 python3 <<'PY'
 import requests, json, sys
 
-BASE='https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io'
+BASE='https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io'
 GROUP='test-5pdfs-1767429340223041632'
 
 def run(q):

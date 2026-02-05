@@ -64,7 +64,7 @@ async def main():
     print()
     print("   Example curl command:")
     print(f"""
-   curl -X POST "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/index/documents" \\
+   curl -X POST "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/index/documents" \\
      -H "X-Group-ID: {GROUP_ID}" \\
      -H "Content-Type: application/json" \\
      -d '{{

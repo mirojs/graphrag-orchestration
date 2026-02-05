@@ -8,7 +8,7 @@ import json
 import httpx
 from datetime import datetime
 
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "test-5pdfs-v2-enhanced-ex"
 
 # The same query that got 0 entities

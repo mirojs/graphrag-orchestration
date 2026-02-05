@@ -10,7 +10,7 @@ from datetime import datetime
 async def test_qg10():
     """Test Q-G10 question standalone."""
     
-    url = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+    url = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
     endpoint = f"{url}/hybrid/query"
     
     # Q-G10 from QUESTION_BANK_5PDFS_2025-12-24.md

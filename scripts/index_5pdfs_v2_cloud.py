@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 
 # Configuration
-API_BASE_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 # Use existing PDFs from input_docs
 TEST_PDFS_DIR = Path("/afh/projects/graphrag-orchestration/graphrag-orchestration/data/input_docs")

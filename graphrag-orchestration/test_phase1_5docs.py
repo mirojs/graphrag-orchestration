@@ -18,7 +18,7 @@ from neo4j import GraphDatabase
 # Allow overriding to test local/staging deployments.
 API_URL = os.getenv(
     "API_URL",
-    "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+    "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
 )
 GROUP_ID = os.getenv("GROUP_ID", f"phase1-5docs-{int(time.time())}")  # Unique group ID
 NEO4J_URI = "neo4j+s://a86dcf63.databases.neo4j.io"

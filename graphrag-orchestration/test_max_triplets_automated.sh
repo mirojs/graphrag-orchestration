@@ -4,7 +4,7 @@
 
 set -e
 
-API_BASE="https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE="https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 TEST_VALUES=(20 40 60 80 100)
 
 echo "================================================================="

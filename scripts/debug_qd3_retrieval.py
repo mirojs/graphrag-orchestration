@@ -4,7 +4,7 @@
 import requests
 import json
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "test-5pdfs-1768557493369886422"
 QUERY = 'Compare "time windows" across the set: list all explicit day-based timeframes.'
 

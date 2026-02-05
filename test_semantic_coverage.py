@@ -5,7 +5,7 @@ import httpx
 import json
 import sys
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "test-5pdfs-1768557493369886422"
 
 def test_query(query: str):

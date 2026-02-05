@@ -9,7 +9,7 @@ Routes tested:
 - Route 4: DRIFT Multi-Hop (Q-D1, Q-D2, Q-D3)
 
 Run:
-    export GRAPHRAG_CLOUD_URL="https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+    export GRAPHRAG_CLOUD_URL="https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
     export TEST_GROUP_ID="<your-indexed-group>"
     pytest tests/cloud/test_cloud_question_bank.py -v
 """
@@ -30,7 +30,7 @@ import pytest
 
 CLOUD_URL = os.getenv(
     "GRAPHRAG_CLOUD_URL",
-    "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+    "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 )
 GROUP_ID = os.getenv("TEST_GROUP_ID", "invoice-contract-verification")
 

@@ -4,7 +4,7 @@ Debug script to check entity embeddings and search directly.
 import requests
 import json
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "phase1-5docs-1766238684"
 
 # Test 1: Check health

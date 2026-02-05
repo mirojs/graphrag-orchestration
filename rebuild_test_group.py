@@ -7,7 +7,7 @@ import requests
 import time
 import json
 
-BASE_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+BASE_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "test-5pdfs-1768486622652179443"
 HEADERS = {"X-Group-ID": GROUP_ID}
 

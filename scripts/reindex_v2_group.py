@@ -14,7 +14,7 @@ import requests
 import time
 import sys
 
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 # Use existing group to test new lifecycle features
 V2_GROUP_ID = "test-5pdfs-v2-1769496129"

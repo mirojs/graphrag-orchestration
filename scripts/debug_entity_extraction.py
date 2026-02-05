@@ -9,7 +9,7 @@ import httpx
 from datetime import datetime
 
 GROUP_ID = "test-5pdfs-v2-enhanced-ex"
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 # Simple entity query
 ENTITY_QUERY = "What are the payment terms in the Contoso invoice?"

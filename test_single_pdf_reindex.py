@@ -5,7 +5,7 @@ import asyncio
 import requests
 import time
 
-BASE_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+BASE_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 TEST_GROUP = f"test-invoice-debug-{int(time.time())}"
 
 PDF_URL = "https://neo4jstorage21224.blob.core.windows.net/test-docs/contoso_lifts_invoice.pdf"

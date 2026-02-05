@@ -30,7 +30,7 @@ import time
 # Configuration
 BASE_URL = os.getenv(
     "BASE_URL",
-    "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+    "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
 )
 
 # Allow overriding via env var for re-indexing

@@ -22,7 +22,7 @@ import json
 from datetime import datetime
 
 # API endpoint (same as before)
-API_URL = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query"
+API_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io/hybrid/query"
 
 # Test configurations - all use same group, different knn_config
 BASELINE_GROUP = "test-5pdfs-v2-enhanced-ex"

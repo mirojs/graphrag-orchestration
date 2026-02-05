@@ -2,7 +2,7 @@
 # Trigger re-indexing for test-5pdfs-1768558518157 to populate document dates
 
 GROUP_ID="test-5pdfs-1768558518157"
-BASE_URL="https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+BASE_URL="https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 
 # Document URLs (from blob storage)
 DOCS='[

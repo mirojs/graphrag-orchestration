@@ -4,7 +4,7 @@
 import requests
 import json
 
-url = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+url = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 group_id = "test-5pdfs-1767429340223041632"
 doc_id = "1f55a0d4-c35d-46b1-8604-2a3455df27dd"
 

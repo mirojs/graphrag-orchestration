@@ -58,7 +58,7 @@ from neo4j import GraphDatabase
 import os
 import json
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "$GROUP_ID"
 
 print(f"Group ID: {GROUP_ID}")

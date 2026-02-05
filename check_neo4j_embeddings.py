@@ -4,7 +4,7 @@ Check if entities in Neo4j actually have embeddings stored.
 import requests
 import json
 
-API_BASE = "https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+API_BASE = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
 GROUP_ID = "test-warnings-1766244680"
 
 # Custom diagnostic query to check embeddings directly in Neo4j

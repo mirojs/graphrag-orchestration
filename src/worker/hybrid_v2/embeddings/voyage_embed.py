@@ -30,8 +30,7 @@ import logging
 from typing import List, Optional
 
 from src.core.config import settings
-from src.core.services.usage_tracker import UsageTracker
-from src.core.models.usage import UsageType
+from src.core.services.usage_tracker import get_usage_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +218,8 @@ class VoyageEmbedService:
     def embed_documents_contextualized(
         self,
         document_chunks: List[List[str]],
+        group_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> List[List[List[float]]]:
         """
         Embed documents with contextual awareness using Voyage contextualized_embed.
@@ -234,6 +235,8 @@ class VoyageEmbedService:
                                ["chunk1 from doc1", "chunk2 from doc1"],
                                ["chunk1 from doc2", "chunk2 from doc2", "chunk3 from doc2"]
                            ]
+            group_id: Optional group ID for usage tracking
+            user_id: Optional user ID for usage tracking
             
         Returns:
             List of documents, where each document is a list of embedding vectors.
@@ -246,10 +249,13 @@ class VoyageEmbedService:
             the knowledge graph (no token overlap needed).
         """
         all_embeddings: List[List[List[float]]] = []
+        total_tokens_used = 0
+        total_chunks = 0
         
         for doc_chunks in document_chunks:
             # Check if document needs bin-packing
             bins = self._bin_pack_chunks(doc_chunks)
+            total_chunks += len(doc_chunks)
             
             if len(bins) == 1:
                 # Small document - single API call
@@ -260,6 +266,9 @@ class VoyageEmbedService:
                     output_dimension=settings.VOYAGE_EMBEDDING_DIM,
                 )
                 all_embeddings.append(result.results[0].embeddings)
+                # Track tokens used
+                if hasattr(result, 'usage') and result.usage:
+                    total_tokens_used += result.usage.total_tokens
             else:
                 # Large document - embed each bin, concatenate results
                 doc_embeddings: List[List[float]] = []
@@ -271,14 +280,33 @@ class VoyageEmbedService:
                         output_dimension=settings.VOYAGE_EMBEDDING_DIM,
                     )
                     doc_embeddings.extend(result.results[0].embeddings)
+                    # Track tokens used
+                    if hasattr(result, 'usage') and result.usage:
+                        total_tokens_used += result.usage.total_tokens
                     logger.debug(
                         f"Embedded bin {bin_idx + 1}/{len(bins)} with {len(bin_chunks)} chunks"
                     )
                 all_embeddings.append(doc_embeddings)
         
+        # Log usage (fire-and-forget)
+        if total_tokens_used > 0:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(get_usage_tracker().log_embedding_usage(
+                    partition_id=group_id or "indexing",
+                    model=self.model_name,
+                    total_tokens=total_tokens_used,
+                    dimensions=settings.VOYAGE_EMBEDDING_DIM,
+                    chunk_count=total_chunks,
+                    user_id=user_id,
+                ))
+            except Exception:
+                pass  # Fire-and-forget: ignore failures
+        
         logger.debug(
             f"Contextual embedded {len(document_chunks)} documents with "
-            f"{sum(len(doc) for doc in document_chunks)} total chunks "
+            f"{total_chunks} total chunks ({total_tokens_used} tokens) "
             f"using Voyage ({self.model_name})"
         )
         
@@ -339,15 +367,20 @@ class VoyageEmbedService:
         )
         
         # Track usage (Voyage API returns usage in result)
-        if hasattr(result, 'usage') and result.usage and (group_id or user_id):
-            UsageTracker().log_usage(
-                usage_type=UsageType.EMBEDDING,
-                model_name=self.model_name,
-                prompt_tokens=result.usage.total_tokens,
-                completion_tokens=0,
-                group_id=group_id,
-                user_id=user_id,
-            )
+        if hasattr(result, 'usage') and result.usage:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(get_usage_tracker().log_embedding_usage(
+                    partition_id=group_id or "unknown",
+                    model=self.model_name,
+                    total_tokens=result.usage.total_tokens,
+                    dimensions=settings.VOYAGE_EMBEDDING_DIM,
+                    chunk_count=1,
+                    user_id=user_id,
+                ))
+            except Exception:
+                pass  # Fire-and-forget: ignore failures
         
         return result.results[0].embeddings[0]
     
@@ -376,15 +409,20 @@ class VoyageEmbedService:
         )
         
         # Track usage
-        if hasattr(result, 'usage') and result.usage and (group_id or user_id):
-            UsageTracker().log_usage(
-                usage_type=UsageType.EMBEDDING,
-                model_name=self.model_name,
-                prompt_tokens=result.usage.total_tokens,
-                completion_tokens=0,
-                group_id=group_id,
-                user_id=user_id,
-            )
+        if hasattr(result, 'usage') and result.usage:
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                loop.create_task(get_usage_tracker().log_embedding_usage(
+                    partition_id=group_id or "unknown",
+                    model=self.model_name,
+                    total_tokens=result.usage.total_tokens,
+                    dimensions=settings.VOYAGE_EMBEDDING_DIM,
+                    chunk_count=len(queries),
+                    user_id=user_id,
+                ))
+            except Exception:
+                pass  # Fire-and-forget: ignore failures
         
         return [doc.embeddings[0] for doc in result.results]
     

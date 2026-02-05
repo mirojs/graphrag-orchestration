@@ -1,6 +1,6 @@
 # Phase 2 Implementation Status
 
-**Updated:** January 31, 2026  
+**Updated:** February 5, 2026  
 **Started:** January 31, 2026
 
 ---
@@ -15,12 +15,12 @@ This document tracks the implementation of Phase 2: Fullstack Restructure with R
 
 | Phase | Tasks | Completed | In Progress | Not Started |
 |-------|-------|-----------|-------------|-------------|
-| **Phase 1** | 7 tasks | 6 | 1 | 0 |
+| **Phase 1** | 7 tasks | 7 | 0 | 0 |
 | **Phase 2** | 5 tasks | 3 | 0 | 2 |
 | **Phase 3** | 3 tasks | 0 | 0 | 3 |
-| **Total** | 15 tasks | 9 | 1 | 5 |
+| **Total** | 15 tasks | 10 | 0 | 5 |
 
-**Overall Progress:** 60% (9/15 tasks complete, 1 in progress)
+**Overall Progress:** 67% (10/15 tasks complete)
 
 ---
 
@@ -222,25 +222,34 @@ This document tracks the implementation of Phase 2: Fullstack Restructure with R
 
 ---
 
-## In Progress Tasks 🔄
+## Completed Tasks (continued)
 
-### Task 1d (partial): Add LLM/Embedding Instrumentation Hooks
-**Status:** 🔄 In Progress  
-**Effort:** 1 day
+### Task 1d: Add LLM/Embedding Instrumentation Hooks
+**Status:** ✅ Complete  
+**Commit:** `be6d255a` (February 5, 2026)  
+**Date:** February 5, 2026
 
-**Completed:**
-- ✅ UsageTracker service created
+**Changes:**
+- ✅ UsageTracker service with fire-and-forget pattern
 - ✅ Cosmos DB usage container provisioned
-- ✅ Fire-and-forget pattern implemented
+- ✅ LLMService.generate() tracks LLM token usage
+- ✅ LLMService.embed() and embed_batch() track embedding usage
+- ✅ VoyageEmbedService.embed_query() tracks query embedding usage
+- ✅ VoyageEmbedService.embed_query_batch() tracks batch query usage
+- ✅ VoyageEmbedService.embed_documents_contextualized() tracks indexing usage
+- ✅ InstrumentationHooks class for centralized tracking
 
-**Remaining:**
-- 🔲 Hook into LLM service calls (token counting)
-- 🔲 Hook into embedding service calls
-- 🔲 Automatic usage logging on every LLM/embedding call
+**Files Modified:**
+- `src/worker/services/llm_service.py` - Added usage tracking to generate/embed methods
+- `src/worker/hybrid_v2/embeddings/voyage_embed.py` - Fixed usage tracking methods
+- `src/core/services/usage_tracker.py` - Fire-and-forget Cosmos DB writes
+- `src/core/instrumentation/hooks.py` - Centralized instrumentation hub
 
-**Files to Modify:**
-- `src/worker/services/llm_service.py`
-- `src/worker/services/graph_service.py` (embedding calls)
+**Usage Tracking Coverage:**
+- Azure OpenAI LLM completions (prompt + completion tokens)
+- Azure OpenAI embeddings (estimated tokens)
+- Voyage AI contextual embeddings (actual tokens from API)
+- Document Intelligence pages (via log_doc_intel_usage)
 
 ---
 

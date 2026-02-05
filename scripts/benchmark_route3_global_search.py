@@ -41,6 +41,7 @@ import difflib
 import json
 import os
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -74,6 +75,31 @@ NEGATIVE_QUERY_SUFFIX = (
     "\n\nImportant: If the answer is not explicitly stated in the provided evidence (or the field is blank), "
     "reply with exactly: Not specified. Do not guess or infer."
 )
+
+
+def _get_aad_token() -> Optional[str]:
+    """Get Azure AD access token for API authentication."""
+    try:
+        result = subprocess.run(
+            [
+                "az",
+                "account",
+                "get-access-token",
+                "--scope",
+                "api://b68b6881-80ba-4cec-b9dd-bd2232ec8817/.default",
+                "--query",
+                "accessToken",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"Warning: Failed to get AAD token: {e}")
+        return None
 
 
 def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> Dict[str, Any]:
@@ -488,6 +514,14 @@ def main() -> int:
     )
 
     headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
+    
+    # Add Azure AD authentication if available
+    token = _get_aad_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        print("✓ Using Azure AD authentication\n", flush=True)
+    else:
+        print("⚠ No authentication token available\n", flush=True)
 
     results: Dict[str, Dict[str, Any]] = {}
     endpoint = base_url + "/hybrid/query"

@@ -32,6 +32,7 @@ import difflib
 import json
 import os
 import re
+import subprocess
 import time
 import urllib.error
 import urllib.request
@@ -248,6 +249,31 @@ def _percentile(values: List[int], p: float) -> int:
     return int(xs[k])
 
 
+def _get_aad_token() -> Optional[str]:
+    """Get Azure AD access token for API authentication."""
+    try:
+        result = subprocess.run(
+            [
+                "az",
+                "account",
+                "get-access-token",
+                "--scope",
+                "api://b68b6881-80ba-4cec-b9dd-bd2232ec8817/.default",
+                "--query",
+                "accessToken",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"Warning: Failed to get AAD token: {e}")
+        return None
+
+
 def _jaccard(a: List[str], b: List[str]) -> float:
     sa = set(a)
     sb = set(b)
@@ -417,6 +443,14 @@ def benchmark_scenario(
 
     url = f"{api_base_url.rstrip('/')}/hybrid/query"
     headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
+    
+    # Add Azure AD authentication if available
+    token = _get_aad_token()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        print("✓ Using Azure AD authentication\n")
+    else:
+        print("⚠ No authentication token available\n")
 
     results: List[Dict[str, Any]] = []
 

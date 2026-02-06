@@ -1,6 +1,21 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 5, 2026
+**Last Updated:** February 6, 2026
+
+**Recent Updates (February 6, 2026):**
+- ✅ **Deploy Traffic Routing Fix:** GitHub Actions deploys were creating new Azure Container Apps revisions with **0% traffic** (multi-revision mode). All deploys since Feb 5 were unreachable. Fixed `deploy.yml` to auto-route 100% traffic to new revisions. Commit `15f59e1f`.
+- ✅ **Language Spans Propagation Fix (3 bugs):** 2 of 5 documents (`contoso_lifts_invoice`, `purchase_contract`) were missing `language_spans` on their Document nodes. Root causes:
+  1. **`_select_model()` filename heuristic removed:** Silently routed filenames containing "invoice" to `prebuilt-invoice` model, which does NOT support the `LANGUAGES` add-on. Now always uses caller's `default_model`; explicit override required for specialised models.
+  2. **First-unit gating bug fixed:** `languages` was only attached to DI unit metadata when `section_idx == 0 AND part == "direct"`. If section 0 had no direct content (e.g., `purchase_contract` with 40 DI units), `languages` was lost. Now attaches to whichever unit is emitted first.
+  3. **Page-based fallback path fixed:** The per-page extraction path (for docs without sections) never included `languages` in any unit's metadata. Now extracts and attaches to first page unit.
+  - Commit `d31142d0`. **Requires re-index** of affected groups to take effect.
+- ✅ **Graph Completeness Audit (`test-5pdfs-v2-fix2`):** Identified pre-existing issues from original Feb 5 indexing run:
+  - **PART_OF edges = 0** — All 17 TextChunks orphaned from Documents
+  - **Section & KeyValue embedding_v2 = 0** — Cannot participate in KNN/semantic search
+  - **GDS properties (community_id, pagerank) = 0** on all nodes — Louvain/PageRank never ran
+  - **Entity KNN SEMANTICALLY_SIMILAR = 0** — Only KVP↔KVP KNN edges (540) present
+  - **3 orphan Sections** without HAS_SECTION from parent Document
+  - All issues will be resolved by re-indexing with deployed fixes.
 
 **Recent Updates (February 5, 2026):**
 - ✅ **Route 3 Sentence-Level Citation Enrichment (February 5, 2026):** Enriches Route 3 global search with sentence-level `[Na]` citation markers using Azure DI `language_spans`, bringing Route 4's word-level precision to Route 3's graph-enriched summaries. See [Section 22](#22-route-3-sentence-level-citation-enrichment-february-5-2026).
@@ -2363,14 +2378,16 @@ Key-value extraction provides **marginal benefit** for:
 
 **Current Implementation** (`document_intelligence_service.py`):
 
-1. **Filename Heuristics (Free, Pre-DI)**
+1. ~~**Filename Heuristics (Free, Pre-DI)** — **REMOVED (Feb 6, 2026)**~~
    ```python
-   # _select_model() uses filename patterns before calling Azure DI
-   if "invoice" in filename.lower(): return "prebuilt-invoice"
-   if "receipt" in filename.lower(): return "prebuilt-receipt"
+   # _select_model() NO LONGER uses filename patterns.
+   # Previously: if "invoice" in filename.lower(): return "prebuilt-invoice"
+   # This was removed because prebuilt-invoice does NOT support LANGUAGES add-on,
+   # causing silent loss of language_spans for documents with "invoice" in the filename.
+   # Now always respects the caller's default_model (prebuilt-layout).
    ```
 
-2. **Per-Item Override (API-level)**
+2. **Per-Item Override (API-level)** — the ONLY way to use specialised models
    ```python
    # Callers can specify doc_type or di_model per document
    {"url": "...", "doc_type": "invoice"}  # → prebuilt-invoice
@@ -2382,6 +2399,8 @@ Key-value extraction provides **marginal benefit** for:
    # model_strategy parameter: "auto" | "layout" | "invoice" | "receipt"
    await di_service.extract_documents(group_id, urls, model_strategy="invoice")
    ```
+
+**⚠️ Important (Feb 6, 2026):** Specialised models (`prebuilt-invoice`, `prebuilt-receipt`) do **NOT** support the `LANGUAGES` add-on feature. Documents processed with these models will not have `language_spans` on their Document nodes, which means no sentence-level `[Na]` citations in Route 3. Only `prebuilt-layout` and `prebuilt-read` support `LANGUAGES`.
 
 **Recommended Approach: User-Specified Upload Categories**
 
@@ -2544,6 +2563,7 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 - **V2 Pipeline Factory:** `src/worker/hybrid/indexing/lazygraphrag_indexing_pipeline.py` (`get_lazygraphrag_indexing_pipeline_v2()`)
 - **V2 Pipeline Engine:** `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`
 - **V2 Fixed Test Script (RECOMMENDED):** `scripts/index_4_new_groups_v2.py` (Feb 2, 2026 - includes URL decode, language spans, improved KVP matching)
+- **⚠️ Re-Index Required (Feb 6, 2026):** `test-5pdfs-v2-fix2` needs re-indexing after deploying commit `d31142d0` to fix: missing PART_OF edges, zero Section/KeyValue embeddings, zero GDS properties (community_id, pagerank), and language_spans for `contoso_lifts_invoice` + `purchase_contract`.
 - **V2 Test Script (Legacy):** `scripts/index_5pdfs_v2_cloud.py` (uses API server with V2 factory)
 - **V2 Enhanced Script:** `scripts/index_5pdfs_v2_enhanced_examples.py` (enhanced entity extraction examples)
 - **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
@@ -5612,7 +5632,8 @@ Section          204     ✅ embedding_v2   community_id,       Structure - 158 
 TextChunk         74     ✅ embedding_v2   community_id,       Content - fully linked
                                            pagerank
 Document           5     ❌ No             primary_language,   Metadata only
-                                           detected_languages
+                                           detected_languages,
+                                           language_spans (JSON)
 Table            ~50     ❌ No             -                   Structured data extraction
 KeyValue          *      ✅ embedding_v2   -                   High-precision field extraction (Jan 22)
 Barcode           *      ❌ No             -                   Azure DI barcode extraction (Jan 27)
@@ -6930,8 +6951,34 @@ citations for precision.
 | `route_3_global.py` | Added `_fetch_language_spans()`, parallelized with Stage 3.3.5 | Fetch sentence boundaries in parallel |
 | `synthesis.py` | Added sentence segmentation, `[Na]` formatting, prompt update, citation extraction | Core sentence citation logic |
 | `text_store.py` | Fixed `"\n".join()` → `"".join()` in `get_all_documents_with_sentences()` | Azure DI offset alignment bug |
+| `document_intelligence_service.py` | Removed `_select_model()` filename heuristic; fixed first-unit gating; added languages to page path | Language spans propagation fix (Feb 6) |
+| `.github/workflows/deploy.yml` | Added `az containerapp ingress traffic set` after deploy | Traffic routing fix (Feb 6) |
 
-### 22.6. Environment Variable
+### 22.6. Deployment & Traffic Routing Fix (February 6, 2026)
+
+**Critical Issue Discovered:** After deploying sentence-level citations on Feb 5, the feature appeared non-functional (zero `[Na]` citations in responses, zero debug instrumentation visible). Root cause: Azure Container Apps was in **multi-revision mode** — all GitHub Actions deploys created new revisions with **0% traffic**. Traffic stayed on an old `azd-deploy` revision from Feb 5.
+
+**Fix:** Added traffic routing to `.github/workflows/deploy.yml`:
+```bash
+az containerapp ingress traffic set \
+  --name graphrag-api \
+  --resource-group rg-graphrag-feature \
+  --revision-weight "${REVISION_NAME}=100"
+```
+
+Once traffic was routed to the correct revision, sentence-level citations worked immediately: **977 sentence-level `[Na]` citations** across the Route 3 benchmark (19/19 pass), 34.9% sentence citation ratio (expected since only 3/5 docs had language spans at the time). Commit `15f59e1f`.
+
+### 22.7. Language Spans Propagation Fix (February 6, 2026)
+
+Only 3 of 5 documents had `language_spans` on their Document nodes. Three bugs in `document_intelligence_service.py`:
+
+1. **`contoso_lifts_invoice` — wrong model:** `_select_model()` filename heuristic matched "invoice" → routed to `prebuilt-invoice`, which does NOT support the `LANGUAGES` add-on. **Fix:** Removed URL-based model guessing entirely. Callers must use explicit `di_model` override for specialised models.
+2. **`purchase_contract` — first-unit gating:** Correctly used `prebuilt-layout` (40 DI units via section-aware path), but `languages` metadata was gated on `section_idx == 0 AND part == "direct"`. Section 0 had no direct content (only child sections), so `languages` never made it to any unit's metadata. **Fix:** Attach document-level metadata to whichever unit is emitted first (`len(docs) == 0` check).
+3. **Page-based fallback path:** The per-page extraction path (for docs without DI sections) never extracted or included `languages` in any unit's metadata. **Fix:** Added `_extract_languages()` call and attachment to first page unit.
+
+Commit `d31142d0`. **Requires re-index** of affected groups to take effect.
+
+### 22.8. Environment Variable
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -6939,7 +6986,7 @@ citations for precision.
 
 When disabled, Route 3 behaves identically to the pre-enhancement pipeline. No latency impact.
 
-### 22.7. Latency Impact
+### 22.9. Latency Impact
 
 | Component | Added Latency | Notes |
 |-----------|--------------|-------|
@@ -6948,7 +6995,7 @@ When disabled, Route 3 behaves identically to the pre-enhancement pipeline. No l
 | LLM synthesis | ~0ms | Same token count — sentences replace paragraphs, not add to them |
 | **Total sequential impact** | **~0ms net** | Fully parallelized; only visible if RRF is faster than the spans fetch |
 
-### 22.8. Key Design Decision: `language_spans` vs `SectionChunk.sentences`
+### 22.10. Key Design Decision: `language_spans` vs `SectionChunk.sentences`
 
 | Property | `Document.language_spans` | `SectionChunk.sentences` |
 |----------|--------------------------|--------------------------|
@@ -6960,7 +7007,7 @@ When disabled, Route 3 behaves identically to the pre-enhancement pipeline. No l
 
 **Decision:** Use `language_spans` exclusively for segmentation — it provides ML-detected sentence boundaries that match the original Azure DI document offsets.
 
-### 22.9. Relationship to Route 4's Sentence Citations
+### 22.11. Relationship to Route 4's Sentence Citations
 
 | Aspect | Route 3 (this enhancement) | Route 4 (`comprehensive_sentence`) |
 |--------|---------------------------|-------------------------------------|

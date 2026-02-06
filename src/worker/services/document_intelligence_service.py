@@ -1527,6 +1527,11 @@ class DocumentIntelligenceService:
                     # Store offset range for fallback geometry reconstruction
                     chunk_geometry["offset_range"] = [start_offset, end_offset]
 
+                # Document-level metadata: attach to the FIRST emitted unit so
+                # that _store_di_metadata_in_graph() can pick it up regardless
+                # of which section/part combination happens to be first.
+                is_first_unit = len(docs) == 0
+
                 docs.append(
                     Document(
                         text=text,
@@ -1549,11 +1554,11 @@ class DocumentIntelligenceService:
                             **({"end_offset": end_offset} if end_offset is not None else {}),
                             # Word geometry for pixel-accurate highlighting
                             **(chunk_geometry if chunk_geometry else {}),
-                            # Document-level metadata (included in first chunk)
-                            **({"barcodes": barcodes} if section_idx == 0 and part == "direct" and barcodes else {}),
-                            **({"languages": languages} if section_idx == 0 and part == "direct" and languages else {}),
-                            **({"figures": figures} if section_idx == 0 and part == "direct" and figures else {}),
-                            **({"selection_marks": selection_marks} if section_idx == 0 and part == "direct" and selection_marks else {}),
+                            # Document-level metadata (included in first emitted unit)
+                            **({"barcodes": barcodes} if is_first_unit and barcodes else {}),
+                            **({"languages": languages} if is_first_unit and languages else {}),
+                            **({"figures": figures} if is_first_unit and figures else {}),
+                            **({"selection_marks": selection_marks} if is_first_unit and selection_marks else {}),
                         },
                     )
                 )
@@ -1589,19 +1594,18 @@ class DocumentIntelligenceService:
 
         Priority:
         1) explicit override (e.g., 'prebuilt-invoice')
-        2) filename/url heuristics
-        3) default model
+        2) default model
+
+        NOTE: URL-based heuristics were removed because they silently routed
+        documents to specialised models (prebuilt-invoice, prebuilt-receipt) that
+        do NOT support add-on features such as LANGUAGES.  Callers that need a
+        non-layout model should pass ``explicit`` or set ``di_model`` on the
+        input item dict.
         """
         if explicit:
             return explicit
 
-        lower = url.lower()
-        # Simple heuristics: prefer invoice/receipt when filename hints exist
-        if any(k in lower for k in ["invoice", "inv_"]):
-            return "prebuilt-invoice"
-        if any(k in lower for k in ["receipt", "rcpt_"]):
-            return "prebuilt-receipt"
-        # Fallback
+        # No filename-based guessing — always honour the caller's default.
         return default_model
 
     async def _analyze_single_document(
@@ -1724,6 +1728,10 @@ class DocumentIntelligenceService:
                     return (url, section_docs, None)
                 
                 # Create one document per page (better for large docs)
+                # Extract document-level add-on features for propagation
+                page_languages = self._extract_languages(result)
+                page_barcodes = self._extract_barcodes(result)
+
                 for page in result.pages:
                     page_num = page.page_number
 
@@ -1818,6 +1826,8 @@ class DocumentIntelligenceService:
                     # The 'tables' metadata enables direct field mapping without LLM parsing
                     logger.info(f"📄 Extracted page {page_num}: {len(markdown)} chars, {len(page_paragraphs)} paragraphs, {len(page_tables)} tables")
                     if markdown.strip():
+                        # Attach document-level metadata to first emitted unit
+                        is_first_page_unit = len(documents) == 0
                         doc = Document(
                             text=markdown,
                             metadata={
@@ -1831,6 +1841,9 @@ class DocumentIntelligenceService:
                                 "paragraph_count": len(page_paragraphs),
                                 # Word geometry for pixel-accurate highlighting
                                 **page_geometry,
+                                # Document-level metadata (first unit only)
+                                **({"languages": page_languages} if is_first_page_unit and page_languages else {}),
+                                **({"barcodes": page_barcodes} if is_first_page_unit and page_barcodes else {}),
                             },
                         )
                         documents.append(doc)

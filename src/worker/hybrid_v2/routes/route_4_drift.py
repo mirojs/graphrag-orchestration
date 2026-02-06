@@ -125,6 +125,9 @@ class DRIFTHandler(BaseRouteHandler):
                     end_offset=c.get("end_offset") or meta.get("end_offset"),
                     score=c.get("score", 0.0),
                     text_preview=c.get("text_preview", ""),
+                    # Sentence-level citation data (comprehensive_sentence mode)
+                    sentences=c.get("sentences"),
+                    page_dimensions=c.get("page_dimensions"),
                 ))
             
             return RouteResult(
@@ -298,6 +301,9 @@ class DRIFTHandler(BaseRouteHandler):
                     end_offset=c.get("end_offset") or meta.get("end_offset"),
                     score=c.get("score", 0.0),
                     text_preview=c.get("text_preview", c.get("text", ""))[:200],
+                    # Sentence-level citation data (comprehensive_sentence mode)
+                    sentences=c.get("sentences"),
+                    page_dimensions=c.get("page_dimensions"),
                 ))
         
         return RouteResult(

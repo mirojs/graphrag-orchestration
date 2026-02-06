@@ -316,8 +316,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             metadata["processing_mode"] = synthesis_result.get("processing_mode")
         
         # Pass through sentence citation debug info
-        if synthesis_result.get("_sentence_debug"):
-            metadata["_sentence_debug"] = synthesis_result["_sentence_debug"]
+        metadata["_sentence_debug"] = synthesis_result.get("_sentence_debug", {"missing": True})
         
         if enable_timings:
             metadata["timings_ms"] = timings_ms

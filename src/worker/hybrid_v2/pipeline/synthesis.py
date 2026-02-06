@@ -149,7 +149,8 @@ class EvidenceSynthesizer:
         response_type: str = "detailed_report",
         sub_questions: Optional[List[str]] = None,
         intermediate_context: Optional[List[Dict[str, Any]]] = None,
-        coverage_chunks: Optional[List[Dict[str, Any]]] = None
+        coverage_chunks: Optional[List[Dict[str, Any]]] = None,
+        prompt_variant: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -250,7 +251,8 @@ class EvidenceSynthesizer:
             query=query,
             context=context,
             response_type=response_type,
-            sub_questions=sub_questions
+            sub_questions=sub_questions,
+            prompt_variant=prompt_variant,
         )
         
         # Step 5: Extract and validate citations
@@ -550,12 +552,6 @@ class EvidenceSynthesizer:
             "text_chunks_used": len(graph_context.source_chunks),
             "graph_context_used": True,
             "relationships_used": len(graph_context.relationships),
-            "_sentence_debug": {
-                "segmentation_enabled": _sentence_segmentation_enabled,
-                "spans_docs": list(_spans_by_doc.keys()),
-                "sentence_citation_count": len(sentence_citation_map),
-                "sentence_citation_keys": list(sentence_citation_map.keys())[:20],
-            },
         }
     
     async def _generate_graph_response(
@@ -908,7 +904,8 @@ Response:"""
         query: str,
         context: str,
         response_type: str,
-        sub_questions: Optional[List[str]] = None
+        sub_questions: Optional[List[str]] = None,
+        prompt_variant: Optional[str] = None,
     ) -> str:
         """Generate the final response with citation requirements."""
         
@@ -919,7 +916,7 @@ Response:"""
         # Different prompts for different response types
         if sub_questions:
             # DRIFT mode: Use multi-question synthesis prompt
-            prompt = self._get_drift_synthesis_prompt(query, context, sub_questions)
+            prompt = self._get_drift_synthesis_prompt(query, context, sub_questions, prompt_variant=prompt_variant)
         else:
             prompts = {
                 "detailed_report": self._get_detailed_report_prompt(query, context),
@@ -939,12 +936,32 @@ Response:"""
         self, 
         query: str, 
         context: str,
-        sub_questions: List[str]
+        sub_questions: List[str],
+        prompt_variant: Optional[str] = None,
     ) -> str:
-        """Prompt for DRIFT-style multi-question synthesis."""
+        """Prompt for DRIFT-style multi-question synthesis.
+        
+        Supports multiple prompt variants for A/B testing:
+        - None / "v0": Current production prompt (verbose, structured)
+        - "v1_concise": Query-focused, concise output
+        - "v2_adaptive": Format adapts to query type (compare/list/explain)
+        - "v3_budget": Explicit word budget constraint
+        """
         sub_q_list = "\n".join(f"  {i+1}. {q}" for i, q in enumerate(sub_questions))
         
-        return f"""You are analyzing a complex query that was decomposed into multiple sub-questions.
+        variant = (prompt_variant or "v0").lower().strip()
+        
+        logger.info(
+            "drift_synthesis_prompt_variant",
+            variant=variant,
+            query=query[:60],
+            num_sub_questions=len(sub_questions),
+            context_length=len(context),
+        )
+        
+        # ---- V0: Current production prompt (no change) ----
+        if variant == "v0":
+            return f"""You are analyzing a complex query that was decomposed into multiple sub-questions.
 
 Original Query: {query}
 
@@ -975,6 +992,65 @@ Format:
 [Final answer to the original query]
 
 Your response:"""
+        
+        # ---- V1: Query-focused, concise ----
+        # Answers the original query directly instead of walking through sub-questions.
+        # Omits irrelevant sub-question findings. No mandatory sections.
+        if variant == "v1_concise":
+            return f"""Answer the following query using the evidence gathered from multiple sources.
+
+Query: {query}
+
+Evidence (with citation markers [n]):
+{context}
+
+Rules:
+- Answer the query DIRECTLY — do not walk through sub-questions one by one
+- Include ONLY findings relevant to what was asked — omit tangential information
+- Cite every factual claim with [n]
+- Keep the response focused: 2-4 paragraphs unless the query explicitly asks for a list or table
+- No section headers unless the query asks for structured output (e.g., "list", "compare side by side")
+
+Your response:"""
+        
+        # ---- V2: Task-adaptive ----
+        # Detects query intent (compare, list, explain) and adjusts format accordingly.
+        # Still concise but allows structured output when the query demands it.
+        if variant == "v2_adaptive":
+            return f"""You are a document analysis expert. Answer the query below using ONLY the evidence provided.
+
+Query: {query}
+
+Evidence (citations marked as [n]):
+{context}
+
+Instructions:
+- Determine what the query is asking for and respond in the most natural format:
+  • If COMPARING items: use a concise side-by-side analysis highlighting differences
+  • If LISTING items: use a compact numbered/bulleted list
+  • If EXPLAINING a concept: give a focused explanation (2-3 paragraphs max)
+  • If IDENTIFYING a specific fact: state it directly in 1-2 sentences
+- Cite every claim with [n] — no unsupported statements
+- Include ONLY information that directly answers the query
+- Do NOT repeat evidence text verbatim — synthesize and reason about it
+
+Your response:"""
+        
+        # ---- V3: Word-budget constrained ----
+        # Explicit word limit to force brevity. Still requires citations.
+        if variant == "v3_budget":
+            return f"""Query: {query}
+
+Evidence (citations [n]):
+{context}
+
+Answer the query in 150-300 words. Cite sources with [n]. Focus only on what was asked. If comparing, highlight key differences concisely. Skip background context the user didn't request.
+
+Your response:"""
+        
+        # Unknown variant — fall back to v0
+        logger.warning("unknown_prompt_variant_falling_back_to_v0", variant=variant)
+        return self._get_drift_synthesis_prompt(query, context, sub_questions, prompt_variant="v0")
     
     def _get_detailed_report_prompt(self, query: str, context: str) -> str:
         return f"""You are an expert analyst generating a detailed report.

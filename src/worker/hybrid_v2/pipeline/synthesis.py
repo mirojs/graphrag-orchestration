@@ -445,6 +445,18 @@ class EvidenceSynthesizer:
                 # Try sentence-level segmentation from Azure DI language_spans
                 chunk_sentences = _get_sentences_for_chunk(chunk)
                 
+                logger.info(
+                    "sentence_segmentation_per_chunk",
+                    chunk_id=chunk.chunk_id,
+                    doc_id=chunk.document_id,
+                    has_offsets=chunk.start_offset is not None and chunk.end_offset is not None,
+                    start_offset=chunk.start_offset,
+                    end_offset=chunk.end_offset,
+                    doc_in_spans=bool(chunk.document_id and chunk.document_id in _spans_by_doc),
+                    sentences_found=len(chunk_sentences),
+                    segmentation_enabled=_sentence_segmentation_enabled,
+                )
+                
                 if chunk_sentences:
                     # Format as individually-citable sentences: [1a], [1b], [1c]...
                     chunk_num = original_idx + 1
@@ -538,6 +550,12 @@ class EvidenceSynthesizer:
             "text_chunks_used": len(graph_context.source_chunks),
             "graph_context_used": True,
             "relationships_used": len(graph_context.relationships),
+            "_sentence_debug": {
+                "segmentation_enabled": _sentence_segmentation_enabled,
+                "spans_docs": list(_spans_by_doc.keys()),
+                "sentence_citation_count": len(sentence_citation_map),
+                "sentence_citation_keys": list(sentence_citation_map.keys())[:20],
+            },
         }
     
     async def _generate_graph_response(

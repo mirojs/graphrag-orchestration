@@ -41,6 +41,8 @@ class VectorRAGHandler(BaseRouteHandler):
         query: str,
         response_type: str = "summary",
         knn_config: Optional[str] = None,
+        prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 1: Vector RAG for fast fact lookups.

@@ -47,6 +47,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         response_type: str = "summary",
         knn_config: Optional[str] = None,
         prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 3: Global Search for thematic queries.

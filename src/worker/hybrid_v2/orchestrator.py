@@ -340,6 +340,8 @@ class HybridPipeline:
         response_type: str = "detailed_report",
         use_modular_handlers: bool = True,
         knn_config: Optional[str] = None,
+        prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -351,6 +353,7 @@ class HybridPipeline:
                                   If False, use legacy inline methods (for A/B testing).
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
                         If None, no KNN edges are traversed (baseline).
+            synthesis_model: Optional override for synthesis LLM deployment name.
             
         Returns:
             Dictionary containing:
@@ -368,7 +371,7 @@ class HybridPipeline:
         # =======================================================================
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            result = await handler.execute(query, response_type, knn_config=knn_config)
+            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model)
             # Convert RouteResult to dict for API compatibility
             return result.to_dict()
         
@@ -2175,6 +2178,8 @@ Sub-questions:"""
         response_type: str = "detailed_report",
         use_modular_handlers: bool = True,
         knn_config: Optional[str] = None,
+        prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2185,11 +2190,12 @@ Sub-questions:"""
             use_modular_handlers: If True (default), use modular route handlers.
                                   If False, use legacy inline methods (for A/B testing).
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
+            synthesis_model: Optional override for synthesis LLM deployment name.
         """
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            result = await handler.execute(query, response_type, knn_config=knn_config)
+            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model)
             return result.to_dict()
         
         # Legacy fallback

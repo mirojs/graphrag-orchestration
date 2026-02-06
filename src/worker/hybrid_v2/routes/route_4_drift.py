@@ -61,6 +61,8 @@ class DRIFTHandler(BaseRouteHandler):
         query: str,
         response_type: str = "summary",
         knn_config: Optional[str] = None,
+        prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 4: DRIFT for complex multi-hop queries.
@@ -88,6 +90,8 @@ class DRIFTHandler(BaseRouteHandler):
         """
         # Store knn_config for use in tracing
         self._knn_config = knn_config
+        self._prompt_variant = prompt_variant
+        self._synthesis_model = synthesis_model
         
         # ==================================================================
         # WORKFLOW MODE: Use LlamaIndex Workflow for parallel sub-questions
@@ -276,7 +280,9 @@ class DRIFTHandler(BaseRouteHandler):
             response_type=response_type,
             sub_questions=sub_questions + refined_sub_questions,
             intermediate_context=intermediate_results,
-            coverage_chunks=coverage_chunks if coverage_chunks else None
+            coverage_chunks=coverage_chunks if coverage_chunks else None,
+            prompt_variant=prompt_variant,
+            synthesis_model=synthesis_model,
         )
         logger.info("stage_4.4_complete")
         

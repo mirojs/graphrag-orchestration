@@ -137,7 +137,7 @@ class BaseRouteHandler:
     All shared retrieval methods are defined here.
     
     Subclasses must implement:
-        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None) -> RouteResult
+        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None) -> RouteResult
     """
 
     # Route identifier (override in subclasses)
@@ -188,7 +188,7 @@ class BaseRouteHandler:
             return {"folder_id": self.folder_id}
         return {}
 
-    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None) -> RouteResult:
+    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None) -> RouteResult:
         """Execute the route on a query.
         
         Args:

@@ -151,6 +151,7 @@ class EvidenceSynthesizer:
         intermediate_context: Optional[List[Dict[str, Any]]] = None,
         coverage_chunks: Optional[List[Dict[str, Any]]] = None,
         prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -253,6 +254,7 @@ class EvidenceSynthesizer:
             response_type=response_type,
             sub_questions=sub_questions,
             prompt_variant=prompt_variant,
+            synthesis_model=synthesis_model,
         )
         
         # Step 5: Extract and validate citations
@@ -906,12 +908,33 @@ Response:"""
         response_type: str,
         sub_questions: Optional[List[str]] = None,
         prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> str:
         """Generate the final response with citation requirements."""
         
         if self.llm is None:
             logger.error("llm_not_configured_cannot_generate_response")
             return "Error: LLM client not configured"
+        
+        # Model override: create a temporary LLM client if a different model is requested
+        llm = self.llm
+        if synthesis_model:
+            try:
+                from src.worker.services.llm_service import LLMService
+                llm_service = LLMService()
+                llm = llm_service._create_llm_client(synthesis_model)
+                logger.info(
+                    "synthesis_model_override",
+                    requested_model=synthesis_model,
+                    default_model="HYBRID_SYNTHESIS_MODEL",
+                )
+            except Exception as e:
+                logger.warning(
+                    "synthesis_model_override_failed_using_default",
+                    requested_model=synthesis_model,
+                    error=str(e),
+                )
+                llm = self.llm
         
         # Different prompts for different response types
         if sub_questions:
@@ -926,7 +949,7 @@ Response:"""
             prompt = prompts.get(response_type, prompts["detailed_report"])
         
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await llm.acomplete(prompt)
             return response.text.strip()
         except Exception as e:
             logger.error("response_generation_failed", error=str(e))

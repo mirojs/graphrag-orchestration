@@ -196,6 +196,14 @@ class HybridQueryRequest(BaseModel):
         default=None,
         description="KNN configuration to use for SEMANTICALLY_SIMILAR edge traversal. Options: 'knn-1', 'knn-2', 'knn-3'. If None, no KNN edges are traversed (baseline)."
     )
+    prompt_variant: Optional[str] = Field(
+        default=None,
+        description="Synthesis prompt variant for A/B testing. Options: 'v0' (current), 'v1_concise', 'v2_adaptive', 'v3_budget'. If None, uses default (v0)."
+    )
+    synthesis_model: Optional[str] = Field(
+        default=None,
+        description="Override synthesis LLM deployment name for A/B testing. E.g. 'gpt-4.1', 'gpt-4o'. If None, uses default (HYBRID_SYNTHESIS_MODEL)."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -485,9 +493,11 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                 route=forced_route,
                 response_type=body.response_type,
                 knn_config=body.knn_config,
+                prompt_variant=body.prompt_variant,
+                synthesis_model=body.synthesis_model,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model)
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000

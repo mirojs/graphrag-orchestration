@@ -78,6 +78,8 @@ class LocalSearchHandler(BaseRouteHandler):
         query: str,
         response_type: str = "summary",
         knn_config: Optional[str] = None,
+        prompt_variant: Optional[str] = None,
+        synthesis_model: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 2: LazyGraphRAG for entity-focused queries.

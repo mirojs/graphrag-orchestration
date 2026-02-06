@@ -951,7 +951,10 @@ class Neo4jTextUnitStore:
                         doc_id=doc_id,
                     )
                     
-                    full_content = "\n".join(
+                    # Reconstruct full document content
+                    # Azure DI spans are relative to original document content.
+                    # Concatenate chunks WITHOUT newlines to match original offsets.
+                    full_content = "".join(
                         r.get("text") or "" for r in content_result
                     )
                     

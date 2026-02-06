@@ -1,6 +1,9 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 4, 2026
+**Last Updated:** February 5, 2026
+
+**Recent Updates (February 5, 2026):**
+- ✅ **Route 3 Sentence-Level Citation Enrichment (February 5, 2026):** Enriches Route 3 global search with sentence-level `[Na]` citation markers using Azure DI `language_spans`, bringing Route 4's word-level precision to Route 3's graph-enriched summaries. See [Section 22](#22-route-3-sentence-level-citation-enrichment-february-5-2026).
 
 **Recent Updates (February 4, 2026):**
 - ✅ **comprehensive_sentence Mode: 14/14 Accuracy (100%)** - Sentence-Level Evidence Eliminates LLM Data Selection Errors
@@ -703,6 +706,17 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
     - `coverage_metadata.total_docs_in_group`: Total documents available
     - `coverage_metadata.docs_from_relevance`: Documents found via normal retrieval
 *   **Output:** Guaranteed document coverage with minimal context dilution
+
+#### Stage 3.3.6: Sentence Boundary Fetch (Parallel with Stage 3.3.5) — February 5, 2026
+*   **Engine:** Neo4j `Document.language_spans` property (Azure DI LANGUAGES ML feature)
+*   **What:** Fetch `language_spans` JSON from Document nodes for all documents referenced by retrieved chunks. Runs in parallel with Stage 3.3.5 (Hybrid RRF) via `asyncio.gather()`.
+*   **Why:** Enables sentence-level `[Na]` citation markers in the synthesis output, giving users precise sub-chunk evidence for each claim in the summary.
+*   **Environment Variable:** `ROUTE3_SENTENCE_CITATIONS=1` (default: enabled). Set to `0` to disable.
+*   **Data Source:** `Document.language_spans` — stored as JSON string on Document nodes, containing Azure DI LANGUAGES ML-detected sentence boundaries with `{offset, length}` spans.
+*   **Latency Impact:** ~40-90ms additional (parallel, not sequential). No impact when disabled.
+*   **Graceful Degradation:** Chunks without `start_offset`/`end_offset` (e.g., split chunks) fall back to chunk-level `[N]` citations only.
+*   **Output:** `Dict[str, List[Dict]]` mapping `document_id → [{offset, length}]` sentence spans
+*   **Details:** See Section 22 for full architecture.
 
 #### Stage 3.5: Raw Text Chunk Fetching
 *   **Engine:** Storage backend (Neo4j / Parquet)
@@ -6789,5 +6803,172 @@ POST /api/v1/qa/documents/{doc_id}/review
 GET /api/v1/qa/pending
 → Returns list of documents awaiting human review
 ```
+
+---
+
+## 22. Route 3 Sentence-Level Citation Enrichment (February 5, 2026)
+
+**Added:** February 5, 2026  
+**Motivation:** Route 3 (Global Search) produces high-quality thematic summaries with graph-enriched context but only cites at the chunk level (`[1]`, `[2]`, ...). Route 4 (DRIFT) demonstrates that sentence-level citations provide critical traceability for audit/compliance. This enhancement brings Route 4's sentence-level precision to Route 3's graph-enriched summaries.
+
+### 22.1. Problem Statement
+
+Route 3's synthesis cites entire text chunks (`[1]`, `[2]`), which can be 200-500 tokens each. When a user clicks a citation to verify a claim, they must manually scan the entire chunk to find the relevant sentence. For audit/compliance use cases, this is insufficient — users need to see **exactly which sentence** supports each claim.
+
+Route 4 already solves this using Azure DI `language_spans` for sentence-level evidence, but Route 4 lacks Route 3's rich graph context (community matching, hub extraction, PPR tracing, section-aware retrieval). The goal is to combine both strengths.
+
+### 22.2. Architecture: Sentence-Level Citation in Route 3
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                    ROUTE 3 SENTENCE CITATION PIPELINE                        │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│   Stage 3.3 (Graph Context)                                                  │
+│        │                                                                     │
+│        ├── Stage 3.3.5: Hybrid BM25 + Vector RRF ──┐                        │
+│        │                                             │  asyncio.gather()     │
+│        └── Stage 3.3.6: Fetch language_spans ───────┘                        │
+│                              │                                               │
+│                              ▼                                               │
+│              ┌─────────────────────────────┐                                 │
+│              │  Sentence Segmentation       │                                │
+│              │  For each chunk:             │                                │
+│              │    1. Get chunk offsets       │                                │
+│              │    2. Filter language_spans   │                                │
+│              │    3. Extract sentence text   │                                │
+│              │    4. Assign [Na] markers     │                                │
+│              └──────────────┬──────────────┘                                 │
+│                             │                                                │
+│                             ▼                                                │
+│              ┌─────────────────────────────┐                                 │
+│              │  LLM Synthesis with [Na]     │                                │
+│              │  citations in prompt          │                                │
+│              │                              │                                │
+│              │  "Chunk [1] (Page 3):        │                                │
+│              │   [1a] First sentence...     │                                │
+│              │   [1b] Second sentence...    │                                │
+│              │   [1c] Third sentence..."    │                                │
+│              └──────────────┬──────────────┘                                 │
+│                             │                                                │
+│                             ▼                                                │
+│              ┌─────────────────────────────┐                                 │
+│              │  Citation Extraction         │                                │
+│              │  Regex: \[(\d+[a-z])\]      │                                │
+│              │  Regex: \[(\d+)\](?![a-z])  │                                │
+│              │  Both sentence & chunk-level │                                │
+│              └─────────────────────────────┘                                 │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 22.3. Data Flow: Azure DI `language_spans` → Sentence Markers
+
+**Source:** `Document.language_spans` property in Neo4j (JSON string)
+
+```json
+[
+  {
+    "locale": "en",
+    "confidence": 0.99,
+    "span_count": 42,
+    "spans": [
+      {"offset": 0, "length": 85},
+      {"offset": 86, "length": 120},
+      {"offset": 207, "length": 95}
+    ]
+  }
+]
+```
+
+**Segmentation Logic (per chunk):**
+
+1. Each `SourceChunk` carries `start_offset` and `end_offset` (character positions in the original document)
+2. Filter `language_spans.spans` to those overlapping the chunk's offset range:
+   ```
+   span.offset >= chunk.start_offset AND span.offset < chunk.end_offset
+   ```
+3. Extract sentence text: `full_doc_text[span.offset : span.offset + span.length]`
+4. Assign hierarchical markers: `[1a]`, `[1b]`, `[1c]`, ... where `1` is the chunk number
+
+**Fallback:** Chunks without `start_offset`/`end_offset` (e.g., split chunks from older indexing) receive only chunk-level `[N]` markers — no sentence breakdown.
+
+### 22.4. Citation Format
+
+**Before (chunk-level only):**
+```
+The insurance policy requires annual inspections [1] and the contract specifies 
+quarterly maintenance windows [2].
+```
+
+**After (sentence-level enrichment):**
+```
+The insurance policy requires annual inspections [1b] and the contract specifies 
+quarterly maintenance windows [2a]. The inspection schedule is detailed in Section 
+4.3 of the warranty document [1c].
+```
+
+**Citation Hierarchy:**
+| Pattern | Level | Example | Meaning |
+|---------|-------|---------|---------|
+| `[N]` | Chunk | `[1]` | Reference to entire chunk 1 |
+| `[Na]` | Sentence | `[1a]` | Reference to sentence "a" within chunk 1 |
+
+**LLM Prompt Addition:**
+```
+IMPORTANT: Use sentence-level citations [1a], [1b], [2a] etc. to cite specific 
+sentences from the evidence. Each [Na] marker corresponds to an exact sentence 
+shown below each chunk header. Prefer sentence-level citations over chunk-level 
+citations for precision.
+```
+
+### 22.5. Implementation Files
+
+| File | Change | Purpose |
+|------|--------|---------|
+| `enhanced_graph_retriever.py` | Extended `SourceChunk` with `page_number`, `start_offset`, `end_offset` | Enable offset-based sentence filtering |
+| `route_3_global.py` | Added `_fetch_language_spans()`, parallelized with Stage 3.3.5 | Fetch sentence boundaries in parallel |
+| `synthesis.py` | Added sentence segmentation, `[Na]` formatting, prompt update, citation extraction | Core sentence citation logic |
+| `text_store.py` | Fixed `"\n".join()` → `"".join()` in `get_all_documents_with_sentences()` | Azure DI offset alignment bug |
+
+### 22.6. Environment Variable
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ROUTE3_SENTENCE_CITATIONS` | `"1"` (enabled) | Set to `"0"` to disable sentence-level citations and use chunk-level only |
+
+When disabled, Route 3 behaves identically to the pre-enhancement pipeline. No latency impact.
+
+### 22.7. Latency Impact
+
+| Component | Added Latency | Notes |
+|-----------|--------------|-------|
+| Neo4j `language_spans` fetch | ~40-90ms | Parallel with Hybrid RRF (hidden behind its latency) |
+| Sentence segmentation (Python) | <5ms | Simple offset filtering, no ML |
+| LLM synthesis | ~0ms | Same token count — sentences replace paragraphs, not add to them |
+| **Total sequential impact** | **~0ms net** | Fully parallelized; only visible if RRF is faster than the spans fetch |
+
+### 22.8. Key Design Decision: `language_spans` vs `SectionChunk.sentences`
+
+| Property | `Document.language_spans` | `SectionChunk.sentences` |
+|----------|--------------------------|--------------------------|
+| **Source** | Azure DI LANGUAGES ML feature | Regex split at `(?<=[.!?])\s+` + DI word polygons |
+| **Purpose** | Authoritative sentence boundary detection | Pixel-accurate frontend highlighting |
+| **Stored As** | JSON on Document nodes | JSON on SectionChunk nodes |
+| **Contains** | `{offset, length}` per sentence | Paragraph text + word polygon geometry |
+| **Used For** | Sentence-level citation in synthesis | PDF viewer sentence highlighting |
+
+**Decision:** Use `language_spans` exclusively for segmentation — it provides ML-detected sentence boundaries that match the original Azure DI document offsets.
+
+### 22.9. Relationship to Route 4's Sentence Citations
+
+| Aspect | Route 3 (this enhancement) | Route 4 (`comprehensive_sentence`) |
+|--------|---------------------------|-------------------------------------|
+| **Graph Context** | Full (communities, PPR, sections) | None (bypasses entity disambiguation) |
+| **Sentence Source** | `language_spans` filtered by chunk offsets | `get_all_documents_with_sentences()` (all sentences) |
+| **Citation Format** | `[Na]` hierarchical (chunk + sentence) | `[N]` flat (sentence = citation unit) |
+| **LLM Calls** | 1 (synthesis) | 1 (synthesis) |
+| **Best For** | Thematic summaries with precise evidence | Deep inconsistency analysis across documents |
+| **Negative Detection** | Graph-based + field validation | N/A (retrieves everything) |
 
 ---

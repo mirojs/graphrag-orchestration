@@ -277,6 +277,7 @@ class EvidenceSynthesizer:
         evidence_nodes: List[Tuple[str, float]],
         graph_context: EnhancedGraphContext,
         response_type: str = "detailed_report",
+        language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     ) -> Dict[str, Any]:
         """
         Enhanced synthesis using full graph context (Route 3 v2.0).
@@ -285,12 +286,15 @@ class EvidenceSynthesizer:
         1. Source chunks from MENTIONS edges (real citations!)
         2. Relationship context from RELATED_TO edges
         3. Entity descriptions for richer understanding
+        4. Sentence-level segmentation from Azure DI language_spans (when available)
         
         Args:
             query: The original user query.
             evidence_nodes: List of (entity_name, score) from PPR.
             graph_context: EnhancedGraphContext with chunks, relationships.
             response_type: "detailed_report" | "summary" | "audit_trail"
+            language_spans_by_doc: Optional dict mapping doc_id -> language span groups
+                from Azure DI LANGUAGES feature for sentence-level citation granularity.
             
         Returns:
             Dictionary with response, citations, and evidence path.
@@ -352,6 +356,80 @@ class EvidenceSynthesizer:
         
         context_parts = []
         citation_map: Dict[str, Dict[str, Any]] = {}
+        sentence_citation_map: Dict[str, Dict[str, Any]] = {}
+        
+        # Pre-compute sentence spans per chunk for sentence-level citations
+        # language_spans_by_doc: {doc_id -> [{locale, confidence, spans: [{offset, length}]}]}
+        _spans_by_doc = language_spans_by_doc or {}
+        _sentence_segmentation_enabled = bool(_spans_by_doc)
+        
+        # For sentence segmentation we need full document content to slice by offset.
+        # Reconstruct per-document content from the chunks we have (ordered by section).
+        # We also need a mapping from chunk -> its position in the reconstructed content.
+        _doc_full_content: Dict[str, str] = {}
+        _doc_chunk_offsets: Dict[str, List[Tuple[int, int, str]]] = {}  # doc_id -> [(start, end, chunk_id)]
+        
+        if _sentence_segmentation_enabled:
+            for doc_key, chunks_with_idx in doc_groups.items():
+                # Only attempt if document has language_spans
+                if doc_key not in _spans_by_doc:
+                    continue
+                # Check all chunks have offsets — if any lacks, skip this document
+                has_all_offsets = all(
+                    chunk.start_offset is not None and chunk.end_offset is not None
+                    for _, chunk in chunks_with_idx
+                )
+                if not has_all_offsets:
+                    continue
+                # Sort chunks by start_offset to reconstruct content
+                sorted_chunks = sorted(chunks_with_idx, key=lambda x: x[1].start_offset or 0)
+                # We don't concatenate — we use the original document offsets directly
+                # since language_spans offsets reference the original document content.
+                # Store individual chunk offset ranges for span filtering.
+                _doc_chunk_offsets[doc_key] = [
+                    (chunk.start_offset, chunk.end_offset, chunk.chunk_id)
+                    for _, chunk in sorted_chunks
+                ]
+        
+        def _get_sentences_for_chunk(chunk) -> List[Dict[str, Any]]:
+            """Filter language spans that fall within this chunk's offset range."""
+            if not _sentence_segmentation_enabled:
+                return []
+            doc_id = chunk.document_id or ""
+            if doc_id not in _spans_by_doc:
+                return []
+            if chunk.start_offset is None or chunk.end_offset is None:
+                return []
+            
+            chunk_start = chunk.start_offset
+            chunk_end = chunk.end_offset
+            sentences = []
+            
+            for lang_group in _spans_by_doc[doc_id]:
+                confidence = lang_group.get("confidence", 1.0)
+                locale = lang_group.get("locale", "en")
+                for span in lang_group.get("spans", []):
+                    s_offset = span.get("offset", 0)
+                    s_length = span.get("length", 0)
+                    # Span must fall entirely within the chunk's range
+                    if s_offset >= chunk_start and s_offset + s_length <= chunk_end:
+                        # Extract text from chunk by adjusting offset relative to chunk
+                        relative_offset = s_offset - chunk_start
+                        chunk_text = chunk.text or ""
+                        if relative_offset >= 0 and relative_offset + s_length <= len(chunk_text):
+                            sent_text = chunk_text[relative_offset:relative_offset + s_length].strip()
+                        else:
+                            # Offset mismatch (content may have been trimmed during chunking)
+                            sent_text = ""
+                        if sent_text and len(sent_text) >= 5:
+                            sentences.append({
+                                "text": sent_text,
+                                "offset": s_offset,
+                                "length": s_length,
+                                "confidence": confidence,
+                                "locale": locale,
+                            })
+            return sentences
         
         # Add unique document count header to help LLM with document-counting questions
         # This prevents LLM from counting sections/chunks as separate documents
@@ -381,11 +459,44 @@ class EvidenceSynthesizer:
                     "document_title": chunk.document_title or doc_title,  # Include document title
                     "section": section_str,
                     "entity": chunk.entity_name,
-                    "text_preview": chunk.text[:150] + "..." if len(chunk.text) > 150 else chunk.text
+                    "text_preview": chunk.text[:150] + "..." if len(chunk.text) > 150 else chunk.text,
+                    **({"page_number": chunk.page_number} if chunk.page_number is not None else {}),
+                    **({"start_offset": chunk.start_offset} if chunk.start_offset is not None else {}),
+                    **({"end_offset": chunk.end_offset} if chunk.end_offset is not None else {}),
                 }
                 
-                # Build context entry with section metadata
-                entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
+                # Try sentence-level segmentation from Azure DI language_spans
+                chunk_sentences = _get_sentences_for_chunk(chunk)
+                
+                if chunk_sentences:
+                    # Format as individually-citable sentences: [1a], [1b], [1c]...
+                    chunk_num = original_idx + 1
+                    entry_lines = [f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]"]
+                    for s_idx, sent in enumerate(chunk_sentences):
+                        suffix = chr(ord('a') + s_idx) if s_idx < 26 else str(s_idx)
+                        sent_citation_id = f"[{chunk_num}{suffix}]"
+                        entry_lines.append(f"{sent_citation_id} {sent['text']}")
+                        # Build sentence citation map entry
+                        sentence_citation_map[sent_citation_id] = {
+                            "source": chunk.document_source or chunk.document_title,
+                            "chunk_id": chunk.chunk_id,
+                            "document": doc_title,
+                            "document_id": chunk.document_id or "",
+                            "document_title": chunk.document_title or doc_title,
+                            "section": section_str,
+                            "entity": chunk.entity_name,
+                            "text_preview": sent["text"][:150],
+                            "sentence_text": sent["text"],
+                            "sentence_offset": sent["offset"],
+                            "sentence_length": sent["length"],
+                            "sentence_confidence": sent["confidence"],
+                            "sentence_locale": sent["locale"],
+                            **({"page_number": chunk.page_number} if chunk.page_number is not None else {}),
+                        }
+                    entry = "\n".join(entry_lines)
+                else:
+                    # Fallback: standard chunk-level citation
+                    entry = f"{citation_id} [Section: {section_str}] [Entity: {chunk.entity_name}]\n{chunk.text}"
                 context_parts.append(entry)
             
             context_parts.append("")  # Blank line between documents
@@ -425,17 +536,22 @@ class EvidenceSynthesizer:
             query=query,
             context=full_context,
             hub_entities=graph_context.hub_entities,
-            response_type=response_type
+            response_type=response_type,
+            has_sentence_citations=bool(sentence_citation_map),
         )
         
         # Step 6: Extract citations from response
-        citations = self._extract_citations(response, citation_map)
+        citations = self._extract_citations(
+            response, citation_map,
+            sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
+        )
         
         logger.info("synthesis_with_graph_context_complete",
                    query=query[:50],
                    num_source_chunks=len(graph_context.source_chunks),
                    num_relationships=len(graph_context.relationships),
                    num_citations=len(citations),
+                   num_sentence_citations=len(sentence_citation_map),
                    response_length=len(response))
         
         return {
@@ -452,7 +568,8 @@ class EvidenceSynthesizer:
         query: str,
         context: str,
         hub_entities: List[str],
-        response_type: str
+        response_type: str,
+        has_sentence_citations: bool = False,
     ) -> str:
         """Generate response with graph-aware prompting."""
         if self.llm is None:
@@ -482,10 +599,25 @@ class EvidenceSynthesizer:
         - If a document has no termination/cancellation mechanism, state that explicitly.
         """
         
+        # Sentence-level citation guidance when Azure DI language_spans are available
+        sentence_hint = ""
+        if has_sentence_citations:
+            sentence_hint = """
+
+SENTENCE-LEVEL CITATIONS: Evidence is segmented at sentence granularity with markers
+like [1a], [1b], [2a], etc. Cite the specific sentence marker (e.g., [1a]) for each
+factual claim. When referencing numeric values, dates, or critical terms, quote exact
+wording from the cited sentence. You may also cite [N] to reference an entire evidence block."""
+        
+        citation_instruction = "Cites specific sources for EVERY claim using [N] notation"
+        if has_sentence_citations:
+            citation_instruction = "Cites specific sources for EVERY claim using sentence markers [Na] (e.g., [1a], [2b]) or block markers [N]"
+        
         prompt = f"""You are an expert analyst generating a response using knowledge graph evidence.
 
-CRITICAL REQUIREMENT: You MUST cite your sources using the citation markers (e.g., [1], [2])
+CRITICAL REQUIREMENT: You MUST cite your sources using the citation markers (e.g., [1], [2], [1a], [1b])
 for EVERY factual claim. Citations link to source documents via entity relationships.
+{sentence_hint}
 
 Query: {query}
 
@@ -500,7 +632,7 @@ Evidence Context (organized by entity relationships and document sections):
 
 Generate a comprehensive {response_type.replace('_', ' ')} that:
 1. Directly answers the query
-2. Cites specific sources for EVERY claim using [N] notation
+2. {citation_instruction}
 3. Leverages the entity relationships to explain connections
 4. Organizes information by document sections where relevant
 5. Highlights cross-references between different sources
@@ -2150,21 +2282,45 @@ BEGIN ANALYSIS:"""
     def _extract_citations(
         self, 
         response: str, 
-        citation_map: Dict[str, Dict[str, str]]
+        citation_map: Dict[str, Dict[str, str]],
+        sentence_citation_map: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> List[Dict[str, str]]:
-        """Extract and validate citations from the response."""
+        """Extract and validate citations from the response.
+        
+        Supports both chunk-level [N] and sentence-level [Na] citations.
+        Sentence citations (e.g., [1a], [2b]) are matched first, then chunk
+        citations [N] are matched with a negative lookahead to avoid
+        double-counting [1] inside [1a].
+        """
         import re
         
-        # Find all citation markers in the response
-        citation_pattern = r'\[(\d+)\]'
-        used_citations = set(re.findall(citation_pattern, response))
-        
         citations = []
+        _sent_map = sentence_citation_map or {}
+        
+        # Step 1: Extract sentence-level citations [Na] (e.g., [1a], [2b])
+        if _sent_map:
+            sent_pattern = r'\[(\d+[a-z])\]'
+            used_sentence_cites = set(re.findall(sent_pattern, response))
+            for cite_key_raw in sorted(used_sentence_cites):
+                cite_key = f"[{cite_key_raw}]"
+                if cite_key in _sent_map:
+                    citations.append({
+                        "citation": cite_key,
+                        "citation_type": "sentence",
+                        **_sent_map[cite_key],
+                    })
+        
+        # Step 2: Extract chunk-level citations [N] (negative lookahead avoids [1] in [1a])
+        # Use negative lookahead (?![a-z]) so [1] doesn't match if followed by a letter
+        chunk_pattern = r'\[(\d+)\](?![a-z])'
+        used_citations = set(re.findall(chunk_pattern, response))
+        
         for cite_num in sorted(used_citations, key=int):
             cite_key = f"[{cite_num}]"
             if cite_key in citation_map:
                 citations.append({
                     "citation": cite_key,
+                    "citation_type": "chunk",
                     **citation_map[cite_key]
                 })
         

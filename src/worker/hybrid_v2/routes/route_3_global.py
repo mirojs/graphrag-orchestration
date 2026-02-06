@@ -22,6 +22,8 @@ were removed 2026-01-24 after production benchmarks confirmed 100% theme coverag
 without them. BM25 + Vector RRF retrieval is sufficient.
 """
 
+import asyncio
+import json
 import os
 import re
 import time
@@ -125,8 +127,21 @@ class GlobalSearchHandler(BaseRouteHandler):
                    num_related_entities=len(graph_context.related_entities))
         
         # Stage 3.3.5: Cypher 25 Hybrid RRF (BM25 + Vector)
+        # Stage 3.3.6: Fetch language_spans for sentence-level citations (parallel)
         t0 = time.perf_counter()
-        await self._apply_hybrid_rrf_stage(query, graph_context)
+        enable_sentence_citations = os.getenv("ROUTE3_SENTENCE_CITATIONS", "1").strip().lower() in {"1", "true", "yes"}
+        
+        if enable_sentence_citations:
+            # Collect unique document IDs from source chunks
+            doc_ids = list({c.document_id for c in graph_context.source_chunks if c.document_id})
+            # Run in parallel: Hybrid RRF + language spans fetch
+            rrf_result, doc_language_spans = await asyncio.gather(
+                self._apply_hybrid_rrf_stage(query, graph_context),
+                self._fetch_language_spans(doc_ids),
+            )
+        else:
+            rrf_result = await self._apply_hybrid_rrf_stage(query, graph_context)
+            doc_language_spans = {}
         timings_ms["stage_3.3.5_ms"] = int((time.perf_counter() - t0) * 1000)
         
         # ==================================================================
@@ -237,6 +252,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             hub_entities=hub_entities,
             ppr_evidence=evidence_nodes,
             response_type=response_type,
+            language_spans_by_doc=doc_language_spans,
         )
         timings_ms["stage_3.5_ms"] = int((time.perf_counter() - t0) * 1000)
         
@@ -618,6 +634,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         hub_entities: List[str],
         ppr_evidence: List,
         response_type: str,
+        language_spans_by_doc: Optional[Dict[str, List[Dict]]] = None,
     ) -> Dict[str, Any]:
         """Synthesize global response with theme coverage.
         
@@ -634,6 +651,74 @@ class GlobalSearchHandler(BaseRouteHandler):
             evidence_nodes=ppr_evidence,
             graph_context=graph_context,
             response_type=response_type,
+            language_spans_by_doc=language_spans_by_doc,
         )
         
         return synthesis_result
+
+    # ==========================================================================
+    # LANGUAGE SPANS FETCH
+    # ==========================================================================
+
+    async def _fetch_language_spans(
+        self, doc_ids: List[str]
+    ) -> Dict[str, List[Dict]]:
+        """Fetch language_spans from Document nodes for sentence-level citations.
+        
+        Azure DI LANGUAGES feature provides ML-detected sentence boundaries
+        stored as JSON on Document.language_spans. These are used to segment
+        chunk text into individually-citable sentences.
+        
+        Args:
+            doc_ids: List of document IDs to fetch spans for
+            
+        Returns:
+            Dict mapping doc_id -> list of span groups [{locale, confidence, spans: [{offset, length}]}]
+        """
+        if not doc_ids:
+            return {}
+        
+        query = """
+        MATCH (d:Document {group_id: $group_id})
+        WHERE d.id IN $doc_ids AND d.language_spans IS NOT NULL
+        RETURN d.id AS doc_id, d.language_spans AS spans
+        """
+        
+        try:
+            loop = asyncio.get_event_loop()
+            driver = self.pipeline.neo4j_driver
+            group_id = self.pipeline.group_id
+            
+            def _run():
+                with driver.session() as session:
+                    result = session.run(query, group_id=group_id, doc_ids=doc_ids)
+                    return list(result)
+            
+            records = await loop.run_in_executor(None, _run)
+            
+            spans_map: Dict[str, List[Dict]] = {}
+            for record in records:
+                doc_id = record.get("doc_id") or ""
+                raw = record.get("spans") or "[]"
+                try:
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(parsed, list):
+                        spans_map[doc_id] = parsed
+                    elif isinstance(parsed, dict):
+                        spans_map[doc_id] = [parsed]
+                    else:
+                        spans_map[doc_id] = []
+                except (json.JSONDecodeError, TypeError):
+                    spans_map[doc_id] = []
+            
+            logger.info(
+                "stage_3.3.6_language_spans_fetched",
+                requested_docs=len(doc_ids),
+                docs_with_spans=len(spans_map),
+                total_span_groups=sum(len(v) for v in spans_map.values()),
+            )
+            return spans_map
+            
+        except Exception as e:
+            logger.warning("stage_3.3.6_language_spans_failed", error=str(e))
+            return {}

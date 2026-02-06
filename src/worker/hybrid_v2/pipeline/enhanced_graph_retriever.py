@@ -74,6 +74,10 @@ class SourceChunk:
     document_title: str = ""
     document_source: str = ""
     relevance_score: float = 0.0
+    # Location metadata from Azure DI (for sentence-level citations)
+    page_number: Optional[int] = None
+    start_offset: Optional[int] = None  # Character offset in original document
+    end_offset: Optional[int] = None  # End character offset in original document
 
 
 @dataclass
@@ -933,6 +937,10 @@ class EnhancedGraphRetriever:
                         document_title=record.get("doc_title") or metadata.get("document_title", ""),
                         document_source=record.get("doc_source") or metadata.get("url", ""),
                         relevance_score=float(record.get("score") or 0.0),
+                        # Location metadata from Azure DI (for sentence-level citations)
+                        page_number=metadata.get("page_number"),
+                        start_offset=metadata.get("start_offset"),
+                        end_offset=metadata.get("end_offset"),
                     )
                 )
             
@@ -1108,6 +1116,9 @@ class EnhancedGraphRetriever:
                         document_title=record.get("doc_title") or metadata.get("document_title", ""),
                         document_source=record.get("doc_source") or metadata.get("url", ""),
                         relevance_score=float(record.get("score") or 0.0),
+                        page_number=metadata.get("page_number"),
+                        start_offset=metadata.get("start_offset"),
+                        end_offset=metadata.get("end_offset"),
                     )
                 )
 
@@ -1160,6 +1171,9 @@ class EnhancedGraphRetriever:
                                 document_title=record.get("doc_title") or metadata.get("document_title", ""),
                                 document_source=record.get("doc_source") or metadata.get("url", ""),
                                 relevance_score=float(record.get("score") or 0.0),
+                                page_number=metadata.get("page_number"),
+                                start_offset=metadata.get("start_offset"),
+                                end_offset=metadata.get("end_offset"),
                             )
                         )
 

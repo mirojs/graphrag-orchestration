@@ -316,7 +316,12 @@ class GlobalSearchHandler(BaseRouteHandler):
             metadata["processing_mode"] = synthesis_result.get("processing_mode")
         
         # Pass through sentence citation debug info
-        metadata["_sentence_debug"] = synthesis_result.get("_sentence_debug", {"missing": True})
+        _synth_debug = synthesis_result.get("_sentence_debug", {"missing": True})
+        _synth_debug["_route_doc_ids"] = list({c.document_id for c in graph_context.source_chunks if c.document_id})[:10]
+        _synth_debug["_route_enable_sentence"] = os.getenv("ROUTE3_SENTENCE_CITATIONS", "1")
+        _synth_debug["_route_spans_passed"] = len(doc_language_spans) if 'doc_language_spans' in dir() else -1
+        _synth_debug["_route_num_chunks"] = len(graph_context.source_chunks)
+        metadata["_sentence_debug"] = _synth_debug
         
         if enable_timings:
             metadata["timings_ms"] = timings_ms

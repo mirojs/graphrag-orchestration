@@ -315,6 +315,10 @@ class GlobalSearchHandler(BaseRouteHandler):
             metadata["raw_extractions"] = synthesis_result["raw_extractions"]
             metadata["processing_mode"] = synthesis_result.get("processing_mode")
         
+        # Pass through sentence citation debug info
+        if synthesis_result.get("_sentence_debug"):
+            metadata["_sentence_debug"] = synthesis_result["_sentence_debug"]
+        
         if enable_timings:
             metadata["timings_ms"] = timings_ms
         

@@ -565,30 +565,132 @@ class GlobalSearchHandler(BaseRouteHandler):
         return True
 
     # ==========================================================================
-    # COVERAGE GAP FILL
+    # COVERAGE GAP FILL (with Document-Level Tracking + Dynamic Sizing)
+    # Ported from Route 4's enhanced coverage gap fill pattern
     # ==========================================================================
-    
+
     async def _apply_coverage_gap_fill(self, query: str, graph_context) -> None:
-        """Fill coverage gaps for cross-document queries."""
+        """Fill coverage gaps for cross-document queries.
+
+        For queries like "What is the latest date across all documents?" or
+        "Compare the terms in all contracts", entity-based retrieval may miss
+        documents that don't have strong entity mentions (e.g., simple contracts).
+
+        This stage ensures we have at least ONE chunk from every document in
+        the corpus before synthesis, so the LLM can answer corpus-level questions.
+
+        Feb 2026 Enhancement (ported from Route 4 pattern):
+        1. Document-level tracking with existing_docs set
+        2. Dynamic sizing based on corpus size
+        3. Early exit when full coverage already achieved
+        4. Comprehensive query detection for scaled retrieval
+        """
         try:
-            # Get lead chunks from all documents
+            if not self.pipeline.enhanced_retriever:
+                return
+
+            # Detect comprehensive enumeration queries that need more chunks per document
+            # (copied from Route 4 _apply_coverage_gap_fill)
+            def _is_comprehensive_query(q: str) -> bool:
+                """Detect queries asking for exhaustive lists or comparisons."""
+                q_lower = q.lower()
+                # Patterns that indicate comprehensive enumeration
+                comprehensive_patterns = [
+                    "list all", "list every", "enumerate", "compare all",
+                    "compare the", "all explicit", "all the", "every ",
+                    "what are all", "find all", "identify all", "show all",
+                    "across all", "across the set", "in all documents",
+                    "each document", "every document", "comprehensive",
+                ]
+                return any(pattern in q_lower for pattern in comprehensive_patterns)
+
+            is_comprehensive = _is_comprehensive_query(query)
+
+            # 1. Build set of documents already covered by evidence
+            # (ported from Route 4: document-level tracking)
+            covered_docs: set = set()
+            existing_chunk_ids: set = set()
+
+            for c in graph_context.source_chunks:
+                doc_key = (
+                    c.document_id or
+                    c.document_source or
+                    c.document_title or
+                    ""
+                ).strip().lower()
+                if doc_key:
+                    covered_docs.add(doc_key)
+                if c.chunk_id:
+                    existing_chunk_ids.add(c.chunk_id)
+
+            # 2. Get all documents in the corpus
+            all_documents = await self.pipeline.enhanced_retriever.get_all_documents()
+            total_docs = len(all_documents)
+
+            # 3. Early exit when full coverage already achieved
+            # (ported from Route 4: early exit optimization)
+            if total_docs > 0 and len(covered_docs) >= total_docs:
+                logger.info("coverage_gap_fill_skipped",
+                           reason="already_full_coverage",
+                           covered=len(covered_docs),
+                           total=total_docs)
+                return
+
+            # 4. Dynamic sizing based on corpus size and query type
+            # (ported from Route 4: dynamic sizing formula)
+            if is_comprehensive:
+                max_total = min(max(total_docs * 2, 10), 200)
+            else:
+                max_total = min(max(total_docs, 10), 200)
+
+            logger.info("coverage_gap_fill_start",
+                       is_comprehensive=is_comprehensive,
+                       existing_docs=len(covered_docs),
+                       total_docs=total_docs,
+                       max_total=max_total)
+
+            # 5. Get lead chunks from all documents
             fill_chunks = await self.pipeline.enhanced_retriever.get_document_lead_chunks(
-                max_total=10,
+                max_total=max_total,
                 min_text_chars=20,
             )
-            
+
             if not fill_chunks:
                 return
-            
-            existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-            added = [c for c in fill_chunks if c.chunk_id not in existing_ids]
-            
+
+            # 6. Add only chunks from documents NOT already covered
+            # (ported from Route 4: document-level dedup)
+            added = []
+            new_docs: set = set()
+            for c in fill_chunks:
+                if c.chunk_id in existing_chunk_ids:
+                    continue
+
+                doc_key = (
+                    c.document_id or
+                    c.document_source or
+                    c.document_title or
+                    ""
+                ).strip().lower()
+
+                if doc_key and doc_key in covered_docs:
+                    continue
+
+                c.entity_name = "coverage_fill"
+                added.append(c)
+                if doc_key:
+                    covered_docs.add(doc_key)
+                    new_docs.add(doc_key)
+                existing_chunk_ids.add(c.chunk_id)
+
             if added:
-                for c in added:
-                    c.entity_name = "coverage_fill"
                 graph_context.source_chunks.extend(added)
-                logger.info("coverage_gap_fill_applied", added=len(added))
-                           
+                logger.info("coverage_gap_fill_applied",
+                           chunks_added=len(added),
+                           new_docs=len(new_docs),
+                           is_comprehensive=is_comprehensive,
+                           total_docs_in_corpus=total_docs)
+
         except Exception as e:
             logger.warning("coverage_gap_fill_failed", error=str(e))
 

@@ -363,33 +363,10 @@ class EvidenceSynthesizer:
         _spans_by_doc = language_spans_by_doc or {}
         _sentence_segmentation_enabled = bool(_spans_by_doc)
         
-        # For sentence segmentation we need full document content to slice by offset.
-        # Reconstruct per-document content from the chunks we have (ordered by section).
-        # We also need a mapping from chunk -> its position in the reconstructed content.
-        _doc_full_content: Dict[str, str] = {}
-        _doc_chunk_offsets: Dict[str, List[Tuple[int, int, str]]] = {}  # doc_id -> [(start, end, chunk_id)]
-        
-        if _sentence_segmentation_enabled:
-            for doc_key, chunks_with_idx in doc_groups.items():
-                # Only attempt if document has language_spans
-                if doc_key not in _spans_by_doc:
-                    continue
-                # Check all chunks have offsets — if any lacks, skip this document
-                has_all_offsets = all(
-                    chunk.start_offset is not None and chunk.end_offset is not None
-                    for _, chunk in chunks_with_idx
-                )
-                if not has_all_offsets:
-                    continue
-                # Sort chunks by start_offset to reconstruct content
-                sorted_chunks = sorted(chunks_with_idx, key=lambda x: x[1].start_offset or 0)
-                # We don't concatenate — we use the original document offsets directly
-                # since language_spans offsets reference the original document content.
-                # Store individual chunk offset ranges for span filtering.
-                _doc_chunk_offsets[doc_key] = [
-                    (chunk.start_offset, chunk.end_offset, chunk.chunk_id)
-                    for _, chunk in sorted_chunks
-                ]
+        # Sentence segmentation is handled per-chunk in _get_sentences_for_chunk().
+        # Each chunk is checked individually for offset availability — chunks
+        # without offsets (e.g. BM25-sourced) gracefully fall back to chunk-level
+        # citations while chunks WITH offsets get sentence-level granularity.
         
         def _get_sentences_for_chunk(chunk) -> List[Dict[str, Any]]:
             """Filter language spans that fall within this chunk's offset range."""

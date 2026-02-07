@@ -121,7 +121,6 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
         LazyGraphRAGIndexingPipeline,
         LazyGraphRAGIndexingConfig,
     )
-    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
     from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
     from src.worker.services.llm_service import LLMService
     
@@ -151,24 +150,23 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
     # LLM service for entity extraction
     llm_service = LLMService()
     
-    # Voyage embedder
-    voyage_embedder = VoyageEmbedService(
-        model_name=settings.VOYAGE_MODEL_NAME,
-        api_key=settings.VOYAGE_API_KEY,
-    )
+    # Voyage embedder (use LlamaIndex embed model, same as pipeline_factory.py)
+    from src.worker.hybrid_v2.embeddings import get_voyage_embed_service
+    voyage_service = get_voyage_embed_service()
+    embedder = voyage_service.get_llama_index_embed_model()
     
-    # V2 config
+    # V2 config (matches pipeline_factory.py get_lazygraphrag_indexing_pipeline_v2)
     config = LazyGraphRAGIndexingConfig(
-        chunk_size=512,
-        chunk_overlap=64,
-        embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,
+        chunk_size=1500,     # Section-aware: larger chunks (section boundaries)
+        chunk_overlap=50,    # Overlap for split sections
+        embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,  # 2048
     )
     
     # V2 pipeline
     pipeline = LazyGraphRAGIndexingPipeline(
         neo4j_store=neo4j_store,
         llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
-        embedder=voyage_embedder,
+        embedder=embedder,
         config=config,
         use_v2_embedding_property=True,
     )
@@ -203,7 +201,7 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
         ingestion="document-intelligence",
         run_community_detection=False,
         run_raptor=False,
-        knn_enabled=False,  # Disabled for troubleshooting entity embeddings
+        knn_enabled=True,  # GDS KNN creates SEMANTICALLY_SIMILAR edges
     )
     
     elapsed = time.time() - start_time

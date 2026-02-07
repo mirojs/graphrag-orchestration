@@ -53,6 +53,12 @@ coverage.xml
 *.log
 nosetests.xml
 
+# Benchmark output files (root directory only - keep benchmarks/ folder)
+/bench*.txt
+/bench*.json
+/bench_*.txt
+/bench_*.json
+
 # Node
 node_modules/
 npm-debug.log*

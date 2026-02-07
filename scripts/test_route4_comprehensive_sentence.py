@@ -118,7 +118,7 @@ def make_request(query: str, group_id: str, response_type: str, force_route: str
 
 
 def score_response(response_text: str) -> Dict[str, Any]:
-    """Score response against 16 ground truth items."""
+    """Score response against 15 ground truth items."""
     text_lower = response_text.lower()
     
     def check_item(keywords: List[str]) -> bool:
@@ -137,6 +137,7 @@ def score_response(response_text: str) -> Dict[str, Any]:
             "B3": check_item(["wr-500", "wr500", "lock"]),
             "B4": check_item(["outdoor", "fitting", "configuration package"]),
             "B5": check_item(["initial payment", "contradiction", "29900", "full"]),
+            "B6": check_item(["automatic opener", "door operator", "opener omit", "opener missing"]),
         },
         "minor": {
             "C1": check_item(["ww.contoso", "url", "malformed"]),
@@ -157,11 +158,11 @@ def score_response(response_text: str) -> Dict[str, Any]:
         "scores": scores,
         "found": {
             "major": f"{found_major}/3",
-            "medium": f"{found_medium}/5",
+            "medium": f"{found_medium}/6",
             "minor": f"{found_minor}/6",
-            "total": f"{found_total}/14",
+            "total": f"{found_total}/15",
         },
-        "percentage": f"{(found_total/14)*100:.1f}%",
+        "percentage": f"{(found_total/15)*100:.1f}%",
     }
 
 

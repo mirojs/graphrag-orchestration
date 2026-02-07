@@ -418,6 +418,10 @@ class DRIFTHandler(BaseRouteHandler):
 Original Query: "{query}"
 
 Guidelines:
+- Each sub-question MUST be a complete, self-contained sentence that can be understood without reading any other sub-question.
+  BAD: "to both documents."  (sentence fragment)
+  BAD: "—and analyze these to find..."  (starts with dash/conjunction, missing context)
+  GOOD: "What are the differences in product specifications between the invoice and contract?"
 - Each sub-question should focus on identifying specific entities or relationships
 - Questions should build on each other (entity discovery → relationship exploration → analysis)
 - Generate 2-5 sub-questions depending on complexity
@@ -426,8 +430,8 @@ Guidelines:
   (e.g., if original asks for "California-specific" clauses, each sub-question must include that geographic constraint)
 
 Format your response as a numbered list:
-1. [First sub-question]
-2. [Second sub-question]
+1. [First complete sub-question]
+2. [Second complete sub-question]
 ...
 
 Sub-questions:"""
@@ -436,20 +440,36 @@ Sub-questions:"""
             response = await self.llm.acomplete(prompt)
             text = response.text.strip()
             
+            # --- Robust multi-line parser ---
+            # LLM may wrap long sub-questions across multiple lines.
+            # First, join continuation lines back onto their numbered item.
+            # A "continuation line" is any line that does NOT start with a digit
+            # (i.e., it's not a new numbered item).
+            import re
             lines = text.split('\n')
-            sub_questions = []
-            
+            merged_lines: List[str] = []
             for line in lines:
-                line = line.strip()
-                if line and line[0].isdigit():
-                    content = line.split('.', 1)[-1].strip()
-                    content = content.split(')', 1)[-1].strip()
-                    
-                    if content:
-                        normalized = content.strip().strip('"').strip("'").strip()
-                        if normalized in {"?", "-", "—"} or len(normalized) < 8:
-                            continue
-                        sub_questions.append(normalized)
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                # New numbered item (e.g., "1.", "2)", "3.")
+                if re.match(r'^\d+[\.\)]\s', stripped):
+                    merged_lines.append(stripped)
+                elif merged_lines:
+                    # Continuation of previous item — append with space
+                    merged_lines[-1] += " " + stripped
+                # else: preamble text before first numbered item — skip
+            
+            sub_questions = []
+            for line in merged_lines:
+                # Strip numbering: "1. ..." or "1) ..."
+                content = re.sub(r'^\d+[\.\)]\s*', '', line).strip()
+                
+                if content:
+                    normalized = content.strip('"').strip("'").strip()
+                    if normalized in {"?", "-", "—"} or len(normalized) < 8:
+                        continue
+                    sub_questions.append(normalized)
             
             # Deduplicate
             deduped = []

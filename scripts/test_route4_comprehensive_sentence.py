@@ -6,8 +6,9 @@ Tests the newly deployed comprehensive_sentence mode which uses:
 - Azure Document Intelligence sentence spans for precise text boundaries
 - Raw evidence approach (sentences + tables + HippoRAG chunks)
 
-Evaluates against 14 ground truth items for invoice/contract inconsistency detection.
-(Originally 16 items, but 2 were from deleted Seattle mock data not in actual 5 PDFs.)
+Evaluates against 16 ground truth items for invoice/contract inconsistency detection.
+(Originally 14 items, expanded to 15 after confirming B6 opener/door-operator,
+then 16 after confirming B7 power-system/operation-parts from Neo4j Table data.)
 """
 
 import json
@@ -31,8 +32,8 @@ Look for differences in:
 
 Provide a detailed analysis with specific references to both documents."""
 
-# 14 Ground Truth Items (reduced from 16 after Seattle mock data deletion)
-# See ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md for history
+# 16 Ground Truth Items (3 major + 7 medium + 6 minor)
+# History: 14 → 15 (B6 opener) → 16 (B7 power system / operation parts)
 GROUND_TRUTH = {
     "major": [
         "A1: Lift model mismatch (Savaria V1504 vs AscendPro VPX200)",
@@ -45,6 +46,8 @@ GROUND_TRUTH = {
         "B3: WR-500 lock added vs not specified",
         "B4: Outdoor terminology (fitting vs configuration package)",
         "B5: Invoice self-contradiction (initial payment vs full $29,900)",
+        "B6: Automatic opener vs door operator terminology",
+        "B7: Power system (contract) vs operation parts (invoice)",
     ],
     "minor": [
         "C1: URL malformed (ww.contosolifts.com)",
@@ -118,7 +121,7 @@ def make_request(query: str, group_id: str, response_type: str, force_route: str
 
 
 def score_response(response_text: str) -> Dict[str, Any]:
-    """Score response against 15 ground truth items."""
+    """Score response against 16 ground truth items."""
     text_lower = response_text.lower()
     
     def check_item(keywords: List[str]) -> bool:
@@ -138,6 +141,7 @@ def score_response(response_text: str) -> Dict[str, Any]:
             "B4": check_item(["outdoor", "fitting", "configuration package"]),
             "B5": check_item(["initial payment", "contradiction", "29900", "full"]),
             "B6": check_item(["automatic opener", "door operator", "opener omit", "opener missing"]),
+            "B7": check_item(["power system", "operation parts", "110 vac", "12 vac"]),
         },
         "minor": {
             "C1": check_item(["ww.contoso", "url", "malformed"]),
@@ -158,11 +162,11 @@ def score_response(response_text: str) -> Dict[str, Any]:
         "scores": scores,
         "found": {
             "major": f"{found_major}/3",
-            "medium": f"{found_medium}/6",
+            "medium": f"{found_medium}/7",
             "minor": f"{found_minor}/6",
-            "total": f"{found_total}/15",
+            "total": f"{found_total}/16",
         },
-        "percentage": f"{(found_total/15)*100:.1f}%",
+        "percentage": f"{(found_total/16)*100:.1f}%",
     }
 
 
@@ -229,13 +233,13 @@ def main():
         print()
     
     # Score against ground truth
-    print("SCORING AGAINST 14 GROUND TRUTH ITEMS:")
+    print("SCORING AGAINST 16 GROUND TRUTH ITEMS:")
     print("-" * 80)
     scoring = score_response(response_text)
     
     print(f"\nRESULTS:")
     print(f"  Major (A1-A3): {scoring['found']['major']}")
-    print(f"  Medium (B1-B5): {scoring['found']['medium']}")
+    print(f"  Medium (B1-B7): {scoring['found']['medium']}")
     print(f"  Minor (C1-C6): {scoring['found']['minor']}")
     print(f"  TOTAL: {scoring['found']['total']} = {scoring['percentage']}")
     print()

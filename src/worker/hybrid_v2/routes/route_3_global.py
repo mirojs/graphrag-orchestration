@@ -361,10 +361,9 @@ class GlobalSearchHandler(BaseRouteHandler):
             # Get query embedding (V2 Voyage 2048D if enabled, else V1 OpenAI 3072D)
             query_embedding = None
             if enable_hybrid:
-                try:
-                    query_embedding = get_query_embedding(query)
-                except Exception as e:
-                    logger.warning("hybrid_rrf_embedding_failed", error=str(e))
+                query_embedding = get_query_embedding(query)
+                if not query_embedding:
+                    raise RuntimeError("get_query_embedding() returned empty — check VOYAGE_API_KEY and VOYAGE_V2_ENABLED")
             
             # Choose search strategy
             bm25_results: List[Tuple[Dict[str, Any], float, bool]] = []
@@ -372,7 +371,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             if enable_hybrid and query_embedding:
                 # Cypher 25 Hybrid: BM25 + Vector + RRF (best quality)
                 # Returns List[Tuple[Dict, float, bool]]
-                hybrid_results = await self.pipeline._search_chunks_cypher25_hybrid_rrf(
+                hybrid_results = await self._search_chunks_cypher25_hybrid_rrf(
                     query_text=query,
                     embedding=query_embedding,
                     top_k=20,
@@ -386,7 +385,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             else:
                 # Fallback: Pure BM25 (fast, no embedding required)
                 # Returns List[Tuple[Dict, float, bool]]
-                bm25_only_results = await self.pipeline._search_chunks_graph_native_bm25(
+                bm25_only_results = await self._search_chunks_graph_native_bm25(
                     query_text=query,
                     top_k=20,
                     use_phrase_boost=True,
@@ -516,41 +515,14 @@ class GlobalSearchHandler(BaseRouteHandler):
             return metadata
             
         except Exception as e:
-            logger.warning("stage_3.3.5_bm25_phrase_failed", error=str(e))
-            # Fall back to simple fulltext if BM25 phrase search fails
-            if enable_fulltext_boost:
-                logger.info("stage_3.3.5_fallback_to_simple_fulltext")
-                try:
-                    from src.worker.hybrid_v2.pipeline.enhanced_graph_retriever import SourceChunk
-                    fulltext_chunks = await self.pipeline._search_text_chunks_fulltext(
-                        query_text=query,
-                        top_k=15,
-                    )
-                    existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-                    for chunk_dict, score in fulltext_chunks:
-                        cid = (chunk_dict.get("id") or "").strip()
-                        if not cid or cid in existing_ids:
-                            continue
-                        spk = (chunk_dict.get("section_path_key") or "").strip()
-                        section_path = spk.split(" > ") if spk else []
-                        graph_context.source_chunks.append(
-                            SourceChunk(
-                                chunk_id=cid,
-                                text=chunk_dict.get("text") or "",
-                                entity_name="fulltext_fallback",
-                                section_path=list(section_path),
-                                section_id=(chunk_dict.get("section_id") or "").strip(),
-                                document_id=(chunk_dict.get("document_id") or "").strip(),
-                                document_title=(chunk_dict.get("document_title") or "").strip(),
-                                document_source=(chunk_dict.get("document_source") or "").strip(),
-                                relevance_score=float(score or 0.0),
-                            )
-                        )
-                        existing_ids.add(cid)
-                except Exception as fallback_e:
-                    logger.warning("stage_3.3.5_fulltext_fallback_failed", error=str(fallback_e))
-        
-        return metadata
+            # NO silent fallback — surface the error so broken vector search is caught immediately
+            logger.error("stage_3.3.5_hybrid_rrf_FAILED", error=str(e), error_type=type(e).__name__)
+            raise RuntimeError(
+                f"Stage 3.3.5 Hybrid RRF failed: {e}. "
+                f"Check: (1) _search_chunks_cypher25_hybrid_rrf exists on handler, "
+                f"(2) vector index matches embedding property (embedding vs embedding_v2), "
+                f"(3) fulltext index exists."
+            ) from e
 
     # ==========================================================================
     # ENTITY RELEVANCE CHECK

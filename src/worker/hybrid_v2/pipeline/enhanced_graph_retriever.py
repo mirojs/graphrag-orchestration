@@ -2162,8 +2162,10 @@ class EnhancedGraphRetriever:
         query = """
         MATCH (e:Entity)
         WHERE e.group_id = $group_id
-          AND e.embedding IS NOT NULL
-                WITH e, vector.similarity.cosine(e.embedding, $query_embedding) as score
+          AND (e.embedding_v2 IS NOT NULL OR e.embedding IS NOT NULL)
+        WITH e, vector.similarity.cosine(
+            COALESCE(e.embedding_v2, e.embedding), $query_embedding
+        ) as score
         ORDER BY score DESC
         LIMIT $top_k
         RETURN e.name as name, score

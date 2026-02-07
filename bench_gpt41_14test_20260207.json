@@ -1,0 +1,2237 @@
+{
+  "query": "Analyze the invoice and contract documents to find all inconsistencies, discrepancies, or conflicts between them. \n\nLook for differences in:\n1. Major items: Product/service specifications, payment terms, customer/vendor names\n2. Medium items: Feature specifications, terminology differences, payment structure contradictions\n3. Minor items: Contact details, URLs, entity name variations, site references\n\nProvide a detailed analysis with specific references to both documents.",
+  "model": "gpt-4.1",
+  "group_id": "test-5pdfs-v2-fix2",
+  "response_type": "comprehensive_sentence",
+  "response": "Below is a structured list of all inconsistencies, grouped by type and backed by explicit citations.\n\nI focus primarily on the relationship between the **contoso_lifts_invoice** [4] and the **purchase_contract** [5], but also note cross\u2011document party/term conflicts where relevant.\n\n---\n\n## 1. Product / Model Name\n\n**FIELD:** Vertical Platform Lift model\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4] \u2013 model:  \n  - Table 2, Row 1:  \n    > \u201cVertical Platform Lift (**Savaria V1504**)\u201d [4, Table 2 Row 1; Chunk 1]\n\n- Purchase Contract [5] \u2013 model:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 Vertical Platform Lift (**AscendPro VPX200**)\u201d [5, Chunk 1]\n\n**SIGNIFICANCE:**  \nThe contract and invoice describe different lift models. This is a **major** inconsistency: the customer may have contracted for an AscendPro VPX200 but is being invoiced for a Savaria V1504. It affects expectations, performance, warranty, and potentially price/value.\n\n---\n\n## 2. Product Description \u2013 \u201cOutdoor\u201d vs. \u201cOutdoor configuration package\u201d\n\n**FIELD:** Outdoor configuration / fitting description\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 4:  \n    > \u201cOutdoor fitting\u201d [4, Table 2 Row 4; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 **Outdoor configuration package**\u201d [5, Chunk 1]\n\n**SIGNIFICANCE:**  \nTerminology differs: \u201cOutdoor fitting\u201d vs. \u201cOutdoor configuration package.\u201d This is a **medium** inconsistency. It may indicate a narrower scope on the invoice (e.g., just hardware) versus a broader package in the contract (possibly including weatherproofing, enclosures, etc.). Could lead to disputes over what is included.\n\n---\n\n## 3. Door Specifications\n\n**FIELD:** Door height and feature details\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 5:  \n    > \u201c**80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator**\u201d [4, Table 2 Row 5; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 **Aluminum door with plexi-glass inserts & automatic opener**\u201d [5, Chunk 1]\n\n**Differences:**\n\n- Invoice specifies:\n  - Height: \u201c80\" High\u201d\n  - \u201clow profile\u201d\n  - \u201cWR-500 lock\u201d\n  - \u201cautomatic door operator\u201d\n- Contract specifies:\n  - No height given\n  - No \u201clow profile\u201d term\n  - No lock model mentioned\n  - \u201cautomatic opener\u201d (similar but not identical wording)\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The invoice includes more specific features (height, lock model) that are not explicitly in the contract. If the customer expected a different height or lock type, or if \u201clow profile\u201d is a meaningful design constraint, this could be contested. Also, \u201cautomatic opener\u201d vs. \u201cautomatic door operator\u201d is likely equivalent but not identical wording.\n\n---\n\n## 4. Hall Call Stations \u2013 Terminology\n\n**FIELD:** Hall call station description\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 6:  \n    > \u201cHall Call stations for **bottom and upper landing**\u201d [4, Table 2 Row 6; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 2 **Flush-mount Hall Call stations (upper & lower)**\u201d [5, Chunk 1]\n\n**Differences:**\n\n- Invoice: \u201cHall Call stations\u201d (no \u201cflush-mount\u201d)\n- Contract: \u201cFlush-mount Hall Call stations\u201d\n- \u201cbottom and upper landing\u201d vs. \u201cupper & lower\u201d (likely equivalent)\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The contract explicitly requires \u201cflush-mount\u201d stations; the invoice omits that qualifier. If surface\u2011mount units are supplied instead, the supplier could argue they matched the invoice, while the customer points to the contract.\n\n---\n\n## 5. Lift Power System Description\n\n**FIELD:** Power system wording\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 2:  \n    > \u201c110 VAC 60 Hz up, 12 VAC down **operation parts**\u201d [4, Table 2 Row 2; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\u201d [5, Chunk 1]\n\n**Differences:**\n\n- Invoice: \u201coperation parts\u201d\n- Contract: \u201cPower system\u201d\n\n**SIGNIFICANCE:**  \nThis is a **medium/minor** inconsistency. The wording suggests the invoice might be itemizing \u201cparts\u201d rather than a complete \u201csystem.\u201d If a dispute arises over what is included (e.g., installation, controls), this difference could be relevant.\n\n---\n\n## 6. Payment Terms \u2013 Structure vs. Invoice Terms\n\n**FIELD:** Payment schedule vs. invoice due terms\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 1 (and repeated Table 4):  \n    > \u201cTERMS \u2026 **Due on contract signing**\u201d [4, Table 1 Row 1; Chunk 1, Chunk 2]  \n  - Table 3:  \n    > \u201cAMOUNT DUE | 29900.00\u201d [4, Table 3 Row 3; Table 6 Row 3]\n\n- Purchase Contract [5]:  \n  - Payment Terms:  \n    > \u201cTotal contract price is **$29,900.00, payable in 3 installments:**  \n    > \u00b7 **$20,000.00 upon signing**  \n    > \u00b7 **$7,000.00 upon delivery**  \n    > \u00b7 **$2,900.00 upon completion**\u201d [5, Chunk 1]\n\n**SIGNIFICANCE:**  \nThis is a **major** inconsistency. The contract clearly sets a three\u2011installment schedule, but the invoice demands the full $29,900 \u201cDue on contract signing.\u201d That directly contradicts the agreed payment structure and could be a breach of contract if enforced as written on the invoice.\n\n---\n\n## 7. Product Name vs. Contract Scope \u2013 Brand/Model Mismatch\n\n**FIELD:** Brand/model alignment with Exhibit A\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract / Exhibit A [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  > \u201cVertical Platform Lift (**Savaria V1504**)\u201d [4, Table 2 Row 1]\n\n- Purchase Contract / Exhibit A [5]:  \n  > \u201c1 Vertical Platform Lift (**AscendPro VPX200**)\u201d [5, Chunk 1; Chunk 3]\n\n**SIGNIFICANCE:**  \nReiterating the model mismatch with Exhibit A: the scope of work in Exhibit A is consistent with the main contract (AscendPro VPX200), while the invoice uses a different model. This reinforces that the discrepancy is not a typo but a systematic difference between contract and invoice. **Major** impact on what is actually being supplied.\n\n---\n\n## 8. Party Names \u2013 Contoso Lifts LLC vs. Contoso Ltd.\n\n**FIELD:** Entity name (vendor/contractor vs. owner in other agreements)\n\n**DOCUMENTS:** Invoice [4], Purchase Contract [5], Property Management Agreement [3], Builders Warranty [1], Holding Tank Contract [2]\n\n**EVIDENCE:**\n\n- Elevator contract & invoice:  \n  - Purchase Contract:  \n    > \u201cThis contract is entered into by and between **Contoso Lifts LLC. (Contractor)** \u2026 and **Fabrikam Inc. (Customer)**\u201d [5, Chunk 1]  \n  - Invoice:  \n    > \u201c**Contoso Lifts LLC**\u201d [4, S1\u2013S2; Chunk 2]\n\n- Other documents use \u201cContoso Ltd.\u201d:  \n  - Builders Limited Warranty:  \n    > \u201c\u2026 extended by Fabrikam Inc. \u2026 to by **Contoso Ltd. (the Buyer/Owner)**\u201d [1, Chunk 1]  \n  - Property Management Agreement:  \n    > \u201cTHIS AGREEMENT, by and between: **Contoso Ltd. (hereinafter called \"Owner\")** and Walt Flood Realty\u2026\u201d [3, Chunk 1]  \n  - Holding Tank Servicing Contract:  \n    > \u201cHolding Tank Owner(s) Name(s): **Contoso Ltd.**\u201d [2, Chunk 1; Table 1 Row 1]\n\n**SIGNIFICANCE:**  \nAcross the corpus, \u201cContoso Ltd.\u201d and \u201cContoso Lifts LLC\u201d appear as different legal entities. Within the elevator transaction itself, however, the contract and invoice consistently use \u201cContoso Lifts LLC,\u201d so there is **no internal inconsistency** for that deal. This is a **minor cross\u2011document inconsistency** in the broader dataset, but not a direct conflict between the specific invoice and purchase contract.\n\n---\n\n## 9. Customer Name \u2013 Fabrikam Inc. vs. Fabrikam Construction\n\n**FIELD:** Customer / buyer name\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Purchase Contract [5]:  \n  > \u201c\u2026 and **Fabrikam Inc. (Customer)**, located at 61 S 34th Street, Dayton, FL 33155.\u201d [5, Chunk 1]\n\n- Invoice [4]:  \n  > \u201cSHIP TO:  \n  > John Doe  \n  > **Fabrikam Construction**  \n  > 61 S 34th Street  \n  > Dayton, FL 33155\u201d [4, Chunk 1; Chunk 2]\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The contract is with \u201cFabrikam Inc.\u201d while the invoice is addressed to \u201cFabrikam Construction\u201d at the same address, with contact \u201cJohn Doe.\u201d If \u201cFabrikam Construction\u201d is a different legal entity or division, this could affect who is legally obligated to pay and who has rights under the contract.\n\n---\n\n## 10. Governing Law \u2013 Idaho vs. Florida (Cross\u2011Agreement Conflict)\n\n**FIELD:** Governing law / jurisdiction\n\n**DOCUMENTS:** Builders Limited Warranty [1] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Builders Limited Warranty [1]:  \n  > \u201cThe arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the **State of Idaho**.\u201d [1, Chunk 4/6]\n\n- Purchase Contract [5]:  \n  > \u201cThis contract shall be governed by the laws of the **State of Florida**.\u201d [5, S7; Chunk 1]\n\n**SIGNIFICANCE:**  \nThese are different agreements (home construction warranty vs. elevator purchase contract), so they are not expected to match. However, if someone mistakenly tried to apply the builder\u2019s warranty arbitration program to the elevator contract, there would be a **major** conflict in governing law (Idaho vs. Florida). For the elevator transaction alone, the contract and invoice are consistent (both Florida\u2011based addresses; only the contract states governing law).\n\n---\n\n## 11. Warranty Duration \u2013 Builder vs. Contractor (Cross\u2011Document)\n\n**FIELD:** Warranty duration and type\n\n**DOCUMENTS:** Builders Limited Warranty [1] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Builders Limited Warranty [1]:  \n  > \u201cThe Builder warrants for a period of **one (1) year** \u2026\u201d [1, Chunk 7/8]  \n  > \u201cThe Builder warrants \u2026 for a period of **sixty (60) days** that the following items will be free of defects\u2026\u201d [1, Chunk 7/8]\n\n- Purchase Contract [5]:  \n  > \u201cManufacturer warranty applies. **Contractor warrants labor for 90 days.**\u201d [5, S10; Chunk 1/2 (truncated but clear)]\n\n**SIGNIFICANCE:**  \nThese are different contracts for different work (home vs. lift installation). The mismatch (1 year / 60 days vs. 90 days labor) is expected across unrelated agreements. It is a **minor cross\u2011document inconsistency**, not a conflict between the elevator invoice and its purchase contract (which are internally consistent on warranty: the invoice itself does not restate warranty terms).\n\n---\n\n## 12. URL Typo in Invoice\n\n**FIELD:** Payment portal URL\n\n**DOCUMENTS:** Invoice [4]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  > \u201cPayments can also be made via our online portal: **https://ww.contosolifts.com/portal/pay**\u201d [4, S15]\n\n**SIGNIFICANCE:**  \nThis is a **minor** inconsistency/issue: the URL appears to be missing a \u201cw\u201d (\u201cww\u201d instead of \u201cwww\u201d). It may cause payment problems if a customer types it exactly as printed.\n\n---\n\n## 13. Contact Entity in Exhibit A Signature Block\n\n**FIELD:** Signing entity name in Exhibit A\n\n**DOCUMENTS:** Exhibit A [5] vs. Main Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Main Purchase Contract [5]:  \n  > \u201cThis contract is entered into by and between **Contoso Lifts LLC. (Contractor)** \u2026 and **Fabrikam Inc. (Customer)**\u201d [5, Chunk 1]\n\n- Exhibit A \u2013 Scope of Work [5]:  \n  > \u201cSigned this 04/30/2025:  \n  > Authorized Representative  \n  > **Contoso Ltd.**  \n  >  \n  > Authorized Representative  \n  > **Fabrikam Inc.**\u201d [5, Chunk 3/4]\n\n**SIGNIFICANCE:**  \nThis is a **major internal inconsistency within the contract package**. The main contract names \u201cContoso Lifts LLC\u201d as the contractor, but Exhibit A is signed on behalf of \u201cContoso Ltd.\u201d That raises questions about whether the correct legal entity executed the scope of work and could complicate enforcement or liability.\n\n---\n\n## 14. Job Name / Site vs. Invoice \u201cShip To\u201d (Potential Scope Mismatch)\n\n**FIELD:** Project site vs. shipping address\n\n**DOCUMENTS:** Exhibit A [5] vs. Invoice [4]\n\n**EVIDENCE:**\n\n- Exhibit A [5]:  \n  > \u201cJob Name: **Bayfront Animal Clinic**  \n  > Job Location: **811 Ocean Drive, Suite 405, Tampa, FL 33602**\u201d [5, Chunk 3]\n\n- Invoice [4]:  \n  > \u201cSHIP TO:  \n  > John Doe  \n  > Fabrikam Construction  \n  > **61 S 34th Street  \n  > Dayton, FL 33155**\u201d [4, Chunk 1/2]\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The contract\u2019s Exhibit A clearly identifies the job location in Tampa, FL, while the invoice\u2019s \u201cShip To\u201d address is the customer\u2019s office in Dayton, FL. This might be legitimate (equipment shipped to the contractor\u2019s office, then installed at the job site), but it is a factual mismatch between the project site and the shipping destination. If the contract expects direct delivery to the job site, this could be disputed.\n\n---\n\n## 15. Minor Formatting / Terminology Differences\n\nThese are small but worth noting:\n\n1. **Automatic opener vs. automatic door operator**  \n   - Contract: \u201cautomatic opener\u201d [5, Chunk 1]  \n   - Invoice: \u201cautomatic door operator\u201d [4, Table 2 Row 5]  \n   Likely equivalent; **minor**.\n\n2. **Upper & lower vs. bottom and upper landing**  \n   - Contract: \u201cupper & lower\u201d [5, Chunk 1]  \n   - Invoice: \u201cbottom and upper landing\u201d [4, Table 2 Row 6]  \n   Semantically similar; **minor**.\n\n---\n\n## Summary of Most Critical Conflicts\n\n1. **Model mismatch:** AscendPro VPX200 (contract) vs. Savaria V1504 (invoice).  \n2. **Payment terms:** 3\u2011installment schedule (contract) vs. full amount due on signing (invoice).  \n3. **Signing entity mismatch:** Contoso Lifts LLC (contract) vs. Contoso Ltd. (Exhibit A signature).  \n4. **Customer name variation:** Fabrikam Inc. (contract) vs. Fabrikam Construction (invoice).  \n5. **Scope details:** \u201cOutdoor configuration package\u201d vs. \u201cOutdoor fitting\u201d; \u201cflush\u2011mount\u201d omitted on invoice.\n\nThese are the inconsistencies most likely to create legal or commercial disputes between the parties.",
+  "length": 13823,
+  "latency": 41.68941903114319,
+  "citations": [
+    {
+      "index": 1,
+      "chunk_id": "chunk_1",
+      "document_id": "doc_fa45ea1eeb31434286d9f3e407529f66",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "",
+      "sentences": [
+        {
+          "text": "BUILDERS LIMITED WARRANTY",
+          "offset": 2,
+          "length": 25,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 1
+        },
+        {
+          "text": "(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201",
+          "offset": 245,
+          "length": 74,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 2
+        },
+        {
+          "text": "to by Contoso Ltd.",
+          "offset": 321,
+          "length": 18,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 3
+        },
+        {
+          "text": ". The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days",
+          "offset": 1055,
+          "length": 124,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 4
+        },
+        {
+          "text": "CONSEQUENTIAL OR INCIDENTAL DAMAGES. (SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION\nOF INCIDENTAL OR CONSEQUENTIAL DAMAGES, SO THE LIMITATION OR EXCLUSION MAY NOT APPLY TO YOU).",
+          "offset": 2609,
+          "length": 187,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 5
+        },
+        {
+          "text": "ragraph 2 of this Limited Warranty).",
+          "offset": 3120,
+          "length": 38,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 6
+        },
+        {
+          "text": "sidential use of the home.",
+          "offset": 3293,
+          "length": 28,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 7
+        },
+        {
+          "text": "eakage, wind storm, hail, lightening, falling trees, aircraft, vehicles, flood, earthquakes or acts of God.",
+          "offset": 4063,
+          "length": 109,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 8
+        },
+        {
+          "text": "gligence, improper maintenance, lack of maintenance, improper action or inaction, willful or malicious acts by any party other than the\nB",
+          "offset": 4609,
+          "length": 137,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 9
+        },
+        {
+          "text": "nstruction by Builder.",
+          "offset": 4915,
+          "length": 24,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 10
+        },
+        {
+          "text": "corporated into this warranty.",
+          "offset": 5061,
+          "length": 32,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 11
+        },
+        {
+          "text": "presentative John Smith\nC",
+          "offset": 5889,
+          "length": 25,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 12
+        },
+        {
+          "text": "ty, State, Zip_Pocatello, ID 83201\nEmergency Number ( 208 ) 555-2311",
+          "offset": 5966,
+          "length": 70,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 13
+        },
+        {
+          "text": "d all other damages.",
+          "offset": 6567,
+          "length": 22,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 14
+        },
+        {
+          "text": "OPERTY OF THE BUILDING CONTRACTORS ASSOCIATION OF SOUTH EAST IDAHO AND MEMBER OF GOOD STANDING\"",
+          "offset": 6788,
+          "length": 96,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 15
+        },
+        {
+          "text": "ansferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates.",
+          "offset": 7361,
+          "length": 129,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 16
+        },
+        {
+          "text": ". Arbitration.\nA",
+          "offset": 7492,
+          "length": 16,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 17
+        },
+        {
+          "text": "FORCE DECISION OF THE ARBITRATOR.ar",
+          "offset": 9224,
+          "length": 35,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 18
+        },
+        {
+          "text": "ll be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all D",
+          "offset": 9939,
+          "length": 132,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 20
+        },
+        {
+          "text": "eiver\nfrom a court having jurisdiction. Such rights can be exercised at any time except",
+          "offset": 11117,
+          "length": 87,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 21
+        },
+        {
+          "text": "about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of",
+          "offset": 12531,
+          "length": 96,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 22
+        },
+        {
+          "text": "law or regulation. If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall",
+          "offset": 13850,
+          "length": 129,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 23
+        },
+        {
+          "text": "all be valid or binding if not contai",
+          "offset": 14383,
+          "length": 37,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 24
+        },
+        {
+          "text": "erein.\n\nEntered into as of date of last signature of the parties hereto.\n\nContoso Ltd.\n\nFabrikam",
+          "offset": 15135,
+          "length": 96,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 26
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "chunk_id": "chunk_2",
+      "document_id": "doc_b46952e4249a43e7a7d2e1c283095052",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "",
+      "sentences": [
+        {
+          "text": "HOLDING TANK SERVICING CONTRACT",
+          "offset": 2,
+          "length": 31,
+          "confidence": 0.9,
+          "locale": "en",
+          "sentence_index": 1
+        },
+        {
+          "text": "Pumper's Name:",
+          "offset": 188,
+          "length": 14,
+          "confidence": 0.9,
+          "locale": "en",
+          "sentence_index": 2
+        },
+        {
+          "text": "Legal Description:",
+          "offset": 346,
+          "length": 18,
+          "confidence": 0.9,
+          "locale": "en",
+          "sentence_index": 3
+        },
+        {
+          "text": "Code SPS 383.21(2)5.",
+          "offset": 677,
+          "length": 20,
+          "confidence": 0.9,
+          "locale": "en",
+          "sentence_index": 4
+        },
+        {
+          "text": "REG-54321",
+          "offset": 2626,
+          "length": 9,
+          "confidence": 0.9,
+          "locale": "en",
+          "sentence_index": 5
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "chunk_id": "chunk_3",
+      "document_id": "doc_591d5a607cca4f0481a64c659864cddb",
+      "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "",
+      "sentences": [
+        {
+          "text": "PROPERTY MANAGEMENT AGREEMENT",
+          "offset": 2,
+          "length": 29,
+          "confidence": 0.8,
+          "locale": "en",
+          "sentence_index": 1
+        },
+        {
+          "text": "PROPERTY MANAGEMENT AGREEMENT:",
+          "offset": 3391,
+          "length": 30,
+          "confidence": 0.8,
+          "locale": "en",
+          "sentence_index": 2
+        },
+        {
+          "text": "AGENT: Walt Flood Realty",
+          "offset": 6029,
+          "length": 24,
+          "confidence": 0.8,
+          "locale": "en",
+          "sentence_index": 3
+        },
+        {
+          "text": "It's Principal Broker",
+          "offset": 6106,
+          "length": 21,
+          "confidence": 0.8,
+          "locale": "en",
+          "sentence_index": 4
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "chunk_id": "chunk_4",
+      "document_id": "doc_9b843f68a15144fa8536be6bc2530307",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "",
+      "sentences": [
+        {
+          "text": "Contoso Lifts LLC",
+          "offset": 0,
+          "length": 17,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 1
+        },
+        {
+          "text": "Contoso Lifts LLC",
+          "offset": 50,
+          "length": 17,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 2
+        },
+        {
+          "text": "COMMENTS OR SPECIAL INSTRUCTIONS:",
+          "offset": 249,
+          "length": 33,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 4
+        },
+        {
+          "text": "USTOMER ID #: 4905201",
+          "offset": 359,
+          "length": 22,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 5
+        },
+        {
+          "text": ".O. NUMBER<",
+          "offset": 542,
+          "length": 11,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 6
+        },
+        {
+          "text": "HIPPED VIA<",
+          "offset": 586,
+          "length": 11,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 7
+        },
+        {
+          "text": "UANTITY<",
+          "offset": 793,
+          "length": 8,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 8
+        },
+        {
+          "text": "ESCRIPTION<",
+          "offset": 811,
+          "length": 11,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 9
+        },
+        {
+          "text": "pecial Size 42\" x 62\" cab with 90 degree Type 3<",
+          "offset": 1106,
+          "length": 48,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 10
+        },
+        {
+          "text": "utdoor fitting<",
+          "offset": 1220,
+          "length": 15,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 11
+        },
+        {
+          "text": "0\" High low profile aluminum door with plexi-glass inserts,",
+          "offset": 1301,
+          "length": 60,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 12
+        },
+        {
+          "text": "all Call stations for bottom and upper landing<",
+          "offset": 1464,
+          "length": 47,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 13
+        },
+        {
+          "text": "MOUNT DUE<",
+          "offset": 1815,
+          "length": 10,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 15
+        },
+        {
+          "text": "ake all checks payable to Contoso Lifts LLC\nIf you have any questions concerning this invoice, contact Jim Contoso, (305) 490-5997, jim@contosolifts.com\nPayments can also be made via our online portal: https://ww.contosolifts.com/portal/pay",
+          "offset": 1866,
+          "length": 241,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 16
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "chunk_id": "chunk_5",
+      "document_id": "doc_5ec2c9c790e2498393afeca09b07546e",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "",
+      "sentences": [
+        {
+          "text": "PURCHASE CONTRACT",
+          "offset": 2,
+          "length": 17,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 1
+        },
+        {
+          "text": ". 1 Custom cab 42\" x 62\" with Type 3 90-degree access",
+          "offset": 477,
+          "length": 53,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 2
+        },
+        {
+          "text": "\u00b7 1 Aluminum door with plexi-glass inserts & automatic opener",
+          "offset": 567,
+          "length": 61,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 3
+        },
+        {
+          "text": "\u00b7 2 Flush-mount Hall Call stations (upper & lower)",
+          "offset": 630,
+          "length": 50,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 4
+        },
+        {
+          "text": "\u00b7 $2,900.00 upon completion",
+          "offset": 822,
+          "length": 27,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 5
+        },
+        {
+          "text": "6. Delivery",
+          "offset": 1162,
+          "length": 11,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 6
+        },
+        {
+          "text": "This contract shall be governed by the laws of the State of Florida.",
+          "offset": 1294,
+          "length": 68,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 7
+        },
+        {
+          "text": "8. Assignment",
+          "offset": 1368,
+          "length": 13,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 8
+        },
+        {
+          "text": "Neither party may assign this contract without the other's written consent.",
+          "offset": 1383,
+          "length": 75,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 9
+        },
+        {
+          "text": "Manufacturer warranty applies. Contractor warrants labor for 90 days.",
+          "offset": 1477,
+          "length": 69,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 10
+        },
+        {
+          "text": "11. Right to Cancel",
+          "offset": 1678,
+          "length": 19,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 11
+        },
+        {
+          "text": "ntractor agrees to furnis",
+          "offset": 1816,
+          "length": 25,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 12
+        },
+        {
+          "text": "opener\n\n\u00b7 2 Flush-mount Hall Call stations (upper &",
+          "offset": 2111,
+          "length": 53,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 13
+        },
+        {
+          "text": "ntract price is $29,900.00, payable in 3 installments:\n\n\u00b7 $20",
+          "offset": 2201,
+          "length": 61,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 14
+        },
+        {
+          "text": "00.00 upon signing\n\n\u00b7 $7,000.00 upon delivery\n\n\u00b7 $",
+          "offset": 2264,
+          "length": 50,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 15
+        },
+        {
+          "text": "Any changes must be agreed",
+          "offset": 2355,
+          "length": 27,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 16
+        },
+        {
+          "text": "in writing and will affect the next payment milestone.\n\n\n### 4.",
+          "offset": 2384,
+          "length": 64,
+          "confidence": 0.95,
+          "locale": "en",
+          "sentence_index": 17
+        }
+      ]
+    }
+  ],
+  "full_response": {
+    "response": "Below is a structured list of all inconsistencies, grouped by type and backed by explicit citations.\n\nI focus primarily on the relationship between the **contoso_lifts_invoice** [4] and the **purchase_contract** [5], but also note cross\u2011document party/term conflicts where relevant.\n\n---\n\n## 1. Product / Model Name\n\n**FIELD:** Vertical Platform Lift model\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4] \u2013 model:  \n  - Table 2, Row 1:  \n    > \u201cVertical Platform Lift (**Savaria V1504**)\u201d [4, Table 2 Row 1; Chunk 1]\n\n- Purchase Contract [5] \u2013 model:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 Vertical Platform Lift (**AscendPro VPX200**)\u201d [5, Chunk 1]\n\n**SIGNIFICANCE:**  \nThe contract and invoice describe different lift models. This is a **major** inconsistency: the customer may have contracted for an AscendPro VPX200 but is being invoiced for a Savaria V1504. It affects expectations, performance, warranty, and potentially price/value.\n\n---\n\n## 2. Product Description \u2013 \u201cOutdoor\u201d vs. \u201cOutdoor configuration package\u201d\n\n**FIELD:** Outdoor configuration / fitting description\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 4:  \n    > \u201cOutdoor fitting\u201d [4, Table 2 Row 4; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 **Outdoor configuration package**\u201d [5, Chunk 1]\n\n**SIGNIFICANCE:**  \nTerminology differs: \u201cOutdoor fitting\u201d vs. \u201cOutdoor configuration package.\u201d This is a **medium** inconsistency. It may indicate a narrower scope on the invoice (e.g., just hardware) versus a broader package in the contract (possibly including weatherproofing, enclosures, etc.). Could lead to disputes over what is included.\n\n---\n\n## 3. Door Specifications\n\n**FIELD:** Door height and feature details\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 5:  \n    > \u201c**80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator**\u201d [4, Table 2 Row 5; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 **Aluminum door with plexi-glass inserts & automatic opener**\u201d [5, Chunk 1]\n\n**Differences:**\n\n- Invoice specifies:\n  - Height: \u201c80\" High\u201d\n  - \u201clow profile\u201d\n  - \u201cWR-500 lock\u201d\n  - \u201cautomatic door operator\u201d\n- Contract specifies:\n  - No height given\n  - No \u201clow profile\u201d term\n  - No lock model mentioned\n  - \u201cautomatic opener\u201d (similar but not identical wording)\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The invoice includes more specific features (height, lock model) that are not explicitly in the contract. If the customer expected a different height or lock type, or if \u201clow profile\u201d is a meaningful design constraint, this could be contested. Also, \u201cautomatic opener\u201d vs. \u201cautomatic door operator\u201d is likely equivalent but not identical wording.\n\n---\n\n## 4. Hall Call Stations \u2013 Terminology\n\n**FIELD:** Hall call station description\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 6:  \n    > \u201cHall Call stations for **bottom and upper landing**\u201d [4, Table 2 Row 6; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 2 **Flush-mount Hall Call stations (upper & lower)**\u201d [5, Chunk 1]\n\n**Differences:**\n\n- Invoice: \u201cHall Call stations\u201d (no \u201cflush-mount\u201d)\n- Contract: \u201cFlush-mount Hall Call stations\u201d\n- \u201cbottom and upper landing\u201d vs. \u201cupper & lower\u201d (likely equivalent)\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The contract explicitly requires \u201cflush-mount\u201d stations; the invoice omits that qualifier. If surface\u2011mount units are supplied instead, the supplier could argue they matched the invoice, while the customer points to the contract.\n\n---\n\n## 5. Lift Power System Description\n\n**FIELD:** Power system wording\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 2, Row 2:  \n    > \u201c110 VAC 60 Hz up, 12 VAC down **operation parts**\u201d [4, Table 2 Row 2; Chunk 1]\n\n- Purchase Contract [5]:  \n  - Scope of Work:  \n    > \u201c\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\u201d [5, Chunk 1]\n\n**Differences:**\n\n- Invoice: \u201coperation parts\u201d\n- Contract: \u201cPower system\u201d\n\n**SIGNIFICANCE:**  \nThis is a **medium/minor** inconsistency. The wording suggests the invoice might be itemizing \u201cparts\u201d rather than a complete \u201csystem.\u201d If a dispute arises over what is included (e.g., installation, controls), this difference could be relevant.\n\n---\n\n## 6. Payment Terms \u2013 Structure vs. Invoice Terms\n\n**FIELD:** Payment schedule vs. invoice due terms\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  - Table 1 (and repeated Table 4):  \n    > \u201cTERMS \u2026 **Due on contract signing**\u201d [4, Table 1 Row 1; Chunk 1, Chunk 2]  \n  - Table 3:  \n    > \u201cAMOUNT DUE | 29900.00\u201d [4, Table 3 Row 3; Table 6 Row 3]\n\n- Purchase Contract [5]:  \n  - Payment Terms:  \n    > \u201cTotal contract price is **$29,900.00, payable in 3 installments:**  \n    > \u00b7 **$20,000.00 upon signing**  \n    > \u00b7 **$7,000.00 upon delivery**  \n    > \u00b7 **$2,900.00 upon completion**\u201d [5, Chunk 1]\n\n**SIGNIFICANCE:**  \nThis is a **major** inconsistency. The contract clearly sets a three\u2011installment schedule, but the invoice demands the full $29,900 \u201cDue on contract signing.\u201d That directly contradicts the agreed payment structure and could be a breach of contract if enforced as written on the invoice.\n\n---\n\n## 7. Product Name vs. Contract Scope \u2013 Brand/Model Mismatch\n\n**FIELD:** Brand/model alignment with Exhibit A\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract / Exhibit A [5]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  > \u201cVertical Platform Lift (**Savaria V1504**)\u201d [4, Table 2 Row 1]\n\n- Purchase Contract / Exhibit A [5]:  \n  > \u201c1 Vertical Platform Lift (**AscendPro VPX200**)\u201d [5, Chunk 1; Chunk 3]\n\n**SIGNIFICANCE:**  \nReiterating the model mismatch with Exhibit A: the scope of work in Exhibit A is consistent with the main contract (AscendPro VPX200), while the invoice uses a different model. This reinforces that the discrepancy is not a typo but a systematic difference between contract and invoice. **Major** impact on what is actually being supplied.\n\n---\n\n## 8. Party Names \u2013 Contoso Lifts LLC vs. Contoso Ltd.\n\n**FIELD:** Entity name (vendor/contractor vs. owner in other agreements)\n\n**DOCUMENTS:** Invoice [4], Purchase Contract [5], Property Management Agreement [3], Builders Warranty [1], Holding Tank Contract [2]\n\n**EVIDENCE:**\n\n- Elevator contract & invoice:  \n  - Purchase Contract:  \n    > \u201cThis contract is entered into by and between **Contoso Lifts LLC. (Contractor)** \u2026 and **Fabrikam Inc. (Customer)**\u201d [5, Chunk 1]  \n  - Invoice:  \n    > \u201c**Contoso Lifts LLC**\u201d [4, S1\u2013S2; Chunk 2]\n\n- Other documents use \u201cContoso Ltd.\u201d:  \n  - Builders Limited Warranty:  \n    > \u201c\u2026 extended by Fabrikam Inc. \u2026 to by **Contoso Ltd. (the Buyer/Owner)**\u201d [1, Chunk 1]  \n  - Property Management Agreement:  \n    > \u201cTHIS AGREEMENT, by and between: **Contoso Ltd. (hereinafter called \"Owner\")** and Walt Flood Realty\u2026\u201d [3, Chunk 1]  \n  - Holding Tank Servicing Contract:  \n    > \u201cHolding Tank Owner(s) Name(s): **Contoso Ltd.**\u201d [2, Chunk 1; Table 1 Row 1]\n\n**SIGNIFICANCE:**  \nAcross the corpus, \u201cContoso Ltd.\u201d and \u201cContoso Lifts LLC\u201d appear as different legal entities. Within the elevator transaction itself, however, the contract and invoice consistently use \u201cContoso Lifts LLC,\u201d so there is **no internal inconsistency** for that deal. This is a **minor cross\u2011document inconsistency** in the broader dataset, but not a direct conflict between the specific invoice and purchase contract.\n\n---\n\n## 9. Customer Name \u2013 Fabrikam Inc. vs. Fabrikam Construction\n\n**FIELD:** Customer / buyer name\n\n**DOCUMENTS:** Invoice [4] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Purchase Contract [5]:  \n  > \u201c\u2026 and **Fabrikam Inc. (Customer)**, located at 61 S 34th Street, Dayton, FL 33155.\u201d [5, Chunk 1]\n\n- Invoice [4]:  \n  > \u201cSHIP TO:  \n  > John Doe  \n  > **Fabrikam Construction**  \n  > 61 S 34th Street  \n  > Dayton, FL 33155\u201d [4, Chunk 1; Chunk 2]\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The contract is with \u201cFabrikam Inc.\u201d while the invoice is addressed to \u201cFabrikam Construction\u201d at the same address, with contact \u201cJohn Doe.\u201d If \u201cFabrikam Construction\u201d is a different legal entity or division, this could affect who is legally obligated to pay and who has rights under the contract.\n\n---\n\n## 10. Governing Law \u2013 Idaho vs. Florida (Cross\u2011Agreement Conflict)\n\n**FIELD:** Governing law / jurisdiction\n\n**DOCUMENTS:** Builders Limited Warranty [1] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Builders Limited Warranty [1]:  \n  > \u201cThe arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the **State of Idaho**.\u201d [1, Chunk 4/6]\n\n- Purchase Contract [5]:  \n  > \u201cThis contract shall be governed by the laws of the **State of Florida**.\u201d [5, S7; Chunk 1]\n\n**SIGNIFICANCE:**  \nThese are different agreements (home construction warranty vs. elevator purchase contract), so they are not expected to match. However, if someone mistakenly tried to apply the builder\u2019s warranty arbitration program to the elevator contract, there would be a **major** conflict in governing law (Idaho vs. Florida). For the elevator transaction alone, the contract and invoice are consistent (both Florida\u2011based addresses; only the contract states governing law).\n\n---\n\n## 11. Warranty Duration \u2013 Builder vs. Contractor (Cross\u2011Document)\n\n**FIELD:** Warranty duration and type\n\n**DOCUMENTS:** Builders Limited Warranty [1] vs. Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Builders Limited Warranty [1]:  \n  > \u201cThe Builder warrants for a period of **one (1) year** \u2026\u201d [1, Chunk 7/8]  \n  > \u201cThe Builder warrants \u2026 for a period of **sixty (60) days** that the following items will be free of defects\u2026\u201d [1, Chunk 7/8]\n\n- Purchase Contract [5]:  \n  > \u201cManufacturer warranty applies. **Contractor warrants labor for 90 days.**\u201d [5, S10; Chunk 1/2 (truncated but clear)]\n\n**SIGNIFICANCE:**  \nThese are different contracts for different work (home vs. lift installation). The mismatch (1 year / 60 days vs. 90 days labor) is expected across unrelated agreements. It is a **minor cross\u2011document inconsistency**, not a conflict between the elevator invoice and its purchase contract (which are internally consistent on warranty: the invoice itself does not restate warranty terms).\n\n---\n\n## 12. URL Typo in Invoice\n\n**FIELD:** Payment portal URL\n\n**DOCUMENTS:** Invoice [4]\n\n**EVIDENCE:**\n\n- Invoice [4]:  \n  > \u201cPayments can also be made via our online portal: **https://ww.contosolifts.com/portal/pay**\u201d [4, S15]\n\n**SIGNIFICANCE:**  \nThis is a **minor** inconsistency/issue: the URL appears to be missing a \u201cw\u201d (\u201cww\u201d instead of \u201cwww\u201d). It may cause payment problems if a customer types it exactly as printed.\n\n---\n\n## 13. Contact Entity in Exhibit A Signature Block\n\n**FIELD:** Signing entity name in Exhibit A\n\n**DOCUMENTS:** Exhibit A [5] vs. Main Purchase Contract [5]\n\n**EVIDENCE:**\n\n- Main Purchase Contract [5]:  \n  > \u201cThis contract is entered into by and between **Contoso Lifts LLC. (Contractor)** \u2026 and **Fabrikam Inc. (Customer)**\u201d [5, Chunk 1]\n\n- Exhibit A \u2013 Scope of Work [5]:  \n  > \u201cSigned this 04/30/2025:  \n  > Authorized Representative  \n  > **Contoso Ltd.**  \n  >  \n  > Authorized Representative  \n  > **Fabrikam Inc.**\u201d [5, Chunk 3/4]\n\n**SIGNIFICANCE:**  \nThis is a **major internal inconsistency within the contract package**. The main contract names \u201cContoso Lifts LLC\u201d as the contractor, but Exhibit A is signed on behalf of \u201cContoso Ltd.\u201d That raises questions about whether the correct legal entity executed the scope of work and could complicate enforcement or liability.\n\n---\n\n## 14. Job Name / Site vs. Invoice \u201cShip To\u201d (Potential Scope Mismatch)\n\n**FIELD:** Project site vs. shipping address\n\n**DOCUMENTS:** Exhibit A [5] vs. Invoice [4]\n\n**EVIDENCE:**\n\n- Exhibit A [5]:  \n  > \u201cJob Name: **Bayfront Animal Clinic**  \n  > Job Location: **811 Ocean Drive, Suite 405, Tampa, FL 33602**\u201d [5, Chunk 3]\n\n- Invoice [4]:  \n  > \u201cSHIP TO:  \n  > John Doe  \n  > Fabrikam Construction  \n  > **61 S 34th Street  \n  > Dayton, FL 33155**\u201d [4, Chunk 1/2]\n\n**SIGNIFICANCE:**  \nThis is a **medium** inconsistency. The contract\u2019s Exhibit A clearly identifies the job location in Tampa, FL, while the invoice\u2019s \u201cShip To\u201d address is the customer\u2019s office in Dayton, FL. This might be legitimate (equipment shipped to the contractor\u2019s office, then installed at the job site), but it is a factual mismatch between the project site and the shipping destination. If the contract expects direct delivery to the job site, this could be disputed.\n\n---\n\n## 15. Minor Formatting / Terminology Differences\n\nThese are small but worth noting:\n\n1. **Automatic opener vs. automatic door operator**  \n   - Contract: \u201cautomatic opener\u201d [5, Chunk 1]  \n   - Invoice: \u201cautomatic door operator\u201d [4, Table 2 Row 5]  \n   Likely equivalent; **minor**.\n\n2. **Upper & lower vs. bottom and upper landing**  \n   - Contract: \u201cupper & lower\u201d [5, Chunk 1]  \n   - Invoice: \u201cbottom and upper landing\u201d [4, Table 2 Row 6]  \n   Semantically similar; **minor**.\n\n---\n\n## Summary of Most Critical Conflicts\n\n1. **Model mismatch:** AscendPro VPX200 (contract) vs. Savaria V1504 (invoice).  \n2. **Payment terms:** 3\u2011installment schedule (contract) vs. full amount due on signing (invoice).  \n3. **Signing entity mismatch:** Contoso Lifts LLC (contract) vs. Contoso Ltd. (Exhibit A signature).  \n4. **Customer name variation:** Fabrikam Inc. (contract) vs. Fabrikam Construction (invoice).  \n5. **Scope details:** \u201cOutdoor configuration package\u201d vs. \u201cOutdoor fitting\u201d; \u201cflush\u2011mount\u201d omitted on invoice.\n\nThese are the inconsistencies most likely to create legal or commercial disputes between the parties.",
+    "route_used": "route_4_drift_multi_hop",
+    "citations": [
+      {
+        "index": 1,
+        "chunk_id": "chunk_1",
+        "document_id": "doc_fa45ea1eeb31434286d9f3e407529f66",
+        "document_title": "BUILDERS LIMITED WARRANTY",
+        "document_url": "",
+        "score": 0.0,
+        "text_preview": "",
+        "sentences": [
+          {
+            "text": "BUILDERS LIMITED WARRANTY",
+            "offset": 2,
+            "length": 25,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 1
+          },
+          {
+            "text": "(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201",
+            "offset": 245,
+            "length": 74,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 2
+          },
+          {
+            "text": "to by Contoso Ltd.",
+            "offset": 321,
+            "length": 18,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 3
+          },
+          {
+            "text": ". The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days",
+            "offset": 1055,
+            "length": 124,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 4
+          },
+          {
+            "text": "CONSEQUENTIAL OR INCIDENTAL DAMAGES. (SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION\nOF INCIDENTAL OR CONSEQUENTIAL DAMAGES, SO THE LIMITATION OR EXCLUSION MAY NOT APPLY TO YOU).",
+            "offset": 2609,
+            "length": 187,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 5
+          },
+          {
+            "text": "ragraph 2 of this Limited Warranty).",
+            "offset": 3120,
+            "length": 38,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 6
+          },
+          {
+            "text": "sidential use of the home.",
+            "offset": 3293,
+            "length": 28,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 7
+          },
+          {
+            "text": "eakage, wind storm, hail, lightening, falling trees, aircraft, vehicles, flood, earthquakes or acts of God.",
+            "offset": 4063,
+            "length": 109,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 8
+          },
+          {
+            "text": "gligence, improper maintenance, lack of maintenance, improper action or inaction, willful or malicious acts by any party other than the\nB",
+            "offset": 4609,
+            "length": 137,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 9
+          },
+          {
+            "text": "nstruction by Builder.",
+            "offset": 4915,
+            "length": 24,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 10
+          },
+          {
+            "text": "corporated into this warranty.",
+            "offset": 5061,
+            "length": 32,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 11
+          },
+          {
+            "text": "presentative John Smith\nC",
+            "offset": 5889,
+            "length": 25,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 12
+          },
+          {
+            "text": "ty, State, Zip_Pocatello, ID 83201\nEmergency Number ( 208 ) 555-2311",
+            "offset": 5966,
+            "length": 70,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 13
+          },
+          {
+            "text": "d all other damages.",
+            "offset": 6567,
+            "length": 22,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 14
+          },
+          {
+            "text": "OPERTY OF THE BUILDING CONTRACTORS ASSOCIATION OF SOUTH EAST IDAHO AND MEMBER OF GOOD STANDING\"",
+            "offset": 6788,
+            "length": 96,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 15
+          },
+          {
+            "text": "ansferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates.",
+            "offset": 7361,
+            "length": 129,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 16
+          },
+          {
+            "text": ". Arbitration.\nA",
+            "offset": 7492,
+            "length": 16,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 17
+          },
+          {
+            "text": "FORCE DECISION OF THE ARBITRATOR.ar",
+            "offset": 9224,
+            "length": 35,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 18
+          },
+          {
+            "text": "ll be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all D",
+            "offset": 9939,
+            "length": 132,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 20
+          },
+          {
+            "text": "eiver\nfrom a court having jurisdiction. Such rights can be exercised at any time except",
+            "offset": 11117,
+            "length": 87,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 21
+          },
+          {
+            "text": "about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of",
+            "offset": 12531,
+            "length": 96,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 22
+          },
+          {
+            "text": "law or regulation. If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall",
+            "offset": 13850,
+            "length": 129,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 23
+          },
+          {
+            "text": "all be valid or binding if not contai",
+            "offset": 14383,
+            "length": 37,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 24
+          },
+          {
+            "text": "erein.\n\nEntered into as of date of last signature of the parties hereto.\n\nContoso Ltd.\n\nFabrikam",
+            "offset": 15135,
+            "length": 96,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 26
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "chunk_id": "chunk_2",
+        "document_id": "doc_b46952e4249a43e7a7d2e1c283095052",
+        "document_title": "HOLDING TANK SERVICING CONTRACT",
+        "document_url": "",
+        "score": 0.0,
+        "text_preview": "",
+        "sentences": [
+          {
+            "text": "HOLDING TANK SERVICING CONTRACT",
+            "offset": 2,
+            "length": 31,
+            "confidence": 0.9,
+            "locale": "en",
+            "sentence_index": 1
+          },
+          {
+            "text": "Pumper's Name:",
+            "offset": 188,
+            "length": 14,
+            "confidence": 0.9,
+            "locale": "en",
+            "sentence_index": 2
+          },
+          {
+            "text": "Legal Description:",
+            "offset": 346,
+            "length": 18,
+            "confidence": 0.9,
+            "locale": "en",
+            "sentence_index": 3
+          },
+          {
+            "text": "Code SPS 383.21(2)5.",
+            "offset": 677,
+            "length": 20,
+            "confidence": 0.9,
+            "locale": "en",
+            "sentence_index": 4
+          },
+          {
+            "text": "REG-54321",
+            "offset": 2626,
+            "length": 9,
+            "confidence": 0.9,
+            "locale": "en",
+            "sentence_index": 5
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "chunk_id": "chunk_3",
+        "document_id": "doc_591d5a607cca4f0481a64c659864cddb",
+        "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+        "document_url": "",
+        "score": 0.0,
+        "text_preview": "",
+        "sentences": [
+          {
+            "text": "PROPERTY MANAGEMENT AGREEMENT",
+            "offset": 2,
+            "length": 29,
+            "confidence": 0.8,
+            "locale": "en",
+            "sentence_index": 1
+          },
+          {
+            "text": "PROPERTY MANAGEMENT AGREEMENT:",
+            "offset": 3391,
+            "length": 30,
+            "confidence": 0.8,
+            "locale": "en",
+            "sentence_index": 2
+          },
+          {
+            "text": "AGENT: Walt Flood Realty",
+            "offset": 6029,
+            "length": 24,
+            "confidence": 0.8,
+            "locale": "en",
+            "sentence_index": 3
+          },
+          {
+            "text": "It's Principal Broker",
+            "offset": 6106,
+            "length": 21,
+            "confidence": 0.8,
+            "locale": "en",
+            "sentence_index": 4
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "chunk_id": "chunk_4",
+        "document_id": "doc_9b843f68a15144fa8536be6bc2530307",
+        "document_title": "contoso_lifts_invoice",
+        "document_url": "",
+        "score": 0.0,
+        "text_preview": "",
+        "sentences": [
+          {
+            "text": "Contoso Lifts LLC",
+            "offset": 0,
+            "length": 17,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 1
+          },
+          {
+            "text": "Contoso Lifts LLC",
+            "offset": 50,
+            "length": 17,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 2
+          },
+          {
+            "text": "COMMENTS OR SPECIAL INSTRUCTIONS:",
+            "offset": 249,
+            "length": 33,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 4
+          },
+          {
+            "text": "USTOMER ID #: 4905201",
+            "offset": 359,
+            "length": 22,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 5
+          },
+          {
+            "text": ".O. NUMBER<",
+            "offset": 542,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 6
+          },
+          {
+            "text": "HIPPED VIA<",
+            "offset": 586,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 7
+          },
+          {
+            "text": "UANTITY<",
+            "offset": 793,
+            "length": 8,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 8
+          },
+          {
+            "text": "ESCRIPTION<",
+            "offset": 811,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 9
+          },
+          {
+            "text": "pecial Size 42\" x 62\" cab with 90 degree Type 3<",
+            "offset": 1106,
+            "length": 48,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 10
+          },
+          {
+            "text": "utdoor fitting<",
+            "offset": 1220,
+            "length": 15,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 11
+          },
+          {
+            "text": "0\" High low profile aluminum door with plexi-glass inserts,",
+            "offset": 1301,
+            "length": 60,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 12
+          },
+          {
+            "text": "all Call stations for bottom and upper landing<",
+            "offset": 1464,
+            "length": 47,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 13
+          },
+          {
+            "text": "MOUNT DUE<",
+            "offset": 1815,
+            "length": 10,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 15
+          },
+          {
+            "text": "ake all checks payable to Contoso Lifts LLC\nIf you have any questions concerning this invoice, contact Jim Contoso, (305) 490-5997, jim@contosolifts.com\nPayments can also be made via our online portal: https://ww.contosolifts.com/portal/pay",
+            "offset": 1866,
+            "length": 241,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 16
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "chunk_id": "chunk_5",
+        "document_id": "doc_5ec2c9c790e2498393afeca09b07546e",
+        "document_title": "purchase_contract",
+        "document_url": "",
+        "score": 0.0,
+        "text_preview": "",
+        "sentences": [
+          {
+            "text": "PURCHASE CONTRACT",
+            "offset": 2,
+            "length": 17,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 1
+          },
+          {
+            "text": ". 1 Custom cab 42\" x 62\" with Type 3 90-degree access",
+            "offset": 477,
+            "length": 53,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 2
+          },
+          {
+            "text": "\u00b7 1 Aluminum door with plexi-glass inserts & automatic opener",
+            "offset": 567,
+            "length": 61,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 3
+          },
+          {
+            "text": "\u00b7 2 Flush-mount Hall Call stations (upper & lower)",
+            "offset": 630,
+            "length": 50,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 4
+          },
+          {
+            "text": "\u00b7 $2,900.00 upon completion",
+            "offset": 822,
+            "length": 27,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 5
+          },
+          {
+            "text": "6. Delivery",
+            "offset": 1162,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 6
+          },
+          {
+            "text": "This contract shall be governed by the laws of the State of Florida.",
+            "offset": 1294,
+            "length": 68,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 7
+          },
+          {
+            "text": "8. Assignment",
+            "offset": 1368,
+            "length": 13,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 8
+          },
+          {
+            "text": "Neither party may assign this contract without the other's written consent.",
+            "offset": 1383,
+            "length": 75,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 9
+          },
+          {
+            "text": "Manufacturer warranty applies. Contractor warrants labor for 90 days.",
+            "offset": 1477,
+            "length": 69,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 10
+          },
+          {
+            "text": "11. Right to Cancel",
+            "offset": 1678,
+            "length": 19,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 11
+          },
+          {
+            "text": "ntractor agrees to furnis",
+            "offset": 1816,
+            "length": 25,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 12
+          },
+          {
+            "text": "opener\n\n\u00b7 2 Flush-mount Hall Call stations (upper &",
+            "offset": 2111,
+            "length": 53,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 13
+          },
+          {
+            "text": "ntract price is $29,900.00, payable in 3 installments:\n\n\u00b7 $20",
+            "offset": 2201,
+            "length": 61,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 14
+          },
+          {
+            "text": "00.00 upon signing\n\n\u00b7 $7,000.00 upon delivery\n\n\u00b7 $",
+            "offset": 2264,
+            "length": 50,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 15
+          },
+          {
+            "text": "Any changes must be agreed",
+            "offset": 2355,
+            "length": 27,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 16
+          },
+          {
+            "text": "in writing and will affect the next payment milestone.\n\n\n### 4.",
+            "offset": 2384,
+            "length": 64,
+            "confidence": 0.95,
+            "locale": "en",
+            "sentence_index": 17
+          }
+        ]
+      }
+    ],
+    "evidence_path": [],
+    "metadata": {
+      "sub_questions": [
+        "to both documents.",
+        "\u2014and analyze these to find and describe any differences, contradictions, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+        ", URLs, variations in entity names (e.g., abbreviations, spelling differences, legal suffixes), and site or location references\u2014and analyze these to find and describe any inconsistencies, discrepancies, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+        ", provide an integrated, detailed analysis that explains how these issues relate to each other, their potential impact on interpreting the agreement or processing the invoice, and support this analysis with specific references to the relevant parts of both documents."
+      ],
+      "refined_sub_questions": [
+        "Based on what we found, please identify and clarify all unknowns, ambiguities, or unclear points that appear in both documents, and analyze these to find and describe any differences, contradictions, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+        ", and site or location references in both documents, and analyze these to find and describe any inconsistencies, discrepancies, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+        ", provide an integrated, detailed analysis that explains how these issues relate to each other, their potential impact on interpreting the agreement or processing the invoice, and support this analysis with specific references to the relevant parts of both documents."
+      ],
+      "confidence_score": 0.4,
+      "confidence_loop_triggered": true,
+      "all_seeds_discovered": [],
+      "intermediate_results": [
+        {
+          "question": "to both documents.",
+          "entities": [],
+          "evidence_count": 0
+        },
+        {
+          "question": "\u2014and analyze these to find and describe any differences, contradictions, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+          "entities": [],
+          "evidence_count": 0
+        },
+        {
+          "question": ", URLs, variations in entity names (e.g., abbreviations, spelling differences, legal suffixes), and site or location references\u2014and analyze these to find and describe any inconsistencies, discrepancies, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+          "entities": [],
+          "evidence_count": 0
+        },
+        {
+          "question": ", provide an integrated, detailed analysis that explains how these issues relate to each other, their potential impact on interpreting the agreement or processing the invoice, and support this analysis with specific references to the relevant parts of both documents.",
+          "entities": [],
+          "evidence_count": 0
+        },
+        {
+          "question": "Based on what we found, please identify and clarify all unknowns, ambiguities, or unclear points that appear in both documents, and analyze these to find and describe any differences, contradictions, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+          "entities": [],
+          "evidence_count": 0
+        },
+        {
+          "question": ", and site or location references in both documents, and analyze these to find and describe any inconsistencies, discrepancies, or conflicts between the documents, providing a detailed analysis with specific references to both documents.",
+          "entities": [],
+          "evidence_count": 0
+        },
+        {
+          "question": ", provide an integrated, detailed analysis that explains how these issues relate to each other, their potential impact on interpreting the agreement or processing the invoice, and support this analysis with specific references to the relevant parts of both documents.",
+          "entities": [],
+          "evidence_count": 0
+        }
+      ],
+      "num_evidence_nodes": 0,
+      "text_chunks_used": 86,
+      "latency_estimate": "thorough",
+      "precision_level": "maximum",
+      "route_description": "DRIFT iterative multi-hop with confidence loop",
+      "coverage_retrieval": {
+        "applied": true,
+        "strategy": "section_based_hybrid_reranked",
+        "is_comprehensive_query": true,
+        "chunks_per_doc": 5,
+        "chunks_added": 18,
+        "docs_added": 5,
+        "docs_from_entity_retrieval": 0,
+        "total_docs_in_corpus": 5
+      },
+      "raw_extractions": [
+        {
+          "document_title": "BUILDERS LIMITED WARRANTY",
+          "sentences": [
+            {
+              "text": "BUILDERS LIMITED WARRANTY",
+              "offset": 2,
+              "length": 25,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201",
+              "offset": 245,
+              "length": 74,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "to by Contoso Ltd.",
+              "offset": 321,
+              "length": 18,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": ". The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days\n",
+              "offset": 1055,
+              "length": 124,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": " CONSEQUENTIAL OR INCIDENTAL DAMAGES. (SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION\nOF INCIDENTAL OR CONSEQUENTIAL DAMAGES, SO THE LIMITATION OR EXCLUSION MAY NOT APPLY TO YOU).\n\n",
+              "offset": 2609,
+              "length": 187,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ragraph 2 of this Limited Warranty).\n\n",
+              "offset": 3120,
+              "length": 38,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "sidential use of the home.\n\n",
+              "offset": 3293,
+              "length": 28,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "eakage, wind storm, hail, lightening, falling trees, aircraft, vehicles, flood, earthquakes or acts of God.\n\n",
+              "offset": 4063,
+              "length": 109,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "gligence, improper maintenance, lack of maintenance, improper action or inaction, willful or malicious acts by any party other than the\nB",
+              "offset": 4609,
+              "length": 137,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "nstruction by Builder.\n\n",
+              "offset": 4915,
+              "length": 24,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "corporated into this warranty.\n\n",
+              "offset": 5061,
+              "length": 32,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "presentative John Smith\nC",
+              "offset": 5889,
+              "length": 25,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ty, State, Zip_Pocatello, ID 83201\nEmergency Number ( 208 ) 555-2311\n\n",
+              "offset": 5966,
+              "length": 70,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "d all other damages.\n\n",
+              "offset": 6567,
+              "length": 22,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "OPERTY OF THE BUILDING CONTRACTORS ASSOCIATION OF SOUTH EAST IDAHO AND MEMBER OF GOOD STANDING\" ",
+              "offset": 6788,
+              "length": 96,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ansferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates.\n\n",
+              "offset": 7361,
+              "length": 129,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": ". Arbitration.\nA",
+              "offset": 7492,
+              "length": 16,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "FORCE DECISION OF THE ARBITRATOR.ar",
+              "offset": 9224,
+              "length": 35,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "tr",
+              "offset": 9261,
+              "length": 2,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ll be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all D",
+              "offset": 9939,
+              "length": 132,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "eiver\nfrom a court having jurisdiction. Such rights can be exercised at any time except",
+              "offset": 11117,
+              "length": 87,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of ",
+              "offset": 12531,
+              "length": 96,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "law or regulation. If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall ",
+              "offset": 13850,
+              "length": 129,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "all be valid or binding if not contai",
+              "offset": 14383,
+              "length": 37,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "im",
+              "offset": 14967,
+              "length": 2,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "erein.\n\nEntered into as of date of last signature of the parties hereto.\n\nContoso Ltd.\n\nFabrikam",
+              "offset": 15135,
+              "length": 96,
+              "confidence": 0.95,
+              "locale": "en"
+            }
+          ],
+          "total_spans": 0
+        },
+        {
+          "document_title": "HOLDING TANK SERVICING CONTRACT",
+          "sentences": [
+            {
+              "text": "HOLDING TANK SERVICING CONTRACT",
+              "offset": 2,
+              "length": 31,
+              "confidence": 0.9,
+              "locale": "en"
+            },
+            {
+              "text": "Pumper's Name:",
+              "offset": 188,
+              "length": 14,
+              "confidence": 0.9,
+              "locale": "en"
+            },
+            {
+              "text": "Legal Description:",
+              "offset": 346,
+              "length": 18,
+              "confidence": 0.9,
+              "locale": "en"
+            },
+            {
+              "text": "Code SPS 383.21(2)5.",
+              "offset": 677,
+              "length": 20,
+              "confidence": 0.9,
+              "locale": "en"
+            },
+            {
+              "text": "REG-54321",
+              "offset": 2626,
+              "length": 9,
+              "confidence": 0.9,
+              "locale": "en"
+            }
+          ],
+          "total_spans": 0
+        },
+        {
+          "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+          "sentences": [
+            {
+              "text": "PROPERTY MANAGEMENT AGREEMENT",
+              "offset": 2,
+              "length": 29,
+              "confidence": 0.8,
+              "locale": "en"
+            },
+            {
+              "text": "PROPERTY MANAGEMENT AGREEMENT:",
+              "offset": 3391,
+              "length": 30,
+              "confidence": 0.8,
+              "locale": "en"
+            },
+            {
+              "text": "AGENT: Walt Flood Realty",
+              "offset": 6029,
+              "length": 24,
+              "confidence": 0.8,
+              "locale": "en"
+            },
+            {
+              "text": "It's Principal Broker",
+              "offset": 6106,
+              "length": 21,
+              "confidence": 0.8,
+              "locale": "en"
+            }
+          ],
+          "total_spans": 0
+        },
+        {
+          "document_title": "contoso_lifts_invoice",
+          "sentences": [
+            {
+              "text": "Contoso Lifts LLC",
+              "offset": 0,
+              "length": 17,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "Contoso Lifts LLC",
+              "offset": 50,
+              "length": 17,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "TO:",
+              "offset": 152,
+              "length": 3,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "COMMENTS OR SPECIAL INSTRUCTIONS:",
+              "offset": 249,
+              "length": 33,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "USTOMER ID #: 4905201\n",
+              "offset": 359,
+              "length": 22,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": ".O. NUMBER<",
+              "offset": 542,
+              "length": 11,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "HIPPED VIA<",
+              "offset": 586,
+              "length": 11,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "UANTITY<",
+              "offset": 793,
+              "length": 8,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ESCRIPTION<",
+              "offset": 811,
+              "length": 11,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "pecial Size 42\" x 62\" cab with 90 degree Type 3<",
+              "offset": 1106,
+              "length": 48,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "utdoor fitting<",
+              "offset": 1220,
+              "length": 15,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "0\" High low profile aluminum door with plexi-glass inserts, ",
+              "offset": 1301,
+              "length": 60,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "all Call stations for bottom and upper landing<",
+              "offset": 1464,
+              "length": 47,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "AX<",
+              "offset": 1734,
+              "length": 3,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "MOUNT DUE<",
+              "offset": 1815,
+              "length": 10,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ake all checks payable to Contoso Lifts LLC\nIf you have any questions concerning this invoice, contact Jim Contoso, (305) 490-5997, jim@contosolifts.com\nPayments can also be made via our online portal: https://ww.contosolifts.com/portal/pay\n",
+              "offset": 1866,
+              "length": 241,
+              "confidence": 0.95,
+              "locale": "en"
+            }
+          ],
+          "total_spans": 0
+        },
+        {
+          "document_title": "purchase_contract",
+          "sentences": [
+            {
+              "text": "PURCHASE CONTRACT",
+              "offset": 2,
+              "length": 17,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": ". 1 Custom cab 42\" x 62\" with Type 3 90-degree access",
+              "offset": 477,
+              "length": 53,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "\u00b7 1 Aluminum door with plexi-glass inserts & automatic opener",
+              "offset": 567,
+              "length": 61,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "\u00b7 2 Flush-mount Hall Call stations (upper & lower)",
+              "offset": 630,
+              "length": 50,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "\u00b7 $2,900.00 upon completion",
+              "offset": 822,
+              "length": 27,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "6. Delivery",
+              "offset": 1162,
+              "length": 11,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "This contract shall be governed by the laws of the State of Florida.",
+              "offset": 1294,
+              "length": 68,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "8. Assignment",
+              "offset": 1368,
+              "length": 13,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "Neither party may assign this contract without the other's written consent.",
+              "offset": 1383,
+              "length": 75,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "Manufacturer warranty applies. Contractor warrants labor for 90 days.",
+              "offset": 1477,
+              "length": 69,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "11. Right to Cancel",
+              "offset": 1678,
+              "length": 19,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ntractor agrees to furnis",
+              "offset": 1816,
+              "length": 25,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": " opener\n\n\u00b7 2 Flush-mount Hall Call stations (upper & ",
+              "offset": 2111,
+              "length": 53,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "ntract price is $29,900.00, payable in 3 installments:\n\n\u00b7 $20",
+              "offset": 2201,
+              "length": 61,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "00.00 upon signing\n\n\u00b7 $7,000.00 upon delivery\n\n\u00b7 $",
+              "offset": 2264,
+              "length": 50,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": "Any changes must be agreed ",
+              "offset": 2355,
+              "length": 27,
+              "confidence": 0.95,
+              "locale": "en"
+            },
+            {
+              "text": " in writing and will affect the next payment milestone.\n\n\n### 4.",
+              "offset": 2384,
+              "length": 64,
+              "confidence": 0.95,
+              "locale": "en"
+            }
+          ],
+          "total_spans": 0
+        }
+      ],
+      "processing_mode": "comprehensive_sentence_level"
+    },
+    "raw_extractions": [
+      {
+        "document_title": "BUILDERS LIMITED WARRANTY",
+        "sentences": [
+          {
+            "text": "BUILDERS LIMITED WARRANTY",
+            "offset": 2,
+            "length": 25,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201",
+            "offset": 245,
+            "length": 74,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "to by Contoso Ltd.",
+            "offset": 321,
+            "length": 18,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": ". The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days\n",
+            "offset": 1055,
+            "length": 124,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": " CONSEQUENTIAL OR INCIDENTAL DAMAGES. (SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION\nOF INCIDENTAL OR CONSEQUENTIAL DAMAGES, SO THE LIMITATION OR EXCLUSION MAY NOT APPLY TO YOU).\n\n",
+            "offset": 2609,
+            "length": 187,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ragraph 2 of this Limited Warranty).\n\n",
+            "offset": 3120,
+            "length": 38,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "sidential use of the home.\n\n",
+            "offset": 3293,
+            "length": 28,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "eakage, wind storm, hail, lightening, falling trees, aircraft, vehicles, flood, earthquakes or acts of God.\n\n",
+            "offset": 4063,
+            "length": 109,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "gligence, improper maintenance, lack of maintenance, improper action or inaction, willful or malicious acts by any party other than the\nB",
+            "offset": 4609,
+            "length": 137,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "nstruction by Builder.\n\n",
+            "offset": 4915,
+            "length": 24,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "corporated into this warranty.\n\n",
+            "offset": 5061,
+            "length": 32,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "presentative John Smith\nC",
+            "offset": 5889,
+            "length": 25,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ty, State, Zip_Pocatello, ID 83201\nEmergency Number ( 208 ) 555-2311\n\n",
+            "offset": 5966,
+            "length": 70,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "d all other damages.\n\n",
+            "offset": 6567,
+            "length": 22,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "OPERTY OF THE BUILDING CONTRACTORS ASSOCIATION OF SOUTH EAST IDAHO AND MEMBER OF GOOD STANDING\" ",
+            "offset": 6788,
+            "length": 96,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ansferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates.\n\n",
+            "offset": 7361,
+            "length": 129,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": ". Arbitration.\nA",
+            "offset": 7492,
+            "length": 16,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "FORCE DECISION OF THE ARBITRATOR.ar",
+            "offset": 9224,
+            "length": 35,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "tr",
+            "offset": 9261,
+            "length": 2,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ll be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all D",
+            "offset": 9939,
+            "length": 132,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "eiver\nfrom a court having jurisdiction. Such rights can be exercised at any time except",
+            "offset": 11117,
+            "length": 87,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of ",
+            "offset": 12531,
+            "length": 96,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "law or regulation. If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall ",
+            "offset": 13850,
+            "length": 129,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "all be valid or binding if not contai",
+            "offset": 14383,
+            "length": 37,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "im",
+            "offset": 14967,
+            "length": 2,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "erein.\n\nEntered into as of date of last signature of the parties hereto.\n\nContoso Ltd.\n\nFabrikam",
+            "offset": 15135,
+            "length": 96,
+            "confidence": 0.95,
+            "locale": "en"
+          }
+        ],
+        "total_spans": 0
+      },
+      {
+        "document_title": "HOLDING TANK SERVICING CONTRACT",
+        "sentences": [
+          {
+            "text": "HOLDING TANK SERVICING CONTRACT",
+            "offset": 2,
+            "length": 31,
+            "confidence": 0.9,
+            "locale": "en"
+          },
+          {
+            "text": "Pumper's Name:",
+            "offset": 188,
+            "length": 14,
+            "confidence": 0.9,
+            "locale": "en"
+          },
+          {
+            "text": "Legal Description:",
+            "offset": 346,
+            "length": 18,
+            "confidence": 0.9,
+            "locale": "en"
+          },
+          {
+            "text": "Code SPS 383.21(2)5.",
+            "offset": 677,
+            "length": 20,
+            "confidence": 0.9,
+            "locale": "en"
+          },
+          {
+            "text": "REG-54321",
+            "offset": 2626,
+            "length": 9,
+            "confidence": 0.9,
+            "locale": "en"
+          }
+        ],
+        "total_spans": 0
+      },
+      {
+        "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+        "sentences": [
+          {
+            "text": "PROPERTY MANAGEMENT AGREEMENT",
+            "offset": 2,
+            "length": 29,
+            "confidence": 0.8,
+            "locale": "en"
+          },
+          {
+            "text": "PROPERTY MANAGEMENT AGREEMENT:",
+            "offset": 3391,
+            "length": 30,
+            "confidence": 0.8,
+            "locale": "en"
+          },
+          {
+            "text": "AGENT: Walt Flood Realty",
+            "offset": 6029,
+            "length": 24,
+            "confidence": 0.8,
+            "locale": "en"
+          },
+          {
+            "text": "It's Principal Broker",
+            "offset": 6106,
+            "length": 21,
+            "confidence": 0.8,
+            "locale": "en"
+          }
+        ],
+        "total_spans": 0
+      },
+      {
+        "document_title": "contoso_lifts_invoice",
+        "sentences": [
+          {
+            "text": "Contoso Lifts LLC",
+            "offset": 0,
+            "length": 17,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "Contoso Lifts LLC",
+            "offset": 50,
+            "length": 17,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "TO:",
+            "offset": 152,
+            "length": 3,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "COMMENTS OR SPECIAL INSTRUCTIONS:",
+            "offset": 249,
+            "length": 33,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "USTOMER ID #: 4905201\n",
+            "offset": 359,
+            "length": 22,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": ".O. NUMBER<",
+            "offset": 542,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "HIPPED VIA<",
+            "offset": 586,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "UANTITY<",
+            "offset": 793,
+            "length": 8,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ESCRIPTION<",
+            "offset": 811,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "pecial Size 42\" x 62\" cab with 90 degree Type 3<",
+            "offset": 1106,
+            "length": 48,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "utdoor fitting<",
+            "offset": 1220,
+            "length": 15,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "0\" High low profile aluminum door with plexi-glass inserts, ",
+            "offset": 1301,
+            "length": 60,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "all Call stations for bottom and upper landing<",
+            "offset": 1464,
+            "length": 47,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "AX<",
+            "offset": 1734,
+            "length": 3,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "MOUNT DUE<",
+            "offset": 1815,
+            "length": 10,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ake all checks payable to Contoso Lifts LLC\nIf you have any questions concerning this invoice, contact Jim Contoso, (305) 490-5997, jim@contosolifts.com\nPayments can also be made via our online portal: https://ww.contosolifts.com/portal/pay\n",
+            "offset": 1866,
+            "length": 241,
+            "confidence": 0.95,
+            "locale": "en"
+          }
+        ],
+        "total_spans": 0
+      },
+      {
+        "document_title": "purchase_contract",
+        "sentences": [
+          {
+            "text": "PURCHASE CONTRACT",
+            "offset": 2,
+            "length": 17,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": ". 1 Custom cab 42\" x 62\" with Type 3 90-degree access",
+            "offset": 477,
+            "length": 53,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "\u00b7 1 Aluminum door with plexi-glass inserts & automatic opener",
+            "offset": 567,
+            "length": 61,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "\u00b7 2 Flush-mount Hall Call stations (upper & lower)",
+            "offset": 630,
+            "length": 50,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "\u00b7 $2,900.00 upon completion",
+            "offset": 822,
+            "length": 27,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "6. Delivery",
+            "offset": 1162,
+            "length": 11,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "This contract shall be governed by the laws of the State of Florida.",
+            "offset": 1294,
+            "length": 68,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "8. Assignment",
+            "offset": 1368,
+            "length": 13,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "Neither party may assign this contract without the other's written consent.",
+            "offset": 1383,
+            "length": 75,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "Manufacturer warranty applies. Contractor warrants labor for 90 days.",
+            "offset": 1477,
+            "length": 69,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "11. Right to Cancel",
+            "offset": 1678,
+            "length": 19,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ntractor agrees to furnis",
+            "offset": 1816,
+            "length": 25,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": " opener\n\n\u00b7 2 Flush-mount Hall Call stations (upper & ",
+            "offset": 2111,
+            "length": 53,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "ntract price is $29,900.00, payable in 3 installments:\n\n\u00b7 $20",
+            "offset": 2201,
+            "length": 61,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "00.00 upon signing\n\n\u00b7 $7,000.00 upon delivery\n\n\u00b7 $",
+            "offset": 2264,
+            "length": 50,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": "Any changes must be agreed ",
+            "offset": 2355,
+            "length": 27,
+            "confidence": 0.95,
+            "locale": "en"
+          },
+          {
+            "text": " in writing and will affect the next payment milestone.\n\n\n### 4.",
+            "offset": 2384,
+            "length": 64,
+            "confidence": 0.95,
+            "locale": "en"
+          }
+        ],
+        "total_spans": 0
+      }
+    ]
+  }
+}

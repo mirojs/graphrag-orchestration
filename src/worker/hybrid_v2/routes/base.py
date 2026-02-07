@@ -467,6 +467,235 @@ class BaseRouteHandler:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._executor, _run_sync)
 
+    # =========================================================================
+    # Hybrid RRF Search (BM25 + Vector)
+    # =========================================================================
+
+    async def _search_chunks_cypher25_hybrid_rrf(
+        self,
+        query_text: str,
+        embedding: list,
+        top_k: int = 20,
+        vector_k: int = 30,
+        bm25_k: int = 30,
+        rrf_k: int = 60,
+        use_phrase_boost: bool = True,
+    ) -> List[Tuple[Dict[str, Any], float, bool]]:
+        """Cypher 25 hybrid search with native BM25 + Vector RRF fusion.
+
+        Uses the correct vector index based on V2 mode (chunk_embeddings_v2 vs
+        chunk_embedding) via ``get_vector_index_name()``.
+
+        Returns:
+            List of (chunk_dict, rrf_score, is_anchor) tuples.
+        """
+        if not self.neo4j_driver:
+            return []
+
+        await self._ensure_textchunk_fulltext_index()
+        group_id = self.group_id
+
+        if use_phrase_boost:
+            bm25_query = self._build_phrase_aware_fulltext_query(query_text)
+        else:
+            bm25_query = self._sanitize_query_for_fulltext(query_text)
+
+        if not bm25_query:
+            bm25_query = query_text
+
+        from src.worker.hybrid_v2.orchestrator import get_vector_index_name
+        vector_index = get_vector_index_name()
+        driver = self.neo4j_driver
+
+        def _run_sync():
+            cypher = f"""
+            CYPHER 25
+            WITH $bm25_query AS bm25_query, $group_id AS group_id,
+                 $bm25_k AS bm25_k, $embedding AS embedding,
+                 $vector_k AS vector_k, $rrf_k AS rrf_k, $top_k AS top_k
+
+            CALL (bm25_query, group_id) {{
+                CALL db.index.fulltext.queryNodes('textchunk_fulltext', bm25_query)
+                YIELD node, score
+                WHERE node.group_id = group_id
+                WITH node, score ORDER BY score DESC LIMIT $bm25_k
+                WITH collect(node) AS nodes
+                UNWIND range(0, size(nodes)-1) AS i
+                RETURN nodes[i] AS node, (i + 1) AS rank
+            }}
+            WITH collect({{node: node, rank: rank}}) AS bm25List,
+                 embedding, group_id, vector_k, rrf_k, top_k
+
+            CALL (embedding, group_id) {{
+                CALL db.index.vector.queryNodes('{vector_index}', $vector_k * 10, embedding)
+                YIELD node, score
+                WHERE node.group_id = group_id
+                WITH node, score ORDER BY score DESC LIMIT $vector_k
+                WITH collect(node) AS nodes
+                UNWIND range(0, size(nodes)-1) AS i
+                RETURN nodes[i] AS node, (i + 1) AS rank
+            }}
+            WITH bm25List, collect({{node: node, rank: rank}}) AS vectorList,
+                 group_id, rrf_k, top_k
+
+            WITH bm25List, vectorList, group_id, rrf_k, top_k,
+                 [x IN bm25List | x.node] + [y IN vectorList | y.node] AS allNodes
+            UNWIND allNodes AS node
+            WITH DISTINCT node, bm25List, vectorList, group_id, rrf_k, top_k
+            WITH node, group_id, rrf_k, top_k,
+                 [b IN bm25List WHERE b.node = node | b.rank][0] AS bm25Rank,
+                 [v IN vectorList WHERE v.node = node | v.rank][0] AS vectorRank
+            WITH node, group_id, top_k,
+                 (CASE WHEN bm25Rank IS NULL THEN 0.0
+                       ELSE 1.0 / (rrf_k + bm25Rank) END) +
+                 (CASE WHEN vectorRank IS NULL THEN 0.0
+                       ELSE 1.0 / (rrf_k + vectorRank) END) AS rrfScore,
+                 bm25Rank IS NOT NULL AS hasBM25,
+                 vectorRank IS NOT NULL AS hasVector
+
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: group_id}})
+            OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
+
+            RETURN node.id AS id, node.text AS text,
+                   node.chunk_index AS chunk_index,
+                   d.id AS document_id, d.title AS document_title,
+                   d.source AS document_source,
+                   s.id AS section_id, s.path_key AS section_path_key,
+                   rrfScore AS score, hasBM25, hasVector
+            ORDER BY rrfScore DESC
+            LIMIT $top_k
+            """
+
+            rows = []
+            try:
+                with driver.session() as session:
+                    result = session.run(
+                        cypher,
+                        bm25_query=bm25_query,
+                        embedding=embedding,
+                        group_id=group_id,
+                        vector_k=vector_k,
+                        bm25_k=bm25_k,
+                        rrf_k=rrf_k,
+                        top_k=top_k,
+                    )
+                    for r in result:
+                        chunk = {
+                            "id": r["id"],
+                            "text": r["text"],
+                            "chunk_index": r.get("chunk_index", 0),
+                            "document_id": r.get("document_id", ""),
+                            "document_title": r.get("document_title", ""),
+                            "document_source": r.get("document_source", ""),
+                            "section_id": r.get("section_id", ""),
+                            "section_path_key": r.get("section_path_key", ""),
+                        }
+                        is_anchor = bool(r.get("hasBM25")) and bool(r.get("hasVector"))
+                        rows.append((chunk, float(r.get("score") or 0.0), is_anchor))
+            except Exception as e:
+                logger.error("cypher25_hybrid_rrf_failed", error=str(e), error_type=type(e).__name__)
+
+            return rows
+
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(self._executor, _run_sync)
+
+        logger.info(
+            "cypher25_hybrid_rrf_complete",
+            query=query_text[:80],
+            bm25_query=bm25_query[:100],
+            total_results=len(results),
+            anchors=sum(1 for _, _, a in results if a),
+            vector_index=vector_index,
+        )
+
+        return results
+
+    async def _search_chunks_graph_native_bm25(
+        self,
+        query_text: str,
+        top_k: int = 15,
+        anchor_limit: int = 15,
+        graph_decay: float = 0.5,
+        use_phrase_boost: bool = True,
+    ) -> List[Tuple[Dict[str, Any], float, bool]]:
+        """Pure BM25 retrieval with phrase-aware queries (no vector search).
+
+        Returns:
+            List of (chunk_dict, score, is_anchor) tuples.
+        """
+        if not self.neo4j_driver:
+            return []
+
+        await self._ensure_textchunk_fulltext_index()
+        group_id = self.group_id
+        driver = self.neo4j_driver
+
+        if use_phrase_boost:
+            search_query = self._build_phrase_aware_fulltext_query(query_text)
+        else:
+            search_query = self._sanitize_query_for_fulltext(query_text)
+
+        if not search_query:
+            return []
+
+        def _run_sync():
+            cypher = """
+            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $search_query)
+            YIELD node AS chunk, score AS bm25_score
+            WHERE chunk.group_id = $group_id
+
+            OPTIONAL MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+
+            RETURN chunk.id AS id, chunk.text AS text,
+                   chunk.chunk_index AS chunk_index,
+                   d.id AS document_id, d.title AS document_title,
+                   d.source AS document_source,
+                   s.id AS section_id, s.path_key AS section_path_key,
+                   bm25_score AS score, true AS is_anchor
+            ORDER BY score DESC
+            LIMIT $top_k
+            """
+
+            rows = []
+            try:
+                with driver.session() as session:
+                    result = session.run(
+                        cypher,
+                        search_query=search_query,
+                        group_id=group_id,
+                        top_k=top_k,
+                    )
+                    for r in result:
+                        chunk = {
+                            "id": r["id"],
+                            "text": r["text"],
+                            "chunk_index": r.get("chunk_index", 0),
+                            "document_id": r.get("document_id", ""),
+                            "document_title": r.get("document_title", ""),
+                            "document_source": r.get("document_source", ""),
+                            "section_id": r.get("section_id", ""),
+                            "section_path_key": r.get("section_path_key", ""),
+                        }
+                        rows.append((chunk, float(r.get("score") or 0.0), True))
+            except Exception as e:
+                logger.error("graph_native_bm25_query_failed", error=str(e))
+
+            return rows
+
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(self._executor, _run_sync)
+
+        logger.info(
+            "pure_bm25_phrase_search_complete",
+            query=query_text[:80],
+            search_query=search_query[:100],
+            total_results=len(results),
+        )
+
+        return results
+
     async def _search_via_entity_graph(
         self,
         query: str,

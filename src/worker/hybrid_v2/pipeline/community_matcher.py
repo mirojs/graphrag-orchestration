@@ -283,8 +283,11 @@ class CommunityMatcher:
                     embedding_query = """
                     MATCH (e)
                     WHERE (e:Entity OR e:`__Entity__`)
-                      AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                    WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
+                      AND e.group_id = $group_id 
+                      AND (e.embedding_v2 IS NOT NULL OR e.embedding IS NOT NULL)
+                    WITH e, vector.similarity.cosine(
+                        COALESCE(e.embedding_v2, e.embedding), $query_embedding
+                    ) AS similarity
                     WHERE similarity > 0.35
                     OPTIONAL MATCH (c:TextChunk)-[:MENTIONS]->(e)
                     WHERE c.group_id = $group_id
@@ -419,8 +422,11 @@ class CommunityMatcher:
                     embedding_query = """
                     MATCH (e)
                     WHERE (e:Entity OR e:`__Entity__`)
-                      AND e.group_id = $group_id AND e.embedding IS NOT NULL
-                    WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
+                      AND e.group_id = $group_id 
+                      AND (e.embedding_v2 IS NOT NULL OR e.embedding IS NOT NULL)
+                    WITH e, vector.similarity.cosine(
+                        COALESCE(e.embedding_v2, e.embedding), $query_embedding
+                    ) AS similarity
                     WHERE similarity > 0.3
                     RETURN e.name AS name, e.description AS description, similarity
                     ORDER BY similarity DESC

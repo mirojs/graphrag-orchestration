@@ -50,11 +50,11 @@ class HippoRAGRetrieverConfig:
     # Entity extraction prompt
     entity_extraction_prompt: str = field(default="""
 Extract the key entities from the following query that would be useful for graph-based retrieval.
-Return a JSON array of entity names/phrases.
+Return ONLY a markdown list of entity names, one per line.
 
 Query: {query}
 
-Entities (JSON array):""")
+Entities:""")
 
 
 class HippoRAGRetriever(BaseRetriever):
@@ -254,29 +254,37 @@ class HippoRAGRetriever(BaseRetriever):
         """Use LLM to extract seed entities from the query."""
         if self.llm is None:
             return []
-        
+
         try:
             import json
-            
+
             prompt = self.config.entity_extraction_prompt.format(query=query)
-            
+
             # Use the LLM to extract entities
             response = await self.llm.acomplete(prompt)
             response_text = str(response).strip()
-            
-            # Parse JSON response
-            # Try to find JSON array in response
-            if "[" in response_text:
-                start = response_text.index("[")
-                end = response_text.rindex("]") + 1
-                json_str = response_text[start:end]
-                entities = json.loads(json_str)
-                
-                if isinstance(entities, list):
-                    return [str(e).strip() for e in entities if e]
-            
-            return []
-            
+
+            # Parse markdown list response
+            entities = []
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if line.startswith('- '):
+                    entities.append(line[2:].strip())
+                elif line.startswith('* '):
+                    entities.append(line[2:].strip())
+
+            if not entities:
+                # Fallback: try JSON array parsing for backward compatibility
+                if "[" in response_text:
+                    start = response_text.index("[")
+                    end = response_text.rindex("]") + 1
+                    json_str = response_text[start:end]
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, list):
+                        entities = [str(e).strip() for e in parsed if e]
+
+            return [e for e in entities if e]
+
         except Exception as e:
             logger.warning("hipporag_entity_extraction_failed", error=str(e))
             return []
@@ -645,24 +653,34 @@ class HippoRAGRetriever(BaseRetriever):
         """Synchronous entity extraction fallback."""
         if self.llm is None:
             return []
-        
+
         try:
             import json
-            
+
             prompt = self.config.entity_extraction_prompt.format(query=query)
             response = self.llm.complete(prompt)
             response_text = str(response).strip()
-            
-            if "[" in response_text:
-                start = response_text.index("[")
-                end = response_text.rindex("]") + 1
-                json_str = response_text[start:end]
-                entities = json.loads(json_str)
-                
-                if isinstance(entities, list):
-                    return [str(e).strip() for e in entities if e]
-            
-            return []
+
+            # Parse markdown list response
+            entities = []
+            for line in response_text.split('\n'):
+                line = line.strip()
+                if line.startswith('- '):
+                    entities.append(line[2:].strip())
+                elif line.startswith('* '):
+                    entities.append(line[2:].strip())
+
+            if not entities:
+                # Fallback: try JSON array parsing for backward compatibility
+                if "[" in response_text:
+                    start = response_text.index("[")
+                    end = response_text.rindex("]") + 1
+                    json_str = response_text[start:end]
+                    parsed = json.loads(json_str)
+                    if isinstance(parsed, list):
+                        entities = [str(e).strip() for e in parsed if e]
+
+            return [e for e in entities if e]
             
         except Exception as e:
             logger.warning("hipporag_entity_extraction_sync_failed", error=str(e))

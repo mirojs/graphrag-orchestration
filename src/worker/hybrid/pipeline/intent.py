@@ -109,17 +109,37 @@ Available Communities/Entities:
 Important:
 - Return specific entity-like strings (proper nouns, organizations, document titles, named clauses) likely to exist in the graph.
 - Do NOT return generic keywords (e.g., "licensed", "state", "jurisdiction", "payment", "instructions").
-- If you are unsure, return an empty JSON array: []
+- If you are unsure, return nothing.
 
-Return ONLY a JSON array of entity names. Example: ["Contoso Ltd.", "Purchase Contract", "Warranty Agreement"]
-Do not include any explanation, just the JSON array.
+Return ONLY a markdown list of entity names, one per line. Example:
+- Contoso Ltd.
+- Purchase Contract
+- Warranty Agreement
+
+Do not include any explanation, just the list.
 """
-        
+
         try:
             response = await self.llm.acomplete(prompt)
-            # Parse the JSON response
-            import json
-            entities = json.loads(response.text.strip())
+            # Parse markdown list response
+            raw_text = response.text.strip()
+            entities = []
+            for line in raw_text.split('\n'):
+                line = line.strip()
+                if line.startswith('- '):
+                    entities.append(line[2:].strip())
+                elif line.startswith('* '):
+                    entities.append(line[2:].strip())
+
+            if not entities:
+                # Fallback: try JSON parsing for backward compatibility
+                import json
+                try:
+                    parsed = json.loads(raw_text)
+                    if isinstance(parsed, list):
+                        entities = [str(x).strip() for x in parsed if isinstance(x, str)]
+                except (json.JSONDecodeError, ValueError):
+                    pass
             
             if isinstance(entities, list):
                 def _clean(name: str) -> str:

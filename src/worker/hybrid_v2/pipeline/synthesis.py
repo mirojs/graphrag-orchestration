@@ -226,7 +226,6 @@ class EvidenceSynthesizer:
         
         # Step 2: Build context with citations (now groups by document for better reasoning)
         context, citation_map = self._build_cited_context(text_chunks)
-        context, citation_map = self._build_cited_context(text_chunks)
         
         # Step 2.5: Inject global document overview when retrieval is sparse.
         # This fixes Q-D7 (dates) and Q-D8 (comparisons) where PPR returns few/no entities.
@@ -623,13 +622,21 @@ Evidence Context (organized by entity relationships and document sections):
 
 {termination_hint}
 
-Generate a comprehensive {response_type.replace('_', ' ')} that:
-1. Directly answers the query
-2. {citation_instruction}
-3. Leverages the entity relationships to explain connections
-4. Organizes information by document sections where relevant
-5. Highlights cross-references between different sources
-6. Includes any explicit numeric values found in evidence (e.g., dollar amounts, time periods/deadlines, percentages, counts) verbatim
+Generate a comprehensive {response_type.replace('_', ' ')} using this format:
+
+## Answer
+
+[Direct answer to the query with citations {citation_instruction.split('using ')[-1]} for every factual claim]
+
+## Supporting Details
+
+- [Key detail 1 with citation]
+- [Key detail 2 with citation]
+- [Additional details as needed]
+
+## Cross-References
+
+[Any connections between different sources or entities, with citations]
 
 Response:"""
 
@@ -1093,11 +1100,17 @@ Question: {query}
 Evidence Context:
 {context}
 
-Generate a comprehensive, detailed response that:
-1. Directly answers the question
-2. Cites specific sources for every claim using [N] notation
-3. Explains the connections between entities
-4. Highlights any important details from the source documents
+If the requested information IS present, respond using this format:
+
+## Answer
+
+[Direct answer to the question with citations [N] for every factual claim]
+
+## Details
+
+- [Specific detail with citation [N]]
+- [Connection between entities with citation [N]]
+- [Important highlights from source documents with citation [N]]
 
 Response:"""
 
@@ -1158,7 +1171,20 @@ Instructions:
 6. Prefer concrete obligations/thresholds over general paraphrases.
 7. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 {document_guidance}
-Summary:"""
+
+Respond using this format:
+
+## Summary
+
+[Concise summary (2-3 paragraphs) with citations [N] for every factual claim. Include explicit numeric values verbatim.]
+
+## Key Points
+
+- [Distinct item/obligation 1 with citation [N]]
+- [Distinct item/obligation 2 with citation [N]]
+- [Additional items as needed]
+
+Response:"""
 
     def _get_audit_trail_prompt(self, query: str, context: str) -> str:
         return f"""You are generating an audit trail for compliance purposes.
@@ -1170,11 +1196,22 @@ Question: {query}
 Evidence Context:
 {context}
 
-Generate an audit trail that:
-1. Lists each relevant finding with its exact source citation [N]
-2. Shows the logical chain of evidence
-3. Notes any gaps or uncertainties
-4. Provides a confidence assessment
+Respond using this format:
+
+## Findings
+
+- **Finding 1:** [Statement with exact source citation [N]]
+- **Finding 2:** [Statement with exact source citation [N]]
+- [Additional findings as needed]
+
+## Evidence Chain
+
+[Logical chain showing how evidence connects, with citations [N]]
+
+## Gaps and Confidence
+
+- **Gaps:** [Any missing information or uncertainties]
+- **Confidence:** [High/Medium/Low with justification]
 
 Audit Trail:"""
 

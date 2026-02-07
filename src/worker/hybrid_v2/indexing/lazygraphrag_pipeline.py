@@ -36,7 +36,11 @@ from llama_index.core.schema import TextNode
 try:
     from neo4j_graphrag.experimental.components.entity_relation_extractor import LLMEntityRelationExtractor
     from neo4j_graphrag.experimental.components.types import TextChunk as NativeTextChunk, TextChunks
-    from neo4j_graphrag.experimental.components.schema import NodeType, PropertyType, RelationshipType, GraphSchema
+    # neo4j_graphrag >= 1.7.0: NodeType→SchemaEntity, PropertyType→SchemaProperty,
+    # RelationshipType→SchemaRelation, GraphSchema→SchemaConfig
+    from neo4j_graphrag.experimental.components.schema import (
+        SchemaEntity, SchemaProperty, SchemaRelation, SchemaConfig,
+    )
     from neo4j_graphrag.llm import AzureOpenAILLM
     NATIVE_EXTRACTOR_AVAILABLE = True
 except ImportError:
@@ -306,6 +310,12 @@ class LazyGraphRAGIndexingPipeline:
                 chunks=all_chunks,
             )
             logger.info(f"entity_extraction_complete: {len(entities)} entities, {len(relationships)} relationships")
+            # Diagnostic: log relationship count to help debug validation failures
+            if len(relationships) < self.config.min_mentions:
+                logger.warning(
+                    f"low_relationship_count: {len(relationships)} relationships "
+                    f"(min_mentions={self.config.min_mentions}), entities={len(entities)}"
+                )
 
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
@@ -675,13 +685,14 @@ class LazyGraphRAGIndexingPipeline:
 
             for kr in kg_rels:
                 # Best-effort parsing of relation objects/dicts.
-                subj = getattr(kr, "source", None) or getattr(kr, "subject", None)
-                obj = getattr(kr, "target", None) or getattr(kr, "object", None)
+                # LlamaIndex Relation uses source_id/target_id; older versions used source/target.
+                subj = getattr(kr, "source_id", None) or getattr(kr, "source", None) or getattr(kr, "subject", None)
+                obj = getattr(kr, "target_id", None) or getattr(kr, "target", None) or getattr(kr, "object", None)
                 label = getattr(kr, "label", None) or getattr(kr, "relation", None)
 
                 if isinstance(kr, dict):
-                    subj = subj or kr.get("source") or kr.get("subject")
-                    obj = obj or kr.get("target") or kr.get("object")
+                    subj = subj or kr.get("source_id") or kr.get("source") or kr.get("subject")
+                    obj = obj or kr.get("target_id") or kr.get("target") or kr.get("object")
                     label = label or kr.get("label") or kr.get("relation")
 
                 subj_name = (str(subj) if subj is not None else "").strip()
@@ -2009,74 +2020,86 @@ Output:
         }
         return list(canonical_entities.values()), out_rels, dedup_stats
 
-    def _build_extraction_schema(self) -> "GraphSchema":
+    def _build_extraction_schema(self) -> "SchemaConfig":
         """
         Build a schema that instructs the LLM to extract aliases alongside entities.
         
         This enables matching user queries like "Fabrikam Inc." to entities stored as
         "Fabrikam Construction" by including common variations in the aliases property.
+        
+        Uses neo4j_graphrag >= 1.7.0 SchemaConfig API (entities/relations as dicts).
         """
-        # Common entity types with aliases property
-        entity_types = [
-            NodeType(
-                label="ORGANIZATION",
-                description="A company, corporation, business entity, or legal organization",
-                properties=[
-                    PropertyType(name="name", type="STRING", description="Official/legal name as it appears in the document", required=True),
-                    PropertyType(name="aliases", type="LIST", description="Common alternative names, abbreviations, short forms, or variations users might use (e.g., 'Fabrikam' for 'Fabrikam Construction Inc.')", required=False),
-                    PropertyType(name="description", type="STRING", description="Brief description of the organization", required=False),
+        # Entity types with alias properties for fuzzy matching
+        entities = {
+            "ORGANIZATION": {
+                "description": "A company, corporation, business entity, or legal organization",
+                "properties": [
+                    {"name": "name", "type": "STRING", "description": "Official/legal name as it appears in the document"},
+                    {"name": "aliases", "type": "LIST", "description": "Common alternative names, abbreviations, short forms, or variations users might use (e.g., 'Fabrikam' for 'Fabrikam Construction Inc.')"},
+                    {"name": "description", "type": "STRING", "description": "Brief description of the organization"},
                 ],
-            ),
-            NodeType(
-                label="PERSON",
-                description="A named individual or person",
-                properties=[
-                    PropertyType(name="name", type="STRING", description="Full name as it appears in the document", required=True),
-                    PropertyType(name="aliases", type="LIST", description="Nicknames, maiden names, titles, or common variations", required=False),
-                    PropertyType(name="description", type="STRING", description="Role or brief description", required=False),
+            },
+            "PERSON": {
+                "description": "A named individual or person",
+                "properties": [
+                    {"name": "name", "type": "STRING", "description": "Full name as it appears in the document"},
+                    {"name": "aliases", "type": "LIST", "description": "Nicknames, maiden names, titles, or common variations"},
+                    {"name": "description", "type": "STRING", "description": "Role or brief description"},
                 ],
-            ),
-            NodeType(
-                label="DOCUMENT",
-                description="A legal document, contract, agreement, or formal document",
-                properties=[
-                    PropertyType(name="name", type="STRING", description="Document title or name", required=True),
-                    PropertyType(name="aliases", type="LIST", description="Short names or common references (e.g., 'the contract' for 'Purchase Contract Agreement')", required=False),
-                    PropertyType(name="description", type="STRING", description="Brief description of document purpose", required=False),
+            },
+            "DOCUMENT": {
+                "description": "A legal document, contract, agreement, or formal document",
+                "properties": [
+                    {"name": "name", "type": "STRING", "description": "Document title or name"},
+                    {"name": "aliases", "type": "LIST", "description": "Short names or common references (e.g., 'the contract' for 'Purchase Contract Agreement')"},
+                    {"name": "description", "type": "STRING", "description": "Brief description of document purpose"},
                 ],
-            ),
-            NodeType(
-                label="LOCATION",
-                description="A geographic location, address, or place",
-                properties=[
-                    PropertyType(name="name", type="STRING", description="Location name or address", required=True),
-                    PropertyType(name="aliases", type="LIST", description="Abbreviated forms or common references", required=False),
+            },
+            "LOCATION": {
+                "description": "A geographic location, address, or place",
+                "properties": [
+                    {"name": "name", "type": "STRING", "description": "Location name or address"},
+                    {"name": "aliases", "type": "LIST", "description": "Abbreviated forms or common references"},
                 ],
-            ),
-            NodeType(
-                label="CONCEPT",
-                description="An abstract concept, term, clause, or named section",
-                properties=[
-                    PropertyType(name="name", type="STRING", description="Concept or term name", required=True),
-                    PropertyType(name="aliases", type="LIST", description="Alternative phrasings or abbreviations", required=False),
-                    PropertyType(name="description", type="STRING", description="Brief explanation", required=False),
+            },
+            "CONCEPT": {
+                "description": "An abstract concept, term, clause, or named section",
+                "properties": [
+                    {"name": "name", "type": "STRING", "description": "Concept or term name"},
+                    {"name": "aliases", "type": "LIST", "description": "Alternative phrasings or abbreviations"},
+                    {"name": "description", "type": "STRING", "description": "Brief explanation"},
                 ],
-            ),
-        ]
+            },
+        }
         
-        # Common relationship types
-        relationship_types = [
-            RelationshipType(label="RELATED_TO", description="General relationship between entities"),
-            RelationshipType(label="PARTY_TO", description="Entity is a party to a document/agreement"),
-            RelationshipType(label="LOCATED_IN", description="Entity is located in a place"),
-            RelationshipType(label="MENTIONS", description="Document mentions an entity"),
-            RelationshipType(label="DEFINES", description="Document defines a term or concept"),
+        # Relationship types
+        relations = {
+            "RELATED_TO": {"description": "General relationship between entities"},
+            "PARTY_TO": {"description": "Entity is a party to a document/agreement"},
+            "LOCATED_IN": {"description": "Entity is located in a place"},
+            "MENTIONS": {"description": "Document mentions an entity"},
+            "DEFINES": {"description": "Document defines a term or concept"},
             # Azure DI-extracted relationships (FREE add-ons)
-            RelationshipType(label="FOUND_IN", description="Barcode or Figure found in a Document"),
-            RelationshipType(label="REFERENCES", description="Figure references another element (paragraph, table, section)"),
+            "FOUND_IN": {"description": "Barcode or Figure found in a Document"},
+            "REFERENCES": {"description": "Figure references another element (paragraph, table, section)"},
+        }
+        
+        # Define plausible schema triples for guided extraction
+        potential_schema = [
+            ("ORGANIZATION", "PARTY_TO", "DOCUMENT"),
+            ("PERSON", "PARTY_TO", "DOCUMENT"),
+            ("ORGANIZATION", "LOCATED_IN", "LOCATION"),
+            ("PERSON", "LOCATED_IN", "LOCATION"),
+            ("DOCUMENT", "MENTIONS", "ORGANIZATION"),
+            ("DOCUMENT", "MENTIONS", "PERSON"),
+            ("DOCUMENT", "MENTIONS", "LOCATION"),
+            ("DOCUMENT", "DEFINES", "CONCEPT"),
+            ("ORGANIZATION", "RELATED_TO", "ORGANIZATION"),
+            ("PERSON", "RELATED_TO", "ORGANIZATION"),
+            ("CONCEPT", "RELATED_TO", "CONCEPT"),
         ]
         
-        return GraphSchema(node_types=entity_types, relationship_types=relationship_types)
+        return SchemaConfig(entities=entities, relations=relations, potential_schema=potential_schema)
 
     @staticmethod
     def _canonical_entity_key(name: str, locale: Optional[str] = None) -> str:

@@ -2568,7 +2568,7 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 - **V2 Enhanced Script:** `scripts/index_5pdfs_v2_enhanced_examples.py` (enhanced entity extraction examples)
 - **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
 - **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
-- **Verification Script:** `check_edges.py` (compares graph structure between groups)
+- **Verification Script:** `check_edges.py` — comprehensive graph validation for V1 & V2 indexing (updated Feb 7, 2026: covers all node types, structural/entity/semantic/DI edges, GDS properties, embeddings, language spans, orphan detection; supports `--json`, `--expected-docs N`, exit code 1 on issues)
 - **V2 Latest Group:** `test-5pdfs-v2-1769609082` (Jan 28, 2026) - **GDS UNIFIED** ✅ (KNN only, deduplicated)
 - **V1 Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
 
@@ -2726,17 +2726,20 @@ python3 scripts/index_5pdfs.py
 **Graph Verification (`check_edges.py`):**
 
 ```bash
-cd graphrag-orchestration
-export $(cat .env | grep -v '^#' | xargs)
+# Check latest group (reads from last_test_group_id.txt or defaults to test-5pdfs-v2-fix2)
+python3 check_edges.py
 
-# Check latest group (reads from last_test_group_id.txt)
-python3 ../check_edges.py
+# Check specific group
+python3 check_edges.py test-5pdfs-v2-fix2
 
-# Check V2 group
-python3 ../check_edges.py test-5pdfs-v2-1769496129
+# Validate expected document count (exits 1 on mismatch)
+python3 check_edges.py test-5pdfs-v2-fix2 --expected-docs 5
+
+# JSON output for automation / CI
+python3 check_edges.py test-5pdfs-v2-fix2 --json
 
 # Check V1 group for comparison
-python3 ../check_edges.py test-5pdfs-1769071711867955961
+python3 check_edges.py test-5pdfs-1769071711867955961
 ```
 
 **V2 vs V1 Comparison (Jan 26, 2026):**
@@ -2806,28 +2809,33 @@ Azure Document Intelligence key-value pair extraction is now preserved as dedica
 
 **Verification Script (`check_edges.py`):**
 
-After indexing completes, verify the graph structure including V2 embeddings:
+After indexing completes, verify the full graph structure. The script auto-detects V1 vs V2 features and flags issues:
 
 ```bash
-cd graphrag-orchestration
-export $(cat .env | grep -v '^#' | xargs)
-
 # Check latest indexed group (reads from last_test_group_id.txt)
-python3 ../check_edges.py
+python3 check_edges.py
 
-# Check V2 group (current: test-5pdfs-v2-1769603510 with GDS enabled)
-python3 ../check_edges.py test-5pdfs-v2-1769603510
+# Check specific V2 group with expected doc count
+python3 check_edges.py test-5pdfs-v2-fix2 --expected-docs 5
 
-# Check V1 group (test-5pdfs-1769071711867955961 with OpenAI embeddings)
-python3 ../check_edges.py test-5pdfs-1769071711867955961
+# JSON output for CI / automation pipelines
+python3 check_edges.py test-5pdfs-v2-fix2 --json
 ```
 
-**What the Check Script Verifies (Updated Jan 26, 2026):**
+**What the Check Script Verifies (Updated Feb 7, 2026):**
 
-1. **Phase 1 Foundation Edges** - APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY
-2. **Phase 2 Connectivity Edges** - SHARES_ENTITY (cross-document section links)
-3. **Phase 3 Semantic Edges** - SIMILAR_TO (entity semantic similarity)
-4. **Entity Aliases** - Verifies aliases extracted during indexing (enables flexible entity lookup)
+1. **Node Counts** — Document, TextChunk, Section, Entity, Table, KeyValue, KeyValuePair, Figure, Barcode, Community, GroupMeta
+2. **Structural Edges** — IN_DOCUMENT (V2) / PART_OF (V1), HAS_SECTION, SUBSECTION_OF, IN_SECTION, IN_CHUNK; orphan Section detection
+3. **Entity / Knowledge Edges** — MENTIONS (TextChunk→Entity), RELATED_TO (Entity→Entity)
+4. **Phase 1 Foundation Edges** — APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY
+5. **Phase 2 Connectivity Edges** — SHARES_ENTITY (cross-document section links)
+6. **Phase 3 Semantic Edges** — SIMILAR_TO (V1 entity cosine), SEMANTICALLY_SIMILAR (V2 Section↔Section + GDS KNN breakdown)
+7. **DI Metadata Edges** — FOUND_IN for Barcode, Figure, KeyValuePair
+8. **GDS Properties** — community_id (Louvain), pagerank, importance_score, BELONGS_TO (Entity→Community)
+9. **Embeddings** — TextChunk V1/V2 (dim check), Section, Entity V1/V2, KeyValue key_embedding, KeyValuePair embedding_v2, Figure embedding_v2
+10. **Entity Aliases** — Count + samples
+11. **Language Spans** — Per-document language_spans and primary_language with ✅/❌ indicators
+12. **Validation Summary** — Aggregated issues list; exit code 1 if any issues found (CI-friendly)
 5. **V2 Embeddings** - ✅ NEW: Checks `embedding_v2` (Voyage 2048d) vs `embedding` (OpenAI 3072d)
 6. **Table & KeyValue Nodes** - ✅ NEW: Counts structured Table and KeyValue nodes
 7. **Document Nodes** - ✅ NEW: Lists all indexed documents by title

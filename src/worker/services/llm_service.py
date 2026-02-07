@@ -208,10 +208,19 @@ class LLMService:
         return self._embed_model
     
     def get_routing_llm(self) -> Any:
-        """Get the specialized routing LLM (o4-mini)."""
-        deployment = settings.AZURE_OPENAI_ROUTING_DEPLOYMENT or "o4-mini"
-        effort = settings.AZURE_OPENAI_ROUTING_REASONING_EFFORT or "medium"
-        return self._create_llm_client(deployment, reasoning_effort=effort)
+        """Get the specialized routing LLM (default: gpt-5.1).
+
+        Uses AZURE_OPENAI_ROUTING_DEPLOYMENT from settings.
+        Only applies reasoning_effort for o-series models.
+        """
+        deployment = settings.AZURE_OPENAI_ROUTING_DEPLOYMENT or "gpt-4o-mini"
+
+        # Only use reasoning_effort for o-series models
+        if deployment.startswith(("o1", "o3", "o4")):
+            effort = settings.AZURE_OPENAI_ROUTING_REASONING_EFFORT or "medium"
+            return self._create_llm_client(deployment, reasoning_effort=effort)
+        else:
+            return self._create_llm_client(deployment)
 
     def get_indexing_llm(self) -> Any:
         """Get the specialized indexing LLM (GPT-4.1)."""

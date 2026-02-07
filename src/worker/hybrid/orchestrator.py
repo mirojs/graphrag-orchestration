@@ -140,11 +140,23 @@ class HybridPipeline:
             group_id: Tenant identifier.
         """
         self.profile = profile
-        self.llm = llm_client
         self.relevance_budget = relevance_budget
         self.graph_communities = graph_communities
         self.group_id = group_id
         self.neo4j_driver = neo4j_driver
+
+        # Initialize LLM client from LLMService if not provided
+        if llm_client is None:
+            try:
+                from src.worker.services.llm_service import LLMService
+                llm_service = LLMService()
+                llm_client = llm_service.get_routing_llm()
+                logger.info("router_llm_initialized", deployment=llm_service.config.get("AZURE_OPENAI_ROUTING_DEPLOYMENT", "unknown"))
+            except Exception as e:
+                logger.warning("router_llm_init_failed", error=str(e))
+                # Will fall back to heuristic-based routing
+
+        self.llm = llm_client
 
         # Route 1 (Vector RAG) is a capability flag, not a standalone component.
         # It is disabled in High Assurance and requires Neo4j.

@@ -15,6 +15,7 @@ Note: Vector RAG (formerly Route 1) was removed after comprehensive testing show
 
 from enum import Enum
 from typing import Optional, Any, List, Literal
+import re
 import structlog
 import json
 
@@ -32,41 +33,51 @@ ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval
 - Information that can be found in one or a few document sections
 - Examples: "What is the total amount?", "Who is the Agent?", "What are the payment terms?"
 
-**global_search** - Cross-document thematic analysis
+**global_search** - Cross-document thematic analysis and aggregation
 - Asks for summaries, patterns, or themes across ALL documents
 - Requires aggregating similar information from multiple sources
 - Looking at the "big picture" without specific entity focus
-- Keywords: "summarize all", "list all X across", "what are the main themes"
-- Examples: "Summarize all termination clauses", "List all parties across documents"
+- Listing or identifying mentions across documents WITHOUT ranking or comparing values
+- Keywords: "summarize all", "list all X across", "what are the main themes", "identify which documents"
+- Examples: "Summarize all termination clauses", "List all parties across documents", "Identify which documents reference jurisdictions"
 
 **drift_multi_hop** - Complex multi-hop reasoning and comparison
 - Requires connecting multiple pieces of information
-- **COMPARATIVE analysis** between documents or entities (which is more/less/latest/earliest)
+- **COMPARATIVE analysis** between documents — ranking, finding extremes (most/least/latest/earliest)
+- Cross-referencing: asks what something IS and then asks to extract/compare specifics ("which mention X and what are the Y?")
 - Needs to trace chains of relationships or dependencies
-- Conditional or hypothetical questions ("if X happens, what about Y?")
-- Questions asking "which document" when comparison is needed
-- Keywords: "compare", "which document has", "if...then", "difference between", "latest/earliest date"
-- Examples: "Compare X across documents", "Which document has the latest date?", "If condition A, what happens to B?"
+- Conditional or hypothetical questions ("if X happens, what about Y?", "what happens if...is terminated/sold")
+- The word "compare" in the query is a STRONG signal for this route
+- Keywords: "compare", "which document has the most/least/latest/earliest", "if...then", "difference between", "and what limits/values/terms"
+- Examples: "Compare time windows across documents", "Which document has the latest date?", "If condition A, what happens to B?", "Which documents mention insurance and what limits are specified?"
 
 ## Critical Distinctions
 
-**global_search vs drift_multi_hop:**
-- global_search: "List all insurance mentions" (aggregation, no comparison)
-- drift_multi_hop: "Which documents mention insurance and what limits are specified?" (requires cross-referencing)
+**global_search vs drift_multi_hop — "which documents" queries:**
+- global_search: "Which documents reference jurisdictions?" (AGGREGATION — just listing/identifying)
+- drift_multi_hop: "Which documents mention insurance and what limits are specified?" (CROSS-REFERENCING — listing + extracting specific values)
+- drift_multi_hop: "Which document has the HIGHEST insurance limit?" (COMPARISON — ranking values)
+- drift_multi_hop: "Which document has the LATEST date?" (COMPARISON — finding an extreme)
+- Rule: If the query just asks to LIST or IDENTIFY → global_search. If it asks to CROSS-REFERENCE (list + extract specifics), RANK, COMPARE, or find an EXTREME → drift_multi_hop.
 
 **local_search vs drift_multi_hop:**
 - local_search: "What is the date in document X?" (single lookup)
 - drift_multi_hop: "Which document has the latest date?" (requires comparing dates across documents)
+- drift_multi_hop: "What happens to X if Y is terminated?" (conditional, requires tracing consequences)
 
 ## Instructions
 Analyze the query and select the BEST matching route:
-1. Use **drift_multi_hop** for ANY comparison, conditional, or "which document" questions
-2. Use **global_search** for aggregation/summary across documents (no comparison needed)
-3. Use **local_search** as default for all other factual questions
+1. If the query contains "compare" or explicit comparison/ranking words → **drift_multi_hop**
+2. If the query asks a conditional ("if...what happens", "what happens if...terminated/sold") → **drift_multi_hop**
+3. If the query asks "which documents" + requests specific extracted values → **drift_multi_hop**
+4. If the query asks for summaries, lists, or identification across documents (no comparison/extraction) → **global_search**
+5. Otherwise → **local_search** (default for factual questions)
 
 Query: {query}
 
-Respond with JSON: {{"route": "<route_name>", "reasoning": "<brief explanation>"}}"""
+Respond in this exact format (not JSON):
+**Route:** <route_name>
+**Reasoning:** <brief explanation>"""
 
 
 class QueryRoute(Enum):
@@ -167,28 +178,49 @@ class HybridRouter:
     async def _llm_classify(self, query: str) -> tuple[QueryRoute, str]:
         """
         Use LLM to classify query into appropriate route.
-        
+
         Returns:
             Tuple of (QueryRoute, reasoning string)
         """
         prompt = ROUTE_CLASSIFICATION_PROMPT.format(query=query)
-        
+
         try:
             # Call LLM for classification
             response = await self.llm.acomplete(prompt)
             response_text = str(response).strip()
-            
-            # Parse JSON response
-            # Handle potential markdown code blocks
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-            result = json.loads(response_text)
-            route_str = result.get("route", "local_search")
-            reasoning = result.get("reasoning", "")
-            
+
+            # Parse markdown format: **Route:** <route_name>
+            route_str = "local_search"  # default
+            reasoning = ""
+
+            route_match = re.search(
+                r'\*\*Route:\*\*\s*(\w+)', response_text
+            )
+            if route_match:
+                route_str = route_match.group(1).strip().lower()
+            else:
+                # Fallback: try JSON parsing for backward compatibility
+                try:
+                    if "```json" in response_text:
+                        response_text = response_text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in response_text:
+                        response_text = response_text.split("```")[1].split("```")[0].strip()
+                    result = json.loads(response_text)
+                    route_str = result.get("route", "local_search")
+                    reasoning = result.get("reasoning", "")
+                except (json.JSONDecodeError, IndexError):
+                    logger.warning("llm_classify_parse_failed",
+                                   response=response_text[:200],
+                                   query=query[:50])
+
+            # Extract reasoning from markdown format
+            if not reasoning:
+                reason_match = re.search(
+                    r'\*\*Reasoning:\*\*\s*(.+)', response_text
+                )
+                if reason_match:
+                    reasoning = reason_match.group(1).strip()
+
             # Map string to enum (with backward compatibility for vector_rag)
             route_map = {
                 "local_search": QueryRoute.LOCAL_SEARCH,
@@ -197,10 +229,10 @@ class HybridRouter:
                 # Legacy support: vector_rag maps to local_search
                 "vector_rag": QueryRoute.LOCAL_SEARCH,
             }
-            
+
             route = route_map.get(route_str, QueryRoute.LOCAL_SEARCH)
             return route, reasoning
-            
+
         except Exception as e:
             logger.warning("llm_classify_failed", error=str(e), query=query[:50])
             # Fallback to heuristics

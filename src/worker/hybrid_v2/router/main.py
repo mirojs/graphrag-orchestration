@@ -30,7 +30,9 @@ ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval
 - Direct questions asking for specific values, names, dates, or identifiers
 - Questions about specific named entities, roles, or relationships
 - Information that can be found in one or a few document sections
-- Examples: "What is the total amount?", "Who is the Agent?", "What are the payment terms?"
+- Lists of specific items or conditions within a document (e.g., installments, schedules)
+- Simple document identification by explicit mentions or attributes (e.g., "Which contracts are in NY?", "Which document mentions 'indemnity'?")
+- Examples: "What is the total amount?", "List the 3 installment amounts", "Which documents are governed by California?"
 
 **global_search** - Cross-document thematic analysis
 - Asks for summaries, patterns, or themes across ALL documents
@@ -44,9 +46,9 @@ ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval
 - **COMPARATIVE analysis** between documents or entities (which is more/less/latest/earliest)
 - Needs to trace chains of relationships or dependencies
 - Conditional or hypothetical questions ("if X happens, what about Y?")
-- Questions asking "which document" when comparison is needed
+- Questions asking "which document" based on calculated conditions, ranking, or cross-referencing
 - Keywords: "compare", "which document has", "if...then", "difference between", "latest/earliest date"
-- Examples: "Compare X across documents", "Which document has the latest date?", "If condition A, what happens to B?"
+- Examples: "Compare X across documents", "Which document has the latest date?", "If condition A, what happens to B?", "Which document contradicts the invoice?"
 
 ## Critical Distinctions
 
@@ -55,14 +57,16 @@ ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval
 - drift_multi_hop: "Which documents mention insurance and what limits are specified?" (requires cross-referencing)
 
 **local_search vs drift_multi_hop:**
-- local_search: "What is the date in document X?" (single lookup)
-- drift_multi_hop: "Which document has the latest date?" (requires comparing dates across documents)
+- local_search: "List the 3 installment amounts" (lookup in one context)
+- drift_multi_hop: "Compare installment amounts across contracts" (requires comparing/chaining)
+- local_search: "Which contracts are in NY?" (explicit attribute lookup)
+- drift_multi_hop: "Which contract has the best payment terms?" (requires evaluation/comparison)
 
 ## Instructions
 Analyze the query and select the BEST matching route:
-1. Use **drift_multi_hop** for ANY comparison, conditional, or "which document" questions
+1. Use **drift_multi_hop** for ANY comparison, conditional logic, or "which document" questions involving ranking or calculated criteria
 2. Use **global_search** for aggregation/summary across documents (no comparison needed)
-3. Use **local_search** as default for all other factual questions
+3. Use **local_search** as default for all other factual questions, including lists and simple lookups
 
 Query: {query}
 

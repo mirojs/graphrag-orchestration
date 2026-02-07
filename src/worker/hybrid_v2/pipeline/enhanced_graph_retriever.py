@@ -1000,7 +1000,7 @@ class EnhancedGraphRetriever:
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 {folder_filter_clause}
                 WITH entity_name, t, s, d
-                ORDER BY coalesce(t.chunk_index, 0)
+                ORDER BY coalesce(t.chunk_index, 0), d.id
                 WITH entity_name, collect({{
                         chunk_id: t.id,
                         text: t.text,

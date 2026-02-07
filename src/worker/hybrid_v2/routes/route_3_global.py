@@ -240,9 +240,13 @@ class GlobalSearchHandler(BaseRouteHandler):
             logger.info("stage_3.4_complete", num_evidence=len(evidence_nodes))
         timings_ms["stage_3.4_ms"] = int((time.perf_counter() - t0) * 1000)
         
-        # Stage 3.4.1: Coverage Gap Fill
-        if coverage_mode:
-            await self._apply_coverage_gap_fill(query, graph_context)
+        # Stage 3.4.1: Coverage Gap Fill (always enabled for global search)
+        # Route 3 = global / thematic → ensure at least one chunk per document
+        # so isolated entity clusters (e.g. "Customer Default" / "legal fees"
+        # unreachable from Arbitration hubs) still appear in synthesis context.
+        # Previously gated on coverage_mode only; broadened after Q-G5 regression
+        # showed purchase-contract chunks randomly excluded by max_chunks_per_entity.
+        await self._apply_coverage_gap_fill(query, graph_context)
         
         # Stage 3.5: Synthesis
         logger.info("stage_3.5_synthesis")

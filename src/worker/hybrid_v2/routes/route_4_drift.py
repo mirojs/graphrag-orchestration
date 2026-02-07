@@ -284,6 +284,7 @@ class DRIFTHandler(BaseRouteHandler):
             coverage_chunks=coverage_chunks if coverage_chunks else None,
             prompt_variant=prompt_variant,
             synthesis_model=synthesis_model,
+            include_context=include_context,
         )
         logger.info("stage_4.4_complete")
         
@@ -334,6 +335,7 @@ class DRIFTHandler(BaseRouteHandler):
                 # Pass through raw_extractions from comprehensive mode (2-pass extraction)
                 **({"raw_extractions": synthesis_result["raw_extractions"]} if synthesis_result.get("raw_extractions") else {}),
                 **({"processing_mode": synthesis_result["processing_mode"]} if synthesis_result.get("processing_mode") else {}),
+                **({"llm_context": synthesis_result["llm_context"]} if synthesis_result.get("llm_context") else {}),
             }
         )
 

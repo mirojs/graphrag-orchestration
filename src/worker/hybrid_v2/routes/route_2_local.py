@@ -119,7 +119,8 @@ class LocalSearchHandler(BaseRouteHandler):
         synthesis_result = await self.synthesizer.synthesize(
             query=query,
             evidence_nodes=evidence_nodes,
-            response_type=response_type
+            response_type=response_type,
+            include_context=include_context,
         )
         logger.info("stage_2.3_complete")
         
@@ -190,6 +191,7 @@ class LocalSearchHandler(BaseRouteHandler):
                 "latency_estimate": "moderate",
                 "precision_level": "high",
                 "route_description": "Entity-focused with LazyGraphRAG iterative deepening",
+                **({"llm_context": synthesis_result["llm_context"]} if synthesis_result.get("llm_context") else {}),
                 # Pass through raw_extractions from comprehensive mode (2-pass extraction)
                 **({
                     "raw_extractions": synthesis_result["raw_extractions"],

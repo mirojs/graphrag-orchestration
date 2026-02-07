@@ -152,6 +152,7 @@ class EvidenceSynthesizer:
         coverage_chunks: Optional[List[Dict[str, Any]]] = None,
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
+        include_context: bool = False,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -271,7 +272,8 @@ class EvidenceSynthesizer:
             "citations": citations,
             "evidence_path": [node for node, _ in evidence_nodes],
             "text_chunks_used": len(text_chunks),
-            "sub_questions_addressed": sub_questions or []
+            "sub_questions_addressed": sub_questions or [],
+            "llm_context": context if include_context else None,
         }
     
     async def synthesize_with_graph_context(

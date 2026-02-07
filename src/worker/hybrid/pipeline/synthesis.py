@@ -474,21 +474,28 @@ Evidence Context (organized by entity relationships and document sections):
 
 {termination_hint}
 
-Generate a comprehensive {response_type.replace('_', ' ')} using this format:
+Generate a comprehensive {response_type.replace('_', ' ')} that:
+1. Directly answers the query
+2. Cites specific sources for EVERY claim using [N] notation
+3. Leverages the entity relationships to explain connections
+4. Organizes information by document sections where relevant
+5. Highlights cross-references between different sources
+6. Includes any explicit numeric values found in evidence (e.g., dollar amounts, time periods/deadlines, percentages, counts) verbatim
+
+Use this output format:
 
 ## Answer
 
-[Direct answer to the query with citations [N] for every factual claim]
+[Direct answer with citations]
 
 ## Supporting Details
 
-- [Key detail 1 with citation [N]]
-- [Key detail 2 with citation [N]]
-- [Additional details as needed]
+- [Key detail 1 with citation]
+- [Additional details as needed, covering ALL source documents]
 
 ## Cross-References
 
-[Any connections between different sources or entities, with citations]
+[Connections between different sources or entities, with citations]
 
 Response:"""
 
@@ -909,13 +916,13 @@ Respond using this format:
 
 ## Summary
 
-[Concise summary (2-3 paragraphs) with citations [N] for every factual claim. Include explicit numeric values verbatim.]
+[Summary with citations [N] for every factual claim. Include explicit numeric values verbatim. Cover provisions from ALL source documents, not just the most prominent one.]
 
 ## Key Points
 
 - [Distinct item/obligation 1 with citation [N]]
 - [Distinct item/obligation 2 with citation [N]]
-- [Additional items as needed]
+- [Additional items from each source document as needed]
 
 Response:"""
 

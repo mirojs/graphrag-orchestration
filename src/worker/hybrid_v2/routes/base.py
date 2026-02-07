@@ -11,6 +11,7 @@ to the main HybridPipeline and access its services through that reference.
 
 from __future__ import annotations
 
+import json
 import re
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -187,6 +188,70 @@ class BaseRouteHandler:
         if self.folder_id is not None:
             return {"folder_id": self.folder_id}
         return {}
+
+    async def _fetch_language_spans(
+        self, doc_ids: List[str]
+    ) -> Dict[str, List[Dict]]:
+        """Fetch language_spans from Document nodes for sentence-level citations.
+
+        Azure DI LANGUAGES feature provides ML-detected sentence boundaries
+        stored as JSON on Document.language_spans. These are used to segment
+        chunk text into individually-citable sentences.
+
+        Args:
+            doc_ids: List of document IDs to fetch spans for
+
+        Returns:
+            Dict mapping doc_id -> list of span groups
+            [{locale, confidence, spans: [{offset, length}]}]
+        """
+        if not doc_ids:
+            return {}
+
+        query = """
+        MATCH (d:Document {group_id: $group_id})
+        WHERE d.id IN $doc_ids AND d.language_spans IS NOT NULL
+        RETURN d.id AS doc_id, d.language_spans AS spans
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+            driver = self.neo4j_driver
+            group_id = self.group_id
+
+            def _run():
+                with driver.session() as session:
+                    result = session.run(query, group_id=group_id, doc_ids=doc_ids)
+                    return list(result)
+
+            records = await loop.run_in_executor(None, _run)
+
+            spans_map: Dict[str, List[Dict]] = {}
+            for record in records:
+                doc_id = record.get("doc_id") or ""
+                raw = record.get("spans") or "[]"
+                try:
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(parsed, list):
+                        spans_map[doc_id] = parsed
+                    elif isinstance(parsed, dict):
+                        spans_map[doc_id] = [parsed]
+                    else:
+                        spans_map[doc_id] = []
+                except (json.JSONDecodeError, TypeError):
+                    spans_map[doc_id] = []
+
+            logger.info(
+                "language_spans_fetched",
+                requested_docs=len(doc_ids),
+                docs_with_spans=len(spans_map),
+                total_span_groups=sum(len(v) for v in spans_map.values()),
+            )
+            return spans_map
+
+        except Exception as e:
+            logger.warning("language_spans_fetch_failed", error=str(e))
+            return {}
 
     async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False) -> RouteResult:
         """Execute the route on a query.

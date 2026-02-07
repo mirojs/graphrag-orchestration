@@ -153,6 +153,7 @@ class EvidenceSynthesizer:
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -226,7 +227,9 @@ class EvidenceSynthesizer:
             return await self._comprehensive_sentence_level_extract(query, text_chunks, evidence_nodes)
         
         # Step 2: Build context with citations (now groups by document for better reasoning)
-        context, citation_map = self._build_cited_context(text_chunks)
+        context, citation_map, sentence_citation_map = self._build_cited_context(
+            text_chunks, language_spans_by_doc=language_spans_by_doc
+        )
         
         # Step 2.5: Inject global document overview when retrieval is sparse.
         # This fixes Q-D7 (dates) and Q-D8 (comparisons) where PPR returns few/no entities.
@@ -247,6 +250,17 @@ class EvidenceSynthesizer:
                 context, sub_questions, intermediate_context
             )
         
+        # Step 3.5: Add sentence-level citation guidance when language spans are available
+        has_sentence_citations = bool(sentence_citation_map)
+        if has_sentence_citations:
+            sentence_hint = (
+                "\n\nSENTENCE-LEVEL CITATIONS: Evidence is segmented at sentence granularity with markers "
+                "like [1a], [1b], [2a], etc. Cite the specific sentence marker (e.g., [1a]) for each "
+                "factual claim. When referencing numeric values, dates, or critical terms, quote exact "
+                "wording from the cited sentence. You may also cite [N] to reference an entire evidence block."
+            )
+            context = context + sentence_hint
+        
         # Step 4: Generate response with citation requirements
         response = await self._generate_response(
             query=query,
@@ -258,7 +272,10 @@ class EvidenceSynthesizer:
         )
         
         # Step 5: Extract and validate citations
-        citations = self._extract_citations(response, citation_map)
+        citations = self._extract_citations(
+            response, citation_map,
+            sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
+        )
         
         logger.info("synthesis_complete",
                    query=query,
@@ -783,8 +800,9 @@ Response:"""
     
     def _build_cited_context(
         self, 
-        text_chunks: List[Dict[str, Any]]
-    ) -> Tuple[str, Dict[str, Dict[str, str]]]:
+        text_chunks: List[Dict[str, Any]],
+        language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    ) -> Tuple[str, Dict[str, Dict[str, str]], Dict[str, Dict[str, Any]]]:
         """
         Build a context string with citation markers, grouped by document.
         
@@ -797,7 +815,48 @@ Response:"""
             Tuple of (context_string, citation_map)
         """
         citation_map: Dict[str, Dict[str, str]] = {}
-        
+        sentence_citation_map: Dict[str, Dict[str, Any]] = {}
+        _spans_by_doc = language_spans_by_doc or {}
+        _sentence_segmentation_enabled = bool(_spans_by_doc)
+
+        def _get_sentences_for_dict_chunk(
+            chunk: Dict[str, Any], meta: Dict[str, Any]
+        ) -> List[Dict[str, Any]]:
+            """Filter language spans that fall within this chunk's offset range."""
+            if not _sentence_segmentation_enabled:
+                return []
+            doc_id = meta.get("document_id", "")
+            if doc_id not in _spans_by_doc:
+                return []
+            start_offset = meta.get("start_offset")
+            end_offset = meta.get("end_offset")
+            if start_offset is None or end_offset is None:
+                return []
+
+            chunk_text = chunk.get("text", "")
+            sentences = []
+            for lang_group in _spans_by_doc[doc_id]:
+                confidence = lang_group.get("confidence", 1.0)
+                locale = lang_group.get("locale", "en")
+                for span in lang_group.get("spans", []):
+                    s_offset = span.get("offset", 0)
+                    s_length = span.get("length", 0)
+                    if s_offset >= start_offset and s_offset + s_length <= end_offset:
+                        relative_offset = s_offset - start_offset
+                        if relative_offset >= 0 and relative_offset + s_length <= len(chunk_text):
+                            sent_text = chunk_text[relative_offset:relative_offset + s_length].strip()
+                        else:
+                            sent_text = ""
+                        if sent_text and len(sent_text) >= 5:
+                            sentences.append({
+                                "text": sent_text,
+                                "offset": s_offset,
+                                "length": s_length,
+                                "confidence": confidence,
+                                "locale": locale,
+                            })
+            return sentences
+
         def _normalize_doc_key(doc_key: str) -> str:
             """
             Normalize document keys to merge sub-parts with parent documents.
@@ -913,11 +972,38 @@ Response:"""
                     **({"end_offset": end_offset} if end_offset is not None else {}),
                 }
                 
-                context_parts.append(f"{citation_id} {text}")
+                # Try sentence-level segmentation from Azure DI language_spans
+                chunk_sentences = _get_sentences_for_dict_chunk(chunk, meta)
+                if chunk_sentences:
+                    chunk_num = original_idx + 1
+                    entry_lines = [f"{citation_id} [Section: {section_str}]"]
+                    for s_idx, sent in enumerate(chunk_sentences):
+                        suffix = chr(ord('a') + s_idx) if s_idx < 26 else str(s_idx)
+                        sent_citation_id = f"[{chunk_num}{suffix}]"
+                        entry_lines.append(f"{sent_citation_id} {sent['text']}")
+                        sentence_citation_map[sent_citation_id] = {
+                            "source": source,
+                            "chunk_id": chunk.get("id", f"chunk_{original_idx}"),
+                            "document": doc_title,
+                            "document_id": document_id,
+                            "document_title": doc_title,
+                            "document_url": document_url,
+                            "section": section_str,
+                            "text_preview": sent["text"][:150],
+                            "sentence_text": sent["text"],
+                            "sentence_offset": sent["offset"],
+                            "sentence_length": sent["length"],
+                            "sentence_confidence": sent["confidence"],
+                            "sentence_locale": sent["locale"],
+                            **({"page_number": page_number} if page_number is not None else {}),
+                        }
+                    context_parts.append("\n".join(entry_lines))
+                else:
+                    context_parts.append(f"{citation_id} {text}")
             
             context_parts.append("")  # Blank line between documents
         
-        return "\n\n".join(context_parts), citation_map
+        return "\n\n".join(context_parts), citation_map, sentence_citation_map
     
     async def _generate_response(
         self,

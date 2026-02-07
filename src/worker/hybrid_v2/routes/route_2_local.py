@@ -18,7 +18,9 @@ V2 Mode (VOYAGE_V2_ENABLED=True):
 Note: No HippoRAG in this route - entities are explicit in the query.
 """
 
-from typing import Dict, Any, Optional
+import asyncio
+import os
+from typing import Dict, Any, List, Optional
 
 import structlog
 
@@ -114,6 +116,17 @@ class LocalSearchHandler(BaseRouteHandler):
         )
         logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes))
         
+        # Stage 2.2.5: Fetch language spans for sentence-level citations
+        enable_sentence_citations = os.getenv("ROUTE2_SENTENCE_CITATIONS", "1").strip().lower() in {"1", "true", "yes"}
+        doc_language_spans: Dict[str, List[Dict]] = {}
+        if enable_sentence_citations:
+            # Retrieve text chunks first to get document IDs
+            pre_chunks = await self.synthesizer._retrieve_text_chunks(evidence_nodes)
+            doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in pre_chunks} - {""})
+            if doc_ids:
+                doc_language_spans = await self._fetch_language_spans(doc_ids)
+                logger.info("stage_2.2.5_sentence_spans", num_docs=len(doc_ids), docs_with_spans=len(doc_language_spans))
+
         # Stage 2.3: Synthesis with Citations
         logger.info("stage_2.3_synthesis")
         synthesis_result = await self.synthesizer.synthesize(
@@ -121,6 +134,7 @@ class LocalSearchHandler(BaseRouteHandler):
             evidence_nodes=evidence_nodes,
             response_type=response_type,
             include_context=include_context,
+            language_spans_by_doc=doc_language_spans if doc_language_spans else None,
         )
         logger.info("stage_2.3_complete")
         

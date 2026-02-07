@@ -2556,172 +2556,93 @@ curl -X POST "https://your-service.azurecontainerapps.io/hybrid/index/initialize
 }
 ```
 
-**Recommended Indexing Script:**
+**Indexing Setup (Updated Feb 7, 2026):**
 
-**Current Indexing Setup (V2 - Voyage voyage-context-3):**
+> **Two indexing paths exist:** (1) the **app endpoint** `POST /hybrid/index/documents` for production use, and (2) **local scripts** for development/testing. Both use the same V2 pipeline engine.
 
-- **V2 Pipeline Factory:** `src/worker/hybrid/indexing/lazygraphrag_indexing_pipeline.py` (`get_lazygraphrag_indexing_pipeline_v2()`)
-- **V2 Pipeline Engine:** `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`
-- **V2 Fixed Test Script (RECOMMENDED):** `scripts/index_4_new_groups_v2.py` (Feb 2, 2026 - includes URL decode, language spans, improved KVP matching)
-- **⚠️ Re-Index Required (Feb 6, 2026):** `test-5pdfs-v2-fix2` needs re-indexing after deploying commit `d31142d0` to fix: missing PART_OF edges, zero Section/KeyValue embeddings, zero GDS properties (community_id, pagerank), and language_spans for `contoso_lifts_invoice` + `purchase_contract`.
-- **V2 Test Script (Legacy):** `scripts/index_5pdfs_v2_cloud.py` (uses API server with V2 factory)
-- **V2 Enhanced Script:** `scripts/index_5pdfs_v2_enhanced_examples.py` (enhanced entity extraction examples)
-- **V2 Test Script (Alternative):** `scripts/index_5pdfs_v2_local.py` (local execution, no API needed)
-- **V1 Test Script:** `scripts/index_5pdfs.py` (uses API server with V1 factory)
-- **Verification Script:** `check_edges.py` — comprehensive graph validation for V1 & V2 indexing (updated Feb 7, 2026: covers all node types, structural/entity/semantic/DI edges, GDS properties, embeddings, language spans, orphan detection; supports `--json`, `--expected-docs N`, exit code 1 on issues)
-- **V2 Latest Group:** `test-5pdfs-v2-1769609082` (Jan 28, 2026) - **GDS UNIFIED** ✅ (KNN only, deduplicated)
-- **V1 Latest Group:** `test-5pdfs-1769071711867955961` (Jan 22, 2026)
+**Architecture:**
 
-**⚠️ IMPORTANT - V2 Indexing Gotcha (Fixed Jan 26, 2026):**
+| Component | Path | Purpose |
+|-----------|------|---------|
+| **V2 Pipeline Factory** | `src/worker/hybrid_v2/indexing/pipeline_factory.py` | Creates pipeline with `use_v2_embedding_property=True`, Voyage embedder |
+| **V2 Pipeline Engine** | `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` | Core indexing: chunking → entity extraction → embeddings → GDS KNN |
+| **App Endpoint** | `POST /hybrid/index/documents` | Production indexing (async, returns `job_id`) |
+| **App Status Polling** | `GET /hybrid/index/status/{job_id}` | Track indexing progress: `pending` → `running` → `completed`/`failed` |
+| **Verification Script** | `check_edges.py` | Graph completeness audit (V1 & V2, CI-friendly, `--json`, `--expected-docs N`) |
 
-The `/hybrid/index/documents` API endpoint now correctly uses the V2 factory when `VOYAGE_V2_ENABLED=true`. Previously it always used the V1 factory, causing chunks to have OpenAI embeddings in the `embedding` property instead of Voyage embeddings in the `embedding_v2` property. This resulted in vector search failures at query time.
+**App Indexing (Production):**
 
-**Fix Applied:** `src/api_gateway/routers/hybrid.py` line 220 now checks `settings.VOYAGE_V2_ENABLED` and calls `get_lazygraphrag_indexing_pipeline_v2()` when true.
+The app endpoint already uses the V2 pipeline (`get_lazygraphrag_indexing_pipeline_v2()`) which stores embeddings in `embedding_v2`. No separate configuration needed — the factory reads `VOYAGE_V2_ENABLED`, `VOYAGE_API_KEY`, etc. from environment.
 
-**If you have V2 groups indexed before Jan 26, 2026 18:30 UTC, they must be re-indexed!**
+```
+POST /hybrid/index/documents  →  returns { job_id, status: "accepted" }
+GET  /hybrid/index/status/{job_id}  →  returns { status: "completed", stats: {...} }
+```
 
-**V2 Features (Updated Jan 28, 2026):**
+**RECOMMENDED Local Script — `scripts/index_5pdfs_v2_local.py`:**
 
-- **Voyage voyage-context-3:** 2048-dimension contextual embeddings
-- **Universal Multilingual:** Entity canonicalization for all scripts (CJK, Arabic, Hindi, Thai, Russian, Greek)
-- **Q-D8 Fix:** Document counting synthesis patterns
-- **Section Coverage Fallback:** For documents >32K tokens
-- **Bin-Packing:** Large document handling with contextual chunking
-- **GDS-Only Semantic Edges:** Unified to `SEMANTICALLY_SIMILAR` via GDS KNN (legacy cosine similarity removed)
+```bash
+# Dry run (verify V2 configuration)
+python3 scripts/index_5pdfs_v2_local.py --dry-run
+
+# Fresh V2 indexing (creates new group ID)
+python3 scripts/index_5pdfs_v2_local.py
+
+# Re-index existing V2 group
+export GROUP_ID=test-5pdfs-v2-fix2
+python3 scripts/index_5pdfs_v2_local.py
+```
+
+This is the canonical script for local testing. It:
+- Executes the V2 pipeline directly (no API server needed)
+- Stores embeddings in `embedding_v2` (Voyage 2048d)
+- Runs GDS KNN for `SEMANTICALLY_SIMILAR` edges
+- Supports `--dry-run` and `--verify-only` modes
+
+**Graph Verification (`check_edges.py`):**
+
+```bash
+# Check latest group (reads from last_test_group_id.txt or defaults to test-5pdfs-v2-fix2)
+python3 check_edges.py
+
+# Validate expected document count (exits 1 on mismatch)
+python3 check_edges.py test-5pdfs-v2-fix2 --expected-docs 5
+
+# JSON output for CI / automation
+python3 check_edges.py test-5pdfs-v2-fix2 --json
+```
+
+**Deprecated Scripts (kept for reference only):**
+
+| Script | Status | Notes |
+|--------|--------|-------|
+| `scripts/index_5pdfs_v2_cloud.py` | DEPRECATED | Uses API server; replaced by local script |
+| `scripts/index_5pdfs_v2_enhanced_examples.py` | DEPRECATED | One-off enhanced entity extraction test |
+| `scripts/index_4_new_groups_v2.py` | DEPRECATED | Multi-group batch script; replaced by local script |
+| `scripts/index_5pdfs.py` | DEPRECATED (V1) | Uses V1 OpenAI embeddings in `embedding` property |
+| `scripts/index_5pdfs_knn_test.py` | DEPRECATED | One-off KNN parameter test |
 
 **V2 Configuration (.env):**
 
 ```bash
-# Voyage V2 settings
 VOYAGE_V2_ENABLED=true
 VOYAGE_API_KEY=your-api-key
 VOYAGE_MODEL_NAME=voyage-context-3
 VOYAGE_EMBEDDING_DIM=2048
-
-# GDS KNN settings for semantic edges
-# No longer using cosine similarity threshold - all semantic edges via GDS KNN
 ```
 
-**V2 Semantic Edge Evolution (Jan 28, 2026):**
+**How Users Know Indexing Is Done:**
 
-**Legacy Approach (REMOVED):**
-- `_create_semantic_edges()` method using cosine similarity with threshold 0.87
-- Created `SIMILAR_TO` edges for Entity↔Entity pairs
-- Separate from GDS KNN, causing redundant edge creation
+1. **App endpoint:** `POST /hybrid/index/documents` returns a `job_id`. Poll `GET /hybrid/index/status/{job_id}` — status transitions: `pending` → `running` → `completed` (with `stats`) or `failed` (with `error`). The response message tells the user: _"Poll /hybrid/index/status/{job_id} for progress."_
+2. **Local script:** Prints progress to stdout and exits with a summary of indexed entities, chunks, edges, and GDS stats.
+3. **Verification:** Run `check_edges.py <group-id> --expected-docs N` after indexing. Exit code 0 = healthy, 1 = issues found.
 
-**New Unified Approach (Jan 28, 2026):**
+**V2 Semantic Edges (GDS KNN):**
+
 - **All semantic edges via GDS KNN only** (K=5, similarity cutoff 0.60)
-- **Single edge type:** `SEMANTICALLY_SIMILAR` (SIMILAR_TO eliminated)
-- **Deduplication:** `id(n1) < id(n2)` constraint prevents bidirectional edges
+- **Single edge type:** `SEMANTICALLY_SIMILAR` (legacy `SIMILAR_TO` eliminated)
 - **Coverage:** Entity, Figure, KeyValuePair, Chunk nodes
-
-**Results Comparison:**
-- V1 baseline: 50 SIMILAR_TO edges (legacy cosine)
-- V2 GDS: **506 SEMANTICALLY_SIMILAR edges** (+912% increase, 10x improvement)
-- **Semantic edge density:** 2.71 edges/entity (vs 0.42 in V1)
-
----
-
-### Voyage voyage-context-3: Query Strategies & Features (Jan 26, 2026)
-
-**Why voyage-context-3 is Different:**
-
-Unlike OpenAI's `text-embedding-3-large` which embeds text in isolation, `voyage-context-3` uses **contextual embeddings** - each chunk is embedded with awareness of:
-1. **Document context** - chunks know which document they belong to
-2. **Surrounding chunks** - chunks understand their position in the document
-3. **Semantic relationships** - the model internally tracks entity relationships
-
-**How to Query for Maximum Benefit:**
-
-| Query Type | OpenAI Approach | Voyage V2 Approach | Benefit |
-|------------|-----------------|-------------------|---------|
-| **Chunk retrieval** | Embed query → cosine similarity | Same, but use `input_type="query"` | Asymmetric query/doc embeddings |
-| **Multi-hop** | Embed query → traverse graph | Embed query with context → graph | Context-aware starting points |
-| **Cross-doc** | Multiple separate searches | Single search finds related chunks | Voyage clusters cross-doc concepts |
-
-**Key API Differences:**
-
-```python
-# OpenAI (V1) - Simple embedding
-response = openai.embeddings.create(
-    input=["What is the warranty period?"],
-    model="text-embedding-3-large"
-)
-query_embedding = response.data[0].embedding
-
-# Voyage (V2) - Contextual embedding with query type
-result = voyage_client.contextualized_embed(
-    inputs=[["What is the warranty period?"]],  # List of documents, each is list of chunks
-    model="voyage-context-3",
-    input_type="query",  # IMPORTANT: Use "query" for search queries
-    output_dimension=2048
-)
-query_embedding = result.results[0].embeddings[0]
-```
-
-**Relationship Preservation Feature:**
-
-Voyage `voyage-context-3` internally maintains relationship awareness during embedding. While we don't directly access these relationships, they manifest as:
-
-1. **Tighter semantic clustering** - Related entities embed closer together (why we raised threshold to 0.87)
-2. **Better cross-document linking** - Chunks mentioning same entities across documents cluster naturally
-3. **Implicit co-reference** - "the buyer", "Contoso Ltd.", and "purchaser" embed similarly when in same document
-
-**How We Leverage This:**
-
-| Feature | Implementation | Benefit |
-|---------|---------------|---------|
-| **SIMILAR_TO edges** | Cosine similarity > 0.87 | 600 semantic edges (vs 25 in V1) |
-| **Entity deduplication** | Embedding similarity + rule-based | Better alias detection |
-| **Cross-doc PPR** | Higher edge density improves PageRank | Better multi-hop reasoning |
-| **Section awareness** | Chunks embed with section context | Preserves document hierarchy |
-
-**Future Enhancements (Not Yet Implemented):**
-
-1. **Query expansion with context**: Include document titles/section headers in query embedding
-2. **Iterative retrieval**: Re-embed query with retrieved context for refinement
-3. **Relationship extraction from embeddings**: Use embedding similarity patterns to infer relationships
-
----
-
-**V2 Cloud Indexing (Recommended - Uses API with V2 Factory):**
-
-```bash
-cd graphrag-orchestration
-
-# Fresh V2 indexing (creates new group ID)
-python3 ../scripts/index_5pdfs_v2_cloud.py
-
-# Verify the group has correct V2 embeddings
-python3 ../scripts/index_5pdfs_v2_local.py --verify-only test-5pdfs-v2-1769496129
-```
-
-**V2 Local Indexing (Alternative - Direct Pipeline Execution):**
-
-```bash
-cd graphrag-orchestration
-
-# Dry run (verify V2 configuration)
-python3 ../scripts/index_5pdfs_v2_local.py --dry-run
-
-# Fresh V2 indexing (creates new group ID)
-python3 ../scripts/index_5pdfs_v2_local.py
-
-# Re-index existing V2 group
-export GROUP_ID=test-5pdfs-v2-1769496129
-python3 ../scripts/index_5pdfs_v2_local.py
-```
-
-**V1 Indexing (Legacy - Uses API Server):**
-
-```bash
-# Fresh indexing (creates new group ID)
-python3 scripts/index_5pdfs.py
-
-# Re-index existing group (cleans old data first)
-export GROUP_ID=test-5pdfs-1769071711867955961
-python3 scripts/index_5pdfs.py
-```
+- **Results:** 506 SEMANTICALLY_SIMILAR edges (vs 50 SIMILAR_TO in V1 = 10x improvement)
 
 **Graph Verification (`check_edges.py`):**
 

@@ -43,6 +43,7 @@ llama-parse>=0.6.0  # Layout-aware PDF parsing
 neo4j>=6.0.0
 neo4j-graphrag==1.12.0  # v1.12.0 supports neo4j<7.0.0,>=5.17.0 (allows v6.0+)
 rapidfuzz>=3.6.0  # Required by neo4j-graphrag
+graphdatascience>=1.19  # Aura Serverless Graph Analytics (KNN, Louvain, PageRank)
 
 # HippoRAG 2 - Deterministic multi-hop retrieval with Personalized PageRank
 # hipporag>=0.1.0  # Optional - not used in current LlamaIndex-native implementation

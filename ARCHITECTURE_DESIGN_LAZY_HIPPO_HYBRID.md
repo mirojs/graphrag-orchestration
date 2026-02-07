@@ -6974,7 +6974,9 @@ az containerapp ingress traffic set \
   --revision-weight "${REVISION_NAME}=100"
 ```
 
-Once traffic was routed to the correct revision, sentence-level citations worked immediately: **977 sentence-level `[Na]` citations** across the Route 3 benchmark (19/19 pass), 34.9% sentence citation ratio (expected since only 3/5 docs had language spans at the time). Commit `15f59e1f`.
+Once traffic was routed to the correct revision, sentence-level citations worked immediately: **977 sentence-level `[Na]` citations** across the Route 3 benchmark (19/19 pass), 33.0% sentence citation ratio (expected since only 3/5 docs had language spans at the time). Commit `15f59e1f`.
+
+**Post-Reindex Results (February 7, 2026):** After full V2 reindex with all 5/5 docs having `language_spans`, sentence citation coverage improved significantly: **1619 `[Na]` citations** (+66%), **49.1% sentence citation ratio** (+16 percentage points). 8/10 questions improved; Q-G2 had the largest gain (25.0% → 73.9%). All 19/19 tests pass. Benchmark `route3_global_search_20260207T083756Z`.
 
 ### 22.7. Language Spans Propagation Fix (February 6, 2026)
 

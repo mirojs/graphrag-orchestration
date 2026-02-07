@@ -6,9 +6,13 @@ Tests the newly deployed comprehensive_sentence mode which uses:
 - Azure Document Intelligence sentence spans for precise text boundaries
 - Raw evidence approach (sentences + tables + HippoRAG chunks)
 
-Evaluates against 16 ground truth items for invoice/contract inconsistency detection.
-(Originally 14 items, expanded to 15 after confirming B6 opener/door-operator,
-then 16 after confirming B7 power-system/operation-parts from Neo4j Table data.)
+Evaluates against 16 ground truth items + 2 bonus observations (18 total).
+Ground truth: 3 major + 7 medium + 6 minor = 16 strict inconsistencies.
+Observations (D): 2 cross-document findings that are not direct invoice-vs-contract
+  inconsistencies but demonstrate deep analytical capability (e.g. Tax N/A from
+  structured Table nodes, entity role differences across the 5-doc corpus).
+
+History: 14 → 15 (B6 opener) → 16 (B7 power system) → 16+2 obs (D1 tax, D2 roles).
 """
 
 import json
@@ -33,7 +37,8 @@ Look for differences in:
 Provide a detailed analysis with specific references to both documents."""
 
 # 16 Ground Truth Items (3 major + 7 medium + 6 minor)
-# History: 14 → 15 (B6 opener) → 16 (B7 power system / operation parts)
+# + 2 Observation Items (cross-document analytical findings, not strict inconsistencies)
+# History: 14 → 15 (B6 opener) → 16 (B7 power system) → 16+2 obs (D1 tax, D2 roles)
 GROUND_TRUTH = {
     "major": [
         "A1: Lift model mismatch (Savaria V1504 vs AscendPro VPX200)",
@@ -56,6 +61,15 @@ GROUND_TRUTH = {
         "C4: Bayfront site mismatch (61 S 34th Street vs Bayfront Animal Clinic)",
         "C5: Address number (61 vs 62 S 34th Street)",
         "C6: Price decimal inconsistency ($29,900.00 vs $29,900)",
+    ],
+    # ── Observations (bonus) ──────────────────────────────────────────────
+    # Not strict invoice-vs-contract inconsistencies, but real cross-document
+    # findings confirmed in Neo4j.  Demonstrates the app's ability to surface
+    # deep analytical insights beyond the direct comparison scope.
+    "observation": [
+        "D1: Tax field N/A on invoice (Table row: SUBTOTAL→TAX, 29900.00→N/A)",
+        "D2: Entity role variation across corpus (Contoso Ltd=Owner in warranty/"
+        "tank/property-mgmt vs Contoso Lifts LLC=Contractor in invoice/contract)",
     ],
 }
 
@@ -151,11 +165,17 @@ def score_response(response_text: str) -> Dict[str, Any]:
             "C5": check_item(["61", "62", "34th", "address"]),
             "C6": check_item(["decimal", "29900.00", "29,900.00"]),
         },
+        # Observations — bonus cross-document insights (not counted in core score)
+        "observation": {
+            "D1": check_item(["tax", "n/a", "subtotal"]),
+            "D2": check_item(["owner", "contractor", "role", "contoso ltd", "contoso lifts"]),
+        },
     }
     
     found_major = sum(1 for v in scores["major"].values() if v)
     found_medium = sum(1 for v in scores["medium"].values() if v)
     found_minor = sum(1 for v in scores["minor"].values() if v)
+    found_obs = sum(1 for v in scores["observation"].values() if v)
     found_total = found_major + found_medium + found_minor
     
     return {
@@ -165,8 +185,11 @@ def score_response(response_text: str) -> Dict[str, Any]:
             "medium": f"{found_medium}/7",
             "minor": f"{found_minor}/6",
             "total": f"{found_total}/16",
+            "observation": f"{found_obs}/2",
+            "total_with_obs": f"{found_total + found_obs}/18",
         },
         "percentage": f"{(found_total/16)*100:.1f}%",
+        "percentage_with_obs": f"{((found_total + found_obs)/18)*100:.1f}%",
     }
 
 
@@ -238,10 +261,12 @@ def main():
     scoring = score_response(response_text)
     
     print(f"\nRESULTS:")
-    print(f"  Major (A1-A3): {scoring['found']['major']}")
+    print(f"  Major  (A1-A3): {scoring['found']['major']}")
     print(f"  Medium (B1-B7): {scoring['found']['medium']}")
-    print(f"  Minor (C1-C6): {scoring['found']['minor']}")
-    print(f"  TOTAL: {scoring['found']['total']} = {scoring['percentage']}")
+    print(f"  Minor  (C1-C6): {scoring['found']['minor']}")
+    print(f"  CORE SCORE:     {scoring['found']['total']} = {scoring['percentage']}")
+    print(f"  Observations (D1-D2): {scoring['found']['observation']}  (bonus — not strict inconsistencies)")
+    print(f"  WITH OBS:       {scoring['found']['total_with_obs']} = {scoring['percentage_with_obs']}")
     print()
     
     # Detailed breakdown

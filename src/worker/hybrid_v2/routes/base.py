@@ -137,7 +137,7 @@ class BaseRouteHandler:
     All shared retrieval methods are defined here.
     
     Subclasses must implement:
-        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None) -> RouteResult
+        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False) -> RouteResult
     """
 
     # Route identifier (override in subclasses)
@@ -188,13 +188,14 @@ class BaseRouteHandler:
             return {"folder_id": self.folder_id}
         return {}
 
-    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None) -> RouteResult:
+    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False) -> RouteResult:
         """Execute the route on a query.
         
         Args:
             query: The user's natural language query
             response_type: Response format ("summary", "detailed_report", etc.)
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
+            include_context: If True, include the full LLM context in response metadata.
             
         Returns:
             RouteResult with response, citations, and metadata

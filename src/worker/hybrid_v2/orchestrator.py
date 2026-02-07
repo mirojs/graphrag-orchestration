@@ -342,6 +342,7 @@ class HybridPipeline:
         knn_config: Optional[str] = None,
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
+        include_context: bool = False,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -371,7 +372,7 @@ class HybridPipeline:
         # =======================================================================
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model)
+            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model, include_context=include_context)
             # Convert RouteResult to dict for API compatibility
             return result.to_dict()
         
@@ -2180,6 +2181,7 @@ Sub-questions:"""
         knn_config: Optional[str] = None,
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
+        include_context: bool = False,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2195,7 +2197,7 @@ Sub-questions:"""
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model)
+            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model, include_context=include_context)
             return result.to_dict()
         
         # Legacy fallback

@@ -281,6 +281,7 @@ class EvidenceSynthesizer:
         graph_context: EnhancedGraphContext,
         response_type: str = "detailed_report",
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        include_context: bool = False,
     ) -> Dict[str, Any]:
         """
         Enhanced synthesis using full graph context (Route 3 v2.0).
@@ -553,6 +554,7 @@ class EvidenceSynthesizer:
             "text_chunks_used": len(graph_context.source_chunks),
             "graph_context_used": True,
             "relationships_used": len(graph_context.relationships),
+            "llm_context": full_context if include_context else None,
         }
     
     async def _generate_graph_response(

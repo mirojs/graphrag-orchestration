@@ -43,6 +43,7 @@ class VectorRAGHandler(BaseRouteHandler):
         knn_config: Optional[str] = None,
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
+        include_context: bool = False,
     ) -> RouteResult:
         """
         Execute Route 1: Vector RAG for fast fact lookups.

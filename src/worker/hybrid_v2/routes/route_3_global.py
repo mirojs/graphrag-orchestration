@@ -48,6 +48,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         knn_config: Optional[str] = None,
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
+        include_context: bool = False,
     ) -> RouteResult:
         """
         Execute Route 3: Global Search for thematic queries.
@@ -259,6 +260,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             ppr_evidence=evidence_nodes,
             response_type=response_type,
             language_spans_by_doc=doc_language_spans,
+            include_context=include_context,
         )
         timings_ms["stage_3.5_ms"] = int((time.perf_counter() - t0) * 1000)
         
@@ -320,6 +322,10 @@ class GlobalSearchHandler(BaseRouteHandler):
         if synthesis_result.get("raw_extractions"):
             metadata["raw_extractions"] = synthesis_result["raw_extractions"]
             metadata["processing_mode"] = synthesis_result.get("processing_mode")
+        
+        # Include full LLM context when requested (for debugging retrieval vs LLM issues)
+        if synthesis_result.get("llm_context"):
+            metadata["llm_context"] = synthesis_result["llm_context"]
         
         if enable_timings:
             metadata["timings_ms"] = timings_ms
@@ -616,6 +622,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         ppr_evidence: List,
         response_type: str,
         language_spans_by_doc: Optional[Dict[str, List[Dict]]] = None,
+        include_context: bool = False,
     ) -> Dict[str, Any]:
         """Synthesize global response with theme coverage.
         
@@ -633,6 +640,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             graph_context=graph_context,
             response_type=response_type,
             language_spans_by_doc=language_spans_by_doc,
+            include_context=include_context,
         )
         
         return synthesis_result

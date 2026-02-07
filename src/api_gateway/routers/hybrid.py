@@ -204,6 +204,10 @@ class HybridQueryRequest(BaseModel):
         default=None,
         description="Override synthesis LLM deployment name for A/B testing. E.g. 'gpt-4.1', 'gpt-4o'. If None, uses default (HYBRID_SYNTHESIS_MODEL)."
     )
+    include_context: bool = Field(
+        default=False,
+        description="If true, include the full LLM context (retrieved evidence assembled into the prompt) in the response metadata under 'llm_context'. Useful for debugging retrieval vs LLM issues."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -495,9 +499,10 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                 knn_config=body.knn_config,
                 prompt_variant=body.prompt_variant,
                 synthesis_model=body.synthesis_model,
+                include_context=body.include_context,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context)
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000

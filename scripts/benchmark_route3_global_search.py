@@ -457,6 +457,8 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("--top-k", type=int, default=5)  # hybrid currently ignores; kept for compatibility
     ap.add_argument("--max-questions", type=int, default=0)
+    ap.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis model (e.g. gpt-4.1, gpt-4.1-mini)")
+    ap.add_argument("--include-context", action="store_true", default=False, help="Include full LLM context (retrieved evidence) in benchmark output for debugging")
     args = ap.parse_args()
 
     base_url = str(args.url).rstrip("/")
@@ -540,6 +542,10 @@ def main() -> int:
                 "force_route": "global_search",
                 "response_type": response_type,
             }
+            if args.synthesis_model:
+                payload["synthesis_model"] = args.synthesis_model
+            if args.include_context:
+                payload["include_context"] = True
 
             status, resp, elapsed_s, err = _http_post_json(
                 url=endpoint,
@@ -566,6 +572,11 @@ def main() -> int:
                 "evidence_path_sig": evidence_path_sig,
                 "error": err,
             }
+            # Include LLM context when requested (for retrieval vs LLM debugging)
+            if args.include_context and isinstance(resp, dict):
+                llm_ctx = (resp.get("metadata") or {}).get("llm_context")
+                if llm_ctx:
+                    run_row["llm_context"] = llm_ctx
             runs.append(run_row)
 
         summary = _summarize_runs(runs)

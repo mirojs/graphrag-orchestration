@@ -1,8 +1,0 @@
-vector: pos_ok=0/10 neg_pass=9/9
-local: pos_ok=0/10 neg_pass=9/9
-graph: pos_ok=0/10 neg_pass=9/9
-drift: pos_ok=0/10 neg_pass=9/9
-
-Wrote:
-- /afh/projects/graphrag-orchestration/benchmarks/all4_routes_posneg_qbank_20260125T130914Z.json
-- /afh/projects/graphrag-orchestration/benchmarks/all4_routes_posneg_qbank_20260125T130914Z.md

@@ -1,6 +1,0 @@
-usage: benchmark_all4_routes_posneg_qbank.py
-       [-h] [--url URL] [--group-id GROUP_ID]
-       [--question-bank QUESTION_BANK] [--top-k TOP_K]
-       [--timeout TIMEOUT] [--sleep SLEEP]
-       [--synthesize | --no-synthesize]
-benchmark_all4_routes_posneg_qbank.py: error: unrecognized arguments: --routes global_search

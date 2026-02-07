@@ -1,5 +1,0 @@
-[1/3] Q-G1: repeats=3 exact=1.00
-[2/3] Q-G2: repeats=3 exact=1.00
-[3/3] Q-G3: repeats=3 exact=1.00
-/afh/projects/graphrag-orchestration/benchmarks/route3_graph_repeat_qbank_20260124T092621Z.json
-/afh/projects/graphrag-orchestration/benchmarks/route3_graph_repeat_qbank_20260124T092621Z.md

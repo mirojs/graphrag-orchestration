@@ -1,7 +1,0 @@
-usage: benchmark_route2_local_search.py [-h]
-                                        [--url URL]
-                                        [--group-id GROUP_ID]
-                                        [--repeats REPEATS]
-                                        [--timeout TIMEOUT]
-                                        [--qbank QBANK]
-benchmark_route2_local_search.py: error: unrecognized arguments: --base-url https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io

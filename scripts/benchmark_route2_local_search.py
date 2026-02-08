@@ -435,6 +435,7 @@ def benchmark_scenario(
     repeats: int,
     timeout_s: float,
     ground_truth: Dict[str, GroundTruth],
+    synthesis_model: Optional[str] = None,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -465,6 +466,8 @@ def benchmark_scenario(
                 "force_route": "local_search",  # Route 2
                 "response_type": response_type,
             }
+            if synthesis_model:
+                payload["synthesis_model"] = synthesis_model
 
             status, resp, elapsed, err = _http_post_json(
                 url=url,
@@ -663,6 +666,12 @@ def main():
         default=DEFAULT_QUESTION_BANK,
         help="Path to question bank MD file (default: QUESTION_BANK_5PDFS_2025-12-24.md)",
     )
+    parser.add_argument(
+        "--synthesis-model",
+        type=str,
+        default=None,
+        help="Override synthesis LLM deployment name (e.g. gpt-4.1-mini, gpt-5.1)",
+    )
 
     args = parser.parse_args()
     print(f"[DEBUG] Parsed arguments. URL: {args.url}")
@@ -693,6 +702,10 @@ def main():
 
     timestamp = _now_utc_stamp()
 
+    synthesis_model = getattr(args, 'synthesis_model', None)
+    if synthesis_model:
+        print(f"  Synthesis model override: {synthesis_model}")
+
     result = benchmark_scenario(
         api_base_url=args.url,
         group_id=args.group_id,
@@ -702,6 +715,7 @@ def main():
         repeats=args.repeats,
         timeout_s=args.timeout,
         ground_truth=ground_truth,
+        synthesis_model=synthesis_model,
     )
 
     # Write outputs
@@ -712,15 +726,18 @@ def main():
     out_md = out_dir / f"route2_local_search_{timestamp}.md"
 
     with out_json.open("w", encoding="utf-8") as f:
+        out_data = {
+            "timestamp": timestamp,
+            "api_base_url": args.url,
+            "group_id": args.group_id,
+            "force_route": "local_search",
+            "response_type": response_type,
+        }
+        if synthesis_model:
+            out_data["synthesis_model"] = synthesis_model
+        out_data["scenario"] = result
         json.dump(
-            {
-                "timestamp": timestamp,
-                "api_base_url": args.url,
-                "group_id": args.group_id,
-                "force_route": "local_search",
-                "response_type": response_type,
-                "scenario": result,
-            },
+            out_data,
             f,
             indent=2,
             ensure_ascii=False,

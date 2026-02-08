@@ -133,6 +133,8 @@ class LocalSearchHandler(BaseRouteHandler):
             query=query,
             evidence_nodes=evidence_nodes,
             response_type=response_type,
+            prompt_variant=prompt_variant,
+            synthesis_model=synthesis_model,
             include_context=include_context,
             language_spans_by_doc=doc_language_spans if doc_language_spans else None,
         )

@@ -122,7 +122,7 @@ def _get_aoai_endpoint() -> str:
     try:
         result = subprocess.run(
             ["az", "cognitiveservices", "account", "list",
-             "--resource-group", "rg-knowledgegraph",
+             "--resource-group", "rg-graphrag-feature",
              "--query", "[?kind=='OpenAI' || kind=='AIServices'].properties.endpoint | [0]",
              "-o", "tsv"],
             capture_output=True, text=True, check=True,
@@ -132,7 +132,7 @@ def _get_aoai_endpoint() -> str:
             return ep.rstrip("/")
     except Exception:
         pass
-    return "https://graphrag-cu-swedencentral.cognitiveservices.azure.com"
+    return "https://graphrag-openai-8476.openai.azure.com"
 
 
 def _get_aoai_token() -> str:
@@ -214,40 +214,68 @@ def _call_aoai_direct(
     api_version: str = "2024-10-21",
     temperature: float = 0.0,
     max_tokens: int = 8192,
+    max_retries: int = 5,
 ) -> Tuple[str, int]:
-    """Call Azure OpenAI chat completion directly. Returns (text, elapsed_ms)."""
+    """Call Azure OpenAI chat completion directly. Returns (text, elapsed_ms).
+
+    Retries on 429 (rate limit) with exponential backoff, respecting Retry-After.
+    """
     url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
+    # gpt-5.x models require max_completion_tokens instead of max_tokens
+    use_new_param = any(tag in deployment for tag in ("gpt-5", "o4", "o3", "o1"))
+    token_key = "max_completion_tokens" if use_new_param else "max_tokens"
     payload = {
         "messages": [{"role": "user", "content": prompt}],
         "temperature": temperature,
-        "max_tokens": max_tokens,
+        token_key: max_tokens,
     }
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}",
     }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    t0 = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            elapsed_ms = int(round((time.monotonic() - t0) * 1000))
-            data = json.loads(raw)
-            text = data["choices"][0]["message"]["content"]
-            return text.strip(), elapsed_ms
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int(round((time.monotonic() - t0) * 1000))
-        body = ""
+
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        t0 = time.monotonic()
         try:
-            body = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
-        raise RuntimeError(f"AOAI HTTP {e.code}: {body}") from e
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                elapsed_ms = int(round((time.monotonic() - t0) * 1000))
+                data = json.loads(raw)
+                text = data["choices"][0]["message"]["content"]
+                return text.strip(), elapsed_ms
+        except urllib.error.HTTPError as e:
+            elapsed_ms = int(round((time.monotonic() - t0) * 1000))
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+
+            if e.code == 429 and attempt < max_retries:
+                # Parse Retry-After header, fallback to exponential backoff
+                retry_after = None
+                try:
+                    retry_after = int(e.headers.get("Retry-After", "0"))
+                except (ValueError, TypeError):
+                    pass
+                wait_s = max(retry_after or 0, 2 ** attempt * 10)
+                print(
+                    f"    ⏳ 429 rate limit on {deployment} (attempt {attempt+1}/{max_retries}), "
+                    f"waiting {wait_s}s...",
+                    flush=True,
+                )
+                time.sleep(wait_s)
+                continue
+
+            raise RuntimeError(f"AOAI HTTP {e.code}: {body}") from e
+
+    raise RuntimeError(f"AOAI: max retries ({max_retries}) exhausted for {deployment}")
 
 
 # ── DRIFT synthesis prompt (production v0) ──
@@ -325,7 +353,7 @@ def main() -> int:
     ap.add_argument(
         "--models",
         nargs="+",
-        default=["gpt-5.1", "gpt-4.1", "gpt-5.1-mini", "gpt-4.1-mini"],
+        default=["gpt-5.1", "gpt-4.1", "gpt-4.1-mini"],
         help="List of synthesis model deployment names to compare",
     )
     ap.add_argument("--repeats", type=int, default=1, help="Repeats per model per question")

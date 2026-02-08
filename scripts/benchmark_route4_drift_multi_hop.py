@@ -272,6 +272,8 @@ def benchmark_scenario(
     repeats: int,
     timeout_s: float,
     ground_truth: Dict[str, GroundTruth],
+    synthesis_model: Optional[str] = None,
+    include_context: bool = False,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -303,6 +305,10 @@ def benchmark_scenario(
                 "force_route": "drift_multi_hop",  # Route 4
                 "response_type": response_type,
             }
+            if synthesis_model:
+                payload["synthesis_model"] = synthesis_model
+            if include_context:
+                payload["include_context"] = True
 
             status, resp, elapsed, err = _http_post_json(
                 url=url,
@@ -323,8 +329,7 @@ def benchmark_scenario(
 
             print(f"  [{rep}/{repeats}] {elapsed_ms}ms - {len(answer)} chars")
 
-            runs.append(
-                {
+            run_row = {
                     "run": rep,
                     "text": answer,
                     "text_norm": text_norm,
@@ -332,8 +337,12 @@ def benchmark_scenario(
                     "evidence_path_sig": evidence_path_sig,
                     "elapsed_ms": elapsed_ms,
                     "full_response": resp,
-                }
-            )
+            }
+            if include_context and isinstance(resp, dict):
+                llm_ctx = (resp.get("metadata") or {}).get("llm_context")
+                if llm_ctx:
+                    run_row["llm_context"] = llm_ctx
+            runs.append(run_row)
 
         summary = _summarize_runs(runs) if runs else {}
         
@@ -505,6 +514,18 @@ def main():
         choices=["summary", "detailed_report", "nlp_audit", "nlp_connected"],
         help="Response type for synthesis (default: summary)",
     )
+    parser.add_argument(
+        "--synthesis-model",
+        type=str,
+        default=None,
+        help="Override synthesis LLM deployment name (e.g. 'gpt-4.1'). If None, uses server default.",
+    )
+    parser.add_argument(
+        "--include-context",
+        action="store_true",
+        default=False,
+        help="Include full LLM context (retrieved evidence) in benchmark output for debugging/replay",
+    )
 
     args = parser.parse_args()
 
@@ -540,6 +561,14 @@ def main():
 
     timestamp = _now_utc_stamp()
 
+    synthesis_model = args.synthesis_model
+    if synthesis_model:
+        print(f"Synthesis model override: {synthesis_model}")
+
+    include_context = args.include_context
+    if include_context:
+        print("Including LLM context in output (for model comparison replay)")
+
     result = benchmark_scenario(
         api_base_url=args.url,
         group_id=args.group_id,
@@ -549,6 +578,8 @@ def main():
         repeats=args.repeats,
         timeout_s=args.timeout,
         ground_truth=ground_truth,
+        synthesis_model=synthesis_model,
+        include_context=include_context,
     )
 
     # Write outputs
@@ -566,6 +597,7 @@ def main():
                 "group_id": args.group_id,
                 "force_route": "drift_multi_hop",
                 "response_type": response_type,
+                "synthesis_model": synthesis_model or "default (gpt-5.1)",
                 "scenario": result,
             },
             f,

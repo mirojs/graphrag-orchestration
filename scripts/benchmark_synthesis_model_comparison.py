@@ -77,22 +77,23 @@ def _get_aoai_endpoint() -> str:
     ep = os.environ.get("AZURE_OPENAI_ENDPOINT")
     if ep:
         return ep.rstrip("/")
-    # Fallback: query Azure CLI
-    try:
-        result = subprocess.run(
-            ["az", "cognitiveservices", "account", "list",
-             "--resource-group", "rg-knowledgegraph",
-             "--query", "[?kind=='OpenAI' || kind=='AIServices'].properties.endpoint | [0]",
-             "-o", "tsv"],
-            capture_output=True, text=True, check=True,
-        )
-        ep = result.stdout.strip()
-        if ep:
-            return ep.rstrip("/")
-    except Exception:
-        pass
-    # Last resort: hardcoded from deploy script
-    return "https://graphrag-cu-swedencentral.cognitiveservices.azure.com"
+    # Query Azure CLI — same logic as deploy-simple.sh
+    for rg in ("rg-graphrag-feature", "rg-knowledgegraph"):
+        try:
+            result = subprocess.run(
+                ["az", "cognitiveservices", "account", "list",
+                 "--resource-group", rg,
+                 "--query", "[?kind=='OpenAI' || kind=='AIServices'].properties.endpoint | [0]",
+                 "-o", "tsv"],
+                capture_output=True, text=True, check=True,
+            )
+            ep = result.stdout.strip()
+            if ep:
+                return ep.rstrip("/")
+        except Exception:
+            continue
+    # Last resort: hardcoded from deploy-simple.sh (graphrag-openai-8476)
+    return "https://graphrag-openai-8476.openai.azure.com"
 
 
 def _get_aoai_token() -> str:
@@ -121,37 +122,53 @@ def _call_aoai_direct(
 ) -> Tuple[str, int]:
     """Call Azure OpenAI chat completion directly. Returns (text, elapsed_ms)."""
     url = f"{endpoint}/openai/deployments/{deployment}/chat/completions?api-version={api_version}"
-    payload = {
+    # gpt-5.x and gpt-5-mini require max_completion_tokens instead of max_tokens
+    use_new_param = any(deployment.startswith(p) for p in ("gpt-5", "o3", "o4"))
+    token_key = "max_completion_tokens" if use_new_param else "max_tokens"
+    # gpt-5-mini and o-series don't support temperature (only default=1)
+    no_temperature = any(deployment.startswith(p) for p in ("gpt-5-mini", "gpt-5-nano", "o1", "o3", "o4"))
+    payload: Dict[str, Any] = {
         "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
+        token_key: max_tokens,
     }
+    if not no_temperature:
+        payload["temperature"] = temperature
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {token}",
     }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    t0 = time.monotonic()
-    try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-            elapsed_ms = int(round((time.monotonic() - t0) * 1000))
-            data = json.loads(raw)
-            text = data["choices"][0]["message"]["content"]
-            return text.strip(), elapsed_ms
-    except urllib.error.HTTPError as e:
-        elapsed_ms = int(round((time.monotonic() - t0) * 1000))
-        body = ""
+    max_retries = 5
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        t0 = time.monotonic()
         try:
-            body = e.read().decode("utf-8", errors="replace")[:500]
-        except Exception:
-            pass
-        raise RuntimeError(f"AOAI HTTP {e.code}: {body}") from e
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                elapsed_ms = int(round((time.monotonic() - t0) * 1000))
+                data = json.loads(raw)
+                text = data["choices"][0]["message"]["content"]
+                return text.strip(), elapsed_ms
+        except urllib.error.HTTPError as e:
+            elapsed_ms = int(round((time.monotonic() - t0) * 1000))
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="replace")[:500]
+            except Exception:
+                pass
+            if e.code == 429 and attempt < max_retries:
+                # Parse retry-after header or use exponential backoff
+                retry_after = e.headers.get("Retry-After")
+                wait = int(retry_after) if retry_after and retry_after.isdigit() else min(30, 5 * (2 ** attempt))
+                print(f"    ⏳ 429 rate-limited, waiting {wait}s (attempt {attempt + 1}/{max_retries})...", flush=True)
+                time.sleep(wait)
+                continue
+            raise RuntimeError(f"AOAI HTTP {e.code}: {body}") from e
+    raise RuntimeError("Exhausted retries")
 
 
 def _build_summary_prompt(query: str, context: str) -> str:
@@ -530,7 +547,7 @@ def main() -> int:
             "group_id": group_id,
         },
         "captured_contexts": {
-            qid: {"query": ctx["query"], "retrieval_ms": ctx["retrieval_ms"], "context_chars": len(ctx["llm_context"])}
+            qid: {"query": ctx["query"], "retrieval_ms": ctx["retrieval_ms"], "llm_context": ctx["llm_context"]}
             for qid, ctx in captured.items()
         },
         "comparison_summary": comparison,

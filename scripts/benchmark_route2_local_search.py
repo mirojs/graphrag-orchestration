@@ -99,7 +99,11 @@ def _now_utc_stamp() -> str:
 def _normalize_text(text: str) -> str:
     t = (text or "").strip().lower()
     t = re.sub(r"\s+", " ", t)
-    t = re.sub(r"[^a-z0-9 $%./:-]", "", t)
+    # Replace punctuation (incl. hyphens, slashes, colons) with spaces so
+    # compound tokens like "2010-06-15" or "$75.00/month" become separate words.
+    # Keep $ and % as they are meaningful in financial contexts.
+    t = re.sub(r"[^a-z0-9 $%]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
     return t
 
 
@@ -123,35 +127,42 @@ def _extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
             if is_negative:
                 expected = "not specified"
             else:
-                # Look ahead for Expected field
-                j = i + 1
-                while j < len(lines) and not re.match(r'^\d*\.?\s*\*\*Q-', lines[j]):
-                    line_content = lines[j].strip()
-                    exp_match = re.match(r'-\s+\*\*Expected:\*\*\s*(.*)$', line_content)
-                    if exp_match:
-                        expected = exp_match.group(1).strip() if exp_match.group(1) else ""
-                        # Handle multi-line expected answers
-                        k = j + 1
-                        while k < len(lines):
-                            next_line = lines[k].strip()
-                            if re.match(r'-\s+\*\*(?:Source|Expected):', next_line):
-                                break
-                            if re.match(r'^\d*\.?\s*\*\*Q-', next_line) or next_line.startswith('##'):
-                                break
-                            if not next_line:
-                                if k + 1 < len(lines):
-                                    peek = lines[k + 1].strip()
-                                    if peek and not re.match(r'-\s+\*\*', peek) and not re.match(r'^\d+\.', peek):
-                                        k += 1
-                                        continue
-                                break
-                            if next_line.startswith('-'):
-                                expected += ' ' + next_line[1:].strip()
-                            else:
-                                expected += ' ' + next_line
-                            k += 1
-                        break
-                    j += 1
+                # First: check if Expected is inline on the same line as the question
+                inline_exp = re.search(r'-\s+\*\*Expected:\*\*\s*(.+?)(?:\s*$)', question)
+                if inline_exp:
+                    expected = inline_exp.group(1).strip()
+                    # Trim the question to remove the inline metadata
+                    question = re.split(r'\s+-\s+\*\*Expected\s+Route:\*\*', question)[0].strip()
+                else:
+                    # Look ahead for Expected field on subsequent lines
+                    j = i + 1
+                    while j < len(lines) and not re.match(r'^\d*\.?\s*\*\*Q-', lines[j]):
+                        line_content = lines[j].strip()
+                        exp_match = re.match(r'-\s+\*\*Expected:\*\*\s*(.*)$', line_content)
+                        if exp_match:
+                            expected = exp_match.group(1).strip() if exp_match.group(1) else ""
+                            # Handle multi-line expected answers
+                            k = j + 1
+                            while k < len(lines):
+                                next_line = lines[k].strip()
+                                if re.match(r'-\s+\*\*(?:Source|Expected):', next_line):
+                                    break
+                                if re.match(r'^\d*\.?\s*\*\*Q-', next_line) or next_line.startswith('##'):
+                                    break
+                                if not next_line:
+                                    if k + 1 < len(lines):
+                                        peek = lines[k + 1].strip()
+                                        if peek and not re.match(r'-\s+\*\*', peek) and not re.match(r'^\d+\.', peek):
+                                            k += 1
+                                            continue
+                                    break
+                                if next_line.startswith('-'):
+                                    expected += ' ' + next_line[1:].strip()
+                                else:
+                                    expected += ' ' + next_line
+                                k += 1
+                            break
+                        j += 1
             
             # Clean up expected answer
             expected = re.sub(r'`', '', expected)

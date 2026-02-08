@@ -208,7 +208,7 @@ class LLMService:
         return self._embed_model
     
     def get_routing_llm(self) -> Any:
-        """Get the specialized routing LLM (default: gpt-5.1).
+        """Get the specialized routing LLM (default: gpt-4.1-mini).
 
         Uses AZURE_OPENAI_ROUTING_DEPLOYMENT from settings.
         Only applies reasoning_effort for o-series models.

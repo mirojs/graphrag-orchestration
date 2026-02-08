@@ -154,6 +154,7 @@ class EvidenceSynthesizer:
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        pre_fetched_chunks: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -173,7 +174,7 @@ class EvidenceSynthesizer:
             - evidence_path: The nodes used to generate the response.
         """
         # Step 1: Retrieve raw text chunks for evidence nodes
-        text_chunks = await self._retrieve_text_chunks(evidence_nodes)
+        text_chunks = pre_fetched_chunks if pre_fetched_chunks is not None else await self._retrieve_text_chunks(evidence_nodes)
         
         # Step 1.5: Merge coverage chunks if provided
         if coverage_chunks:

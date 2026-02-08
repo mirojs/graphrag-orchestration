@@ -137,6 +137,7 @@ class LocalSearchHandler(BaseRouteHandler):
             synthesis_model=synthesis_model,
             include_context=include_context,
             language_spans_by_doc=doc_language_spans if doc_language_spans else None,
+            pre_fetched_chunks=pre_chunks if enable_sentence_citations else None,
         )
         logger.info("stage_2.3_complete")
         

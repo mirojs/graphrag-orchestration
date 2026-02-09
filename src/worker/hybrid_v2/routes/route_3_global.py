@@ -318,6 +318,10 @@ class GlobalSearchHandler(BaseRouteHandler):
             "route_description": "LazyGraphRAG + HippoRAG thematic search",
         }
         
+        # Context stats for de-noising effectiveness measurement
+        if synthesis_result.get("context_stats"):
+            metadata["context_stats"] = synthesis_result["context_stats"]
+        
         # Pass through raw_extractions from comprehensive mode (2-pass extraction)
         if synthesis_result.get("raw_extractions"):
             metadata["raw_extractions"] = synthesis_result["raw_extractions"]

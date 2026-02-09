@@ -332,6 +332,7 @@ class DRIFTHandler(BaseRouteHandler):
                 "precision_level": "maximum",
                 "route_description": "DRIFT iterative multi-hop with confidence loop",
                 **({"coverage_retrieval": coverage_metadata} if coverage_metadata else {}),
+                **({"context_stats": synthesis_result["context_stats"]} if synthesis_result.get("context_stats") else {}),
                 # Pass through raw_extractions from comprehensive mode (2-pass extraction)
                 **({"raw_extractions": synthesis_result["raw_extractions"]} if synthesis_result.get("raw_extractions") else {}),
                 **({"processing_mode": synthesis_result["processing_mode"]} if synthesis_result.get("processing_mode") else {}),

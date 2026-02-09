@@ -241,7 +241,7 @@ class EvidenceSynthesizer:
         
         # Step 2: Build context with citations (now groups by document for better reasoning)
         # Pass entity_scores so _build_cited_context can enforce token budget by PPR rank.
-        context, citation_map, sentence_citation_map = self._build_cited_context(
+        context, citation_map, sentence_citation_map, context_stats = self._build_cited_context(
             text_chunks, language_spans_by_doc=language_spans_by_doc,
             entity_scores=entity_scores,
         )
@@ -292,12 +292,19 @@ class EvidenceSynthesizer:
             sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
         )
         
+        # Measure final context (after sparse-retrieval injection + sentence hints)
+        final_context_chars = len(context)
+        final_context_tokens = self._estimate_tokens(context)
+        context_stats["final_context_chars"] = final_context_chars
+        context_stats["final_context_tokens"] = final_context_tokens
+
         logger.info("synthesis_complete",
                    query=query,
                    num_citations=len(citations),
                    response_length=len(response),
                    response_type=response_type,
-                   is_drift_mode=sub_questions is not None)
+                   is_drift_mode=sub_questions is not None,
+                   **context_stats)
         
         return {
             "response": response,
@@ -306,6 +313,7 @@ class EvidenceSynthesizer:
             "text_chunks_used": len(text_chunks),
             "sub_questions_addressed": sub_questions or [],
             "llm_context": context if include_context else None,
+            "context_stats": context_stats,
         }
     
     async def synthesize_with_graph_context(
@@ -579,8 +587,22 @@ class EvidenceSynthesizer:
                    num_relationships=len(graph_context.relationships),
                    num_citations=len(citations),
                    num_sentence_citations=len(sentence_citation_map),
-                   response_length=len(response))
+                   response_length=len(response),
+                   final_context_chars=len(full_context),
+                   final_context_tokens=self._estimate_tokens(full_context))
         
+        context_stats = {
+            "chunks_before_budget": len(graph_context.source_chunks),
+            "chunks_after_budget": len(graph_context.source_chunks),
+            "chunks_dropped": 0,
+            "context_tokens": self._estimate_tokens(full_context),
+            "context_chars": len(full_context),
+            "final_context_chars": len(full_context),
+            "final_context_tokens": self._estimate_tokens(full_context),
+            "token_budget": self._get_token_budget(),
+            "num_doc_groups": len(doc_groups),
+        }
+
         return {
             "response": response,
             "citations": citations,
@@ -589,6 +611,7 @@ class EvidenceSynthesizer:
             "graph_context_used": True,
             "relationships_used": len(graph_context.relationships),
             "llm_context": full_context if include_context else None,
+            "context_stats": context_stats,
         }
     
     async def _generate_graph_response(
@@ -891,7 +914,7 @@ Response:"""
         text_chunks: List[Dict[str, Any]],
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         entity_scores: Optional[Dict[str, float]] = None,
-    ) -> Tuple[str, Dict[str, Dict[str, str]], Dict[str, Dict[str, Any]]]:
+    ) -> Tuple[str, Dict[str, Dict[str, str]], Dict[str, Dict[str, Any]], Dict[str, Any]]:
         """
         Build a context string with citation markers, grouped by document.
         
@@ -907,7 +930,9 @@ Response:"""
         - Document-level properties (dates, totals)
         
         Returns:
-            Tuple of (context_string, citation_map, sentence_citation_map)
+            Tuple of (context_string, citation_map, sentence_citation_map, context_stats)
+            context_stats contains: chunks_before_budget, chunks_after_budget,
+            chunks_dropped, context_tokens, context_chars, token_budget, num_doc_groups
         """
         citation_map: Dict[str, Dict[str, str]] = {}
         sentence_citation_map: Dict[str, Dict[str, Any]] = {}
@@ -1136,7 +1161,17 @@ Response:"""
             
             context_parts.append("")  # Blank line between documents
         
-        return "\n\n".join(context_parts), citation_map, sentence_citation_map
+        context_string = "\n\n".join(context_parts)
+        context_stats = {
+            "chunks_before_budget": len(text_chunks),
+            "chunks_after_budget": len(budgeted_chunks),
+            "chunks_dropped": chunks_dropped,
+            "context_tokens": tokens_used,
+            "context_chars": len(context_string),
+            "token_budget": token_budget,
+            "num_doc_groups": len(doc_groups_budgeted),
+        }
+        return context_string, citation_map, sentence_citation_map, context_stats
     
     async def _generate_response(
         self,

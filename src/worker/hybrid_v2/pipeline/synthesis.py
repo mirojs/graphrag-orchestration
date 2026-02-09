@@ -18,6 +18,7 @@ import structlog
 
 from src.worker.hybrid_v2.services.extraction_service import ExtractionService
 from src.worker.hybrid_v2.pipeline.enhanced_graph_retriever import EnhancedGraphContext
+from src.worker.hybrid_v2.pipeline.chunk_filters import apply_noise_filters
 
 logger = structlog.get_logger(__name__)
 
@@ -836,8 +837,17 @@ Response:"""
                         hash_to_chunk[content_hash]["_source_entity"] = entity_name
             
             # Sort deduped chunks by entity score (highest first) for downstream ranking
+            deduped_chunks = list(hash_to_chunk.values())
+            
+            # --- Noise filtering (February 9, 2026) ---
+            # Penalise form-label, bare-heading, and low-content chunks by reducing
+            # their _entity_score.  This pushes noisy chunks below the token budget
+            # cutoff without hard-deleting them.
+            noise_penalised = apply_noise_filters(deduped_chunks, score_key="_entity_score")
+            
+            # Now sort by (potentially penalised) entity score
             chunks = sorted(
-                hash_to_chunk.values(),
+                deduped_chunks,
                 key=lambda c: c.get("_entity_score", 0.0),
                 reverse=True,
             )
@@ -846,6 +856,7 @@ Response:"""
                        num_chunks_raw=len(raw_chunks),
                        num_chunks_deduped=len(chunks),
                        duplicates_removed=duplicates_removed,
+                       noise_penalised=noise_penalised,
                        dedup_ratio=f"{duplicates_removed / len(raw_chunks) * 100:.1f}%" if raw_chunks else "0%",
                        num_entities=len(selected_entities),
                        batched=hasattr(self.text_store, 'get_chunks_for_entities'))

@@ -62,8 +62,8 @@ RUN echo "CACHE_BUST=${CACHE_BUST}" > /dev/null
 COPY src/ /app/src/
 
 # Copy built frontend static files from Stage 1
-# Vite outputs to ../backend/static relative to frontend dir → /backend/static in that stage
-COPY --from=frontend-builder /backend/static /app/static
+# Vite outputs to dist/ in the /frontend workdir
+COPY --from=frontend-builder /frontend/dist /app/static
 
 # Set PATH and environment
 ENV PATH=/root/.local/bin:$PATH \

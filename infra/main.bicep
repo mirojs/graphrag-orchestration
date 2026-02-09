@@ -25,8 +25,8 @@ param SERVICE_GRAPHRAG_API_IMAGE_NAME string = ''
 param SERVICE_GRAPHRAG_WORKER_IMAGE_NAME string = ''
 
 // Resolve image names with explicit fallback to ensure correct images
-var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : (!empty(SERVICE_GRAPHRAG_API_IMAGE_NAME) ? SERVICE_GRAPHRAG_API_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-api-default:latest')
-var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : (!empty(SERVICE_GRAPHRAG_WORKER_IMAGE_NAME) ? SERVICE_GRAPHRAG_WORKER_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-orchestration/graphrag-worker-default:latest')
+var apiImageName = !empty(serviceGraphragApiImageName) ? serviceGraphragApiImageName : (!empty(SERVICE_GRAPHRAG_API_IMAGE_NAME) ? SERVICE_GRAPHRAG_API_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-api:latest')
+var workerImageName = !empty(serviceGraphragWorkerImageName) ? serviceGraphragWorkerImageName : (!empty(SERVICE_GRAPHRAG_WORKER_IMAGE_NAME) ? SERVICE_GRAPHRAG_WORKER_IMAGE_NAME : '${containerRegistry.name}.azurecr.io/graphrag-worker:latest')
 
 @secure()
 @description('Neo4j Password')

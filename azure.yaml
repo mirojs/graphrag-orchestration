@@ -1,6 +1,6 @@
-name: graphrag-orchestration
+name: graphrag
 metadata:
-  template: graphrag-orchestration@1.0
+  template: graphrag@1.0
 
 services:
   # API Gateway - handles HTTP requests, chat endpoints, folder management

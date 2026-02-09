@@ -26,6 +26,13 @@ const router = createHashRouter([
                 element: <Chat />
             },
             {
+                path: "files",
+                lazy: async () => {
+                    const { default: Component } = await import("./pages/files/Files");
+                    return { Component };
+                }
+            },
+            {
                 path: "*",
                 lazy: () => import("./pages/NoPage")
             }

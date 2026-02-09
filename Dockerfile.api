@@ -56,7 +56,8 @@ COPY --from=builder /root/.local /root/.local
 # Create data directories
 RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache
 
-# Copy application code from new src/ structure
+# Copy application code from new src/ structure  
+# Force rebuild: 2026-02-09-13:45
 ARG CACHE_BUST=""
 RUN echo "CACHE_BUST=${CACHE_BUST}" > /dev/null
 COPY src/ /app/src/

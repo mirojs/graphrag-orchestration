@@ -319,22 +319,22 @@ After all solutions, the synthesis LLM receives:
 | Step | Work | Depends On | Est. Effort |
 |------|------|------------|-------------|
 | 1 | ~~Louvain → LazyGraphRAG composition (Step 9)~~ | — | ✅ DONE |
-| 2 | Verify `test-5pdfs-v2-fix2` has `SEMANTICALLY_SIMILAR` edges | — | 15 min |
-| 3 | If not, reindex with `knn_enabled=True` or run maintenance recompute | Step 2 | 30 min |
+| 2 | ~~Verify `test-5pdfs-v2-fix2` has `SEMANTICALLY_SIMILAR` edges~~ | — | ✅ DONE (5,434 edges, 5,416 via GDS KNN) |
+| 3 | ~~If not, reindex~~ — not needed, edges present | Step 2 | ✅ DONE (skipped) |
 
 > **Audit traceability (February 9, 2026):** Steps 2-3 are justified by the **graph completeness audit** documented in `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` (Feb 6 updates): `test-5pdfs-v2-fix2` was found to have **Entity KNN SEMANTICALLY_SIMILAR = 0** (only KVP↔KVP KNN edges present, 540 total). GDS properties (`community_id`, `pagerank`) were also 0 on all nodes. A reindex with deployed fixes is expected to resolve all issues.
 
-| 4 | Chunk dedup (content-hash) in `_retrieve_text_chunks()` | — | 1-2 hours |
-| 5 | Token budget in `_build_cited_context()` | — | 1-2 hours |
+| 4 | ~~Chunk dedup (content-hash) in `_retrieve_text_chunks()`~~ | — | ✅ DONE (`30df3e85`) |
+| 5 | ~~Token budget in `_build_cited_context()`~~ | — | ✅ DONE (`30df3e85`) |
 
 #### Week 2 — PPR Score Propagation + Benchmarking
 
 | Step | Work | Depends On | Est. Effort |
 |------|------|------------|-------------|
-| 6 | PPR score propagation to synthesis | Steps 4-5 | 2-3 hours |
-| 7 | Score-ranked context ordering | Step 6 | 1 hour |
-| 8 | KNN config consistency (Route 2 vs 4) | — | 1 hour |
-| 9 | Benchmark regression (all routes, 10-question suite) | Steps 4-7 | 2 hours |
+| 6 | ~~PPR score propagation to synthesis~~ | Steps 4-5 | ✅ DONE (`30df3e85`) |
+| 7 | ~~Score-ranked context ordering~~ | Step 6 | ✅ DONE (`30df3e85`) |
+| 8 | ~~KNN config consistency (Route 2 vs 4)~~ | — | ✅ DONE — normalized `semantic_multihop_beam` default to include all KNN edges (matching PPR Path 3). `knn_config=None` now includes all; `knn_config="none"` for A/B baseline. |
+| 9 | Benchmark regression (all routes, 10-question suite) | Steps 4-8, **cloud deployment** | 2 hours — blocked on deployment |
 
 #### Week 3 — Noise Filters + PPR Tuning
 
@@ -371,7 +371,7 @@ After all solutions, the synthesis LLM receives:
 | `DESIGN_LOUVAIN_COMMUNITY_SUMMARIZATION_2026-02-09.md` | Detailed design for Step 9 (Louvain → communities) |
 | `ANALYSIS_CONTEXT_OVERRETRIEVAL_ALL_ROUTES_2026-02-08.md` | 6 gaps + 3-phase optimization plan |
 | `ANALYSIS_CONTEXT_QUALITY_AND_DEDUP_2026-02-08.md` | 56.5% duplicate chunks analysis |
-| `ARCHITECTURE_CORRECTIONS_2026-02-08.md` | 13 corrections to architecture doc (pending) |
+| `ARCHITECTURE_CORRECTIONS_2026-02-08.md` | 13 corrections to architecture doc (**applied** `3105b53d`) |
 | `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` | Main architecture doc (Section 23 updated) |
 
 ### 6.2 Key Code Locations

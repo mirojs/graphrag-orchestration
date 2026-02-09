@@ -305,7 +305,8 @@ class DeterministicTracer:
             max_hops: Number of hops (default 3).
             beam_width: Candidates per hop (default 10).
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
-                        If None, no KNN edges are traversed (baseline mode).
+                        If None (default), all KNN edges are traversed (consistent with PPR).
+                        If "none", no KNN edges are traversed (A/B baseline mode).
 
         Returns:
             List of (entity_name, accumulated_score) sorted descending.

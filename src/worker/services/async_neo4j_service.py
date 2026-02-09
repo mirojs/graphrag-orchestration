@@ -1212,7 +1212,10 @@ class AsyncNeo4jService:
             beam_width: How many candidates to keep per hop (default 10).
             damping: Decay applied per hop to accumulator score.
             knn_config: Optional KNN configuration filter for SEMANTICALLY_SIMILAR edges.
-                        If None, no SEMANTICALLY_SIMILAR edges are traversed (baseline).
+                        If None (default), ALL SEMANTICALLY_SIMILAR edges are traversed
+                        (consistent with PPR Path 3 — edges already quality-filtered at
+                        indexing time with similarity_cutoff=0.60).
+                        If "none", no SEMANTICALLY_SIMILAR edges are traversed (A/B baseline).
                         If set (e.g., 'knn-1', 'knn-2', 'knn-3'), only traverse 
                         SEMANTICALLY_SIMILAR edges with matching knn_config property.
 
@@ -1222,10 +1225,32 @@ class AsyncNeo4jService:
         # Query uses native vector.similarity.cosine (available in Neo4j 5.18+/Aura)
         # Runs a single hop at a time; Python loop controls iteration.
         #
-        # KNN config filtering:
-        # - If knn_config is None: exclude all SEMANTICALLY_SIMILAR edges (baseline)
-        # - If knn_config is set: include SEMANTICALLY_SIMILAR edges matching that config
-        if knn_config:
+        # KNN config filtering (normalized Feb 2026 to match PPR Path 3):
+        # - If knn_config is None: include ALL SEMANTICALLY_SIMILAR edges (consistent with PPR)
+        # - If knn_config == "none": explicitly exclude all SEMANTICALLY_SIMILAR edges (A/B baseline)
+        # - If knn_config is set (e.g., 'knn-1'): only edges matching that config tag
+        if knn_config == "none":
+            # A/B testing baseline: exclude all SEMANTICALLY_SIMILAR edges
+            hop_query = cypher25_query("""
+            UNWIND $current_ids AS eid
+            MATCH (src)-[r]-(neighbor)
+            WHERE (src:Entity OR src:`__Entity__`)
+              AND (neighbor:Entity OR neighbor:`__Entity__`)
+              AND src.id = eid
+              AND neighbor.group_id = $group_id
+              AND type(r) <> 'MENTIONS'
+              AND type(r) <> 'SEMANTICALLY_SIMILAR'
+              AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
+            WITH DISTINCT neighbor,
+                 vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
+            ORDER BY sim DESC
+            LIMIT $beam_width
+            RETURN neighbor.id AS id,
+                   neighbor.name AS name,
+                   sim AS similarity
+            """)
+        elif knn_config:
+            # A/B testing: only traverse SEMANTICALLY_SIMILAR edges with matching knn_config tag
             hop_query = cypher25_query("""
             UNWIND $current_ids AS eid
             MATCH (src)-[r]-(neighbor)
@@ -1248,7 +1273,8 @@ class AsyncNeo4jService:
                    sim AS similarity
             """)
         else:
-            # Baseline: exclude all SEMANTICALLY_SIMILAR edges
+            # Default: include ALL SEMANTICALLY_SIMILAR edges (normalized to match PPR Path 3)
+            # Edges are already quality-filtered at indexing time (similarity_cutoff=0.60)
             hop_query = cypher25_query("""
             UNWIND $current_ids AS eid
             MATCH (src)-[r]-(neighbor)
@@ -1257,7 +1283,6 @@ class AsyncNeo4jService:
               AND src.id = eid
               AND neighbor.group_id = $group_id
               AND type(r) <> 'MENTIONS'
-              AND type(r) <> 'SEMANTICALLY_SIMILAR'
               AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
             WITH DISTINCT neighbor,
                  vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim

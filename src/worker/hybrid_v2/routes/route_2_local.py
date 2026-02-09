@@ -142,6 +142,12 @@ class LocalSearchHandler(BaseRouteHandler):
         )
         logger.info("stage_2.3_complete")
         
+        # Merge retrieval stats when chunks were pre-fetched (retrieval happened in this handler)
+        if enable_sentence_citations and _retrieval_stats:
+            cs = synthesis_result.get("context_stats")
+            if cs and isinstance(cs, dict):
+                cs["retrieval"] = _retrieval_stats
+        
         # ================================================================
         # POST-SYNTHESIS NEGATIVE DETECTION
         # ================================================================

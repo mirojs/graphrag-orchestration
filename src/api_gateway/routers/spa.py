@@ -3,6 +3,7 @@ SPA (Single Page Application) Router
 
 Serves the React frontend and provides MSAL auth setup endpoint.
 Replaces the Quart static file serving and auth_setup endpoint.
+Updated 2026-02-09 with new file management UI.
 """
 
 import os

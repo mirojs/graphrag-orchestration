@@ -367,14 +367,44 @@ def evaluate_response_quality(response: Dict[str, Any], question: Dict[str, Any]
     }
 
 
+def _get_bearer_token(token_arg: Optional[str] = None) -> Optional[str]:
+    """Resolve Bearer token from arg, env var, or az CLI."""
+    if token_arg:
+        return token_arg
+    env_token = os.getenv("GRAPHRAG_API_TOKEN") or os.getenv("BEARER_TOKEN")
+    if env_token:
+        return env_token
+    # Try az CLI
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["az", "account", "get-access-token",
+             "--scope", "api://b68b6881-80ba-4cec-b9dd-bd2232ec8817/.default",
+             "--query", "accessToken", "-o", "tsv"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
 def run_benchmark(
     base_url: str,
     group_id: str,
     timeout: float = 180.0,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the thematic benchmark for Route 3."""
     
     headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
+    bearer = _get_bearer_token(token)
+    if bearer:
+        headers["Authorization"] = f"Bearer {bearer}"
+        print(f"Auth: Bearer token ({len(bearer)} chars)")
+    else:
+        print("Auth: None (may fail with 401)")
     endpoint = base_url.rstrip("/") + "/hybrid/query"
     
     all_questions = THEMATIC_QUESTIONS + CROSS_DOC_QUESTIONS
@@ -478,6 +508,7 @@ def main():
     parser.add_argument("--url", default=DEFAULT_URL, help="Base URL of the API")
     parser.add_argument("--group-id", default=_default_group_id(), help="Group ID")
     parser.add_argument("--timeout", type=float, default=180.0, help="Request timeout")
+    parser.add_argument("--token", default=None, help="Bearer token (or set GRAPHRAG_API_TOKEN env var)")
     parser.add_argument("--output", help="Output JSON file path")
     args = parser.parse_args()
     
@@ -485,6 +516,7 @@ def main():
         base_url=args.url,
         group_id=args.group_id,
         timeout=args.timeout,
+        token=args.token,
     )
     
     print_summary(results)

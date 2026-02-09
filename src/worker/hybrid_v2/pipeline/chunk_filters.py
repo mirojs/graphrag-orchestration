@@ -136,26 +136,42 @@ def compute_noise_penalty(text: str) -> float:
 def apply_noise_filters(
     chunks: List[Dict[str, Any]],
     score_key: str = "_entity_score",
-) -> int:
+) -> Dict[str, Any]:
     """Apply noise penalties to a list of chunks **in place**.
 
     For each chunk, `chunk[score_key]` is multiplied by the noise penalty.
     A `_noise_penalty` field is added to each chunk for observability.
+    A `_noise_filters_hit` list is added with the names of filters that fired.
 
     Args:
         chunks: List of chunk dicts (must have `text` and `score_key`).
         score_key: Key holding the relevance score to penalise.
 
     Returns:
-        Number of chunks that were penalised (penalty < 1.0).
+        Dict with per-filter counts and total penalised count:
+        {
+            "total_penalised": int,
+            "form_label": int,
+            "bare_heading": int,
+            "min_content": int,
+        }
     """
+    filter_counts: Dict[str, int] = {name: 0 for name, _fn in _FILTERS}
     penalised = 0
     for chunk in chunks:
         text = chunk.get("text", "")
-        penalty = compute_noise_penalty(text)
-        chunk["_noise_penalty"] = penalty
-        if penalty < 1.0:
+        combined_penalty = 1.0
+        filters_hit: List[str] = []
+        for name, fn in _FILTERS:
+            p = fn(text)
+            if p < 1.0:
+                filter_counts[name] += 1
+                filters_hit.append(name)
+            combined_penalty *= p
+        chunk["_noise_penalty"] = combined_penalty
+        chunk["_noise_filters_hit"] = filters_hit
+        if combined_penalty < 1.0:
             original = chunk.get(score_key, 0.0)
-            chunk[score_key] = original * penalty
+            chunk[score_key] = original * combined_penalty
             penalised += 1
-    return penalised
+    return {"total_penalised": penalised, **filter_counts}

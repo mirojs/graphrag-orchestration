@@ -211,10 +211,12 @@ class TestApplyNoiseFilters:
         ]
         penalised = apply_noise_filters(chunks)
         
-        assert penalised >= 1  # At least the form-label chunk
+        assert penalised["total_penalised"] >= 1  # At least the form-label chunk
         assert chunks[0]["_entity_score"] < 1.0  # Penalised
         assert chunks[0]["_noise_penalty"] < 1.0
+        assert chunks[0]["_noise_filters_hit"]  # Should have filter names
         assert chunks[1]["_noise_penalty"] == 1.0  # Clean chunk
+        assert chunks[1]["_noise_filters_hit"] == []  # No filters fired
 
     def test_preserves_clean_chunks(self):
         """Clean chunks should keep their original score."""
@@ -234,7 +236,9 @@ class TestApplyNoiseFilters:
 
     def test_empty_list(self):
         """Empty list should work without error."""
-        assert apply_noise_filters([]) == 0
+        result = apply_noise_filters([])
+        assert result["total_penalised"] == 0
+        assert result["form_label"] == 0
 
     def test_reranking_effect(self):
         """After filtering, a previously lower-scored clean chunk should

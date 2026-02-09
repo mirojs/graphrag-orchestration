@@ -181,12 +181,13 @@ class EvidenceSynthesizer:
             - evidence_path: The nodes used to generate the response.
         """
         # Step 1: Retrieve raw text chunks for evidence nodes
-        # _retrieve_text_chunks returns (deduped_chunks, entity_scores) after Feb 9 de-noising.
+        # _retrieve_text_chunks returns (deduped_chunks, entity_scores, retrieval_stats) after Feb 9 de-noising.
+        retrieval_stats: Dict[str, Any] = {}
         if pre_fetched_chunks is not None:
             text_chunks = pre_fetched_chunks
             entity_scores: Dict[str, float] = {name: score for name, score in evidence_nodes}
         else:
-            text_chunks, entity_scores = await self._retrieve_text_chunks(evidence_nodes)
+            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes)
         
         # Step 1.5: Merge coverage chunks if provided
         if coverage_chunks:
@@ -297,6 +298,9 @@ class EvidenceSynthesizer:
         final_context_tokens = self._estimate_tokens(context)
         context_stats["final_context_chars"] = final_context_chars
         context_stats["final_context_tokens"] = final_context_tokens
+        # Merge retrieval-stage stats for per-measure attribution
+        if retrieval_stats:
+            context_stats["retrieval"] = retrieval_stats
 
         logger.info("synthesis_complete",
                    query=query,
@@ -768,7 +772,7 @@ Response:"""
     async def _retrieve_text_chunks(
         self, 
         evidence_nodes: List[Tuple[str, float]],
-    ) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         """Retrieve raw text chunks for the evidence nodes.
         
         Performance optimization: Uses batched Neo4j query to fetch all entities
@@ -781,11 +785,13 @@ Response:"""
         - Returns entity_scores dict so callers can rank/budget by PPR score.
         
         Returns:
-            Tuple of (deduplicated_chunks, entity_scores_dict)
+            Tuple of (deduplicated_chunks, entity_scores_dict, retrieval_stats)
+            retrieval_stats contains: chunks_raw, duplicates_removed, dedup_ratio,
+            noise_filter_counts (per-filter breakdown), entities_selected.
         """
         if not self.text_store:
             logger.warning("no_text_store_available")
-            return [], {}
+            return [], {}, {}
         
         chunks: List[Dict[str, Any]] = []
         def _clean_entity_name(name: str) -> str:
@@ -816,7 +822,7 @@ Response:"""
         # Common Route 4 case: no entity seeds. Don't emit a misleading "0 chunks" log here;
         # the caller may fall back to query-based retrieval.
         if len(selected_entities) == 0:
-            return [], entity_scores
+            return [], entity_scores, {"chunks_raw": 0, "entities_selected": 0}
         
         try:
             # Batch query: fetch all entities in one round-trip (major performance gain)
@@ -834,6 +840,8 @@ Response:"""
                         raw_chunks.append((entity_name, chunk))
             
             # --- Content-hash dedup + cross-entity dedup ---
+            # Ablation toggle: set DENOISE_DISABLE_DEDUP=1 to skip dedup (measure its contribution)
+            dedup_enabled = os.environ.get("DENOISE_DISABLE_DEDUP", "") != "1"
             # When the same chunk is retrieved via multiple entities, keep only the
             # copy associated with the highest-scored entity (best PPR rank).
             seen_hashes: Dict[str, float] = {}  # content_hash → best entity score
@@ -845,7 +853,7 @@ Response:"""
                 content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
                 ent_score = entity_scores.get(entity_name, 0.0)
                 
-                if content_hash not in seen_hashes:
+                if content_hash not in seen_hashes or not dedup_enabled:
                     seen_hashes[content_hash] = ent_score
                     # Stamp the chunk with its best entity score for downstream ranking
                     chunk["_entity_score"] = ent_score
@@ -863,10 +871,15 @@ Response:"""
             deduped_chunks = list(hash_to_chunk.values())
             
             # --- Noise filtering (February 9, 2026) ---
+            # Ablation toggle: set DENOISE_DISABLE_NOISE=1 to skip noise filters
+            noise_enabled = os.environ.get("DENOISE_DISABLE_NOISE", "") != "1"
             # Penalise form-label, bare-heading, and low-content chunks by reducing
             # their _entity_score.  This pushes noisy chunks below the token budget
             # cutoff without hard-deleting them.
-            noise_penalised = apply_noise_filters(deduped_chunks, score_key="_entity_score")
+            if noise_enabled:
+                noise_stats = apply_noise_filters(deduped_chunks, score_key="_entity_score")
+            else:
+                noise_stats = {"total_penalised": 0, "form_label": 0, "bare_heading": 0, "min_content": 0, "disabled": True}
             
             # Now sort by (potentially penalised) entity score
             chunks = sorted(
@@ -875,11 +888,23 @@ Response:"""
                 reverse=True,
             )
             
+            # Build retrieval stats for per-measure attribution
+            retrieval_stats = {
+                "chunks_raw": len(raw_chunks),
+                "chunks_after_dedup": len(chunks),
+                "duplicates_removed": duplicates_removed,
+                "dedup_ratio": round(duplicates_removed / len(raw_chunks) * 100, 1) if raw_chunks else 0.0,
+                "noise_filters": noise_stats,
+                "entities_selected": len(selected_entities),
+                "dedup_enabled": dedup_enabled,
+                "noise_enabled": noise_enabled,
+            }
+            
             logger.info("text_chunks_retrieved", 
                        num_chunks_raw=len(raw_chunks),
                        num_chunks_deduped=len(chunks),
                        duplicates_removed=duplicates_removed,
-                       noise_penalised=noise_penalised,
+                       noise_stats=noise_stats,
                        dedup_ratio=f"{duplicates_removed / len(raw_chunks) * 100:.1f}%" if raw_chunks else "0%",
                        num_entities=len(selected_entities),
                        batched=hasattr(self.text_store, 'get_chunks_for_entities'))
@@ -891,11 +916,11 @@ Response:"""
                     sample_entities=selected_entities[:5],
                     hint="Likely entity/chunk label or MENTIONS direction mismatch, or chunks not linked to entities for this group_id",
                 )
-            return chunks, entity_scores
+            return chunks, entity_scores, retrieval_stats
             
         except Exception as e:
             logger.error("text_chunk_retrieval_failed", error=str(e))
-            return [], entity_scores
+            return [], entity_scores, {"error": str(e)}
     
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -1022,6 +1047,8 @@ Response:"""
             doc_groups[doc_key].append((i, chunk))
         
         # --- Token budget enforcement (February 9, 2026) ---
+        # Ablation toggle: set DENOISE_DISABLE_BUDGET=1 to skip token budget
+        budget_enabled = os.environ.get("DENOISE_DISABLE_BUDGET", "") != "1"
         # Chunks arrive pre-sorted by PPR entity score (highest first from
         # _retrieve_text_chunks).  We accumulate tokens and drop chunks that
         # would exceed the budget.  Dropped chunks are the lowest-scored.
@@ -1039,7 +1066,7 @@ Response:"""
         
         for idx, chunk in all_indexed_chunks:
             chunk_tokens = self._estimate_tokens(chunk.get("text", ""))
-            if tokens_used + chunk_tokens > token_budget and budgeted_chunks:
+            if budget_enabled and tokens_used + chunk_tokens > token_budget and budgeted_chunks:
                 chunks_dropped += 1
                 continue
             tokens_used += chunk_tokens
@@ -1169,6 +1196,7 @@ Response:"""
             "context_tokens": tokens_used,
             "context_chars": len(context_string),
             "token_budget": token_budget,
+            "budget_enabled": budget_enabled,
             "num_doc_groups": len(doc_groups_budgeted),
         }
         return context_string, citation_map, sentence_citation_map, context_stats

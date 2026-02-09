@@ -1,299 +1,370 @@
-# Implementation Plan: KNN + Louvain + Context De-noising
+# KNN + Louvain + Context De-noising: Implementation Plan
 
 **Date:** 2026-02-09  
 **Status:** In Progress  
-**Architecture:** HippoRAG 2 (PPR entity graph) + LazyGraphRAG (community summarization) — preserved and enhanced  
-**Scope:** Routes 2/3/4 — improve signal-to-noise ratio of context fed to synthesis LLM  
+**Architecture:** HippoRAG 2 (PPR entity graph) + LazyGraphRAG (community summarization)  
+**Scope:** Routes 2/3/4  
 
 ---
 
-## 0. Executive Summary
+## 1. Issues
 
-Three complementary improvements share one goal: **reduce noise and improve relevance of context chunks sent to the synthesis LLM**. They compose naturally within the existing HippoRAG 2 + LazyGraphRAG dual architecture, which remains the backbone — no architectural rewrites.
+### 1.1 The Synthesis LLM Receives Noisy, Unbounded, Unranked Context
 
-| # | Work Item | Status | Impact |
-|---|-----------|--------|--------|
-| A | **Louvain Community Materialization (Step 9)** | ✅ DONE | Route 3 theme coverage 69.8% → 100% |
-| B | **KNN Embedding Score Propagation** | 🔲 TODO | Routes 2/3/4 — PPR scores surfaced to synthesis, score-ranked context |
-| C | **Context De-noising Pipeline** | 🔲 TODO | Routes 2/3/4 — dedup, token budget, noise filtering |
+Routes 2, 3, and 4 all follow the same final step: collect text chunks from the knowledge graph and send them to a synthesis LLM to generate a cited answer. Benchmarking on Feb 8, 2026 revealed that **the quality of the context fed to the LLM is the primary bottleneck** — not the LLM itself, not the graph structure, not the retrieval algorithm.
 
-**Architectural principle:** HippoRAG 2 PPR remains the retrieval backbone (5-path entity graph traversal). LazyGraphRAG community matching remains Route 3's entry point. Both systems are **enhanced, not replaced** — GDS KNN feeds PPR Path 3, Louvain communities feed CommunityMatcher.
+| Symptom | Measured Value | Route(s) |
+|---------|---------------|----------|
+| **Duplicate chunks** — same chunk retrieved via multiple entities, sent to LLM 2-3× | **56.5%** of all chunks are exact duplicates | All routes |
+| **Unbounded context** — no token limit on context window | Route 2: **49K tokens**, Route 3: **100K+**, Route 4: **55K-460K** | All routes |
+| **PPR scores discarded** — expensive graph traversal scores computed then thrown away | `for name, _score in evidence_nodes` — score explicitly ignored | All routes |
+| **Form-label noise** — structurally useless chunks consume token budget | `Pumper's Name:____`, `Date:____`, `Signature:____` | Routes 2, 3 |
+| **Bare heading chunks** — heading-only chunks with no substantive text | `"4. Customer Default"` — present but carries zero information | Route 3 |
+| **Theme coverage gaps** — thematic queries miss known topics | Average **69.8%** theme coverage (10 questions, Feb 8 benchmark) | Route 3 |
+
+### 1.2 Two Powerful GDS Tools Sit Underutilized
+
+The indexing pipeline (Step 8) computes two graph-structural signals via Neo4j GDS, but neither is fully exploited at query time:
+
+| Tool | Indexed? | Used at Query Time? | What's Wasted |
+|------|----------|---------------------|---------------|
+| **GDS KNN** — `SEMANTICALLY_SIMILAR` edges between entities by embedding cosine similarity | ✅ Yes (Step 8a) | ⚠️ Partial — PPR Path 3 traverses them, but resulting PPR scores are **discarded before synthesis** | The entire PPR score computation. KNN improves which entities PPR finds, but downstream code throws away the scores. |
+| **GDS Louvain** — `community_id` integer on every entity based on graph topology | ✅ Yes (Step 8b) | ❌ No — `CommunityMatcher` never reads `community_id`. It generates ad-hoc entity clusters per query via a fragile 4-level fallback cascade. | Topological clustering. Entities that co-occur in the same clauses form Louvain clusters, but Route 3 can't see them. |
 
 ---
 
-## A. Louvain Community Materialization — ✅ COMPLETE
+## 2. Issue Analysis
 
+### 2.1 The Problem is Two-Layered
+
+These issues exist at two different layers, and **both need fixing — they are complementary, not competing**:
+
+| Layer | What's Broken | Tools That Fix It |
+|-------|---------------|-------------------|
+| **Retrieval quality** — which entities/chunks make it into the candidate set | Louvain communities unused, KNN edges partially wasted | GDS Louvain composition, GDS KNN score propagation, GDS structural embeddings (FastRP) |
+| **Context assembly quality** — how the candidate set is filtered and presented to the LLM | No dedup, no token budget, no score ranking, no noise filtering | Chunk dedup, token budget, PPR score-weighted allocation, noise filters |
+
+With KNN improvements but no token budget → better entities but still 49K tokens of noise.  
+With token budget but no KNN → capped context but may cap it with noise entities from structural paths alone.
+
+### 2.2 PPR Score Flow — Where It Breaks
+
+HippoRAG 2's PPR algorithm computes per-entity relevance scores via 5 traversal paths:
+
+| Path | Traversal | What It Captures |
+|------|-----------|------------------|
+| **Path 1** | Seed entity → graph edges → neighbor entities | Direct co-occurrence relationships |
+| **Path 2** | Seed → mentions → chunks → sections → similar sections → chunks → entities | Cross-section topical similarity |
+| **Path 3** | Seed → `SEMANTICALLY_SIMILAR` → neighbor entities (**KNN edges**) | Cross-document entity linking by embedding similarity |
+| **Path 4** | Seed → section → shared-entity sections → hub entities | Hub entity discovery via section co-membership |
+| **Path 5** | Seed → section → hub entities (direct) | High-mention-count entity discovery |
+
+Final entity score = sum of all 5 path contributions. Scores are correct and meaningful. But then:
+
+```python
+# synthesis.py L754 — THE BREAK POINT
+for name, _score in evidence_nodes:    # ← score DISCARDED here
+    cleaned = _clean_entity_name(name)
+    ...
+```
+
+```
+PPR 5-path traversal → evidence_nodes: List[(name, score)]
+                                ↓
+    ┌─ get_ppr_evidence_chunks(): scores USED for ranking ✓ (Route 3 fast_mode only)
+    │
+    └─ synthesis._retrieve_text_chunks(): scores DISCARDED ✗
+       └─ _build_cited_context(): chunks grouped by document, NO score ordering
+          └─ LLM prompt: unbounded, unranked bag of chunks
+```
+
+### 2.3 Route 3 Community Matching — Why It Misses Themes
+
+Route 3's `CommunityMatcher` generates ad-hoc entity clusters per query via a **4-level fallback cascade**:
+
+```
+Level 1: Embedding similarity search on entity nodes (threshold > 0.35)
+Level 2: Keyword matching on entity names/descriptions
+Level 3: Multi-document sampling (top entities per document)
+Level 4: Degree-based fallback (highest-connected entities)
+```
+
+Three fundamental weaknesses:
+
+| Weakness | Effect | Example |
+|----------|--------|---------|
+| **No topological awareness** | Clusters formed by text similarity, not graph structure | `Pumper`, `Holding Tank Owner`, `pumping equipment` share dense contract edges but names don't match "key parties" |
+| **No semantic summaries** | Dynamic "community" gets placeholder summary: `"Dynamically generated..."` | Hub entity selection is blind to what the cluster represents |
+| **Non-deterministic** | Same query can produce different clusters depending on which fallback triggers | Violates the architecture's determinism principle |
+
+Meanwhile, GDS Louvain already assigns `community_id` based on graph topology — exactly the signal CommunityMatcher needs but never reads.
+
+### 2.4 KNN Embedding Gap — Text vs Structural
+
+KNN currently uses **Voyage AI text embeddings** (`embedding_v2`). This captures entity name/description similarity but NOT graph topology:
+
+| Embedding Type | Encodes | "AGENT'S FEES" is similar to... |
+|---------------|---------|----------------------------------|
+| **Text (Voyage)** — current | Textual semantics of entity name + description | "FEES", "AGENCY CHARGES", "BROKER'S FEES" (name-similar) |
+| **Structural (FastRP)** — future | Graph neighborhood: shared edges, sections, documents | "MANAGEMENT FEE", "COMMISSION RATE", "PAYMENT TERMS" (graph-position-similar) |
+
+The original insight: *"KNN embedding will enhance the LLM embedding from graph relationships"* — this requires GDS structural embeddings (FastRP or node2vec), not yet implemented.
+
+### 2.5 KNN Impact by Route
+
+| Route | Impact | Why |
+|-------|--------|-----|
+| **Route 2** (Local) | **MEDIUM** | PPR Path 3 adds semantic gravity (reach `MANAGEMENT FEE` from `AGENT'S FEES`). But real noise problem is downstream — scores discarded at synthesis. Complementary to score-weighted allocation. |
+| **Route 3** (Global) | **MINIMAL** | CommunityMatcher doesn't use PPR Path 3. Chunks collected before PPR runs. Near-zero impact — Louvain communities are what transforms Route 3. |
+| **Route 4** (DRIFT) | **MEDIUM-HIGH** | Biggest beneficiary. 3-5 PPR passes compound KNN benefit. Better sub-question entity discovery. Most valuable combined with score-weighted allocation. |
+
+### 2.6 Asymmetric KNN Config
+
+Route 2 PPR Path 3 **always** traverses `SEMANTICALLY_SIMILAR` edges (no `knn_config` filter). Route 4 beam search **conditionally** includes them based on `knn_config`. Inconsistent behavior for the same edges.
+
+---
+
+## 3. Proposed Solutions
+
+### 3.1 Solution A: Louvain → LazyGraphRAG Community Composition — ✅ DONE
+
+**Core idea:** Use GDS Louvain to define community boundaries (structural), then use LazyGraphRAG to summarize each community (semantic). Each tool does what it's best at.
+
+| Concern | Tool | Strength |
+|---------|------|----------|
+| **Which entities belong together?** (structure) | GDS Louvain | Fast, deterministic, captures graph topology |
+| **What does this group mean?** (semantics) | LazyGraphRAG LLM summarization | Human-readable descriptions for semantic matching |
+
+**Neither alone solves the problem:**
+- Louvain without summaries → communities can't be matched to queries (no semantic bridge)
+- Summaries without Louvain → summaries describe ad-hoc clusters that don't reflect real graph structure
+
+**Together:** Louvain defines subgraph boundaries → LazyGraphRAG summarizes each subgraph → CommunityMatcher matches queries to summaries.
+
+```
+INDEX TIME:
+  Step 8b: GDS Louvain → community_id on entities          [EXISTING]
+  Step 9a: Group entities by community_id                    [NEW]
+  Step 9b: Create :Community nodes + :BELONGS_TO edges       [NEW]
+  Step 9c: LLM summary per community                        [NEW]
+  Step 9d: Voyage embedding per community summary            [NEW]
+
+QUERY TIME (Route 3):
+  CommunityMatcher → semantic match against community embeddings
+  → top-3 communities → hub entities → PPR → synthesis
+```
+
+**LazyGraphRAG "lazy" principle — tension and resolution:**
+
+Pre-computing summaries at index time could violate LazyGraphRAG's "lazy" principle. Resolved because:
+- Louvain runs in seconds (not expensive like Microsoft GraphRAG)
+- LLM summaries are per-community (~10-30), not per-entity (~hundreds)
+- Total added indexing: ~30-60s — negligible vs entity extraction (~60-120s)
+- **Option A (eager, at index time) chosen** over Option B (lazy, first-query triggers) — indexing already takes minutes, every query benefits from day one
+
+This is NOT Microsoft GraphRAG's heavy community pipeline. It's LazyGraphRAG's lightweight "just enough" approach on Louvain's structural output.
+
+**Route 3 impact — transformative:**
+
+| Question | Before (ad-hoc cascade) | After (Louvain composition) |
+|----------|------------------------|---------------------------|
+| Q-G6 "key parties" | `pumper` missed — 26 form-label occurrences | Louvain clusters `Pumper`, `Holding Tank Owner`, `pumping equipment` → summary mentions pumper-owner relation → matched |
+| Q-G5 "dispute resolution" | `default` missed — bare heading only | Louvain clusters `Customer Default`, `Payment Terms`, `Legal Fees` → summary mentions "default remedies" |
+| Q-G4 "financial terms" | `expenses`/`income` missed by 2/5 models | Financial entities form Louvain cluster → summary describes income/expense terms |
+
+**Status:** ✅ Implemented, tested (25/25 unit tests), benchmarked (69.8% → 100% theme coverage, +41% citations), deployed (`1d78ec26-05`).  
 **Commits:** `8271e404`, `9062b2c1`, `b42b3352`, `c662a6bb`, `1d78ec26`, `4c54bc60`  
-**Design doc:** `DESIGN_LOUVAIN_COMMUNITY_SUMMARIZATION_2026-02-09.md` (741 lines)  
-**Deployed:** Image `1d78ec26-05` on `graphrag-api` + `graphrag-worker`
-
-### What was done
-
-- **Step 9** added to `lazygraphrag_pipeline.py`: GDS Louvain `community_id` → `:Community` nodes + `:BELONGS_TO` edges + LLM summaries + Voyage embeddings
-- **CommunityMatcher** upgraded: loads communities from Neo4j (Louvain-backed) with semantic matching; falls back to ad-hoc 4-level cascade if none exist
-- **Neo4j store** extended: `update_community_summary()`, `update_community_embedding()` methods
-- **25 unit tests** passing, all committed
-- **Benchmark:** `test-5pdfs-v2-fix2` — 6 communities, 105 BELONGS_TO edges, theme coverage 100%, +41% citations, 10/10 pass rate
-- **`min_community_size`** lowered from 3 to 2 to capture small but meaningful clusters
-
-### How it fits the architecture
-
-```
-LazyGraphRAG Community Layer (Route 3 entry point):
-  Query → CommunityMatcher → semantic match against Louvain community summaries
-       → top-3 communities → hub entity extraction → PPR → synthesis
-
-HippoRAG 2 PPR Layer (Routes 2/3/4 backbone):
-  Seed entities → 5-path PPR traversal (unchanged) → evidence entities → chunks → synthesis
-```
-
-Louvain defines **structural boundaries** (graph topology). LazyGraphRAG provides **semantic bridge** (LLM summaries + Voyage embeddings for matching). Neither replaces the other.
+**Design doc:** `DESIGN_LOUVAIN_COMMUNITY_SUMMARIZATION_2026-02-09.md`
 
 ---
 
-## B. KNN Embedding Score Propagation — TODO
+### 3.2 Solution B: KNN Score Propagation + GDS Structural Embeddings
 
-### B.1 Problem Statement
+**Phase B.1 (immediate): Propagate PPR scores through to synthesis**
 
-GDS KNN creates `SEMANTICALLY_SIMILAR` edges at index time (Step 8a) with cosine similarity scores. These edges are traversed by PPR Path 3, contributing to per-entity scores. However, the PPR scores are **discarded before synthesis**:
-
-```python
-# synthesis.py line 754 — SCORE EXPLICITLY DISCARDED
-for name, _score in evidence_nodes:
-    cleaned = _clean_entity_name(name)
-    ...
-```
-
-**Current score flow:**
-```
-GDS KNN → SEMANTICALLY_SIMILAR edges (score: 0.60–1.0)
-    ↓
-PPR 5-path query → combined score per entity (sum of 5 path contributions)
-    ↓
-evidence_nodes: List[(name, score)]  ← scores computed correctly
-    ↓
-┌─ get_ppr_evidence_chunks(): scores USED for chunk ranking ✓
-│
-└─ synthesis._retrieve_text_chunks(): scores DISCARDED ✗
-   └─ _build_cited_context(): chunks grouped by document, NO score ordering
-      └─ LLM prompt: NO score signal visible to LLM
-```
-
-**Consequence:** The synthesis LLM receives an unbounded, unranked bag of chunks. High-relevance and low-relevance chunks are treated equally. The expensive PPR computation is wasted at the final step.
-
-### B.2 Root Cause Detail
-
-| Location | Issue | Line |
-|----------|-------|------|
-| `synthesis.py` `_retrieve_text_chunks()` | Score variable named `_score` — intentionally ignored | L754 |
-| `synthesis.py` `_build_cited_context()` | Chunks grouped by document, not by PPR rank | L800+ |
-| `synthesis.py` `synthesize()` | `evidence_path` extracts names only: `[node for node, _ in evidence_nodes]` | L291 |
-| Routes 2 PPR | Always traverses SEMANTICALLY_SIMILAR (no knn_config filter) | Path 3 always on |
-| Route 4 beam search | Conditionally traverses SEMANTICALLY_SIMILAR (via knn_config) | Asymmetric |
-
-### B.3 Planned Changes
-
-#### B.3.1 Propagate PPR scores to chunk selection
-
-**File:** `src/worker/hybrid_v2/pipeline/synthesis.py`
+Stop discarding PPR scores. Use them to rank chunks and enforce a token budget:
 
 ```python
-# BEFORE (current):
+# BEFORE — scores discarded:
 for name, _score in evidence_nodes:
     cleaned = _clean_entity_name(name)
 
-# AFTER:
+# AFTER — scores propagated:
 entity_scores = {_clean_entity_name(name): score for name, score in evidence_nodes}
-for name in entity_scores:
-    ...
 ```
 
-Pass `entity_scores` dict through to `_build_cited_context()` so chunks can be ranked by the PPR score of their source entity.
+Changes:
+1. Pass `entity_scores` dict through to `_build_cited_context()` — chunks ranked by source entity's PPR score
+2. Score-ranked assembly — higher-scored chunks earlier in LLM prompt (LLM attention bias toward early context)
+3. Token budget — stop adding chunks at configurable limit (e.g., 32K tokens)
+4. Normalize `knn_config` — both Route 2 and 4 always include KNN edges (already quality-filtered by `similarity_cutoff=0.60`)
 
-#### B.3.2 Score-ranked context assembly
+**Phase B.2 (future): GDS Structural Embeddings (FastRP)**
 
-**File:** `src/worker/hybrid_v2/pipeline/synthesis.py` → `_build_cited_context()`
+Add FastRP to `_run_gds_graph_algorithms()` — generate embeddings encoding **graph neighborhood structure**:
+- Store as `embedding_structural` property → re-run KNN on combined embeddings
+- `SEMANTICALLY_SIMILAR` edges then encode textual AND topological similarity
+- Effort: HIGH (new algorithm, new property, KNN recalculation, benchmarking)
 
-Sort chunks by their entity's PPR score before assembling context. Higher-scored chunks appear first in the LLM prompt (recency bias in LLMs means earlier context gets more attention).
-
-#### B.3.3 Token budget enforcement
-
-When assembling context, stop when cumulative token count reaches a configurable budget (e.g., 32K tokens for a 128K model). This naturally drops the lowest-scored chunks.
-
-#### B.3.4 Consistent knn_config across routes
-
-Route 2 PPR Path 3 always traverses SEMANTICALLY_SIMILAR regardless of `knn_config`. Route 4 beam search conditionally includes them. Normalize: either both respect `knn_config` or both always include KNN edges (recommended — KNN edges are valuable and already quality-filtered by `similarity_cutoff=0.60`).
-
-### B.4 Files to Modify
+**Files to modify:**
 
 | # | File | Change |
 |---|------|--------|
-| 1 | `pipeline/synthesis.py` | Propagate scores, add score-ranked assembly, add token budget |
-| 2 | `pipeline/synthesis.py` | Chunk dedup by content hash before assembly |
-| 3 | `services/async_neo4j_service.py` | (Optional) Add knn_config filter to PPR Path 3 for consistency |
-
-### B.5 Expected Impact
-
-- PPR scores become **actionable** — highest-relevance chunks appear first in context
-- Token budget prevents unbounded context (currently 49K–100K+ tokens observed)
-- KNN Path 3 contribution becomes meaningful (currently diluted by noise)
-
-### B.6 Metrics
-
-| Metric | Current | Target |
-|--------|---------|--------|
-| PPR scores used in synthesis | No (discarded) | Yes |
-| Context ordered by relevance | No (by document) | Yes |
-| Token budget enforced | No (unbounded) | Yes (configurable) |
-| KNN edges in Route 2 vs 4 | Asymmetric | Consistent |
+| 1 | `pipeline/synthesis.py` | Propagate scores, score-ranked assembly, token budget, chunk dedup |
+| 2 | `services/async_neo4j_service.py` | (Optional) Normalize knn_config in PPR Path 3 |
+| 3 | `indexing/lazygraphrag_pipeline.py` | (Future) Add FastRP to GDS pipeline |
 
 ---
 
-## C. Context De-noising Pipeline — TODO
+### 3.3 Solution C: Context De-noising Pipeline
 
-### C.1 Problem Statement (from Feb 8 analysis)
+Three phases, each building on the previous:
 
-From `ANALYSIS_CONTEXT_OVERRETRIEVAL_ALL_ROUTES_2026-02-08.md` and `ANALYSIS_CONTEXT_QUALITY_AND_DEDUP_2026-02-08.md`:
+**Phase 1: Chunk Dedup + Token Budget** (combined with B.1)
 
-| Issue | Severity | Detail |
-|-------|----------|--------|
-| **56.5% duplicate chunks** | P0 | Same chunk retrieved via multiple entities, sent to LLM 2-3× |
-| **No token budget** | P0 | Route 2: 49K tokens, Route 3: 100K+ tokens, Route 4: 55K+ tokens |
-| **PPR scores discarded** | P0 | Covered in Section B above |
-| **Form-label noise** | P1 | `Pumper's Name:____`, `Date:____` — structurally useless chunks |
-| **Bare heading chunks** | P1 | `"4. Customer Default"` — heading-only chunks with no substantive text |
-| **No cross-entity dedup** | P0 | If entities A and B both `MENTIONS` chunk X, it appears twice |
+| Fix | Method | Impact |
+|-----|--------|--------|
+| Content-hash dedup | Hash chunk text → keep first occurrence → eliminate 56.5% duplicates | Halves context volume |
+| Cross-entity dedup | When entities A and B both reference chunk X, keep chunk associated with highest-scored entity | Removes redundant citations |
+| Token budget | Accumulate tokens, stop at limit (32K default). Strict score-ranked → dropped chunks are least relevant. | Bounded, relevant context |
 
-### C.2 Three-Phase Plan
+**Design note — strict score-ranking in Phase 1:** The token budget uses pure score-ranked truncation with no document-grouping logic. This means a high-scoring chunk from Document A may appear adjacent to a high-scoring chunk from Document B, potentially without their surrounding context. This is *intentional* for Phase 1: simplicity first, benchmark, then refine. Document-integrity grouping ("if we accept one chunk from a section, prefer its neighbors") is deferred to Phase 2 — it adds complexity and may not be needed if score-ranking alone produces coherent context.
 
-#### Phase 1: Chunk Dedup + Token Budget (immediate, with B.3)
+**Phase 2: Noise Filtering** (after Phase 1 validated)
 
-**Goal:** Eliminate the 56.5% duplicate chunks and enforce a token ceiling.
+| Fix | Method | Impact |
+|-----|--------|--------|
+| Form-label filter | Detect chunks predominantly form fields (`Name:____`, `Date:____`) → deprioritize | Removes structural noise |
+| Bare heading filter | Chunks with <20 substantive characters → deprioritize | Removes empty headings |
+| Minimum content threshold | Chunks with <50 tokens of actual content → deprioritize | Budget spent on useful text |
+| Document-integrity grouping | If a chunk is accepted, prefer its same-section neighbors (within budget) over distant lower-scored chunks | Reduces cross-document fragmentation |
 
-1. **Content-hash dedup** in `_retrieve_text_chunks()`: Before assembly, hash each chunk's text content and keep only the first occurrence. O(n) compute, eliminates ~half the context.
-2. **Token budget** in `_build_cited_context()`: Accumulate tokens (tiktoken encoding) as chunks are added. Stop at budget limit (default 32K). Since chunks are now score-ranked (from B.3.2), the dropped chunks are the least relevant.
-3. **Cross-entity dedup**: When multiple entities reference the same chunk, keep the chunk but associate it with the highest-scored entity.
+**Phase 2 files:** New `pipeline/chunk_filters.py` + integration in `synthesis.py`
 
-**Files:** `synthesis.py` (same changes as B.3, combined implementation)
+**Phase 3: PPR Weight Tuning** (after Phase 1+2 validated)
 
-#### Phase 2: Noise Filtering (after Phase 1 validated)
+| Fix | Method | Impact |
+|-----|--------|--------|
+| Path contribution analysis | Log which of 5 PPR paths contributes most per entity | Identifies noise-dominant paths |
+| Weight tuning | Adjust `damping`, `sim_weight`, `hub_weight` | Better signal balance |
+| KNN cutoff tuning | Test 0.65, 0.70 (current 0.60 may be too permissive) | Tighter semantic edges |
+| Community-aware PPR seeding | Bias PPR seeds toward entities in CommunityMatcher's top-3 communities | Connects Louvain to PPR |
 
-**Goal:** Remove structurally useless chunks before they consume token budget.
-
-1. **Form-label filter**: Detect chunks that are predominantly form field labels (pattern: `Name:____`, `Signature:____`, `Date:____`). Score them at 0 or skip.
-2. **Bare heading filter**: Detect chunks with <20 substantive characters after stripping heading markers. These are section headings with no body text.
-3. **Minimum content threshold**: Chunks with <50 tokens of actual content (excluding whitespace, form labels, headings) are deprioritized.
-
-**Files:** New `pipeline/chunk_filters.py` + integration in `synthesis.py`
-
-#### Phase 3: PPR Weight Tuning (after Phase 1+2 validated)
-
-**Goal:** Optimize the 5 PPR path weights for best chunk quality.
-
-1. **Path contribution analysis**: Log which paths contribute most to each evidence entity's final score. Identify if any paths are noise-dominant.
-2. **Weight tuning**: Adjust `damping`, `sim_weight`, `hub_weight` parameters based on analysis.
-3. **KNN similarity cutoff tuning**: Current cutoff=0.60 may be too permissive. Test 0.65, 0.70 on benchmark suite.
-4. **Community-aware PPR seeding**: After CommunityMatcher selects top-3 communities (from Section A), bias PPR seeds toward entities in those communities. This connects the Louvain investment to PPR scoring.
-
-**Files:** `services/async_neo4j_service.py` (PPR query), `lazygraphrag_pipeline.py` (KNN params)
-
-### C.3 Dependency Chain
-
+**Dependency chain:**
 ```
-Phase 1 (Dedup + Budget) ← depends on B.3 (score propagation)
+Phase 1 (Dedup + Budget) ← combined with B.1 (score propagation)
 Phase 2 (Noise Filters) ← independent, can parallel with Phase 1
-Phase 3 (PPR Tuning) ← depends on Phase 1+2 validation
+Phase 3 (PPR Tuning) ← depends on Phase 1+2 benchmarks
 ```
-
-### C.4 Expected Impact
-
-| Metric | Current (Feb 8) | After Phase 1 | After Phase 2 | After Phase 3 |
-|--------|-----------------|---------------|---------------|---------------|
-| Duplicate chunks | 56.5% | ~0% | ~0% | ~0% |
-| Context tokens (Route 2) | ~49K | ≤32K | ≤32K | ≤32K |
-| Context tokens (Route 3) | ~100K+ | ≤32K | ≤32K | ≤32K |
-| Form-label noise | Present | Present | Filtered | Filtered |
-| PPR scores in synthesis | Discarded | Used | Used | Tuned |
-| Theme coverage (Route 3) | 100% (after A) | 100% | 100%+ | 100%+ |
 
 ---
 
-## D. Architecture Preservation Principles
+## 4. Architecture Alignment
 
-The following principles guide all three work items. They reflect the design of the HippoRAG 2 + LazyGraphRAG hybrid system and must not be violated:
+All changes must preserve the HippoRAG 2 + LazyGraphRAG dual architecture.
 
-### D.1 HippoRAG 2 Is the Retrieval Backbone
+### 4.1 Framework Alignment Check
 
-- **PPR 5-path traversal** remains the core retrieval algorithm for Routes 2/3/4
-- Entity graph structure (extracted entities + relationships) is the primary knowledge representation
-- GDS algorithms (KNN, Louvain, PageRank) **enrich** the entity graph — they don't replace it
-- `SEMANTICALLY_SIMILAR` edges from GDS KNN are **one of five PPR paths**, not the primary signal
+| Proposed Change | LazyGraphRAG | HippoRAG 2 | Verdict |
+|----------------|-------------|------------|----------|
+| KNN edge activation | Neutral (index-time edges feed PPR) | **Enhances** Path 3 | ✅ Safe |
+| PPR score-weighted allocation | Neutral (post-retrieval) | **Fulfills** design intent | ✅ Safe |
+| Chunk dedup + token budget | Neutral (post-retrieval) | Neutral | ✅ Safe |
+| Louvain summaries replacing CommunityMatcher | **Violates** lazy principle | Neutral | ⚠️ Rejected |
+| Louvain → LazyGraphRAG composition (Step 9) | **Compatible** (lazy-scale cost) | Neutral | ✅ Adopted |
+| GDS structural embeddings (FastRP) | Neutral (index-time enrichment) | Enhances KNN quality | ✅ Safe (future) |
 
-### D.2 LazyGraphRAG Is the Community Layer
+**Key tension resolved:** Directly replacing CommunityMatcher's lazy clustering with pre-computed Louvain summaries would regress toward Microsoft GraphRAG's expensive indexing. The composition pattern resolves this: Louvain provides structural boundaries (seconds), LazyGraphRAG provides semantic summaries (per-community, not per-entity). Total ~30-60s index time — orders of magnitude cheaper than Microsoft GraphRAG.
 
-- **Community-based thematic matching** is Route 3's entry point (via CommunityMatcher)
-- Louvain communities (now materialized as Step 9) provide structural clustering
-- LLM summaries provide semantic bridge between user queries and community content
-- The ad-hoc 4-level cascade remains as fallback for corpora without communities
+### 4.2 Principles
 
-### D.3 GDS KNN and Louvain Work Together
+| Principle | How Preserved |
+|-----------|--------------|
+| **HippoRAG 2 PPR backbone** | PPR 5-path traversal unchanged. GDS algorithms enrich the graph, don't replace it. `SEMANTICALLY_SIMILAR` is one of five PPR paths, not the primary signal. |
+| **LazyGraphRAG community layer** | CommunityMatcher remains Route 3's entry point. Louvain communities (Step 9) feed it with structural clustering. Ad-hoc cascade remains as fallback. |
+| **KNN + Louvain synergy** | KNN creates semantic bridges between distant entities. Louvain identifies dense subgraphs in the enriched graph. Both inform PPR scoring — KNN via Path 3, Louvain via community hub entities. |
+| **Determinism** | Louvain is deterministic. Summaries generated once at index time. KNN edges deterministic. Token budget truncation deterministic (score-ranked, fixed budget). |
+| **Backward compatibility** | No GDS → Path 3 returns 0, others compensate. No communities → ad-hoc cascade. No budget → no truncation. All changes additive. |
 
-```
-GDS KNN (Step 8a):
-  Entity embeddings → SEMANTICALLY_SIMILAR edges → PPR Path 3 traversal
-  Purpose: Cross-document entity linking by embedding similarity
+### 4.3 Target State
 
-GDS Louvain (Step 8b):
-  Entity graph → community_id assignment → Community nodes (Step 9)
-  Purpose: Topological clustering for thematic grouping
-
-Together:
-  KNN creates semantic bridges between distant entities
-  Louvain identifies dense subgraphs (communities) in the enriched graph
-  Both inform PPR scoring (KNN via Path 3, Louvain via community hub entities)
-```
-
-### D.4 Synthesis LLM Receives Ranked, Bounded, De-duplicated Context
-
-This is the **target state** after all three work items are complete:
-- Chunks sorted by PPR score (highest relevance first)
-- Token budget enforced (no unbounded context)
-- Duplicate chunks eliminated (content-hash dedup)
-- Noise chunks filtered (form labels, bare headings)
-- Citation metadata preserved (document source, page, section)
-
-### D.5 Backward Compatibility
-
-- If GDS is unavailable: KNN edges don't exist, PPR Path 3 returns 0, other paths compensate
-- If Louvain communities don't exist: CommunityMatcher falls back to ad-hoc cascade
-- If token budget is not set: existing behavior (no truncation) preserved
-- All changes are additive — no existing method signatures are broken
+After all solutions, the synthesis LLM receives:
+- Chunks **sorted by PPR score** (highest relevance first)
+- **Token budget enforced** (no unbounded context)
+- **Duplicates eliminated** (content-hash dedup)
+- **Noise filtered** (form labels, bare headings)
+- **Citation metadata preserved** (document source, page, section)
 
 ---
 
-## E. Implementation Order
+## 5. Implementation Plan
+
+### 5.1 Expected Impact
+
+| Metric | Current (Feb 8) | After A (done) | After B+C Phase 1 | After C Phase 2 | After C Phase 3 + B.2 |
+|--------|-----------------|----------------|--------------------|-----------------|-----------------------|
+| Theme coverage (Route 3) | 69.8% | **100%** | 100% | 100%+ | 100%+ |
+| Duplicate chunks | 56.5% | 56.5% | **~0%** | ~0% | ~0% |
+| Context tokens (Route 2) | ~49K | ~49K | **≤32K** | ≤32K | ≤32K |
+| Context tokens (Route 3) | ~100K+ | ~100K+ | **≤32K** | ≤32K | ≤32K |
+| Context tokens (Route 4) | ~55K-460K | ~55K-460K | **≤32K** | ≤32K | ≤32K |
+| PPR scores in synthesis | Discarded | Discarded | **Used** | Used | Tuned |
+| Form-label noise | Present | Present | Present | **Filtered** | Filtered |
+| KNN embedding type | Text only | Text only | Text only | Text only | **Text + Structural** |
+
+### 5.2 Weekly Schedule
+
+#### Week 1 — Verify KNN + Phase 1 Pipeline Fixes (immediate relief)
 
 | Step | Work | Depends On | Est. Effort |
 |------|------|------------|-------------|
-| 1 | ~~Louvain community materialization~~ | — | ✅ DONE |
-| 2 | PPR score propagation to synthesis | Step 1 ✅ | 2-3 hours |
-| 3 | Chunk dedup (content-hash) | — | 1-2 hours |
-| 4 | Token budget in context assembly | Steps 2+3 | 1-2 hours |
-| 5 | Score-ranked context ordering | Step 2 | 1 hour |
-| 6 | Noise filters (form-label, bare heading) | — | 2-3 hours |
-| 7 | KNN config consistency (Route 2 vs 4) | — | 1 hour |
-| 8 | Benchmark regression (all routes) | Steps 2-5 | 2 hours |
-| 9 | PPR weight tuning | Step 8 results | 3-4 hours |
-| 10 | Community-aware PPR seeding | Steps 1+9 | 2-3 hours |
+| 1 | ~~Louvain → LazyGraphRAG composition (Step 9)~~ | — | ✅ DONE |
+| 2 | Verify `test-5pdfs-v2-fix2` has `SEMANTICALLY_SIMILAR` edges | — | 15 min |
+| 3 | If not, reindex with `knn_enabled=True` or run maintenance recompute | Step 2 | 30 min |
 
-**Logical grouping:**
-- **Sprint 1 (next):** Steps 2-5 — Score propagation + dedup + budget (combined implementation in synthesis.py)
-- **Sprint 2:** Steps 6-7 — Noise filters + KNN consistency
-- **Sprint 3:** Steps 8-10 — Benchmark + PPR tuning + community-PPR integration
+> **Audit traceability (February 9, 2026):** Steps 2-3 are justified by the **graph completeness audit** documented in `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` (Feb 6 updates): `test-5pdfs-v2-fix2` was found to have **Entity KNN SEMANTICALLY_SIMILAR = 0** (only KVP↔KVP KNN edges present, 540 total). GDS properties (`community_id`, `pagerank`) were also 0 on all nodes. A reindex with deployed fixes is expected to resolve all issues.
+
+| 4 | Chunk dedup (content-hash) in `_retrieve_text_chunks()` | — | 1-2 hours |
+| 5 | Token budget in `_build_cited_context()` | — | 1-2 hours |
+
+#### Week 2 — PPR Score Propagation + Benchmarking
+
+| Step | Work | Depends On | Est. Effort |
+|------|------|------------|-------------|
+| 6 | PPR score propagation to synthesis | Steps 4-5 | 2-3 hours |
+| 7 | Score-ranked context ordering | Step 6 | 1 hour |
+| 8 | KNN config consistency (Route 2 vs 4) | — | 1 hour |
+| 9 | Benchmark regression (all routes, 10-question suite) | Steps 4-7 | 2 hours |
+
+#### Week 3 — Noise Filters + PPR Tuning
+
+| Step | Work | Depends On | Est. Effort |
+|------|------|------------|-------------|
+| 10 | Noise filters (form-label, bare heading) | — | 2-3 hours |
+| 11 | PPR weight tuning (damping, sim_weight, hub_weight) | Step 9 results | 3-4 hours |
+| 12 | Community-aware PPR seeding (bias toward matched communities) | Steps 1+11 | 2-3 hours |
+
+#### Documentation Updates (keep architecture aligned)
+
+| Step | Work | Depends On | Est. Effort |
+|------|------|------------|-------------|
+| D1 | ~~Apply corrections from `ARCHITECTURE_CORRECTIONS_2026-02-08.md` into `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` (route numbering, Stage 2.2 engine, add Stage 2.2.5)~~ | — | ✅ DONE |
+| D2 | ~~Add audit traceability note for Steps 2/3~~ | — | ✅ DONE |
+
+#### Future — GDS Structural Embeddings
+
+| Step | Work | Depends On | Est. Effort |
+|------|------|------------|-------------|
+| 13 | Add FastRP to `_run_gds_graph_algorithms()` | Steps 9-12 validated | 4-6 hours |
+| 14 | Re-run KNN on structural embeddings | Step 13 | 1 hour (reindex) |
+| 15 | Benchmark: text-only KNN vs text+structural KNN | Step 14 | 2-3 hours |
+| 16 | Route 4 sub-question community routing | Steps 1+12 | 3-4 hours |
 
 ---
 
-## F. Reference Documents
+## 6. Reference
+
+### 6.1 Documents
 
 | Document | Content |
 |----------|---------|
@@ -303,17 +374,15 @@ This is the **target state** after all three work items are complete:
 | `ARCHITECTURE_CORRECTIONS_2026-02-08.md` | 13 corrections to architecture doc (pending) |
 | `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` | Main architecture doc (Section 23 updated) |
 
----
-
-## G. Key Code Locations
+### 6.2 Key Code Locations
 
 | Component | File | Key Lines |
 |-----------|------|-----------|
 | GDS KNN edge creation | `indexing/lazygraphrag_pipeline.py` | `_run_gds_graph_algorithms()` L1660-1862 |
 | GDS Louvain + Step 9 | `indexing/lazygraphrag_pipeline.py` | `_materialize_louvain_communities()` L1930+ |
 | PPR 5-path query | `services/async_neo4j_service.py` | `_build_ppr_query_with_section_graph()` L708-950 |
-| PPR Path 3 (KNN) | `services/async_neo4j_service.py` | L790-800 |
-| Score discarding | `pipeline/synthesis.py` | `_retrieve_text_chunks()` L754 |
+| PPR Path 3 (KNN edges) | `services/async_neo4j_service.py` | L790-800 |
+| Score discarding (break point) | `pipeline/synthesis.py` | `_retrieve_text_chunks()` L754 |
 | Context assembly | `pipeline/synthesis.py` | `_build_cited_context()` L800+ |
 | CommunityMatcher | `pipeline/community_matcher.py` | `_load_from_neo4j()`, `_semantic_match()` |
 | Route 4 beam search | `services/async_neo4j_service.py` | `semantic_multihop_beam()` L1187 |

@@ -475,9 +475,9 @@ The base system is **LazyGraphRAG**, enhanced with **HippoRAG 2** for determinis
 
 ## 2. Architecture Overview
 
-The new architecture provides **3 distinct routes**, each optimized for a specific query pattern:
+The new architecture provides **4 distinct routes**, each optimized for a specific query pattern:
 
-### The 3-Way Routing Logic
+### The 4-Way Routing Logic
 
 ```
                               ┌─────────────────────────────────────┐
@@ -485,81 +485,107 @@ The new architecture provides **3 distinct routes**, each optimized for a specif
                               │   (LLM + Heuristics Assessment)     │
                               └─────────────────────────────────────┘
                                               │
-            ┌─────────────────────────────────┼─────────────────────────────────┐
-            │                                 │                                 │
-            ▼                                 ▼                                 ▼
-┌───────────────────┐               ┌───────────────────┐               ┌───────────────────┐
-│   ROUTE 1         │               │   ROUTE 2         │               │   ROUTE 3         │
-│   Local Search    │               │   Global Search   │               │   DRIFT Multi-Hop │
-│   (Entity-Focused)│               │   (Thematic)      │               │   (Complex)       │
-└───────────────────┘               └───────────────────┘               └───────────────────┘
-        │                                   │                                   │
-        ▼                                   ▼                                   ▼
-┌───────────────────┐               ┌───────────────────┐               ┌───────────────────┐
-│ LazyGraphRAG      │               │ Entity Embedding  │               │ LLM Decomposition │
-│ Iterative Deep.   │               │ + BM25/Vector RRF │               │ + HippoRAG 2 PPR  │
-│ Entity-focused    │               │ + Optional PPR    │               │ Multi-step reason │
-└───────────────────┘               └───────────────────┘               └───────────────────┘
+        ┌───────────────┬─────────────────────┼─────────────────────┬───────────────┐
+        │               │                     │                     │               │
+        ▼               ▼                     ▼                     ▼               │
+┌──────────────┐ ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │
+│  ROUTE 1     │ │  ROUTE 2     │    │  ROUTE 3     │    │  ROUTE 4     │          │
+│  Vector RAG  │ │  Local Search│    │  Global      │    │  DRIFT       │          │
+│  (Fast Lane) │ │  (Entity)    │    │  (Thematic)  │    │  (Multi-Hop) │          │
+└──────────────┘ └──────────────┘    └──────────────┘    └──────────────┘          │
+        │               │                     │                     │               │
+        ▼               ▼                     ▼                     ▼               │
+┌──────────────┐ ┌──────────────┐    ┌──────────────┐    ┌──────────────┐          │
+│ BM25+Vector  │ │ NER (LLM)    │    │ Community    │    │ LLM Decomp   │          │
+│ Hybrid RRF   │ │ → HippoRAG   │    │ Matching     │    │ → HippoRAG   │          │
+│              │ │ PPR          │    │ → BM25/RRF   │    │ PPR (×3)     │          │
+└──────────────┘ └──────────────┘    │ → [PPR]      │    └──────────────┘
+                                     └──────────────┘
 ```
 
-> **Note (January 24, 2026):** Vector RAG was removed after testing showed Local Search provides equivalent or better answers with only 14% more latency. This simplifies routing and improves accuracy.
+> **Note (January 24, 2026):** Vector RAG (Route 1) was removed as a default after testing showed Local Search provides equivalent or better answers with only 14% more latency. Route 1 remains available but disabled in High Assurance profile.
 
-### Route 1: Local Search (Entity-Focused)
+> **Correction (February 9, 2026):** This overview now uses the **4-route scheme matching the code** (`_execute_route_1_vector_rag()` through `_execute_route_4_drift()`). Previously, the overview used a 3-route scheme that created a confusing mapping mismatch with the component breakdown. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §1.
+
+### Route 1: Vector RAG (Fast Lane)
+*   **Trigger:** Simple factual lookups where graph traversal is unnecessary
+*   **Example:** "What is the invoice amount?" (single entity, no relationships)
+*   **Goal:** Fast BM25+vector hybrid retrieval without PPR overhead
+*   **Engines:** Neo4j vector + fulltext search → RRF fusion → LLM Synthesis
+*   **Code:** `_execute_route_1_vector_rag()`
+*   **Profile:** General Enterprise only (disabled in High Assurance)
+
+### Route 2: Local Search (Entity-Focused)
 *   **Trigger:** Factual lookups and entity-focused queries with explicit or implied entity mentions
 *   **Example:** "What is the invoice amount for transaction TX-12345?" or "What are all the contracts with Vendor ABC?"
 *   **Goal:** Comprehensive entity-centric retrieval via graph traversal
 *   **When to Use:** Direct questions, specific values, entity relationships
-*   **Engines:** Entity Extraction → LazyGraphRAG Iterative Deepening → LLM Synthesis
+*   **Engines:** NER (gpt-4o) → HippoRAG PPR (top_k=15) → Text Chunk Retrieval → LLM Synthesis
+*   **Code:** `_execute_route_2_local_search()`
 *   **Profile:** Both profiles (default route for most queries)
 
 > **Note:** Local Search now handles all queries that previously went to Vector RAG. Testing showed identical answer quality with only 14% latency difference.
 
-### Route 2: Global Search (Thematic Analysis)
+> **Correction (February 9, 2026):** Engines updated from "Entity Extraction → LazyGraphRAG Iterative Deepening" to actual code path: NER (gpt-4o) → HippoRAG PPR. Route 2 does NOT use LazyGraphRAG. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2, §11.
+
+### Route 3: Global Search (Thematic Analysis)
 *   **Trigger:** Thematic queries without explicit entities, cross-document summaries
 *   **Example:** "What are the main compliance risks in our portfolio?" or "Summarize all termination clauses"
 *   **Goal:** Thematic coverage WITH detail preservation + hallucination prevention
-*   **Engines (Full Mode):** Entity Embedding Search → Hub Entities → Graph Evidence → BM25+Vector RRF → Section Boost → Keyword Boost → HippoRAG 2 PPR → Synthesis
-*   **Engines (Fast Mode):** Entity Embedding Search → BM25+Vector RRF → Coverage Fill → Synthesis → Validation
+*   **Engines (Full Mode):** Community Matching → Hub Entities → Enhanced Graph Context → BM25+Vector RRF → [PPR if complex] → Coverage Fill → `synthesize_with_graph_context()`
+*   **Engines (Fast Mode):** Community Matching → BM25+Vector RRF → Coverage Fill → Synthesis → Validation
 *   **Engines (Negative):** Deterministic Neo4j-backed field validation (post-synthesis) → Strict refusal response
+*   **Code:** `_execute_route_3_global_search()`
 *   **Profile:** Both profiles (thematic queries)
 *   **Solves:** 
     - Original Global Search's **detail loss problem** (summaries lost fine print)
     - LLM **hallucination problem** on negative queries (graph-based validation)
 
-### Route 3: DRIFT Multi-Hop (Complex Reasoning)
+> **Correction (February 9, 2026):** Full Mode engines updated to match actual code path. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §11.
+
+### Route 4: DRIFT Multi-Hop (Complex Reasoning)
 *   **Trigger:** Ambiguous, multi-hop queries requiring iterative decomposition, comparisons
 *   **Example:** "Analyze our risk exposure to tech vendors through subsidiary connections" or "Which document has the latest date?"
 *   **Goal:** Handle vague/comparative queries through step-by-step reasoning
-*   **Engines:** LLM Decomposition + HippoRAG 2 PPR + Synthesis
+*   **Engines:** LLM Decomposition + HippoRAG 2 PPR (up to 3 passes) + Synthesis
+*   **Code:** `_execute_route_4_drift()`
 *   **Profile:** Both profiles (complex queries)
 *   **Solves:** HippoRAG 2's **ambiguous query problem** (needs clear seeds to start PPR)
 
-### 2.1. Why 3 Routes?
+### 2.1. Why 4 Routes?
 
 | Query Type | Route | Why This Route |
 |:-----------|:------|:---------------|
-| "What is vendor ABC's address?" | Route 1 | Factual lookup, entity-focused retrieval |
-| "List all ABC contracts" | Route 1 | Explicit entity, LazyGraphRAG iterative deepening |
-| "What are the main risks?" | Route 2 | Thematic, needs entity embedding → hub → PPR for details |
-| "Summarize all termination clauses" | Route 2 | Cross-document aggregation |
-| "How are subsidiaries connected to risk?" | Route 3 | Ambiguous, needs LLM decomposition first |
-| "Which document has the latest date?" | Route 3 | Comparative, needs multi-document reasoning |
+| "What is the invoice amount?" | Route 1 (Vector RAG) | Simple factual lookup, no graph traversal needed |
+| "What is vendor ABC's address?" | Route 2 (Local Search) | Factual lookup, entity-focused PPR retrieval |
+| "List all ABC contracts" | Route 2 (Local Search) | Explicit entity, HippoRAG PPR traversal |
+| "What are the main risks?" | Route 3 (Global Search) | Thematic, needs community matching → hub → PPR for details |
+| "Summarize all termination clauses" | Route 3 (Global Search) | Cross-document aggregation |
+| "How are subsidiaries connected to risk?" | Route 4 (DRIFT) | Ambiguous, needs LLM decomposition first |
+| "Which document has the latest date?" | Route 4 (DRIFT) | Comparative, needs multi-document reasoning |
 
 ### 2.2. Division of Labor
 
-| Component | Role | Analogy |
-|:----------|:-----|:--------|
-| **LazyGraphRAG** | Librarian + Editor | Finds the right shelf, writes the report |
-| **HippoRAG 2** | Researcher | Finds every relevant page on that shelf (deterministic) |
-| **Synthesis LLM** | Writer | Generates human-readable output |
+| Component | Role | Used In | Analogy |
+|:----------|:-----|:--------|:--------|
+| **HippoRAG 2 PPR** | Entity-focused graph traversal | Routes 2, 3 (conditional), 4 | Researcher — finds every relevant page |
+| **BM25+Vector RRF** | Lexical + semantic chunk retrieval | Routes 1, 3 | Keyword + meaning search |
+| **Louvain + LazyGraphRAG** | Structural community detection + semantic summaries | Route 3 | Librarian — organizes shelves by topic |
+| **Query Decomposition** | Break complex queries into sub-questions | Route 4 only | Editor — splits ambiguous questions |
+| **Synthesis LLM** | Generates human-readable output | All routes | Writer |
+
+> **Correction (February 9, 2026):** Updated to list actual components used in code. Previously listed "LazyGraphRAG" as a standalone component, which was misleading — the code uses HippoRAG PPR directly for Routes 2/4. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §10.
 
 ### 2.3. Where HippoRAG 2 Is Used
 
-| Route | HippoRAG 2 Used? | Entity Aliases? | Why |
-|:------|:-----------------|:----------------|:----|
-| Route 1 (Local Search) | ✅ Yes | ✅ Yes | PPR from extracted entities for entity-focused traversal |
-| Route 2 (Global Search) | ✅ Optional | ✅ Yes | PPR from hub entities (full mode) or skip (fast mode) |
-| Route 3 (DRIFT) | ✅ Yes | ✅ Yes | PPR after query decomposition for complex reasoning |
+| Route | HippoRAG 2 Used? | Entity Aliases? | PPR Scores Used for Retrieval? | Why |
+|:------|:-----------------|:----------------|:-------------------------------|:----|
+| Route 1 (Vector RAG) | ❌ No | ✅ Yes | N/A | Pure BM25+Vector hybrid |
+| Route 2 (Local Search) | ✅ Yes (always) | ✅ Yes | ⚠️ Discarded | PPR from NER entities (top_k=15) |
+| Route 3 (Global Search) | ✅ Conditional | ✅ Yes | ❌ Never used | Scores stored as metadata only |
+| Route 4 (DRIFT) | ✅ Yes (up to 3 passes) | ✅ Yes | ⚠️ Discarded | PPR after query decomposition |
+
+> **February 8, 2026 Finding:** PPR scores are computed but never used to weight chunk allocation in ANY route. Scores are discarded at `synthesis.py` `_retrieve_text_chunks()`. Fix planned: see `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solution B.1.
 
 ---
 
@@ -595,26 +621,46 @@ The new architecture provides **3 distinct routes**, each optimized for a specif
 *   **Profile:** General Enterprise only (disabled in High Assurance)
 *   **Why Neo4j:** Unified storage eliminates sync issues between external vector stores and graph data
 
-### Route 2: Local Search Equivalent (LazyGraphRAG Only)
+### Route 2: Local Search Equivalent (HippoRAG PPR)
 
 This is the replacement for Microsoft GraphRAG's Local Search mode.
 
-#### Stage 2.1: Entity Extraction
-*   **Engine:** NER / Embedding Match (deterministic)
-*   **What:** Extract explicit entity names from the query
-*   **Output:** `["Entity: ABC Corp", "Entity: Contract-2024-001"]`
+> **Correction (February 9, 2026):** Header updated from "LazyGraphRAG Only" to "HippoRAG PPR". Route 2 does NOT use LazyGraphRAG — it uses HippoRAG 2 PPR traversal. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2.
 
-#### Stage 2.2: LazyGraphRAG Iterative Deepening
-*   **Engine:** LazyGraphRAG
-*   **What:** Start from extracted entities, iteratively explore neighbors
-*   **Why:** Entities are explicit → LazyGraphRAG can navigate from clear starting points
-*   **Output:** Rich context from entity neighborhoods
+#### Stage 2.1: Entity Extraction (NER)
+*   **Engine:** NER via LLM (gpt-4o) — extracts entity names from query
+*   **What:** Extract explicit entity names from the query via LLM-based named entity recognition
+*   **Output:** `["Entity: ABC Corp", "Entity: Contract-2024-001"]`
+*   **Code:** `extraction_service.py` → gpt-4o NER prompt
+
+> **Correction (February 9, 2026):** Engine updated from "NER / Embedding Match (deterministic)" to LLM-based NER. This is an LLM call, not deterministic. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §3.
+
+#### Stage 2.2: HippoRAG PPR Tracing
+*   **Engine:** HippoRAG 2 (Personalized PageRank) via `tracer.trace()`
+*   **What:** Run PPR from extracted entities as seeds to find structurally connected evidence nodes
+*   **Parameters:** top_k=15 → produces ~13 budgeted entities (after 0.8 relevance budget)
+*   **Output:** `List[Tuple[str, float]]` — ranked (entity_name, ppr_score) pairs
+*   **Code:** `orchestrator.py` L415-L460 → `tracing.py` → `async_neo4j_service.py` `personalized_pagerank_native()`
+
+> **Correction (February 9, 2026):** Completely rewritten. Previously described as "LazyGraphRAG Iterative Deepening" — this was factually wrong. Route 2 uses HippoRAG PPR, the same engine as Routes 3/4. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2.
+
+#### Stage 2.2.5: Text Chunk Retrieval
+*   **Engine:** `synthesis.py` → `_retrieve_text_chunks()`
+*   **What:** For each evidence entity, fetch TextChunks via MENTIONS edges from Neo4j
+*   **Parameters:** `limit_per_entity=12`, `max_per_section=3`, `max_per_document=6` (via `text_store.get_chunks_for_entities()`)
+*   **Known Issue (February 8, 2026):** No cross-entity chunk deduplication — same chunk can appear multiple times when it MENTIONS multiple entities. Uses `chunks.extend()` without checking `chunk_id` uniqueness. **56.5% duplicate chunks measured.** Fix planned: `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solution C Phase 1.
+*   **Known Issue (February 8, 2026):** PPR scores are **discarded** here — every entity gets uniform chunk allocation regardless of PPR rank. Fix planned: Solution B.1.
+*   **Output:** Flat list of text chunks (PPR scores NOT passed through)
+
+> **Added (February 9, 2026):** This stage was missing from the original doc. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §4.
 
 #### Stage 2.3: Synthesis with Citations
-*   **Engine:** LLM (or deterministic extraction if `response_type="nlp_audit"`)
+*   **Engine:** LLM via `synthesizer.synthesize()` → `_build_cited_context()` → `_generate_response()` (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Generate cited response from collected context
+*   **Known Issue (February 8, 2026):** **No token budget** on context assembly. Each chunk's full text (~1,150 tokens avg) is appended verbatim. With 42 chunks → ~49K tokens for a simple factual lookup. No re-ranking by query relevance. Fix planned: `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solution C Phase 1.
 *   **Output:** Detailed report with `[Source: doc.pdf, page 5]` citations
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, uses regex-based sentence extraction (no LLM) for 100% repeatability
+*   **Code:** `synthesis.py` L145 (`synthesize()`), L802 (`_build_cited_context()`)
 
 ### Route 3: Global Search Equivalent (LazyGraphRAG + HippoRAG 2)
 
@@ -699,11 +745,16 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
     - `ROUTE3_GRAPH_NATIVE_BM25=1`: Pure BM25 fallback (legacy behavior)
 *   **How it integrates:** Hybrid candidates are deduped with graph-derived chunks (and then section expansion + keyword boosts can be applied) before synthesis.
 
-#### Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
+#### Stage 3.4: HippoRAG PPR Tracing (CONDITIONAL — DETAIL RECOVERY)
 *   **Engine:** HippoRAG 2 (Personalized PageRank)
 *   **What:** Mathematical graph traversal from hub entities
 *   **Why:** Finds ALL structurally connected nodes (even "boring" ones LLM might skip)
-*   **Output:** Ranked evidence nodes with PPR scores
+*   **Condition:** In `fast_mode` (default ON), PPR is **SKIPPED** unless query has relationship indicators ("between", "impact on", "connected to") or 2+ proper nouns. For simple thematic queries, PPR never runs.
+*   **Known Issue (February 8, 2026):** PPR scores are **NEVER used for chunk retrieval** in Route 3. Chunks are already collected in `graph_context.source_chunks` from Stages 3.3 + 3.3.5 BEFORE PPR runs. The `evidence_nodes` output is stored as `evidence_path` metadata only — it has **zero influence** on which chunks the LLM sees. This is fundamentally different from Routes 2/4.
+*   **Output:** Ranked evidence nodes with PPR scores (stored as metadata, not used for retrieval)
+*   **Code:** `orchestrator.py` L1007-L1057
+
+> **Correction (February 9, 2026):** Added conditional note and PPR score usage clarification. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §6.
 
 #### Stage 3.4.1: Coverage Gap Fill (FINAL DOC COVERAGE)
 *   **Engine:** Document Graph enumeration + gap detection
@@ -739,17 +790,18 @@ This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced wi
 *   **Output:** `Dict[str, List[Dict]]` mapping `document_id → [{offset, length}]` sentence spans
 *   **Details:** See Section 22 for full architecture.
 
-#### Stage 3.5: Raw Text Chunk Fetching
-*   **Engine:** Storage backend (Neo4j / Parquet)
-*   **What:** Fetch raw text chunks for all evidence nodes
-*   **Why:** This is where detail recovery happens (no summary loss)
-*   **Output:** Complete text content for synthesis
-
-#### Stage 3.5: Synthesis with Citations
-*   **Engine:** LLM (or deterministic extraction if `response_type="nlp_audit"`)
-*   **What:** Generate comprehensive response from raw chunks
+#### Stage 3.5: Synthesis with Citations (DIFFERENT CODE PATH from Routes 2/4)
+*   **Engine:** LLM via `synthesizer.synthesize_with_graph_context()` — **NOT** `synthesize()`
+*   **What:** Build context from `graph_context.source_chunks` (already collected in Stages 3.3 + 3.3.5), group by document, add relationship context + entity descriptions, then send to LLM.
+*   **Architecture Note:** Route 3 uses a completely separate synthesis code path:
+    - Routes 2/4: `synthesize()` → `_retrieve_text_chunks()` → `_build_cited_context()`
+    - Route 3: `synthesize_with_graph_context()` → builds context from `graph_context.source_chunks` → `_generate_graph_response()`
+*   **Known Issue (February 8, 2026):** **No token budget** on context assembly. Full chunk text appended verbatim. With ~40-60 chunks, context can reach 57K-80K+ tokens. Fix planned: `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solution C Phase 1.
 *   **Output:** Detailed report with full audit trail
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, uses position-based sentence ranking (no LLM) for byte-identical repeatability across identical inputs
+*   **Code:** `synthesis.py` L297 (`synthesize_with_graph_context()`)
+
+> **Correction (February 9, 2026):** Merged duplicate "Stage 3.5" entries. Removed "Raw Text Chunk Fetching" stage (Route 3 does NOT call `_retrieve_text_chunks()`). Updated engine to correct code path. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §7.
 
 #### Route 2 Fast Mode (Finalized January 24, 2026)
 
@@ -1109,8 +1161,9 @@ if unit_qualifier_match:
 *   **Outcome:** Enables LLM to answer “latest date” and “compare documents” queries even when PPR seeds are empty
 
 #### Stage 4.5: Multi-Source Synthesis
-*   **Engine:** LLM with DRIFT-style aggregation (or deterministic extraction if `response_type="nlp_audit"`)
+*   **Engine:** LLM via `synthesizer.synthesize()` → `_retrieve_text_chunks()` → `_build_cited_context()` with DRIFT-style aggregation (or deterministic extraction if `response_type="nlp_audit"`)
 *   **What:** Synthesize findings from all sub-questions into coherent report
+*   **Known Issue (February 8, 2026):** Route 4 runs up to **3 PPR passes** (Stages 4.2, 4.3, 4.3.5) producing ranked `(entity, score)` tuples, but `_retrieve_text_chunks()` **discards all scores** — every entity gets uniform `limit_per_entity=12`. Combined with sub-question iteration and coverage gap-fill, Route 4 can send **100K+ tokens** to the LLM. Fix planned: `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solutions B.1 + C Phase 1.
 *   **Output:** Executive summary + detailed evidence trail
 *   **Citation Format (Fixed January 17, 2026):**
     - **Issue:** Route 4 citations were missing `section` field, causing document-level attribution instead of section-level
@@ -5465,7 +5518,9 @@ Total                       7.8s avg
 
 ### 18.3. Future Optimization Opportunities
 
-#### Priority 1: LLM Token Reduction (High Impact)
+> **Note (February 9, 2026):** Priorities 1 items (context pruning, adaptive context window, citation-aware truncation) now have a concrete implementation plan with phases and timelines. See `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solutions B+C. Phase 1 (chunk dedup + token budget + PPR score propagation) requires **zero additional API calls** and is scheduled for Week 1-2.
+
+#### Priority 1: LLM Token Reduction (High Impact) — ACTIVE IMPLEMENTATION
 **Target:** Reduce synthesis time from 5-10s to 3-5s
 
 **Approaches:**

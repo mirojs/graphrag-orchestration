@@ -1,7 +1,7 @@
 #!/bin/bash
-# Reliable GraphRAG Deployment Script
-# Based on proven docker-build.sh pattern from dev/pro environment
-# Supports both manual config and azd environment integration
+# GraphRAG Deployment Script
+# Builds one Docker image and deploys to both graphrag-api and graphrag-worker
+# container apps in Azure Container Apps (rg-graphrag-feature).
 
 set -e
 
@@ -52,8 +52,9 @@ get_env_value_or_default() {
 AZURE_SUBSCRIPTION_ID=$(get_env_value_or_default "AZURE_SUBSCRIPTION_ID" "")
 AZURE_RESOURCE_GROUP=$(get_env_value_or_default "AZURE_RESOURCE_GROUP" "rg-graphrag-feature")
 AZURE_LOCATION=$(get_env_value_or_default "AZURE_LOCATION" "swedencentral")
-CONTAINER_REGISTRY_NAME=$(get_env_value_or_default "CONTAINER_REGISTRY_NAME" "" true)
-CONTAINER_APP_NAME=$(get_env_value_or_default "CONTAINER_APP_NAME" "graphrag-orchestration")
+CONTAINER_REGISTRY_NAME=$(get_env_value_or_default "CONTAINER_REGISTRY_NAME" "graphragacr12153" true)
+CONTAINER_APP_API=$(get_env_value_or_default "CONTAINER_APP_API" "graphrag-api")
+CONTAINER_APP_WORKER=$(get_env_value_or_default "CONTAINER_APP_WORKER" "graphrag-worker")
 CONTAINER_APP_ENVIRONMENT=$(get_env_value_or_default "CONTAINER_APP_ENVIRONMENT" "graphrag-env")
 AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "")
 
@@ -61,7 +62,9 @@ AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "")
 # Can be overridden via env var or `azd env set AZURE_ENV_IMAGETAG <tag>`.
 if [ -z "$AZURE_ENV_IMAGETAG" ]; then
     GIT_SHA=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "manual")
-    AZURE_ENV_IMAGETAG="main-${GIT_SHA}-$(date -u +"%Y%m%d%H%M%S")"
+    # Match existing tag format: {sha}-{seq}. Use epoch seconds as sequence.
+    BUILD_SEQ=$(date -u +"%s" | tail -c 3)
+    AZURE_ENV_IMAGETAG="${GIT_SHA}-${BUILD_SEQ}"
 fi
 CONTAINER_APP_USER_IDENTITY_ID=$(get_env_value_or_default "CONTAINER_APP_USER_IDENTITY_ID" "")
 
@@ -86,7 +89,8 @@ echo "=================================================="
 echo "Resource Group:       $AZURE_RESOURCE_GROUP"
 echo "Location:             $AZURE_LOCATION"
 echo "Container Registry:   $CONTAINER_REGISTRY_NAME"
-echo "Container App:        $CONTAINER_APP_NAME"
+echo "Container App (API):   $CONTAINER_APP_API"
+echo "Container App (Worker):$CONTAINER_APP_WORKER"
 echo "Image Tag:            $AZURE_ENV_IMAGETAG"
 echo "DI Endpoint:          ${AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT:-${AZURE_CONTENT_UNDERSTANDING_ENDPOINT:-<unset>}}"
 echo "Docker Cleanup:       $DOCKER_CLEANUP_ENABLED"
@@ -130,14 +134,18 @@ echo "✅ ACR Endpoint: $ACR_SERVER"
 echo ""
 
 # Build and push Docker image using ACR build (no login required)
+# Both graphrag-api and graphrag-worker use the same image.
 echo "=================================================="
-echo "🐳 Building and Pushing Docker Image"
+echo "🐳 Building and Pushing Docker Images"
 echo "=================================================="
 
-IMAGE_NAME="graphrag-orchestration"
-IMAGE_URI="$ACR_SERVER/$IMAGE_NAME:$AZURE_ENV_IMAGETAG"
+API_IMAGE_NAME="graphrag-api"
+WORKER_IMAGE_NAME="graphrag-worker"
+API_IMAGE_URI="$ACR_SERVER/$API_IMAGE_NAME:$AZURE_ENV_IMAGETAG"
+WORKER_IMAGE_URI="$ACR_SERVER/$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG"
 
-echo "Image URI: $IMAGE_URI"
+echo "API Image:    $API_IMAGE_URI"
+echo "Worker Image: $WORKER_IMAGE_URI"
 echo "Build Context: $APP_DIR"
 echo ""
 
@@ -145,85 +153,76 @@ echo "⏳ Building and pushing image in ACR (this may take 2-3 minutes)..."
 az acr build \
     --registry "$CONTAINER_REGISTRY_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
-    --image "$IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
+    --image "$API_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
+    --image "$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --build-arg VERSION="$AZURE_ENV_IMAGETAG" \
     --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
     "$APP_DIR"
 
-echo "✅ Image built and pushed: $IMAGE_URI"
+echo "✅ Images built and pushed"
 echo ""
 
-# Update Container App
+# Update Container Apps (both API and Worker)
 echo "=================================================="
-echo "🚀 Updating Container App"
+echo "🚀 Updating Container Apps"
 echo "=================================================="
 
-# Check if Container App exists
-CONTAINER_APP_EXISTS=$(az containerapp show \
-    --name "$CONTAINER_APP_NAME" \
-    --resource-group "$AZURE_RESOURCE_GROUP" \
-    --query name -o tsv 2>/dev/null || echo "")
-
-if [ -z "$CONTAINER_APP_EXISTS" ]; then
-    echo "❌ Container App '$CONTAINER_APP_NAME' not found in resource group '$AZURE_RESOURCE_GROUP'"
-    echo "   Please create it first using the infrastructure deployment (azd up or bicep)."
-    exit 1
-fi
-
-echo "✅ Container App found: $CONTAINER_APP_NAME"
+for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
+    CA_EXISTS=$(az containerapp show \
+        --name "$CA_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query name -o tsv 2>/dev/null || echo "")
+    if [ -z "$CA_EXISTS" ]; then
+        echo "❌ Container App '$CA_NAME' not found in resource group '$AZURE_RESOURCE_GROUP'"
+        exit 1
+    fi
+    echo "✅ Container App found: $CA_NAME"
+done
 echo ""
 
-# Auto-detect managed identity if not provided
+# Auto-detect managed identity from the API container app
 if [ -z "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
     echo "🔍 Auto-detecting managed identity..."
-    
-    # Check for system-assigned identity first
     SYSTEM_IDENTITY=$(az containerapp show \
-        --name "$CONTAINER_APP_NAME" \
+        --name "$CONTAINER_APP_API" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
         --query "identity.type" -o tsv 2>/dev/null || echo "")
-    
-    if [ "$SYSTEM_IDENTITY" == "SystemAssigned" ] || [ "$SYSTEM_IDENTITY" == "SystemAssigned, UserAssigned" ]; then
+    if [[ "$SYSTEM_IDENTITY" == *"SystemAssigned"* ]]; then
         echo "✅ Found system-assigned managed identity"
         CONTAINER_APP_USER_IDENTITY_ID="system"
     else
-        # Check for user-assigned identity
         CONTAINER_APP_USER_IDENTITY_ID=$(az containerapp show \
-            --name "$CONTAINER_APP_NAME" \
+            --name "$CONTAINER_APP_API" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --query "identity.userAssignedIdentities | keys(@) | [0]" -o tsv 2>/dev/null || echo "")
-        
         if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
             echo "✅ Found user-assigned managed identity: ${CONTAINER_APP_USER_IDENTITY_ID##*/}"
         fi
     fi
 fi
 
-# Check if registry is already configured (skip if it is - saves 30-60 seconds)
-EXISTING_REGISTRY=$(az containerapp show \
-    --name "$CONTAINER_APP_NAME" \
-    --resource-group "$AZURE_RESOURCE_GROUP" \
-    --query "properties.configuration.registries[?server=='$ACR_SERVER'].server" -o tsv 2>/dev/null || echo "")
-
-if [ -n "$EXISTING_REGISTRY" ]; then
-    echo "✅ ACR authentication already configured, skipping..."
-else
-    # Set registry authentication (using managed identity if available)
-    if [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
-        echo "⏳ Configuring ACR authentication with managed identity..."
+# Ensure ACR registry auth is configured on both container apps
+for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
+    EXISTING_REGISTRY=$(az containerapp show \
+        --name "$CA_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "properties.configuration.registries[?server=='$ACR_SERVER'].server" -o tsv 2>/dev/null || echo "")
+    if [ -n "$EXISTING_REGISTRY" ]; then
+        echo "✅ ACR auth on $CA_NAME: already configured"
+    elif [ -n "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
+        echo "⏳ Configuring ACR auth on $CA_NAME..."
         az containerapp registry set \
-            --name "$CONTAINER_APP_NAME" \
+            --name "$CA_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --server "$ACR_SERVER" \
             --identity "$CONTAINER_APP_USER_IDENTITY_ID" \
             --only-show-errors
-        echo "✅ Registry authentication configured (managed identity)"
+        echo "✅ ACR auth on $CA_NAME: configured (managed identity)"
     else
-        echo "⚠️  No managed identity found. Using ACR admin credentials (less secure)."
-        echo "   Consider enabling managed identity for better security."
+        echo "⚠️  No managed identity found for $CA_NAME. ACR admin credentials needed."
     fi
-fi
+done
 
 # Update container app with new image
 echo "⏳ Updating Container App with new image..."
@@ -253,44 +252,58 @@ ROUTE3_PPR_PER_NEIGHBOR_LIMIT=${ROUTE3_PPR_PER_NEIGHBOR_LIMIT:-10}
 ROUTE3_GRAPH_NATIVE_BM25=${ROUTE3_GRAPH_NATIVE_BM25:-1}
 ROUTE4_WORKFLOW=${ROUTE4_WORKFLOW:-0}
 
-az containerapp update \
-    --name "$CONTAINER_APP_NAME" \
-    --resource-group "$AZURE_RESOURCE_GROUP" \
-    --image "$IMAGE_URI" \
-        --set-env-vars \
-            REFRESH_TIMESTAMP="$REFRESH_TIMESTAMP" \
-            AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT="$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT" \
-            AZURE_DOCUMENT_INTELLIGENCE_KEY="$AZURE_DOCUMENT_INTELLIGENCE_KEY" \
-            AZURE_CONTENT_UNDERSTANDING_ENDPOINT="$AZURE_CONTENT_UNDERSTANDING_ENDPOINT" \
-            AZURE_CONTENT_UNDERSTANDING_API_KEY="$AZURE_CONTENT_UNDERSTANDING_API_KEY" \
-            V3_GLOBAL_DYNAMIC_SELECTION="$V3_GLOBAL_DYNAMIC_SELECTION" \
-            V3_GLOBAL_DYNAMIC_MAX_DEPTH="$V3_GLOBAL_DYNAMIC_MAX_DEPTH" \
-            V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET="$V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET" \
-            V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL="$V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL" \
-            V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD="$V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD" \
-            V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE="$V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE" \
-            V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY="$V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY" \
-            ROUTE3_RETURN_TIMINGS="$ROUTE3_RETURN_TIMINGS" \
-            ROUTE3_DISABLE_PPR="$ROUTE3_DISABLE_PPR" \
-            ROUTE3_PPR_PER_SEED_LIMIT="$ROUTE3_PPR_PER_SEED_LIMIT" \
-            ROUTE3_PPR_PER_NEIGHBOR_LIMIT="$ROUTE3_PPR_PER_NEIGHBOR_LIMIT" \
-            ROUTE3_GRAPH_NATIVE_BM25="$ROUTE3_GRAPH_NATIVE_BM25" \
-            ROUTE4_WORKFLOW="$ROUTE4_WORKFLOW" \
-    --only-show-errors
+ENV_VARS=(
+    REFRESH_TIMESTAMP="$REFRESH_TIMESTAMP"
+    AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT="$AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT"
+    AZURE_DOCUMENT_INTELLIGENCE_KEY="$AZURE_DOCUMENT_INTELLIGENCE_KEY"
+    AZURE_CONTENT_UNDERSTANDING_ENDPOINT="$AZURE_CONTENT_UNDERSTANDING_ENDPOINT"
+    AZURE_CONTENT_UNDERSTANDING_API_KEY="$AZURE_CONTENT_UNDERSTANDING_API_KEY"
+    V3_GLOBAL_DYNAMIC_SELECTION="$V3_GLOBAL_DYNAMIC_SELECTION"
+    V3_GLOBAL_DYNAMIC_MAX_DEPTH="$V3_GLOBAL_DYNAMIC_MAX_DEPTH"
+    V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET="$V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET"
+    V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL="$V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL"
+    V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD="$V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD"
+    V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE="$V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE"
+    V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY="$V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY"
+    ROUTE3_RETURN_TIMINGS="$ROUTE3_RETURN_TIMINGS"
+    ROUTE3_DISABLE_PPR="$ROUTE3_DISABLE_PPR"
+    ROUTE3_PPR_PER_SEED_LIMIT="$ROUTE3_PPR_PER_SEED_LIMIT"
+    ROUTE3_PPR_PER_NEIGHBOR_LIMIT="$ROUTE3_PPR_PER_NEIGHBOR_LIMIT"
+    ROUTE3_GRAPH_NATIVE_BM25="$ROUTE3_GRAPH_NATIVE_BM25"
+    ROUTE4_WORKFLOW="$ROUTE4_WORKFLOW"
+)
 
-echo "✅ Container App updated successfully"
+# Update graphrag-api
+echo "⏳ Updating $CONTAINER_APP_API with $API_IMAGE_URI..."
+az containerapp update \
+    --name "$CONTAINER_APP_API" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --image "$API_IMAGE_URI" \
+    --set-env-vars "${ENV_VARS[@]}" \
+    --only-show-errors
+echo "✅ $CONTAINER_APP_API updated"
+
+# Update graphrag-worker
+echo "⏳ Updating $CONTAINER_APP_WORKER with $WORKER_IMAGE_URI..."
+az containerapp update \
+    --name "$CONTAINER_APP_WORKER" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --image "$WORKER_IMAGE_URI" \
+    --set-env-vars "${ENV_VARS[@]}" \
+    --only-show-errors
+echo "✅ $CONTAINER_APP_WORKER updated"
 echo ""
 
-# Get Container App endpoint
+# Get API endpoint
 CONTAINER_APP_FQDN=$(az containerapp show \
-    --name "$CONTAINER_APP_NAME" \
+    --name "$CONTAINER_APP_API" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
     --query properties.configuration.ingress.fqdn -o tsv)
 
 if [ -n "$CONTAINER_APP_FQDN" ]; then
-    echo "🌐 Application URL: https://$CONTAINER_APP_FQDN"
-    echo "   Swagger UI:      https://$CONTAINER_APP_FQDN/docs"
-    echo "   Health Check:    https://$CONTAINER_APP_FQDN/health"
+    echo "🌐 API URL:       https://$CONTAINER_APP_FQDN"
+    echo "   Swagger UI:    https://$CONTAINER_APP_FQDN/docs"
+    echo "   Health Check:  https://$CONTAINER_APP_FQDN/health"
 fi
 echo ""
 
@@ -344,14 +357,15 @@ echo "✅ Deployment Complete!"
 echo "=================================================="
 echo ""
 echo "📋 Summary:"
-echo "  • Image:     $IMAGE_URI"
-echo "  • App URL:   https://$CONTAINER_APP_FQDN"
-echo "  • Timestamp: $REFRESH_TIMESTAMP"
+echo "  • API Image:    $API_IMAGE_URI"
+echo "  • Worker Image: $WORKER_IMAGE_URI"
+echo "  • API URL:      https://$CONTAINER_APP_FQDN"
+echo "  • Timestamp:    $REFRESH_TIMESTAMP"
 echo ""
 echo "🔧 Next steps:"
-echo "  1. Test health endpoint:    curl https://$CONTAINER_APP_FQDN/health"
-echo "  2. View Swagger docs:       open https://$CONTAINER_APP_FQDN/docs"
-echo "  3. Check application logs:  az containerapp logs show -n $CONTAINER_APP_NAME -g $AZURE_RESOURCE_GROUP --follow"
-echo "  4. Run test suite:          python test_managed_identity_pdfs.py"
+echo "  1. Test health:    curl https://$CONTAINER_APP_FQDN/health"
+echo "  2. Swagger docs:   open https://$CONTAINER_APP_FQDN/docs"
+echo "  3. API logs:       az containerapp logs show -n $CONTAINER_APP_API -g $AZURE_RESOURCE_GROUP --follow"
+echo "  4. Worker logs:    az containerapp logs show -n $CONTAINER_APP_WORKER -g $AZURE_RESOURCE_GROUP --follow"
 echo ""
 echo "=================================================="

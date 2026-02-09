@@ -9,14 +9,14 @@ FROM node:20-slim AS frontend-builder
 WORKDIR /frontend
 
 # Copy package files first for layer caching
-COPY graphrag-orchestration/frontend/app/frontend/package.json \
-     graphrag-orchestration/frontend/app/frontend/package-lock.json* \
+COPY frontend/app/frontend/package.json \
+     frontend/app/frontend/package-lock.json* \
      ./
 
 RUN npm ci --no-audit --no-fund
 
 # Copy frontend source and build
-COPY graphrag-orchestration/frontend/app/frontend/ ./
+COPY frontend/app/frontend/ ./
 RUN npm run build
 
 # Build output goes to ../backend/static per vite.config.ts

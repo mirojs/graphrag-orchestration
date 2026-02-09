@@ -9,14 +9,14 @@ FROM node:20-slim AS frontend-builder
 WORKDIR /frontend
 
 # Copy package files first for layer caching
-COPY graphrag-orchestration/frontend/app/frontend/package.json \
-     graphrag-orchestration/frontend/app/frontend/package-lock.json* \
+COPY frontend/app/frontend/package.json \
+     frontend/app/frontend/package-lock.json* \
      ./
 
 RUN npm ci --no-audit --no-fund
 
 # Copy frontend source and build
-COPY graphrag-orchestration/frontend/app/frontend/ ./
+COPY frontend/app/frontend/ ./
 RUN npm run build
 
 # Build output goes to ../backend/static per vite.config.ts
@@ -36,9 +36,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install to user site packages
-COPY graphrag-orchestration/requirements.txt .
+COPY requirements.txt .
 # Copy local optional stubs used for base builds (e.g., graspologic stub)
-COPY graphrag-orchestration/third_party/graspologic_stub third_party/graspologic_stub
+COPY third_party/graspologic_stub third_party/graspologic_stub
 # Upgrade pip to latest before installs to avoid resolver bugs on older pip
 RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore \
     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt

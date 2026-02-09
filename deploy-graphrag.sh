@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_DIR="$SCRIPT_DIR/graphrag-orchestration"
+APP_DIR="$SCRIPT_DIR"
 
 # Helper function to get environment value from azd or fallback to default
 get_env_value_or_default() {
@@ -153,6 +153,7 @@ echo "⏳ Building and pushing image in ACR (this may take 2-3 minutes)..."
 az acr build \
     --registry "$CONTAINER_REGISTRY_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
+    --file Dockerfile.api \
     --image "$API_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --image "$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \

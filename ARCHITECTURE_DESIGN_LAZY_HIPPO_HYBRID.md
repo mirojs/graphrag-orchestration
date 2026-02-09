@@ -1,6 +1,11 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 6, 2026
+**Last Updated:** February 9, 2026
+
+**Recent Updates (February 9, 2026):**
+- ✅ **Louvain Community Materialization (Step 9):** GDS Louvain communities are now eagerly materialized as `:Community` nodes with LLM-generated summaries and Voyage voyage-context-3 embeddings (2048-dim) at index time. CommunityMatcher loads these from Neo4j for cosine similarity matching at query time. Results: theme coverage 69.8% → 100%, +41% citation density, 10/10 benchmark pass rate. `min_community_size=2` produces 6 communities with 105 BELONGS_TO edges. See [Section 23](#23-louvain-community-materialization-step-9-february-9-2026).
+- ✅ **Deploy Script Modernization:** Updated `deploy-graphrag.sh` to target current container architecture (`graphrag-api` + `graphrag-worker`) instead of removed `graphrag-orchestration` container. One build, two image tags via `az acr build --image` x2. Commit `1d78ec26`.
+- ✅ **Cloud Redeployment:** Both `graphrag-api` and `graphrag-worker` updated to `1d78ec26-05` with all community materialization code + evidence metadata wiring.
 
 **Recent Updates (February 6, 2026):**
 - ✅ **Deploy Traffic Routing Fix:** GitHub Actions deploys were creating new Azure Container Apps revisions with **0% traffic** (multi-revision mode). All deploys since Feb 5 were unreachable. Fixed `deploy.yml` to auto-route 100% traffic to new revisions. Commit `15f59e1f`.
@@ -6952,5 +6957,146 @@ When disabled, Route 3 behaves identically to the pre-enhancement pipeline. No l
 | **LLM Calls** | 1 (synthesis) | 1 (synthesis) |
 | **Best For** | Thematic summaries with precise evidence | Deep inconsistency analysis across documents |
 | **Negative Detection** | Graph-based + field validation | N/A (retrieves everything) |
+
+---
+
+## 23. Louvain Community Materialization — Step 9 (February 9, 2026)
+
+### 23.1. Problem Statement
+
+Route 3 (Global Search) relied on entity embedding search + keyword matching as a 4-level cascade for community matching. This was the original "lazy" approach from LazyGraphRAG — communities existed as Louvain `community_id` properties on entities (from GDS Step 8), but no materialized community summaries existed. The CommunityMatcher had to:
+
+1. Search entity embeddings for semantic matches
+2. Fall back to keyword matching
+3. Fall back to fuzzy matching
+4. Fall back to entity-type matching
+
+This missed thematic connections that didn't share entity names. Benchmark showed **69.8% theme coverage** — 3 of 10 questions failed to find relevant cross-document themes.
+
+### 23.2. Solution: Eager Community Summarization at Index Time
+
+Convert from pure lazy to **hybrid** LazyGraphRAG: eager structural clustering + LLM summaries at index time, lazy query-specific resolution at query time.
+
+**New indexing Step 9** (`_materialize_louvain_communities()`) runs after GDS Step 8:
+
+```
+Step 8: GDS (KNN → Louvain → PageRank)
+                    ↓
+Step 9: Community Materialization
+    ├── Read Louvain community_id from entities
+    ├── Filter by min_community_size (≥2 entities)
+    ├── For each community:
+    │   ├── Gather member entity names + types + relationships
+    │   ├── LLM summarization → title + summary (gpt-4o)
+    │   ├── Embed summary → 2048-dim vector (voyage-context-3)
+    │   ├── CREATE (:Community) node in Neo4j
+    │   └── CREATE (:Entity)-[:BELONGS_TO]->(:Community) edges
+    └── Done
+```
+
+### 23.3. Neo4j Schema
+
+```cypher
+-- Community node
+(:Community {
+    group_id: "test-5pdfs-v2-fix2",
+    community_id: 42,
+    title: "Commercial Lift Equipment & Contract Terms",
+    summary: "Community covering Contoso Lifts LLC equipment...",
+    embedding: [0.023, -0.041, ...],  -- 2048-dim voyage-context-3
+    member_count: 18,
+    created_at: "2026-02-09T..."
+})
+
+-- Membership edges
+(:Entity)-[:BELONGS_TO {group_id: "..."}]->(:Community)
+```
+
+### 23.4. Query-Time Flow (CommunityMatcher)
+
+```
+Query → Embed query (voyage-context-3)
+         ↓
+    Load Community nodes from Neo4j (with embeddings)
+         ↓
+    Cosine similarity: query ↔ community summaries
+         ↓
+    Top-k communities → hub entities → PPR → chunks → synthesis
+         ↓
+    Fallback: entity embedding search (if no communities exist)
+```
+
+The `CommunityMatcher._load_from_neo4j()` method loads communities eagerly. If no `:Community` nodes exist (legacy index), it falls back to the original 4-level entity embedding cascade.
+
+### 23.5. Files Modified
+
+| File | Changes |
+|------|--------|
+| `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` | `_materialize_louvain_communities()`, `_summarize_community()`, `_parse_community_summary()` |
+| `src/worker/hybrid_v2/pipeline/community_matcher.py` | `_load_from_neo4j()` — Neo4j-first loading with JSON-fallback |
+| `src/worker/hybrid_v2/services/neo4j_store.py` | `update_community_summary()`, `update_community_embedding()` |
+| `tests/unit/test_community_materialization.py` | 25 unit tests (parser, summarizer, matcher, theme evaluator) |
+| `scripts/rerun_step9_communities.py` | Helper to re-run Step 9 without full reindex |
+| `scripts/benchmark_route3_thematic.py` | Bearer token auth + A/B comparison support |
+| `deploy-graphrag.sh` | Updated for `graphrag-api` + `graphrag-worker` containers |
+
+### 23.6. Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `min_community_size` | 2 | Minimum entities per community to materialize |
+| LLM model | gpt-4o | Community summarization model |
+| Embedder | voyage-context-3 | Community summary embedding model |
+| Embedding dim | 2048 | Embedding vector dimension |
+
+### 23.7. Benchmark Results
+
+**A/B Comparison: `test-5pdfs-v2-fix1` (no communities) vs `test-5pdfs-v2-fix2` (6 communities)**
+
+| Metric | fix1 (baseline) | fix2 (communities) | Delta |
+|--------|------------------|---------------------|-------|
+| Pass rate | 9/10 (90%) | **10/10 (100%)** | +1 |
+| Theme coverage | 69.8% | **100%** | +30.2pp |
+| Avg citations | ~5.2 | **~7.3** | **+41%** |
+| Avg latency | ~18s | ~19s | +5% |
+| X-1 (timeout) | FAIL (timeout) | PASS (76.6s) | Fixed |
+
+**Neo4j Data (`test-5pdfs-v2-fix2`):**
+
+| Metric | Value |
+|--------|-------|
+| Community nodes | 6 |
+| BELONGS_TO edges | 105 |
+| Entities | 132 |
+| Avg members/community | 17.5 |
+| All have title | ✅ |
+| All have summary | ✅ |
+| All have embedding (2048-dim) | ✅ |
+
+### 23.8. Unit Tests
+
+25 tests in `tests/unit/test_community_materialization.py`:
+
+| Group | Tests | Coverage |
+|-------|-------|----------|
+| Parser (`_parse_community_summary`) | 7 | Title/summary extraction, edge cases |
+| Summarizer (`_summarize_community`) | 2 | LLM call, error handling |
+| Matcher loading (`_load_from_neo4j`) | 7 | Neo4j loading, fallback, empty results |
+| Theme evaluator | 9 | Coverage scoring, pass/fail thresholds |
+
+### 23.9. Git History
+
+| Commit | Description |
+|--------|-------------|
+| `8271e404` | Initial Step 9 implementation + benchmark scripts |
+| `9062b2c1` | Lower `min_community_size` from 3 → 2 (4 → 6 communities) |
+| `b42b3352` | Add `rerun_step9_communities.py` helper |
+| `73d79367` | A/B benchmark comparison report |
+| `c662a6bb` | 25 integration tests (all passing) |
+| `1d78ec26` | Deploy script modernization + cloud redeploy |
+
+### 23.10. Design Document
+
+Full design specification: `DESIGN_LOUVAIN_COMMUNITY_SUMMARIZATION_2026-02-09.md`
 
 ---

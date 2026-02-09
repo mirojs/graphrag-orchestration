@@ -1,8 +1,32 @@
-# GraphRAG API Gateway Dockerfile
-# Handles HTTP requests, chat endpoints, folder management, config endpoints
+# GraphRAG API Gateway Dockerfile (Unified Fullstack)
+# Serves FastAPI backend + React SPA frontend in a single container
 
-# Stage 1: Builder - Install all dependencies
-FROM python:3.11-slim as builder
+# ====================================================================
+# Stage 1: Frontend Builder - Build React SPA with Vite
+# ====================================================================
+FROM node:20-slim AS frontend-builder
+
+WORKDIR /frontend
+
+# Copy package files first for layer caching
+COPY graphrag-orchestration/frontend/app/frontend/package.json \
+     graphrag-orchestration/frontend/app/frontend/package-lock.json* \
+     ./
+
+RUN npm ci --no-audit --no-fund
+
+# Copy frontend source and build
+COPY graphrag-orchestration/frontend/app/frontend/ ./
+RUN npm run build
+
+# Build output goes to ../backend/static per vite.config.ts
+# but since we're in /frontend, it's at /backend/static
+# Actually vite outDir is relative: "../backend/static" → /backend/static
+
+# ====================================================================
+# Stage 2: Python Builder - Install all Python dependencies
+# ====================================================================
+FROM python:3.11-slim AS builder
 
 WORKDIR /tmp
 
@@ -19,7 +43,9 @@ COPY graphrag-orchestration/third_party/graspologic_stub third_party/graspologic
 RUN pip install --upgrade pip --no-warn-script-location --root-user-action=ignore \
     && pip install --user --no-cache-dir --no-warn-script-location --root-user-action=ignore -r requirements.txt
 
-# Stage 2: Runtime - Minimal final image
+# ====================================================================
+# Stage 3: Runtime - Minimal final image with API + SPA
+# ====================================================================
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -35,11 +61,16 @@ ARG CACHE_BUST=""
 RUN echo "CACHE_BUST=${CACHE_BUST}" > /dev/null
 COPY src/ /app/src/
 
+# Copy built frontend static files from Stage 1
+# Vite outputs to ../backend/static relative to frontend dir → /backend/static in that stage
+COPY --from=frontend-builder /backend/static /app/static
+
 # Set PATH and environment
 ENV PATH=/root/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
-    SERVICE_ROLE=api
+    SERVICE_ROLE=api \
+    FRONTEND_STATIC_DIR=/app/static
 
 # Expose port
 EXPOSE 8000

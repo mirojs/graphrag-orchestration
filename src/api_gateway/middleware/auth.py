@@ -22,6 +22,7 @@ from fastapi import Header, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -50,11 +51,37 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
         self.auth_type = auth_type.upper()
         self.require_auth = require_auth
         
+    # Static file extensions that never require auth
+    STATIC_EXTENSIONS = {
+        ".html", ".js", ".css", ".ico", ".svg", ".png", ".jpg", ".jpeg",
+        ".gif", ".woff", ".woff2", ".ttf", ".eot", ".map", ".json",
+    }
+
+    # Paths that never require auth
+    SKIP_AUTH_PATHS = {
+        "/health", "/config", "/docs", "/openapi.json", "/redoc",
+        "/auth_setup", "/redirect", "/favicon.ico",
+    }
+
+    def _is_static_request(self, path: str) -> bool:
+        """Check if the request is for a static file or SPA route."""
+        # Exact path matches
+        if path in self.SKIP_AUTH_PATHS or path == "/":
+            return True
+        # Assets directory (Vite bundles)
+        if path.startswith("/assets/"):
+            return True
+        # Static file extensions
+        for ext in self.STATIC_EXTENSIONS:
+            if path.endswith(ext):
+                return True
+        return False
+
     async def dispatch(self, request: Request, call_next):
         """Process request and validate JWT token."""
         
-        # Skip auth for health and config endpoints
-        if request.url.path in ["/health", "/config", "/docs", "/openapi.json", "/redoc"]:
+        # Skip auth for health, config, static files, and SPA routes
+        if self._is_static_request(request.url.path):
             return await call_next(request)
         
         try:
@@ -118,18 +145,21 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 
             elif self.require_auth:
                 # No token found and auth is required
+                # Return JSONResponse directly instead of raising HTTPException
+                # to avoid Starlette BaseHTTPMiddleware ExceptionGroup bug
                 auth_value = request.headers.get("authorization")
                 logger.warning(
-                    "auth_no_token_headers: headers=%s auth_present=%s auth_prefix=%s auth_len=%s",
+                    "auth_no_token_headers: headers=%s auth_present=%s auth_prefix=%s auth_len=%s path=%s",
                     list(request.headers.keys()),
                     bool(auth_value),
                     (auth_value[:20] if auth_value else None),
-                    (len(auth_value) if auth_value else 0)
+                    (len(auth_value) if auth_value else 0),
+                    request.url.path,
                 )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Authentication required. No valid token found.",
-                    headers={"WWW-Authenticate": "Bearer"}
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "Authentication required. No valid token found."},
+                    headers={"WWW-Authenticate": "Bearer"},
                 )
             else:
                 # Auth not required, proceed without token claims
@@ -139,15 +169,20 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 if not getattr(request.state, "user_id", None):
                     request.state.user_id = None
                 
-        except HTTPException:
-            raise
+        except HTTPException as he:
+            # Convert HTTPException to JSONResponse to avoid ExceptionGroup bug
+            return JSONResponse(
+                status_code=he.status_code,
+                content={"detail": he.detail},
+                headers=he.headers or {},
+            )
         except Exception as e:
             logger.error(f"JWT validation error: {e}", exc_info=True)
             if self.require_auth:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Invalid authentication: {str(e)}",
-                    headers={"WWW-Authenticate": "Bearer"}
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": f"Invalid authentication: {str(e)}"},
+                    headers={"WWW-Authenticate": "Bearer"},
                 )
         
         return await call_next(request)

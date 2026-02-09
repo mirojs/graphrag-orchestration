@@ -38,12 +38,24 @@ class GroupIsolationMiddleware(BaseHTTPMiddleware):
     - Falls back to path/header only when JWT doesn't provide it
     """
     
+    # Static file extensions that never require group isolation
+    STATIC_EXTENSIONS = {
+        ".html", ".js", ".css", ".ico", ".svg", ".png", ".jpg", ".jpeg",
+        ".gif", ".woff", ".woff2", ".ttf", ".eot", ".map", ".json",
+    }
+
     async def dispatch(self, request: Request, call_next):
-        # Skip isolation check for health/metrics/docs/admin endpoints
-        skip_paths = ["/health", "/health/detailed", "/metrics", "/docs", "/redoc", "/admin", "/openapi.json"]
-        skip_prefixes = ["/api/v1/openapi.json", "/api/v1/graphrag/health"]
+        # Skip isolation check for health/metrics/docs/admin/SPA endpoints
+        skip_paths = ["/health", "/health/detailed", "/metrics", "/docs", "/redoc", "/admin", "/openapi.json",
+                      "/auth_setup", "/redirect", "/config", "/favicon.ico"]
+        skip_prefixes = ["/api/v1/openapi.json", "/api/v1/graphrag/health", "/assets/"]
         
-        if any(request.url.path.startswith(p) for p in skip_paths + skip_prefixes):
+        path = request.url.path
+        if path == "/" or any(path.startswith(p) for p in skip_paths + skip_prefixes):
+            return await call_next(request)
+        
+        # Skip static file requests (SPA assets)
+        if any(path.endswith(ext) for ext in self.STATIC_EXTENSIONS):
             return await call_next(request)
         
         # Priority 1: JWT-extracted group_id (set by JWTAuthMiddleware)

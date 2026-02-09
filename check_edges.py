@@ -434,7 +434,98 @@ def build_report(session, group_id, args):
     report["language_spans"] = lang_info
 
     # ──────────────────────────────────────────────────────────────────
-    # 12. DOCUMENT LIST
+    # 12. LOUVAIN COMMUNITY MATERIALIZATION (Step 9)
+    # ──────────────────────────────────────────────────────────────────
+    community_info = OrderedDict()
+
+    total_communities = nodes["Community"]
+    community_info["Total Community nodes"] = total_communities
+
+    # Communities with non-empty title
+    with_title = count_query(session, '''
+        MATCH (c:Community {group_id: $gid})
+        WHERE c.title IS NOT NULL AND c.title <> ''
+        RETURN count(c) as count
+    ''', gid=group_id)
+    community_info["With LLM title"] = f"{with_title}/{total_communities}"
+
+    # Communities with non-empty summary
+    with_summary = count_query(session, '''
+        MATCH (c:Community {group_id: $gid})
+        WHERE c.summary IS NOT NULL AND c.summary <> ''
+        RETURN count(c) as count
+    ''', gid=group_id)
+    community_info["With LLM summary"] = f"{with_summary}/{total_communities}"
+
+    # Communities with embedding
+    with_embedding = count_query(session, '''
+        MATCH (c:Community {group_id: $gid})
+        WHERE c.embedding IS NOT NULL
+        RETURN count(c) as count
+    ''', gid=group_id)
+    community_info["With embedding"] = f"{with_embedding}/{total_communities}"
+
+    # Embedding dimension
+    if with_embedding > 0:
+        result = session.run('''
+            MATCH (c:Community {group_id: $gid})
+            WHERE c.embedding IS NOT NULL
+            RETURN size(c.embedding) AS dim LIMIT 1
+        ''', gid=group_id)
+        dim = result.single()["dim"]
+        community_info["Community embedding dim"] = f"{dim} (expected: 2048)"
+        if dim != 2048:
+            issues.append(f"Community embedding dimension {dim} != 2048")
+
+    # BELONGS_TO edges
+    belongs_to = count_query(session, '''
+        MATCH (e:Entity {group_id: $gid})-[r:BELONGS_TO]->(c:Community)
+        RETURN count(r) as count
+    ''', gid=group_id)
+    community_info["BELONGS_TO (Entity→Community)"] = belongs_to
+
+    # Distinct community_ids on entities
+    distinct_cids = count_query(session, '''
+        MATCH (e:Entity {group_id: $gid})
+        WHERE e.community_id IS NOT NULL
+        WITH DISTINCT e.community_id AS cid
+        RETURN count(cid) as count
+    ''', gid=group_id)
+    community_info["Distinct community_ids on Entities"] = distinct_cids
+
+    # Community size distribution
+    result = session.run('''
+        MATCH (c:Community {group_id: $gid})<-[:BELONGS_TO]-(e:Entity)
+        WITH c, count(e) AS members
+        RETURN c.id AS id, c.title AS title,
+               left(coalesce(c.summary, ''), 80) AS summary_preview,
+               members,
+               c.embedding IS NOT NULL AS has_embedding
+        ORDER BY members DESC
+    ''', gid=group_id)
+    community_details = []
+    for rec in result:
+        community_details.append({
+            "id": rec["id"],
+            "title": rec["title"],
+            "summary_preview": rec["summary_preview"],
+            "members": rec["members"],
+            "has_embedding": rec["has_embedding"],
+        })
+    community_info["community_details"] = community_details
+
+    # Validation: communities should have summaries + embeddings
+    if total_communities > 0 and with_summary == 0:
+        issues.append("Community nodes exist but none have LLM summaries (Step 9c failed)")
+    if total_communities > 0 and with_embedding == 0:
+        issues.append("Community nodes exist but none have embeddings (Step 9d-9e failed)")
+    if total_communities == 0 and entities_with_community > 0:
+        issues.append("Entities have community_id but no Community nodes materialized (Step 9 not run)")
+
+    report["community_materialization"] = community_info
+
+    # ──────────────────────────────────────────────────────────────────
+    # 13. DOCUMENT LIST
     # ──────────────────────────────────────────────────────────────────
     result = session.run('''
         MATCH (d:Document {group_id: $gid})
@@ -522,6 +613,22 @@ def print_report(report, group_id):
     section_header("Language Detection on Documents")
     for k, v in report["language_spans"].items():
         print(f"  {k:45s} {v}")
+
+    # Louvain Community Materialization (Step 9)
+    section_header("Louvain Community Materialization (Step 9)")
+    for k, v in report["community_materialization"].items():
+        if k == "community_details":
+            if v:
+                print(f"\n  Community Breakdown:")
+                for c in v:
+                    emb_icon = status_icon(c['has_embedding'])
+                    print(f"    {emb_icon} [{c['members']} members] {c['title']}")
+                    if c['summary_preview']:
+                        print(f"       {c['summary_preview']}...")
+            else:
+                print(f"\n  (No community details available)")
+        else:
+            print(f"  {str(k):45s} {v}")
 
     # Documents
     section_header("Documents")

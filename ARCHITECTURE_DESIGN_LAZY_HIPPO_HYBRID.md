@@ -463,7 +463,7 @@ As of the January 24, 2026 update, **Vector RAG has been removed** after compreh
 The base system is **LazyGraphRAG**, enhanced with **HippoRAG 2** for deterministic detail recovery in thematic and multi-hop queries. Designed specifically for high-stakes industries such as **auditing, finance, and insurance**, this architecture prioritizes **determinism, auditability, and high precision** over raw speed.
 
 ### Key Design Principles
-- **LazyGraphRAG** is the foundation (replaces all GraphRAG search modes)
+- **Hybrid LazyGraphRAG** is the foundation — eager structural clustering (GDS Louvain → LLM summaries) at index time, lazy query-specific resolution at query time
 - **HippoRAG 2** enhances Routes 2 & 3 for deterministic pathfinding
 - **2 Profiles:** General Enterprise vs High Assurance (both use same 3 routes)
 - **Fast Mode:** Optional latency optimization for Route 3 (Global Search)
@@ -615,14 +615,15 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 
 This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced with HippoRAG 2 for detail recovery.
 
-#### Stage 3.1: Entity Embedding Search (Corrected January 24, 2026)
-*   **Engine:** Entity embedding similarity + keyword fallback + multi-document sampling
-*   **What:** Find entities matching query via vector similarity on entity embeddings
-*   **Correction:** This stage does NOT use pre-computed Microsoft GraphRAG-style community summaries. It performs direct entity embedding search.
+#### Stage 3.1: Community Semantic Matching (Updated February 9, 2026)
+*   **Engine:** Pre-computed Louvain community summaries (primary) + entity embedding fallback
+*   **What:** Semantically match query against pre-computed community summary embeddings; fall back to entity embedding search if no communities exist
+*   **Update (Feb 9, 2026):** GDS Louvain communities are now materialized as `:Community` nodes with LLM-generated summaries and Voyage embeddings at index time (Step 9). CommunityMatcher loads these from Neo4j and performs cosine similarity matching. If no materialized communities exist (legacy index), falls back to the previous entity embedding search + 4-level cascade.
 *   **Process:**
-    1. Vector search on entity embeddings to find query-relevant entities
-    2. Keyword fallback: match entity names/descriptions if embedding fails
-    3. Multi-document sampling: round-robin across documents for diversity
+    1. Load Community nodes from Neo4j (with embeddings)
+    2. Cosine similarity between query embedding and community summary embeddings
+    3. Return top-k communities ranked by semantic relevance
+    4. Fallback: entity embedding search + keyword matching if no communities found
 *   **Why Keep (Fast Mode):** Required for PPR seeds, citation provenance, and multi-doc diversity
 *   **Output:** `["Entity: Compliance_Policy_2024", "Entity: Risk_Assessment_Q3"]` (query-relevant entity clusters)
 
@@ -2972,12 +2973,15 @@ Sample entities with aliases:
 - 219 SEMANTICALLY_SIMILAR edges (cross-document semantic connections)
 
 ⏳ **Created On-Demand (LazyGraphRAG Pattern):**
-- Communities: Generated during Route 3 (Global Search) queries, not pre-computed
 - RAPTOR nodes: Optional, disabled by default (`run_raptor=False`)
 
+✅ **Created During Indexing (Step 9 — Eager Community Summarization, added Feb 9 2026):**
+- Community nodes: GDS Louvain clusters materialized as `:Community` nodes with LLM-generated summaries and Voyage embeddings
+- BELONGS_TO edges: `(:Entity)-[:BELONGS_TO]->(:Community)` for community membership
+- See `DESIGN_LOUVAIN_COMMUNITY_SUMMARIZATION_2026-02-09.md` for full design
+
 **What's Missing After Fresh Indexing:**
-- Nothing required for the 4-route hybrid system is missing
-- Communities appear "missing" but are intentionally lazy (created when needed)
+- Nothing required for the 3-route hybrid system is missing
 
 **Verification Queries:**
 
@@ -3077,7 +3081,7 @@ print(f"✅ Ready to query with group_id: {GROUP_ID}")
 |-----------|---------|-------------|
 | `ingestion` | `"document-intelligence"` | Use Azure DI for PDF extraction |
 | `run_raptor` | `false` | Skip RAPTOR (not needed for LazyGraphRAG) |
-| `run_community_detection` | `false` | Skip upfront communities (LazyGraphRAG computes on-demand) |
+| `run_community_detection` | `false` | Legacy on-demand community generation (ignored when Louvain Step 9 is active) |
 | `max_triplets_per_chunk` | `20` | Entity/relationship extraction density |
 | `reindex` | `false` | Set `true` to clean existing data for this group |
 | `model_strategy` | `"auto"` | DI model: `"auto"`, `"layout"`, `"invoice"`, `"receipt"` |

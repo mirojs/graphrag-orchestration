@@ -388,7 +388,7 @@ class LazyGraphRAGIndexingPipeline:
                 logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
                 community_stats = await self._materialize_louvain_communities(
                     group_id=group_id,
-                    min_community_size=3,
+                    min_community_size=2,
                 )
                 stats["communities_created"] = community_stats.get("communities_created", 0)
                 stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
@@ -1935,7 +1935,7 @@ Output:
         self,
         *,
         group_id: str,
-        min_community_size: int = 3,
+        min_community_size: int = 2,
     ) -> Dict[str, int]:
         """Materialize GDS Louvain clusters into Community nodes with LLM summaries.
 

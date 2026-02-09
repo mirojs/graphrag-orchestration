@@ -266,6 +266,11 @@ class LLMService:
                 "api_version": settings.AZURE_OPENAI_API_VERSION,
             }
             
+        # Models that do NOT support a custom temperature (only default=1)
+        no_temperature_models = ("gpt-5-mini", "gpt-5-nano", "o1", "o3", "o4")
+        if not deployment_name.startswith(no_temperature_models):
+            llm_kwargs["temperature"] = 0.0  # Deterministic outputs for repeatability
+
         # Add reasoning_effort if specified and model supports it
         if reasoning_effort and deployment_name.startswith(("o1", "o3", "o4")):
             llm_kwargs["additional_kwargs"] = {"reasoning_effort": reasoning_effort}

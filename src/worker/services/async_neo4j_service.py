@@ -576,6 +576,14 @@ class AsyncNeo4jService:
         per_seed_limit: int = 25,
         per_neighbor_limit: int = 10,
         include_section_graph: bool = True,  # Re-enabled after bug fix
+        # Path weight multipliers (Step 11 — February 9, 2026)
+        # Each multiplier scales its path's contribution to the final score.
+        # Default 1.0 preserves original behavior.  Set via env vars for tuning.
+        weight_entity: float = 1.0,
+        weight_section: float = 1.0,
+        weight_similar: float = 1.0,
+        weight_shares: float = 1.0,
+        weight_hub: float = 1.0,
     ) -> List[Tuple[str, float]]:
         """
         Native Cypher approximation of Personalized PageRank.
@@ -627,6 +635,11 @@ class AsyncNeo4jService:
                 top_k=top_k,
                 per_seed_limit=per_seed_limit,
                 per_neighbor_limit=per_neighbor_limit,
+                weight_entity=weight_entity,
+                weight_section=weight_section,
+                weight_similar=weight_similar,
+                weight_shares=weight_shares,
+                weight_hub=weight_hub,
             )
             records = await result.data()
         dt_ms = int((time.perf_counter() - t0) * 1000)
@@ -658,7 +671,8 @@ class AsyncNeo4jService:
                  $group_id AS group_id,
                  $per_seed_limit AS per_seed_limit,
                  $per_neighbor_limit AS per_neighbor_limit,
-                 $damping AS damping
+                 $damping AS damping,
+                 $weight_entity AS w_entity
             CALL (seed, group_id, per_seed_limit) {
                 MATCH (seed)-[r1]-(n1)
                 WHERE n1.group_id = group_id
@@ -740,7 +754,12 @@ class AsyncNeo4jService:
                  $group_id AS group_id,
                  $per_seed_limit AS per_seed_limit,
                  $per_neighbor_limit AS per_neighbor_limit,
-                 $damping AS damping
+                 $damping AS damping,
+                 $weight_entity AS w_entity,
+                 $weight_section AS w_section,
+                 $weight_similar AS w_similar,
+                 $weight_shares AS w_shares,
+                 $weight_hub AS w_hub
 
             // =====================================================================
             // Path 1: Standard Entity-to-Entity relationships (original behavior)
@@ -857,12 +876,14 @@ class AsyncNeo4jService:
             // Process entity-path with 2-hop expansion
             // =====================================================================
             WITH seed, entity_hop1, section_hop1, similar_entities, shares_entity_hop, hub_entities,
-                 group_id, per_neighbor_limit, damping
+                 group_id, per_neighbor_limit, damping,
+                 w_entity, w_section, w_similar, w_shares, w_hub
 
             // Process entity-path neighbors (standard decay)
             UNWIND (entity_hop1 + [seed]) AS hop1_node
             WITH seed, hop1_node, entity_hop1, section_hop1, similar_entities, shares_entity_hop, hub_entities,
-                 group_id, per_neighbor_limit, damping
+                 group_id, per_neighbor_limit, damping,
+                 w_entity, w_section, w_similar, w_shares, w_hub
 
             // 2-hop expansion from entity path
             CALL (seed, hop1_node, group_id, per_neighbor_limit) {
@@ -879,12 +900,14 @@ class AsyncNeo4jService:
             // Collect all entity IDs from entity-path for scoring
             WITH seed, hop1_node, hop2, entity_hop1, section_hop1, similar_entities, 
                  shares_entity_hop, hub_entities, damping,
+                 w_entity, w_section, w_similar, w_shares, w_hub,
                  [e IN entity_hop1 | e.id] AS hop1_ids,
                  [e IN hop2 | e.id] AS hop2_ids
 
             // Extract all path entities as nodes for inclusion
             WITH seed, hop1_node, hop2, section_hop1, similar_entities, shares_entity_hop, 
                  hub_entities, damping, hop1_ids, hop2_ids,
+                 w_entity, w_section, w_similar, w_shares, w_hub,
                  [item IN section_hop1 | item.node] AS section_nodes,
                  [item IN similar_entities | item.node] AS similar_nodes,
                  [item IN shares_entity_hop | item.node] AS shares_nodes,
@@ -893,11 +916,12 @@ class AsyncNeo4jService:
             // UNION all paths
             UNWIND (hop2 + [hop1_node] + section_nodes + similar_nodes + shares_nodes + hub_nodes) AS entity
             
-            // Calculate combined scores
+            // Calculate combined scores (with configurable path weights)
             WITH DISTINCT entity, seed, hop1_node, section_hop1, similar_entities, 
                  shares_entity_hop, hub_entities, damping, hop1_ids, hop2_ids,
-                 // Entity-path contribution
-                 CASE
+                 w_entity, w_section, w_similar, w_shares, w_hub,
+                 // Entity-path contribution (scaled by w_entity)
+                 w_entity * CASE
                      WHEN entity.id = seed.id THEN 1.0
                      WHEN entity.id = hop1_node.id THEN damping
                      WHEN entity.id IN hop1_ids THEN damping
@@ -915,20 +939,20 @@ class AsyncNeo4jService:
 
             WITH entity, seed, damping, entity_path_score, 
                  section_matches, similar_matches, shares_matches, hub_matches,
-                 // Section path score
-                 CASE WHEN size(section_matches) > 0 
+                 // Section path score (scaled by w_section)
+                 w_section * CASE WHEN size(section_matches) > 0 
                       THEN section_matches[0].weight * damping * damping
                       ELSE 0.0 END AS section_path_score,
-                 // SIMILAR_TO score (higher weight - direct semantic similarity)
-                 CASE WHEN size(similar_matches) > 0 
+                 // SIMILAR_TO score (scaled by w_similar)
+                 w_similar * CASE WHEN size(similar_matches) > 0 
                       THEN similar_matches[0].weight * damping
                       ELSE 0.0 END AS similar_to_score,
-                 // SHARES_ENTITY score
-                 CASE WHEN size(shares_matches) > 0 
+                 // SHARES_ENTITY score (scaled by w_shares)
+                 w_shares * CASE WHEN size(shares_matches) > 0 
                       THEN shares_matches[0].weight * damping * damping
                       ELSE 0.0 END AS shares_entity_score,
-                 // HUB_ENTITY score
-                 CASE WHEN size(hub_matches) > 0 
+                 // HUB_ENTITY score (scaled by w_hub)
+                 w_hub * CASE WHEN size(hub_matches) > 0 
                       THEN hub_matches[0].weight * damping
                       ELSE 0.0 END AS hub_entity_score
 
@@ -945,6 +969,81 @@ class AsyncNeo4jService:
             LIMIT $top_k
         """)
     
+    # =========================================================================
+    # Community-Aware Seed Expansion (Step 12 — February 9, 2026)
+    # =========================================================================
+
+    async def get_community_peers(
+        self,
+        group_id: str,
+        seed_entity_ids: List[str],
+        max_peers: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Find high-degree entities in the same Louvain communities as the seeds.
+
+        For each seed, looks up its ``community_id`` property (set by GDS Louvain
+        at indexing time), then returns the top-degree entities from those
+        communities that are **not already seeds**.
+
+        This biases PPR toward the topological neighbourhood identified by
+        Louvain's modularity optimisation, improving recall for queries that
+        map cleanly onto a community cluster.
+
+        Args:
+            group_id: Tenant isolation key.
+            seed_entity_ids: IDs of the resolved seed entities.
+            max_peers: Maximum number of community peers to return (across
+                       all communities).
+
+        Returns:
+            List of dicts with keys ``id``, ``name``, ``community_id``, ``degree``.
+            Empty if no community_id data exists on the seeds.
+        """
+        query = cypher25_query("""
+        // Collect distinct community_ids from the seed entities
+        UNWIND $seed_ids AS sid
+        MATCH (seed {id: sid})
+        WHERE seed.group_id = $group_id
+          AND (seed:Entity OR seed:`__Entity__`)
+          AND seed.community_id IS NOT NULL
+        WITH collect(DISTINCT seed.community_id) AS cids,
+             collect(DISTINCT seed.id) AS seed_id_set
+
+        // Find top-degree peers in those communities (excluding seeds)
+        UNWIND cids AS cid
+        MATCH (peer)
+        WHERE peer.group_id = $group_id
+          AND (peer:Entity OR peer:`__Entity__`)
+          AND peer.community_id = cid
+          AND NOT peer.id IN seed_id_set
+        WITH peer, cid
+        ORDER BY coalesce(peer.degree, 0) DESC
+        LIMIT $max_peers
+        RETURN peer.id AS id,
+               peer.name AS name,
+               cid AS community_id,
+               coalesce(peer.degree, 0) AS degree
+        """)
+        import time
+        t0 = time.perf_counter()
+        async with self._get_session() as session:
+            result = await session.run(
+                query,
+                group_id=group_id,
+                seed_ids=seed_entity_ids,
+                max_peers=max_peers,
+            )
+            records = await result.data()
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "community_peers_found",
+            group_id=group_id,
+            num_seeds=len(seed_entity_ids),
+            num_peers=len(records),
+            duration_ms=dt_ms,
+        )
+        return records
+
     # =========================================================================
     # Chunk Retrieval (Route 2/3)
     # =========================================================================

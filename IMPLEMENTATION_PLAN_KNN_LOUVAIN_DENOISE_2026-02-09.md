@@ -341,8 +341,8 @@ After all solutions, the synthesis LLM receives:
 | Step | Work | Depends On | Est. Effort |
 |------|------|------------|-------------|
 | 10 | ~~Noise filters (form-label, bare heading)~~ | — | ✅ DONE — `chunk_filters.py` module: form-label (0.05×), bare-heading (0.10×), min-content (0.20×) penalty multipliers. Integrated into `_retrieve_text_chunks` after dedup, before sort. 23 unit tests. |
-| 11 | PPR weight tuning (damping, sim_weight, hub_weight) | Step 9 results | 3-4 hours |
-| 12 | Community-aware PPR seeding (bias toward matched communities) | Steps 1+11 | 2-3 hours |
+| 11 | ~~PPR weight tuning (damping, sim_weight, hub_weight)~~ | Step 9 results | ✅ DONE — 5 per-path weight multipliers (`w_entity`, `w_section`, `w_similar`, `w_shares`, `w_hub`) parameterized in Cypher query, env-var configurable (`PPR_WEIGHT_*`). Default 1.0 preserves original behavior. |
+| 12 | ~~Community-aware PPR seeding (bias toward matched communities)~~ | Steps 1+11 | ✅ DONE — `get_community_peers()` in async_neo4j_service.py queries Louvain `community_id` to find top-degree peers. Tracing layer augments seed set before PPR. Configurable via `PPR_COMMUNITY_SEED_AUGMENT` env var (default 5, 0 to disable). |
 
 #### Documentation Updates (keep architecture aligned)
 

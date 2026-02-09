@@ -168,8 +168,23 @@ class DeterministicTracer:
                 except Exception:
                     return default
 
+            def _get_float_env(name: str, default: float) -> float:
+                raw = (os.getenv(name, str(default)) or "").strip()
+                try:
+                    v = float(raw)
+                    return v if v >= 0 else default
+                except Exception:
+                    return default
+
             per_seed_limit = _get_int_env("ROUTE3_PPR_PER_SEED_LIMIT", 25)
             per_neighbor_limit = _get_int_env("ROUTE3_PPR_PER_NEIGHBOR_LIMIT", 10)
+
+            # PPR path weight multipliers (Step 11 — tuneable via env vars)
+            weight_entity = _get_float_env("PPR_WEIGHT_ENTITY", 1.0)
+            weight_section = _get_float_env("PPR_WEIGHT_SECTION", 1.0)
+            weight_similar = _get_float_env("PPR_WEIGHT_SIMILAR", 1.0)
+            weight_shares = _get_float_env("PPR_WEIGHT_SHARES", 1.0)
+            weight_hub = _get_float_env("PPR_WEIGHT_HUB", 1.0)
 
             # First, resolve seed entity names to IDs using Strategies 1-5
             result = await self.async_neo4j.get_entities_by_names(
@@ -252,6 +267,29 @@ class DeterministicTracer:
                 )
                 return []
             
+            # Step 12: Community-aware seed augmentation (February 9, 2026)
+            # Look up Louvain community_id on resolved seeds and add top-degree
+            # peers from the same communities.  This biases PPR toward the
+            # topological neighbourhood without replacing the original seeds.
+            community_seed_augment = _get_int_env("PPR_COMMUNITY_SEED_AUGMENT", 5)
+            if community_seed_augment > 0 and hasattr(self.async_neo4j, 'get_community_peers'):
+                try:
+                    peers = await self.async_neo4j.get_community_peers(
+                        group_id=self.group_id,
+                        seed_entity_ids=seed_ids,
+                        max_peers=community_seed_augment,
+                    )
+                    peer_ids = [p["id"] for p in peers if p["id"] not in seed_ids]
+                    if peer_ids:
+                        seed_ids = seed_ids + peer_ids
+                        logger.info("community_seed_augmentation",
+                                   original_seeds=len(seed_ids) - len(peer_ids),
+                                   community_peers_added=len(peer_ids),
+                                   total_seeds=len(seed_ids))
+                except Exception as e:
+                    # Non-fatal — proceed with original seeds
+                    logger.warning("community_seed_augmentation_failed", error=str(e))
+
             # Use native PPR approximation (distance-based decay)
             ranked_nodes = await self.async_neo4j.personalized_pagerank_native(
                 group_id=self.group_id,
@@ -261,6 +299,11 @@ class DeterministicTracer:
                 top_k=top_k,
                 per_seed_limit=per_seed_limit,
                 per_neighbor_limit=per_neighbor_limit,
+                weight_entity=weight_entity,
+                weight_section=weight_section,
+                weight_similar=weight_similar,
+                weight_shares=weight_shares,
+                weight_hub=weight_hub,
             )
             
             logger.info("async_neo4j_ppr_success",

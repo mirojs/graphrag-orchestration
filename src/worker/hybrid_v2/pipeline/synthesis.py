@@ -11,6 +11,8 @@ Model Selection:
 """
 
 from typing import List, Tuple, Optional, Dict, Any, TYPE_CHECKING
+import hashlib
+import os
 import re
 import structlog
 
@@ -50,6 +52,10 @@ class EvidenceSynthesizer:
         self.llm = llm_client
         self.text_store = text_unit_store
         self.relevance_budget = relevance_budget
+
+    # Default token budget for LLM context window (configurable via SYNTHESIS_TOKEN_BUDGET env var).
+    # Chunks are added in PPR-score order until this limit is reached.
+    DEFAULT_TOKEN_BUDGET: int = 32_000
 
     _REFUSAL_MESSAGE = "The requested information was not found in the available documents."
 
@@ -174,7 +180,12 @@ class EvidenceSynthesizer:
             - evidence_path: The nodes used to generate the response.
         """
         # Step 1: Retrieve raw text chunks for evidence nodes
-        text_chunks = pre_fetched_chunks if pre_fetched_chunks is not None else await self._retrieve_text_chunks(evidence_nodes)
+        # _retrieve_text_chunks returns (deduped_chunks, entity_scores) after Feb 9 de-noising.
+        if pre_fetched_chunks is not None:
+            text_chunks = pre_fetched_chunks
+            entity_scores: Dict[str, float] = {name: score for name, score in evidence_nodes}
+        else:
+            text_chunks, entity_scores = await self._retrieve_text_chunks(evidence_nodes)
         
         # Step 1.5: Merge coverage chunks if provided
         if coverage_chunks:
@@ -228,8 +239,10 @@ class EvidenceSynthesizer:
             return await self._comprehensive_sentence_level_extract(query, text_chunks, evidence_nodes)
         
         # Step 2: Build context with citations (now groups by document for better reasoning)
+        # Pass entity_scores so _build_cited_context can enforce token budget by PPR rank.
         context, citation_map, sentence_citation_map = self._build_cited_context(
-            text_chunks, language_spans_by_doc=language_spans_by_doc
+            text_chunks, language_spans_by_doc=language_spans_by_doc,
+            entity_scores=entity_scores,
         )
         
         # Step 2.5: Inject global document overview when retrieval is sparse.
@@ -730,35 +743,47 @@ Response:"""
     
     async def _retrieve_text_chunks(
         self, 
-        evidence_nodes: List[Tuple[str, float]]
-    ) -> List[Dict[str, Any]]:
+        evidence_nodes: List[Tuple[str, float]],
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, float]]:
         """Retrieve raw text chunks for the evidence nodes.
         
         Performance optimization: Uses batched Neo4j query to fetch all entities
         in a single round-trip instead of sequential queries (4-10x faster).
+        
+        De-noising (February 9, 2026):
+        - Content-hash dedup:  identical chunk text → keep first occurrence only.
+        - Cross-entity dedup:  when entities A and B reference the same chunk,
+          keep the one associated with the highest-scored entity.
+        - Returns entity_scores dict so callers can rank/budget by PPR score.
+        
+        Returns:
+            Tuple of (deduplicated_chunks, entity_scores_dict)
         """
         if not self.text_store:
             logger.warning("no_text_store_available")
-            return []
+            return [], {}
         
-        chunks = []
+        chunks: List[Dict[str, Any]] = []
         def _clean_entity_name(name: str) -> str:
             cleaned = (name or "").strip()
             while len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in ('"', "'", "`"):
                 cleaned = cleaned[1:-1].strip()
             return cleaned
 
-        # Normalize + de-dupe (preserve order)
-        seen: set[str] = set()
+        # Build entity_scores dict — propagate PPR scores instead of discarding them.
+        entity_scores: Dict[str, float] = {}
+        seen_entities: set[str] = set()
         entity_names: List[str] = []
-        for name, _score in evidence_nodes:
+        for name, score in evidence_nodes:
             cleaned = _clean_entity_name(name)
             if not cleaned:
                 continue
-            if cleaned in seen:
-                continue
-            seen.add(cleaned)
-            entity_names.append(cleaned)
+            if cleaned not in seen_entities:
+                seen_entities.add(cleaned)
+                entity_names.append(cleaned)
+            # Keep highest score if entity appears multiple times
+            if cleaned not in entity_scores or score > entity_scores[cleaned]:
+                entity_scores[cleaned] = score
         
         # Apply relevance budget (limit entities processed)
         budget_limit = int(len(entity_names) * self.relevance_budget) + 1
@@ -767,22 +792,61 @@ Response:"""
         # Common Route 4 case: no entity seeds. Don't emit a misleading "0 chunks" log here;
         # the caller may fall back to query-based retrieval.
         if len(selected_entities) == 0:
-            return []
+            return [], entity_scores
         
         try:
             # Batch query: fetch all entities in one round-trip (major performance gain)
+            raw_chunks: List[Tuple[str, Dict[str, Any]]] = []  # (entity_name, chunk)
             if hasattr(self.text_store, 'get_chunks_for_entities'):
                 entity_chunks_map = await self.text_store.get_chunks_for_entities(selected_entities)
                 for entity_name in selected_entities:
-                    chunks.extend(entity_chunks_map.get(entity_name, []))
+                    for chunk in entity_chunks_map.get(entity_name, []):
+                        raw_chunks.append((entity_name, chunk))
             else:
                 # Fallback to sequential queries (for HippoRAGTextUnitStore or old implementations)
                 for entity_name in selected_entities:
                     entity_chunks = await self.text_store.get_chunks_for_entity(entity_name)
-                    chunks.extend(entity_chunks)
+                    for chunk in entity_chunks:
+                        raw_chunks.append((entity_name, chunk))
+            
+            # --- Content-hash dedup + cross-entity dedup ---
+            # When the same chunk is retrieved via multiple entities, keep only the
+            # copy associated with the highest-scored entity (best PPR rank).
+            seen_hashes: Dict[str, float] = {}  # content_hash → best entity score
+            hash_to_chunk: Dict[str, Dict[str, Any]] = {}
+            duplicates_removed = 0
+            
+            for entity_name, chunk in raw_chunks:
+                text = chunk.get("text", "")
+                content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+                ent_score = entity_scores.get(entity_name, 0.0)
+                
+                if content_hash not in seen_hashes:
+                    seen_hashes[content_hash] = ent_score
+                    # Stamp the chunk with its best entity score for downstream ranking
+                    chunk["_entity_score"] = ent_score
+                    chunk["_source_entity"] = entity_name
+                    hash_to_chunk[content_hash] = chunk
+                else:
+                    duplicates_removed += 1
+                    # If this entity has a higher score, upgrade the chunk's score
+                    if ent_score > seen_hashes[content_hash]:
+                        seen_hashes[content_hash] = ent_score
+                        hash_to_chunk[content_hash]["_entity_score"] = ent_score
+                        hash_to_chunk[content_hash]["_source_entity"] = entity_name
+            
+            # Sort deduped chunks by entity score (highest first) for downstream ranking
+            chunks = sorted(
+                hash_to_chunk.values(),
+                key=lambda c: c.get("_entity_score", 0.0),
+                reverse=True,
+            )
             
             logger.info("text_chunks_retrieved", 
-                       num_chunks=len(chunks),
+                       num_chunks_raw=len(raw_chunks),
+                       num_chunks_deduped=len(chunks),
+                       duplicates_removed=duplicates_removed,
+                       dedup_ratio=f"{duplicates_removed / len(raw_chunks) * 100:.1f}%" if raw_chunks else "0%",
                        num_entities=len(selected_entities),
                        batched=hasattr(self.text_store, 'get_chunks_for_entities'))
 
@@ -793,19 +857,38 @@ Response:"""
                     sample_entities=selected_entities[:5],
                     hint="Likely entity/chunk label or MENTIONS direction mismatch, or chunks not linked to entities for this group_id",
                 )
-            return chunks
+            return chunks, entity_scores
             
         except Exception as e:
             logger.error("text_chunk_retrieval_failed", error=str(e))
-            return []
+            return [], entity_scores
     
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """Fast token estimate: ~4 chars per token (GPT-family heuristic)."""
+        return len(text) // 4 + 1
+
+    def _get_token_budget(self) -> int:
+        """Return the configured token budget (env override or default)."""
+        env_val = os.environ.get("SYNTHESIS_TOKEN_BUDGET", "")
+        if env_val.isdigit():
+            return int(env_val)
+        return self.DEFAULT_TOKEN_BUDGET
+
     def _build_cited_context(
         self, 
         text_chunks: List[Dict[str, Any]],
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        entity_scores: Optional[Dict[str, float]] = None,
     ) -> Tuple[str, Dict[str, Dict[str, str]], Dict[str, Dict[str, Any]]]:
         """
         Build a context string with citation markers, grouped by document.
+        
+        De-noising (February 9, 2026):
+        - Chunks arrive **pre-sorted by PPR entity score** (from _retrieve_text_chunks).
+        - A configurable **token budget** (default 32K) caps context size.
+          Chunks beyond the budget are dropped (lowest-scored first since list is
+          score-sorted).
         
         Grouping by document enables the LLM to reason about:
         - Which document a fact comes from
@@ -813,7 +896,7 @@ Response:"""
         - Document-level properties (dates, totals)
         
         Returns:
-            Tuple of (context_string, citation_map)
+            Tuple of (context_string, citation_map, sentence_citation_map)
         """
         citation_map: Dict[str, Dict[str, str]] = {}
         sentence_citation_map: Dict[str, Dict[str, Any]] = {}
@@ -902,18 +985,56 @@ Response:"""
                 doc_key = _normalize_doc_key(raw_doc_key)
             doc_groups[doc_key].append((i, chunk))
         
+        # --- Token budget enforcement (February 9, 2026) ---
+        # Chunks arrive pre-sorted by PPR entity score (highest first from
+        # _retrieve_text_chunks).  We accumulate tokens and drop chunks that
+        # would exceed the budget.  Dropped chunks are the lowest-scored.
+        token_budget = self._get_token_budget()
+        tokens_used = 0
+        budgeted_chunks: List[Tuple[int, Dict[str, Any]]] = []
+        chunks_dropped = 0
+        
+        # Flatten doc_groups back into score-sorted order for budget enforcement
+        all_indexed_chunks = sorted(
+            [(i, chunk) for group in doc_groups.values() for i, chunk in group],
+            key=lambda ic: ic[1].get("_entity_score", 0.0),
+            reverse=True,
+        )
+        
+        for idx, chunk in all_indexed_chunks:
+            chunk_tokens = self._estimate_tokens(chunk.get("text", ""))
+            if tokens_used + chunk_tokens > token_budget and budgeted_chunks:
+                chunks_dropped += 1
+                continue
+            tokens_used += chunk_tokens
+            budgeted_chunks.append((idx, chunk))
+        
+        # Re-group by document after budget enforcement
+        doc_groups_budgeted: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
+        for i, chunk in budgeted_chunks:
+            meta = chunk.get("metadata", {})
+            doc_key = meta.get("document_id")
+            if not doc_key:
+                raw_doc_key = meta.get("document_title") or chunk.get("source", "Unknown")
+                doc_key = _normalize_doc_key(raw_doc_key)
+            doc_groups_budgeted[doc_key].append((i, chunk))
+        
         # Log document grouping for debugging
         logger.info(
             "build_cited_context_grouping",
-            num_chunks=len(text_chunks),
-            num_doc_groups=len(doc_groups),
-            doc_keys=list(doc_groups.keys())[:10],  # Log first 10 doc keys
+            num_chunks_input=len(text_chunks),
+            num_chunks_budgeted=len(budgeted_chunks),
+            chunks_dropped_by_budget=chunks_dropped,
+            tokens_used=tokens_used,
+            token_budget=token_budget,
+            num_doc_groups=len(doc_groups_budgeted),
+            doc_keys=list(doc_groups_budgeted.keys())[:10],
         )
         
         context_parts = []
         
         # Build context with document headers
-        for doc_key, chunks_with_idx in doc_groups.items():
+        for doc_key, chunks_with_idx in doc_groups_budgeted.items():
             # Extract document metadata from first chunk
             first_chunk = chunks_with_idx[0][1]
             meta = first_chunk.get("metadata", {})

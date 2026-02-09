@@ -846,6 +846,7 @@ Response:"""
             # copy associated with the highest-scored entity (best PPR rank).
             seen_hashes: Dict[str, float] = {}  # content_hash → best entity score
             hash_to_chunk: Dict[str, Dict[str, Any]] = {}
+            all_chunks_no_dedup: List[Dict[str, Any]] = []  # used when dedup disabled
             duplicates_removed = 0
             
             for entity_name, chunk in raw_chunks:
@@ -853,11 +854,15 @@ Response:"""
                 content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
                 ent_score = entity_scores.get(entity_name, 0.0)
                 
-                if content_hash not in seen_hashes or not dedup_enabled:
+                # Stamp every chunk with its entity score for downstream ranking
+                chunk["_entity_score"] = ent_score
+                chunk["_source_entity"] = entity_name
+                
+                if not dedup_enabled:
+                    # Ablation: keep ALL chunks including duplicates
+                    all_chunks_no_dedup.append(chunk)
+                elif content_hash not in seen_hashes:
                     seen_hashes[content_hash] = ent_score
-                    # Stamp the chunk with its best entity score for downstream ranking
-                    chunk["_entity_score"] = ent_score
-                    chunk["_source_entity"] = entity_name
                     hash_to_chunk[content_hash] = chunk
                 else:
                     duplicates_removed += 1
@@ -868,7 +873,7 @@ Response:"""
                         hash_to_chunk[content_hash]["_source_entity"] = entity_name
             
             # Sort deduped chunks by entity score (highest first) for downstream ranking
-            deduped_chunks = list(hash_to_chunk.values())
+            deduped_chunks = all_chunks_no_dedup if not dedup_enabled else list(hash_to_chunk.values())
             
             # --- Noise filtering (February 9, 2026) ---
             # Ablation toggle: set DENOISE_DISABLE_NOISE=1 to skip noise filters

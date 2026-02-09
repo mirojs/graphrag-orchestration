@@ -558,6 +558,219 @@ def benchmark_scenario(
     }
 
 
+def _extract_model_stats(model_result: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract summary stats from a single model's benchmark result."""
+    questions = model_result.get("questions", [])
+    positive_qs = [q for q in questions if q["qid"].startswith("Q-L")]
+    negative_qs = [q for q in questions if q["qid"].startswith("Q-N")]
+
+    # Positive accuracy
+    pos_pass = sum(
+        1 for q in positive_qs
+        if q.get("accuracy", {}).get("containment", 0) >= 0.5
+    )
+    # Negative accuracy
+    neg_pass = sum(
+        1 for q in negative_qs
+        if q.get("accuracy", {}).get("negative_test_pass", False)
+    )
+    # Latencies
+    latencies = []
+    char_lengths = []
+    word_lengths = []
+    f1_scores = []
+    containments = []
+    for q in questions:
+        runs = q.get("runs", [])
+        for r in runs:
+            latencies.append(r.get("elapsed_ms", 0))
+            txt = r.get("text", "")
+            char_lengths.append(len(txt))
+            word_lengths.append(len(txt.split()) if txt else 0)
+        acc = q.get("accuracy", {})
+        if "f1_score" in acc and acc.get("f1_score") is not None:
+            f1_scores.append(acc["f1_score"])
+        if "containment" in acc and acc.get("containment") is not None:
+            containments.append(acc["containment"])
+
+    avg_latency = int(sum(latencies) / len(latencies)) if latencies else 0
+    avg_chars = int(sum(char_lengths) / len(char_lengths)) if char_lengths else 0
+    avg_words = int(sum(word_lengths) / len(word_lengths)) if word_lengths else 0
+    avg_f1 = round(sum(f1_scores) / len(f1_scores), 3) if f1_scores else 0
+    avg_containment = round(sum(containments) / len(containments), 3) if containments else 0
+
+    return {
+        "positive_pass": pos_pass,
+        "positive_total": len(positive_qs),
+        "negative_pass": neg_pass,
+        "negative_total": len(negative_qs),
+        "avg_latency_ms": avg_latency,
+        "avg_chars": avg_chars,
+        "avg_words": avg_words,
+        "avg_f1": avg_f1,
+        "avg_containment": avg_containment,
+        "per_question": {
+            q["qid"]: {
+                "latency_ms": q.get("runs", [{}])[0].get("elapsed_ms", 0) if q.get("runs") else 0,
+                "chars": len(q.get("runs", [{}])[0].get("text", "")) if q.get("runs") else 0,
+                "words": len(q.get("runs", [{}])[0].get("text", "").split()) if q.get("runs") and q.get("runs", [{}])[0].get("text") else 0,
+                "containment": q.get("accuracy", {}).get("containment"),
+                "f1": q.get("accuracy", {}).get("f1_score"),
+                "neg_pass": q.get("accuracy", {}).get("negative_test_pass"),
+            }
+            for q in questions
+        },
+    }
+
+
+def _print_model_comparison(
+    all_model_results: Dict[str, Dict[str, Any]],
+    models: List[str],
+) -> None:
+    """Print a comparison table to console."""
+    stats = {m: _extract_model_stats(all_model_results[m]) for m in models}
+
+    print(f"\n{'=' * 90}")
+    print("ROUTE 2 SYNTHESIS MODEL COMPARISON RESULTS")
+    print(f"{'=' * 90}")
+
+    # Summary table
+    print(f"\n{'Model':20s} {'Avg ms':>8s} {'Avg chars':>10s} {'Avg words':>10s} {'Pos Pass':>10s} {'Neg Pass':>10s} {'Avg F1':>8s} {'Contain':>8s}")
+    print("-" * 100)
+    for m in models:
+        s = stats[m]
+        print(
+            f"{m:20s} {s['avg_latency_ms']:>7d}ms {s['avg_chars']:>9d} {s['avg_words']:>9d} "
+            f"{s['positive_pass']}/{s['positive_total']:>8} "
+            f"{s['negative_pass']}/{s['negative_total']:>8} "
+            f"{s['avg_f1']:>7.3f} {s['avg_containment']:>7.3f}"
+        )
+    print(f"{'=' * 100}")
+
+    # Per-question comparison (positive only)
+    all_qids = []
+    for m in models:
+        for qid in stats[m]["per_question"]:
+            if qid.startswith("Q-L") and qid not in all_qids:
+                all_qids.append(qid)
+    all_qids.sort(key=lambda x: int(re.search(r'\d+', x).group()) if re.search(r'\d+', x) else 0)
+
+    print(f"\nPer-Question Detail (positive tests):")
+    hdr = f"{'QID':8s}"
+    for m in models:
+        short = m.replace('gpt-', '')
+        hdr += f" | {short:>18s}"
+    print(hdr)
+    print("-" * len(hdr))
+
+    for qid in all_qids:
+        row = f"{qid:8s}"
+        for m in models:
+            pq = stats[m]["per_question"].get(qid, {})
+            ms = pq.get("latency_ms", 0)
+            ch = pq.get("chars", 0)
+            wc = pq.get("words", 0)
+            f1 = pq.get("f1", 0) or 0
+            row += f" | {ms:5d}ms {wc:4d}w {ch:4d}c f1={f1:.2f}"
+        print(row)
+
+    # Per-question comparison (negative tests)
+    neg_qids = []
+    for m in models:
+        for qid in stats[m]["per_question"]:
+            if qid.startswith("Q-N") and qid not in neg_qids:
+                neg_qids.append(qid)
+    neg_qids.sort(key=lambda x: int(re.search(r'\d+', x).group()) if re.search(r'\d+', x) else 0)
+
+    if neg_qids:
+        print(f"\nNegative Tests:")
+        hdr = f"{'QID':8s}"
+        for m in models:
+            short = m.replace('gpt-', '')
+            hdr += f" | {short:>10s}"
+        print(hdr)
+        print("-" * len(hdr))
+        for qid in neg_qids:
+            row = f"{qid:8s}"
+            for m in models:
+                pq = stats[m]["per_question"].get(qid, {})
+                passed = pq.get("neg_pass", False)
+                row += f" | {'PASS':>10s}" if passed else f" | {'FAIL':>10s}"
+            print(row)
+    print()
+
+
+def _write_model_comparison_md(
+    out_md: Path,
+    timestamp: str,
+    api_base_url: str,
+    group_id: str,
+    models: List[str],
+    repeats: int,
+    all_model_results: Dict[str, Dict[str, Any]],
+) -> None:
+    """Write model comparison markdown."""
+    stats = {m: _extract_model_stats(all_model_results[m]) for m in models}
+
+    with out_md.open("w", encoding="utf-8") as f:
+        f.write(f"# Route 2 Synthesis Model Comparison — {timestamp}\n\n")
+        f.write(f"- **Endpoint:** `{api_base_url}`\n")
+        f.write(f"- **Group ID:** `{group_id}`\n")
+        f.write(f"- **Models:** {', '.join(models)}\n")
+        f.write(f"- **Repeats:** {repeats}\n\n")
+
+        # Summary table
+        f.write("## Summary\n\n")
+        f.write("| Model | Avg Latency | Avg Chars | Avg Words | Positive Pass | Negative Pass | Avg F1 | Avg Containment |\n")
+        f.write("|-------|------------|-----------|-----------|--------------|--------------|--------|----------------|\n")
+        for m in models:
+            s = stats[m]
+            f.write(
+                f"| {m} | {s['avg_latency_ms']}ms | {s['avg_chars']} | {s['avg_words']} | "
+                f"{s['positive_pass']}/{s['positive_total']} | "
+                f"{s['negative_pass']}/{s['negative_total']} | "
+                f"{s['avg_f1']:.3f} | {s['avg_containment']:.3f} |\n"
+            )
+
+        # Per-question positive
+        all_qids = sorted(
+            {qid for m in models for qid in stats[m]["per_question"] if qid.startswith("Q-L")},
+            key=lambda x: int(re.search(r'\d+', x).group()) if re.search(r'\d+', x) else 0,
+        )
+        f.write("\n## Per-Question Detail (Positive Tests)\n\n")
+        f.write("| QID |" + " | ".join(f"{m} (ms / words / chars / F1)" for m in models) + " |\n")
+        f.write("|-----|" + "|".join(["---" for _ in models]) + "|\n")
+        for qid in all_qids:
+            cells = []
+            for m in models:
+                pq = stats[m]["per_question"].get(qid, {})
+                ms = pq.get("latency_ms", 0)
+                ch = pq.get("chars", 0)
+                wc = pq.get("words", 0)
+                f1 = pq.get("f1", 0) or 0
+                cells.append(f"{ms}ms / {wc}w / {ch}c / {f1:.2f}")
+            f.write(f"| {qid} | " + " | ".join(cells) + " |\n")
+
+        # Negative tests
+        neg_qids = sorted(
+            {qid for m in models for qid in stats[m]["per_question"] if qid.startswith("Q-N")},
+            key=lambda x: int(re.search(r'\d+', x).group()) if re.search(r'\d+', x) else 0,
+        )
+        if neg_qids:
+            f.write("\n## Negative Tests\n\n")
+            f.write("| QID |" + " | ".join(models) + " |\n")
+            f.write("|-----|" + "|".join(["---" for _ in models]) + "|\n")
+            for qid in neg_qids:
+                cells = []
+                for m in models:
+                    pq = stats[m]["per_question"].get(qid, {})
+                    passed = pq.get("neg_pass", False)
+                    cells.append("✅ PASS" if passed else "❌ FAIL")
+                f.write(f"| {qid} | " + " | ".join(cells) + " |\n")
+
+        f.write("\n---\n")
+
+
 def _write_analysis_md(
     out_md: Path,
     timestamp: str,
@@ -683,6 +896,12 @@ def main():
         default=None,
         help="Override synthesis LLM deployment name (e.g. gpt-4.1-mini, gpt-5.1)",
     )
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        help="Run comparison across multiple synthesis models (e.g. --models gpt-5.1 gpt-4.1 gpt-4.1-mini gpt-5.1-mini). Overrides --synthesis-model.",
+    )
 
     args = parser.parse_args()
     print(f"[DEBUG] Parsed arguments. URL: {args.url}")
@@ -713,6 +932,78 @@ def main():
 
     timestamp = _now_utc_stamp()
 
+    # Multi-model comparison mode
+    models_to_test = getattr(args, 'models', None)
+    if models_to_test:
+        print(f"\n{'=' * 70}")
+        print(f"ROUTE 2 SYNTHESIS MODEL COMPARISON")
+        print(f"Models: {', '.join(models_to_test)}")
+        print(f"{'=' * 70}")
+
+        all_model_results: Dict[str, Dict[str, Any]] = {}
+        out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        for model in models_to_test:
+            print(f"\n{'─' * 70}")
+            print(f"  MODEL: {model}")
+            print(f"{'─' * 70}")
+            result = benchmark_scenario(
+                api_base_url=args.url,
+                group_id=args.group_id,
+                questions=questions,
+                scenario_name=f"{scenario_name}_{model}",
+                response_type=response_type,
+                repeats=args.repeats,
+                timeout_s=args.timeout,
+                ground_truth=ground_truth,
+                synthesis_model=model,
+            )
+            all_model_results[model] = result
+
+        # Save combined JSON
+        out_json = out_dir / f"route2_synthesis_model_comparison_{timestamp}.json"
+        out_md = out_dir / f"route2_synthesis_model_comparison_{timestamp}.md"
+
+        with out_json.open("w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "timestamp": timestamp,
+                    "api_base_url": args.url,
+                    "group_id": args.group_id,
+                    "force_route": "local_search",
+                    "response_type": response_type,
+                    "models": models_to_test,
+                    "repeats": args.repeats,
+                    "model_results": {
+                        m: r for m, r in all_model_results.items()
+                    },
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+
+        # Print and write comparison
+        _print_model_comparison(all_model_results, models_to_test)
+        _write_model_comparison_md(
+            out_md=out_md,
+            timestamp=timestamp,
+            api_base_url=args.url,
+            group_id=args.group_id,
+            models=models_to_test,
+            repeats=args.repeats,
+            all_model_results=all_model_results,
+        )
+
+        print(f"\n{'=' * 70}")
+        print(f"✅ Model comparison complete!")
+        print(f"   JSON: {out_json}")
+        print(f"   MD:   {out_md}")
+        print(f"{'=' * 70}\n")
+        return
+
+    # Single model mode (original behavior)
     synthesis_model = getattr(args, 'synthesis_model', None)
     if synthesis_model:
         print(f"  Synthesis model override: {synthesis_model}")

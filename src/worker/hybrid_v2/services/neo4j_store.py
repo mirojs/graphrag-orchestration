@@ -929,6 +929,24 @@ class Neo4jStoreV3:
             
             return cast(str, record["id"]) if record else community.id
     
+    def update_community_summary(self, group_id: str, community_id: str, title: str, summary: str) -> None:
+        """Update Community node with LLM-generated title and summary."""
+        query = """
+        MATCH (c:Community {id: $community_id, group_id: $group_id})
+        SET c.title = $title, c.summary = $summary, c.updated_at = datetime()
+        """
+        with self.driver.session(database=self.database) as session:
+            session.run(query, community_id=community_id, group_id=group_id, title=title, summary=summary)
+
+    def update_community_embedding(self, group_id: str, community_id: str, embedding: List[float]) -> None:
+        """Store embedding vector on a Community node for semantic matching."""
+        query = """
+        MATCH (c:Community {id: $community_id, group_id: $group_id})
+        SET c.embedding = $embedding
+        """
+        with self.driver.session(database=self.database) as session:
+            session.run(query, community_id=community_id, group_id=group_id, embedding=embedding)
+
     def get_communities_by_level(self, group_id: str, level: int) -> List[Community]:
         """Get all communities at a specific level."""
         query = """

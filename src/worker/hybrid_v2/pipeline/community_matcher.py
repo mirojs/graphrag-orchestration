@@ -61,10 +61,22 @@ class CommunityMatcher:
                    has_neo4j_service=neo4j_service is not None)
     
     async def load_communities(self) -> bool:
-        """Load community data and embeddings."""
+        """Load community data and embeddings.
+
+        Priority order:
+        1. Neo4j Community nodes (materialized by Step 9 Louvain pipeline)
+        2. JSON file (legacy pre-computed communities)
+        """
         if self._loaded:
             return True
-        
+
+        # Try Neo4j first — materialized Louvain communities with embeddings
+        if self.neo4j_service:
+            neo4j_loaded = await self._load_from_neo4j()
+            if neo4j_loaded:
+                return True
+
+        # Fall back to JSON file
         if self.communities_path and self.communities_path.exists():
             try:
                 with open(self.communities_path) as f:
@@ -74,7 +86,7 @@ class CommunityMatcher:
                 self._community_embeddings = data.get("embeddings", {})
                 self._loaded = True
                 
-                logger.info("communities_loaded",
+                logger.info("communities_loaded_from_json",
                            num_communities=len(self._communities))
                 return True
                 
@@ -85,6 +97,71 @@ class CommunityMatcher:
         logger.warning("no_community_data_found",
                       path=str(self.communities_path))
         return False
+
+    async def _load_from_neo4j(self) -> bool:
+        """Load materialized Louvain communities from Neo4j.
+
+        Reads Community nodes created by the indexing pipeline Step 9.
+        Communities have title, summary, and (optionally) embedding vectors.
+
+        Returns:
+            True if communities were loaded successfully (at least 1 found).
+        """
+        try:
+            query = """
+            MATCH (c:Community {group_id: $group_id})
+            WHERE c.title IS NOT NULL AND c.title <> ''
+            OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity)
+            WITH c, collect(e.name) AS entity_names
+            RETURN c.id AS id,
+                   c.title AS title,
+                   coalesce(c.summary, '') AS summary,
+                   coalesce(c.rank, 0.0) AS rank,
+                   coalesce(c.level, 0) AS level,
+                   c.embedding AS embedding,
+                   entity_names
+            ORDER BY c.rank DESC
+            """
+            with self.neo4j_service.driver.session(
+                database=self.neo4j_service.database
+            ) as session:
+                result = session.run(query, group_id=self.group_id)
+                records = list(result)
+
+            if not records:
+                logger.info("no_neo4j_communities_found", group_id=self.group_id)
+                return False
+
+            communities = []
+            embeddings = {}
+            for rec in records:
+                community = {
+                    "id": rec["id"],
+                    "title": rec["title"],
+                    "summary": rec["summary"],
+                    "rank": rec["rank"],
+                    "level": rec["level"],
+                    "entity_names": rec["entity_names"],
+                }
+                communities.append(community)
+                if rec["embedding"]:
+                    embeddings[rec["id"]] = list(rec["embedding"])
+
+            self._communities = communities
+            self._community_embeddings = embeddings
+            self._loaded = True
+
+            logger.info(
+                "communities_loaded_from_neo4j",
+                num_communities=len(communities),
+                num_with_embeddings=len(embeddings),
+                group_id=self.group_id,
+            )
+            return True
+
+        except Exception as e:
+            logger.warning("neo4j_community_load_failed", error=str(e))
+            return False
     
     async def match_communities(
         self,

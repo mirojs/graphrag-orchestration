@@ -17,6 +17,7 @@ Design goals:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -380,6 +381,29 @@ class LazyGraphRAGIndexingPipeline:
             stats["gds_entity_edges"] = 0
             stats["gds_communities"] = 0
             stats["gds_pagerank_nodes"] = 0
+
+        # ── Step 9: Materialize Louvain communities with LLM summaries ──
+        if stats.get("gds_communities", 0) > 0:
+            try:
+                logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
+                community_stats = await self._materialize_louvain_communities(
+                    group_id=group_id,
+                    min_community_size=3,
+                )
+                stats["communities_created"] = community_stats.get("communities_created", 0)
+                stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
+                stats["embeddings_stored"] = community_stats.get("embeddings_stored", 0)
+                logger.info(
+                    "✅ Step 9 complete: %d communities, %d summaries, %d embeddings",
+                    stats["communities_created"],
+                    stats["summaries_generated"],
+                    stats["embeddings_stored"],
+                )
+            except Exception as e:
+                logger.warning(f"⚠️  Community materialization failed: {e}")
+                stats["communities_created"] = 0
+                stats["summaries_generated"] = 0
+                stats["embeddings_stored"] = 0
         
         stats["elapsed_s"] = round(time.time() - start_time, 2)
         return stats
@@ -1904,6 +1928,208 @@ Output:
             # Don't raise - allow indexing to continue without GDS
         
         return stats
+
+    # ==================== Step 9: Louvain Community Materialization ====================
+
+    async def _materialize_louvain_communities(
+        self,
+        *,
+        group_id: str,
+        min_community_size: int = 3,
+    ) -> Dict[str, int]:
+        """Materialize GDS Louvain clusters into Community nodes with LLM summaries.
+
+        Bridges GDS Louvain (structural clustering) with LazyGraphRAG (semantic
+        summarization):
+        1. Read community_id assignments from Step 8 (already on Entity nodes)
+        2. Create :Community nodes and :BELONGS_TO edges via neo4j_store
+        3. Generate LLM summary for each community from entity/relationship context
+        4. Embed summaries and store on Community nodes for semantic matching
+
+        Args:
+            group_id: Tenant group identifier
+            min_community_size: Skip communities with fewer than this many entities
+
+        Returns:
+            Stats dict with communities_created, summaries_generated, embeddings_stored
+        """
+        from src.worker.hybrid_v2.services.neo4j_store import Community
+
+        stats = {"communities_created": 0, "summaries_generated": 0, "embeddings_stored": 0}
+
+        # Guard: skip if LLM or embedder unavailable (both are Optional in pipeline)
+        if not self.llm or not self.embedder:
+            logger.warning(
+                "⏭️  Skipping community materialization: llm=%s, embedder=%s",
+                bool(self.llm), bool(self.embedder),
+            )
+            return stats
+
+        # 9a) Group entities by community_id
+        logger.info("📋 Step 9a: Grouping entities by Louvain community_id...")
+        community_query = """
+        MATCH (e:Entity {group_id: $group_id})
+        WHERE e.community_id IS NOT NULL
+        WITH e.community_id AS cid,
+             collect({
+                 name: e.name,
+                 id: e.id,
+                 description: coalesce(e.description, ''),
+                 degree: coalesce(e.degree, 0),
+                 pagerank: coalesce(e.pagerank, 0.0)
+             }) AS members
+        WHERE size(members) >= $min_size
+        RETURN cid, members
+        ORDER BY size(members) DESC
+        """
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(community_query, group_id=group_id, min_size=min_community_size)
+            community_groups = [(record["cid"], record["members"]) for record in result]
+
+        if not community_groups:
+            logger.info("⏭️  No Louvain communities with >= %d members found", min_community_size)
+            return stats
+
+        logger.info("📋 Found %d Louvain communities (>= %d members)", len(community_groups), min_community_size)
+
+        # 9b) Create Community nodes + BELONGS_TO edges
+        logger.info("🏗️ Step 9b: Creating Community nodes...")
+        for cid, members in community_groups:
+            avg_pagerank = sum(m["pagerank"] for m in members) / len(members)
+            community = Community(
+                id=f"louvain_{group_id}_{cid}",
+                level=0,
+                title="",
+                summary="",
+                rank=avg_pagerank,
+                entity_ids=[m["id"] for m in members],
+            )
+            self.neo4j_store.upsert_community(group_id, community)
+            stats["communities_created"] += 1
+
+        # 9c) Generate LLM summaries (bounded parallelism)
+        logger.info("📝 Step 9c: Generating LLM summaries for %d communities...", len(community_groups))
+        sem = asyncio.Semaphore(5)  # Bound parallel LLM calls to avoid 429s
+
+        async def _summarize_one(cid: int, members: List[Dict]) -> Optional[Tuple[str, str]]:
+            async with sem:
+                return await self._summarize_community(group_id, cid, members)
+
+        tasks = [_summarize_one(cid, members) for cid, members in community_groups]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        summaries_cache: Dict[str, Tuple[str, str]] = {}  # community_id -> (title, summary)
+        for (cid, _), result in zip(community_groups, results):
+            if isinstance(result, Exception):
+                logger.warning("⚠️  Community %d summarization failed: %s", cid, result)
+                continue
+            if result is None:
+                continue
+            title, summary = result
+            community_id = f"louvain_{group_id}_{cid}"
+            self.neo4j_store.update_community_summary(group_id, community_id, title, summary)
+            summaries_cache[community_id] = (title, summary)
+            stats["summaries_generated"] += 1
+
+        # 9d-9e) Embed summaries and store on Community nodes
+        if summaries_cache and self.embedder:
+            logger.info("🔢 Step 9d: Embedding %d community summaries...", len(summaries_cache))
+            community_ids_ordered = list(summaries_cache.keys())
+            summary_texts = [
+                f"{summaries_cache[cid][0]}. {summaries_cache[cid][1]}"
+                for cid in community_ids_ordered
+            ]
+            try:
+                embeddings = await self.embedder.aget_text_embedding_batch(summary_texts)
+                for community_id, embedding in zip(community_ids_ordered, embeddings):
+                    self.neo4j_store.update_community_embedding(group_id, community_id, embedding)
+                    stats["embeddings_stored"] += 1
+                logger.info("✅ Step 9e: Stored %d community embeddings", stats["embeddings_stored"])
+            except Exception as e:
+                logger.warning("⚠️  Community embedding failed: %s", e)
+
+        return stats
+
+    async def _summarize_community(
+        self,
+        group_id: str,
+        community_id: int,
+        members: List[Dict],
+    ) -> Optional[Tuple[str, str]]:
+        """Generate title + summary for one Louvain community via LLM.
+
+        Returns:
+            (title, summary) tuple or None on failure.
+        """
+        # Fetch intra-community relationships
+        rel_query = """
+        MATCH (e1:Entity {group_id: $group_id})-[r]->(e2:Entity {group_id: $group_id})
+        WHERE e1.community_id = $community_id
+          AND e2.community_id = $community_id
+          AND NOT type(r) IN ['MENTIONS', 'SEMANTICALLY_SIMILAR', 'BELONGS_TO', 'APPEARS_IN_SECTION', 'APPEARS_IN_DOCUMENT']
+        RETURN e1.name AS source, type(r) AS rel_type, e2.name AS target,
+               coalesce(r.description, '') AS description
+        LIMIT 50
+        """
+        relationships = []
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(rel_query, group_id=group_id, community_id=community_id)
+            relationships = [dict(record) for record in result]
+
+        # Build entity list (sorted by pagerank descending)
+        entity_lines = []
+        for m in sorted(members, key=lambda x: x["pagerank"], reverse=True)[:30]:
+            desc = f" — {m['description']}" if m["description"] else ""
+            entity_lines.append(f"- {m['name']}{desc}")
+
+        # Build relationship list
+        rel_lines = []
+        for r in relationships[:30]:
+            desc = f" ({r['description']})" if r.get("description") else ""
+            rel_lines.append(f"- {r['source']} → {r['rel_type']} → {r['target']}{desc}")
+
+        prompt = f"""You are analyzing a group of related entities from a knowledge graph of legal/business documents.
+
+ENTITIES IN THIS CLUSTER ({len(members)} entities):
+{chr(10).join(entity_lines)}
+
+RELATIONSHIPS BETWEEN THEM ({len(relationships)} relationships):
+{chr(10).join(rel_lines) if rel_lines else '(No explicit relationships extracted)'}
+
+Based on these entities and their relationships, provide:
+1. TITLE: A short descriptive title for this cluster (5-10 words)
+2. SUMMARY: A 2-3 sentence summary describing what this group of entities represents, what topics or themes it covers, and what types of questions it could help answer. Be specific about the domain terms and party names.
+
+Format your response exactly as:
+TITLE: <title>
+SUMMARY: <summary>"""
+
+        try:
+            from llama_index.core.llms import ChatMessage
+            response = await self.llm.achat([ChatMessage(role="user", content=prompt)])
+            text = response.message.content.strip()
+            return self._parse_community_summary(text)
+        except Exception as e:
+            logger.warning("⚠️  LLM summarization failed for community %d: %s", community_id, e)
+            return None
+
+    @staticmethod
+    def _parse_community_summary(text: str) -> Tuple[str, str]:
+        """Parse TITLE: / SUMMARY: from LLM response text."""
+        title = ""
+        summary = ""
+        for line in text.split("\n"):
+            line = line.strip()
+            if line.upper().startswith("TITLE:"):
+                title = line[6:].strip()
+            elif line.upper().startswith("SUMMARY:"):
+                summary = line[8:].strip()
+        # If parsing fails, use the whole text as summary
+        if not summary:
+            summary = text[:500]
+        if not title:
+            title = summary[:50] + ("..." if len(summary) > 50 else "")
+        return title, summary
 
     def _deduplicate_entities(
         self,

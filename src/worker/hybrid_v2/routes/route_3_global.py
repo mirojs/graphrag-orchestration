@@ -199,7 +199,8 @@ class GlobalSearchHandler(BaseRouteHandler):
         # Fast Mode: PPR is conditional - skip for simple thematic queries, keep for relationship queries
         env_disable_ppr = os.getenv("ROUTE3_DISABLE_PPR", "0").strip().lower() in {"1", "true", "yes"}
         # PPR scoring mode: always run PPR so scores can be used for chunk ranking
-        ppr_scoring_mode = os.getenv("ROUTE3_DENOISE_PPR_SCORING", "0").strip().lower() in {"1", "true", "yes"}
+        # Default ON — matches synthesis.py D3 default.
+        ppr_scoring_mode = os.getenv("ROUTE3_DENOISE_PPR_SCORING", "1").strip().lower() in {"1", "true", "yes"}
         
         # In fast mode, only enable PPR if query has relationship indicators
         # UNLESS ppr_scoring_mode is on — then always run PPR for denoising

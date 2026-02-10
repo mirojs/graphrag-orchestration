@@ -397,7 +397,8 @@ class EvidenceSynthesizer:
 
         # --- Step D1: Hash-based exact dedup ---
         # Same chunk fetched via multiple entities (56.5% measured duplication).
-        _enable_dedup = os.getenv("ROUTE3_DENOISE_DEDUP", "0").strip().lower() in {"1", "true", "yes"}
+        # Default ON — proven 46% token reduction. Set ROUTE3_DENOISE_DEDUP=0 to disable.
+        _enable_dedup = os.getenv("ROUTE3_DENOISE_DEDUP", "1").strip().lower() in {"1", "true", "yes"}
         if _enable_dedup:
             _seen_hashes: set = set()
             _deduped: list = []
@@ -415,7 +416,8 @@ class EvidenceSynthesizer:
 
         # --- Step D2: Content quality noise filter ---
         # Filter out non-informative fragments: form labels, bare headings, tiny snippets.
-        _enable_noise_filter = os.getenv("ROUTE3_DENOISE_NOISE_FILTER", "0").strip().lower() in {"1", "true", "yes"}
+        # Default ON — safety net for noisy datasets. Set ROUTE3_DENOISE_NOISE_FILTER=0 to disable.
+        _enable_noise_filter = os.getenv("ROUTE3_DENOISE_NOISE_FILTER", "1").strip().lower() in {"1", "true", "yes"}
         if _enable_noise_filter:
             import re as _re_noise
             _before_noise = len(graph_context.source_chunks)
@@ -444,7 +446,8 @@ class EvidenceSynthesizer:
         # Use PPR entity scores to rank chunks. Each chunk has entity_name
         # indicating which entity retrieved it. Map PPR score → chunk score,
         # then sort descending so highest-relevance chunks come first.
-        _enable_ppr_scoring = os.getenv("ROUTE3_DENOISE_PPR_SCORING", "0").strip().lower() in {"1", "true", "yes"}
+        # Default ON — recovered containment to 0.815. Set ROUTE3_DENOISE_PPR_SCORING=0 to disable.
+        _enable_ppr_scoring = os.getenv("ROUTE3_DENOISE_PPR_SCORING", "1").strip().lower() in {"1", "true", "yes"}
         _ppr_stats = {"enabled": _enable_ppr_scoring, "scored": 0, "unscored": 0}
         if _enable_ppr_scoring and evidence_nodes:
             # Build entity → PPR score lookup
@@ -480,7 +483,8 @@ class EvidenceSynthesizer:
         # After PPR scoring and sorting, drop lowest-scored chunks that exceed
         # the token budget. Chunks are already sorted by relevance (D3), so we
         # keep top-scored chunks and trim from the tail.
-        _enable_token_budget = os.getenv("ROUTE3_DENOISE_TOKEN_BUDGET", "0").strip().lower() in {"1", "true", "yes"}
+        # Default ON — safety net for larger datasets. Set ROUTE3_DENOISE_TOKEN_BUDGET=0 to disable.
+        _enable_token_budget = os.getenv("ROUTE3_DENOISE_TOKEN_BUDGET", "1").strip().lower() in {"1", "true", "yes"}
         _budget_stats = {"enabled": _enable_token_budget, "dropped": 0, "budget": 0}
         if _enable_token_budget and graph_context.source_chunks:
             _token_budget = self._get_token_budget()

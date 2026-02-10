@@ -198,10 +198,13 @@ class GlobalSearchHandler(BaseRouteHandler):
         # Stage 3.4: HippoRAG PPR Tracing (DETAIL RECOVERY)
         # Fast Mode: PPR is conditional - skip for simple thematic queries, keep for relationship queries
         env_disable_ppr = os.getenv("ROUTE3_DISABLE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+        # PPR scoring mode: always run PPR so scores can be used for chunk ranking
+        ppr_scoring_mode = os.getenv("ROUTE3_DENOISE_PPR_SCORING", "0").strip().lower() in {"1", "true", "yes"}
         
         # In fast mode, only enable PPR if query has relationship indicators
+        # UNLESS ppr_scoring_mode is on — then always run PPR for denoising
         fast_mode_ppr_skip = False
-        if fast_mode and not env_disable_ppr:
+        if fast_mode and not env_disable_ppr and not ppr_scoring_mode:
             relationship_keywords = [
                 "connected", "through", "linked", "related to", 
                 "associated with", "path", "chain", "relationship",

@@ -187,7 +187,7 @@ class EvidenceSynthesizer:
             text_chunks = pre_fetched_chunks
             entity_scores: Dict[str, float] = {name: score for name, score in evidence_nodes}
         else:
-            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes)
+            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes, query=query)
         
         # Step 1.5: Merge coverage chunks if provided
         if coverage_chunks:
@@ -439,6 +439,42 @@ class EvidenceSynthesizer:
                        after=len(_filtered),
                        removed=_distill_stats["noise_filtered"])
 
+        # --- Step D3: PPR-based chunk scoring and re-ranking ---
+        # Use PPR entity scores to rank chunks. Each chunk has entity_name
+        # indicating which entity retrieved it. Map PPR score → chunk score,
+        # then sort descending so highest-relevance chunks come first.
+        _enable_ppr_scoring = os.getenv("ROUTE3_DENOISE_PPR_SCORING", "0").strip().lower() in {"1", "true", "yes"}
+        _ppr_stats = {"enabled": _enable_ppr_scoring, "scored": 0, "unscored": 0}
+        if _enable_ppr_scoring and evidence_nodes:
+            # Build entity → PPR score lookup
+            _entity_scores: Dict[str, float] = {}
+            for ent_name, ent_score in evidence_nodes:
+                _entity_scores[ent_name] = max(_entity_scores.get(ent_name, 0.0), ent_score)
+            
+            # Score each chunk via its entity_name
+            for chunk in graph_context.source_chunks:
+                ent = getattr(chunk, 'entity_name', '') or ''
+                # BM25/coverage-fill chunks use marker names; give them a baseline score
+                if ent in _entity_scores:
+                    chunk.relevance_score = _entity_scores[ent]
+                    _ppr_stats["scored"] += 1
+                else:
+                    # Non-entity chunks (bm25_phrase, coverage_fill, etc.)
+                    # Keep existing relevance_score (from RRF) or assign floor
+                    if chunk.relevance_score <= 0:
+                        chunk.relevance_score = 0.01  # floor so they sort last
+                    _ppr_stats["unscored"] += 1
+            
+            # Sort by PPR score descending
+            graph_context.source_chunks.sort(
+                key=lambda c: c.relevance_score, reverse=True
+            )
+            logger.info("route3_distill_ppr_scoring",
+                       total=len(graph_context.source_chunks),
+                       scored=_ppr_stats["scored"],
+                       unscored=_ppr_stats["unscored"],
+                       top_score=graph_context.source_chunks[0].relevance_score if graph_context.source_chunks else 0)
+
         # Step 1: Build citation context from source chunks (MENTIONS-derived)
         # Group chunks by document_id to ensure proper document attribution
         from collections import defaultdict
@@ -653,6 +689,7 @@ class EvidenceSynthesizer:
             "chunks_dropped": 0,
             "dedup_removed": _distill_stats["dedup_removed"],
             "noise_filtered": _distill_stats["noise_filtered"],
+            "ppr_scoring": _ppr_stats,
             "context_tokens": self._estimate_tokens(full_context),
             "context_chars": len(full_context),
             "final_context_chars": len(full_context),
@@ -826,6 +863,7 @@ Response:"""
     async def _retrieve_text_chunks(
         self, 
         evidence_nodes: List[Tuple[str, float]],
+        query: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         """Retrieve raw text chunks for the evidence nodes.
         
@@ -1034,6 +1072,68 @@ Response:"""
                     for chunk in entity_chunks[:budget]:
                         raw_chunks.append((entity_name, chunk))
             
+            # --- Vector chunk safety net (Improvement #5) ---
+            # After entity-based retrieval, optionally add top-k vector-similar
+            # chunks directly from the chunk embedding index.  This catches content
+            # that the NER → PPR path misses (e.g., vocabulary mismatch, entity not
+            # linked to the most relevant chunk).
+            # Toggle: DENOISE_VECTOR_FALLBACK=1 to enable.
+            vector_fallback_enabled = os.environ.get("DENOISE_VECTOR_FALLBACK", "") == "1"
+            vector_fallback_top_k = int(os.environ.get("VECTOR_FALLBACK_TOP_K", "3"))
+            vector_fallback_stats: Dict[str, Any] = {"enabled": vector_fallback_enabled}
+            
+            if vector_fallback_enabled and query and self.text_store and hasattr(self.text_store, 'search_chunks_by_vector'):
+                try:
+                    # Lazy import to avoid circular dependency
+                    from src.worker.hybrid_v2.orchestrator import get_query_embedding, get_vector_index_name
+                    
+                    query_embedding = get_query_embedding(query)
+                    index_name = get_vector_index_name()
+                    
+                    vector_results = await self.text_store.search_chunks_by_vector(
+                        query_embedding,
+                        top_k=vector_fallback_top_k,
+                        index_name=index_name,
+                    )
+                    
+                    # Collect IDs already in raw_chunks to count true additions
+                    existing_ids = {c.get("id") for _, c in raw_chunks if c.get("id")}
+                    vector_new = 0
+                    vector_duplicate = 0
+                    
+                    # Assign a low entity score so vector chunks rank below PPR-derived
+                    # ones but above zero.  Use min PPR score × 0.5 as a ceiling.
+                    min_ppr = min(entity_scores.values()) if entity_scores else 0.01
+                    fallback_score_cap = max(min_ppr * 0.5, 0.001)
+                    entity_scores["__vector_fallback__"] = fallback_score_cap
+                    
+                    for chunk_dict, sim_score in vector_results:
+                        chunk_id = chunk_dict.get("id", "")
+                        if chunk_id in existing_ids:
+                            vector_duplicate += 1
+                            continue
+                        # Scale similarity into entity-score space
+                        chunk_dict["_vector_similarity"] = sim_score
+                        raw_chunks.append(("__vector_fallback__", chunk_dict))
+                        existing_ids.add(chunk_id)
+                        vector_new += 1
+                    
+                    vector_fallback_stats.update({
+                        "index": index_name,
+                        "top_k": vector_fallback_top_k,
+                        "candidates": len(vector_results),
+                        "new_chunks_added": vector_new,
+                        "already_in_entity_pool": vector_duplicate,
+                        "fallback_score_cap": round(fallback_score_cap, 6),
+                    })
+                    if vector_new > 0:
+                        logger.info("vector_fallback_added_chunks",
+                                   new=vector_new, duplicate=vector_duplicate,
+                                   top_k=vector_fallback_top_k)
+                except Exception as exc:
+                    logger.warning("vector_fallback_failed", error=str(exc))
+                    vector_fallback_stats["error"] = str(exc)
+            
             # --- Content-hash dedup + cross-entity dedup ---
             # Ablation toggle: set DENOISE_DISABLE_DEDUP=1 to skip dedup (measure its contribution)
             dedup_enabled = os.environ.get("DENOISE_DISABLE_DEDUP", "") != "1"
@@ -1172,6 +1272,7 @@ Response:"""
                 "community_filter": community_stats,
                 "score_gap": score_gap_stats,
                 "semantic_dedup": semantic_dedup_stats,
+                "vector_fallback": vector_fallback_stats,
             }
             
             logger.info("text_chunks_retrieved", 

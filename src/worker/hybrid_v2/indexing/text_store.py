@@ -429,6 +429,124 @@ class Neo4jTextUnitStore:
         
         return results
 
+    # ------------------------------------------------------------------
+    # Improvement #5: Vector chunk safety net
+    # ------------------------------------------------------------------
+
+    async def search_chunks_by_vector(
+        self,
+        embedding: list,
+        *,
+        top_k: int = 3,
+        index_name: str = "chunk_embeddings_v2",
+    ) -> list:
+        """Vector-search text chunks as a safety-net for NER/PPR misses.
+
+        Uses the Neo4j vector index on TextChunk to find the top-k most
+        similar chunks regardless of entity linkage.  Returns dicts in the
+        same shape as ``get_chunks_for_entities`` so callers can merge them
+        directly into the raw_chunks pool.
+
+        Returns:
+            List of (chunk_dict, similarity_score) tuples.
+        """
+        if not embedding:
+            return []
+        return await asyncio.to_thread(
+            self._search_chunks_by_vector_sync, embedding, top_k, index_name,
+        )
+
+    def _search_chunks_by_vector_sync(
+        self,
+        embedding: list,
+        top_k: int,
+        index_name: str,
+    ) -> list:
+        # Over-fetch to compensate for the group_id filter (index has all groups).
+        fetch_k = top_k * 5
+
+        query = """
+        CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
+        YIELD node AS t, score
+        WHERE t.group_id = $group_id
+        WITH t, score
+        ORDER BY score DESC
+        LIMIT $top_k
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        RETURN t, d, score
+        """
+
+        results: list = []
+        try:
+            with self._driver.session() as session:
+                records = session.run(
+                    query,
+                    index_name=index_name,
+                    fetch_k=int(fetch_k),
+                    embedding=embedding,
+                    group_id=self._group_id,
+                    top_k=int(top_k),
+                )
+                for record in records:
+                    t = record["t"]
+                    d = record.get("d")
+                    sim = float(record.get("score", 0.0))
+                    if not t:
+                        continue
+
+                    raw_meta = t.get("metadata")
+                    meta: dict = {}
+                    if raw_meta:
+                        if isinstance(raw_meta, str):
+                            try:
+                                meta = json.loads(raw_meta)
+                            except Exception:
+                                meta = {}
+                        elif isinstance(raw_meta, dict):
+                            meta = dict(raw_meta)
+
+                    doc_title = (d.get("title") if d else "") or meta.get("document_title", "")
+                    doc_source = (d.get("source") if d else "") or meta.get("document_source", "")
+                    doc_id = (d.get("id") if d else "") or meta.get("document_id", "")
+
+                    section_path = meta.get("section_path")
+                    section_label = ""
+                    if isinstance(section_path, list) and section_path:
+                        section_label = " > ".join(str(x) for x in section_path if x)
+                    elif isinstance(section_path, str) and section_path:
+                        section_label = section_path
+
+                    source_label = doc_title or doc_source or "neo4j"
+                    if section_label:
+                        source_label = f"{source_label} — {section_label}"
+
+                    chunk_dict = {
+                        "id": str(t.get("id") or ""),
+                        "source": str(source_label),
+                        "text": str(t.get("text") or ""),
+                        "entity": "__vector_fallback__",
+                        "metadata": {
+                            **meta,
+                            "document_id": str(doc_id),
+                            "document_title": str(doc_title),
+                            "document_source": str(doc_source),
+                            "vector_similarity": sim,
+                        },
+                    }
+                    results.append((chunk_dict, sim))
+
+            logger.info(
+                "vector_safety_net_search",
+                group_id=self._group_id,
+                index=index_name,
+                top_k=top_k,
+                results=len(results),
+            )
+        except Exception as exc:
+            logger.warning("vector_safety_net_failed", error=str(exc))
+
+        return results
+
     async def get_all_chunks_for_comprehensive(self, *, limit: int = 50) -> List[Dict[str, Any]]:
         """Retrieve all text chunks for the group - used by comprehensive mode fallback.
         

@@ -562,6 +562,10 @@ def main() -> int:
             citations_sig = _extract_citation_ids(resp)
             evidence_path_sig = _extract_evidence_path(resp)
 
+            # Extract context stats from metadata for denoising measurement
+            _meta = resp.get("metadata", {}) if isinstance(resp, dict) else {}
+            _ctx_stats = _meta.get("context_stats", {})
+
             run_row = {
                 "run": ri,
                 "status": status,
@@ -571,10 +575,22 @@ def main() -> int:
                 "citations_sig": citations_sig,
                 "evidence_path_sig": evidence_path_sig,
                 "error": err,
+                # Route 3 context stats (denoising measurement)
+                "num_source_chunks": _meta.get("num_source_chunks"),
+                "text_chunks_used": _meta.get("text_chunks_used"),
+                "context_tokens": _ctx_stats.get("context_tokens"),
+                "context_chars": _ctx_stats.get("context_chars"),
+                "chunks_before_budget": _ctx_stats.get("chunks_before_budget"),
+                "chunks_after_budget": _ctx_stats.get("chunks_after_budget"),
+                "chunks_dropped": _ctx_stats.get("chunks_dropped"),
+                "dedup_removed": _ctx_stats.get("dedup_removed"),
+                "noise_filtered": _ctx_stats.get("noise_filtered"),
+                "token_budget": _ctx_stats.get("token_budget"),
+                "hub_entities": _meta.get("hub_entities"),
             }
             # Include LLM context when requested (for retrieval vs LLM debugging)
             if args.include_context and isinstance(resp, dict):
-                llm_ctx = (resp.get("metadata") or {}).get("llm_context")
+                llm_ctx = _meta.get("llm_context")
                 if llm_ctx:
                     run_row["llm_context"] = llm_ctx
             runs.append(run_row)
@@ -627,13 +643,33 @@ def main() -> int:
             total = theme_coverage_metrics.get("total_terms", 0)
             theme_str = f" | theme={cov:.0%} ({matched}/{total})"
         
+        # Context stats for denoising measurement
+        ctx_str = ""
+        if runs:
+            r0 = runs[0]
+            _chunks = r0.get("num_source_chunks")
+            _tok = r0.get("context_tokens")
+            _dedup = r0.get("dedup_removed")
+            _noise = r0.get("noise_filtered")
+            parts = []
+            if _chunks is not None:
+                parts.append(f"chunks={_chunks}")
+            if _tok is not None:
+                parts.append(f"tok={_tok}")
+            if _dedup:
+                parts.append(f"dedup-{_dedup}")
+            if _noise:
+                parts.append(f"noise-{_noise}")
+            if parts:
+                ctx_str = f" | {' '.join(parts)}"
+        
         print(
             f"[{scenario_name}] [{qi}/{len(questions)}] {q.qid}: "
             f"exact={summary['text_norm_exact_rate']:.2f} "
             f"min_sim={summary['text_norm_min_similarity']:.2f} "
             f"cite_jacc_min={summary['citations_min_jaccard_vs_first']:.2f} "
             f"path_jacc_min={summary['evidence_path_min_jaccard_vs_first']:.2f} "
-            f"p50={summary['latency_ms']['p50']}ms{acc_str}{theme_str}",
+            f"p50={summary['latency_ms']['p50']}ms{acc_str}{theme_str}{ctx_str}",
             flush=True,
         )
 

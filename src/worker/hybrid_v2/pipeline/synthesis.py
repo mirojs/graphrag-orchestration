@@ -387,6 +387,31 @@ class EvidenceSynthesizer:
             result.setdefault("relationships_used", len(graph_context.relationships))
             return result
 
+        # ================================================================
+        # Route 3 Context Distillation (Phase 0)
+        # Each measure gated by env toggle for ablation testing.
+        # ================================================================
+        import hashlib as _hashlib
+        _distill_stats = {"dedup_removed": 0, "noise_filtered": 0}
+
+        # --- Step D1: Hash-based exact dedup ---
+        # Same chunk fetched via multiple entities (56.5% measured duplication).
+        _enable_dedup = os.getenv("ROUTE3_DENOISE_DEDUP", "0").strip().lower() in {"1", "true", "yes"}
+        if _enable_dedup:
+            _seen_hashes: set = set()
+            _deduped: list = []
+            for chunk in graph_context.source_chunks:
+                h = _hashlib.sha256((chunk.text or "").strip().encode()).hexdigest()
+                if h not in _seen_hashes:
+                    _seen_hashes.add(h)
+                    _deduped.append(chunk)
+            _distill_stats["dedup_removed"] = len(graph_context.source_chunks) - len(_deduped)
+            graph_context.source_chunks = _deduped
+            logger.info("route3_distill_dedup",
+                       before=_distill_stats["dedup_removed"] + len(_deduped),
+                       after=len(_deduped),
+                       removed=_distill_stats["dedup_removed"])
+
         # Step 1: Build citation context from source chunks (MENTIONS-derived)
         # Group chunks by document_id to ensure proper document attribution
         from collections import defaultdict
@@ -596,9 +621,11 @@ class EvidenceSynthesizer:
                    final_context_tokens=self._estimate_tokens(full_context))
         
         context_stats = {
-            "chunks_before_budget": len(graph_context.source_chunks),
+            "chunks_before_budget": len(graph_context.source_chunks) + _distill_stats["dedup_removed"] + _distill_stats["noise_filtered"],
             "chunks_after_budget": len(graph_context.source_chunks),
             "chunks_dropped": 0,
+            "dedup_removed": _distill_stats["dedup_removed"],
+            "noise_filtered": _distill_stats["noise_filtered"],
             "context_tokens": self._estimate_tokens(full_context),
             "context_chars": len(full_context),
             "final_context_chars": len(full_context),

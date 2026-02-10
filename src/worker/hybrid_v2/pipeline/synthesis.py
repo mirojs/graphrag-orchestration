@@ -699,7 +699,7 @@ class EvidenceSynthesizer:
             hub_entities=graph_context.hub_entities,
             response_type=response_type,
             has_sentence_citations=bool(sentence_citation_map),
-            has_community_context=_community_prompt_used,
+            has_community_context=False,
         )
         
         # Step 6: Extract citations from response
@@ -732,7 +732,7 @@ class EvidenceSynthesizer:
             "final_context_tokens": self._estimate_tokens(full_context),
             "token_budget": self._get_token_budget(),
             "num_doc_groups": len(doc_groups),
-            "community_prompt": _community_prompt_used,
+            "community_prompt": False,
         }
 
         return {

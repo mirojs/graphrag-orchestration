@@ -824,19 +824,47 @@ Response:"""
         if len(selected_entities) == 0:
             return [], entity_scores, {"chunks_raw": 0, "entities_selected": 0}
         
+        # --- Score-weighted chunk allocation (February 10, 2026) ---
+        # Instead of giving every entity uniform limit_per_entity=12, allocate
+        # proportional to PPR score.  Top entity gets full limit; noise entities get fewer.
+        # Toggle: set DENOISE_SCORE_WEIGHTED=1 to enable (off by default for safe rollout).
+        score_weighted_enabled = os.environ.get("DENOISE_SCORE_WEIGHTED", "") == "1"
+        DEFAULT_LIMIT = 12  # matches text_store default limit_per_entity
+
+        entity_budgets: Dict[str, int] = {}
+        if score_weighted_enabled and selected_entities:
+            scores_list = [entity_scores.get(e, 0.0) for e in selected_entities]
+            max_score = max(scores_list) if scores_list else 0.0
+            if max_score > 0:
+                for ent in selected_entities:
+                    ratio = entity_scores.get(ent, 0.0) / max_score
+                    entity_budgets[ent] = max(1, round(ratio * DEFAULT_LIMIT))
+            else:
+                # All scores zero/equal — fall back to uniform
+                entity_budgets = {e: DEFAULT_LIMIT for e in selected_entities}
+            logger.info(
+                "score_weighted_budgets",
+                budgets={e: entity_budgets[e] for e in selected_entities[:10]},
+                max_score=max_score,
+            )
+        else:
+            entity_budgets = {e: DEFAULT_LIMIT for e in selected_entities}
+
         try:
             # Batch query: fetch all entities in one round-trip (major performance gain)
             raw_chunks: List[Tuple[str, Dict[str, Any]]] = []  # (entity_name, chunk)
             if hasattr(self.text_store, 'get_chunks_for_entities'):
                 entity_chunks_map = await self.text_store.get_chunks_for_entities(selected_entities)
                 for entity_name in selected_entities:
-                    for chunk in entity_chunks_map.get(entity_name, []):
+                    budget = entity_budgets.get(entity_name, DEFAULT_LIMIT)
+                    for chunk in entity_chunks_map.get(entity_name, [])[:budget]:
                         raw_chunks.append((entity_name, chunk))
             else:
                 # Fallback to sequential queries (for HippoRAGTextUnitStore or old implementations)
                 for entity_name in selected_entities:
                     entity_chunks = await self.text_store.get_chunks_for_entity(entity_name)
-                    for chunk in entity_chunks:
+                    budget = entity_budgets.get(entity_name, DEFAULT_LIMIT)
+                    for chunk in entity_chunks[:budget]:
                         raw_chunks.append((entity_name, chunk))
             
             # --- Content-hash dedup + cross-entity dedup ---
@@ -903,6 +931,8 @@ Response:"""
                 "entities_selected": len(selected_entities),
                 "dedup_enabled": dedup_enabled,
                 "noise_enabled": noise_enabled,
+                "score_weighted_enabled": score_weighted_enabled,
+                "entity_budgets": {e: entity_budgets.get(e, DEFAULT_LIMIT) for e in selected_entities[:10]} if score_weighted_enabled else None,
             }
             
             logger.info("text_chunks_retrieved", 

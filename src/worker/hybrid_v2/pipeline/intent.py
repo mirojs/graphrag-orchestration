@@ -78,14 +78,13 @@ class IntentDisambiguator:
         self.llm = llm_client
         self.communities = graph_communities or []
     
-    async def disambiguate(self, query: str, top_k: int = 3) -> List[str]:
+    async def disambiguate(self, query: str, top_k: int = 5) -> List[str]:
         """
         Given an ambiguous query, identify the top-k specific entities.
         
         Args:
             query: The user's natural language query.
-            top_k: Number of seed entities to return (default 3, reduced from 5
-                   to prevent synonym flooding — most effective extractions use 2-3).
+            top_k: Number of seed entities to return.
             
         Returns:
             List of entity names/IDs to use as seeds for HippoRAG.
@@ -97,29 +96,25 @@ class IntentDisambiguator:
         # Build context from community summaries
         community_context = self._build_community_context()
         
-        prompt = f"""You are an expert at identifying specific entities in a knowledge graph to answer user queries.
+        prompt = f"""You are an expert at identifying specific entities in a knowledge graph.
 
-Step 1 — Understand the intent: What specific information is the user seeking?
-Step 2 — Select entities: Pick the fewest entities needed to locate the answer in the graph.
+Given the following user query and the available entity communities in our graph,
+identify the top {top_k} specific entity names that this query is referring to.
 
 User Query: "{query}"
 
 Available Communities/Entities:
 {community_context}
 
-Rules:
-- Return the MINIMUM number of entities needed (1-{top_k}). Fewer is better.
-- Each entity must target a DIFFERENT concept. Do NOT include synonyms, paraphrases, or alternative phrasings of the same idea.
-  BAD:  "Initial Term", "Term Start Date", "Commencement Date" (3 ways to say "start date")
-  GOOD: "Initial Term" (one entity for that concept)
-- Prefer entity names that appear in the community titles/summaries above.
-- Include the document or agreement name ONLY if the query spans multiple documents and disambiguation is needed.
+Important:
 - Return specific entity-like strings (proper nouns, organizations, document titles, named clauses) likely to exist in the graph.
 - Do NOT return generic keywords (e.g., "licensed", "state", "jurisdiction", "payment", "instructions").
+- If you are unsure, return nothing.
 
 Return ONLY a markdown list of entity names, one per line. Example:
-- Agent fee
-- Short-term rentals
+- Contoso Ltd.
+- Purchase Contract
+- Warranty Agreement
 
 Do not include any explanation, just the list.
 """

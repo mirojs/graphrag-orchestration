@@ -412,6 +412,33 @@ class EvidenceSynthesizer:
                        after=len(_deduped),
                        removed=_distill_stats["dedup_removed"])
 
+        # --- Step D2: Content quality noise filter ---
+        # Filter out non-informative fragments: form labels, bare headings, tiny snippets.
+        _enable_noise_filter = os.getenv("ROUTE3_DENOISE_NOISE_FILTER", "0").strip().lower() in {"1", "true", "yes"}
+        if _enable_noise_filter:
+            import re as _re_noise
+            _before_noise = len(graph_context.source_chunks)
+            _filtered: list = []
+            for chunk in graph_context.source_chunks:
+                txt = (chunk.text or "").strip()
+                txt_len = len(txt)
+                # Rule 1: Form labels — short text ending with colon
+                if txt_len < 40 and txt.endswith(":"):
+                    continue
+                # Rule 2: Bare headings — short, no sentence punctuation
+                if txt_len < 50 and not _re_noise.search(r'[.?!]', txt):
+                    continue
+                # Rule 3: Tiny fragments — too short to be useful
+                if txt_len < 15:
+                    continue
+                _filtered.append(chunk)
+            _distill_stats["noise_filtered"] = _before_noise - len(_filtered)
+            graph_context.source_chunks = _filtered
+            logger.info("route3_distill_noise_filter",
+                       before=_before_noise,
+                       after=len(_filtered),
+                       removed=_distill_stats["noise_filtered"])
+
         # Step 1: Build citation context from source chunks (MENTIONS-derived)
         # Group chunks by document_id to ensure proper document attribution
         from collections import defaultdict

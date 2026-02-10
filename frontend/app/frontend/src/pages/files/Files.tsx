@@ -68,7 +68,11 @@ const Files = () => {
         try {
             setLoading(true);
             const token = await getToken(client);
-            if (!token) throw new Error("Not authenticated");
+            if (!token) {
+                // User hasn't signed in yet — nothing to load, not an error
+                setFiles([]);
+                return;
+            }
             const result = await listFilesApi(token);
             setFiles(result);
         } catch (err: any) {

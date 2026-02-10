@@ -139,6 +139,9 @@ const getAppServicesToken = (): Promise<AppServicesToken | null> => {
             }
 
             return null;
+        }).catch(() => {
+            // Silently ignore fetch errors (e.g. 401 when not behind App Service auth)
+            return null;
         });
     };
 
@@ -199,9 +202,24 @@ export const getToken = async (client: IPublicClientApplication): Promise<string
         return Promise.resolve(appServicesToken.access_token);
     }
 
+    // Ensure there is an active account before attempting silent token acquisition.
+    // If no active account is set, try to pick one from the MSAL cache.
+    let account = client.getActiveAccount();
+    if (!account) {
+        const accounts = client.getAllAccounts();
+        if (accounts.length > 0) {
+            client.setActiveAccount(accounts[0]);
+            account = accounts[0];
+        } else {
+            // No accounts available — user has not signed in yet
+            return undefined;
+        }
+    }
+
     return client
         .acquireTokenSilent({
             ...tokenRequest,
+            account,
             redirectUri: getRedirectUri()
         })
         .then(r => r.accessToken)

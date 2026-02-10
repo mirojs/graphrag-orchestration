@@ -1043,6 +1043,75 @@ Response:"""
             # Sort deduped chunks by entity score (highest first) for downstream ranking
             deduped_chunks = all_chunks_no_dedup if not dedup_enabled else list(hash_to_chunk.values())
             
+            # --- Semantic near-dedup (Improvement #4) ---
+            # After exact MD5 dedup, catch near-duplicate chunks that differ only in
+            # whitespace, punctuation, or minor OCR artefacts.  Uses word-level Jaccard
+            # similarity (no external API calls → zero added latency).
+            # Toggle: DENOISE_SEMANTIC_DEDUP=1 to enable.
+            semantic_dedup_enabled = os.environ.get("DENOISE_SEMANTIC_DEDUP", "") == "1"
+            semantic_dedup_threshold = float(os.environ.get("SEMANTIC_DEDUP_THRESHOLD", "0.85"))
+            semantic_dedup_stats: Dict[str, Any] = {"enabled": semantic_dedup_enabled}
+            
+            if semantic_dedup_enabled and len(deduped_chunks) > 1:
+                import re as _re
+                
+                def _normalize_words(text: str) -> set:
+                    """Extract word-level token set for Jaccard comparison."""
+                    # Lowercase, strip non-alphanumeric, split on whitespace
+                    words = _re.findall(r'[a-z0-9]+', text.lower())
+                    return set(words)
+                
+                # Pre-compute word sets for all chunks
+                chunk_word_sets = [_normalize_words(c.get("text", "")) for c in deduped_chunks]
+                
+                # Greedily cluster: iterate in score order (highest first), mark
+                # near-duplicates of already-kept chunks for removal.
+                # Sort by score first so we always keep the highest-scored version.
+                scored_indices = sorted(
+                    range(len(deduped_chunks)),
+                    key=lambda i: deduped_chunks[i].get("_entity_score", 0.0),
+                    reverse=True,
+                )
+                
+                kept_indices: List[int] = []
+                removed_by_semantic = 0
+                
+                for idx in scored_indices:
+                    words_idx = chunk_word_sets[idx]
+                    if not words_idx:
+                        kept_indices.append(idx)  # empty chunks pass through
+                        continue
+                    
+                    is_near_dup = False
+                    for kept_idx in kept_indices:
+                        words_kept = chunk_word_sets[kept_idx]
+                        if not words_kept:
+                            continue
+                        # Jaccard similarity
+                        intersection = len(words_idx & words_kept)
+                        union = len(words_idx | words_kept)
+                        if union > 0 and intersection / union >= semantic_dedup_threshold:
+                            is_near_dup = True
+                            removed_by_semantic += 1
+                            break
+                    
+                    if not is_near_dup:
+                        kept_indices.append(idx)
+                
+                deduped_chunks = [deduped_chunks[i] for i in sorted(kept_indices)]
+                semantic_dedup_stats.update({
+                    "chunks_before": len(chunk_word_sets),
+                    "chunks_after": len(deduped_chunks),
+                    "near_duplicates_removed": removed_by_semantic,
+                    "threshold": semantic_dedup_threshold,
+                })
+                if removed_by_semantic > 0:
+                    logger.info("semantic_near_dedup_applied",
+                               removed=removed_by_semantic,
+                               before=len(chunk_word_sets),
+                               after=len(deduped_chunks),
+                               threshold=semantic_dedup_threshold)
+            
             # --- Noise filtering (February 9, 2026) ---
             # Ablation toggle: set DENOISE_DISABLE_NOISE=1 to skip noise filters
             noise_enabled = os.environ.get("DENOISE_DISABLE_NOISE", "") != "1"
@@ -1075,6 +1144,7 @@ Response:"""
                 "entity_budgets": {e: entity_budgets.get(e, DEFAULT_LIMIT) for e in selected_entities[:10]} if score_weighted_enabled else None,
                 "community_filter": community_stats,
                 "score_gap": score_gap_stats,
+                "semantic_dedup": semantic_dedup_stats,
             }
             
             logger.info("text_chunks_retrieved", 

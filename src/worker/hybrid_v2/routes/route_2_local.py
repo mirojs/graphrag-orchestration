@@ -122,7 +122,7 @@ class LocalSearchHandler(BaseRouteHandler):
         if enable_sentence_citations:
             # Retrieve text chunks first to get document IDs
             # _retrieve_text_chunks returns (deduped_chunks, entity_scores, retrieval_stats) tuple after de-noising changes
-            pre_chunks, _entity_scores, _retrieval_stats = await self.synthesizer._retrieve_text_chunks(evidence_nodes)
+            pre_chunks, _entity_scores, _retrieval_stats = await self.synthesizer._retrieve_text_chunks(evidence_nodes, query=query)
             doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in pre_chunks} - {""})
             if doc_ids:
                 doc_language_spans = await self._fetch_language_spans(doc_ids)

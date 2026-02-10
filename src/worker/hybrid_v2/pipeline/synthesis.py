@@ -824,70 +824,6 @@ Response:"""
         if len(selected_entities) == 0:
             return [], entity_scores, {"chunks_raw": 0, "entities_selected": 0}
 
-        # --- PPR Score-Gap Pruning (February 10, 2026 — Improvement #2) ---
-        # PPR returns ~13 entities but often there's a natural score gap between
-        # high-relevance seeds/neighbors and noise entities that snuck through via
-        # long graph paths. This step detects the largest relative score drop and
-        # prunes entities below it.
-        # Toggle: set DENOISE_SCORE_GAP=1 to enable.
-        # SCORE_GAP_THRESHOLD: minimum relative drop (fraction) to trigger pruning.
-        # E.g. 0.5 means a 50%+ drop from entity[i] to entity[i+1] triggers pruning.
-        # SCORE_GAP_MIN_KEEP: minimum number of entities to keep (never prune below this).
-        score_gap_enabled = os.environ.get("DENOISE_SCORE_GAP", "") == "1"
-        score_gap_stats: Dict[str, Any] = {"enabled": score_gap_enabled}
-
-        if score_gap_enabled and len(selected_entities) > 2:
-            gap_threshold = float(os.environ.get("SCORE_GAP_THRESHOLD", "0.5"))
-            min_keep = int(os.environ.get("SCORE_GAP_MIN_KEEP", "3"))
-
-            # Sort entities by PPR score descending
-            sorted_by_score = sorted(
-                selected_entities,
-                key=lambda e: entity_scores.get(e, 0.0),
-                reverse=True,
-            )
-            scores_sorted = [entity_scores.get(e, 0.0) for e in sorted_by_score]
-
-            # Find the largest relative drop
-            best_gap_idx = None
-            best_gap_ratio = 0.0
-            for i in range(max(min_keep - 1, 0), len(scores_sorted) - 1):
-                if scores_sorted[i] > 0:
-                    relative_drop = 1.0 - (scores_sorted[i + 1] / scores_sorted[i])
-                    if relative_drop > gap_threshold and relative_drop > best_gap_ratio:
-                        best_gap_ratio = relative_drop
-                        best_gap_idx = i
-
-            original_count = len(selected_entities)
-            if best_gap_idx is not None:
-                # Keep entities up to and including the gap index
-                kept_entities = set(sorted_by_score[: best_gap_idx + 1])
-                selected_entities = [e for e in selected_entities if e in kept_entities]
-                score_gap_stats.update({
-                    "gap_found": True,
-                    "gap_index": best_gap_idx,
-                    "gap_ratio": round(best_gap_ratio, 3),
-                    "score_at_gap": round(scores_sorted[best_gap_idx], 6),
-                    "score_below_gap": round(scores_sorted[best_gap_idx + 1], 6),
-                    "entities_before": original_count,
-                    "entities_after": len(selected_entities),
-                    "entities_pruned": original_count - len(selected_entities),
-                })
-                logger.info(
-                    "score_gap_pruning",
-                    gap_idx=best_gap_idx,
-                    gap_ratio=round(best_gap_ratio, 3),
-                    before=original_count,
-                    after=len(selected_entities),
-                )
-            else:
-                score_gap_stats.update({
-                    "gap_found": False,
-                    "entities_before": original_count,
-                    "entities_after": original_count,
-                    "reason": f"no_drop_exceeds_{gap_threshold}",
-                })
-
         # --- Community-aware entity scoring (February 10, 2026 — Improvement #1.5) ---
         # PPR expands to entities across multiple Louvain communities.  Entities outside
         # the seed community (the "target" cluster) are often noise.  This step looks up
@@ -937,6 +873,69 @@ Response:"""
             except Exception as e:
                 logger.warning("community_filter_failed error=%s", str(e))
                 community_stats["error"] = str(e)
+
+        # --- PPR Score-Gap Pruning (February 10, 2026 — Improvement #2) ---
+        # Runs AFTER community penalty so it detects the amplified gaps between
+        # in-community (full score) and out-of-community (0.3× score) entities.
+        # Detects the largest relative score drop and prunes entities below it.
+        # Toggle: set DENOISE_SCORE_GAP=1 to enable.
+        # SCORE_GAP_THRESHOLD: minimum relative drop (fraction) to trigger pruning.
+        # E.g. 0.5 means a 50%+ drop from entity[i] to entity[i+1] triggers pruning.
+        # SCORE_GAP_MIN_KEEP: minimum number of entities to keep (never prune below this).
+        score_gap_enabled = os.environ.get("DENOISE_SCORE_GAP", "") == "1"
+        score_gap_stats: Dict[str, Any] = {"enabled": score_gap_enabled}
+
+        if score_gap_enabled and len(selected_entities) > 2:
+            gap_threshold = float(os.environ.get("SCORE_GAP_THRESHOLD", "0.5"))
+            min_keep = int(os.environ.get("SCORE_GAP_MIN_KEEP", "3"))
+
+            # Sort entities by (potentially penalised) PPR score descending
+            sorted_by_score = sorted(
+                selected_entities,
+                key=lambda e: entity_scores.get(e, 0.0),
+                reverse=True,
+            )
+            scores_sorted = [entity_scores.get(e, 0.0) for e in sorted_by_score]
+
+            # Find the largest relative drop
+            best_gap_idx = None
+            best_gap_ratio = 0.0
+            for i in range(max(min_keep - 1, 0), len(scores_sorted) - 1):
+                if scores_sorted[i] > 0:
+                    relative_drop = 1.0 - (scores_sorted[i + 1] / scores_sorted[i])
+                    if relative_drop > gap_threshold and relative_drop > best_gap_ratio:
+                        best_gap_ratio = relative_drop
+                        best_gap_idx = i
+
+            original_count = len(selected_entities)
+            if best_gap_idx is not None:
+                # Keep entities up to and including the gap index
+                kept_entities = set(sorted_by_score[: best_gap_idx + 1])
+                selected_entities = [e for e in selected_entities if e in kept_entities]
+                score_gap_stats.update({
+                    "gap_found": True,
+                    "gap_index": best_gap_idx,
+                    "gap_ratio": round(best_gap_ratio, 3),
+                    "score_at_gap": round(scores_sorted[best_gap_idx], 6),
+                    "score_below_gap": round(scores_sorted[best_gap_idx + 1], 6),
+                    "entities_before": original_count,
+                    "entities_after": len(selected_entities),
+                    "entities_pruned": original_count - len(selected_entities),
+                })
+                logger.info(
+                    "score_gap_pruning",
+                    gap_idx=best_gap_idx,
+                    gap_ratio=round(best_gap_ratio, 3),
+                    before=original_count,
+                    after=len(selected_entities),
+                )
+            else:
+                score_gap_stats.update({
+                    "gap_found": False,
+                    "entities_before": original_count,
+                    "entities_after": original_count,
+                    "reason": f"no_drop_exceeds_{gap_threshold}",
+                })
 
         # --- Score-weighted chunk allocation (February 10, 2026) ---
         # Instead of giving every entity uniform limit_per_entity=12, allocate

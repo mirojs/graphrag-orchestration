@@ -475,6 +475,35 @@ class EvidenceSynthesizer:
                        unscored=_ppr_stats["unscored"],
                        top_score=graph_context.source_chunks[0].relevance_score if graph_context.source_chunks else 0)
 
+        # --- Step D4: Token budget enforcement ---
+        # After PPR scoring and sorting, drop lowest-scored chunks that exceed
+        # the token budget. Chunks are already sorted by relevance (D3), so we
+        # keep top-scored chunks and trim from the tail.
+        _enable_token_budget = os.getenv("ROUTE3_DENOISE_TOKEN_BUDGET", "0").strip().lower() in {"1", "true", "yes"}
+        _budget_stats = {"enabled": _enable_token_budget, "dropped": 0, "budget": 0}
+        if _enable_token_budget and graph_context.source_chunks:
+            _token_budget = self._get_token_budget()
+            _budget_stats["budget"] = _token_budget
+            _tokens_used = 0
+            _budgeted: list = []
+            for chunk in graph_context.source_chunks:
+                chunk_tokens = self._estimate_tokens(chunk.text or "")
+                if _tokens_used + chunk_tokens > _token_budget and _budgeted:
+                    # Budget exceeded — stop adding chunks
+                    break
+                _tokens_used += chunk_tokens
+                _budgeted.append(chunk)
+            _budget_stats["dropped"] = len(graph_context.source_chunks) - len(_budgeted)
+            _budget_stats["tokens_used"] = _tokens_used
+            if _budget_stats["dropped"] > 0:
+                logger.info("route3_distill_token_budget",
+                           budget=_token_budget,
+                           before=len(graph_context.source_chunks),
+                           after=len(_budgeted),
+                           dropped=_budget_stats["dropped"],
+                           tokens_used=_tokens_used)
+            graph_context.source_chunks = _budgeted
+
         # Step 1: Build citation context from source chunks (MENTIONS-derived)
         # Group chunks by document_id to ensure proper document attribution
         from collections import defaultdict
@@ -684,12 +713,13 @@ class EvidenceSynthesizer:
                    final_context_tokens=self._estimate_tokens(full_context))
         
         context_stats = {
-            "chunks_before_budget": len(graph_context.source_chunks) + _distill_stats["dedup_removed"] + _distill_stats["noise_filtered"],
+            "chunks_before_budget": len(graph_context.source_chunks) + _distill_stats["dedup_removed"] + _distill_stats["noise_filtered"] + _budget_stats["dropped"],
             "chunks_after_budget": len(graph_context.source_chunks),
-            "chunks_dropped": 0,
+            "chunks_dropped": _budget_stats["dropped"],
             "dedup_removed": _distill_stats["dedup_removed"],
             "noise_filtered": _distill_stats["noise_filtered"],
             "ppr_scoring": _ppr_stats,
+            "token_budget_enforcement": _budget_stats,
             "context_tokens": self._estimate_tokens(full_context),
             "context_chars": len(full_context),
             "final_context_chars": len(full_context),

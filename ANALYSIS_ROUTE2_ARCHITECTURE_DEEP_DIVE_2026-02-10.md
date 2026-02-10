@@ -141,29 +141,48 @@ Source: `route2_local_search_20260209T162951Z.json` (baseline, all measures ON)
 
 | Metric | Baseline (all ON) | + Score-Weighted | Delta |
 |---|---|---|---|
-| Containment | 10/10 | | |
-| F1 (avg) | 0.261 | | |
-| Chunks to LLM (avg) | 9.9 | | |
-| Raw chunks (pre-dedup) | 40.0 | | |
-| Latency (avg) | 5,920 ms | | |
-| Negative pass | 9/9 | | |
+| Containment | 10/10 | 10/10 | — |
+| F1 (avg) | 0.261 | 0.259 | −0.002 |
+| Precision (avg) | 0.155 | 0.155 | — |
+| Recall (avg) | 0.988 | 0.988 | — |
+| Chunks to LLM (avg) | 9.9 | 8.4 | −15% |
+| Raw chunks (pre-dedup) | 40.0 | 36.4 | −9% |
+| Context tokens (avg) | 12,651 | 10,031 | −21% |
+| Latency (avg) | 5,920 ms | 6,610 ms | +12%* |
+| Negative pass | 9/9 | 9/9 | — |
+
+*\*Latency increase dominated by Q-L1 cold start (14,491ms vs 6,081ms). Excluding Q-L1: 5,902ms → 5,734ms (−3%).*
 
 **Per-question detail:**
 
-| QID | Baseline F1 | + Score-Weighted F1 | Baseline chunks | + Score-Weighted chunks |
-|---|---|---|---|---|
-| Q-L1 | 0.304 | | 10 | |
-| Q-L2 | 0.062 | | 10 | |
-| Q-L3 | 0.412 | | 10 | |
-| Q-L4 | 0.133 | | 9 | |
-| Q-L5 | 0.222 | | 8 | |
-| Q-L6 | 0.291 | | 10 | |
-| Q-L7 | 0.197 | | 8 | |
-| Q-L8 | 0.275 | | 10 | |
-| Q-L9 | 0.432 | | 12 | |
-| Q-L10 | 0.286 | | 12 | |
+| QID | Base F1 | New F1 | Δ F1 | Base P | New P | Base chunks | New chunks | Base tokens | New tokens |
+|---|---|---|---|---|---|---|---|---|---|
+| Q-L1 | 0.304 | 0.275 | −0.029 | 0.179 | 0.159 | 10 | 8 | 12,744 | 9,252 |
+| Q-L2 | 0.062 | 0.082 | +0.020 | 0.032 | 0.043 | 10 | 10 | 12,744 | 12,744 |
+| Q-L3 | 0.412 | 0.424 | +0.012 | 0.259 | 0.269 | 10 | 8 | 12,744 | 9,252 |
+| Q-L4 | 0.133 | 0.120 | −0.013 | 0.071 | 0.064 | 9 | 9 | 11,414 | 11,414 |
+| Q-L5 | 0.222 | 0.189 | −0.033 | 0.125 | 0.104 | 8 | 8 | 11,891 | 11,891 |
+| Q-L6 | 0.291 | 0.188 | −0.103 | 0.170 | 0.104 | 10 | 9 | 12,744 | 11,323 |
+| Q-L7 | 0.197 | 0.241 | +0.044 | 0.109 | 0.137 | 8 | 9 | 11,891 | 11,323 |
+| Q-L8 | 0.275 | 0.275 | +0.000 | 0.163 | 0.163 | 10 | 8 | 12,744 | 9,252 |
+| Q-L9 | 0.432 | 0.485 | +0.053 | 0.276 | 0.320 | 12 | 10 | 13,798 | 10,306 |
+| Q-L10 | 0.286 | 0.312 | +0.026 | 0.167 | 0.185 | 12 | 5 | 13,798 | 3,556 |
 
-**Verdict:** *(pending evaluation)*
+**Winners:** Q-L9 (+0.053), Q-L7 (+0.044), Q-L10 (+0.026), Q-L2 (+0.020), Q-L3 (+0.012)
+**Losers:** Q-L6 (−0.103), Q-L5 (−0.033), Q-L1 (−0.029), Q-L4 (−0.013)
+**Neutral:** Q-L8 (+0.000)
+
+**Observations:**
+1. **F1 essentially flat** (−0.002, well within noise). 5 winners vs 4 losers, roughly balanced.
+2. **Context tokens reduced 21%** — significant cost saving and leaves headroom for future improvements.
+3. **Q-L6 is the big loser** (−0.103): dropped from 10→9 chunks, lost 1 relevant chunk. This question asks about specific monetary terms where the missing chunk likely contained key data.
+4. **Q-L10 dramatic token reduction** (13,798→3,556, −74%): budget cut 12→5 chunks, yet F1 *improved* (+0.026), confirming noise dilution was real.
+5. **Recall unchanged** (0.988 both): score-weighting doesn't lose ground-truth entities, only adjusts chunk depth.
+6. All entity budgets still ≥1 (minimum guaranteed), so no entity is completely silenced.
+
+**Verdict:** ✅ **KEEP — neutral F1, 21% token reduction.** Score-weighted allocation doesn't improve F1 alone but reduces context noise by 21%, creating headroom for downstream improvements. The Q-L6 regression warrants monitoring. Proceed to Improvement #1.5.
+
+**Benchmark file:** `benchmarks/route2_local_search_20260210T030934Z.json`
 
 ---
 

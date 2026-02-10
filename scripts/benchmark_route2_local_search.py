@@ -447,6 +447,7 @@ def benchmark_scenario(
     timeout_s: float,
     ground_truth: Dict[str, GroundTruth],
     synthesis_model: Optional[str] = None,
+    prompt_variant: Optional[str] = None,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -479,6 +480,8 @@ def benchmark_scenario(
             }
             if synthesis_model:
                 payload["synthesis_model"] = synthesis_model
+            if prompt_variant:
+                payload["prompt_variant"] = prompt_variant
 
             status, resp, elapsed, err = _http_post_json(
                 url=url,
@@ -902,6 +905,12 @@ def main():
         default=None,
         help="Run comparison across multiple synthesis models (e.g. --models gpt-5.1 gpt-4.1 gpt-4.1-mini gpt-5.1-mini). Overrides --synthesis-model.",
     )
+    parser.add_argument(
+        "--prompt-variant",
+        type=str,
+        default=None,
+        help="Prompt variant for A/B testing (e.g. v0, v1_concise). Default: None (uses v0).",
+    )
 
     args = parser.parse_args()
     print(f"[DEBUG] Parsed arguments. URL: {args.url}")
@@ -1005,8 +1014,11 @@ def main():
 
     # Single model mode (original behavior)
     synthesis_model = getattr(args, 'synthesis_model', None)
+    prompt_variant = getattr(args, 'prompt_variant', None)
     if synthesis_model:
         print(f"  Synthesis model override: {synthesis_model}")
+    if prompt_variant:
+        print(f"  Prompt variant: {prompt_variant}")
 
     result = benchmark_scenario(
         api_base_url=args.url,
@@ -1018,6 +1030,7 @@ def main():
         timeout_s=args.timeout,
         ground_truth=ground_truth,
         synthesis_model=synthesis_model,
+        prompt_variant=prompt_variant,
     )
 
     # Write outputs
@@ -1037,6 +1050,8 @@ def main():
         }
         if synthesis_model:
             out_data["synthesis_model"] = synthesis_model
+        if prompt_variant:
+            out_data["prompt_variant"] = prompt_variant
         out_data["scenario"] = result
         json.dump(
             out_data,

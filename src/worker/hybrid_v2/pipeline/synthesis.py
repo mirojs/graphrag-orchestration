@@ -327,6 +327,7 @@ class EvidenceSynthesizer:
         graph_context: EnhancedGraphContext,
         response_type: str = "detailed_report",
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+        community_data: Optional[List[Dict[str, Any]]] = None,
         include_context: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -694,6 +695,7 @@ class EvidenceSynthesizer:
             hub_entities=graph_context.hub_entities,
             response_type=response_type,
             has_sentence_citations=bool(sentence_citation_map),
+            has_community_context=_community_prompt_used,
         )
         
         # Step 6: Extract citations from response
@@ -726,6 +728,7 @@ class EvidenceSynthesizer:
             "final_context_tokens": self._estimate_tokens(full_context),
             "token_budget": self._get_token_budget(),
             "num_doc_groups": len(doc_groups),
+            "community_prompt": _community_prompt_used,
         }
 
         return {
@@ -746,6 +749,7 @@ class EvidenceSynthesizer:
         hub_entities: List[str],
         response_type: str,
         has_sentence_citations: bool = False,
+        has_community_context: bool = False,
     ) -> str:
         """Generate response with graph-aware prompting."""
         if self.llm is None:
@@ -1648,7 +1652,7 @@ Response:"""
         else:
             prompts = {
                 "detailed_report": self._get_detailed_report_prompt(query, context),
-                "summary": self._get_summary_prompt(query, context),
+                "summary": self._get_summary_prompt(query, context, prompt_variant=prompt_variant),
                 "audit_trail": self._get_audit_trail_prompt(query, context)
             }
             prompt = prompts.get(response_type, prompts["detailed_report"])
@@ -1812,7 +1816,15 @@ If the requested information IS present, respond using this format:
 
 Response:"""
 
-    def _get_summary_prompt(self, query: str, context: str) -> str:
+    def _get_summary_prompt(self, query: str, context: str, prompt_variant: Optional[str] = None) -> str:
+        """Summary synthesis prompt with variant support for A/B testing.
+        
+        Variants:
+        - None / "v0": Current production prompt (structured sections, verbose)
+        - "v1_concise": Direct-answer style, no forced sections, precision-optimised
+        """
+        variant = (prompt_variant or "v0").lower().strip()
+        
         # Detect document-counting and per-document queries
         # These patterns trigger document consolidation guidance
         q_lower = query.lower()
@@ -1847,6 +1859,40 @@ IMPORTANT for Per-Document Queries:
 - If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
 """
         
+        logger.info(
+            "summary_prompt_variant",
+            variant=variant,
+            query=query[:60],
+            is_per_document_query=is_per_document_query,
+            context_length=len(context),
+        )
+        
+        # ---- V1: Concise, precision-optimised ----
+        # Targets the precision gap identified in Route 2 ablation study:
+        # - No forced section headers (## Summary / ## Key Points overhead)
+        # - No paragraph count instruction (avoids padding)
+        # - Direct-answer style — answer length scales with question complexity
+        # - Keeps refusal logic (critical for negative queries) but compressed
+        # - Keeps citation + numeric verbatim requirements
+        if variant == "v1_concise":
+            return f"""Answer the question below using ONLY the evidence provided.
+
+Question: {query}
+
+Evidence (citation markers [N]):
+{context}
+
+Rules:
+- If the evidence does NOT contain the specific information requested, respond ONLY with: "The requested information was not found in the available documents."
+- Do NOT provide alternative or related information when the exact item is missing.
+- Cite every factual claim with [N].
+- Quote exact numeric values, dates, dollar amounts, and deadlines from the evidence.
+- Answer directly and concisely — no section headers unless the question asks for a list or comparison.
+- Include ONLY information that answers what was asked. Omit background context, qualifiers, and hedging.
+{document_guidance}
+Your response:"""
+        
+        # ---- V0: Current production prompt ----
         return f"""You are an expert analyst generating a concise summary.
 
 Question: {query}

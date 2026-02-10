@@ -118,8 +118,8 @@ Source: `route2_local_search_20260209T162951Z.json` (baseline, all measures ON)
 | **1** | PPR score-weighted chunk allocation | N3 (scores discarded) | `DENOISE_SCORE_WEIGHTED=1` (enable) | Raw chunks ~40→~20; F1 ↑ | ✅ KEPT (−0.002 F1, −21% tokens) |
 | **1.5** | Community-aware PPR entity filtering | N2 (graph expansion) | `DENOISE_COMMUNITY_FILTER=1` (enable) | Cross-community noise entities penalized | ✅ KEPT (−0.008 F1, −8% tokens) |
 | **2** | PPR score-gap pruning | N2 (graph expansion) | `DENOISE_SCORE_GAP=1` (enable) | Entity count ~13→~6-8 | ✅ KEPT (+0.009 F1, −10% tokens) |
-| **3** | Query-intent NER prompt | N1 (broad NER) | Prompt change only | Seed count ~5→~2-3 targeted | 🔧 Next |
-| **4** | Semantic near-dedup (embedding cosine) | N5 (cross-doc copies) | `DENOISE_SEMANTIC_DEDUP=1` (enable) | Catches formatting-variant duplicates | ⏳ Queued |
+| **3** | Query-intent NER prompt | N1 (broad NER) | Prompt change only | Seed count ~5→~2-3 targeted | ❌ REVERTED (−0.028 F1, lost containment) |
+| **4** | Semantic near-dedup (embedding cosine) | N5 (cross-doc copies) | `DENOISE_SEMANTIC_DEDUP=1` (enable) | Catches formatting-variant duplicates | 🔧 Next |
 | **5** | Vector chunk safety net | N/A (coverage gap) | `DENOISE_VECTOR_FALLBACK=1` (enable) | Insurance for NER misses | ⏳ Queued |
 
 ---
@@ -356,7 +356,50 @@ Gap ratios cluster around two values: ~0.52 (community penalty 0.3× on in-commu
 
 ### 6.4 Improvement #3: Query-Intent NER Prompt
 
-*(Pending)*
+**Hypothesis:** Reducing synonym flooding in NER by adding anti-synonym guidance and lowering `top_k` from 5 to 3 will produce fewer, more targeted seed entities, reducing PPR expansion noise.
+
+**Implementation:**
+- Modified NER prompt in `intent.py` with 2-step reasoning (understand intent → select entities)
+- Added explicit BAD/GOOD synonym examples
+- Reduced `top_k` default from 5→3
+- Added guidance: "Return MINIMUM number of entities needed"
+- Added: "Include document name ONLY if multi-doc disambiguation needed"
+
+**Results:**
+
+| Metric | + #2 Score-Gap | + #3 NER Intent | Delta |
+|---|---|---|---|
+| Containment | 10/10 | **9/10** | **−1** |
+| F1 (avg) | 0.261 | 0.232 | **−0.028** |
+| Chunks to LLM (avg) | 6.9 | 9.4 | **+36%** |
+| Context tokens (avg) | 8,292 | 11,072 | **+34%** |
+| Entities selected (avg) | 9.9 | 11.7 | **+18%** |
+| Seeds (avg) | 3.0 | 1.7 | −43% |
+| Negative pass | 9/9 | 9/9 | — |
+
+**Seed entity changes (prompt effect):**
+
+| QID | Old Seeds | New Seeds | Effect |
+|---|---|---|---|
+| Q-L4 | 5 ('Initial Term', 'Term Start Date', 'PMA', 'Commencement Date', 'Effective Date') | 1 ('Initial Term') | **Containment lost** — single seed insufficient |
+| Q-L5 | 5 (PMA + 4 termination synonyms) | 2 ('PMA', 'Termination notice period') | entities 10→13 — fewer seeds = smoother PPR = no gap |
+| Q-L7 | 5 (Agent fee + 4 synonyms) | 2 ('Agent fee', 'Long-term leases') | F1 −0.100 — lost secondary entry point for PPR |
+| Q-L6 | 3 | 2 (dropped 'Agent commission') | entities 8→13 — gap pruning no longer fires |
+| Q-L8 | 3 | 2 (lowercase, dropped PMA) | entities 10→0 (!) — seed resolution failure |
+
+**Root Cause: Counterintuitive interaction with score-gap pruning.**
+- Fewer seeds → fewer PPR entry points → smoother (less diverse) PPR score distribution
+- Smoother scores → no gap detected by score-gap pruning → all 13 entities survive
+- Result: entities went **UP** 9.9→11.7 despite seeds going **DOWN** 3.0→1.7
+- The "redundant" synonyms in the old prompt actually helped by creating diverse PPR paths that made score-gap pruning effective
+- Additionally, the new prompt produced lowercase entity names (e.g., "Property management agreement") which may have degraded seed resolution in some cases
+
+**Verdict:** ❌ **REVERT — F1 −0.028, containment lost, entities increased.** The NER prompt change is anti-synergistic with the existing denoising pipeline. The current "noisy" 5-seed extractions are actually beneficial: they create diverse PPR entry points that produce clear score gaps for downstream pruning. Reducing seed count undermines the entire denoising stack. Code reverted via `git revert`.
+
+**Key Insight:** In a pipeline with score-gap pruning, "redundant" NER seeds serve as diversity signals, not noise. The denoising pipeline depends on this diversity to identify clear gaps. Optimizing NER in isolation breaks the pipeline's equilibrium.
+
+**Benchmark file:** `benchmarks/route2_local_search_20260210T072150Z.json`  
+**Commits:** `0e67a762` (feat: attempt), `172ddeea` (revert)
 
 ---
 
@@ -380,7 +423,7 @@ Gap ratios cluster around two values: ~0.52 (community penalty 0.3× on in-commu
 | + #1 Score-weighted | 10/10 | 0.259 | 8.4 | 36.4 | 6,610 ms | 9/9 | ✅ KEEP |
 | + #1.5 Community filter | 10/10 | 0.252 | 7.8 | 34.4 | 7,077 ms | 9/9 | ✅ KEEP |
 | + #2 Score-gap pruning | 10/10 | 0.261 | 6.9 | 17.9 | 5,243 ms | 9/9 | ✅ KEEP |
-| + #3 NER intent prompt | | | | | | | |
+| + #3 NER intent prompt | 9/10 | 0.232 | 9.4 | 34.5 | 5,719 ms | 9/9 | ❌ REVERT |
 | + #4 Semantic dedup | | | | | | | |
 | + #5 Vector safety net | | | | | | | |
 

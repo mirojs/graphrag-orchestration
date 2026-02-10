@@ -1592,3 +1592,78 @@ class AsyncNeo4jService:
         except Exception as e:
             logger.warning("embedding_version_detection_failed", extra={"group_id": group_id, "error": str(e)})
             return "v1"  # Default to V1 for safety
+
+    # =========================================================================
+    # Document-Aware Retrieval — Target Document Resolution (February 10, 2026)
+    # =========================================================================
+
+    async def get_entity_document_coverage(
+        self,
+        group_id: str,
+        entity_names: List[str],
+    ) -> List[Dict[str, Any]]:
+        """
+        For each seed entity, find which documents it appears in via
+        APPEARS_IN_DOCUMENT edges.  Returns per-document coverage stats
+        used by the document-scoping algorithm.
+
+        Returns list of dicts:
+            [{doc_id, doc_title, matching_seeds: [str], seed_coverage: int,
+              entity_doc_counts: {entity_name: num_docs_it_spans}}]
+        """
+        query = """
+        UNWIND $entity_names AS ename
+        MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+          AND (toLower(e.name) = toLower(ename)
+               OR ANY(alias IN coalesce(e.aliases, [])
+                      WHERE toLower(alias) = toLower(ename)))
+        WITH ename, d, count(DISTINCT d) AS _dummy
+        // Per-entity: how many distinct docs does this entity span?
+        WITH ename, d,
+             size([(e2)-[:APPEARS_IN_DOCUMENT]->(d2:Document {group_id: $group_id})
+                   WHERE (e2:Entity OR e2:`__Entity__`) AND e2.group_id = $group_id
+                     AND (toLower(e2.name) = toLower(ename)
+                          OR ANY(a IN coalesce(e2.aliases, []) WHERE toLower(a) = toLower(ename)))
+                   | d2]) AS entity_doc_count
+        WITH d.id AS doc_id, d.title AS doc_title,
+             collect(DISTINCT {name: ename, doc_count: entity_doc_count}) AS seed_info
+        RETURN doc_id, doc_title,
+               [s IN seed_info | s.name] AS matching_seeds,
+               size(seed_info) AS seed_coverage,
+               seed_info
+        ORDER BY seed_coverage DESC
+        """
+        try:
+            async with self._get_session() as session:
+                result = await session.run(
+                    query,
+                    group_id=group_id,
+                    entity_names=entity_names,
+                )
+                records = await result.data()
+
+            # Build per-entity doc count map from the first record that has all
+            entity_doc_counts: Dict[str, int] = {}
+            for rec in records:
+                for info in rec.get("seed_info", []):
+                    name = info["name"]
+                    if name not in entity_doc_counts:
+                        entity_doc_counts[name] = info["doc_count"]
+
+            # Attach to each record for downstream convenience
+            for rec in records:
+                rec["entity_doc_counts"] = entity_doc_counts
+
+            logger.info(
+                "entity_document_coverage",
+                num_entities=len(entity_names),
+                num_docs=len(records),
+                top_doc=records[0]["doc_title"] if records else None,
+                top_coverage=records[0]["seed_coverage"] if records else 0,
+            )
+            return records
+
+        except Exception as e:
+            logger.warning("entity_document_coverage_failed", error=str(e))
+            return []

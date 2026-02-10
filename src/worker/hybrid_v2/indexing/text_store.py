@@ -73,6 +73,86 @@ class Neo4jTextUnitStore:
         results = await self.get_chunks_for_entities([entity_name])
         return results.get(entity_name, [])
 
+    # ------------------------------------------------------------------
+    # Document-Aware Retrieval — Target Document Resolution (Feb 10 2026)
+    # ------------------------------------------------------------------
+
+    async def get_entity_document_coverage(
+        self, entity_names: List[str]
+    ) -> List[Dict[str, Any]]:
+        """For each seed entity, find which documents it appears in.
+
+        Returns per-document coverage stats: [{doc_id, doc_title,
+        matching_seeds, seed_coverage, entity_doc_counts}].
+        Uses APPEARS_IN_DOCUMENT edges (4 522 edges in test corpus).
+        """
+        return await asyncio.to_thread(
+            self._get_entity_document_coverage_sync, entity_names
+        )
+
+    def _get_entity_document_coverage_sync(
+        self, entity_names: List[str]
+    ) -> List[Dict[str, Any]]:
+        query = """
+        UNWIND $entity_names AS ename
+        MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+          AND (toLower(e.name) = toLower(ename)
+               OR ANY(alias IN coalesce(e.aliases, [])
+                      WHERE toLower(alias) = toLower(ename)))
+        WITH ename, d
+        // how many distinct docs does each SEED entity span?
+        WITH ename, d,
+             size(collect(DISTINCT d.id)) AS _agg_dummy
+        WITH d.id AS doc_id, d.title AS doc_title,
+             collect(DISTINCT ename) AS matching_seeds
+        RETURN doc_id, doc_title, matching_seeds,
+               size(matching_seeds) AS seed_coverage
+        ORDER BY seed_coverage DESC
+        """
+
+        # Second tiny query: per-entity doc count (for IDF weighting)
+        doc_count_query = """
+        UNWIND $entity_names AS ename
+        MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+          AND (toLower(e.name) = toLower(ename)
+               OR ANY(alias IN coalesce(e.aliases, [])
+                      WHERE toLower(alias) = toLower(ename)))
+        WITH ename, count(DISTINCT d) AS doc_count
+        RETURN ename, doc_count
+        """
+
+        with self._driver.session() as session:
+            result = session.run(
+                query,
+                group_id=self._group_id,
+                entity_names=entity_names,
+            )
+            records = [dict(r) for r in result]
+
+            # Entity → doc count map
+            dc_result = session.run(
+                doc_count_query,
+                group_id=self._group_id,
+                entity_names=entity_names,
+            )
+            entity_doc_counts: Dict[str, int] = {}
+            for r in dc_result:
+                entity_doc_counts[r["ename"]] = r["doc_count"]
+
+        for rec in records:
+            rec["entity_doc_counts"] = entity_doc_counts
+
+        logger.info(
+            "entity_document_coverage",
+            num_entities=len(entity_names),
+            num_docs=len(records),
+            top_doc=records[0]["doc_title"] if records else None,
+            top_coverage=records[0]["seed_coverage"] if records else 0,
+        )
+        return records
+
     async def get_chunks_for_query(self, query: str, *, limit: int = 24) -> List[Dict[str, Any]]:
         """Fallback: retrieve chunks by keyword overlap with the user query.
 
@@ -217,8 +297,19 @@ class Neo4jTextUnitStore:
             logger.warning("get_entity_communities_failed error=%s", str(e))
         return result
 
-    async def get_chunks_for_entities(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
-        """Get chunks for multiple entities in a single batched query (performance optimization)."""
+    async def get_chunks_for_entities(
+        self,
+        entity_names: List[str],
+        *,
+        target_document_ids: Optional[List[str]] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Get chunks for multiple entities in a single batched query (performance optimization).
+
+        Args:
+            entity_names: Entity names to fetch chunks for.
+            target_document_ids: When provided, only return chunks from these
+                documents (document-scoped retrieval, Feb 10 2026).
+        """
         if not entity_names:
             return {}
         
@@ -236,51 +327,88 @@ class Neo4jTextUnitStore:
             return {}
         
         # Neo4j python driver is sync; run in a thread to avoid blocking the event loop.
-        return await asyncio.to_thread(self._get_chunks_for_entities_batch_sync, names)
+        return await asyncio.to_thread(
+            self._get_chunks_for_entities_batch_sync,
+            names,
+            3,   # max_per_section default
+            6,   # max_per_document default
+            target_document_ids,
+        )
 
     def _get_chunks_for_entities_batch_sync(
         self,
         entity_names: List[str],
         max_per_section: int = 3,
         max_per_document: int = 6,
+        target_document_ids: Optional[List[str]] = None,
     ) -> Dict[str, List[Dict[str, Any]]]:
         """Batch query to fetch chunks for multiple entities in a single round-trip.
         
         Enhanced with section-aware diversification (Jan 2026):
         - Fetches section_id via IN_SECTION edge
         - Applies max_per_section and max_per_document caps for better coverage
+
+        Document-scoped retrieval (Feb 10, 2026):
+        - When target_document_ids is provided, only return chunks from those docs
+        - Uses MATCH + WHERE instead of OPTIONAL MATCH for the document edge
         """
         import os
         
         # Check if section diversification is enabled
         section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         
-        # Enhanced query: also fetch section info via IN_SECTION edge
-        # FIX: Support both Entity and __Entity__ labels (different indexing pipelines use different labels)
-        query = """
-        UNWIND $entity_names AS entity_name
-        MATCH (e {group_id: $group_id})
-        WHERE (e:Entity OR e:`__Entity__`)
-          AND (toLower(e.name) = toLower(entity_name)
-               OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-        MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
-        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-        OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
-        WITH entity_name, c, d, s
-        ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
-        WITH entity_name, collect({chunk: c, doc: d, section: s})[0..$limit] AS items
-        RETURN entity_name, items
-        """
+        # --- Document-scoped vs document-blind query (Feb 10, 2026) ---
+        if target_document_ids:
+            # Scoped: hard-filter chunks to target documents only
+            query = """
+            UNWIND $entity_names AS entity_name
+            MATCH (e {group_id: $group_id})
+            WHERE (e:Entity OR e:`__Entity__`)
+              AND (toLower(e.name) = toLower(entity_name)
+                   OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+            MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            WHERE d.id IN $target_document_ids
+            OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
+            WITH entity_name, c, d, s
+            ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
+            WITH entity_name, collect({chunk: c, doc: d, section: s})[0..$limit] AS items
+            RETURN entity_name, items
+            """
+            logger.info(
+                "doc_scoped_chunk_query",
+                target_docs=target_document_ids,
+                num_entities=len(entity_names),
+            )
+        else:
+            # Unscoped: original document-blind query
+            query = """
+            UNWIND $entity_names AS entity_name
+            MATCH (e {group_id: $group_id})
+            WHERE (e:Entity OR e:`__Entity__`)
+              AND (toLower(e.name) = toLower(entity_name)
+                   OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+            OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
+            WITH entity_name, c, d, s
+            ORDER BY entity_name, coalesce(c.chunk_index, 0) ASC
+            WITH entity_name, collect({chunk: c, doc: d, section: s})[0..$limit] AS items
+            RETURN entity_name, items
+            """
         
         results: Dict[str, List[Dict[str, Any]]] = {name: [] for name in entity_names}
         
+        query_params = dict(
+            group_id=self._group_id,
+            entity_names=entity_names,
+            limit=self._limit,
+        )
+        if target_document_ids:
+            query_params["target_document_ids"] = target_document_ids
+
         with self._driver.session() as session:
-            result = session.run(
-                query,
-                group_id=self._group_id,
-                entity_names=entity_names,
-                limit=self._limit,
-            )
+            result = session.run(query, **query_params)
             
             for record in result:
                 entity_name = record.get("entity_name")

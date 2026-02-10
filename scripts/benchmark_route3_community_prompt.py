@@ -55,6 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 # Re-use helpers from existing benchmarks
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # project root for src.*
 from benchmark_accuracy_utils import GroundTruth, extract_ground_truth, calculate_accuracy_metrics
 from benchmark_route3_global_search import (
     EXPECTED_TERMS,
@@ -326,16 +327,8 @@ def _parse_chunks_from_context(llm_context: str) -> Tuple[str, str, str, List[Di
 
 # ── Context builders ──
 
-_SENTENCE_CITATION_RE = re.compile(r'^\[\d+[a-z]\]\s*', re.MULTILINE)
-
-
-def _strip_sentence_markers(text: str) -> str:
-    """Strip sentence-level citation markers like [1a], [2b] from chunk text.
-
-    Keeps the sentence text, removes only the marker prefix.
-    This prevents the LLM from over-citing every sentence marker.
-    """
-    return _SENTENCE_CITATION_RE.sub('', text).strip()
+# Import shared sentence-marker stripping (authoritative regex lives in synthesis.py)
+from src.worker.hybrid_v2.pipeline.synthesis import strip_sentence_markers as _strip_sentence_markers
 
 
 def _estimate_tokens(text: str) -> int:

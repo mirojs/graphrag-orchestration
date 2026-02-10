@@ -662,3 +662,93 @@ Comparing the original baseline (Feb 9, no denoising) to the final state after #
 6. **Consider adaptive thresholds.** The current `SCORE_GAP_THRESHOLD=0.5` and
    `SEMANTIC_DEDUP_THRESHOLD=0.92` were chosen analytically. As corpus diversity grows,
    these may need per-domain tuning or automatic calibration.
+
+### 8.5 Settings Durability
+
+**Problem identified:** The deploy script (`deploy-graphrag.sh`) and Python code
+(`synthesis.py`) originally defaulted all denoising flags to **off** (safe rollout
+posture). This meant any future `deploy-graphrag.sh` run without explicit env var
+overrides would silently reset the production-tested denoising to disabled — a
+regression trap.
+
+**Fix applied:** Updated defaults in **both layers** to match the production-tested
+configuration:
+
+| Layer | File | Change |
+|---|---|---|
+| Deploy script | `deploy-graphrag.sh` L255-264 | All 4 kept flags default to `1`; `SEMANTIC_DEDUP_THRESHOLD` default → `0.92` |
+| Python code | `synthesis.py` (4 toggle sites) | `os.environ.get("DENOISE_*", "1")` — enabled by default |
+| Python code | `synthesis.py` L1012 | `SCORE_GAP_MIN_KEEP` default `3` → `6` |
+| Python code | `synthesis.py` L1209 | `SEMANTIC_DEDUP_THRESHOLD` default `0.85` → `0.92` |
+
+**How it works now:**
+- A fresh deploy with no env vars → denoising **enabled** with production defaults
+- To **disable** a stage, explicitly set `DENOISE_*=0`
+- `az containerapp update --set-env-vars` is additive (only touches specified vars),
+  so partial updates from other processes won't reset denoising settings
+- The deploy script uses `${VAR:-default}` syntax, so env vars set in `.env` or
+  exported in shell override the script defaults
+
+**Verified container state (Feb 10, 2026):**
+
+```
+graphrag-api + graphrag-worker:
+  DENOISE_SCORE_WEIGHTED    = 1
+  DENOISE_COMMUNITY_FILTER  = 1
+  COMMUNITY_PENALTY         = 0.3
+  DENOISE_SCORE_GAP         = 1
+  SCORE_GAP_THRESHOLD       = 0.5
+  SCORE_GAP_MIN_KEEP        = 6
+  DENOISE_SEMANTIC_DEDUP    = 1
+  SEMANTIC_DEDUP_THRESHOLD  = 0.92
+  DENOISE_VECTOR_FALLBACK   = 0
+  VECTOR_FALLBACK_TOP_K     = 3
+  VOYAGE_API_KEY            = (set)
+```
+
+### 8.5 Input/Output Token Analysis
+
+The benchmark JSON files record `final_context_tokens` (LLM input after budget trimming)
+and `answer_chars` (LLM response length). These reveal where the remaining quality
+headroom lives.
+
+**LLM Input — Context Tokens Fed to Synthesis:**
+
+| Run | final_ctx_tokens (avg) | Δ vs Baseline |
+|---|---:|---:|
+| Baseline | 11,058 | — |
+| +#1 Score-weighted | 8,544 | −23% |
+| +#1.5 Community filter | 8,101 | −27% |
+| +#2 Score-gap pruning | 7,025 | −36% |
+| +#4 Semantic dedup | **5,307** | **−52%** |
+
+**LLM Output — Answer Length:**
+
+| Run | answer_chars (avg) | Δ vs Baseline |
+|---|---:|---:|
+| Baseline | 562 | — |
+| +#1 Score-weighted | 472 | −16% |
+| +#1.5 Community filter | 483 | −14% |
+| +#2 Score-gap pruning | 496 | −12% |
+| +#4 Semantic dedup | 528 | −6% |
+
+**Key Insight:** Input tokens were cut by **52%** but output length only dropped **6%**.
+The LLM generates roughly the same length answer (~500 chars) regardless of how much
+context it receives. This confirms:
+
+1. **Verbosity is prompt-driven, not context-driven.** The synthesis prompt
+   (`_get_summary_prompt`) instructs "2-3 paragraphs" with structured headers
+   (`## Summary`, `## Key Points`) — the model fills those sections regardless of
+   evidence density.
+
+2. **F1 is precision-capped.** With recall at 0.988 (near-perfect), the F1 ceiling is
+   entirely determined by how tightly output matches ground truth. Extra hedging,
+   section headers, and filler dilute precision.
+
+3. **Further denoising yields diminishing returns.** We went from 11K → 5.3K input
+   tokens with near-zero F1 impact. The retrieval is clean; the remaining quality
+   gap is in the synthesis prompt.
+
+**Conclusion:** The next optimization lever is **prompt engineering** — targeting
+conciseness, direct-answer style, and removal of structural overhead in the summary
+prompt.

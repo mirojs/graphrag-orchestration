@@ -951,8 +951,8 @@ Response:"""
         # the seed community (the "target" cluster) are often noise.  This step looks up
         # each entity's community_id and applies a score penalty to off-community
         # entities, which cascades into lower chunk budgets via score-weighted allocation.
-        # Toggle: set DENOISE_COMMUNITY_FILTER=1 to enable.
-        community_filter_enabled = os.environ.get("DENOISE_COMMUNITY_FILTER", "") == "1"
+        # Toggle: set DENOISE_COMMUNITY_FILTER=0 to disable.
+        community_filter_enabled = os.environ.get("DENOISE_COMMUNITY_FILTER", "1") == "1"
         community_stats: Dict[str, Any] = {"enabled": community_filter_enabled}
 
         if community_filter_enabled and self.text_store and hasattr(self.text_store, 'get_entity_communities'):
@@ -1000,16 +1000,16 @@ Response:"""
         # Runs AFTER community penalty so it detects the amplified gaps between
         # in-community (full score) and out-of-community (0.3× score) entities.
         # Detects the largest relative score drop and prunes entities below it.
-        # Toggle: set DENOISE_SCORE_GAP=1 to enable.
+        # Toggle: set DENOISE_SCORE_GAP=0 to disable.
         # SCORE_GAP_THRESHOLD: minimum relative drop (fraction) to trigger pruning.
         # E.g. 0.5 means a 50%+ drop from entity[i] to entity[i+1] triggers pruning.
         # SCORE_GAP_MIN_KEEP: minimum number of entities to keep (never prune below this).
-        score_gap_enabled = os.environ.get("DENOISE_SCORE_GAP", "") == "1"
+        score_gap_enabled = os.environ.get("DENOISE_SCORE_GAP", "1") == "1"
         score_gap_stats: Dict[str, Any] = {"enabled": score_gap_enabled}
 
         if score_gap_enabled and len(selected_entities) > 2:
             gap_threshold = float(os.environ.get("SCORE_GAP_THRESHOLD", "0.5"))
-            min_keep = int(os.environ.get("SCORE_GAP_MIN_KEEP", "3"))
+            min_keep = int(os.environ.get("SCORE_GAP_MIN_KEEP", "6"))
 
             # Sort entities by (potentially penalised) PPR score descending
             sorted_by_score = sorted(
@@ -1062,8 +1062,8 @@ Response:"""
         # --- Score-weighted chunk allocation (February 10, 2026) ---
         # Instead of giving every entity uniform limit_per_entity=12, allocate
         # proportional to PPR score.  Top entity gets full limit; noise entities get fewer.
-        # Toggle: set DENOISE_SCORE_WEIGHTED=1 to enable (off by default for safe rollout).
-        score_weighted_enabled = os.environ.get("DENOISE_SCORE_WEIGHTED", "") == "1"
+        # Toggle: set DENOISE_SCORE_WEIGHTED=0 to disable.
+        score_weighted_enabled = os.environ.get("DENOISE_SCORE_WEIGHTED", "1") == "1"
         DEFAULT_LIMIT = 12  # matches text_store default limit_per_entity
 
         entity_budgets: Dict[str, int] = {}
@@ -1204,9 +1204,9 @@ Response:"""
             # After exact MD5 dedup, catch near-duplicate chunks that differ only in
             # whitespace, punctuation, or minor OCR artefacts.  Uses word-level Jaccard
             # similarity (no external API calls → zero added latency).
-            # Toggle: DENOISE_SEMANTIC_DEDUP=1 to enable.
-            semantic_dedup_enabled = os.environ.get("DENOISE_SEMANTIC_DEDUP", "") == "1"
-            semantic_dedup_threshold = float(os.environ.get("SEMANTIC_DEDUP_THRESHOLD", "0.85"))
+            # Toggle: DENOISE_SEMANTIC_DEDUP=0 to disable.
+            semantic_dedup_enabled = os.environ.get("DENOISE_SEMANTIC_DEDUP", "1") == "1"
+            semantic_dedup_threshold = float(os.environ.get("SEMANTIC_DEDUP_THRESHOLD", "0.92"))
             semantic_dedup_stats: Dict[str, Any] = {"enabled": semantic_dedup_enabled}
             
             if semantic_dedup_enabled and len(deduped_chunks) > 1:

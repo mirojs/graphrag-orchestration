@@ -186,6 +186,37 @@ class Neo4jTextUnitStore:
 
         return rows
     
+    async def get_entity_communities(self, entity_names: List[str]) -> Dict[str, Optional[int]]:
+        """Batch-fetch Louvain community_id for a list of entity names.
+
+        Returns a dict mapping entity_name → community_id (or None if missing).
+        Used by community-aware filtering in synthesis to penalise off-topic entities.
+        """
+        if not entity_names:
+            return {}
+
+        query = """
+            UNWIND $names AS ename
+            MATCH (e)
+            WHERE e.group_id = $group_id
+              AND (e:Entity OR e:`__Entity__`)
+              AND e.name = ename
+            RETURN e.name AS name, e.community_id AS community_id
+        """
+        result: Dict[str, Optional[int]] = {}
+        try:
+            with self._driver.session() as session:
+                records = session.run(
+                    query,
+                    names=entity_names,
+                    group_id=self._group_id,
+                ).data()
+            for r in records:
+                result[r["name"]] = r.get("community_id")
+        except Exception as e:
+            logger.warning("get_entity_communities_failed error=%s", str(e))
+        return result
+
     async def get_chunks_for_entities(self, entity_names: List[str]) -> Dict[str, List[Dict[str, Any]]]:
         """Get chunks for multiple entities in a single batched query (performance optimization)."""
         if not entity_names:

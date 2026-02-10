@@ -824,6 +824,56 @@ Response:"""
         if len(selected_entities) == 0:
             return [], entity_scores, {"chunks_raw": 0, "entities_selected": 0}
         
+        # --- Community-aware entity scoring (February 10, 2026 — Improvement #1.5) ---
+        # PPR expands to entities across multiple Louvain communities.  Entities outside
+        # the seed community (the "target" cluster) are often noise.  This step looks up
+        # each entity's community_id and applies a score penalty to off-community
+        # entities, which cascades into lower chunk budgets via score-weighted allocation.
+        # Toggle: set DENOISE_COMMUNITY_FILTER=1 to enable.
+        community_filter_enabled = os.environ.get("DENOISE_COMMUNITY_FILTER", "") == "1"
+        community_stats: Dict[str, Any] = {"enabled": community_filter_enabled}
+
+        if community_filter_enabled and self.text_store and hasattr(self.text_store, 'get_entity_communities'):
+            try:
+                entity_communities = await self.text_store.get_entity_communities(selected_entities)
+
+                # Identify target community from the top-scoring entities.
+                # Top-3 entities by PPR score are most likely seeds/near-seeds.
+                top_entities = sorted(selected_entities, key=lambda e: entity_scores.get(e, 0), reverse=True)[:3]
+                top_cids = [entity_communities.get(e) for e in top_entities if entity_communities.get(e) is not None]
+
+                if top_cids:
+                    # Majority vote — the most common community among top entities is the target.
+                    from collections import Counter
+                    target_community = Counter(top_cids).most_common(1)[0][0]
+
+                    COMMUNITY_PENALTY = float(os.environ.get("COMMUNITY_PENALTY", "0.3"))
+                    penalised_count = 0
+                    for ent in selected_entities:
+                        ent_cid = entity_communities.get(ent)
+                        if ent_cid is not None and ent_cid != target_community:
+                            entity_scores[ent] = entity_scores.get(ent, 0.0) * COMMUNITY_PENALTY
+                            penalised_count += 1
+
+                    community_stats.update({
+                        "target_community": target_community,
+                        "entities_in_target": len(selected_entities) - penalised_count,
+                        "entities_penalised": penalised_count,
+                        "penalty_factor": COMMUNITY_PENALTY,
+                        "top_entities_used": top_entities[:3],
+                    })
+                    logger.info(
+                        "community_filter_applied",
+                        target=target_community,
+                        penalised=penalised_count,
+                        total=len(selected_entities),
+                    )
+                else:
+                    community_stats["skipped_reason"] = "no_community_ids_on_top_entities"
+            except Exception as e:
+                logger.warning("community_filter_failed error=%s", str(e))
+                community_stats["error"] = str(e)
+
         # --- Score-weighted chunk allocation (February 10, 2026) ---
         # Instead of giving every entity uniform limit_per_entity=12, allocate
         # proportional to PPR score.  Top entity gets full limit; noise entities get fewer.
@@ -933,6 +983,7 @@ Response:"""
                 "noise_enabled": noise_enabled,
                 "score_weighted_enabled": score_weighted_enabled,
                 "entity_budgets": {e: entity_budgets.get(e, DEFAULT_LIMIT) for e in selected_entities[:10]} if score_weighted_enabled else None,
+                "community_filter": community_stats,
             }
             
             logger.info("text_chunks_retrieved", 

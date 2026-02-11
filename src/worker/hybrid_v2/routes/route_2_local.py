@@ -128,6 +128,21 @@ class LocalSearchHandler(BaseRouteHandler):
                 doc_language_spans = await self._fetch_language_spans(doc_ids)
                 logger.info("stage_2.2.5_sentence_spans", num_docs=len(doc_ids), docs_with_spans=len(doc_language_spans))
 
+        # Stage 2.2.6: Skeleton sentence enrichment (Strategy A).
+        # Query sentence vector index for top-k matches, format as supplementary
+        # evidence chunks for injection into the synthesis prompt.
+        skeleton_coverage_chunks: List[Dict[str, Any]] = []
+        if settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_V2_ENABLED:
+            try:
+                skeleton_coverage_chunks = await self._retrieve_skeleton_sentences(query)
+                if skeleton_coverage_chunks:
+                    logger.info(
+                        "stage_2.2.6_skeleton_enrichment",
+                        sentences=len(skeleton_coverage_chunks),
+                    )
+            except Exception as e:
+                logger.warning("skeleton_enrichment_failed", error=str(e))
+
         # Stage 2.3: Synthesis with Citations
         logger.info("stage_2.3_synthesis")
         synthesis_result = await self.synthesizer.synthesize(
@@ -139,6 +154,7 @@ class LocalSearchHandler(BaseRouteHandler):
             include_context=include_context,
             language_spans_by_doc=doc_language_spans if doc_language_spans else None,
             pre_fetched_chunks=pre_chunks if enable_sentence_citations else None,
+            coverage_chunks=skeleton_coverage_chunks if skeleton_coverage_chunks else None,
         )
         logger.info("stage_2.3_complete")
         
@@ -222,5 +238,114 @@ class LocalSearchHandler(BaseRouteHandler):
                     "raw_extractions": synthesis_result["raw_extractions"],
                     "processing_mode": synthesis_result.get("processing_mode")
                 } if synthesis_result.get("raw_extractions") else {}),
+                # Skeleton enrichment metadata (Strategy A)
+                **({"skeleton_sentences_injected": len(skeleton_coverage_chunks)} if skeleton_coverage_chunks else {}),
             }
         )
+
+    # ================================================================
+    # SKELETON ENRICHMENT (Strategy A)
+    # ================================================================
+
+    async def _retrieve_skeleton_sentences(self, query: str) -> List[Dict[str, Any]]:
+        """Query the sentence vector index and format results as pseudo-chunks.
+        
+        Returns list of chunk-format dicts compatible with `coverage_chunks`
+        parameter of `synthesize()`.
+        """
+        # 1. Embed query with Voyage
+        query_embedding = await self._get_query_embedding(query)
+        if not query_embedding:
+            logger.warning("skeleton_no_query_embedding")
+            return []
+        
+        # 2. Vector search against sentence_embeddings_v2 index
+        top_k = settings.SKELETON_SENTENCE_TOP_K
+        threshold = settings.SKELETON_SIMILARITY_THRESHOLD
+        group_id = self.group_id
+        
+        cypher = """
+        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+        YIELD node AS sent, score
+        WHERE sent.group_id = $group_id AND score >= $threshold
+        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
+        OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        RETURN sent.id AS sentence_id,
+               sent.text AS text,
+               sent.source AS source,
+               sent.section_path AS section_path,
+               sent.parent_text AS parent_text,
+               sent.page AS page,
+               sent.chunk_id AS chunk_id,
+               sent.document_id AS document_id,
+               chunk.text AS chunk_text,
+               doc.title AS document_title,
+               sec.path_key AS section_key,
+               score
+        ORDER BY score DESC
+        """
+        
+        sentence_results = []
+        try:
+            # Run sync Neo4j query in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            
+            def _run_query():
+                with self.neo4j_driver.session() as session:
+                    records = session.run(
+                        cypher,
+                        embedding=query_embedding,
+                        group_id=group_id,
+                        top_k=top_k,
+                        threshold=threshold,
+                    )
+                    return [dict(r) for r in records]
+            
+            sentence_results = await loop.run_in_executor(self._executor, _run_query)
+        except Exception as e:
+            logger.warning("skeleton_vector_query_failed", error=str(e))
+            return []
+        
+        if not sentence_results:
+            return []
+        
+        # 3. Format as coverage_chunks (pseudo-chunks for synthesis injection)
+        # The synthesis pipeline processes these as regular text chunks,
+        # merging them into the context window alongside entity-retrieved chunks.
+        coverage_chunks = []
+        for result in sentence_results:
+            # Use parent_text for richer context, fall back to sentence text
+            display_text = result.get("parent_text") or result.get("text", "")
+            if not display_text:
+                continue
+            
+            # Build section path for citation
+            section = result.get("section_key") or result.get("section_path", "")
+            
+            # Prefix with source tag so LLM knows this is supplementary evidence
+            source_tag = result.get("source", "paragraph")
+            tagged_text = (
+                f"[Skeleton: {source_tag}, sim={result.get('score', 0):.3f}] "
+                f"{display_text}"
+            )
+            
+            coverage_chunks.append({
+                "text": tagged_text,
+                "metadata": {
+                    "document_id": result.get("document_id", ""),
+                    "document_title": result.get("document_title", "Unknown"),
+                    "section_path_key": section,
+                    "page_number": result.get("page"),
+                    "source": f"skeleton_{source_tag}",
+                    "skeleton_sentence_id": result.get("sentence_id", ""),
+                    "skeleton_score": result.get("score", 0.0),
+                },
+            })
+        
+        logger.info(
+            "skeleton_sentences_retrieved",
+            total=len(sentence_results),
+            coverage_chunks=len(coverage_chunks),
+        )
+        return coverage_chunks

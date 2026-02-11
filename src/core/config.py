@@ -60,6 +60,19 @@ class Settings(BaseSettings):
     VOYAGE_V2_SIMILARITY_THRESHOLD: float = 0.87  # SIMILAR_TO edge threshold (raised from 0.85 for V2)
     
     # ========================================================================
+    # Skeleton Sentence Enrichment (Strategy A)
+    # See ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md for design
+    # Extracts sentence-level nodes from chunks, embeds with Voyage, stores in Neo4j.
+    # Route 2 queries the sentence index and injects top-k matches as supplementary
+    # evidence into the synthesis prompt.  Benchmark: +289% F1, +36% containment.
+    # ========================================================================
+    SKELETON_ENRICHMENT_ENABLED: bool = False  # Master switch for sentence extraction + injection
+    SKELETON_SENTENCE_TOP_K: int = 8  # Top-k sentence matches to inject into Route 2 prompt
+    SKELETON_SIMILARITY_THRESHOLD: float = 0.45  # Min cosine similarity for sentence retrieval
+    SKELETON_MIN_SENTENCE_CHARS: int = 30  # Minimum characters for a valid sentence
+    SKELETON_MIN_SENTENCE_WORDS: int = 5  # Minimum words for a valid sentence
+    
+    # ========================================================================
     # Algorithm Version Control
     # See ARCHITECTURE_PLAN_FULLSTACK_2026-01-30.md Phase 8 for details
     # ========================================================================

@@ -269,6 +269,31 @@ class LazyGraphRAGIndexingPipeline:
         self.neo4j_store.upsert_text_chunks_batch(group_id, all_chunks)
         stats["chunks"] = len(all_chunks)
 
+        # 4.1) Skeleton: Extract sentence nodes, embed, persist (Strategy A).
+        # Guard: only run when feature flag is on AND Voyage V2 is enabled.
+        skeleton_enabled = settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_V2_ENABLED
+        if skeleton_enabled:
+            try:
+                skeleton_stats = await self._build_sentence_skeleton(
+                    group_id=group_id,
+                    chunks=all_chunks,
+                    chunk_to_doc_id=chunk_to_doc_id,
+                )
+                stats["skeleton_sentences"] = skeleton_stats.get("sentences_created", 0)
+                stats["skeleton_sentences_embedded"] = skeleton_stats.get("sentences_embedded", 0)
+                logger.info(
+                    "step_4.1_skeleton_complete",
+                    sentences=stats["skeleton_sentences"],
+                    embedded=stats["skeleton_sentences_embedded"],
+                )
+            except Exception as e:
+                logger.warning(f"step_4.1_skeleton_failed: {e}")
+                stats["skeleton_sentences"] = 0
+                stats["skeleton_error"] = str(e)
+        else:
+            logger.debug("step_4.1_skeleton_skipped (SKELETON_ENRICHMENT_ENABLED=%s, VOYAGE_V2_ENABLED=%s)",
+                         settings.SKELETON_ENRICHMENT_ENABLED, settings.VOYAGE_V2_ENABLED)
+
         # 4.5) Build Section graph from chunk metadata.
         section_stats = await self._build_section_graph(group_id, all_chunks, chunk_to_doc_id)
         stats["sections"] = section_stats.get("sections_created", 0)
@@ -616,6 +641,83 @@ class LazyGraphRAGIndexingPipeline:
             "wrong_dim": wrong_dim_count,
             "property": "embedding_v2" if self.use_v2_embedding_property else "embedding",
         })
+
+    async def _build_sentence_skeleton(
+        self,
+        group_id: str,
+        chunks: List[TextChunk],
+        chunk_to_doc_id: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """Step 4.1: Extract sentence nodes, embed with Voyage, persist in Neo4j.
+        
+        This is the indexing half of Strategy A skeleton enrichment.
+        Creates :Sentence nodes linked to :TextChunk via PART_OF edges,
+        with Voyage embeddings for sentence-level vector search.
+        
+        The query half (Route 2 injection) is in route_2_local.py.
+        """
+        from src.worker.services.sentence_extraction_service import (
+            extract_sentences_from_chunks,
+        )
+        from src.worker.hybrid_v2.services.neo4j_store import Sentence
+        
+        stats: Dict[str, Any] = {"sentences_created": 0, "sentences_embedded": 0}
+        
+        # Build chunk→section_path map from chunk metadata
+        chunk_section_map: Dict[str, str] = {}
+        for chunk in chunks:
+            metadata = chunk.metadata or {}
+            section_path = self._parse_section_path(metadata)
+            if section_path:
+                chunk_section_map[chunk.id] = " > ".join(section_path)
+        
+        # Extract sentences from all chunks (with cross-chunk dedup)
+        raw_sentences = extract_sentences_from_chunks(chunks, chunk_section_map)
+        if not raw_sentences:
+            logger.info("skeleton_no_sentences_extracted")
+            return stats
+        
+        logger.info(f"skeleton_extracted_sentences: {len(raw_sentences)} from {len(chunks)} chunks")
+        
+        # Embed sentences with Voyage (contextualized)
+        sentence_texts = [s["text"] for s in raw_sentences]
+        sentence_embeddings: List[Optional[List[float]]] = [None] * len(sentence_texts)
+        
+        try:
+            # Use the pipeline's embedder (Voyage V2 via aget_text_embedding_batch)
+            embeddings = await self.embedder.aget_text_embedding_batch(sentence_texts)
+            for i, emb in enumerate(embeddings):
+                if emb and isinstance(emb, list) and len(emb) > 0:
+                    sentence_embeddings[i] = emb
+            stats["sentences_embedded"] = sum(1 for e in sentence_embeddings if e is not None)
+            logger.info(f"skeleton_embedded: {stats['sentences_embedded']}/{len(sentence_texts)} sentences")
+        except Exception as e:
+            logger.warning(f"skeleton_embedding_failed: {e}")
+            # Continue without embeddings — nodes are still useful for graph traversal
+        
+        # Convert to Sentence dataclass instances
+        sentence_objects: List[Sentence] = []
+        for raw, emb in zip(raw_sentences, sentence_embeddings):
+            sentence_objects.append(Sentence(
+                id=raw["id"],
+                text=raw["text"],
+                chunk_id=raw["chunk_id"],
+                document_id=raw["document_id"],
+                source=raw["source"],
+                index_in_chunk=raw["index_in_chunk"],
+                section_path=raw.get("section_path", ""),
+                page=raw.get("page"),
+                confidence=raw.get("confidence", 1.0),
+                embedding_v2=emb,
+                tokens=raw.get("tokens", 0),
+                parent_text=raw.get("parent_text"),
+            ))
+        
+        # Persist in Neo4j
+        count = self.neo4j_store.upsert_sentences_batch(group_id, sentence_objects)
+        stats["sentences_created"] = count
+        
+        return stats
 
     async def _extract_entities_and_relationships(
         self,

@@ -93,6 +93,31 @@ class TextChunk:
 
 
 @dataclass
+class Sentence:
+    """Sentence-level node for skeleton enrichment (Strategy A).
+    
+    Extracted from TextChunks via spaCy (body text) or DI metadata (table rows,
+    figure captions). Embedded with Voyage voyage-context-3 for sentence-level
+    semantic search. Used by Route 2 to inject supplementary evidence into the
+    synthesis prompt.
+    
+    See ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md for design rationale.
+    """
+    id: str
+    text: str
+    chunk_id: str  # Parent TextChunk ID
+    document_id: str
+    source: str  # "paragraph" | "table_row" | "figure_caption"
+    index_in_chunk: int  # Position within parent chunk
+    section_path: str = ""  # Section hierarchy path
+    page: Optional[int] = None
+    confidence: float = 1.0
+    embedding_v2: Optional[List[float]] = None  # Voyage 2048-dim
+    tokens: int = 0
+    parent_text: Optional[str] = None  # Parent paragraph for "sentence search, paragraph display"
+
+
+@dataclass
 class Document:
     """Document metadata."""
     id: str
@@ -243,6 +268,12 @@ class Neo4jStoreV3:
             "CREATE INDEX keyvalue_group IF NOT EXISTS FOR (kv:KeyValue) ON (kv.group_id)",
             "CREATE INDEX keyvalue_key IF NOT EXISTS FOR (kv:KeyValue) ON (kv.key)",
             
+            # Sentence nodes (skeleton enrichment Strategy A)
+            "CREATE CONSTRAINT sentence_id IF NOT EXISTS FOR (s:Sentence) REQUIRE s.id IS UNIQUE",
+            "CREATE INDEX sentence_group IF NOT EXISTS FOR (s:Sentence) ON (s.group_id)",
+            "CREATE INDEX sentence_chunk IF NOT EXISTS FOR (s:Sentence) ON (s.chunk_id)",
+            "CREATE INDEX sentence_doc IF NOT EXISTS FOR (s:Sentence) ON (s.document_id)",
+            
             # Regular indexes for filtering
             "CREATE INDEX entity_group IF NOT EXISTS FOR (e:Entity) ON (e.group_id)",
             "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
@@ -325,6 +356,16 @@ class Neo4jStoreV3:
             """
             CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
             FOR (t:TextChunk) ON (t.embedding_v2)
+            OPTIONS {indexConfig: {
+                `vector.dimensions`: 2048,
+                `vector.similarity_function`: 'cosine'
+            }}
+            """,
+            # Skeleton: Sentence-level embeddings with Voyage (2048-dim)
+            # Used by Route 2 skeleton enrichment (Strategy A) for sentence-level retrieval
+            """
+            CREATE VECTOR INDEX sentence_embeddings_v2 IF NOT EXISTS
+            FOR (s:Sentence) ON (s.embedding_v2)
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
@@ -1746,6 +1787,181 @@ class Neo4jStoreV3:
             result = session.run(query, kvps=kvps_to_create, group_id=group_id)
             count = result.single()["count"]
             logger.info(f"Created {count} KeyValue nodes for group {group_id}")
+    
+    # ==================== Sentence Operations (Skeleton Enrichment) ====================
+    
+    def upsert_sentences_batch(self, group_id: str, sentences: List["Sentence"]) -> int:
+        """Batch insert/update Sentence nodes with embeddings and structural edges.
+        
+        Creates :Sentence nodes linked to parent :TextChunk via PART_OF edges,
+        and NEXT edges between sequential sentences within the same chunk.
+        """
+        if not sentences:
+            return 0
+        
+        query = """
+        UNWIND $sentences AS s
+        MERGE (sent:Sentence {id: s.id})
+        SET sent.text = s.text,
+            sent.chunk_id = s.chunk_id,
+            sent.document_id = s.document_id,
+            sent.source = s.source,
+            sent.index_in_chunk = s.index_in_chunk,
+            sent.section_path = s.section_path,
+            sent.page = s.page,
+            sent.confidence = s.confidence,
+            sent.tokens = s.tokens,
+            sent.parent_text = s.parent_text,
+            sent.group_id = $group_id,
+            sent.updated_at = datetime()
+        
+        // Store Voyage embedding (2048-dim)
+        WITH sent, s
+        FOREACH (_ IN CASE WHEN s.embedding_v2 IS NOT NULL AND size(s.embedding_v2) > 0 THEN [1] ELSE [] END |
+            SET sent.embedding_v2 = s.embedding_v2
+        )
+        
+        // PART_OF edge to parent TextChunk
+        WITH sent, s
+        MATCH (chunk:TextChunk {id: s.chunk_id, group_id: $group_id})
+        MERGE (sent)-[:PART_OF]->(chunk)
+        
+        // IN_DOCUMENT edge
+        WITH sent, s
+        OPTIONAL MATCH (d:Document {id: s.document_id, group_id: $group_id})
+        FOREACH (_ IN CASE WHEN d IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sent)-[:IN_DOCUMENT]->(d)
+        )
+        
+        // IN_SECTION edge (inherit from parent chunk)
+        WITH sent, s
+        OPTIONAL MATCH (chunk:TextChunk {id: s.chunk_id, group_id: $group_id})-[:IN_SECTION]->(sec:Section)
+        FOREACH (_ IN CASE WHEN sec IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sent)-[:IN_SECTION]->(sec)
+        )
+        
+        RETURN count(sent) AS count
+        """
+        
+        sentence_data = []
+        for s in sentences:
+            sentence_data.append({
+                "id": s.id,
+                "text": s.text,
+                "chunk_id": s.chunk_id,
+                "document_id": s.document_id,
+                "source": s.source,
+                "index_in_chunk": s.index_in_chunk,
+                "section_path": s.section_path,
+                "page": s.page,
+                "confidence": s.confidence,
+                "tokens": s.tokens,
+                "parent_text": s.parent_text or "",
+                "embedding_v2": s.embedding_v2,
+            })
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, sentences=sentence_data, group_id=group_id)
+            record = result.single()
+            count = cast(int, record["count"]) if record else 0
+            
+            # Build NEXT edges between sequential sentences within each chunk
+            self._create_sentence_next_edges(group_id, sentences)
+            
+            logger.info(f"Upserted {count} Sentence nodes for group {group_id}")
+            return count
+    
+    def _create_sentence_next_edges(self, group_id: str, sentences: List["Sentence"]) -> None:
+        """Create NEXT edges between sequential sentences within each chunk."""
+        from collections import defaultdict
+        
+        # Group sentences by chunk_id
+        chunk_sentences: Dict[str, List["Sentence"]] = defaultdict(list)
+        for s in sentences:
+            chunk_sentences[s.chunk_id].append(s)
+        
+        next_pairs = []
+        for chunk_id, chunk_sents in chunk_sentences.items():
+            sorted_sents = sorted(chunk_sents, key=lambda s: s.index_in_chunk)
+            for i in range(len(sorted_sents) - 1):
+                next_pairs.append({
+                    "from_id": sorted_sents[i].id,
+                    "to_id": sorted_sents[i + 1].id,
+                })
+        
+        if not next_pairs:
+            return
+        
+        query = """
+        UNWIND $pairs AS p
+        MATCH (a:Sentence {id: p.from_id})
+        MATCH (b:Sentence {id: p.to_id})
+        MERGE (a)-[:NEXT]->(b)
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            session.run(query, pairs=next_pairs)
+    
+    def query_sentences_by_vector(
+        self,
+        query_embedding: List[float],
+        group_id: str,
+        top_k: int = 8,
+        similarity_threshold: float = 0.45,
+    ) -> List[Dict[str, Any]]:
+        """Query Sentence nodes by vector similarity for skeleton enrichment.
+        
+        Returns sentence text + parent chunk context for LLM prompt injection.
+        Uses the sentence_embeddings_v2 vector index.
+        """
+        query = """
+        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+        YIELD node AS sent, score
+        WHERE sent.group_id = $group_id AND score >= $threshold
+        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
+        OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        RETURN sent.id AS sentence_id,
+               sent.text AS text,
+               sent.source AS source,
+               sent.section_path AS section_path,
+               sent.parent_text AS parent_text,
+               sent.page AS page,
+               sent.chunk_id AS chunk_id,
+               sent.document_id AS document_id,
+               chunk.text AS chunk_text,
+               doc.title AS document_title,
+               sec.path_key AS section_key,
+               score
+        ORDER BY score DESC
+        """
+        
+        results = []
+        with self.driver.session(database=self.database) as session:
+            records = session.run(
+                query,
+                embedding=query_embedding,
+                group_id=group_id,
+                top_k=top_k,
+                threshold=similarity_threshold,
+            )
+            for record in records:
+                results.append({
+                    "sentence_id": record["sentence_id"],
+                    "text": record["text"],
+                    "source": record["source"],
+                    "section_path": record["section_path"],
+                    "parent_text": record["parent_text"],
+                    "page": record["page"],
+                    "chunk_id": record["chunk_id"],
+                    "document_id": record["document_id"],
+                    "chunk_text": record["chunk_text"],
+                    "document_title": record["document_title"],
+                    "section_key": record["section_key"],
+                    "score": record["score"],
+                })
+        
+        return results
     
     # ==================== Document Operations ====================
     

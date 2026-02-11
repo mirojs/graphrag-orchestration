@@ -10,6 +10,7 @@ import { AuthenticationResult, EventType, PublicClientApplication } from "@azure
 import "./index.css";
 
 import Chat from "./pages/chat/Chat";
+import Dashboard from "./pages/dashboard/Dashboard";
 import LayoutWrapper from "./layoutWrapper";
 import i18next from "./i18n/config";
 import { msalConfig, useLogin } from "./authConfig";
@@ -29,6 +30,17 @@ const router = createHashRouter([
                 path: "files",
                 lazy: async () => {
                     const { default: Component } = await import("./pages/files/Files");
+                    return { Component };
+                }
+            },
+            {
+                path: "dashboard",
+                element: <Dashboard />
+            },
+            {
+                path: "admin",
+                lazy: async () => {
+                    const { default: Component } = await import("./pages/admin/AdminDashboard");
                     return { Component };
                 }
             },

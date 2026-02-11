@@ -1,0 +1,272 @@
+/* ============================
+   Admin Management Dashboard
+   ============================ */
+
+.adminContainer {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    padding: 1.5rem;
+    gap: 1.5rem;
+    background: #f8f9fb;
+}
+
+/* header */
+.adminHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.adminTitle {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1a1a2e;
+}
+
+.statusBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.statusHealthy {
+    background: #d4edda;
+    color: #155724;
+}
+
+.statusDegraded {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.statusUnhealthy {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Stats row */
+.metricsGrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.metricCard {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.25rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.metricLabel {
+    font-size: 0.75rem;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.metricValue {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #1a1a2e;
+}
+
+.metricSub {
+    font-size: 0.75rem;
+    color: #adb5bd;
+}
+
+/* Sections */
+.section {
+    background: #fff;
+    border-radius: 12px;
+    padding: 1.25rem;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.sectionTitle {
+    margin: 0 0 1rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #1a1a2e;
+}
+
+/* Version pills */
+.versionRow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.versionPill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    background: #e9ecef;
+    color: #495057;
+}
+
+.versionDefault {
+    background: #4cc9f0;
+    color: #1a1a2e;
+}
+
+/* Plan distribution */
+.planDistRow {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.planDistLabel {
+    width: 100px;
+    font-size: 0.85rem;
+    color: #495057;
+    text-transform: capitalize;
+}
+
+.planDistBar {
+    flex: 1;
+    height: 20px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.planDistFill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.fillFree {
+    background: #868e96;
+}
+
+.fillStarter {
+    background: #17a2b8;
+}
+
+.fillProfessional {
+    background: #28a745;
+}
+
+.fillEnterprise {
+    background: #6f42c1;
+}
+
+.planDistCount {
+    width: 40px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1a1a2e;
+    text-align: right;
+}
+
+/* Table-like list */
+.userList {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.userList th,
+.userList td {
+    text-align: left;
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid #e9ecef;
+    font-size: 0.85rem;
+}
+
+.userList th {
+    color: #6c757d;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.5px;
+}
+
+.emptyRow {
+    text-align: center;
+    color: #adb5bd;
+    padding: 2rem 1rem;
+}
+
+/* Forbidden / Access denied */
+.forbiddenContainer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 0.75rem;
+    color: #dc3545;
+}
+
+.loadingContainer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    min-height: 300px;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #e9ecef;
+    border-top-color: #6f42c1;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.backLink {
+    color: #4cc9f0;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.backLink:hover {
+    text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .adminContainer {
+        padding: 1rem;
+    }
+
+    .metricsGrid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .metricsGrid {
+        grid-template-columns: 1fr;
+    }
+}

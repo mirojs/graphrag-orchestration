@@ -2,21 +2,21 @@
 JWT validation middleware for Azure Easy Auth integration.
 
 Validates JWT tokens from Azure App Service Easy Auth and extracts
-tenant claims (group_id or user_id) based on deployment type.
+tenant claims (group_id, user_id, roles) based on deployment type.
 
 Easy Auth Headers:
 - X-MS-TOKEN-AAD-ID-TOKEN: JWT token from Azure AD
 - X-MS-CLIENT-PRINCIPAL: Base64-encoded claims (backup)
 
 Token Claims:
-- B2B: groups[0] → group_id (organization tenant)
-- B2C: oid → user_id (individual tenant)
+- B2B: groups[0] → group_id (organization tenant), roles → app roles
+- B2C: oid → user_id (individual tenant), roles → app roles
 """
 
 import base64
 import json
 import logging
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Header, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -100,6 +100,23 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 # Validate and decode token
                 claims = self._decode_token(token)
                 
+                # Extract roles from token (Entra ID appRoles)
+                roles = claims.get("roles", [])
+                
+                # Build user object from token claims
+                user_info: Dict[str, Any] = {
+                    "oid": claims.get("oid"),
+                    "sub": claims.get("sub"),
+                    "name": claims.get("name"),
+                    "preferred_username": claims.get("preferred_username"),
+                    "email": claims.get("email"),
+                    "roles": roles,
+                    "groups": claims.get("groups", []),
+                    "tid": claims.get("tid"),
+                }
+                request.state.user = user_info
+                request.state.roles = roles
+                
                 # Extract tenant claims based on auth type
                 if self.auth_type == "B2B":
                     # B2B: Use groups[0] as group_id
@@ -140,7 +157,7 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                 
                 logger.info(
                     f"Authenticated request: group_id={request.state.group_id}, "
-                    f"user_id={request.state.user_id}, path={request.url.path}"
+                    f"user_id={request.state.user_id}, roles={roles}, path={request.url.path}"
                 )
                 
             elif self.require_auth:
@@ -168,6 +185,10 @@ class JWTAuthMiddleware(BaseHTTPMiddleware):
                     request.state.group_id = None
                 if not getattr(request.state, "user_id", None):
                     request.state.user_id = None
+                if not getattr(request.state, "user", None):
+                    request.state.user = {}
+                if not getattr(request.state, "roles", None):
+                    request.state.roles = []
                 
         except HTTPException as he:
             # Convert HTTPException to JSONResponse to avoid ExceptionGroup bug
@@ -334,3 +355,51 @@ def get_user_id(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="User ID not found. Authentication required."
     )
+
+
+def get_current_user(request: Request) -> Dict[str, Any]:
+    """
+    Dependency to extract the full user object from request state.
+    
+    Returns dict with: oid, sub, name, preferred_username, email, roles, groups, tid
+    
+    Raises:
+        HTTPException: If no user info available (not authenticated)
+    """
+    user = getattr(request.state, "user", None)
+    if user and user.get("oid"):
+        return user
+    
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required."
+    )
+
+
+def get_user_roles(request: Request) -> List[str]:
+    """
+    Dependency to extract user roles from request state.
+    
+    Returns list of role strings from Entra ID appRoles (e.g., ["Admin", "User"]).
+    Returns empty list if not authenticated or no roles assigned.
+    """
+    return getattr(request.state, "roles", [])
+
+
+def require_role(required_role: str):
+    """
+    Factory for a dependency that checks for a specific role.
+    
+    Usage:
+        @router.get("/admin/settings", dependencies=[Depends(require_role("Admin"))])
+        async def admin_settings(): ...
+    """
+    def _check_role(request: Request):
+        roles = getattr(request.state, "roles", [])
+        if required_role not in roles and required_role.lower() not in [r.lower() for r in roles]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Role '{required_role}' required. Your roles: {roles}"
+            )
+        return True
+    return _check_role

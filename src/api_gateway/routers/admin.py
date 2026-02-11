@@ -6,7 +6,7 @@ Provides administrative endpoints for:
 - System configuration
 - Health and diagnostics
 
-Requires admin role (checked via JWT claim or API key).
+Requires admin role (checked via JWT appRole claim or API key).
 """
 
 from typing import Optional, Dict, Any, List
@@ -44,7 +44,7 @@ async def verify_admin(
     """
     Verify admin access via:
     1. X-Admin-Key header matching ADMIN_API_KEY env var
-    2. JWT claim with admin role (if auth enabled)
+    2. JWT appRole claim with 'Admin' role (set in Entra ID app registration)
     
     Returns True if authorized, raises 403 if not.
     """
@@ -52,11 +52,17 @@ async def verify_admin(
     if ADMIN_API_KEY and x_admin_key == ADMIN_API_KEY:
         return True
     
-    # Check JWT claims for admin role
-    if hasattr(request.state, "user"):
-        user = request.state.user
-        roles = user.get("roles", [])
-        if "admin" in roles or "Admin" in roles:
+    # Check JWT claims for admin role (populated by JWTAuthMiddleware)
+    roles = getattr(request.state, "roles", [])
+    if roles:
+        if any(r.lower() == "admin" for r in roles):
+            user = getattr(request.state, "user", {})
+            logger.info(
+                "admin_access_via_role",
+                user_id=user.get("oid"),
+                username=user.get("preferred_username"),
+                roles=roles,
+            )
             return True
     
     # For development: allow if no ADMIN_API_KEY is set
@@ -66,7 +72,7 @@ async def verify_admin(
     
     raise HTTPException(
         status_code=403,
-        detail="Admin access required. Provide X-Admin-Key header or have admin role."
+        detail="Admin access required. Provide X-Admin-Key header or have Admin role assigned in Entra ID."
     )
 
 

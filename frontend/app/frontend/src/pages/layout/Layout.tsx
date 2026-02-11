@@ -59,11 +59,14 @@ const Layout = () => {
                         <span className={styles.navLabel}>Files</span>
                     </NavLink>
                     <div className={styles.navDivider} />
-                    <div className={`${styles.navItem} ${styles.navItemDisabled}`} title="Coming soon">
+                    <NavLink
+                        to="/dashboard"
+                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
+                        onClick={closeSidebar}
+                    >
                         <span className={styles.navIcon}>📊</span>
                         <span className={styles.navLabel}>Dashboard</span>
-                        <span className={styles.navBadge}>Soon</span>
-                    </div>
+                    </NavLink>
 
                     {/* Bottom spacer pushes version to bottom */}
                     <div className={styles.navSpacer} />

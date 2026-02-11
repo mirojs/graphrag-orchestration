@@ -19,6 +19,7 @@ from src.api_gateway.routers import (
     spa, files, chat_history, file_metadata, speech,
 )
 from src.api_gateway.routers.admin import router as admin_router
+from src.api_gateway.routers.dashboard import router as dashboard_router
 from src.worker.hybrid_v2.routers.document_lifecycle import router as document_lifecycle_router
 from src.worker.hybrid_v2.routers.maintenance import router as maintenance_router
 
@@ -364,6 +365,12 @@ app.include_router(maintenance_router, prefix="/maintenance", tags=["maintenance
 # ============================================================================
 # Requires X-Admin-Key header or admin role in JWT
 app.include_router(admin_router, tags=["admin"])
+
+# ============================================================================
+# Dashboard API - Personal & Management Dashboards
+# ============================================================================
+# Personal endpoints require auth; admin endpoints require Admin role
+app.include_router(dashboard_router, tags=["dashboard"])
 
 # ============================================================================
 # V3 Endpoints - Alternative DRIFT-based Implementation

@@ -175,7 +175,7 @@ if __name__ == "__main__":  # pragma: no cover
 
     use_int_vectorization = os.getenv("USE_FEATURE_INT_VECTORIZATION", "").lower() == "true"
     use_multimodal = os.getenv("USE_MULTIMODAL", "").lower() == "true"
-    use_acls = os.getenv("AZURE_USE_AUTHENTICATION", "").lower() == "true"
+    use_acls = os.getenv("AZURE_USE_AUTHENTICATION", "true").lower() == "true"
     enforce_access_control = os.getenv("AZURE_ENFORCE_ACCESS_CONTROL", "").lower() == "true"
     enable_global_documents = os.getenv("AZURE_ENABLE_GLOBAL_DOCUMENT_ACCESS", "").lower() == "true"
     dont_use_vectors = os.getenv("USE_VECTORS", "").lower() == "false"

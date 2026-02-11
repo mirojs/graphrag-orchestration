@@ -513,8 +513,9 @@ def mock_env(monkeypatch, request):
         monkeypatch.setenv("ALLOWED_ORIGIN", "https://frontend.com")
         for key, value in request.param.items():
             monkeypatch.setenv(key, value)
-        if os.getenv("AZURE_USE_AUTHENTICATION") is not None:
-            monkeypatch.delenv("AZURE_USE_AUTHENTICATION")
+        # Explicitly disable auth for non-auth test fixtures (default is now true)
+        if "AZURE_USE_AUTHENTICATION" not in request.param:
+            monkeypatch.setenv("AZURE_USE_AUTHENTICATION", "false")
 
         with mock.patch("app.AzureDeveloperCliCredential") as mock_default_azure_credential:
             mock_default_azure_credential.return_value = MockAzureCredential()

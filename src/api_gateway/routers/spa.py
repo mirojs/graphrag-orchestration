@@ -25,7 +25,7 @@ async def auth_setup() -> Dict[str, Any]:
 
     The frontend fetches this on startup to configure MSAL authentication.
     """
-    use_authentication = os.getenv("AZURE_USE_AUTHENTICATION", "").lower() == "true"
+    use_authentication = os.getenv("AZURE_USE_AUTHENTICATION", "true").lower() == "true"
     server_app_id = os.getenv("AZURE_SERVER_APP_ID", "")
     client_app_id = os.getenv("AZURE_CLIENT_APP_ID", "")
     tenant_id = os.getenv("AZURE_AUTH_TENANT_ID", os.getenv("AZURE_TENANT_ID", ""))

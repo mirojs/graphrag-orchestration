@@ -611,7 +611,7 @@ async def setup_clients():
     OPENAI_ORGANIZATION = os.getenv("OPENAI_ORGANIZATION")
 
     AZURE_TENANT_ID = os.getenv("AZURE_TENANT_ID")
-    AZURE_USE_AUTHENTICATION = os.getenv("AZURE_USE_AUTHENTICATION", "").lower() == "true"
+    AZURE_USE_AUTHENTICATION = os.getenv("AZURE_USE_AUTHENTICATION", "true").lower() == "true"
     AZURE_ENFORCE_ACCESS_CONTROL = os.getenv("AZURE_ENFORCE_ACCESS_CONTROL", "").lower() == "true"
     AZURE_ENABLE_UNAUTHENTICATED_ACCESS = os.getenv("AZURE_ENABLE_UNAUTHENTICATED_ACCESS", "").lower() == "true"
     AZURE_SERVER_APP_ID = os.getenv("AZURE_SERVER_APP_ID")

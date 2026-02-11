@@ -28,6 +28,7 @@ from src.core.services.redis_service import (
     RedisService,
     OperationStatus,
 )
+from src.core.services.quota_enforcer import enforce_plan_limits, quota_response_headers
 from src.core.config import settings
 
 logger = structlog.get_logger(__name__)
@@ -446,6 +447,7 @@ async def chat_completions(
     body: ChatRequest,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
+    quota: dict = Depends(enforce_plan_limits),
 ):
     """
     OpenAI-compatible chat completion endpoint.
@@ -457,6 +459,8 @@ async def chat_completions(
     - Async (global/drift): Returns 202 Accepted with job_id for polling
     
     Set `stream=true` for streaming mode (recommended for Routes 3/4).
+    
+    Rate limited by plan tier — returns 429 with Retry-After when quota exhausted.
     """
     # Extract user query
     user_messages = [msg for msg in body.messages if msg.role == "user"]
@@ -480,6 +484,7 @@ async def chat_completions(
         return StreamingResponse(
             _stream_chat_response(body, group_id, user_id),
             media_type="text/event-stream",
+            headers=quota_response_headers(quota),
         )
     
     # Non-streaming: check if route should be async
@@ -492,7 +497,7 @@ async def chat_completions(
         result = await _execute_query(query, approach, group_id, body.folder_id)
         
         response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
-        return ChatResponse(
+        chat_resp = ChatResponse(
             id=response_id,
             created=int(time.time()),
             model=f"graphrag-{result.get('route_used', approach).lower()}",
@@ -506,6 +511,10 @@ async def chat_completions(
                 )
             ],
             usage=ChatUsage(**result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})),
+        )
+        return JSONResponse(
+            content=chat_resp.model_dump(),
+            headers=quota_response_headers(quota),
         )
         
     except Exception as e:

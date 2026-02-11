@@ -25,6 +25,7 @@ from src.core.roles import (
     UserProfile,
     resolve_user_profile,
 )
+from src.core.services.quota_enforcer import get_quota_enforcer
 
 logger = structlog.get_logger(__name__)
 
@@ -119,10 +120,21 @@ async def get_my_profile(
 
     This is the primary endpoint for the personal dashboard.
     """
-    # Resolve plan from billing database (TODO: integrate with billing service)
-    # For now, admin users get Enterprise, others get Free
+    user_id = user.get("oid", "")
+
+    # Resolve plan from quota enforcer (Redis-cached) with fallback
+    try:
+        enforcer = await get_quota_enforcer()
+        plan_tier = await enforcer.get_plan(user_id)
+        usage = await enforcer.get_usage(user_id)
+    except Exception:
+        plan_tier = PlanTier.FREE
+        usage = {"queries_today": 0, "queries_this_month": 0}
+
+    # Admin override: admins get Enterprise if they have no explicit plan
     is_admin = any(r.lower() == "admin" for r in user.get("roles", []))
-    plan_tier = PlanTier.ENTERPRISE if is_admin else PlanTier.FREE
+    if is_admin and plan_tier == PlanTier.FREE:
+        plan_tier = PlanTier.ENTERPRISE
 
     # Detect billing type from auth middleware
     auth_type = getattr(request.app.state, "auth_type", "B2B")
@@ -130,8 +142,6 @@ async def get_my_profile(
 
     profile = resolve_user_profile(user, plan_tier=plan_tier, billing_type=billing_type)
 
-    # TODO: Query actual usage from analytics store (Cosmos DB / App Insights)
-    # For now return placeholder data
     limits = profile.plan_limits or PLAN_DEFINITIONS[PlanTier.FREE]
 
     features = {
@@ -154,8 +164,8 @@ async def get_my_profile(
         plan=profile.plan.value,
         plan_limits=profile.plan_limits,
         billing_type=billing_type,
-        queries_today=profile.queries_today,
-        queries_this_month=profile.queries_this_month,
+        queries_today=usage["queries_today"],
+        queries_this_month=usage["queries_this_month"],
         documents_count=profile.documents_count,
         storage_used_gb=profile.storage_used_gb,
         features=features,
@@ -169,21 +179,33 @@ async def get_my_usage(
     """
     Get detailed usage statistics for the current user.
     """
-    # TODO: Query actual usage from analytics store
+    user_id = user.get("oid", "")
+
+    # Get plan and usage from quota enforcer
+    try:
+        enforcer = await get_quota_enforcer()
+        plan_tier = await enforcer.get_plan(user_id)
+        usage = await enforcer.get_usage(user_id)
+    except Exception:
+        plan_tier = PlanTier.FREE
+        usage = {"queries_today": 0, "queries_this_month": 0}
+
     is_admin = any(r.lower() == "admin" for r in user.get("roles", []))
-    plan_tier = PlanTier.ENTERPRISE if is_admin else PlanTier.FREE
+    if is_admin and plan_tier == PlanTier.FREE:
+        plan_tier = PlanTier.ENTERPRISE
+
     limits = PLAN_DEFINITIONS[plan_tier]
 
     return UsageStatsResponse(
-        queries_today=0,
-        queries_this_month=0,
+        queries_today=usage["queries_today"],
+        queries_this_month=usage["queries_this_month"],
         queries_limit_day=limits.queries_per_day,
         queries_limit_month=limits.queries_per_month,
-        documents_count=0,
+        documents_count=0,  # TODO: count from blob/cosmos
         documents_limit=limits.max_documents,
-        storage_used_gb=0.0,
+        storage_used_gb=0.0,  # TODO: calculate from blob
         storage_limit_gb=limits.max_storage_gb,
-        recent_queries=[],
+        recent_queries=[],  # TODO: from Cosmos usage records
         top_topics=[],
     )
 
@@ -196,8 +218,17 @@ async def get_available_plans(
     Get available payment plans and the user's current plan.
     Used for the plan upgrade/comparison UI.
     """
+    user_id = user.get("oid", "")
+
+    try:
+        enforcer = await get_quota_enforcer()
+        current_plan = await enforcer.get_plan(user_id)
+    except Exception:
+        current_plan = PlanTier.FREE
+
     is_admin = any(r.lower() == "admin" for r in user.get("roles", []))
-    current_plan = PlanTier.ENTERPRISE if is_admin else PlanTier.FREE
+    if is_admin and current_plan == PlanTier.FREE:
+        current_plan = PlanTier.ENTERPRISE
 
     plans = {}
     for tier, limits in PLAN_DEFINITIONS.items():

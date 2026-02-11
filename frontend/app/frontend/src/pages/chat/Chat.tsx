@@ -301,6 +301,17 @@ const Chat = () => {
             if (!response.body) {
                 throw Error("No response body");
             }
+            if (response.status === 429) {
+                const errorData = await response.json().catch(() => null);
+                const detail = errorData?.detail;
+                const plan = detail?.plan || "free";
+                const dailyLimit = detail?.daily_limit || "?";
+                const upgradeUrl = detail?.upgrade_url || "/dashboard#plans";
+                throw Error(
+                    `You've reached your daily query limit (${dailyLimit} queries on the ${plan} plan). ` +
+                    `Visit your [dashboard](${upgradeUrl}) to upgrade your plan.`
+                );
+            }
             if (response.status > 299 || !response.ok) {
                 throw Error(`Request failed with status ${response.status}`);
             }

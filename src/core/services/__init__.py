@@ -15,6 +15,12 @@ from .redis_service import (
     Operation,
     Job,
 )
+from .quota_enforcer import (
+    QuotaEnforcer,
+    get_quota_enforcer,
+    enforce_plan_limits,
+    quota_response_headers,
+)
 
 __all__ = [
     "UsageTracker",
@@ -30,4 +36,8 @@ __all__ = [
     "OperationStatus",
     "Operation",
     "Job",
+    "QuotaEnforcer",
+    "get_quota_enforcer",
+    "enforce_plan_limits",
+    "quota_response_headers",
 ]

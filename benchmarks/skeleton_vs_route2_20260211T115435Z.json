@@ -1,0 +1,575 @@
+{
+  "timestamp": "20260211T115435Z",
+  "config": {
+    "api_url": "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+    "group_id": "test-5pdfs-v2-fix2",
+    "response_type": "summary",
+    "skeleton_top_k": 5,
+    "expand_window": 2,
+    "similarity_threshold": 0.9,
+    "synthesis_model": "gpt-5.1"
+  },
+  "skeleton_stats": {
+    "sentences": 178,
+    "paragraphs": 14,
+    "sections": 12,
+    "chunks": 18,
+    "edges_total": 568,
+    "edges_deterministic": 550,
+    "edges_semantic (RELATED_TO)": 18,
+    "edge_types": {
+      "PART_OF": 384,
+      "NEXT": 166,
+      "RELATED_TO": 18
+    },
+    "edge_budget_ratio": 0.1,
+    "edge_budget_ok": true,
+    "metadata_paragraph_text_pct": 100.0,
+    "metadata_prev_next_pct": 97.2
+  },
+  "results": [
+    {
+      "qid": "Q-L1",
+      "query": "Who is the **Agent** in the property management agreement?",
+      "is_negative": false,
+      "expected": "`Walt Flood Realty` (a Hawaii sole proprietorship)",
+      "baseline": {
+        "response": "## Summary\n\nThe **Agent** in the property management agreement is **Walt Flood Realty and its Principal Broker**. [1][2] The agreement explicitly identifies \"AGENT: Walt Flood Realty, It's Principal Broker\" in the heading of the Property Management Agreement for short term and/or vacation/holiday rentals. [1][2]\n\n## Key Points\n\n- The Property Management Agreement designates **Walt Flood Realty** as the **Agent**. [1][2]  \n- The designation also expressly includes **its Principal Broker** as part",
+        "elapsed_ms": 6747,
+        "context_tokens": 0,
+        "chunks_used": 2,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.08108108108108109,
+          "containment": 0.42857142857142855,
+          "precision": 0.07692307692307693,
+          "recall": 0.42857142857142855,
+          "f1_score": 0.13043478260869565
+        }
+      },
+      "enriched": {
+        "response": "The **Agent** in the property management agreement is **Walt Flood Realty**. [1][2]",
+        "elapsed_ms": 858,
+        "context_tokens": 725,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.3076923076923077,
+          "containment": 0.2857142857142857,
+          "precision": 0.18181818181818182,
+          "recall": 0.2857142857142857,
+          "f1_score": 0.2222222222222222
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 21,
+        "tokens_added": 423,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.6021,
+          0.5736,
+          0.535,
+          0.5326,
+          0.5325
+        ]
+      },
+      "delta": {
+        "containment": -0.1429,
+        "f1_score": 0.0918,
+        "precision": 0.1049,
+        "recall": -0.1429
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L2",
+      "query": "Who is the **Owner** in the property management agreement?",
+      "is_negative": false,
+      "expected": "`Contoso Ltd.`",
+      "baseline": {
+        "response": "## Summary\n\nThe requested information was not found in the available documents. The provided excerpts from the Property Management Agreement identify the **Agent** as “Walt Flood Realty, It's Principal Broker” and refer generically to “Owner,” but do not state the Owner’s name or identity. [1][2]\n\nThe Builder’s Limited Warranty documents relate to Contoso Ltd. and Fabrikam Inc. in a separate builder–buyer context and do not identify the Owner under the Property Management Agreement either. [3][4",
+        "elapsed_ms": 7105,
+        "context_tokens": 0,
+        "chunks_used": 5,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.0,
+          "containment": 1.0,
+          "precision": 0.024096385542168676,
+          "recall": 1.0,
+          "f1_score": 0.047058823529411764
+        }
+      },
+      "enriched": {
+        "response": "The **Owner** in the property management agreement is **Contoso Ltd.** [1]",
+        "elapsed_ms": 736,
+        "context_tokens": 1675,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.3157894736842105,
+          "containment": 1.0,
+          "precision": 0.2,
+          "recall": 1.0,
+          "f1_score": 0.33333333333333337
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 19,
+        "tokens_added": 367,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.5249,
+          0.5175,
+          0.4968,
+          0.4618,
+          0.4617
+        ]
+      },
+      "delta": {
+        "containment": 0.0,
+        "f1_score": 0.2863,
+        "precision": 0.1759,
+        "recall": 0.0
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L3",
+      "query": "What is the managed property address in the property management agreement?",
+      "is_negative": false,
+      "expected": "`456 Palm Tree Avenue, Honolulu, HI 96815`",
+      "baseline": {
+        "response": "## Summary\n\nThe managed property address specified in the Property Management Agreement is **456 Palm Tree Avenue, Honolulu, HI 96815**.[1]\n\n## Key Points\n\n- The agreement appoints the agent to manage the property located at 456 Palm Tree Avenue, Honolulu, HI 96815.[1]",
+        "elapsed_ms": 5523,
+        "context_tokens": 0,
+        "chunks_used": 2,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.2638888888888889,
+          "containment": 0.8571428571428571,
+          "precision": 0.23076923076923078,
+          "recall": 0.8571428571428571,
+          "f1_score": 0.36363636363636365
+        }
+      },
+      "enriched": {
+        "response": "The managed property address in the property management agreement is:\n\n**“456 Palm Tree Avenue, Honolulu, HI 96815”**. [1]",
+        "elapsed_ms": 793,
+        "context_tokens": 764,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.5100671140939598,
+          "containment": 0.8571428571428571,
+          "precision": 0.375,
+          "recall": 0.8571428571428571,
+          "f1_score": 0.5217391304347825
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 22,
+        "tokens_added": 462,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.4658,
+          0.375,
+          0.3486,
+          0.3461,
+          0.3447
+        ]
+      },
+      "delta": {
+        "containment": 0.0,
+        "f1_score": 0.1581,
+        "precision": 0.1442,
+        "recall": 0.0
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L4",
+      "query": "What is the initial term start date in the property management agreement?",
+      "is_negative": false,
+      "expected": "`2010-06-15`",
+      "baseline": {
+        "response": "## Summary\n\nThe initial term start date in the property management agreement is **2010-06-15**. [4] This date begins an initial period of twelve months for the agreement. [4]\n\nThe agreement also states that after this initial twelve-month period starting on 2010-06-15, it will be automatically renewed for successive one-year terms. [4]\n\n## Key Points\n\n- The agreement’s initial term begins on **2010-06-15**. [4]  \n- The initial period lasts twelve months from 2010-06-15. [4]  \n- After the initial",
+        "elapsed_ms": 6191,
+        "context_tokens": 0,
+        "chunks_used": 8,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.036297640653357534,
+          "containment": 1.0,
+          "precision": 0.022222222222222223,
+          "recall": 1.0,
+          "f1_score": 0.04347826086956522
+        }
+      },
+      "enriched": {
+        "response": "The initial term start date in the property management agreement is **“2010-06-15.”** [4]",
+        "elapsed_ms": 776,
+        "context_tokens": 2033,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.21978021978021978,
+          "containment": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 22,
+        "tokens_added": 588,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.5112,
+          0.4573,
+          0.4459,
+          0.438,
+          0.4253
+        ]
+      },
+      "delta": {
+        "containment": -1.0,
+        "f1_score": -0.0435,
+        "precision": -0.0222,
+        "recall": -1.0
+      },
+      "verdict": "BASELINE_WINS"
+    },
+    {
+      "qid": "Q-L5",
+      "query": "What written notice period is required for termination of the property management agreement?",
+      "is_negative": false,
+      "expected": "`sixty (60) days written notice`",
+      "baseline": {
+        "response": "## Summary\n\nThe requested information was not found in the available documents. The provided excerpt of the Property Management Agreement includes the term of the agreement and its automatic renewal, but it does not state any written notice period required for termination. [1]\n\n## Key Points\n\n- The agreement has an initial term of twelve months beginning on 2010-06-15 and is automatically renewed for successive one-year terms. [1]\n- The excerpt notes that termination “does not invalidate any exi",
+        "elapsed_ms": 6852,
+        "context_tokens": 0,
+        "chunks_used": 5,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.009077155824508321,
+          "containment": 0.4,
+          "precision": 0.029850746268656716,
+          "recall": 0.4,
+          "f1_score": 0.05555555555555556
+        }
+      },
+      "enriched": {
+        "response": "The property management agreement may be terminated by either party upon **“sixty (60) days written notice.”** [1]",
+        "elapsed_ms": 1052,
+        "context_tokens": 1909,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.42424242424242425,
+          "containment": 0.8,
+          "precision": 0.23529411764705882,
+          "recall": 0.8,
+          "f1_score": 0.3636363636363636
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 25,
+        "tokens_added": 503,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.5488,
+          0.478,
+          0.4742,
+          0.4716,
+          0.4445
+        ]
+      },
+      "delta": {
+        "containment": 0.4,
+        "f1_score": 0.3081,
+        "precision": 0.2054,
+        "recall": 0.4
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L6",
+      "query": "What is the Agent fee/commission for **short-term** rentals (<180 days)?",
+      "is_negative": false,
+      "expected": "`twenty five percent (25%) of the gross revenues`",
+      "baseline": {
+        "response": "## Summary\n\nThe requested information was not found in the available documents. The excerpted **Property Management Agreement (Short Term and/or Vacation/Holiday Rentals)** mentions that the owner must pay certain agent fees and allows the agent to deduct credit card/bankcard fees, but it does **not** state the specific fee or commission percentage/amount for **short-term rentals (<180 days)**. [1]\n\nThe only partial reference to a duration-based fee concerns “long term leases (leases of more tha",
+        "elapsed_ms": 7162,
+        "context_tokens": 0,
+        "chunks_used": 5,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.0081799591002045,
+          "containment": 0.25,
+          "precision": 0.024390243902439025,
+          "recall": 0.25,
+          "f1_score": 0.04444444444444444
+        }
+      },
+      "enriched": {
+        "response": "The Agent’s fee/commission for **short-term rentals (reservations of less than 180 days)** is **“twenty five percent (25%) of the gross revenues”** for management services. [1]",
+        "elapsed_ms": 1408,
+        "context_tokens": 1863,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.4411764705882353,
+          "containment": 1.0,
+          "precision": 0.36363636363636365,
+          "recall": 1.0,
+          "f1_score": 0.5333333333333333
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 25,
+        "tokens_added": 555,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.6071,
+          0.5851,
+          0.5675,
+          0.5514,
+          0.5394
+        ]
+      },
+      "delta": {
+        "containment": 0.75,
+        "f1_score": 0.4889,
+        "precision": 0.3392,
+        "recall": 0.75
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L7",
+      "query": "What is the Agent fee/commission for **long-term** leases (>180 days)?",
+      "is_negative": false,
+      "expected": "`ten percent (10%) of the gross revenues`",
+      "baseline": {
+        "response": "## Summary\n\nThe requested information was not found in the available documents. The excerpted “AGENT'S FEES” section mentions that it addresses fees “for long term leases (leases of more than 180 days)” but does not actually state the fee or commission amount or percentage for such long-term leases in the provided text.[2]\n\n## Key Points\n\n- The Property Management Agreement defines long-term leases as “leases of more than 180 days.”[2]  \n- The section labeled “AGENT'S FEES” indicates that it cov",
+        "elapsed_ms": 7822,
+        "context_tokens": 0,
+        "chunks_used": 2,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.012519561815336464,
+          "containment": 0.2857142857142857,
+          "precision": 0.03389830508474576,
+          "recall": 0.2857142857142857,
+          "f1_score": 0.060606060606060594
+        }
+      },
+      "enriched": {
+        "response": "The Agent’s fee/commission for **long-term leases (leases of more than 180 days)** is **“ten percent (10%) of the gross revenues.”** [2]",
+        "elapsed_ms": 834,
+        "context_tokens": 857,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.47435897435897434,
+          "containment": 0.8571428571428571,
+          "precision": 0.3333333333333333,
+          "recall": 0.8571428571428571,
+          "f1_score": 0.48
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 25,
+        "tokens_added": 555,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.5492,
+          0.5157,
+          0.4917,
+          0.485,
+          0.469
+        ]
+      },
+      "delta": {
+        "containment": 0.5714,
+        "f1_score": 0.4194,
+        "precision": 0.2994,
+        "recall": 0.5714
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L8",
+      "query": "What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?",
+      "is_negative": false,
+      "expected": "`$75.00/month advertising; $50.00/month minimum admin/accounting`",
+      "baseline": {
+        "response": "## Summary\n\nThe property management agreement specifies that there is a minimum administration and accounting charge of **$50.00 per month**. [2] The excerpt provided does not state any pro-ration advertising charge or describe how advertising charges are pro-rated. [2]\n\n## Key Points\n\n- The agreement sets a **minimum charge for administration and accounting at $50.00 per month**. [2]  \n- The available text does **not** provide any information on a **pro-ration advertising charge**. [2]",
+        "elapsed_ms": 8313,
+        "context_tokens": 0,
+        "chunks_used": 2,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.1,
+          "containment": 0.4,
+          "precision": 0.043478260869565216,
+          "recall": 0.4,
+          "f1_score": 0.0784313725490196
+        }
+      },
+      "enriched": {
+        "response": "The property management agreement specifies:\n\n- Pro-ration advertising charge for short-term (vacation) rentals: **\"$75.00/month.\"** [2]  \n- Minimum charge for administration and accounting: **\"$50.00/month (not to include tax preparation/returns/forms).\"** [2]",
+        "elapsed_ms": 1087,
+        "context_tokens": 807,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.17333333333333334,
+          "containment": 0.6,
+          "precision": 0.12,
+          "recall": 0.6,
+          "f1_score": 0.19999999999999998
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 25,
+        "tokens_added": 505,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.4961,
+          0.4844,
+          0.4283,
+          0.4254,
+          0.4251
+        ]
+      },
+      "delta": {
+        "containment": 0.2,
+        "f1_score": 0.1216,
+        "precision": 0.0765,
+        "recall": 0.2
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L9",
+      "query": "In the purchase contract Exhibit A, what is the job location?",
+      "is_negative": false,
+      "expected": "`811 Ocean Drive, Suite 405, Tampa, FL 33602`",
+      "baseline": {
+        "response": "## Summary\n\nThe requested information was not found in the available documents. The Exhibit A - Scope of Work describes the equipment and site preparation details but does not state any job location or address. [4] The purchase contract excerpt likewise does not specify a job location. [2]\n\n## Key Points\n\n- Exhibit A lists the scope of work (custom cab, aluminum door, hall call stations, ramp/pit details, and site prep by others) but does not include a job location. [4]\n- The provided portion of",
+        "elapsed_ms": 5684,
+        "context_tokens": 0,
+        "chunks_used": 4,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.012519561815336464,
+          "containment": 0.0,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0
+        }
+      },
+      "enriched": {
+        "response": "The job location in the purchase contract Exhibit A is:\n\n“**811 Ocean Drive, Suite 405, Tampa, FL 33602**.” [4]",
+        "elapsed_ms": 730,
+        "context_tokens": 835,
+        "metrics": {
+          "is_negative": false,
+          "negative_test_pass": false,
+          "exact_match": false,
+          "fuzzy_score": 0.5755395683453237,
+          "containment": 0.875,
+          "precision": 0.3888888888888889,
+          "recall": 0.875,
+          "f1_score": 0.5384615384615385
+        }
+      },
+      "skeleton_context": {
+        "sentence_count": 22,
+        "tokens_added": 557,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.3999,
+          0.3667,
+          0.3346,
+          0.3334,
+          0.3294
+        ]
+      },
+      "delta": {
+        "containment": 0.875,
+        "f1_score": 0.5385,
+        "precision": 0.3889,
+        "recall": 0.875
+      },
+      "verdict": "ENRICHED_WINS"
+    },
+    {
+      "qid": "Q-L10",
+      "query": "In the purchase contract Exhibit A, what is the contact’s name and email?",
+      "is_negative": false,
+      "expected": "",
+      "baseline": {
+        "response": "## Summary\n\nThe requested information was not found in the available documents. The excerpt of the purchase contract, including Exhibit A – Scope of Work, does not list any contact person’s name or email address. [2][4]\n\n## Key Points\n\n- The purchase contract excerpt describes the custom cab, aluminum door, and hall call stations, but does not identify any contact individual. [2][4]  \n- Exhibit A – Scope of Work includes technical and site preparation details and a signature line for an “Authori",
+        "elapsed_ms": 6618,
+        "context_tokens": 0,
+        "chunks_used": 4,
+        "metrics": {}
+      },
+      "enriched": {
+        "response": "The contact’s name is **“Elizabeth Nolasco”** and the email is **“enolasco@fabrikam.com”**. [4]",
+        "elapsed_ms": 1149,
+        "context_tokens": 1489,
+        "metrics": {}
+      },
+      "skeleton_context": {
+        "sentence_count": 22,
+        "tokens_added": 1203,
+        "anchor_count": 5,
+        "anchor_similarities": [
+          0.376,
+          0.3588,
+          0.3447,
+          0.3409,
+          0.3289
+        ]
+      },
+      "delta": {},
+      "verdict": "TIE"
+    }
+  ],
+  "summary": {
+    "total_questions": 10,
+    "enriched_wins": 8,
+    "baseline_wins": 1,
+    "ties": 1
+  }
+}

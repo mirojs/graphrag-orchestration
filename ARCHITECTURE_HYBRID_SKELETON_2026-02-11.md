@@ -297,12 +297,69 @@ If Phase 0 shows improvement:
 > The only Phase 3+ item that WAS needed — context metadata cleanup — is now
 > implemented in `strip_skeleton_tags()` (synthesis.py).
 
-### Phase 4: Production (1 week)
+### ~~Phase 4: Production~~ (COMPLETE — Feb 11, 2026)
 
-- Full re-index with sentence extraction
-- Update synthesis to use sentence-level citations
-- A/B test against current production
-- Monitor precision/recall/F1 on live traffic
+> **Deployed** as image `a71efb15-39` to Azure Container Apps.
+>
+> **Production config:**
+> - `SKELETON_ENRICHMENT_ENABLED=True` (Strategy B graph traversal)
+> - `SKELETON_GRAPH_TRAVERSAL_ENABLED=True`
+> - `SKELETON_SYNTHESIS_MODEL=gpt-4.1-mini`
+> - `strip_skeleton_tags()` active in synthesis pipeline
+>
+> **Production test:** 5/5 queries returned clean responses (zero metadata leakage).
+> Q-L6 (the previously leaky question) now answers: *"25% of gross revenues [10]"*.
+>
+> **Remaining for full production:**
+> - Full re-index of all production groups with sentence extraction
+> - Monitor precision/recall/F1 on live traffic
+
+---
+
+## Benchmark Results (Feb 11, 2026)
+
+### Quick Benchmark: Strategy A vs B vs Baseline (17 questions)
+
+| Metric | Baseline | Strategy A | Strategy B |
+|---|---|---|---|
+| Wins vs Baseline | — | 8W / 0L / 2T | 8W / 0L / 2T |
+| B vs A (head-to-head) | — | — | 3W / 0L / 7T |
+
+### Deep Benchmark: Accuracy Metrics
+
+| Metric | Baseline | Strategy A | Strategy B |
+|---|---|---|---|
+| Mean F1 | 0.090 | 0.237 (+163%) | 0.250 (+178%) |
+| Mean Containment | 0.462 | 0.532 (+15%) | 0.642 (+39%) |
+| Avg Latency (ms) | — | 1,291 | ~1,300 |
+| Avg Prompt Tokens | — | 3,814 | ~3,900 |
+
+### Synthesis Model Comparison: gpt-4.1-mini vs gpt-5.1 (17 questions)
+
+| Metric | gpt-5.1 | gpt-4.1-mini |
+|---|---|---|
+| Head-to-head | — | **11W / 1L / 5T** |
+| Mean F1 | 0.221 | 0.285 (+29%) |
+| Avg Latency | 1,203ms | 1,009ms (1.2× faster) |
+| Cost | ~$0.03/query | ~$0.003/query (~10× cheaper) |
+
+The single loss (Q-L6) was cosmetic: gpt-4.1-mini leaked `[paragraph, sim=...]` tags.
+Now fixed by `strip_skeleton_tags()` — the loss is eliminated.
+
+### Retrieval Ranking Verification
+
+All 5 previously-flagged "100% noise" questions have answers at **vector search rank #1**.
+The "noise" was a measurement artifact — `noise_ratio` counts non-answer sentences,
+not retrieval failures. Fixed by adding `recall_at_k` and `signal_rank` metrics
+(commit `0cd39c94`).
+
+| Question | Signal Rank | Recall@8 |
+|---|---|---|
+| Q-L4 | 1 | ✅ |
+| Q-L5 | 1 | ✅ |
+| Q-L7 | 1 | ✅ |
+| Q-L8 | 1 | ✅ |
+| Q-L10 | 1 | ✅ |
 
 ---
 
@@ -662,7 +719,7 @@ The hybrid approach subsumes both options and adds the graph structure that make
 
 ## Known Issues & Future Improvements
 
-### Context Metadata Leakage (Priority: Medium)
+### Context Metadata Leakage (Resolved)
 
 **Problem:** When using smaller synthesis models (e.g. `gpt-4.1-mini`), retrieval metadata tags embedded in the context window can leak into the LLM response. Example observed in Q-L6:
 

@@ -531,6 +531,29 @@ const Chat = () => {
 
     const { t, i18n } = useTranslation();
 
+    // Require login before showing chat UI
+    if (useLogin && !loggedIn) {
+        return (
+            <div className={styles.container}>
+                <Helmet>
+                    <title>{t("pageTitle")}</title>
+                </Helmet>
+                <div className={styles.chatRoot}>
+                    <div className={styles.chatContainer}>
+                        <div className={styles.chatEmptyState}>
+                            <img src={appLogo} alt="App logo" width="120" height="120" />
+                            <h1 className={styles.chatEmptyStateTitle}>{t("headerTitle")}</h1>
+                            <h2 className={styles.chatEmptyStateSubtitle}>Sign in to start chatting</h2>
+                            <p style={{ color: "var(--text-secondary, #666)", marginTop: "8px" }}>
+                                Click the login button in the top-right corner to get started.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className={styles.container}>
             {/* Setting the page title using react-helmet-async */}

@@ -634,13 +634,16 @@ def embed_sentences(skeleton: HybridSkeleton) -> int:
 
         try:
             # Voyage contextualized embedding — all sentences from same doc as context
-            result = client.embed(
-                texts,
+            # contextualized_embed() requires inputs=[[sentences_list]] (list of documents,
+            # where each document is a list of its text chunks/sentences)
+            result = client.contextualized_embed(
+                inputs=[texts],  # Single document containing all its sentences
                 model=VOYAGE_MODEL,
                 input_type="document",
+                output_dimension=VOYAGE_DIM,
             )
 
-            for sent, emb in zip(sents, result.embeddings):
+            for sent, emb in zip(sents, result.results[0].embeddings):
                 sent.embedding = np.array(emb, dtype=np.float32)
                 total_embedded += 1
 
@@ -751,14 +754,19 @@ def build_sparse_semantic_links(
 # Step 5: Three-Stage Retrieval
 # ---------------------------------------------------------------------------
 def embed_query(query: str) -> np.ndarray:
-    """Embed a query string with Voyage."""
+    """Embed a query string with Voyage contextualized_embed."""
     try:
         import voyageai
         if not VOYAGE_API_KEY:
             raise ImportError("no key")
         client = voyageai.Client(api_key=VOYAGE_API_KEY)
-        result = client.embed([query], model=VOYAGE_MODEL, input_type="query")
-        return np.array(result.embeddings[0], dtype=np.float32)
+        result = client.contextualized_embed(
+            inputs=[[query]],  # Single document with single chunk
+            model=VOYAGE_MODEL,
+            input_type="query",
+            output_dimension=VOYAGE_DIM,
+        )
+        return np.array(result.results[0].embeddings[0], dtype=np.float32)
     except Exception:
         return np.random.randn(VOYAGE_DIM).astype(np.float32)
 

@@ -1,10 +1,61 @@
 # Architecture: Deterministic Skeleton + Sparse k-NN Hybrid
 
 **Date:** 2026-02-11  
-**Updated:** 2026-02-11 (added metadata design, context window, edge strategy, hallucination controls, industry references)  
+**Updated:** 2026-02-11 (content taxonomy, DI/CU architecture, spaCy sentence detection, cross-chunk dedup)  
 **Status:** Phase 0 experiment ready  
 **Origin:** New inspiration — validated against existing codebase + research conversation  
 **Experiment script:** `scripts/experiment_hybrid_skeleton.py`
+
+---
+
+## Content Taxonomy: What Gets Embedded vs. Metadata
+
+Informed by Azure DI output analysis on real data (5 PDFs, 18 chunks, 708 raw DI sentences).
+
+### Architecture: DI Primary + CU Supplement
+
+```
+PDF
+ ├── DI (primary) ──→ OCR, tables, KVPs, sections, word geometry, barcodes
+ │                     ↓
+ │                   chunk text → spaCy → full SentenceNodes
+ │
+ └── CU (supplement, Phase 2) ──→ ONLY for figure descriptions + equation LaTeX
+                                    ↓
+                                  SentenceNodes (source="figure_description" / "equation")
+```
+
+DI stays as the backbone (~95% of the work). CU is called **only** for documents that
+contain figures or complex equations — features DI doesn't offer.
+
+### Embed as SentenceNodes (searchable via Voyage)
+
+| Content Type | Source | source tag | Notes |
+|---|---|---|---|
+| **Body text** | DI chunk text → spaCy split | `"paragraph"` | spaCy handles abbreviations (P.O., Inc., Ltd.) — DI regex mis-splits at abbreviation periods |
+| **Table rows** | DI table extraction → linearize | `"table_row"` | `"Header: val \| Header: val"` format. Answers structured queries directly |
+| **Figure captions** | DI figure extraction | `"figure_caption"` | Caption text from detected figures |
+| **Figure descriptions** | CU `enableFigureDescription` (Phase 2) | `"figure_description"` | Natural language summary of visual content. Mermaid/Chart.js for diagrams |
+| **Equations (display)** | CU LaTeX or pix2tex fallback (Phase 2) | `"equation"` | Context sentence + LaTeX merged. Equations ARE the answer, not metadata |
+
+### Store as Metadata Only (not embedded)
+
+| Content Type | Why Not Embed | How Used |
+|---|---|---|
+| **KVPs** (key-value pairs) | Already in body text — embedding doubles count | Exact-match lookup (Route 4 style) |
+| **Titles / Section headings** | Labels, not sentences — no semantic content alone | `section_path` metadata on child sentences |
+| **Page headers / footers** | Repeated boilerplate, zero retrieval value | Dropped by DI paragraph role filter |
+| **Barcodes / QR codes** | Identifiers, not semantic content | Structured metadata for exact filter |
+| **Selection marks** (checkboxes) | Boolean flags, not searchable | Metadata on parent paragraph |
+
+### Why spaCy Replaces DI Regex for Sentence Detection
+
+DI's `_extract_sentences_with_geometry()` uses naive regex `(?<=[.!?])\s+` which mis-splits:
+- `"Contoso Ltd. is at P.O. Box 123, FL."` → 4 fragments  
+- spaCy keeps it as 1 sentence
+
+Measured on real data: DI produced 453 noise-filtered "sentences" (25/chunk avg). After
+spaCy + merge + cross-chunk dedup: ~120-150 sentences (7-8/chunk avg). 72% reduction.
 
 ---
 
@@ -15,8 +66,8 @@ This hybrid approach is **not just the right answer — it's the natural evoluti
 | Hybrid Concept | Already Exists | What's Missing |
 |---|---|---|
 | **Section hierarchy** | `:Section` nodes, `SUBSECTION_OF`, `HAS_SECTION`, `IN_SECTION` | Nothing — fully implemented |
-| **Sentence extraction** | `SentenceGeometry` dataclass, `_extract_sentences_with_geometry()`, sentence polygons in chunk metadata | `:Sentence` nodes in Neo4j (data exists as metadata only) |
-| **Table row sentences** | `_extract_table_row_sentences()` produces clean linearizations | Not embedded or stored as separate nodes |
+| **Sentence extraction** | `SentenceGeometry` dataclass, DI sentence polygons in chunk metadata | `:Sentence` nodes in Neo4j. DI regex replaced by spaCy for accuracy |
+| **Table row sentences** | `_extract_table_row_sentences()` produces clean linearizations; tables in chunk metadata | Not embedded or stored as separate nodes |
 | **Paragraph grouping** | DI paragraphs available in pipeline | No `:Paragraph` intermediate node type |
 | **Semantic embedding** | `voyage-context-3` with `contextualized_embed()`, 2048-dim vectors | Only at chunk level, not sentence level |
 | **Sparse semantic linking** | `SEMANTICALLY_SIMILAR` edges between Sections (threshold 0.43), GDS KNN infrastructure | Not at sentence level, threshold too low for sparsity |

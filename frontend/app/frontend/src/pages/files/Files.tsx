@@ -9,9 +9,10 @@
  * - Responsive design
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { useMsal } from "@azure/msal-react";
 import { useLogin, getToken } from "../../authConfig";
+import { LoginContext } from "../../loginContext";
 import {
     listFilesApi,
     uploadFilesApi,
@@ -37,6 +38,7 @@ export interface ToastMessage {
 const Files = () => {
     // Auth
     const client = useLogin ? useMsal().instance : null;
+    const { loggedIn } = useContext(LoginContext);
 
     // State
     const [files, setFiles] = useState<string[]>([]);
@@ -189,8 +191,8 @@ const Files = () => {
             return sortAsc ? cmp : -cmp;
         });
 
-    // Not logged in guard
-    if (!useLogin) {
+    // Not logged in guard — check actual login state, not just auth config
+    if (!useLogin || !loggedIn) {
         return (
             <div className={styles.container}>
                 <div className={styles.emptyState}>

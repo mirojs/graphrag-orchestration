@@ -1,13 +1,15 @@
 import { Outlet, NavLink } from "react-router-dom";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useContext } from "react";
 import { useTranslation } from "react-i18next";
 import styles from "./Layout.module.css";
 
 import { useLogin } from "../../authConfig";
 import { LoginButton } from "../../components/LoginButton";
+import { LoginContext } from "../../loginContext";
 
 const Layout = () => {
     const { t } = useTranslation();
+    const { loggedIn } = useContext(LoginContext);
     const [sidebarOpen, setSidebarOpen] = useState(false);
 
     const toggleSidebar = useCallback(() => setSidebarOpen(prev => !prev), []);
@@ -50,23 +52,27 @@ const Layout = () => {
                         <span className={styles.navIcon}>💬</span>
                         <span className={styles.navLabel}>Chat</span>
                     </NavLink>
-                    <NavLink
-                        to="/files"
-                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
-                        onClick={closeSidebar}
-                    >
-                        <span className={styles.navIcon}>📁</span>
-                        <span className={styles.navLabel}>Files</span>
-                    </NavLink>
+                    {loggedIn && (
+                        <NavLink
+                            to="/files"
+                            className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
+                            onClick={closeSidebar}
+                        >
+                            <span className={styles.navIcon}>📁</span>
+                            <span className={styles.navLabel}>Files</span>
+                        </NavLink>
+                    )}
                     <div className={styles.navDivider} />
-                    <NavLink
-                        to="/dashboard"
-                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
-                        onClick={closeSidebar}
-                    >
-                        <span className={styles.navIcon}>📊</span>
-                        <span className={styles.navLabel}>Dashboard</span>
-                    </NavLink>
+                    {loggedIn && (
+                        <NavLink
+                            to="/dashboard"
+                            className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
+                            onClick={closeSidebar}
+                        >
+                            <span className={styles.navIcon}>📊</span>
+                            <span className={styles.navLabel}>Dashboard</span>
+                        </NavLink>
+                    )}
 
                     {/* Bottom spacer pushes version to bottom */}
                     <div className={styles.navSpacer} />

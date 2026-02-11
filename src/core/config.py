@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     SKELETON_GRAPH_TRAVERSAL_ENABLED: bool = False  # Use graph traversal (B) instead of flat search (A)
     SKELETON_TRAVERSAL_NEXT_HOPS: int = 1  # NEXT/PREV expansion window (sentences in each direction)
     SKELETON_TRAVERSAL_RELATED_HOPS: int = 1  # Max RELATED_TO hops from seed sentence
+
+    # Synthesis model override for Route 2 skeleton path.
+    # Sentence-level context is precise (answer at rank #1), so a smaller/faster model
+    # can extract answers without the reasoning overhead of gpt-5.1.
+    # Empty string = use HYBRID_SYNTHESIS_MODEL (default, no override).
+    # Recommended: "gpt-4.1-mini" for ~3x speed, ~10x cost reduction on extraction tasks.
+    SKELETON_SYNTHESIS_MODEL: str = ""  # Override synthesis model when skeleton enrichment is active
     
     # ========================================================================
     # Algorithm Version Control

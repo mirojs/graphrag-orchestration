@@ -152,13 +152,21 @@ class LocalSearchHandler(BaseRouteHandler):
                 logger.warning("skeleton_enrichment_failed", error=str(e))
 
         # Stage 2.3: Synthesis with Citations
-        logger.info("stage_2.3_synthesis")
+        # When skeleton enrichment provides precise sentence-level context,
+        # allow a lighter model for extraction (see SKELETON_SYNTHESIS_MODEL).
+        effective_model = synthesis_model  # caller override takes priority
+        if not effective_model and skeleton_coverage_chunks and settings.SKELETON_SYNTHESIS_MODEL:
+            effective_model = settings.SKELETON_SYNTHESIS_MODEL
+            logger.info("stage_2.3_skeleton_model_override",
+                       model=effective_model,
+                       skeleton_sentences=len(skeleton_coverage_chunks))
+        logger.info("stage_2.3_synthesis", model=effective_model or "default")
         synthesis_result = await self.synthesizer.synthesize(
             query=query,
             evidence_nodes=evidence_nodes,
             response_type=response_type,
             prompt_variant=prompt_variant,
-            synthesis_model=synthesis_model,
+            synthesis_model=effective_model,
             include_context=include_context,
             language_spans_by_doc=doc_language_spans if doc_language_spans else None,
             pre_fetched_chunks=pre_chunks if enable_sentence_citations else None,

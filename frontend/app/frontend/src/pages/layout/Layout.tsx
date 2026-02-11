@@ -21,14 +21,16 @@ const Layout = () => {
             <header className={styles.header} role="banner">
                 <div className={styles.headerContainer}>
                     <div className={styles.headerLeft}>
-                        <button
-                            className={styles.menuToggle}
-                            onClick={toggleSidebar}
-                            aria-label="Toggle navigation"
-                            aria-expanded={sidebarOpen}
-                        >
-                            <span className={styles.hamburger} />
-                        </button>
+                        {loggedIn && (
+                            <button
+                                className={styles.menuToggle}
+                                onClick={toggleSidebar}
+                                aria-label="Toggle navigation"
+                                aria-expanded={sidebarOpen}
+                            >
+                                <span className={styles.hamburger} />
+                            </button>
+                        )}
                         <NavLink to="/" className={styles.headerTitleContainer} onClick={closeSidebar}>
                             <h3 className={styles.headerTitle}>{t("headerTitle")}</h3>
                         </NavLink>
@@ -39,20 +41,20 @@ const Layout = () => {
 
             <div className={styles.body}>
                 {/* Sidebar overlay for mobile */}
-                {sidebarOpen && <div className={styles.sidebarOverlay} onClick={closeSidebar} />}
+                {sidebarOpen && loggedIn && <div className={styles.sidebarOverlay} onClick={closeSidebar} />}
 
-                {/* Sidebar navigation */}
-                <nav className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`} aria-label="Main navigation">
-                    <NavLink
-                        to="/"
-                        end
-                        className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
-                        onClick={closeSidebar}
-                    >
-                        <span className={styles.navIcon}>💬</span>
-                        <span className={styles.navLabel}>Chat</span>
-                    </NavLink>
-                    {loggedIn && (
+                {/* Sidebar navigation — only shown after login */}
+                {loggedIn && (
+                    <nav className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`} aria-label="Main navigation">
+                        <NavLink
+                            to="/"
+                            end
+                            className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
+                            onClick={closeSidebar}
+                        >
+                            <span className={styles.navIcon}>💬</span>
+                            <span className={styles.navLabel}>Chat</span>
+                        </NavLink>
                         <NavLink
                             to="/files"
                             className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
@@ -61,9 +63,7 @@ const Layout = () => {
                             <span className={styles.navIcon}>📁</span>
                             <span className={styles.navLabel}>Files</span>
                         </NavLink>
-                    )}
-                    <div className={styles.navDivider} />
-                    {loggedIn && (
+                        <div className={styles.navDivider} />
                         <NavLink
                             to="/dashboard"
                             className={({ isActive }) => `${styles.navItem} ${isActive ? styles.navItemActive : ""}`}
@@ -72,12 +72,12 @@ const Layout = () => {
                             <span className={styles.navIcon}>📊</span>
                             <span className={styles.navLabel}>Dashboard</span>
                         </NavLink>
-                    )}
 
-                    {/* Bottom spacer pushes version to bottom */}
-                    <div className={styles.navSpacer} />
-                    <div className={styles.navVersion}>v2.0</div>
-                </nav>
+                        {/* Bottom spacer pushes version to bottom */}
+                        <div className={styles.navSpacer} />
+                        <div className={styles.navVersion}>v2.0</div>
+                    </nav>
+                )}
 
                 {/* Main content area */}
                 <main className={styles.main} id="main-content">

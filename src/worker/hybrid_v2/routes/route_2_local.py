@@ -128,16 +128,24 @@ class LocalSearchHandler(BaseRouteHandler):
                 doc_language_spans = await self._fetch_language_spans(doc_ids)
                 logger.info("stage_2.2.5_sentence_spans", num_docs=len(doc_ids), docs_with_spans=len(doc_language_spans))
 
-        # Stage 2.2.6: Skeleton sentence enrichment (Strategy A).
-        # Query sentence vector index for top-k matches, format as supplementary
-        # evidence chunks for injection into the synthesis prompt.
+        # Stage 2.2.6: Skeleton sentence enrichment.
+        # Strategy A (flat vector search) or Strategy B (graph traversal).
+        # Both inject supplementary evidence chunks into the synthesis prompt.
         skeleton_coverage_chunks: List[Dict[str, Any]] = []
         if settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_V2_ENABLED:
             try:
-                skeleton_coverage_chunks = await self._retrieve_skeleton_sentences(query)
+                if settings.SKELETON_GRAPH_TRAVERSAL_ENABLED:
+                    # Strategy B: graph traversal from seed sentences
+                    skeleton_coverage_chunks = await self._retrieve_skeleton_graph_traversal(query)
+                    strategy_label = "B_graph_traversal"
+                else:
+                    # Strategy A: flat vector search on sentence index
+                    skeleton_coverage_chunks = await self._retrieve_skeleton_sentences(query)
+                    strategy_label = "A_flat_search"
                 if skeleton_coverage_chunks:
                     logger.info(
                         "stage_2.2.6_skeleton_enrichment",
+                        strategy=strategy_label,
                         sentences=len(skeleton_coverage_chunks),
                     )
             except Exception as e:
@@ -346,6 +354,206 @@ class LocalSearchHandler(BaseRouteHandler):
         logger.info(
             "skeleton_sentences_retrieved",
             total=len(sentence_results),
+            coverage_chunks=len(coverage_chunks),
+        )
+        return coverage_chunks
+
+    # ================================================================
+    # STRATEGY B: Graph Traversal Retrieval
+    # ================================================================
+
+    async def _retrieve_skeleton_graph_traversal(self, query: str) -> List[Dict[str, Any]]:
+        """Strategy B: Traverse the sentence graph from vector-matched seeds.
+        
+        Unlike Strategy A (flat vector search → isolated sentences), Strategy B
+        uses the graph structure to discover coherent multi-sentence clusters:
+        
+        1. ANCHOR: Vector search → top-k seed sentences (same as Strategy A)
+        2. EXPAND: From each seed, traverse:
+           - RELATED_TO → cross-chunk semantically similar sentences
+           - NEXT/PREV → neighbouring sentences in same chunk (context window)
+        3. COLLECT: For each discovered sentence, fetch parent chunk context
+        4. SCORE: Seed score × decay per hop type
+        5. DEDUPLICATE: By sentence ID, keep highest score
+        
+        This gives the LLM coherent multi-sentence passages (via NEXT),
+        cross-document related evidence (via RELATED_TO), and full chunk
+        context (via PART_OF) — all from a single graph traversal.
+        """
+        # 1. Embed query
+        query_embedding = await self._get_query_embedding(query)
+        if not query_embedding:
+            logger.warning("strategy_b_no_query_embedding")
+            return []
+        
+        top_k = settings.SKELETON_SENTENCE_TOP_K
+        threshold = settings.SKELETON_SIMILARITY_THRESHOLD
+        next_hops = settings.SKELETON_TRAVERSAL_NEXT_HOPS
+        related_hops = settings.SKELETON_TRAVERSAL_RELATED_HOPS
+        group_id = self.group_id
+        
+        # 2. Graph traversal query: seed → RELATED_TO → NEXT expansion → parent context
+        # Single Cypher query that does the anchor + expand + collect in one round trip.
+        cypher = """
+        // ANCHOR: Vector search for seed sentences
+        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+        YIELD node AS seed, score
+        WHERE seed.group_id = $group_id AND score >= $threshold
+        
+        // EXPAND: Traverse RELATED_TO edges (cross-chunk semantic links)
+        OPTIONAL MATCH (seed)-[rel:RELATED_TO {source: 'knn_sentence'}]-(related:Sentence)
+        WHERE related.group_id = $group_id
+        
+        // Collect seed + related into a unified set
+        WITH collect(DISTINCT {node: seed, score: score, hop: 0, via: 'seed'}) AS seeds,
+             collect(DISTINCT {node: related, score: score * rel.similarity * 0.8, hop: 1, via: 'related_to'}) AS related_nodes
+        WITH seeds + [r IN related_nodes WHERE r.node IS NOT NULL] AS all_anchors
+        UNWIND all_anchors AS anchor
+        WITH DISTINCT anchor.node AS sent, max(anchor.score) AS sent_score, 
+             min(anchor.hop) AS min_hop, collect(DISTINCT anchor.via)[0] AS via
+        
+        // EXPAND: NEXT/PREV neighbours for local context window
+        CALL {
+            WITH sent
+            OPTIONAL MATCH path = (sent)-[:NEXT*1..2]->(fwd:Sentence)
+            RETURN collect(DISTINCT {node: fwd, hop_type: 'next'}) AS next_nodes
+        }
+        CALL {
+            WITH sent
+            OPTIONAL MATCH path = (sent)<-[:NEXT*1..2]-(prev:Sentence)
+            RETURN collect(DISTINCT {node: prev, hop_type: 'prev'}) AS prev_nodes
+        }
+        
+        // Merge: anchor sentence + its NEXT/PREV neighbours
+        WITH sent, sent_score, min_hop, via, next_nodes, prev_nodes
+        WITH sent, sent_score, min_hop, via,
+             [n IN next_nodes WHERE n.node IS NOT NULL | n.node] AS fwd_list,
+             [n IN prev_nodes WHERE n.node IS NOT NULL | n.node] AS prev_list
+        
+        // Collect all sentences from this anchor's expansion
+        WITH collect({
+            node: sent, score: sent_score, hop: min_hop, via: via,
+            fwd: fwd_list, prev: prev_list
+        }) AS expansions
+        UNWIND expansions AS exp
+        
+        // Flatten: anchor + its forward/prev expansions
+        WITH collect({node: exp.node, score: exp.score, via: exp.via}) AS anchor_entries,
+             [e IN expansions | [f IN e.fwd | {node: f, score: e.score * 0.9, via: 'next'}]] AS fwd_entries,
+             [e IN expansions | [p IN e.prev | {node: p, score: e.score * 0.9, via: 'prev'}]] AS prev_entries
+        WITH anchor_entries + 
+             reduce(acc=[], x IN fwd_entries | acc + x) +
+             reduce(acc=[], x IN prev_entries | acc + x) AS all_entries
+        UNWIND all_entries AS entry
+        WITH DISTINCT entry.node AS sent, max(entry.score) AS final_score, 
+             collect(DISTINCT entry.via) AS sources
+        
+        // COLLECT: Parent chunk + document context
+        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
+        OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        
+        RETURN sent.id AS sentence_id,
+               sent.text AS text,
+               sent.source AS source,
+               sent.section_path AS section_path,
+               sent.parent_text AS parent_text,
+               sent.page AS page,
+               sent.chunk_id AS chunk_id,
+               sent.document_id AS document_id,
+               chunk.text AS chunk_text,
+               doc.title AS document_title,
+               sec.path_key AS section_key,
+               final_score AS score,
+               sources
+        ORDER BY final_score DESC
+        """
+        
+        traversal_results = []
+        try:
+            loop = asyncio.get_event_loop()
+            
+            def _run_traversal():
+                with self.neo4j_driver.session() as session:
+                    records = session.run(
+                        cypher,
+                        embedding=query_embedding,
+                        group_id=group_id,
+                        top_k=top_k,
+                        threshold=threshold,
+                    )
+                    return [dict(r) for r in records]
+            
+            traversal_results = await loop.run_in_executor(self._executor, _run_traversal)
+        except Exception as e:
+            logger.warning("strategy_b_traversal_failed", error=str(e))
+            # Fallback to Strategy A
+            logger.info("strategy_b_fallback_to_strategy_a")
+            return await self._retrieve_skeleton_sentences(query)
+        
+        if not traversal_results:
+            return []
+        
+        # 3. Format as coverage_chunks (same format as Strategy A for seamless integration)
+        seen_chunks: set = set()  # Deduplicate by chunk_id (multiple sentences per chunk)
+        coverage_chunks = []
+        
+        for result in traversal_results:
+            chunk_id = result.get("chunk_id", "")
+            sentence_id = result.get("sentence_id", "")
+            
+            # Use parent_text for richer sentence context, fall back to sentence text
+            display_text = result.get("parent_text") or result.get("text", "")
+            if not display_text:
+                continue
+            
+            # For sentences expanded via NEXT, use the chunk text to provide
+            # full coherent context rather than individual sentence fragments
+            sources = result.get("sources", [])
+            is_context_expansion = any(s in ("next", "prev") for s in sources) and "seed" not in sources
+            
+            if is_context_expansion and chunk_id and chunk_id not in seen_chunks:
+                # Context expansion: inject the full chunk text (coherent multi-sentence passage)
+                chunk_text = result.get("chunk_text", "")
+                if chunk_text and len(chunk_text) > len(display_text):
+                    display_text = chunk_text
+                    seen_chunks.add(chunk_id)
+                    source_label = "chunk_expansion"
+                else:
+                    source_label = "next_sentence"
+            elif "related_to" in sources:
+                source_label = "related_to"
+            else:
+                source_label = result.get("source", "paragraph")
+            
+            section = result.get("section_key") or result.get("section_path", "")
+            score = result.get("score", 0)
+            
+            tagged_text = (
+                f"[Skeleton-B: {source_label}, sim={score:.3f}] "
+                f"{display_text}"
+            )
+            
+            coverage_chunks.append({
+                "text": tagged_text,
+                "metadata": {
+                    "document_id": result.get("document_id", ""),
+                    "document_title": result.get("document_title", "Unknown"),
+                    "section_path_key": section,
+                    "page_number": result.get("page"),
+                    "source": f"skeleton_b_{source_label}",
+                    "skeleton_sentence_id": sentence_id,
+                    "skeleton_score": score,
+                    "skeleton_sources": sources,
+                },
+            })
+        
+        logger.info(
+            "strategy_b_graph_traversal_complete",
+            seeds=sum(1 for r in traversal_results if "seed" in (r.get("sources") or [])),
+            related=sum(1 for r in traversal_results if "related_to" in (r.get("sources") or [])),
+            next_expanded=sum(1 for r in traversal_results if "next" in (r.get("sources") or []) or "prev" in (r.get("sources") or [])),
+            total_results=len(traversal_results),
             coverage_chunks=len(coverage_chunks),
         )
         return coverage_chunks

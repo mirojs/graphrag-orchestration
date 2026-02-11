@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     SKELETON_KNN_THRESHOLD: float = 0.90  # Min cosine similarity for sentence RELATED_TO edges
     SKELETON_KNN_MAX_K: int = 2  # Max RELATED_TO edges per sentence (keeps graph sparse)
     
+    # Strategy B: Graph traversal retrieval (replaces flat vector search with graph expansion)
+    # When enabled, Stage 2.2.6 traverses RELATED_TO + NEXT edges from seed sentences
+    # to discover coherent multi-sentence clusters across chunks/documents.
+    SKELETON_GRAPH_TRAVERSAL_ENABLED: bool = False  # Use graph traversal (B) instead of flat search (A)
+    SKELETON_TRAVERSAL_NEXT_HOPS: int = 1  # NEXT/PREV expansion window (sentences in each direction)
+    SKELETON_TRAVERSAL_RELATED_HOPS: int = 1  # Max RELATED_TO hops from seed sentence
+    
     # ========================================================================
     # Algorithm Version Control
     # See ARCHITECTURE_PLAN_FULLSTACK_2026-01-30.md Phase 8 for details

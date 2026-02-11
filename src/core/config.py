@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     # Route 2 queries the sentence index and injects top-k matches as supplementary
     # evidence into the synthesis prompt.  Benchmark: +289% F1, +36% containment.
     # ========================================================================
-    SKELETON_ENRICHMENT_ENABLED: bool = False  # Master switch for sentence extraction + injection
+    SKELETON_ENRICHMENT_ENABLED: bool = True  # Master switch for sentence extraction + injection
     SKELETON_SENTENCE_TOP_K: int = 8  # Top-k sentence matches to inject into Route 2 prompt
     SKELETON_SIMILARITY_THRESHOLD: float = 0.45  # Min cosine similarity for sentence retrieval
     SKELETON_MIN_SENTENCE_CHARS: int = 30  # Minimum characters for a valid sentence
@@ -82,7 +82,7 @@ class Settings(BaseSettings):
     # Strategy B: Graph traversal retrieval (replaces flat vector search with graph expansion)
     # When enabled, Stage 2.2.6 traverses RELATED_TO + NEXT edges from seed sentences
     # to discover coherent multi-sentence clusters across chunks/documents.
-    SKELETON_GRAPH_TRAVERSAL_ENABLED: bool = False  # Use graph traversal (B) instead of flat search (A)
+    SKELETON_GRAPH_TRAVERSAL_ENABLED: bool = True  # Use graph traversal (B) instead of flat search (A)
     SKELETON_TRAVERSAL_NEXT_HOPS: int = 1  # NEXT/PREV expansion window (sentences in each direction)
     SKELETON_TRAVERSAL_RELATED_HOPS: int = 1  # Max RELATED_TO hops from seed sentence
 
@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     # can extract answers without the reasoning overhead of gpt-5.1.
     # Empty string = use HYBRID_SYNTHESIS_MODEL (default, no override).
     # Recommended: "gpt-4.1-mini" for ~3x speed, ~10x cost reduction on extraction tasks.
-    SKELETON_SYNTHESIS_MODEL: str = ""  # Override synthesis model when skeleton enrichment is active
+    SKELETON_SYNTHESIS_MODEL: str = "gpt-4.1-mini"  # Override synthesis model when skeleton enrichment is active
     
     # ========================================================================
     # Algorithm Version Control

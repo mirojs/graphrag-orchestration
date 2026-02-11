@@ -654,3 +654,35 @@ The hybrid skeleton approach is **a mature synthesis of both options plus the gr
 | Parent-chunk expansion | ❌ | ✅ | ✅ |
 
 The hybrid approach subsumes both options and adds the graph structure that makes the system self-reinforcing — the more documents indexed, the more cross-references discovered, the better the retrieval becomes.
+
+---
+
+## Known Issues & Future Improvements
+
+### Context Metadata Leakage (Priority: Medium)
+
+**Problem:** When using smaller synthesis models (e.g. `gpt-4.1-mini`), retrieval metadata tags embedded in the context window can leak into the LLM response. Example observed in Q-L6:
+
+```
+Agent fee/commission for short-term rentals: 15% of Gross Revenue [paragraph, sim=0.751, doc=...]
+```
+
+The `[paragraph, sim=X.XXX, doc=...]` tags are internal retrieval annotations that should never appear in user-facing output.
+
+**Root Cause:** Context assembled in Route 2 includes similarity scores and source metadata inline. gpt-5.1 learns to ignore these; gpt-4.1-mini sometimes copies them verbatim during extraction.
+
+**Fix (Phase 3+):** Strip all retrieval metadata tags from context *before* LLM injection. A simple regex pass (`re.sub(r'\[paragraph,.*?\]', '', context)`) on the assembled context string would eliminate the issue without affecting answer quality.
+
+**Impact:** Cosmetic only — answer accuracy is unaffected. The leaked metadata does reduce F1 slightly because the gold answer doesn't contain those tags.
+
+### Synthesis Model Selection (Resolved)
+
+**Finding:** `gpt-4.1-mini` outperforms `gpt-5.1` on sentence-level extraction tasks (11W/1L/5T, +29% F1, 1.2x faster, ~10x cheaper). When context is precise (answer at rank #1), the reasoning overhead of gpt-5.1 is counterproductive — it sometimes reasons itself into "not stated" when the answer is right there.
+
+**Decision:** `gpt-4.1-mini` is the default `SKELETON_SYNTHESIS_MODEL` for production.
+
+### Reranker Assessment (Resolved — Not Needed)
+
+**Finding:** All 5 previously-flagged "noisy" questions have their answer-bearing sentence at vector search rank #1. The architecture condition for adding a reranker ("answers in top-20 but not top-5") is NOT met. No reranker is needed at this time.
+
+**Revisit:** Only if new documents/queries show ranking degradation (answers dropping below top-5).

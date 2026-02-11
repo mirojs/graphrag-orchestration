@@ -1902,6 +1902,44 @@ class Neo4jStoreV3:
         with self.driver.session(database=self.database) as session:
             session.run(query, pairs=next_pairs)
     
+    def create_sentence_related_to_edges(
+        self,
+        group_id: str,
+        edges: List[Dict[str, Any]],
+    ) -> int:
+        """Create RELATED_TO edges between semantically similar sentences.
+        
+        Phase 2 of skeleton enrichment: sparse cross-chunk sentence links.
+        Each edge dict must have: source_id, target_id, similarity.
+        
+        Edge properties:
+          - similarity: cosine score
+          - source: 'knn_sentence'
+          - group_id: tenant isolation
+          - created_at: timestamp
+        """
+        if not edges:
+            return 0
+        
+        query = """
+        UNWIND $edges AS e
+        MATCH (s1:Sentence {id: e.source_id, group_id: $group_id})
+        MATCH (s2:Sentence {id: e.target_id, group_id: $group_id})
+        MERGE (s1)-[r:RELATED_TO]->(s2)
+        SET r.similarity = e.similarity,
+            r.source = 'knn_sentence',
+            r.group_id = $group_id,
+            r.created_at = datetime()
+        RETURN count(r) AS count
+        """
+        
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, edges=edges, group_id=group_id)
+            count = result.single()["count"]
+        
+        logger.info(f"Created {count} sentence RELATED_TO edges for group {group_id}")
+        return count
+    
     def query_sentences_by_vector(
         self,
         query_embedding: List[float],

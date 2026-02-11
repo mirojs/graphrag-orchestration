@@ -294,6 +294,21 @@ class LazyGraphRAGIndexingPipeline:
             logger.debug("step_4.1_skeleton_skipped (SKELETON_ENRICHMENT_ENABLED=%s, VOYAGE_V2_ENABLED=%s)",
                          settings.SKELETON_ENRICHMENT_ENABLED, settings.VOYAGE_V2_ENABLED)
 
+        # 4.2) Phase 2: Sparse sentence-to-sentence RELATED_TO edges.
+        # Separate from GDS KNN — bounded: threshold 0.90, max k=2, cross-chunk only.
+        if skeleton_enabled and stats.get("skeleton_sentences", 0) > 0:
+            try:
+                knn_stats = await self._build_sentence_knn_edges(group_id)
+                stats["skeleton_related_to_edges"] = knn_stats.get("edges_created", 0)
+                logger.info(
+                    "step_4.2_sentence_knn_complete",
+                    edges=stats["skeleton_related_to_edges"],
+                )
+            except Exception as e:
+                logger.warning(f"step_4.2_sentence_knn_failed: {e}")
+                stats["skeleton_related_to_edges"] = 0
+                stats["skeleton_knn_error"] = str(e)
+
         # 4.5) Build Section graph from chunk metadata.
         section_stats = await self._build_section_graph(group_id, all_chunks, chunk_to_doc_id)
         stats["sections"] = section_stats.get("sections_created", 0)
@@ -718,6 +733,136 @@ class LazyGraphRAGIndexingPipeline:
         stats["sentences_created"] = count
         
         return stats
+
+    async def _build_sentence_knn_edges(
+        self,
+        group_id: str,
+    ) -> Dict[str, Any]:
+        """Step 4.2: Build sparse RELATED_TO edges between sentence nodes.
+        
+        Phase 2 of skeleton enrichment. For each :Sentence with an embedding,
+        finds its nearest cross-chunk neighbours via the vector index and creates
+        RELATED_TO edges with strict thresholds:
+          - similarity >= SKELETON_KNN_THRESHOLD (default 0.90)
+          - max k = SKELETON_KNN_MAX_K (default 2) per sentence
+          - cross-chunk only (same-chunk pairs already linked via NEXT)
+        
+        This is SEPARATE from GDS KNN (step 8), which operates on
+        Entity/Figure/KVP/Chunk at a much lower threshold (0.60, k=5).
+        Sentence k-NN is bounded to avoid graph pollution.
+        """
+        import numpy as np
+        from collections import defaultdict
+        
+        from src.core.config import Settings
+        settings = Settings()
+        
+        threshold = settings.SKELETON_KNN_THRESHOLD
+        max_k = settings.SKELETON_KNN_MAX_K
+        
+        # Fetch all sentences with embeddings for this group
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (s:Sentence {group_id: $group_id})
+                WHERE s.embedding_v2 IS NOT NULL
+                RETURN s.id AS id, s.chunk_id AS chunk_id, s.embedding_v2 AS embedding
+                """,
+                group_id=group_id,
+            )
+            sentences = [
+                {"id": record["id"], "chunk_id": record["chunk_id"], "embedding": record["embedding"]}
+                for record in result
+            ]
+        
+        if len(sentences) < 2:
+            return {"edges_created": 0, "reason": "insufficient_sentences"}
+        
+        logger.info(f"step_4.2_sentence_knn: computing pairwise similarities for {len(sentences)} sentences "
+                     f"(threshold={threshold}, max_k={max_k})")
+        
+        # Compute pairwise cosine similarities (cross-chunk only)
+        # Use numpy for efficiency. With 181 sentences this is instant;
+        # for larger corpora we'd switch to vector index queries.
+        embeddings = np.array([s["embedding"] for s in sentences])
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms[norms == 0] = 1  # Avoid division by zero
+        normalized = embeddings / norms
+        sim_matrix = normalized @ normalized.T
+        
+        # Build edge candidates: cross-chunk, above threshold, max-k per node
+        edge_count: Dict[str, int] = defaultdict(int)
+        
+        # For each sentence, find its top-k cross-chunk neighbours
+        # Process by descending similarity to ensure we keep the best edges
+        candidates = []
+        for i in range(len(sentences)):
+            row_candidates = []
+            for j in range(len(sentences)):
+                if i == j:
+                    continue
+                if sentences[i]["chunk_id"] == sentences[j]["chunk_id"]:
+                    continue  # Same chunk — already linked via NEXT
+                sim = float(sim_matrix[i, j])
+                if sim >= threshold:
+                    row_candidates.append((j, sim))
+            
+            # Sort by similarity descending, take top max_k
+            row_candidates.sort(key=lambda x: x[1], reverse=True)
+            for j, sim in row_candidates[:max_k]:
+                candidates.append((i, j, sim))
+        
+        # Deduplicate: (i→j) and (j→i) are the same edge, keep highest sim
+        seen_pairs: Dict[tuple, float] = {}
+        for i, j, sim in candidates:
+            key = (min(i, j), max(i, j))
+            if key not in seen_pairs or sim > seen_pairs[key]:
+                seen_pairs[key] = sim
+        
+        # Also enforce max_k from the target side
+        # Build final edge list respecting max_k budget for both endpoints
+        edge_count_final: Dict[str, int] = defaultdict(int)
+        edges_to_create = []
+        
+        for (i, j), sim in sorted(seen_pairs.items(), key=lambda x: x[1], reverse=True):
+            sid_i = sentences[i]["id"]
+            sid_j = sentences[j]["id"]
+            if edge_count_final[sid_i] >= max_k or edge_count_final[sid_j] >= max_k:
+                continue
+            edges_to_create.append({
+                "source_id": sid_i,
+                "target_id": sid_j,
+                "similarity": round(sim, 4),
+            })
+            edge_count_final[sid_i] += 1
+            edge_count_final[sid_j] += 1
+        
+        if not edges_to_create:
+            logger.info(f"step_4.2_sentence_knn: no edges above threshold {threshold}")
+            return {"edges_created": 0, "threshold": threshold}
+        
+        # Persist RELATED_TO edges in Neo4j
+        count = self.neo4j_store.create_sentence_related_to_edges(group_id, edges_to_create)
+        
+        logger.info(
+            "step_4.2_sentence_knn_edges_created",
+            extra={
+                "group_id": group_id,
+                "edges_created": count,
+                "threshold": threshold,
+                "max_k": max_k,
+                "sentences_connected": len(edge_count_final),
+                "total_sentences": len(sentences),
+            },
+        )
+        
+        return {
+            "edges_created": count,
+            "threshold": threshold,
+            "max_k": max_k,
+            "sentences_connected": len(edge_count_final),
+            "total_sentences": len(sentences),
+        }
 
     async def _extract_entities_and_relationships(
         self,

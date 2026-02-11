@@ -72,6 +72,13 @@ class Settings(BaseSettings):
     SKELETON_MIN_SENTENCE_CHARS: int = 30  # Minimum characters for a valid sentence
     SKELETON_MIN_SENTENCE_WORDS: int = 5  # Minimum words for a valid sentence
     
+    # Phase 2: Sparse sentence-to-sentence RELATED_TO edges
+    # Separate from GDS KNN (Entity/Figure/KVP/Chunk). Bounded: threshold 0.90, max k=2.
+    # Only cross-chunk pairs (same-chunk sentences already linked via NEXT edges).
+    # See ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md Phase 2.
+    SKELETON_KNN_THRESHOLD: float = 0.90  # Min cosine similarity for sentence RELATED_TO edges
+    SKELETON_KNN_MAX_K: int = 2  # Max RELATED_TO edges per sentence (keeps graph sparse)
+    
     # ========================================================================
     # Algorithm Version Control
     # See ARCHITECTURE_PLAN_FULLSTACK_2026-01-30.md Phase 8 for details

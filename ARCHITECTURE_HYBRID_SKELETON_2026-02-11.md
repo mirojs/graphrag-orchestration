@@ -287,12 +287,15 @@ If Phase 0 shows improvement:
 - Max k=2 per sentence, cross-chunk only
 - Edge type: `RELATED_TO` with `{source: "knn_sentence", similarity: 0.93}`
 
-### Phase 3: Three-Stage Retrieval (2-3 days)
+### ~~Phase 3: Three-Stage Retrieval~~ (SUPERSEDED)
 
-- Add `search_sentences_v2()` to `neo4j_store.py` (vector search on Sentence nodes)
-- Implement sentence → chunk expansion in `enhanced_graph_retriever.py`
-- Add as Route 1-S (sentence-level vector RAG) in the router
-- Full benchmark against existing 4 routes
+> **Status: NOT NEEDED.** Benchmarks confirmed all answer-bearing sentences at vector search
+> rank #1 (see `scripts/verify_sentence_retrieval_ranking.py`, commit `97415141`).
+> The reranker condition ("answers in top-20 but not top-5") is not met.
+> Revisit only if new document corpora show ranking degradation.
+>
+> The only Phase 3+ item that WAS needed — context metadata cleanup — is now
+> implemented in `strip_skeleton_tags()` (synthesis.py).
 
 ### Phase 4: Production (1 week)
 
@@ -671,9 +674,11 @@ The `[paragraph, sim=X.XXX, doc=...]` tags are internal retrieval annotations th
 
 **Root Cause:** Context assembled in Route 2 includes similarity scores and source metadata inline. gpt-5.1 learns to ignore these; gpt-4.1-mini sometimes copies them verbatim during extraction.
 
-**Fix (Phase 3+):** Strip all retrieval metadata tags from context *before* LLM injection. A simple regex pass (`re.sub(r'\[paragraph,.*?\]', '', context)`) on the assembled context string would eliminate the issue without affecting answer quality.
+**Fix:** Implemented in `strip_skeleton_tags()` (synthesis.py). Regex `_SKELETON_TAG_RE` strips
+`[Skeleton: ...]` and `[Skeleton-B: ...]` tags from context before LLM injection.
+Metadata is preserved in the coverage_chunks dicts for structured logging.
 
-**Impact:** Cosmetic only — answer accuracy is unaffected. The leaked metadata does reduce F1 slightly because the gold answer doesn't contain those tags.
+**Impact:** Cosmetic fix — answer accuracy is unaffected. Eliminates the F1 penalty from leaked tags.
 
 ### Synthesis Model Selection (Resolved)
 

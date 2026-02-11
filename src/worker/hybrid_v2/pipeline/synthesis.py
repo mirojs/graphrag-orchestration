@@ -33,6 +33,13 @@ logger = structlog.get_logger(__name__)
 # Stripping converts context back to block-level [N] citations only.
 _SENTENCE_CITATION_RE = re.compile(r"^\[\d+[a-z]\]\s*", re.MULTILINE)
 
+# Matches skeleton retrieval metadata tags injected by route_2_local.py:
+#   [Skeleton: paragraph, sim=0.751]   (Strategy A)
+#   [Skeleton-B: related_to, sim=0.890] (Strategy B)
+# These are useful for debugging but must be stripped before LLM synthesis
+# because smaller models (gpt-4.1-mini) sometimes copy them into responses.
+_SKELETON_TAG_RE = re.compile(r"\[Skeleton(?:-B)?:\s*[^\]]*\]\s*")
+
 
 def strip_sentence_markers(text: str) -> str:
     """Remove sentence-level citation markers ([1a], [2b] …) from *text*.
@@ -46,6 +53,22 @@ def strip_sentence_markers(text: str) -> str:
     'First sentence.\\nSecond.'
     """
     return _SENTENCE_CITATION_RE.sub("", text)
+
+
+def strip_skeleton_tags(text: str) -> str:
+    """Remove skeleton retrieval metadata tags from context before LLM synthesis.
+
+    Tags like ``[Skeleton: paragraph, sim=0.751]`` are injected by
+    route_2_local.py for structured logging.  Smaller models (gpt-4.1-mini)
+    sometimes copy these verbatim into responses, polluting user output.
+    Stripping is safe — the same information lives in chunk metadata.
+
+    >>> strip_skeleton_tags("[Skeleton: paragraph, sim=0.751] The rent is $500.")
+    'The rent is $500.'
+    >>> strip_skeleton_tags("[Skeleton-B: related_to, sim=0.890] Fee is 15%.")
+    'Fee is 15%.'
+    """
+    return _SKELETON_TAG_RE.sub("", text)
 
 
 class EvidenceSynthesizer:
@@ -278,6 +301,12 @@ class EvidenceSynthesizer:
         # Strip to block-level [N] only; sentence text is preserved.
         context = strip_sentence_markers(context)
         sentence_citation_map.clear()
+
+        # ── Metadata cleanup: strip skeleton retrieval tags ───────────
+        # Tags like [Skeleton: paragraph, sim=0.751] are useful for logging
+        # but cause gpt-4.1-mini to leak them into responses.  Strip before
+        # LLM injection; metadata is preserved in coverage_chunks dicts.
+        context = strip_skeleton_tags(context)
 
         # Step 2.5: Inject global document overview when retrieval is sparse.
         # This fixes Q-D7 (dates) and Q-D8 (comparisons) where PPR returns few/no entities.

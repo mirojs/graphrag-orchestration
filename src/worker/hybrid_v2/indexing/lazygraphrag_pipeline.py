@@ -760,6 +760,21 @@ class LazyGraphRAGIndexingPipeline:
         threshold = settings.SKELETON_KNN_THRESHOLD
         max_k = settings.SKELETON_KNN_MAX_K
         
+        # Clean up stale RELATED_TO edges from previous runs before rebuilding.
+        # This ensures re-indexing doesn't leave orphan edges from changed/deleted sentences.
+        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            result = session.run(
+                """
+                MATCH (:Sentence {group_id: $group_id})-[r:RELATED_TO {source: 'knn_sentence'}]->(:Sentence)
+                DELETE r
+                RETURN count(r) AS deleted
+                """,
+                group_id=group_id,
+            )
+            deleted = result.single()["deleted"]
+            if deleted > 0:
+                logger.info(f"step_4.2_cleanup: deleted {deleted} stale RELATED_TO edges")
+        
         # Fetch all sentences with embeddings for this group
         with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
             result = session.run(

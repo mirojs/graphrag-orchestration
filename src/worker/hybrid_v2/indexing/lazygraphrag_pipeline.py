@@ -283,8 +283,10 @@ class LazyGraphRAGIndexingPipeline:
                 stats["skeleton_sentences_embedded"] = skeleton_stats.get("sentences_embedded", 0)
                 logger.info(
                     "step_4.1_skeleton_complete",
-                    sentences=stats["skeleton_sentences"],
-                    embedded=stats["skeleton_sentences_embedded"],
+                    extra={
+                        "sentences": stats["skeleton_sentences"],
+                        "embedded": stats["skeleton_sentences_embedded"],
+                    },
                 )
             except Exception as e:
                 logger.warning(f"step_4.1_skeleton_failed: {e}")
@@ -302,7 +304,7 @@ class LazyGraphRAGIndexingPipeline:
                 stats["skeleton_related_to_edges"] = knn_stats.get("edges_created", 0)
                 logger.info(
                     "step_4.2_sentence_knn_complete",
-                    edges=stats["skeleton_related_to_edges"],
+                    extra={"edges": stats["skeleton_related_to_edges"]},
                 )
             except Exception as e:
                 logger.warning(f"step_4.2_sentence_knn_failed: {e}")
@@ -3469,13 +3471,17 @@ SUMMARY: <summary>"""
         
         with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
             # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
-            # Phase B: Support both Sentence-based and TextChunk-based MENTIONS
+            # Phase B: Sentences reach Section via PART_OF→TextChunk→IN_SECTION
             result = session.run(
                 """
-                MATCH (src)-[:MENTIONS]->(e:Entity), (src)-[:IN_SECTION]->(s:Section)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id AND s.group_id = $group_id
+                MATCH (src)-[:MENTIONS]->(e:Entity)
+                WHERE e.group_id = $group_id AND src.group_id = $group_id
                   AND (src:Sentence OR src:TextChunk)
-                WITH e, s
+                // Resolve to section: TextChunk has direct IN_SECTION, Sentence goes via PART_OF
+                OPTIONAL MATCH (src)-[:IN_SECTION]->(s_direct:Section {group_id: $group_id})
+                OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_SECTION]->(s_via_chunk:Section {group_id: $group_id})
+                WITH e, coalesce(s_direct, s_via_chunk) AS s
+                WHERE s IS NOT NULL
                 MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
                 SET r.group_id = $group_id
                 RETURN count(DISTINCT r) AS count
@@ -3487,9 +3493,13 @@ SUMMARY: <summary>"""
             # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
             result = session.run(
                 """
-                MATCH (src)-[:MENTIONS]->(e:Entity), (src)-[:IN_SECTION]->(s:Section)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id AND s.group_id = $group_id
+                MATCH (src)-[:MENTIONS]->(e:Entity)
+                WHERE e.group_id = $group_id AND src.group_id = $group_id
                   AND (src:Sentence OR src:TextChunk)
+                OPTIONAL MATCH (src)-[:IN_SECTION]->(s_direct:Section {group_id: $group_id})
+                OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_SECTION]->(s_via_chunk:Section {group_id: $group_id})
+                WITH e, coalesce(s_direct, s_via_chunk) AS s
+                WHERE s IS NOT NULL
                 WITH e, s.doc_id AS doc_id
                 MATCH (d:Document {id: doc_id})
                 WHERE d.group_id = $group_id
@@ -3505,8 +3515,14 @@ SUMMARY: <summary>"""
             # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
             result = session.run(
                 """
-                MATCH (s:Section {group_id: $group_id})<-[:IN_SECTION]-(src)-[:MENTIONS]->(e:Entity)
-                WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+                // Collect entity mentions per section, resolving Sentence→PART_OF→TextChunk→IN_SECTION
+                MATCH (src)-[:MENTIONS]->(e:Entity)
+                WHERE e.group_id = $group_id AND src.group_id = $group_id
+                  AND (src:Sentence OR src:TextChunk)
+                OPTIONAL MATCH (src)-[:IN_SECTION]->(s_direct:Section {group_id: $group_id})
+                OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_SECTION]->(s_via_chunk:Section {group_id: $group_id})
+                WITH e, coalesce(s_direct, s_via_chunk) AS s, src
+                WHERE s IS NOT NULL
                 WITH s, e, count(DISTINCT src) AS mention_count
                 ORDER BY s.id, mention_count DESC
                 WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
@@ -3556,13 +3572,19 @@ SUMMARY: <summary>"""
             # Threshold: at least 2 shared entities to reduce noise
             result = session.run(
                 """
-                MATCH (s1:Section {group_id: $group_id})<-[:IN_SECTION]-(src1)
-                      -[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2)
-                      -[:IN_SECTION]->(s2:Section {group_id: $group_id})
-                WHERE s1 <> s2
-                  AND s1.doc_id <> s2.doc_id  // Cross-document only
+                // Resolve src→Section via PART_OF→TextChunk→IN_SECTION for Sentences
+                MATCH (src1)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2)
+                WHERE e.group_id = $group_id
                   AND (src1:Sentence OR src1:TextChunk)
                   AND (src2:Sentence OR src2:TextChunk)
+                OPTIONAL MATCH (src1)-[:IN_SECTION]->(s1d:Section {group_id: $group_id})
+                OPTIONAL MATCH (src1)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s1p:Section {group_id: $group_id})
+                OPTIONAL MATCH (src2)-[:IN_SECTION]->(s2d:Section {group_id: $group_id})
+                OPTIONAL MATCH (src2)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s2p:Section {group_id: $group_id})
+                WITH coalesce(s1d, s1p) AS s1, coalesce(s2d, s2p) AS s2, e
+                WHERE s1 IS NOT NULL AND s2 IS NOT NULL
+                  AND s1 <> s2
+                  AND s1.doc_id <> s2.doc_id  // Cross-document only
                 WITH s1, s2, collect(DISTINCT e.name) AS shared_entities, count(DISTINCT e) AS shared_count
                 WHERE shared_count >= 2  // Threshold: at least 2 shared entities
                 MERGE (s1)-[r:SHARES_ENTITY]->(s2)

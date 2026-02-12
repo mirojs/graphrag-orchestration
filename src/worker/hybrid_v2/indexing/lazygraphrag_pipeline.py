@@ -2182,10 +2182,11 @@ Output:
                 if i < len(embeddings) and embeddings[i]:
                     session.run(
                         """
-                        MATCH (f:Figure {id: $id})
+                        MATCH (f:Figure {id: $id, group_id: $group_id})
                         SET f.embedding_v2 = $embedding
                         """,
                         id=fig["id"],
+                        group_id=group_id,
                         embedding=embeddings[i],
                     )
                     stats["embeddings_created"] += 1
@@ -2198,10 +2199,11 @@ Output:
                 if emb_idx < len(embeddings) and embeddings[emb_idx]:
                     session.run(
                         """
-                        MATCH (k:KeyValuePair {id: $id})
+                        MATCH (k:KeyValuePair {id: $id, group_id: $group_id})
                         SET k.embedding_v2 = $embedding
                         """,
                         id=kvp["id"],
+                        group_id=group_id,
                         embedding=embeddings[emb_idx],
                     )
                     stats["embeddings_created"] += 1
@@ -2395,6 +2397,7 @@ Output:
                             MATCH (n1), (n2) 
                             WHERE id(n1) = $node1 AND id(n2) = $node2
                               AND id(n1) < id(n2)
+                              AND n1.group_id = $group_id AND n2.group_id = $group_id
                             MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
                             SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, 
                                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
@@ -2406,6 +2409,7 @@ Output:
                             MATCH (n1), (n2) 
                             WHERE id(n1) = $node1 AND id(n2) = $node2
                               AND id(n1) < id(n2)
+                              AND n1.group_id = $group_id AND n2.group_id = $group_id
                             MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
                             SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id,
                                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
@@ -2431,9 +2435,9 @@ Output:
                     community_id = int(row["communityId"])
                     
                     session.run("""
-                        MATCH (n) WHERE id(n) = $nodeId
+                        MATCH (n) WHERE id(n) = $nodeId AND n.group_id = $group_id
                         SET n.community_id = $communityId
-                    """, nodeId=node_id, communityId=community_id)
+                    """, nodeId=node_id, communityId=community_id, group_id=group_id)
                     community_ids.add(community_id)
                 
                 stats["communities"] = len(community_ids)
@@ -2450,9 +2454,9 @@ Output:
                     score = float(row["score"])
                     
                     session.run("""
-                        MATCH (n) WHERE id(n) = $nodeId
+                        MATCH (n) WHERE id(n) = $nodeId AND n.group_id = $group_id
                         SET n.pagerank = $score
-                    """, nodeId=node_id, score=score)
+                    """, nodeId=node_id, score=score, group_id=group_id)
                     nodes_scored += 1
                 
                 stats["pagerank_nodes"] = nodes_scored
@@ -3215,10 +3219,11 @@ SUMMARY: <summary>"""
             session.run(
                 """
                 UNWIND $updates AS u
-                MATCH (s:Section {id: u.id})
+                MATCH (s:Section {id: u.id, group_id: $group_id})
                 SET s.embedding = u.embedding
                 """,
                 updates=updates,
+                group_id=group_id,
             )
         
         logger.info(
@@ -3422,10 +3427,11 @@ SUMMARY: <summary>"""
             session.run(
                 """
                 UNWIND $updates AS u
-                MATCH (kv:KeyValue {id: u.id})
+                MATCH (kv:KeyValue {id: u.id, group_id: $group_id})
                 SET kv.key_embedding = u.key_embedding
                 """,
                 updates=updates,
+                group_id=group_id,
             )
         
         logger.info(

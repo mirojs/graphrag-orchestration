@@ -1158,16 +1158,16 @@ class Neo4jStoreV3:
         Used for DRIFT traversal (Summary -> Entity).
         """
         query = """
-        MATCH (r:RaptorNode {id: $raptor_id})
+        MATCH (r:RaptorNode {id: $raptor_id, group_id: $group_id})
         // Traverse down to chunks
-        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk)
+        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk {group_id: $group_id})
         // Find entities in these chunks
-        MATCH (c)-[:MENTIONS]->(e:Entity)
+        MATCH (c)-[:MENTIONS]->(e:Entity {group_id: $group_id})
         RETURN DISTINCT e
         LIMIT $limit
         """
         with self.driver.session(database=self.database) as session:
-            result = session.run(query, raptor_id=raptor_node_id, limit=limit)
+            result = session.run(query, raptor_id=raptor_node_id, group_id=group_id, limit=limit)
             entities = []
             for record in result:
                 e = record["e"]
@@ -1186,12 +1186,12 @@ class Neo4jStoreV3:
         Used for 'Global + RAPTOR' pruning.
         """
         query = """
-        MATCH (r:RaptorNode)
+        MATCH (r:RaptorNode {group_id: $group_id})
         WHERE r.id IN $raptor_ids
         // Traverse down to chunks
-        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk)
+        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk {group_id: $group_id})
         // Find entities in these chunks
-        MATCH (c)-[:MENTIONS]->(e:Entity)
+        MATCH (c)-[:MENTIONS]->(e:Entity {group_id: $group_id})
         // Find communities these entities belong to
         MATCH (e)-[:BELONGS_TO]->(comm:Community)
         WHERE comm.group_id = $group_id AND comm.level = 0

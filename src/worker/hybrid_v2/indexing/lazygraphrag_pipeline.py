@@ -2189,39 +2189,37 @@ Output:
             logger.error(f"Failed to generate DI node embeddings: {e}")
             return stats
         
-        # 4. Update nodes with embeddings
+        # 4. Update nodes with embeddings via UNWIND batch (2 queries instead of N)
+        fig_updates = [
+            {"id": fig["id"], "embedding": embeddings[i]}
+            for i, fig in enumerate(figures_to_embed)
+            if i < len(embeddings) and embeddings[i]
+        ]
+        kvp_start_idx = len(figures_to_embed)
+        kvp_updates = [
+            {"id": kvp["id"], "embedding": embeddings[kvp_start_idx + i]}
+            for i, kvp in enumerate(kvps_to_embed)
+            if (kvp_start_idx + i) < len(embeddings) and embeddings[kvp_start_idx + i]
+        ]
+        
         with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-            # Update Figure embeddings
-            for i, fig in enumerate(figures_to_embed):
-                if i < len(embeddings) and embeddings[i]:
-                    session.run(
-                        """
-                        MATCH (f:Figure {id: $id, group_id: $group_id})
-                        SET f.embedding_v2 = $embedding
-                        """,
-                        id=fig["id"],
-                        group_id=group_id,
-                        embedding=embeddings[i],
-                    )
-                    stats["embeddings_created"] += 1
-                    stats["figures_processed"] += 1
+            if fig_updates:
+                session.run("""
+                    UNWIND $updates AS u
+                    MATCH (f:Figure {id: u.id, group_id: $group_id})
+                    SET f.embedding_v2 = u.embedding
+                """, updates=fig_updates, group_id=group_id)
+            stats["figures_processed"] = len(fig_updates)
+            stats["embeddings_created"] += len(fig_updates)
             
-            # Update KVP embeddings
-            kvp_start_idx = len(figures_to_embed)
-            for i, kvp in enumerate(kvps_to_embed):
-                emb_idx = kvp_start_idx + i
-                if emb_idx < len(embeddings) and embeddings[emb_idx]:
-                    session.run(
-                        """
-                        MATCH (k:KeyValuePair {id: $id, group_id: $group_id})
-                        SET k.embedding_v2 = $embedding
-                        """,
-                        id=kvp["id"],
-                        group_id=group_id,
-                        embedding=embeddings[emb_idx],
-                    )
-                    stats["embeddings_created"] += 1
-                    stats["kvps_processed"] += 1
+            if kvp_updates:
+                session.run("""
+                    UNWIND $updates AS u
+                    MATCH (k:KeyValuePair {id: u.id, group_id: $group_id})
+                    SET k.embedding_v2 = u.embedding
+                """, updates=kvp_updates, group_id=group_id)
+            stats["kvps_processed"] = len(kvp_updates)
+            stats["embeddings_created"] += len(kvp_updates)
         
         logger.info(f"✅ Generated {stats['embeddings_created']} embeddings for DI nodes")
         
@@ -2391,48 +2389,44 @@ Output:
                 import pandas as pd
                 knn_df = pd.DataFrame(columns=["node1", "node2", "similarity"])
             
-            # Process KNN results and create edges in Neo4j
+            # Process KNN results and create edges in Neo4j via UNWIND batch
             # Use SEMANTICALLY_SIMILAR for ALL KNN edges (consistency with GDS)
-            # Only create one edge per pair (id(n1) < id(n2)) to avoid bidirectional duplicates
+            # Only create one edge per pair (n1 < n2) to avoid bidirectional duplicates
+            edge_batch = []
+            for _, row in knn_df.iterrows():
+                n1, n2 = int(row["node1"]), int(row["node2"])
+                if n1 < n2:  # Pre-filter dedup (symmetric similarity)
+                    edge_batch.append({"node1": n1, "node2": n2, "similarity": float(row["similarity"])})
+            
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-                edges_created = 0
-                
-                for _, row in knn_df.iterrows():
-                    node1_id = int(row["node1"])
-                    node2_id = int(row["node2"])
-                    similarity = float(row["similarity"])
-                    
-                    # Create SEMANTICALLY_SIMILAR edge for all node type combinations
-                    # Only create edge if node1 < node2 (avoids A→B and B→A duplicates)
-                    # Similarity is symmetric, so one edge per pair is sufficient
-                    # Include knn_config tag if provided (enables A/B testing of KNN parameters)
+                if edge_batch:
                     if knn_config:
                         result = session.run("""
-                            MATCH (n1), (n2) 
-                            WHERE id(n1) = $node1 AND id(n2) = $node2
-                              AND id(n1) < id(n2)
+                            UNWIND $edges AS e
+                            MATCH (n1), (n2)
+                            WHERE id(n1) = e.node1 AND id(n2) = e.node2
                               AND n1.group_id = $group_id AND n2.group_id = $group_id
                             MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
-                            SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id, 
+                            SET r.score = e.similarity, r.method = 'gds_knn', r.group_id = $group_id,
                                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
                             RETURN count(r) AS cnt
-                        """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id,
-                            knn_config=knn_config, knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                        """, edges=edge_batch, knn_config=knn_config, group_id=group_id,
+                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
                     else:
                         result = session.run("""
-                            MATCH (n1), (n2) 
-                            WHERE id(n1) = $node1 AND id(n2) = $node2
-                              AND id(n1) < id(n2)
+                            UNWIND $edges AS e
+                            MATCH (n1), (n2)
+                            WHERE id(n1) = e.node1 AND id(n2) = e.node2
                               AND n1.group_id = $group_id AND n2.group_id = $group_id
                             MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                            SET r.score = $similarity, r.method = 'gds_knn', r.group_id = $group_id,
+                            SET r.score = e.similarity, r.method = 'gds_knn', r.group_id = $group_id,
                                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
                             RETURN count(r) AS cnt
-                        """, node1=node1_id, node2=node2_id, similarity=similarity, group_id=group_id,
+                        """, edges=edge_batch, group_id=group_id,
                             knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
-                    rec = result.single()
-                    if rec and rec["cnt"] > 0:
-                        edges_created += rec["cnt"]
+                    edges_created = result.single()["cnt"]
+                else:
+                    edges_created = 0
                 
                 stats["knn_edges"] = edges_created
                 config_msg = f" (config={knn_config})" if knn_config else ""
@@ -2442,17 +2436,21 @@ Output:
             logger.info(f"🏘️ Running GDS Louvain community detection...")
             louvain_df = gds.louvain.stream(G, includeIntermediateCommunities=False, concurrency=4)
             
+            updates = []
+            community_ids = set()
+            for _, row in louvain_df.iterrows():
+                node_id = int(row["nodeId"])
+                community_id = int(row["communityId"])
+                updates.append({"nodeId": node_id, "communityId": community_id})
+                community_ids.add(community_id)
+            
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-                community_ids = set()
-                for _, row in louvain_df.iterrows():
-                    node_id = int(row["nodeId"])
-                    community_id = int(row["communityId"])
-                    
+                if updates:
                     session.run("""
-                        MATCH (n) WHERE id(n) = $nodeId AND n.group_id = $group_id
-                        SET n.community_id = $communityId
-                    """, nodeId=node_id, communityId=community_id, group_id=group_id)
-                    community_ids.add(community_id)
+                        UNWIND $updates AS u
+                        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                        SET n.community_id = u.communityId
+                    """, updates=updates, group_id=group_id)
                 
                 stats["communities"] = len(community_ids)
                 logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
@@ -2461,19 +2459,20 @@ Output:
             logger.info(f"📈 Running GDS PageRank...")
             pagerank_df = gds.pageRank.stream(G, dampingFactor=0.85, maxIterations=20, concurrency=4)
             
+            pr_updates = [
+                {"nodeId": int(row["nodeId"]), "score": float(row["score"])}
+                for _, row in pagerank_df.iterrows()
+            ]
+            
             with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
-                nodes_scored = 0
-                for _, row in pagerank_df.iterrows():
-                    node_id = int(row["nodeId"])
-                    score = float(row["score"])
-                    
+                if pr_updates:
                     session.run("""
-                        MATCH (n) WHERE id(n) = $nodeId AND n.group_id = $group_id
-                        SET n.pagerank = $score
-                    """, nodeId=node_id, score=score, group_id=group_id)
-                    nodes_scored += 1
+                        UNWIND $updates AS u
+                        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                        SET n.pagerank = u.score
+                    """, updates=pr_updates, group_id=group_id)
                 
-                stats["pagerank_nodes"] = nodes_scored
+                stats["pagerank_nodes"] = len(pr_updates)
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
             
             # 6. Cleanup

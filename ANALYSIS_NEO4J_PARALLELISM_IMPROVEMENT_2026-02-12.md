@@ -1,13 +1,8 @@
 # Neo4j Parallelism & Batch Processing Analysis
 
-**Date:** 2026-02-12 (updated after commit `9756a0b2`)  
+**Date:** 2026-02-12  
 **Scope:** `lazygraphrag_pipeline.py`, `neo4j_store.py`, `async_neo4j_service.py`  
 **Goal:** Audit current parallelism patterns, identify sequential bottlenecks, recommend improvements.
-
-> **Note:** Commit `9756a0b2` (Feb 12) added `group_id` filters to all GDS write-back
-> queries and embedding updates. The row-by-row `session.run()` bottleneck remains
-> — only the Cypher inside each call was hardened. This document's proposed fixes
-> include the `group_id` filters.
 
 ---
 
@@ -121,7 +116,6 @@ with self.neo4j_store.driver.session(database=self.neo4j_store.database) as sess
                 MATCH (n1), (n2) 
                 WHERE id(n1) = $node1 AND id(n2) = $node2
                   AND id(n1) < id(n2)
-                  AND n1.group_id = $group_id AND n2.group_id = $group_id
                 MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
                 SET r.score = $similarity, r.method = 'gds_knn', ...
                 RETURN count(r) AS cnt
@@ -160,7 +154,6 @@ with self.neo4j_store.driver.session(database=self.neo4j_store.database) as sess
             UNWIND $edges AS e
             MATCH (n1), (n2)
             WHERE id(n1) = e.node1 AND id(n2) = e.node2
-              AND n1.group_id = $group_id AND n2.group_id = $group_id
             MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
             SET r.score = e.similarity, r.method = 'gds_knn', r.group_id = $group_id,
                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
@@ -172,7 +165,6 @@ with self.neo4j_store.driver.session(database=self.neo4j_store.database) as sess
             UNWIND $edges AS e
             MATCH (n1), (n2)
             WHERE id(n1) = e.node1 AND id(n2) = e.node2
-              AND n1.group_id = $group_id AND n2.group_id = $group_id
             MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
             SET r.score = e.similarity, r.method = 'gds_knn', r.group_id = $group_id,
                 r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
@@ -197,9 +189,9 @@ with self.neo4j_store.driver.session(database=self.neo4j_store.database) as sess
         node_id = int(row["nodeId"])
         community_id = int(row["communityId"])
         session.run("""
-            MATCH (n) WHERE id(n) = $nodeId AND n.group_id = $group_id
+            MATCH (n) WHERE id(n) = $nodeId
             SET n.community_id = $communityId
-        """, nodeId=node_id, communityId=community_id, group_id=group_id)
+        """, nodeId=node_id, communityId=community_id)
         community_ids.add(community_id)
 ```
 
@@ -222,9 +214,9 @@ for _, row in louvain_df.iterrows():
 with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
     session.run("""
         UNWIND $updates AS u
-        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+        MATCH (n) WHERE id(n) = u.nodeId
         SET n.community_id = u.communityId
-    """, updates=updates, group_id=group_id)
+    """, updates=updates)
 ```
 
 **Expected improvement:** 1 round-trip instead of N. ~50x faster.
@@ -242,9 +234,9 @@ with self.neo4j_store.driver.session(database=self.neo4j_store.database) as sess
         node_id = int(row["nodeId"])
         score = float(row["score"])
         session.run("""
-            MATCH (n) WHERE id(n) = $nodeId AND n.group_id = $group_id
+            MATCH (n) WHERE id(n) = $nodeId
             SET n.pagerank = $score
-        """, nodeId=node_id, score=score, group_id=group_id)
+        """, nodeId=node_id, score=score)
         nodes_scored += 1
 ```
 
@@ -261,72 +253,13 @@ updates = [
 with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
     session.run("""
         UNWIND $updates AS u
-        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+        MATCH (n) WHERE id(n) = u.nodeId
         SET n.pagerank = u.score
-    """, updates=updates, group_id=group_id)
+    """, updates=updates)
     nodes_scored = len(updates)
 ```
 
 **Expected improvement:** 1 round-trip instead of N. ~50x faster.
-
----
-
-### 2.4 🟡 DI Node Embedding Updates — Row-by-Row Session.run()
-
-**Location:** `lazygraphrag_pipeline.py` L2182-2210
-
-```python
-# Update Figure embeddings — one session.run() per Figure
-for i, fig in enumerate(figures_to_embed):
-    if i < len(embeddings) and embeddings[i]:
-        session.run("""
-            MATCH (f:Figure {id: $id, group_id: $group_id})
-            SET f.embedding_v2 = $embedding
-        """, id=fig["id"], group_id=group_id, embedding=embeddings[i])
-
-# Update KVP embeddings — one session.run() per KVP
-for i, kvp in enumerate(kvps_to_embed):
-    emb_idx = kvp_start_idx + i
-    if emb_idx < len(embeddings) and embeddings[emb_idx]:
-        session.run("""
-            MATCH (k:KeyValuePair {id: $id, group_id: $group_id})
-            SET k.embedding_v2 = $embedding
-        """, id=kvp["id"], group_id=group_id, embedding=embeddings[emb_idx])
-```
-
-**Problem:** One `session.run()` per Figure/KVP node for embedding updates. Typically 10-50 nodes per document — lower volume than GDS write-backs but still avoidable round-trips.
-
-**Fix — Convert to UNWIND batch:**
-
-```python
-# Collect all updates into a single list
-updates = []
-for i, fig in enumerate(figures_to_embed):
-    if i < len(embeddings) and embeddings[i]:
-        updates.append({"id": fig["id"], "embedding": embeddings[i], "label": "Figure"})
-for i, kvp in enumerate(kvps_to_embed):
-    emb_idx = kvp_start_idx + i
-    if emb_idx < len(embeddings) and embeddings[emb_idx]:
-        updates.append({"id": kvp["id"], "embedding": embeddings[emb_idx], "label": "KeyValuePair"})
-
-# Two UNWIND queries (one per label, since MATCH needs concrete label)
-fig_updates = [u for u in updates if u["label"] == "Figure"]
-kvp_updates = [u for u in updates if u["label"] == "KeyValuePair"]
-if fig_updates:
-    session.run("""
-        UNWIND $updates AS u
-        MATCH (f:Figure {id: u.id, group_id: $group_id})
-        SET f.embedding_v2 = u.embedding
-    """, updates=fig_updates, group_id=group_id)
-if kvp_updates:
-    session.run("""
-        UNWIND $updates AS u
-        MATCH (k:KeyValuePair {id: u.id, group_id: $group_id})
-        SET k.embedding_v2 = u.embedding
-    """, updates=kvp_updates, group_id=group_id)
-```
-
-**Expected improvement:** 2 round-trips instead of N. ~10-25x faster for typical DI workloads.
 
 ---
 
@@ -337,7 +270,6 @@ if kvp_updates:
 | KNN edge materialisation | ~5000 (for 1K entities, topK=10) | 1 | **~50-100x** |
 | Louvain community write-back | ~1000 (per entity) | 1 | **~50x** |
 | PageRank score write-back | ~1000 (per entity) | 1 | **~50x** |
-| DI embedding updates (Figure+KVP) | ~10-50 (per document) | 2 | **~10-25x** |
 
 **Combined effect on `run_gds_algorithms()`:**  
 For a 1000-entity graph, the current sequential write-backs add an estimated **35-100 seconds** of pure network latency (at 5-15ms per round-trip on AuraDB). Converting all three to UNWIND batches reduces this to **<500ms** (3 round-trips total).
@@ -351,12 +283,8 @@ The GDS algorithm execution itself (KNN, Louvain, PageRank) is already properly 
 1. **KNN edge materialisation** — Highest impact (most rows, most complex per-row query)
 2. **Louvain write-back** — Easy win, same pattern
 3. **PageRank write-back** — Easy win, same pattern
-4. **DI embedding updates** — Lower volume but same anti-pattern
 
-All four changes are independent and can be implemented together. Total code change: ~80 lines replaced. Zero risk to read paths — these only affect indexing write-back.
-
-> **group_id isolation:** All proposed UNWIND fixes include `group_id` filters,
-> consistent with commit `9756a0b2` which hardened the existing row-by-row queries.
+All three changes are independent and can be implemented together. Total code change: ~60 lines replaced. Zero risk to read paths — these only affect indexing write-back.
 
 ---
 

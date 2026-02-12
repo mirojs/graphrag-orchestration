@@ -236,6 +236,11 @@ def main() -> int:
         default=True,
         help="Send synthesize=true/false in the request payload (server may ignore for some routes).",
     )
+    parser.add_argument(
+        "--routes",
+        default=None,
+        help="Comma-separated list of routes to run, e.g. 'local,graph'. Default: all 4.",
+    )
     args = parser.parse_args()
 
     question_bank_path = Path(str(args.question_bank)).expanduser().resolve()
@@ -250,12 +255,20 @@ def main() -> int:
 
     # Map the 4-route naming to actual V3 force_route values.
     # - "global" in the question bank corresponds to force_route="graph" in V3.
-    route_sets = [
+    all_route_sets = [
         ("vector", "Q-V"),
         ("local", "Q-L"),
         ("graph", "Q-G"),
         ("drift", "Q-D"),
     ]
+    if args.routes:
+        selected = [r.strip().lower() for r in args.routes.split(",")]
+        route_sets = [(r, p) for r, p in all_route_sets if r in selected]
+        if not route_sets:
+            print(f"ERROR: no valid routes in --routes={args.routes}. Choose from: vector,local,graph,drift")
+            return 1
+    else:
+        route_sets = all_route_sets
 
     negatives = _read_question_bank(question_bank_path, prefix="Q-N")
 

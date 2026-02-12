@@ -534,6 +534,16 @@ class Neo4jStoreV3:
         RETURN count(DISTINCT entity) AS count
         """
         
+        # Phase B: Also create TextChunk MENTIONS by propagating from Sentences
+        # This gives Route 2 a direct TextChunk->Entity path (fast, no PART_OF traversal)
+        propagate_query = """
+        MATCH (s:Sentence {group_id: $group_id})-[:MENTIONS]->(e:Entity {group_id: $group_id})
+        MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
+        MERGE (c)-[m:MENTIONS]->(e)
+        SET m.group_id = $group_id
+        RETURN count(m) AS propagated
+        """
+        
         entity_data = [
             {
                 "id": e.id,
@@ -553,9 +563,14 @@ class Neo4jStoreV3:
             record = result.single()
             count = cast(int, record["count"]) if record else 0
             
+            # Propagate Sentence MENTIONS to parent TextChunks
+            prop_result = session.run(propagate_query, group_id=group_id)
+            prop_record = prop_result.single()
+            propagated = cast(int, prop_record["propagated"]) if prop_record else 0
+            
             # Log MENTIONS creation
             mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
-            logger.info(f"Created {count} entities with {mentions_count} MENTIONS relationships")
+            logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS + {propagated} TextChunk MENTIONS (propagated)")
             
             return count
 
@@ -630,6 +645,16 @@ class Neo4jStoreV3:
         RETURN count(DISTINCT entity) AS count
         """
         
+        # Phase B: Also create TextChunk MENTIONS by propagating from Sentences
+        # This gives Route 2 a direct TextChunk->Entity path (fast, no PART_OF traversal)
+        propagate_query = """
+        MATCH (s:Sentence {group_id: $group_id})-[:MENTIONS]->(e:Entity {group_id: $group_id})
+        MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
+        MERGE (c)-[m:MENTIONS]->(e)
+        SET m.group_id = $group_id
+        RETURN count(m) AS propagated
+        """
+        
         entity_data = [
             {
                 "id": e.id,
@@ -656,9 +681,14 @@ class Neo4jStoreV3:
             record = await result.single()
             count = cast(int, record["count"]) if record else 0
             
+            # Propagate Sentence MENTIONS to parent TextChunks
+            prop_result = await session.run(propagate_query, group_id=group_id)
+            prop_record = await prop_result.single()
+            propagated = cast(int, prop_record["propagated"]) if prop_record else 0
+            
             # Log MENTIONS creation
             mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
-            logger.info(f"Created {count} entities with {mentions_count} MENTIONS relationships (async)")
+            logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS + {propagated} TextChunk MENTIONS (propagated, async)")
             
             return count
     

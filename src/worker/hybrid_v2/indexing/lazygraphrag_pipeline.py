@@ -2340,15 +2340,13 @@ Output:
             projection_query = f'''
                 // Timestamp: {timestamp}_{random_suffix} - Ensures unique job ID in Aura GDS
                 CALL () {{
-                    // Project all nodes with embeddings
-                    MATCH (n)
+                    // Project Entity nodes only - KVP/Figure/Chunk add noise to KNN & communities
+                    MATCH (n:Entity)
                     WHERE n.group_id = "{escaped_group_id}"
-                      AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
                       AND NOT n:Deprecated
                       AND n.embedding_v2 IS NOT NULL
-                    OPTIONAL MATCH (n)-[r]->(m)
+                    OPTIONAL MATCH (n)-[r]->(m:Entity)
                     WHERE m.group_id = "{escaped_group_id}"
-                      AND (m:Entity OR m:Figure OR m:KeyValuePair OR m:Chunk)
                       AND NOT m:Deprecated
                       AND m.embedding_v2 IS NOT NULL
                     RETURN 

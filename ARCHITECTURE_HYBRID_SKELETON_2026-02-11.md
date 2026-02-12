@@ -363,6 +363,206 @@ not retrieval failures. Fixed by adding `recall_at_k` and `signal_rank` metrics
 
 ---
 
+## Test Files and Validation (Feb 11, 2026)
+
+This section documents all test and benchmark scripts created during the skeleton enrichment development for complete traceability and reproducibility.
+
+### Phase 0: Experiments and Architecture Validation
+
+#### scripts/experiment_hybrid_skeleton.py
+**Commit:** `748c1d1` (Phase 0), `04923b2` (voyage-context-3 fix), `7490df5` (spaCy sentence detection)  
+**Purpose:** In-memory skeleton experimentation without modifying Neo4j production data  
+**Key Features:**
+- Builds sentence-level skeleton from existing TextChunks in memory
+- Implements full Strategy A pipeline: sentence extraction → Voyage embedding → vector search → context assembly
+- Threshold sweep mode for finding optimal similarity threshold (0.80, 0.85, 0.90, 0.92, 0.95)
+- Validates content taxonomy (body text, table rows, figure captions)
+- Tests spaCy sentence detection vs DI regex (72% noise reduction measured)
+
+**Usage:**
+```bash
+# Basic run on test corpus
+python scripts/experiment_hybrid_skeleton.py --group-id test-5pdfs-v2-fix2
+
+# Threshold sweep
+python scripts/experiment_hybrid_skeleton.py --sweep-thresholds
+
+# Custom parameters
+python scripts/experiment_hybrid_skeleton.py \
+  --similarity-threshold 0.85 \
+  --max-related 2 \
+  --top-k 5 \
+  --expand-window 2
+```
+
+**Results:** Validated that sentence-level retrieval with threshold 0.90 provides optimal precision without over-connecting the graph.
+
+#### scripts/experiment_sentence_knn_threshold.py
+**Commit:** `7ef6983` (Phase 2 sparse edges)  
+**Purpose:** Determine optimal RELATED_TO edge threshold and max k for sentence-level semantic links  
+**Key Features:**
+- Tests threshold values: 0.85, 0.88, 0.90, 0.92, 0.95
+- Tests max k values: 1, 2, 3, 5
+- Measures edge count, graph density, and cross-document connection ratio
+- Validates O(n) sparsity constraint: `semantic_edges ≤ 2 × sentence_count`
+
+**Results:** Selected threshold=0.90, max_k=2 for production (sparse, high-precision connections).
+
+### Phase 1-2: Production Implementation Testing
+
+#### scripts/test_skeleton_e2e.py
+**Commit:** `8c13faf` (E2E test — all 5 phases pass)  
+**Purpose:** End-to-end integration test of full production skeleton enrichment pipeline  
+**Key Features:**
+- Tests complete production code path:
+  1. Sentence extraction via `sentence_extraction_service.py`
+  2. Voyage embedding via `voyage_embed.py`
+  3. Neo4j :Sentence node persistence via `neo4j_store.py`
+  4. Vector index query and retrieval
+  5. Coverage chunks formatting
+  6. Route 2 API integration
+- Uses real Neo4j + Voyage + Azure OpenAI credentials (not mocked)
+- Validates 5 phases: extraction → embedding → indexing → retrieval → synthesis
+
+**Usage:**
+```bash
+export SKELETON_ENRICHMENT_ENABLED=true
+export VOYAGE_V2_ENABLED=true
+python scripts/test_skeleton_e2e.py
+```
+
+**Results:** All 5 phases pass ✅, confirms production readiness.
+
+### Phase 2-3: Strategy and Model Comparison
+
+#### scripts/benchmark_strategy_ab.py
+**Commit:** `9dc0c6e` (Strategy A/B comparison), adapted for Route 3 in future work  
+**Purpose:** Compare Strategy A (flat sentence retrieval) vs Strategy B (graph traversal retrieval) vs baseline  
+**Key Features:**
+- Tests 17 questions (Q-V + Q-L) on test corpus
+- Measures: F1, containment, latency, token count
+- Head-to-head comparison: Strategy B vs A
+- Validates that graph traversal (Strategy B) provides superior context enrichment
+
+**Usage:**
+```bash
+python scripts/benchmark_strategy_ab.py --group-id test-5pdfs-v2-fix2
+```
+
+**Results:** Strategy B wins: +178% F1, +39% containment vs baseline. Strategy B vs A: 3W/0L/7T.
+
+#### scripts/benchmark_strategy_ab_deep.py
+**Commit:** `0cd39c94` (Fix benchmark noise metric)  
+**Purpose:** Deep accuracy analysis with additional metrics: recall@k, signal_rank, dilution (renamed from "noise")  
+**Key Features:**
+- Fixes measurement artifact: "noise_ratio" renamed to "dilution"
+- Adds recall@k: does the answer appear in top-k results?
+- Adds signal_rank: what rank is the answer-bearing sentence?
+- Measures context quality, not just precision/recall
+
+**Usage:**
+```bash
+python scripts/benchmark_strategy_ab_deep.py
+```
+
+**Results:** Reveals that "100% noise" questions actually have answers at rank #1 — measurement was misleading.
+
+#### scripts/benchmark_synthesis_model.py
+**Commit:** `9dc0c6e` (Model comparison)  
+**Purpose:** Compare gpt-4.1-mini vs gpt-5.1 for skeleton synthesis  
+**Key Features:**
+- Same retrieval context, different synthesis models
+- Measures accuracy (F1), latency, cost
+- Tests hypothesis: smaller models work better for extraction (less over-reasoning)
+
+**Usage:**
+```bash
+python scripts/benchmark_synthesis_model.py --model gpt-4.1-mini
+python scripts/benchmark_synthesis_model.py --model gpt-5.1
+```
+
+**Results:** gpt-4.1-mini wins 11/1/5 (W/L/T), +29% F1, 1.2× faster, ~10× cheaper.
+
+#### scripts/benchmark_skeleton_vs_route2.py
+**Commit:** `074488e` (Skeleton vs Route 2 A/B benchmark — 8 wins, 1 loss, 1 tie)  
+**Purpose:** Fair A/B test of skeleton enrichment appended to Route 2 baseline  
+**Key Features:**
+- Phase 1: Call Route 2 API (baseline)
+- Phase 2: Build skeleton in-memory
+- Phase 3: Merge skeleton context + re-synthesize
+- Phase 4: Compare baseline vs enriched on ground truth
+- Same PPR, same denoising, same LLM — only difference is skeleton context
+
+**Usage:**
+```bash
+python scripts/benchmark_skeleton_vs_route2.py --group-id test-5pdfs-v2-fix2
+python scripts/benchmark_skeleton_vs_route2.py --url http://localhost:8000 --repeats 1
+```
+
+**Results:** Skeleton enrichment: 8W/1L/1T vs baseline Route 2. Validates strategy effectiveness.
+
+### Phase 3: Reranker Assessment (NOT NEEDED)
+
+#### scripts/verify_sentence_retrieval_ranking.py
+**Commit:** `97415141` (All answers at rank #1 verification)  
+**Purpose:** Verify whether a reranker is needed by checking answer sentence ranking  
+**Key Features:**
+- Tests 5 previously-flagged "noisy" questions (Q-L4, Q-L5, Q-L7, Q-L8, Q-L10)
+- Measures signal_rank: what position is the answer-bearing sentence?
+- Validates bi-encoder (voyage-context-3) precision at sentence level
+
+**Results:** All 5 questions have answers at **rank #1** in vector search. **No reranker needed** — bi-encoder is precise enough at sentence level. Phase 3 reranker condition NOT met.
+
+**Architecture Impact:** Phase 3 (cross-encoder reranking) is not implemented in production. Revisit only if new corpora show ranking degradation (answers below top-5).
+
+### Test Corpus
+
+All benchmarks use the `test-5pdfs-v2-fix2` group:
+- 5 PDFs (sample documents)
+- 18 chunks after DI processing
+- ~350 sentences after spaCy sentence detection
+- 17 test questions (Q-V + Q-L)
+- Ground truth answers for F1/containment scoring
+
+### Continuous Integration
+
+Test files are preserved in the repository for:
+1. **Regression testing** when modifying sentence extraction or embedding logic
+2. **Threshold tuning** when adding new document types or corpora
+3. **Model comparison** when evaluating new LLM versions
+4. **Performance benchmarking** for production monitoring baselines
+
+### Running All Tests (Recommended Sequence)
+
+```bash
+# 1. Phase 0 validation (in-memory, safe)
+python scripts/experiment_hybrid_skeleton.py --group-id test-5pdfs-v2-fix2
+
+# 2. Threshold tuning (if needed)
+python scripts/experiment_sentence_knn_threshold.py
+
+# 3. E2E production code test
+python scripts/test_skeleton_e2e.py
+
+# 4. Strategy comparison
+python scripts/benchmark_strategy_ab.py
+
+# 5. Deep accuracy analysis
+python scripts/benchmark_strategy_ab_deep.py
+
+# 6. Model comparison
+python scripts/benchmark_synthesis_model.py --model gpt-4.1-mini
+python scripts/benchmark_synthesis_model.py --model gpt-5.1
+
+# 7. Route 2 enrichment A/B test
+python scripts/benchmark_skeleton_vs_route2.py
+
+# 8. Verify reranker necessity (should show rank #1 for all)
+python scripts/verify_sentence_retrieval_ranking.py
+```
+
+---
+
 ## Design Consideration 1: Unified Node Metadata
 
 **Principle:** Voyage semantic search and graph structural search must operate on the **same** sentence node. No dual-node, no separate index.
@@ -748,3 +948,120 @@ Metadata is preserved in the coverage_chunks dicts for structured logging.
 **Finding:** All 5 previously-flagged "noisy" questions have their answer-bearing sentence at vector search rank #1. The architecture condition for adding a reranker ("answers in top-20 but not top-5") is NOT met. No reranker is needed at this time.
 
 **Revisit:** Only if new documents/queries show ranking degradation (answers dropping below top-5).
+
+---
+
+## KNN Edge Taxonomy — Three Distinct Systems (February 12, 2026)
+
+There are three separate "KNN" mechanisms in the system. They share the same Voyage-context-3 embeddings but operate on different node types, at different thresholds, and serve different routes.
+
+### A. Voyage Embedding Vector Search (query-time, no pre-computed edges)
+
+| Property | Value |
+|---|---|
+| **When** | Query time (on every request) |
+| **Mechanism** | `db.index.vector.queryNodes('sentence_embeddings_v2', ...)` |
+| **Nodes** | Sentence |
+| **Output** | Top-k ranked sentences by cosine similarity to query |
+| **Used by** | Route 2 Strategy B (anchor step) |
+| **Not an edge** | This is a vector index lookup, not a graph edge |
+
+### B. Step 4.2 — Sentence KNN Edges (index-time, pre-computed)
+
+| Property | Value |
+|---|---|
+| **When** | Index time (Step 4.2, runs after sentence embedding in Step 4.1) |
+| **Mechanism** | In-process numpy pairwise cosine → `RELATED_TO` edges |
+| **Nodes** | Sentence ↔ Sentence (cross-chunk only) |
+| **Threshold** | 0.90 (strict) |
+| **Max k** | 2 per sentence |
+| **Edge type** | `RELATED_TO {source: 'knn_sentence', method: 'knn_sentence'}` |
+| **Result** | 8 edges for test corpus (181 sentences) |
+| **Used by** | Route 2 Strategy B (expand step — graph traversal from seeds) |
+| **Purpose** | Cross-document evidence linking. Finds sentences in other chunks that are semantically equivalent but use different wording. |
+
+### C. Step 8 — GDS KNN Edges (index-time, pre-computed)
+
+| Property | Value |
+|---|---|
+| **When** | Index time (Step 8, runs after entity commit in Step 7) |
+| **Mechanism** | Aura GDS serverless `gds.knn.stream()` → `SEMANTICALLY_SIMILAR` edges |
+| **Nodes** | Entity ↔ Entity (also Figure, KVP, Chunk) |
+| **Threshold** | 0.60 (permissive) |
+| **Max k** | 5 per node |
+| **Edge type** | `SEMANTICALLY_SIMILAR {method: 'gds_knn'}` |
+| **Result** | 2,717 edges for test corpus (132 entities) |
+| **Used by** | Route 4 DRIFT (`semantic_multihop_beam()` beam search) |
+| **Purpose** | Graph connectivity for entity-level traversal. "Soft hops" between entities with no extracted relationship. |
+
+### How Route 2 Strategy B Uses A + B Together
+
+Strategy B is a **two-phase** retrieval — anchor then expand:
+
+```
+Phase 1 (ANCHOR): Vector search (A) → top-k seed sentences ranked by query similarity
+    ↓
+Phase 2 (EXPAND): From each seed, traverse:
+    • RELATED_TO edges (B) → cross-chunk similar sentences (score × edge_sim × 0.8 decay)
+    • NEXT/PREV edges → neighbouring sentences in same chunk (local context window)
+    ↓
+Phase 3 (COLLECT): Deduplicate by sentence ID, fetch parent chunk text
+```
+
+**Key clarification:** The RELATED_TO edges (B) do NOT verify or re-rank the vector search results. They **expand** the result set by discovering additional relevant sentences in other documents that the vector search alone wouldn't find (because those sentences use different wording). The original ranking from vector search (A) is preserved — expanded sentences receive a discounted score.
+
+### Route 2 Strategy B: Expand-Only vs Verify+Expand — Design Option (February 12, 2026)
+
+**Current implementation: Expand-only**
+
+```
+Vector search → top-k seeds → RELATED_TO expansion → NEXT/PREV expansion → collect
+```
+
+KNN edges only add new sentences. The original vector ranking is unchanged.
+
+**Proposed alternative: Verify + Expand**
+
+```
+Vector search → top-k seeds → KNN edge verification → re-rank → RELATED_TO expansion → collect
+```
+
+After vector search returns top-k candidate seeds, check which seeds have `RELATED_TO` edges to **other seeds in the same result set**. Two independent signals agreeing (both embedding-similar to query AND structurally linked to another hit) is corroborating evidence.
+
+**Verification scoring logic:**
+1. Vector search → top-k=10 seed sentences with scores
+2. For each seed, count how many other seeds it has `RELATED_TO` edges to (mutual KNN links)
+3. Seeds with mutual connections → **score boost** (corroborated by graph structure)
+4. Seeds with zero connections to other seeds → **score penalty** (isolated, possibly false positive)
+5. Re-rank by adjusted score, then proceed with expansion
+
+**Why this could matter:**
+- Current benchmark has answers at rank #1, so no ranking problem exists today
+- With larger corpora (hundreds of documents), vector search noise increases — more borderline candidates in top-k
+- KNN-edge verification acts as a second opinion: "is this sentence structurally related to other hits, or is it an isolated false positive?"
+- This is essentially using the pre-computed KNN graph as a **consistency check** on the real-time vector search
+
+**Implementation complexity:** Low — add a verification pass between anchor and expand steps in `_retrieve_skeleton_graph_traversal()`. No new Neo4j queries needed (the RELATED_TO traversal already happens in the same Cypher query; just need to use edge presence for scoring instead of only expansion).
+
+**When to implement:** After scaling to a larger test corpus where ranking noise becomes measurable. With 5 PDFs and answers at rank #1, there's no signal to optimize.
+
+**Key file:** `src/worker/hybrid_v2/routes/route_2_local.py` — `_retrieve_skeleton_graph_traversal()`
+
+### Route 4 GDS KNN Discussion — TODO for Future Work
+
+**Current state:** Route 4's `semantic_multihop_beam()` traverses `SEMANTICALLY_SIMILAR` edges (C) at each hop of its beam search. These edges have a permissive 0.60 cosine threshold and k=5, producing 2,717 edges for 132 entities — a dense web where many edges may be low-value noise.
+
+**Observation (February 12, 2026):** The sentence-level KNN strategy (B) proves that a strict threshold (0.90) with low k (2) produces a sparse, high-precision graph (8 edges from 181 nodes). Route 4's GDS KNN takes the opposite approach — permissive threshold, high k, noisy graph.
+
+**Options for Route 4 KNN improvement (to evaluate after Route 3 benchmarking is complete):**
+
+1. **Tighten GDS KNN parameters** — Raise threshold to 0.80+ and reduce k to 2-3 at entity level. Keeps the same architecture but reduces noise. Easiest change.
+2. **Hybrid entity + sentence traversal** — Wire Route 4's beam search to also traverse sentence-level RELATED_TO edges. Would require adding sentence nodes to the beam search, which is currently entity-only.
+3. **Replace GDS KNN with parsed-relationship-only traversal** — Remove SEMANTICALLY_SIMILAR edges entirely, rely only on extracted relationships + PPR. Test with `knn_config="none"` (A/B baseline mode already implemented).
+4. **Benchmark first** — Run Route 4 with `knn_config="none"` vs default and measure actual impact before deciding. The A/B testing infrastructure already exists.
+
+**Key files for Route 4 KNN work:**
+- `src/worker/services/async_neo4j_service.py` — `semantic_multihop_beam()` (beam search with KNN edge traversal)
+- `src/worker/hybrid_v2/pipeline/tracing.py` — `semantic_beam_trace()` (caller)
+- `src/worker/hybrid_v2/routes/route_4_drift.py` — Route 4 orchestration
+- `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` — `_run_gds_graph_algorithms()` (Step 8 GDS KNN creation)

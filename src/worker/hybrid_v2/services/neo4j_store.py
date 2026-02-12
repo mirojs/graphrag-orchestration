@@ -1928,6 +1928,7 @@ class Neo4jStoreV3:
         MERGE (s1)-[r:RELATED_TO]->(s2)
         SET r.similarity = e.similarity,
             r.source = 'knn_sentence',
+            r.method = 'knn_sentence',
             r.group_id = $group_id,
             r.created_at = datetime()
         RETURN count(r) AS count

@@ -762,10 +762,13 @@ class LazyGraphRAGIndexingPipeline:
         
         # Clean up stale RELATED_TO edges from previous runs before rebuilding.
         # This ensures re-indexing doesn't leave orphan edges from changed/deleted sentences.
+        # Match on both source and method properties for backward compatibility
+        # (edges created before Feb 12 2026 only had source, not method).
         with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
             result = session.run(
                 """
-                MATCH (:Sentence {group_id: $group_id})-[r:RELATED_TO {source: 'knn_sentence'}]->(:Sentence)
+                MATCH (:Sentence {group_id: $group_id})-[r:RELATED_TO]->(:Sentence)
+                WHERE r.source = 'knn_sentence' OR r.method = 'knn_sentence'
                 DELETE r
                 RETURN count(r) AS deleted
                 """,

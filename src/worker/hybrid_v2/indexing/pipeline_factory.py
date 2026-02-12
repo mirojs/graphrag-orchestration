@@ -96,20 +96,16 @@ def get_lazygraphrag_indexing_pipeline_v2():
             embedding_dimensions=settings.VOYAGE_EMBEDDING_DIM,  # 2048
         )
 
-        # Get Voyage embedder if enabled, otherwise fallback to OpenAI
+        # Get Voyage embedder — required, no fallback to OpenAI
         embedder = None
         if is_voyage_v2_enabled():
-            try:
-                voyage_service = get_voyage_embed_service()
-                embedder = voyage_service.get_llama_index_embed_model()
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).warning(
-                    f"V2 Voyage embedder init failed, falling back to OpenAI: {e}"
-                )
-                embedder = llm_service.embed_model
+            voyage_service = get_voyage_embed_service()
+            embedder = voyage_service.get_llama_index_embed_model()
         else:
-            embedder = llm_service.embed_model
+            raise ValueError(
+                "Voyage V2 embeddings must be enabled for V2 pipeline. "
+                "Set VOYAGE_V2_ENABLED=True and VOYAGE_API_KEY in environment."
+            )
 
         _indexing_pipeline_v2 = LazyGraphRAGIndexingPipeline(
             neo4j_store=store,

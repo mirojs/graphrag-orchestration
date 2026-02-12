@@ -114,6 +114,7 @@ class VoyageEmbedService:
             self._embed_model = VoyageEmbedding(
                 model_name=self.model_name,
                 voyage_api_key=self.api_key,
+                output_dimension=settings.VOYAGE_EMBEDDING_DIM,  # Must match native calls (2048)
             )
         
         logger.info(f"VoyageEmbedService initialized with model: {self.model_name}")

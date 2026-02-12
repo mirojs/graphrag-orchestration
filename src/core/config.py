@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     
     # ========================================================================
     # Algorithm Version Control
-    # See ARCHITECTURE_PLAN_FULLSTACK_2026-01-30.md Phase 8 for details
+    # See ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md Section 26 for details
     # ========================================================================
     DEFAULT_ALGORITHM_VERSION: str = "v2"  # Default when client doesn't specify
     ALGORITHM_V1_ENABLED: bool = True   # Deprecated but available for backward compat

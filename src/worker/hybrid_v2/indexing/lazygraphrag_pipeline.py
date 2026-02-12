@@ -340,7 +340,9 @@ class LazyGraphRAGIndexingPipeline:
         stats["di_figure_refs"] = di_metadata_stats.get("figure_ref_edges", 0)
         stats["di_languages"] = di_metadata_stats.get("languages_updated", 0)
 
-        # 5) Entity/relationship extraction (best-effort, but recommended).
+        # 5) Entity/relationship extraction — sentence-based (Phase B denoising).
+        #    Entities are extracted from Sentence nodes (no overlap, pre-filtered)
+        #    instead of TextChunk nodes (64-token overlap, noisy).
         entities: List[Entity] = []
         relationships: List[Relationship] = []
         if self.llm is None:
@@ -888,58 +890,366 @@ class LazyGraphRAGIndexingPipeline:
         group_id: str,
         chunks: List[TextChunk],
     ) -> Tuple[List[Entity], List[Relationship]]:
-        # Use LlamaIndex extractor to produce KG nodes/relations per chunk.
+        """Extract entities and relationships from Sentence nodes (Phase B).
+
+        Pipeline:
+        1. Fetch all :Sentence nodes for this group_id from Neo4j.
+        2. Classify each sentence (content / metadata / noise).
+        3. Batch content sentences (groups of 6) and send to the LLM extractor.
+        4. Each entity's text_unit_ids point to Sentence IDs (not Chunk IDs).
+        5. Build deterministic co-occurrence edges: if 2+ entities appear in the
+           same sentence, create a RELATED_TO edge with the sentence as provenance.
+
+        Falls back to chunk-based extraction only when zero Sentence nodes exist
+        (e.g., skeleton enrichment was disabled for this group).
+        """
         if self.llm is None:
             return [], []
 
-        # Phase 2: Use native neo4j-graphrag extractor (DEFAULT)
-        # Fallback to LlamaIndex only if native unavailable or explicitly disabled
-        if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
-            entities, relationships = await self._extract_with_native_extractor(group_id, chunks)
-            # If native extractor produced too few entities or no relationships, run fallback
-            if len(entities) < self.config.min_entities or len(relationships) < self.config.min_mentions:
-                logger.warning("native extractor produced insufficient entities/relationships; running fallback LlamaIndex extractor")
-                llm_entities, llm_relationships = await self._extract_with_llamaindex_extractor(chunks)
-                entities, relationships = self._merge_entity_relationships(entities, relationships, llm_entities, llm_relationships)
-                # If still insufficient, run a lightweight NLP seeding pass
-                if len(entities) < self.config.min_entities:
-                    seeded = self._nlp_seed_entities(group_id, chunks)
-                    entities.extend(seeded)
-            return entities, relationships
+        # ── Step 1: Fetch sentences from Neo4j ──────────────────────────────
+        raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+        if not raw_sentences:
+            logger.warning("sentence_extraction_fallback: no Sentence nodes found, using chunk-based extraction")
+            # Fallback: use legacy chunk-based path (e.g., skeleton step was skipped)
+            return await self._extract_entities_from_chunks_legacy(group_id, chunks)
 
-        # Fallback: Use LlamaIndex SchemaLLMPathExtractor (if native disabled)
-        logger.warning(f"Using LlamaIndex fallback extractor (use_native_extractor={self.config.use_native_extractor}, available={NATIVE_EXTRACTOR_AVAILABLE})")
+        # ── Step 2: Classify and filter ──────────────────────────────────────
+        content_sentences = []
+        classification_counts = {"content": 0, "metadata": 0, "noise": 0}
+        for s in raw_sentences:
+            cls = self._classify_sentence(s["text"])
+            classification_counts[cls] += 1
+            if cls == "content":
+                content_sentences.append(s)
+        logger.info(
+            "sentence_classification_complete",
+            extra={
+                "group_id": group_id,
+                "total": len(raw_sentences),
+                **classification_counts,
+            },
+        )
+        if not content_sentences:
+            logger.warning("sentence_extraction_no_content: all sentences filtered out")
+            return [], []
+
+        # ── Step 3: Batch sentences and extract entities via native extractor ─
+        BATCH_SIZE = 6
+        all_entities: List[Entity] = []
+        all_relationships: List[Relationship] = []
+        entities_by_key: Dict[str, Entity] = {}
+
+        if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
+            entities, relationships = await self._extract_with_native_extractor_sentences(
+                group_id, content_sentences
+            )
+        else:
+            # LlamaIndex fallback on sentence batches
+            entities, relationships = await self._extract_with_llamaindex_sentences(
+                group_id, content_sentences
+            )
+
+        # Build a lookup of entities by canonical key for co-occurrence step
+        for ent in entities:
+            key = self._canonical_entity_key(ent.name)
+            if key:
+                entities_by_key[key] = ent
+
+        # ── Step 4: Deterministic sentence-scoped co-occurrence edges ────────
+        cooccurrence_rels: List[Relationship] = []
+        for s in content_sentences:
+            sid = s["id"]
+            # Find entities that mention this sentence
+            ents_in_sentence = [e for e in entities if sid in e.text_unit_ids]
+            if len(ents_in_sentence) >= 2:
+                for i, e1 in enumerate(ents_in_sentence):
+                    for e2 in ents_in_sentence[i + 1:]:
+                        cooccurrence_rels.append(
+                            Relationship(
+                                source_id=e1.id,
+                                target_id=e2.id,
+                                type="RELATED_TO",
+                                description=s["text"][:200],  # sentence IS the provenance
+                                weight=1.0,
+                            )
+                        )
+        # Merge: LLM-extracted relationships + deterministic co-occurrence
+        # Deduplicate by (source, target) keeping the LLM relationship if it exists
+        seen_pairs: set[tuple[str, str]] = set()
+        merged_rels: List[Relationship] = []
+        for r in relationships:
+            pair = (r.source_id, r.target_id)
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                merged_rels.append(r)
+        for r in cooccurrence_rels:
+            pair = (r.source_id, r.target_id)
+            rev_pair = (r.target_id, r.source_id)
+            if pair not in seen_pairs and rev_pair not in seen_pairs:
+                seen_pairs.add(pair)
+                merged_rels.append(r)
+
+        logger.info(
+            "sentence_entity_extraction_complete",
+            extra={
+                "group_id": group_id,
+                "entities": len(entities),
+                "llm_relationships": len(relationships),
+                "cooccurrence_relationships": len(cooccurrence_rels),
+                "merged_relationships": len(merged_rels),
+                "content_sentences": len(content_sentences),
+            },
+        )
+        return entities, merged_rels
+
+    async def _extract_entities_from_chunks_legacy(
+        self,
+        group_id: str,
+        chunks: List[TextChunk],
+    ) -> Tuple[List[Entity], List[Relationship]]:
+        """Legacy chunk-based extraction path (fallback when no Sentence nodes exist)."""
+        if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
+            return await self._extract_with_native_extractor(group_id, chunks)
+        return await self._extract_with_llamaindex_extractor(chunks)
+
+    async def _extract_with_native_extractor_sentences(
+        self,
+        group_id: str,
+        sentences: List[Dict[str, Any]],
+    ) -> Tuple[List[Entity], List[Relationship]]:
+        """Extract entities from Sentence nodes using native neo4j-graphrag extractor.
+
+        Batches sentences into groups of 6, creates virtual TextChunks from each batch,
+        and runs the native extractor. Entity text_unit_ids point to Sentence IDs.
+        """
+        from src.core.config import settings
+
+        BATCH_SIZE = 6
+        logger.info(f"Using native extractor on {len(sentences)} content sentences (batch_size={BATCH_SIZE})")
+
+        # Create neo4j-graphrag LLM
+        llm_kwargs = {
+            "model_name": settings.AZURE_OPENAI_DEPLOYMENT_NAME,
+            "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+            "api_version": settings.AZURE_OPENAI_API_VERSION or "2024-02-01",
+        }
+        if settings.AZURE_OPENAI_API_KEY:
+            llm_kwargs["api_key"] = settings.AZURE_OPENAI_API_KEY
+        else:
+            from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+            credential = DefaultAzureCredential()
+            token_provider = get_bearer_token_provider(
+                credential,
+                "https://cognitiveservices.azure.com/.default"
+            )
+            llm_kwargs["azure_ad_token_provider"] = token_provider
+
+        native_llm = AzureOpenAILLM(**llm_kwargs)
+        extractor = LLMEntityRelationExtractor(
+            llm=native_llm,
+            create_lexical_graph=True,
+            max_concurrency=4,
+        )
+        entity_schema = self._build_extraction_schema()
+
+        # Build batches: group sentences and create virtual text chunks
+        batches: List[Tuple[List[Dict], str]] = []  # (sentence_list, batch_uid)
+        for i in range(0, len(sentences), BATCH_SIZE):
+            batch = sentences[i:i + BATCH_SIZE]
+            batch_text = "\n".join(s["text"] for s in batch)
+            # Use a composite UID encoding all sentence IDs for provenance tracking
+            batch_uid = "|".join(s["id"] for s in batch)
+            batches.append((batch, batch_uid))
+
+        native_chunks = []
+        batch_sentence_map: Dict[str, List[Dict]] = {}  # batch_uid → sentence list
+        for batch, batch_uid in batches:
+            native_chunks.append(NativeTextChunk(
+                text="\n".join(s["text"] for s in batch),
+                index=len(native_chunks),
+                metadata={"sentence_ids": [s["id"] for s in batch]},
+                uid=batch_uid,
+            ))
+            batch_sentence_map[batch_uid] = batch
+
+        text_chunks = TextChunks(chunks=native_chunks)
+
+        # Run extraction
+        graph = await extractor.run(
+            chunks=text_chunks,
+            schema=entity_schema,
+            examples=self._get_extraction_examples(),
+        )
+
+        logger.info(f"Native extractor produced {len(graph.nodes)} nodes, {len(graph.relationships)} relationships from sentences")
+
+        # Convert graph nodes → Entity objects with sentence-based text_unit_ids
+        batch_uids: set[str] = {uid for _, uid in batches}
+        entity_id_map: Dict[str, str] = {}  # native_node_id → stable entity id
+        entities_by_id: Dict[str, Entity] = {}
+
+        def _normalize_labels(n: Any) -> List[str]:
+            labels = getattr(n, "labels", None)
+            if labels:
+                return [str(x) for x in labels if x]
+            label = getattr(n, "label", None)
+            return [str(label)] if label else []
+
+        for node in graph.nodes:
+            node_labels = _normalize_labels(node)
+            if not node_labels or any(l in ("Chunk", "TextChunk") for l in node_labels):
+                continue
+
+            props = getattr(node, "properties", None) or {}
+            if not isinstance(props, dict):
+                props = {}
+
+            name = (props.get("name") or getattr(node, "name", "") or "").strip()
+            native_id = str(getattr(node, "id", None) or getattr(node, "node_id", None) or "").strip()
+            if not name:
+                name = native_id
+            if not name:
+                continue
+
+            key = self._canonical_entity_key(name)
+            if not key:
+                continue
+
+            ent_id = self._stable_entity_id(group_id, key)
+            if native_id:
+                entity_id_map[native_id] = ent_id
+
+            if ent_id not in entities_by_id:
+                raw_aliases = props.get("aliases", [])
+                if isinstance(raw_aliases, str):
+                    aliases_list = [a.strip() for a in raw_aliases.split(",") if a.strip()]
+                elif isinstance(raw_aliases, list):
+                    aliases_list = [str(a).strip() for a in raw_aliases if a]
+                else:
+                    aliases_list = []
+
+                entities_by_id[ent_id] = Entity(
+                    id=ent_id,
+                    name=name,
+                    type=node_labels[0] if node_labels else "CONCEPT",
+                    description=str(props.get("description", "") or ""),
+                    embedding=None,
+                    metadata=props,
+                    text_unit_ids=[],
+                    aliases=aliases_list,
+                )
+
+        # Recover mentions → map to Sentence IDs (not chunk IDs)
+        mentions_total = 0
+        for rel in graph.relationships:
+            start_id = str(getattr(rel, "start_node_id", "") or "")
+            end_id = str(getattr(rel, "end_node_id", "") or "")
+            if not start_id or not end_id:
+                continue
+
+            # batch_uid → entity (lexical graph creates chunk→entity links)
+            if start_id in batch_uids and end_id in entity_id_map:
+                ent_id = entity_id_map[end_id]
+                ent = entities_by_id.get(ent_id)
+                if ent is not None:
+                    # Map back to individual sentence IDs where entity name appears
+                    for s in batch_sentence_map.get(start_id, []):
+                        if ent.name.lower() in s["text"].lower() and s["id"] not in ent.text_unit_ids:
+                            ent.text_unit_ids.append(s["id"])
+                            mentions_total += 1
+                continue
+            if end_id in batch_uids and start_id in entity_id_map:
+                ent_id = entity_id_map[start_id]
+                ent = entities_by_id.get(ent_id)
+                if ent is not None:
+                    for s in batch_sentence_map.get(end_id, []):
+                        if ent.name.lower() in s["text"].lower() and s["id"] not in ent.text_unit_ids:
+                            ent.text_unit_ids.append(s["id"])
+                            mentions_total += 1
+
+        # For entities with no mentions recovered from lexical graph,
+        # do a direct text match across all content sentences
+        for ent in entities_by_id.values():
+            if not ent.text_unit_ids:
+                for s in sentences:
+                    if ent.name.lower() in s["text"].lower():
+                        ent.text_unit_ids.append(s["id"])
+
+        if mentions_total == 0:
+            logger.warning("native_sentence_extractor_no_mentions_recovered",
+                           extra={"group_id": group_id, "sentences": len(sentences), "entities": len(entities_by_id)})
+
+        # Convert entity→entity relationships
+        relationships: List[Relationship] = []
+        for rel in graph.relationships:
+            source_id = entity_id_map.get(str(getattr(rel, "start_node_id", "") or ""))
+            target_id = entity_id_map.get(str(getattr(rel, "end_node_id", "") or ""))
+            if not source_id or not target_id:
+                continue
+            relationships.append(Relationship(
+                source_id=source_id,
+                target_id=target_id,
+                type=rel.type or "RELATED_TO",
+                description=rel.type or "RELATED_TO",
+                weight=1.0,
+            ))
+
+        entities = list(entities_by_id.values())
+
+        # Embeddings for entities
+        if entities and self.embedder is not None:
+            texts = [f"{e.name}: {e.description}" if e.description else e.name for e in entities]
+            try:
+                embs = await self.embedder.aget_text_embedding_batch(texts)
+                for ent, emb in zip(entities, embs):
+                    if self.use_v2_embedding_property:
+                        ent.embedding_v2 = emb
+                    else:
+                        ent.embedding = emb
+            except Exception as e:
+                logger.warning("sentence_entity_embedding_failed", extra={"error": str(e)})
+
+        logger.info(f"Sentence-based native extraction: {len(entities)} entities, {len(relationships)} relationships, {mentions_total} mention links")
+        return entities, relationships
+
+    async def _extract_with_llamaindex_sentences(
+        self,
+        group_id: str,
+        sentences: List[Dict[str, Any]],
+    ) -> Tuple[List[Entity], List[Relationship]]:
+        """Fallback: extract entities from sentence batches using LlamaIndex."""
+        BATCH_SIZE = 6
+        logger.warning(f"Using LlamaIndex fallback extractor on {len(sentences)} sentences")
+
         extractor = SchemaLLMPathExtractor(
             llm=cast(Any, self.llm),
             possible_entities=None,
             possible_relations=None,
             strict=False,
-            num_workers=4,  # Parallel processing: 4 workers (was 1)
+            num_workers=4,
             max_triplets_per_chunk=12,
         )
 
+        # Create TextNode per batch of sentences
         nodes: List[TextNode] = []
-        for c in chunks:
-            nodes.append(
-                TextNode(
-                    id_=c.id,
-                    text=c.text,
-                    metadata={"chunk_index": c.chunk_index, "document_id": c.document_id},
-                )
-            )
+        batch_map: Dict[str, List[Dict]] = {}  # node_id → sentence list
+        for i in range(0, len(sentences), BATCH_SIZE):
+            batch = sentences[i:i + BATCH_SIZE]
+            batch_id = f"sbatch_{i}"
+            batch_text = "\n".join(s["text"] for s in batch)
+            nodes.append(TextNode(id_=batch_id, text=batch_text, metadata={}))
+            batch_map[batch_id] = batch
 
         extracted_nodes = await extractor.acall(nodes)
-        logger.info(f"extractor_complete: {len(extracted_nodes)} nodes extracted")
 
-        # Collect entities/relations and link to originating chunk via text_unit_ids.
         entities_by_key: Dict[str, Entity] = {}
         rel_keys: set[tuple[str, str, str]] = set()
         relationships: List[Relationship] = []
 
         for n in extracted_nodes:
-            chunk_id = getattr(n, "id_", None) or getattr(n, "id", None) or ""
+            batch_id = getattr(n, "id_", None) or getattr(n, "id", None) or ""
+            batch_sents = batch_map.get(batch_id, [])
             meta = getattr(n, "metadata", {}) or {}
-            # LlamaIndex SchemaLLMPathExtractor uses 'nodes' and 'relations' (not 'kg_nodes'/'kg_relations')
             kg_nodes = meta.get("nodes") or meta.get("kg_nodes") or []
             kg_rels = meta.get("relations") or meta.get("kg_relations") or []
 
@@ -969,67 +1279,79 @@ class LazyGraphRAGIndexingPipeline:
                     )
                     entities_by_key[key] = ent
 
-                if chunk_id and chunk_id not in ent.text_unit_ids:
-                    ent.text_unit_ids.append(chunk_id)
+                # Map entity to sentence IDs (not batch ID)
+                for s in batch_sents:
+                    if name.lower() in s["text"].lower() and s["id"] not in ent.text_unit_ids:
+                        ent.text_unit_ids.append(s["id"])
 
             for kr in kg_rels:
-                # Best-effort parsing of relation objects/dicts.
-                # LlamaIndex Relation uses source_id/target_id; older versions used source/target.
                 subj = getattr(kr, "source_id", None) or getattr(kr, "source", None) or getattr(kr, "subject", None)
                 obj = getattr(kr, "target_id", None) or getattr(kr, "target", None) or getattr(kr, "object", None)
                 label = getattr(kr, "label", None) or getattr(kr, "relation", None)
-
                 if isinstance(kr, dict):
                     subj = subj or kr.get("source_id") or kr.get("source") or kr.get("subject")
                     obj = obj or kr.get("target_id") or kr.get("target") or kr.get("object")
                     label = label or kr.get("label") or kr.get("relation")
-
                 subj_name = (str(subj) if subj is not None else "").strip()
                 obj_name = (str(obj) if obj is not None else "").strip()
                 if not subj_name or not obj_name:
                     continue
-
                 skey = self._canonical_entity_key(subj_name)
                 okey = self._canonical_entity_key(obj_name)
                 if not skey or not okey:
                     continue
-
                 sid = self._stable_entity_id(group_id, skey)
                 tid = self._stable_entity_id(group_id, okey)
-
                 rel_desc = (str(label) if label is not None else "RELATED_TO").strip() or "RELATED_TO"
                 rel_key = (sid, tid, rel_desc)
                 if rel_key in rel_keys:
                     continue
                 rel_keys.add(rel_key)
+                relationships.append(Relationship(
+                    source_id=sid, target_id=tid, type="RELATED_TO",
+                    description=rel_desc, weight=1.0,
+                ))
 
-                relationships.append(
-                    Relationship(
-                        source_id=sid,
-                        target_id=tid,
-                        type="RELATED_TO",
-                        description=rel_desc,
-                        weight=1.0,
-                    )
-                )
-
-        # Embeddings for entities (best-effort).
         entities = list(entities_by_key.values())
         if entities and self.embedder is not None:
             texts = [f"{e.name}: {e.description}" if e.description else e.name for e in entities]
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
-                    # V2: Store in embedding_v2 property (Voyage 2048-dim)
-                    # V1: Store in embedding property (OpenAI 3072-dim)
                     if self.use_v2_embedding_property:
                         ent.embedding_v2 = emb
                     else:
                         ent.embedding = emb
             except Exception as e:
-                logger.warning("lazy_index_entity_embedding_failed", extra={"error": str(e)})
+                logger.warning("llamaindex_sentence_embedding_failed", extra={"error": str(e)})
 
         return entities, relationships
+
+    def _get_extraction_examples(self) -> str:
+        """Return few-shot examples for native entity extraction."""
+        return '''
+Example 1:
+Text: "Fabrikam Construction Inc. signed a contract with Contoso Lifts LLC for elevator maintenance."
+Output:
+{"nodes": [
+  {"id": "0", "label": "ORGANIZATION", "properties": {"name": "Fabrikam Construction Inc.", "aliases": ["Fabrikam", "Fabrikam Inc.", "Fabrikam Construction"], "description": "Construction company"}},
+  {"id": "1", "label": "ORGANIZATION", "properties": {"name": "Contoso Lifts LLC", "aliases": ["Contoso", "Contoso Lifts", "Contoso Ltd."], "description": "Elevator maintenance company"}}
+], "relationships": [
+  {"type": "PARTY_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "contract for elevator maintenance"}}
+]}
+
+Example 2:
+Text: "The Property Management Agreement between ABC Realty Corp and 123 Main Street LLC covers maintenance services."
+Output:
+{"nodes": [
+  {"id": "0", "label": "DOCUMENT", "properties": {"name": "Property Management Agreement", "aliases": ["PMA", "the Agreement", "management agreement"], "description": "Agreement for property management services"}},
+  {"id": "1", "label": "ORGANIZATION", "properties": {"name": "ABC Realty Corp", "aliases": ["ABC Realty", "ABC"], "description": "Real estate company"}},
+  {"id": "2", "label": "ORGANIZATION", "properties": {"name": "123 Main Street LLC", "aliases": ["123 Main Street", "Main Street LLC"], "description": "Property owner"}}
+], "relationships": [
+  {"type": "PARTY_TO", "start_node_id": "1", "end_node_id": "0", "properties": {}},
+  {"type": "PARTY_TO", "start_node_id": "2", "end_node_id": "0", "properties": {}}
+]}
+'''
 
     async def _extract_with_native_extractor(
         self,
@@ -1209,21 +1531,12 @@ Output:
                 # Extract aliases from LLM extraction (may be list or string)
                 raw_aliases = props.get("aliases", [])
                 if isinstance(raw_aliases, str):
-                    # Handle comma-separated string format
                     aliases_list = [a.strip() for a in raw_aliases.split(",") if a.strip()]
                 elif isinstance(raw_aliases, list):
                     aliases_list = [str(a).strip() for a in raw_aliases if a]
                 else:
                     aliases_list = []
-                
-                # Generate generic aliases from entity name to improve seed resolution
-                # E.g., "Invoice #1256003" → add "Invoice" alias
-                # E.g., "PURCHASE CONTRACT" → add "Contract" alias
-                generic_aliases = self._generate_generic_aliases(name)
-                for ga in generic_aliases:
-                    if ga.lower() not in [a.lower() for a in aliases_list]:
-                        aliases_list.append(ga)
-                
+
                 entities_by_id[ent_id] = Entity(
                     id=ent_id,
                     name=name,
@@ -1409,29 +1722,6 @@ Output:
         entities = list(entities_by_key.values())
         # Note: embedding assignment skipped for fallback to keep it lightweight
         return entities, relationships
-
-    def _nlp_seed_entities(self, group_id: str, chunks: List[TextChunk]) -> List[Entity]:
-        """Lightweight NER seeding from chunk text (heuristic)."""
-        candidates = {}
-        import re
-        pattern = re.compile(r"([A-Z][a-z]{1,}\s(?:[A-Z][a-z]{1,}\s?){0,3})")
-        for c in chunks:
-            for m in pattern.findall(c.text or ""):
-                name = m.strip()
-                key = self._canonical_entity_key(name)
-                if not key or key in candidates:
-                    continue
-                ent_id = self._stable_entity_id(group_id, key)
-                candidates[key] = Entity(
-                    id=ent_id,
-                    name=name,
-                    type="CONCEPT",
-                    description="",
-                    embedding=None,
-                    metadata={},
-                    text_unit_ids=[c.id],
-                )
-        return list(candidates.values())
 
     async def _validate_and_commit_entities(
         self,
@@ -2593,6 +2883,25 @@ SUMMARY: <summary>"""
         return SchemaConfig(entities=entities, relations=relations, potential_schema=potential_schema)
 
     @staticmethod
+    def _classify_sentence(text: str) -> str:
+        """Classify a sentence as 'content', 'metadata', or 'noise'.
+
+        content  — extract entities from this
+        metadata — store as structured data, skip entity extraction
+        noise    — skip entirely (form labels, empty fields)
+        """
+        t = text.strip()
+        if len(t) < 15:
+            return "noise"
+        if len(t) < 40 and t.endswith(':'):
+            return "noise"  # "Pumper's Name:"
+        if len(t) < 50 and not any(c in t for c in '.!?,;'):
+            return "metadata"  # "Contract Date: 2024-06-15"
+        if re.match(r'^[\d\$,.%\s]+$', t):
+            return "metadata"  # "$29,900.00"
+        return "content"
+
+    @staticmethod
     def _canonical_entity_key(name: str, locale: Optional[str] = None) -> str:
         """Generate canonical key for entity matching.
         
@@ -2609,50 +2918,6 @@ SUMMARY: <summary>"""
             Canonical key for entity matching
         """
         return canonical_key_for_entity(name, locale)
-
-    @staticmethod
-    def _generate_generic_aliases(name: str) -> List[str]:
-        """
-        Generate generic aliases from entity name to improve seed resolution.
-        
-        Examples:
-        - "Invoice #1256003" → ["Invoice"]
-        - "PURCHASE CONTRACT" → ["Contract"]
-        - "Payment installment: $20,000.00 upon signing" → ["Payment"]
-        - "Fabrikam Inc." → ["Fabrikam"]
-        
-        This helps when LLM generates generic seeds like "Invoice" or "Contract"
-        to match specific entities.
-        """
-        aliases = []
-        if not name:
-            return aliases
-            
-        # Extract first word (often the type/category)
-        first_word = name.split()[0] if name.split() else ""
-        
-        # Clean up first word - remove punctuation
-        first_word_clean = re.sub(r'[^a-zA-Z]', '', first_word)
-        
-        # Only add if it's a meaningful word (3+ chars) and different from full name
-        if len(first_word_clean) >= 3 and first_word_clean.lower() != name.lower():
-            # Capitalize first letter for consistency
-            aliases.append(first_word_clean.capitalize())
-        
-        # For compound names with # or : separators, extract the type prefix
-        # E.g., "Invoice #1256003" → "Invoice"
-        # E.g., "Payment installment: $20,000" → "Payment"
-        for sep in ['#', ':', '-']:
-            if sep in name:
-                prefix = name.split(sep)[0].strip()
-                prefix_clean = re.sub(r'[^a-zA-Z\s]', '', prefix).strip()
-                if prefix_clean and len(prefix_clean) >= 3:
-                    # Take first word of prefix
-                    prefix_first = prefix_clean.split()[0] if prefix_clean.split() else ""
-                    if prefix_first and prefix_first.lower() not in [a.lower() for a in aliases]:
-                        aliases.append(prefix_first.capitalize())
-        
-        return aliases
 
     @staticmethod
     def _stable_entity_id(group_id: str, canonical_key: str) -> str:
@@ -3204,10 +3469,12 @@ SUMMARY: <summary>"""
         
         with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
             # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
+            # Phase B: Support both Sentence-based and TextChunk-based MENTIONS
             result = session.run(
                 """
-                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity), (c)-[:IN_SECTION]->(s:Section)
-                WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
+                MATCH (src)-[:MENTIONS]->(e:Entity), (src)-[:IN_SECTION]->(s:Section)
+                WHERE e.group_id = $group_id AND src.group_id = $group_id AND s.group_id = $group_id
+                  AND (src:Sentence OR src:TextChunk)
                 WITH e, s
                 MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
                 SET r.group_id = $group_id
@@ -3220,8 +3487,9 @@ SUMMARY: <summary>"""
             # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
             result = session.run(
                 """
-                MATCH (c:TextChunk)-[:MENTIONS]->(e:Entity), (c)-[:IN_SECTION]->(s:Section)
-                WHERE e.group_id = $group_id AND c.group_id = $group_id AND s.group_id = $group_id
+                MATCH (src)-[:MENTIONS]->(e:Entity), (src)-[:IN_SECTION]->(s:Section)
+                WHERE e.group_id = $group_id AND src.group_id = $group_id AND s.group_id = $group_id
+                  AND (src:Sentence OR src:TextChunk)
                 WITH e, s.doc_id AS doc_id
                 MATCH (d:Document {id: doc_id})
                 WHERE d.group_id = $group_id
@@ -3237,9 +3505,9 @@ SUMMARY: <summary>"""
             # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
             result = session.run(
                 """
-                MATCH (s:Section {group_id: $group_id})<-[:IN_SECTION]-(c:TextChunk)-[:MENTIONS]->(e:Entity)
-                WHERE c.group_id = $group_id
-                WITH s, e, count(DISTINCT c) AS mention_count
+                MATCH (s:Section {group_id: $group_id})<-[:IN_SECTION]-(src)-[:MENTIONS]->(e:Entity)
+                WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+                WITH s, e, count(DISTINCT src) AS mention_count
                 ORDER BY s.id, mention_count DESC
                 WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
                 UNWIND top_entities AS te
@@ -3288,11 +3556,13 @@ SUMMARY: <summary>"""
             # Threshold: at least 2 shared entities to reduce noise
             result = session.run(
                 """
-                MATCH (s1:Section {group_id: $group_id})<-[:IN_SECTION]-(c1:TextChunk)
-                      -[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(c2:TextChunk)
+                MATCH (s1:Section {group_id: $group_id})<-[:IN_SECTION]-(src1)
+                      -[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2)
                       -[:IN_SECTION]->(s2:Section {group_id: $group_id})
                 WHERE s1 <> s2
                   AND s1.doc_id <> s2.doc_id  // Cross-document only
+                  AND (src1:Sentence OR src1:TextChunk)
+                  AND (src2:Sentence OR src2:TextChunk)
                 WITH s1, s2, collect(DISTINCT e.name) AS shared_entities, count(DISTINCT e) AS shared_count
                 WHERE shared_count >= 2  // Threshold: at least 2 shared entities
                 MERGE (s1)-[r:SHARES_ENTITY]->(s2)

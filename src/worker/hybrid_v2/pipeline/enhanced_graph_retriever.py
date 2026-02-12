@@ -990,12 +990,16 @@ class EnhancedGraphRetriever:
         # Includes alias support for flexible entity matching
         query = f"""
                 UNWIND $entity_names AS entity_name
-                MATCH (t:TextChunk)-[:MENTIONS]->(e)
+                MATCH (src)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-                    AND t.group_id = $group_id
+                    AND src.group_id = $group_id
                     AND e.group_id = $group_id
+                    AND (src:Sentence OR src:TextChunk)
+                // Resolve to TextChunk: if src is Sentence, follow PART_OF
+                OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {{group_id: $group_id}})
+                WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS t
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
                 OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
                 {folder_filter_clause}
@@ -1991,12 +1995,14 @@ class EnhancedGraphRetriever:
             AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                  OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         
-        MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e1)
-        MATCH (c)-[:MENTIONS]->(e2)
+        MATCH (src)-[:MENTIONS]->(e1)
+        WHERE (src:Sentence OR src:TextChunk)
+          AND src.group_id = $group_id
+        MATCH (src)-[:MENTIONS]->(e2)
         WHERE (e2:Entity OR e2:`__Entity__`)
           AND e2.group_id = $group_id AND e2 <> e1
         
-        WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
+        WITH e1, e2, count(DISTINCT src) AS shared_chunks, collect(DISTINCT src.id)[0..2] AS chunk_ids
         WHERE shared_chunks > 0
         WITH e1, e2, shared_chunks, chunk_ids
         WHERE elementId(e1) < elementId(e2)

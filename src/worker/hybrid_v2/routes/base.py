@@ -820,7 +820,12 @@ class BaseRouteHandler:
             WHERE e.name =~ $pattern
                OR any(a IN coalesce(e.aliases, []) WHERE a =~ $pattern)
             
-            MATCH (t:TextChunk {{group_id: $group_id}})-[:MENTIONS]->(e)
+            // Phase B: Support both Sentence-based and TextChunk-based MENTIONS
+            MATCH (src)-[:MENTIONS]->(e)
+            WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+            // Resolve to TextChunk: if src is Sentence, follow PART_OF
+            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {{group_id: $group_id}})
+            WITH CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS t, e
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
             WITH t, d, e
             WHERE d IS NULL OR d IS NOT NULL {folder_filter}

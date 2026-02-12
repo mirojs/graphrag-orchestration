@@ -521,11 +521,14 @@ class Neo4jStoreV3:
             SET entity.embedding = e.embedding
         )
         
-        // Create MENTIONS relationships to chunks for DRIFT
+        // Create MENTIONS relationships (Phase B: Sentence-first, TextChunk fallback)
         WITH entity, e
-        UNWIND e.text_unit_ids AS chunk_id
-        MATCH (chunk:TextChunk {id: chunk_id, group_id: $group_id})
-        MERGE (chunk)-[m:MENTIONS]->(entity)
+        UNWIND e.text_unit_ids AS unit_id
+        OPTIONAL MATCH (sent:Sentence {id: unit_id, group_id: $group_id})
+        OPTIONAL MATCH (chunk:TextChunk {id: unit_id, group_id: $group_id})
+        WITH entity, coalesce(sent, chunk) AS source_node
+        WHERE source_node IS NOT NULL
+        MERGE (source_node)-[m:MENTIONS]->(entity)
         SET m.group_id = $group_id
         
         RETURN count(DISTINCT entity) AS count
@@ -573,7 +576,8 @@ class Neo4jStoreV3:
         WITH e, COUNT { (e)-[]-() } AS degree
         SET e.degree = degree
         WITH e
-        WITH e, COUNT { (:TextChunk {group_id: $group_id})-[:MENTIONS]->(e) } AS chunk_count
+        // Phase B: count mentions from both Sentence and TextChunk
+        WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk) } AS chunk_count
         SET e.chunk_count = chunk_count
         SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
         RETURN count(e) AS updated
@@ -613,11 +617,14 @@ class Neo4jStoreV3:
             SET entity.embedding = e.embedding
         )
         
-        // Create MENTIONS relationships to chunks for DRIFT
+        // Create MENTIONS relationships (Phase B: Sentence-first, TextChunk fallback)
         WITH entity, e
-        UNWIND e.text_unit_ids AS chunk_id
-        MATCH (chunk:TextChunk {id: chunk_id, group_id: $group_id})
-        MERGE (chunk)-[m:MENTIONS]->(entity)
+        UNWIND e.text_unit_ids AS unit_id
+        OPTIONAL MATCH (sent:Sentence {id: unit_id, group_id: $group_id})
+        OPTIONAL MATCH (chunk:TextChunk {id: unit_id, group_id: $group_id})
+        WITH entity, coalesce(sent, chunk) AS source_node
+        WHERE source_node IS NOT NULL
+        MERGE (source_node)-[m:MENTIONS]->(entity)
         SET m.group_id = $group_id
         
         RETURN count(DISTINCT entity) AS count
@@ -1789,7 +1796,34 @@ class Neo4jStoreV3:
             logger.info(f"Created {count} KeyValue nodes for group {group_id}")
     
     # ==================== Sentence Operations (Skeleton Enrichment) ====================
-    
+
+    def get_sentences_by_group(self, group_id: str) -> List[Dict[str, Any]]:
+        """Fetch all Sentence nodes for a group_id.
+
+        Returns list of dicts with keys: id, text, chunk_id, document_id, source.
+        Used by Phase B sentence-based entity extraction.
+        """
+        query = """
+        MATCH (s:Sentence {group_id: $group_id})
+        RETURN s.id AS id, s.text AS text, s.chunk_id AS chunk_id,
+               s.document_id AS document_id, s.source AS source
+        ORDER BY s.document_id, s.chunk_id, s.index_in_chunk
+        """
+        with self.driver.session(database=self.database) as session:
+            result = session.run(query, group_id=group_id)
+            sentences = [
+                {
+                    "id": record["id"],
+                    "text": record["text"],
+                    "chunk_id": record["chunk_id"],
+                    "document_id": record["document_id"],
+                    "source": record["source"],
+                }
+                for record in result
+            ]
+            logger.info(f"Fetched {len(sentences)} Sentence nodes for group {group_id}")
+            return sentences
+
     def upsert_sentences_batch(self, group_id: str, sentences: List["Sentence"]) -> int:
         """Batch insert/update Sentence nodes with embeddings and structural edges.
         

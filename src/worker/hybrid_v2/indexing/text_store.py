@@ -358,6 +358,8 @@ class Neo4jTextUnitStore:
         section_graph_enabled = os.getenv("SECTION_GRAPH_ENABLED", "1").strip().lower() in {"1", "true", "yes"}
         
         # --- Document-scoped vs document-blind query (Feb 10, 2026) ---
+        # Phase B: Support both Sentence-based and TextChunk-based MENTIONS.
+        # When MENTIONS comes from a Sentence, traverse PART_OF to get parent TextChunk.
         if target_document_ids:
             # Scoped: hard-filter chunks to target documents only
             query = """
@@ -366,7 +368,11 @@ class Neo4jTextUnitStore:
             WHERE (e:Entity OR e:`__Entity__`)
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+            MATCH (src)-[:MENTIONS]->(e)
+            WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+            // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
+            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {group_id: $group_id})
+            WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS c
             MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             WHERE d.id IN $target_document_ids
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
@@ -388,7 +394,11 @@ class Neo4jTextUnitStore:
             WHERE (e:Entity OR e:`__Entity__`)
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-            MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)
+            MATCH (src)-[:MENTIONS]->(e)
+            WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+            // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
+            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {group_id: $group_id})
+            WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS c
             OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, c, d, s

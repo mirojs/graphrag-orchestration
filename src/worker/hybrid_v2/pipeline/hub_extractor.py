@@ -299,11 +299,15 @@ class HubExtractor:
                 with self.neo4j_driver.session() as session:
                     result = session.run(f"""
                         UNWIND $entity_names AS entity_name
-                        MATCH (c:TextChunk)-[:MENTIONS]->(e)
+                        MATCH (src)-[:MENTIONS]->(e)
                         WHERE (e:Entity OR e:`__Entity__`)
-                          AND c.group_id = $group_id AND e.group_id = $group_id
+                          AND src.group_id = $group_id AND e.group_id = $group_id
+                            AND (src:Sentence OR src:TextChunk)
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+                        // Resolve to TextChunk for metadata
+                        OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {{group_id: $group_id}})
+                        WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS c
                         OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                         WHERE d IS NULL OR (d.group_id = $group_id {folder_filter})
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta

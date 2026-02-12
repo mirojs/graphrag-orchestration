@@ -63,6 +63,9 @@ const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement)
         try {
             await msalInstance.initialize();
 
+            // Handle the redirect response from loginRedirect flow
+            await msalInstance.handleRedirectPromise();
+
             // Default active account to the first one if none is set
             if (!msalInstance.getActiveAccount() && msalInstance.getAllAccounts().length > 0) {
                 msalInstance.setActiveAccount(msalInstance.getAllAccounts()[0]);

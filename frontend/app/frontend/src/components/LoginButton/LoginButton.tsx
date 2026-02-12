@@ -22,35 +22,22 @@ export const LoginButton = () => {
         fetchUsername();
     }, []);
 
-    const handleLoginPopup = () => {
-        /**
-         * When using popup and silent APIs, we recommend setting the redirectUri to a blank page or a page
-         * that does not implement MSAL. Keep in mind that all redirect routes must be registered with the application
-         * For more information, please follow this link: https://github.com/AzureAD/microsoft-authentication-library-for-js/blob/dev/lib/msal-browser/docs/login-user.md#redirecturi-considerations
-         */
+    const handleLogin = () => {
         instance
-            .loginPopup({
+            .loginRedirect({
                 ...loginRequest,
                 redirectUri: getRedirectUri()
             })
-            .catch(error => console.log(error))
-            .then(async () => {
-                setLoggedIn(await checkLoggedIn(instance));
-                setUsername((await getUsername(instance)) ?? "");
-            });
+            .catch(error => console.log(error));
     };
-    const handleLogoutPopup = () => {
+    const handleLogout = () => {
         if (activeAccount) {
             instance
-                .logoutPopup({
-                    mainWindowRedirectUri: "/", // redirects the top level app after logout
+                .logoutRedirect({
+                    postLogoutRedirectUri: "/",
                     account: instance.getActiveAccount()
                 })
-                .catch(error => console.log(error))
-                .then(async () => {
-                    setLoggedIn(await checkLoggedIn(instance));
-                    setUsername((await getUsername(instance)) ?? "");
-                });
+                .catch(error => console.log(error));
         } else {
             appServicesLogout();
         }
@@ -59,7 +46,7 @@ export const LoginButton = () => {
         <DefaultButton
             text={loggedIn ? `${t("logout")}\n${username}` : `${t("login")}`}
             className={styles.loginButton}
-            onClick={loggedIn ? handleLogoutPopup : handleLoginPopup}
+            onClick={loggedIn ? handleLogout : handleLogin}
         ></DefaultButton>
     );
 };

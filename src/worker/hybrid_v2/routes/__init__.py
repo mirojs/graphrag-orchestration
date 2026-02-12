@@ -5,7 +5,7 @@ and implements a specific retrieval strategy:
 
 - Route 1 (VectorRAGHandler): Fast vector search for simple fact lookups
 - Route 2 (LocalSearchHandler): Entity-focused with LazyGraphRAG
-- Route 3 (GlobalSearchHandler): Thematic queries with HippoRAG PPR
+- Route 3 (GlobalSearchHandler): LazyGraphRAG map-reduce for thematic queries
 - Route 4 (DRIFTHandler): Multi-hop iterative reasoning
 
 Usage:

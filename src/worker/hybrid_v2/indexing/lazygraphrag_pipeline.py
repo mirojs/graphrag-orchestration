@@ -800,6 +800,20 @@ class LazyGraphRAGIndexingPipeline:
         if len(sentences) < 2:
             return {"edges_created": 0, "reason": "insufficient_sentences"}
         
+        # Filter to consistent embedding dimensions (defensive: mixed dims crash np.array)
+        if sentences:
+            target_dim = len(sentences[0]["embedding"])
+            filtered = [s for s in sentences if len(s["embedding"]) == target_dim]
+            if len(filtered) < len(sentences):
+                logger.warning(
+                    f"step_4.2_sentence_knn: filtered {len(sentences) - len(filtered)} sentences "
+                    f"with mismatched embedding dim (expected {target_dim})"
+                )
+                sentences = filtered
+        
+        if len(sentences) < 2:
+            return {"edges_created": 0, "reason": "insufficient_sentences_after_dim_filter"}
+        
         logger.info(f"step_4.2_sentence_knn: computing pairwise similarities for {len(sentences)} sentences "
                      f"(threshold={threshold}, max_k={max_k})")
         

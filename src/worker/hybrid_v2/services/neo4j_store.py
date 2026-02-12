@@ -2154,8 +2154,11 @@ class Neo4jStoreV3:
             ("communities", "MATCH (c:Community {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
             ("raptor_nodes", "MATCH (r:RaptorNode {group_id: $group_id}) DETACH DELETE r RETURN count(*) AS count"),
             ("key_values", "MATCH (kv:KeyValue {group_id: $group_id}) DETACH DELETE kv RETURN count(*) AS count"),
+            ("key_value_pairs", "MATCH (kvp:KeyValuePair {group_id: $group_id}) DETACH DELETE kvp RETURN count(*) AS count"),
             ("tables", "MATCH (t:Table {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
             ("sections", "MATCH (s:Section {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
+            ("sentences", "MATCH (s:Sentence {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
+            ("figures", "MATCH (f:Figure {group_id: $group_id}) DETACH DELETE f RETURN count(*) AS count"),
             ("text_chunks", "MATCH (t:TextChunk {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
             ("documents", "MATCH (d:Document {group_id: $group_id}) DETACH DELETE d RETURN count(*) AS count"),
         ]

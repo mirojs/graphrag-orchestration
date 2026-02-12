@@ -369,7 +369,7 @@ class Neo4jTextUnitStore:
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
             MATCH (src)-[:MENTIONS]->(e)
-            WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+            WHERE src.group_id = $group_id
             // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
             OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {group_id: $group_id})
             WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS c
@@ -395,7 +395,7 @@ class Neo4jTextUnitStore:
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
             MATCH (src)-[:MENTIONS]->(e)
-            WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+            WHERE src.group_id = $group_id
             // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
             OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {group_id: $group_id})
             WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS c

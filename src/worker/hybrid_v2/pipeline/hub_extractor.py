@@ -302,7 +302,6 @@ class HubExtractor:
                         MATCH (src)-[:MENTIONS]->(e)
                         WHERE (e:Entity OR e:`__Entity__`)
                           AND src.group_id = $group_id AND e.group_id = $group_id
-                            AND (src:Sentence OR src:TextChunk)
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                         // Resolve to TextChunk for metadata

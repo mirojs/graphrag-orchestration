@@ -577,7 +577,7 @@ class Neo4jStoreV3:
         SET e.degree = degree
         WITH e
         // Phase B: count mentions from both Sentence and TextChunk
-        WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk) } AS chunk_count
+        WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id } AS chunk_count
         SET e.chunk_count = chunk_count
         SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
         RETURN count(e) AS updated

@@ -822,7 +822,7 @@ class BaseRouteHandler:
             
             // Phase B: Support both Sentence-based and TextChunk-based MENTIONS
             MATCH (src)-[:MENTIONS]->(e)
-            WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+            WHERE src.group_id = $group_id
             // Resolve to TextChunk: if src is Sentence, follow PART_OF
             OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {{group_id: $group_id}})
             WITH CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS t, e

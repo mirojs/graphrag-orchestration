@@ -365,7 +365,7 @@ class CommunityMatcher:
                     ) AS similarity
                     WHERE similarity > 0.35
                     OPTIONAL MATCH (src)-[:MENTIONS]->(e)
-                    WHERE src.group_id = $group_id AND (src:Sentence OR src:TextChunk)
+                    WHERE src.group_id = $group_id
                     OPTIONAL MATCH (src)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
                     WITH coalesce(src.url, d.source, d.title, src.document_id, '') AS doc_url, e.name AS name, similarity
                     ORDER BY similarity DESC
@@ -402,7 +402,6 @@ class CommunityMatcher:
                 MATCH (src)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND src.group_id = $group_id AND e.group_id = $group_id
-                  AND (src:Sentence OR src:TextChunk)
                 WITH src, e
                 WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
                        OR any(keyword IN $keywords WHERE toLower(coalesce(e.description, '')) CONTAINS keyword))
@@ -437,15 +436,15 @@ class CommunityMatcher:
                 # Get top entities from EACH document to ensure coverage
                 # Support both Entity and __Entity__ labels for compatibility
                 multi_doc_query = """
-                MATCH (c:TextChunk)-[:MENTIONS]->(e)
+                MATCH (src)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
-                  AND c.group_id = $group_id AND e.group_id = $group_id
-                OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-                WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url,
+                  AND src.group_id = $group_id AND e.group_id = $group_id
+                OPTIONAL MATCH (src)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+                WITH coalesce(src.url, d.source, d.title, src.document_id, '') AS doc_url,
                      e.name AS name,
                      coalesce(e.degree, 0) AS deg
                 ORDER BY doc_url, deg DESC
-                WITH doc_url, collect({name: name, degree: deg})[..2] AS top_entities
+                With doc_url, collect({name: name, degree: deg})[..2] AS top_entities
                 UNWIND top_entities AS entity
                 RETURN entity.name AS name, doc_url
                 LIMIT 10
@@ -540,9 +539,8 @@ class CommunityMatcher:
                 MATCH (src)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND src.group_id = $group_id AND e.group_id = $group_id
-                  AND (src:Sentence OR src:TextChunk)
                 OPTIONAL MATCH (src)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-                WITH coalesce(src.url, d.source, d.title, src.document_id, '') AS doc_url, e, coalesce(e.degree, 0) AS deg
+                With coalesce(src.url, d.source, d.title, src.document_id, '') AS doc_url, e, coalesce(e.degree, 0) AS deg
                 ORDER BY deg DESC
                 WITH doc_url, collect({name: e.name, description: e.description, degree: deg})[..3] AS top_entities
                 UNWIND top_entities AS entity
@@ -604,18 +602,122 @@ class CommunityMatcher:
                           keywords=query_keywords[:5])
             return []
         
-        # Create a synthetic community with validated entities
-        community = {
-            "id": f"dynamic_community_{self.group_id}",
-            "title": f"Query-relevant entities: {' '.join(query_keywords[:3])}",
-            "summary": f"Dynamically generated community for query: {query[:100]}",
-            "keywords": query_keywords,
-            "entities": matching_entities[:10]  # Top 10 matching entities
-        }
+        # Build real community summaries from entity descriptions + source text
+        entity_summaries = await self._build_dynamic_community_summaries(
+            matching_entities[:15], top_k
+        )
         
-        # Score is 1.0 since this is dynamically generated for this specific query
-        return [(community, 1.0)]
+        return entity_summaries
     
+    async def _build_dynamic_community_summaries(
+        self,
+        entity_names: List[str],
+        top_k: int,
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """Build real community summaries from entity descriptions and source text.
+
+        Groups entities by document, fetches their descriptions and the sentence/chunk
+        text that mentions them, then assembles a substantive summary string that
+        Route 3 MAP can extract claims from.
+
+        Returns:
+            List of (community_dict, score) tuples — one per document cluster.
+        """
+        if not self.neo4j_service:
+            return []
+
+        try:
+            # Fetch entity descriptions + source text grouped by document
+            query = """
+            UNWIND $entity_names AS ename
+            MATCH (e)
+            WHERE (e:Entity OR e:`__Entity__`)
+              AND e.group_id = $group_id
+              AND toLower(e.name) = toLower(ename)
+            // Get source sentences/chunks that mention this entity
+            OPTIONAL MATCH (src)-[:MENTIONS]->(e)
+            WHERE src.group_id = $group_id
+            // Resolve document
+            OPTIONAL MATCH (src)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_DOCUMENT]->(d2:Document {group_id: $group_id})
+            WITH e,
+                 coalesce(d.title, d2.title, 'Unknown') AS doc_title,
+                 coalesce(d.id, d2.id, 'unknown') AS doc_id,
+                 CASE WHEN src:Sentence THEN src.text ELSE null END AS sentence_text,
+                 CASE WHEN src:TextChunk THEN src.text ELSE null END AS chunk_text
+            WITH doc_id, doc_title,
+                 collect(DISTINCT {
+                     name: e.name,
+                     description: coalesce(e.description, ''),
+                     type: coalesce(e.type, '')
+                 }) AS entities,
+                 collect(DISTINCT sentence_text)[..8] AS sentences,
+                 collect(DISTINCT chunk_text)[..3] AS chunks
+            RETURN doc_id, doc_title, entities, sentences, chunks
+            ORDER BY size(entities) DESC
+            """
+
+            async with self.neo4j_service._get_session() as session:
+                result = await session.run(
+                    query, group_id=self.group_id, entity_names=entity_names
+                )
+                records = await result.data()
+
+            if not records:
+                logger.warning("dynamic_community_no_records", entity_count=len(entity_names))
+                return []
+
+            communities: List[Tuple[Dict[str, Any], float]] = []
+            for i, rec in enumerate(records[:top_k]):
+                doc_title = rec["doc_title"]
+                entities = rec["entities"]
+                sentences = [s for s in rec.get("sentences", []) if s]
+                chunks = [c for c in rec.get("chunks", []) if c]
+
+                # Build a substantive summary from entity descriptions + source text
+                parts = []
+
+                # Entity descriptions
+                entity_descs = []
+                entity_name_list = []
+                for ent in entities:
+                    entity_name_list.append(ent["name"])
+                    if ent.get("description"):
+                        entity_descs.append(f"- {ent['name']}: {ent['description']}")
+                if entity_descs:
+                    parts.append("Key entities and descriptions:\n" + "\n".join(entity_descs[:10]))
+
+                # Source text (prefer sentences — more precise)
+                source_texts = sentences[:6] or chunks[:3]
+                if source_texts:
+                    parts.append("Relevant excerpts:\n" + "\n".join(
+                        f"- {t.strip()}" for t in source_texts if t.strip()
+                    ))
+
+                summary = "\n\n".join(parts) if parts else f"Document contains entities: {', '.join(entity_name_list[:10])}"
+
+                community = {
+                    "id": f"dynamic_{self.group_id}_{doc_title}_{i}",
+                    "title": doc_title,
+                    "summary": summary,
+                    "entity_names": entity_name_list[:20],
+                }
+                # Score decreases for lower-ranked documents
+                score = 1.0 - (i * 0.1)
+                communities.append((community, max(score, 0.5)))
+
+            logger.info(
+                "dynamic_communities_built",
+                count=len(communities),
+                titles=[c.get("title", "?") for c, _ in communities],
+                total_summary_chars=sum(len(c.get("summary", "")) for c, _ in communities),
+            )
+            return communities
+
+        except Exception as e:
+            logger.error("build_dynamic_community_summaries_failed", error=str(e))
+            return []
+
     @staticmethod
     def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         """Calculate cosine similarity between two vectors."""

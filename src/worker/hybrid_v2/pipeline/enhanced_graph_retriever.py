@@ -996,7 +996,6 @@ class EnhancedGraphRetriever:
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                     AND src.group_id = $group_id
                     AND e.group_id = $group_id
-                    AND (src:Sentence OR src:TextChunk)
                 // Resolve to TextChunk: if src is Sentence, follow PART_OF
                 OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {{group_id: $group_id}})
                 WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE coalesce(parent_chunk, src) END AS t
@@ -1996,8 +1995,7 @@ class EnhancedGraphRetriever:
                  OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         
         MATCH (src)-[:MENTIONS]->(e1)
-        WHERE (src:Sentence OR src:TextChunk)
-          AND src.group_id = $group_id
+        WHERE src.group_id = $group_id
         MATCH (src)-[:MENTIONS]->(e2)
         WHERE (e2:Entity OR e2:`__Entity__`)
           AND e2.group_id = $group_id AND e2 <> e1

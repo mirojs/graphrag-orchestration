@@ -122,11 +122,9 @@ class CommunityMatcher:
                    entity_names
             ORDER BY c.rank DESC
             """
-            with self.neo4j_service.driver.session(
-                database=self.neo4j_service.database
-            ) as session:
-                result = session.run(query, group_id=self.group_id)
-                records = list(result)
+            async with self.neo4j_service._get_session() as session:
+                result = await session.run(query, group_id=self.group_id)
+                records = await result.data()
 
             if not records:
                 logger.info("no_neo4j_communities_found", group_id=self.group_id)

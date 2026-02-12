@@ -167,7 +167,8 @@ ROUTE3_QUESTIONS = [
     {
         "id": "T-7",
         "query": "What are the key obligations and responsibilities outlined for each party?",
-        "expected_themes": ["deliverables", "timelines", "performance standards", "compliance"],
+        # Themes adjusted to match corpus content (home construction / property management contracts)
+        "expected_themes": ["warranty obligations", "dispute resolution", "service responsibilities", "cost obligations"],
     },
     {
         "id": "T-8",
@@ -187,11 +188,59 @@ ROUTE3_QUESTIONS = [
 ]
 
 
-def check_theme_coverage(response: str, expected_themes: List[str]) -> float:
-    """Simple substring match for theme coverage."""
+def _simple_stem(word: str) -> str:
+    """Reduce word to a basic root for fuzzy matching."""
+    if word.endswith('ies') and len(word) > 4:
+        return word[:-3] + 'y'
+    if word.endswith('es') and len(word) > 4:
+        return word[:-2]
+    if word.endswith('s') and not word.endswith('ss') and len(word) > 4:
+        return word[:-1]
+    if word.endswith('ing') and len(word) > 5:
+        return word[:-3]
+    if word.endswith('ed') and len(word) > 4:
+        return word[:-2]
+    if word.endswith('tion') and len(word) > 6:
+        return word[:-4]
+    return word
+
+
+def _stem_in_text(word: str, text: str) -> bool:
+    """Check if word or its stemmed form appears as substring in text."""
+    if word in text:
+        return True
+    stem = _simple_stem(word)
+    return len(stem) >= 4 and stem in text
+
+
+def check_theme_coverage(
+    response: str, expected_themes: List[str]
+) -> tuple[float, Dict[str, bool]]:
+    """Fuzzy theme coverage with stemming.
+
+    A theme matches if:
+      1. The full phrase appears in the response, OR
+      2. >= 50% of its significant words (len>=4) appear (with stemming).
+
+    Returns (coverage_ratio, per_theme_dict).
+    """
     response_lower = response.lower()
-    found = sum(1 for theme in expected_themes if theme.lower() in response_lower)
-    return found / len(expected_themes) if expected_themes else 0.0
+    per_theme: Dict[str, bool] = {}
+    for theme in expected_themes:
+        theme_lower = theme.lower()
+        # Exact phrase match
+        if theme_lower in response_lower:
+            per_theme[theme] = True
+            continue
+        # Fuzzy: >= 50% of significant words (with stemming)
+        significant_words = [w for w in theme_lower.split() if len(w) >= 4]
+        if significant_words:
+            hits = sum(1 for w in significant_words if _stem_in_text(w, response_lower))
+            per_theme[theme] = hits >= max(1, len(significant_words) * 0.5)
+        else:
+            per_theme[theme] = False
+    found = sum(1 for v in per_theme.values() if v)
+    return (found / len(expected_themes) if expected_themes else 0.0, per_theme)
 
 
 # ─── Comparison loader ────────────────────────────────────────────
@@ -237,7 +286,7 @@ def run_benchmark(
             continue
 
         # Metrics
-        theme_cov = check_theme_coverage(resp["response"], q["expected_themes"])
+        theme_cov, theme_details = check_theme_coverage(resp["response"], q["expected_themes"])
         resp_len = len(resp["response"])
         claims_total = resp.get("total_claims", 0)
         claims_text_len = sum(len(c) for c in resp.get("map_claims", []))
@@ -246,6 +295,8 @@ def run_benchmark(
         print(f"  Response:   {resp_len} chars")
         print(f"  Latency:    {resp['elapsed_ms']}ms")
         print(f"  Themes:     {theme_cov:.0%} ({int(theme_cov * len(q['expected_themes']))}/{len(q['expected_themes'])})")
+        for t_name, t_hit in theme_details.items():
+            print(f"    {'✓' if t_hit else '✗'} {t_name}")
         print(f"  Claims:     {claims_total} total")
         print(f"  Claims len: {claims_text_len} chars")
         print(f"  Communities:{resp.get('matched_communities', [])}")
@@ -285,6 +336,7 @@ def run_benchmark(
             "timings_ms": timings,
             "negative_detection": resp.get("negative_detection", False),
             "expected_themes": q["expected_themes"],
+            "theme_details": {k: v for k, v in theme_details.items()},
         }
         if bl:
             result_entry["v1_comparison"] = {

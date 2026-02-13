@@ -98,9 +98,9 @@ class LocalSearchHandler(BaseRouteHandler):
         Returns:
             RouteResult with response, citations, and metadata
         """
-        # Route 2 provides specific, direct answers — default to concise prompt
-        # unless caller explicitly requests a different variant.
-        if prompt_variant is None and response_type == "summary":
+        # Route 2 provides specific, direct answers — always default to concise
+        # extraction prompt unless caller explicitly requests a different variant.
+        if prompt_variant is None:
             prompt_variant = "v1_concise"
 
         logger.info("route_2_local_search_start", 

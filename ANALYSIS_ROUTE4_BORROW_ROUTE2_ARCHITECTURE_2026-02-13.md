@@ -583,3 +583,233 @@ Score-gap pruning with 0.5 threshold may prune too aggressively (if beam scores 
 | "HippoRAG 2 alignment concern" | ✅ **Resolved** — Route 4 already departed from HippoRAG 2 (semantic beam, not PPR). Post-retrieval improvements don't touch the backbone |
 
 **Bottom line:** 6 of 7 concrete improvements still apply. The one correction is significant — DRIFT decomposition must be preserved for retrieval, not just synthesis — but the path forward is clear: fix the shared plumbing (denoising stack), fix the DRIFT-specific seed quality (union strategy), and recalibrate thresholds for beam scores.
+
+---
+
+## Section 11: PPR → Semantic Beam Switch Evaluation (HippoRAG 2 Alignment Analysis)
+*Added 2026-02-13 — Evaluating whether the Jan 30 traversal algorithm switch was beneficial*
+
+### 11.1 Background
+
+Route 4 switched from PPR (`personalized_pagerank_native` via `tracer.trace()`) to semantic beam search (`semantic_multihop_beam` via `tracer.trace_semantic_beam()`) on ~Jan 30 2026. The stated motivation was to provide "multi-hop reasoning capability" aligned with DRIFT's cross-document purpose.
+
+This section evaluates: **was that switch a net positive or negative?**
+
+### 11.2 Benchmark Timeline (Route 4 Only)
+
+| Date | Traversal | Test Set | Score | Notes |
+|------|-----------|----------|-------|-------|
+| Dec 31 | PPR (basic) | 19 questions (Q-D1-D10 + Q-N1-N9) | exact_avg = 0.333 | Early pipeline, no denoising, basic NER |
+| Jan 19 | PPR + entity aliases | 19 questions | 93% (53/57) | Major jump from alias resolution |
+| Jan 28 | PPR + GDS V2 index (506 KNN edges) | 19 questions | **98.2% (56/57)** | Near-perfect. Peak PPR score |
+| ~Jan 30 | **Switch to semantic beam** | — | — | No A/B benchmark at switch point |
+| Feb 5 | Beam (beam_width=30, max_hops=3) | **11 of 19 questions** | 97% (32/33) | Only 58% of test set; not comparable to Jan 28 |
+| Feb 7 | Beam | Invoice consistency test | 75% (gpt-5.1) / 56% (gpt-4.1) | Different test methodology, but significantly lower |
+
+**Critical observation:** There is **no controlled A/B test** comparing PPR and beam on the same test set, same index, same pipeline. The Jan 28 → Feb 5 comparison is confounded by:
+1. Different test sets (19 vs 11 questions)
+2. Different pipeline versions (synthesis changes between dates)
+3. Possible index changes
+
+### 11.3 How The Two Algorithms Work
+
+**PPR (`personalized_pagerank_native`, L569-780 in `async_neo4j_service.py`):**
+- Seeds: disambiguated entities from query
+- Traversal: 5 parallel paths — (1) entity edges, (2) section similarity, (3) KNN similarity edges, (4) SHARES_ENTITY relationships, (5) hub entity expansion
+- Scoring: Sum of weighted path contributions with damping=0.85, max_iterations=20
+- Score distribution: steep decay from seeds, natural cliff at community boundary
+- Result: Returns `List[Tuple[str, float]]` — (entity_name, PPR_score)
+
+**Semantic beam (`semantic_multihop_beam`, L1286-1520 in `async_neo4j_service.py`):**
+- Seeds: same disambiguated entities
+- Traversal: At each hop (0 to max_hops=3), expand neighbors, compute `vector.similarity.cosine(entity.embedding, query_embedding)`, keep top `beam_width=30`
+- **Hop-0 vector injection**: Before any graph traversal, runs a vector similarity search across ALL entities and injects those with score ≥ threshold at 0.9× — **these entities may have zero graph connectivity to the seed entities**
+- Score: accumulated_cosine × damping^hop
+- Score distribution: gradual gradient (cosine 0.3-0.9 range), no structural cliff, top-to-bottom ratio 2-5×
+
+### 11.4 Three Problems Introduced by the Switch
+
+#### Problem 1: Hop-0 Vector Injection Bypasses Graph Structure
+
+The beam search's hop-0 step finds entities by **vector similarity to the query**, not by graph connectivity:
+
+```python
+# From semantic_multihop_beam() — hop-0 expansion
+vector_similar = await session.run("""
+    MATCH (e:Entity)
+    WHERE vector.similarity.cosine(e.embedding, $query_embedding) >= $threshold
+    RETURN e.name, vector.similarity.cosine(e.embedding, $query_embedding) AS score
+""")
+for entity_name, score in vector_similar:
+    beam_scores[entity_name] = score * 0.9  # Injected at 0.9× with NO graph path
+```
+
+This means entities can enter the result set with **no graph relationship to the seed entities**. PPR, by contrast, can only reach entities that are graph-connected (through one of 5 traversal paths) to the seeds. The hop-0 injection effectively makes beam search a **hybrid of graph traversal and vector search** — which may explain why `comprehensive_sentence` mode (pure vector, bypasses graph entirely) achieves 100% accuracy: the graph layer may be adding noise, not signal.
+
+#### Problem 2: Score Distribution Mismatch with Denoising Stack
+
+Route 2's denoising stack was calibrated for PPR score distributions:
+- `SCORE_GAP_THRESHOLD=0.5` — works because PPR creates natural 10-50× score gaps at community boundaries
+- `SCORE_GAP_MIN_KEEP=6` — tuned for PPR's typical 15-30 entity result sets
+
+Beam cosine scores cluster in a narrower band (0.3-0.9) with 2-5× top-to-bottom ratios. The 0.5 gap threshold either:
+- Over-keeps (if scores are 0.7-0.9, no gap exceeds 0.5 → everything kept)
+- Over-prunes (if scores are 0.3-0.5, first gap may hit threshold → too few kept)
+
+**This is fixable** (recalibrate thresholds), but it means that when/if the denoising stack IS enabled for Route 4, it will behave unpredictably with beam scores out of the box.
+
+#### Problem 3: Coverage Loss
+
+Jan 28 (PPR) tested all 19 questions → 56/57 sub-answers correct (98.2%).
+Feb 5 (beam) tested only 11 questions → 32/33 sub-answers correct (97%).
+The 8 dropped questions were never re-tested with beam search. We don't know if beam handles those 8 questions well or poorly — and their omission makes the 97% figure misleadingly comparable to 98.2%.
+
+### 11.5 The `comprehensive_sentence` Mode Signal
+
+A key data point from the architecture docs: `comprehensive_sentence` mode — which **bypasses the graph entirely** and retrieves chunks via pure vector similarity — achieves **100% accuracy** on containment questions. This suggests:
+
+1. The vector embeddings (Voyage voyage-context-3, 2048-dim) are high quality
+2. The knowledge graph layer may be **introducing noise** rather than providing precision
+3. The graph's value may be limited to negative containment (knowing what's NOT there) rather than positive retrieval
+
+If pure vector search achieves 100% and PPR achieves 98.2%, while beam search (a hybrid that mixes graph + vector) achieves ≤97%, then the beam search may be getting the **worst of both worlds** — graph noise without vector completeness.
+
+### 11.6 Historical Decision Context
+
+The architecture docs record a Jan 10 decision:
+
+> "Keep semantic beam experimental; PPR remains the default traversal for production."
+
+This was arguably the correct call. The Jan 30 reversal to make beam the default was done without:
+- A controlled A/B benchmark on the full test set
+- Score distribution analysis comparing beam vs PPR outputs
+- Denoising stack compatibility testing
+- Rollback criteria
+
+### 11.7 Verdict
+
+| Dimension | PPR | Semantic Beam | Winner |
+|-----------|-----|---------------|--------|
+| Best measured accuracy | 98.2% (56/57, full set) | 97% (32/33, partial set) | **PPR** (higher score, fuller test) |
+| Graph structure fidelity | ✅ Only graph-connected entities | ⚠️ Hop-0 injects vector-only entities | **PPR** |
+| Denoising compatibility | ✅ Calibrated thresholds | ⚠️ Score distribution mismatch | **PPR** |
+| Multi-hop reasoning | Limited (walks graph, doesn't "hop" semantically) | ✅ Designed for multi-hop traversal | **Beam** |
+| Controlled evidence | None (no direct comparison) | None (no direct comparison) | **Draw** — no A/B exists |
+
+### 11.8 Recommendation: Clean First, Then Test
+
+**Testing PPR vs beam right now is meaningless.** The shared pipeline has:
+- 56.5% chunk duplication (no dedup)
+- No token budget (context can hit 460K tokens)
+- Evidence scores discarded before synthesis
+- No score-gap pruning, no community filter, no semantic dedup
+
+Any difference between PPR and beam scores is **drowned in pipeline noise**. A performance delta could be caused by the traversal algorithm OR by document duplication OR by context overflow OR by score information loss.
+
+**The correct order:**
+1. **Enable Route 2's denoising stack for Route 4** — this is retriever-agnostic and fixes the shared pipeline
+2. **Re-benchmark on the clean pipeline** with the current beam search to get a fresh baseline
+3. **A/B test**: Run the same 19 questions with (a) `tracer.trace()` (PPR) and (b) `tracer.trace_semantic_beam()` (beam) on the now-clean pipeline
+4. **Measure**: accuracy, retrieval precision, token count, latency
+5. **Decide** based on data, not architecture intuition
+
+This isolates the traversal algorithm as the **sole variable**, eliminating the noise-on-noise problem that would confound any test run today.
+
+### 11.9 Risk Note
+
+If beam search is found to be inferior after cleaning, reverting to PPR is straightforward — `trace_semantic_beam()` already has a built-in fallback to `trace()`. The code change is a single function call swap in `route_4_drift.py`.
+
+---
+
+## Section 12: Denoising Stack Audit — Correction & Coverage Gap Bypass
+*Added 2026-02-13 — Code audit reveals the denoising stack is ALREADY active for Route 4*
+
+### 12.1 Previous Claim vs Reality
+
+| What we believed | What the code shows |
+|------------------|-------------------|
+| "Route 4 has NO denoising" | ❌ **Wrong.** Route 4 calls `synthesize()` → `_retrieve_text_chunks()` which runs the FULL denoising stack |
+| "56.5% chunk duplication" | This was measured from older benchmarks BEFORE the Feb 9-10 denoising additions |
+| "Scores are discarded" | ❌ **Wrong.** Beam scores flow through as `evidence_nodes: List[Tuple[str, float]]` → `entity_scores` dict → `_entity_score` stamped on every chunk |
+
+### 12.2 What IS Enabled (Verified by Code Reading)
+
+`_retrieve_text_chunks()` in [synthesis.py](src/worker/hybrid_v2/pipeline/synthesis.py) runs these features for **all callers** (Route 2, Route 4, any route) with no route-specific gating:
+
+| # | Feature | Location | Env Var | Default |
+|---|---------|----------|---------|---------|
+| 1 | Document scoping (IDF voting) | L1153-1167 | `DOC_SCOPE_ENABLED` | ON (`"1"`) |
+| 2 | Community filter (Louvain penalty) | L1173-1214 | `DENOISE_COMMUNITY_FILTER` | ON (`"1"`) |
+| 3 | Score-gap pruning | L1222-1268 | `DENOISE_SCORE_GAP` | ON (`"1"`) |
+| 4 | Score-weighted chunk allocation | L1274-1295 | `DENOISE_SCORE_WEIGHTED` | ON (`"1"`) |
+| 5 | Content-hash dedup (MD5) | L1376-1426 | `DENOISE_DISABLE_DEDUP` | ON (need `"1"` to disable) |
+| 6 | Semantic near-dedup (Jaccard 0.92) | L1430-1493 | `DENOISE_SEMANTIC_DEDUP` | ON (`"1"`) |
+| 7 | Noise filters (form labels, headings) | L1496-1505 | `DENOISE_DISABLE_NOISE` | ON (need `"1"` to disable) |
+| 8 | Document-coherence penalty | L1509-1531 | `DENOISE_DOC_COHERENCE` | ON (`"1"`) |
+| 9 | Token budget (32K) | L1714-1736 | `DENOISE_DISABLE_BUDGET` | ON (need `"1"` to disable) |
+
+No `.env` files override any of these defaults. **All 9 denoising features are active for Route 4.**
+
+### 12.3 The Real Problem: Coverage Gap Fill Bypass
+
+After `_retrieve_text_chunks()` returns denoised chunks, Route 4's **coverage gap fill** injects additional chunks that **bypass the entire denoising stack**:
+
+```python
+# synthesis.py L237-242
+text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes, query=query)
+
+# Step 1.5: Merge coverage chunks if provided ← THIS IS THE BYPASS
+if coverage_chunks:
+    text_chunks.extend(coverage_chunks)  # Injected AFTER denoising
+```
+
+Coverage chunks created in `route_4_drift.py` L607-958:
+- **No `_entity_score`** — defaults to 0.0 in downstream sorting
+- **No MD5 dedup** against entity-retrieved chunks
+- **No semantic dedup** — may duplicate entity-retrieved content
+- **No community filter** — can come from any community
+- **No score-gap pruning** — included regardless of relevance
+
+For **comprehensive queries** (`"list all"`, `"compare across"`, etc.), the coverage gap fill uses `max_per_section=None` — fetching **ALL chunks from ALL sections**, potentially hundreds of chunks. These are then hybrid-reranked with a 200-line BM25+semantic scoring system, but NOT denoised.
+
+### 12.4 Why This Matters Less Than Expected
+
+The coverage chunks have an implicit safety net: the **token budget in `_build_cited_context()`** (L1714-1736) sorts ALL chunks (including coverage) by `_entity_score` descending and drops those exceeding 32K tokens. Since coverage chunks default to `_entity_score=0.0`, they sort **last** and are the first to be cut.
+
+**In practice:**
+- If entity retrieval produces enough chunks to fill 32K → coverage chunks are **entirely dropped** by the budget
+- If entity retrieval produces few chunks → coverage chunks fill the remaining budget, but as the **lowest-priority** content
+- The only scenario where coverage chunks cause real harm is when entity retrieval returns almost nothing (a common Route 4 failure mode with poorly-resolved seeds)
+
+### 12.5 Revised Diagnosis: Why Is Route 4 Still Underperforming?
+
+Since the denoising stack IS active, the problem isn't "no denoising." The likely causes are:
+
+1. **Score-distribution mismatch**: The `SCORE_GAP_THRESHOLD=0.5` was tuned for PPR's steep decay curve. Beam cosine scores cluster in a narrower 0.3-0.9 band with 2-5× top-to-bottom ratios. The score-gap pruning may not fire at all (no gap exceeds 50% relative drop), leaving too many low-quality entities.
+
+2. **Coverage gap fill noise injection**: For queries where entity retrieval is sparse (common in DRIFT), most of the context comes from un-denoised coverage chunks at score=0.0. The LLM sees a mix of high-quality denoised content and bulk un-filtered section dumps.
+
+3. **Seed quality**: DRIFT decomposition mutates entity names (Section 10). Even with denoising, if the wrong entities are traced, the denoised chunks are still wrong-topic.
+
+4. **Community filter mismatch**: DRIFT queries intentionally span multiple documents/communities. The community filter (which penalizes out-of-community entities by 0.3×) may be counterproductive for Route 4 — penalizing exactly the cross-document entities that DRIFT needs.
+
+### 12.6 Revised Action Plan
+
+Instead of "enable denoising" (already done), the correct actions are:
+
+| # | Action | Rationale |
+|---|--------|-----------|
+| 1 | **Calibrate `SCORE_GAP_THRESHOLD` for beam scores** | Beam cosine scores have different distributions. Needs empirical profiling of typical beam output |
+| 2 | **Consider disabling community filter for Route 4** | DRIFT intentionally spans communities. Penalizing cross-community entities defeats the purpose |
+| 3 | **Apply denoising to coverage chunks** | Run the coverage chunks through at least MD5 dedup and semantic dedup before merging |
+| 4 | **Stamp coverage chunks with meaningful scores** | Use the hybrid reranking score (already computed) as `_entity_score` so the token budget sorts them properly |
+| 5 | **Fix seed quality** | NER on original + decomposed (union), as recommended in Section 10 |
+| 6 | **Profile actual denoising behavior** | Run a benchmark and log the denoising stats to see what's actually happening (community filter counts, score-gap triggers, dedup ratios) |
+
+### 12.7 Corrected Bottom Line
+
+The denoising stack was never the missing piece — **it's been running all along.** The real issues are:
+- **Calibration**: thresholds tuned for PPR, not beam cosine
+- **Community filter**: potentially counterproductive for cross-document DRIFT queries
+- **Coverage gap fill bypass**: un-denoised bulk chunks injected after the stack
+- **Seed quality**: upstream entity resolution, not downstream denoising

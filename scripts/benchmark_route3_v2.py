@@ -205,6 +205,22 @@ def _simple_stem(word: str) -> str:
     return word
 
 
+# Conceptual synonyms for theme matching — covers common paraphrases
+# that the LLM might use instead of the exact expected theme keyword.
+THEME_SYNONYMS: Dict[str, List[str]] = {
+    "clients": ["client", "customer", "tenant", "lessee", "occupant", "buyer", "owner"],
+    "penalties": ["penalty", "penalt", "fine", "late fee", "liquidated damage", "surcharge"],
+    "indemnification": ["indemnif", "indemnit", "hold harmless", "defend and indemnify"],
+    "mediation": ["mediat", "conciliat", "alternative dispute"],
+    "privacy": ["privacy", "personal data", "data protection", "confidential information"],
+    "expiration": ["expir", "expire", "end date", "expiry", "lapse"],
+    "response times": ["response time", "business day", "calendar day", "within.*day",
+                        "timeframe", "time frame", "turnaround"],
+    "invoicing": ["invoic", "billing", "bill", "payment request"],
+    "litigation": ["litigat", "lawsuit", "court action", "legal action", "judicial"],
+}
+
+
 def _stem_in_text(word: str, text: str) -> bool:
     """Check if word or its stemmed form appears as substring in text."""
     if word in text:
@@ -213,32 +229,46 @@ def _stem_in_text(word: str, text: str) -> bool:
     return len(stem) >= 4 and stem in text
 
 
+def _theme_in_text(theme: str, text: str) -> bool:
+    """Check if theme appears in text via exact match, stemming, or synonyms."""
+    theme_lower = theme.lower()
+    text_lower = text.lower()
+
+    # 1. Exact phrase match
+    if theme_lower in text_lower:
+        return True
+
+    # 2. Synonym match
+    synonyms = THEME_SYNONYMS.get(theme_lower, [])
+    for syn in synonyms:
+        if syn in text_lower:
+            return True
+
+    # 3. Fuzzy: >= 50% of significant words (with stemming)
+    significant_words = [w for w in theme_lower.split() if len(w) >= 4]
+    if significant_words:
+        hits = sum(1 for w in significant_words if _stem_in_text(w, text_lower))
+        if hits >= max(1, len(significant_words) * 0.5):
+            return True
+
+    return False
+
+
 def check_theme_coverage(
     response: str, expected_themes: List[str]
 ) -> tuple[float, Dict[str, bool]]:
-    """Fuzzy theme coverage with stemming.
+    """Theme coverage with stemming + synonym support.
 
     A theme matches if:
       1. The full phrase appears in the response, OR
-      2. >= 50% of its significant words (len>=4) appear (with stemming).
+      2. A known synonym for the theme appears, OR
+      3. >= 50% of its significant words (len>=4) appear (with stemming).
 
     Returns (coverage_ratio, per_theme_dict).
     """
-    response_lower = response.lower()
     per_theme: Dict[str, bool] = {}
     for theme in expected_themes:
-        theme_lower = theme.lower()
-        # Exact phrase match
-        if theme_lower in response_lower:
-            per_theme[theme] = True
-            continue
-        # Fuzzy: >= 50% of significant words (with stemming)
-        significant_words = [w for w in theme_lower.split() if len(w) >= 4]
-        if significant_words:
-            hits = sum(1 for w in significant_words if _stem_in_text(w, response_lower))
-            per_theme[theme] = hits >= max(1, len(significant_words) * 0.5)
-        else:
-            per_theme[theme] = False
+        per_theme[theme] = _theme_in_text(theme, response)
     found = sum(1 for v in per_theme.values() if v)
     return (found / len(expected_themes) if expected_themes else 0.0, per_theme)
 

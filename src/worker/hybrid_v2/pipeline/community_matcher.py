@@ -186,12 +186,18 @@ class CommunityMatcher:
         if not self._loaded:
             await self.load_communities()
         
-        # If we have pre-computed communities, use traditional matching
+        # If we have pre-computed communities, use semantic matching
         if self._communities and len(self._communities) > 0:
             if self.embedding_client and self._community_embeddings:
                 results = await self._semantic_match(query, top_k)
             else:
-                results = self._keyword_match(query, top_k)
+                logger.warning(
+                    "community_matching_no_embeddings",
+                    has_embedding_client=self.embedding_client is not None,
+                    num_community_embeddings=len(self._community_embeddings),
+                    num_communities=len(self._communities),
+                )
+                results = []
             
             # Validate that we got meaningful results
             if results and len(results) > 0:
@@ -226,7 +232,8 @@ class CommunityMatcher:
             # Embed the query
             query_embedding = await self._get_embedding(query)
             if not query_embedding:
-                return self._keyword_match(query, top_k)
+                logger.warning("semantic_match_no_query_embedding", query=query[:50])
+                return []
             
             # Calculate similarities
             scored: List[Tuple[Dict[str, Any], float]] = []
@@ -249,38 +256,7 @@ class CommunityMatcher:
             
         except Exception as e:
             logger.error("semantic_match_failed", error=str(e))
-            return self._keyword_match(query, top_k)
-    
-    def _keyword_match(
-        self,
-        query: str,
-        top_k: int
-    ) -> List[Tuple[Dict[str, Any], float]]:
-        """Fallback keyword-based matching."""
-        query_lower = query.lower()
-        query_words = set(query_lower.split())
-        
-        scored: List[Tuple[Dict[str, Any], float]] = []
-        
-        for community in self._communities:
-            title = community.get("title", "").lower()
-            summary = community.get("summary", "").lower()
-            
-            # Calculate word overlap
-            community_words = set(title.split()) | set(summary.split())
-            overlap = len(query_words & community_words)
-            
-            if overlap > 0:
-                score = overlap / max(len(query_words), 1)
-                scored.append((community, score))
-        
-        scored.sort(key=lambda x: x[1], reverse=True)
-        
-        logger.info("keyword_community_match",
-                   query=query[:50],
-                   num_matches=len(scored))
-        
-        return scored[:top_k]
+            return []
     
     async def _get_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding for text."""
@@ -331,15 +307,15 @@ class CommunityMatcher:
         ]
         
         if not query_keywords:
-            # Keyword matching will be skipped, but embedding search can still work.
+            # Keyword matching will be skipped, but embedding search is the primary path.
             logger.warning("no_keywords_extracted_from_query", query=query[:50])
         
         logger.info("extracted_query_keywords", keywords=query_keywords[:5])
         
-        # STRATEGY: Combine EMBEDDING search + keyword matching + multi-document sampling
+        # STRATEGY: Combine EMBEDDING search + keyword supplement + multi-document sampling
         # Priority order:
         # 1. Embedding similarity (most semantically relevant)
-        # 2. Keyword matching (fallback for entities without embeddings)
+        # 2. Keyword supplement (fills gaps when <5 embedding matches)
         # 3. Multi-document sampling (ensures coverage)
         
         embedding_matched_entities = []
@@ -393,7 +369,7 @@ class CommunityMatcher:
             except Exception as e:
                 logger.warning("embedding_entity_search_failed", error=str(e))
         
-        # Step 2: Keyword-based entity search (FALLBACK for entities without embeddings)
+        # Step 2: Keyword-based entity search (SUPPLEMENT when embedding matches < 5)
         if self.neo4j_service and query_keywords and len(embedding_matched_entities) < 5:
             try:
                 # Search entities by keyword, diversify across documents

@@ -2284,8 +2284,14 @@ Output:
             )
             sessions = GdsSessions(api_credentials=api_creds)
             
-            # Note: Can't pre-delete sessions by name - get_or_create handles it
-            # sessions.delete() only works on the current session after get_or_create
+            # Pre-cleanup: delete any expired/orphaned sessions to free resources
+            try:
+                for stale in sessions.list():
+                    if stale.status in ('Expired', 'Failed'):
+                        sessions.delete(session_name=stale.name)
+                        logger.info(f"🧹 Cleaned up stale GDS session: {stale.name} ({stale.status})")
+            except Exception as cleanup_err:
+                logger.debug(f"Pre-cleanup check: {cleanup_err}")
             
             # Extract Aura instance ID from URI (e.g., neo4j+s://abc123.databases.neo4j.io -> abc123)
             import re
@@ -2479,7 +2485,7 @@ Output:
             
             # Delete the GDS session to free resources
             try:
-                sessions.delete()
+                sessions.delete(session_name=session_name)
                 logger.info(f"🧹 Deleted GDS session: {session_name}")
             except Exception as cleanup_err:
                 logger.warning(f"⚠️  Could not delete session {session_name}: {cleanup_err}")
@@ -2493,7 +2499,7 @@ Output:
             # Try to cleanup session even on failure
             try:
                 if 'sessions' in locals() and 'session_name' in locals():
-                    sessions.delete()
+                    sessions.delete(session_name=session_name)
                     logger.info(f"🧹 Cleaned up failed session: {session_name}")
             except Exception:
                 pass

@@ -20,6 +20,7 @@ v3 improvement over v2:
 
 import asyncio
 import os
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -184,6 +185,36 @@ class GlobalSearchHandler(BaseRouteHandler):
             sentence_evidence_count=len(sentence_evidence),
             per_community=community_claim_counts,
         )
+
+        # ================================================================
+        # Step 2B: Denoise + Rerank sentence evidence
+        # ================================================================
+        if sentence_evidence:
+            t0 = time.perf_counter()
+            raw_count = len(sentence_evidence)
+            sentence_evidence = self._denoise_sentences(sentence_evidence)
+            denoised_count = len(sentence_evidence)
+
+            # Rerank denoised sentences with voyage-rerank-2.5
+            rerank_enabled = os.getenv(
+                "ROUTE3_SENTENCE_RERANK", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+            rerank_top_k = int(os.getenv("ROUTE3_RERANK_TOP_K", "15"))
+            if rerank_enabled and sentence_evidence:
+                sentence_evidence = await self._rerank_sentences(
+                    query, sentence_evidence, top_k=rerank_top_k,
+                )
+
+            timings_ms["step_2b_denoise_rerank_ms"] = int(
+                (time.perf_counter() - t0) * 1000
+            )
+            logger.info(
+                "step_2b_denoise_rerank_complete",
+                raw=raw_count,
+                after_denoise=denoised_count,
+                after_rerank=len(sentence_evidence),
+                rerank_enabled=rerank_enabled,
+            )
 
         # ================================================================
         # Negative detection: only if BOTH claims and sentences are empty
@@ -572,6 +603,141 @@ class GlobalSearchHandler(BaseRouteHandler):
             items.append(current)
 
         return items
+
+    # ==================================================================
+    # Step 2B: Denoise + Rerank
+    # ==================================================================
+
+    @staticmethod
+    def _denoise_sentences(
+        evidence: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Remove noisy, non-informative sentences before reranking.
+
+        Filters out:
+        - HTML table fragments / markup-heavy content
+        - Signature blocks and form labels
+        - Tiny fragments that lack sentence structure
+        - Bare headings without sentence punctuation
+
+        This ensures the downstream reranker (voyage-rerank-2.5) receives
+        clean, complete sentences — its accuracy is highest on well-formed
+        natural language, not markup or fragments.
+
+        Returns:
+            Filtered list of evidence dicts.
+        """
+        cleaned: List[Dict[str, Any]] = []
+
+        for ev in evidence:
+            text = (ev.get("sentence_text") or ev.get("text", "")).strip()
+            # Also clean the passage text (prev + current + next)
+            passage = (ev.get("text", "")).strip()
+
+            # --- Rule 1: HTML / markup-heavy ---
+            tag_count = len(re.findall(r"<[^>]+>", text))
+            if tag_count >= 2:
+                continue
+
+            # --- Rule 2: Too short / fragment ---
+            if len(text) < 25:
+                continue
+
+            # --- Rule 3: Signature / form boilerplate ---
+            if re.search(
+                r"(?i)(signature|signed this|print\)|registration number"
+                r"|authorized representative)",
+                text,
+            ):
+                continue
+
+            # --- Rule 4: Bare label ending with colon ---
+            if len(text) < 60 and text.endswith(":"):
+                continue
+
+            # --- Rule 5: No sentence structure (heading-only) ---
+            if len(text) < 50 and not re.search(r"[.?!]", text):
+                continue
+
+            # Strip any residual HTML tags from the passage that gets sent
+            if "<" in passage:
+                passage = re.sub(r"<[^>]+>", "", passage).strip()
+                ev = {**ev, "text": passage}
+
+            cleaned.append(ev)
+
+        logger.info(
+            "route3_denoise_sentences",
+            before=len(evidence),
+            after=len(cleaned),
+            removed=len(evidence) - len(cleaned),
+        )
+        return cleaned
+
+    async def _rerank_sentences(
+        self,
+        query: str,
+        evidence: List[Dict[str, Any]],
+        top_k: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """Rerank denoised sentences using voyage-rerank-2.5.
+
+        Cross-encoder reranking produces a much wider score spread than
+        bi-encoder vector search (which was 0.597-0.625 = 0.028 spread).
+        This allows meaningful top-k selection.
+
+        Args:
+            query: User query.
+            evidence: Denoised sentence evidence list.
+            top_k: Max sentences to keep after reranking.
+
+        Returns:
+            Top-k evidence sorted by rerank score (descending).
+        """
+        rerank_model = os.getenv("ROUTE3_RERANK_MODEL", "rerank-2.5")
+
+        try:
+            import voyageai
+            from src.core.config import settings
+
+            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
+
+            loop = asyncio.get_event_loop()
+            rr_result = await loop.run_in_executor(
+                self._executor,
+                lambda: vc.rerank(
+                    query=query,
+                    documents=documents,
+                    model=rerank_model,
+                    top_k=min(top_k, len(documents)),
+                ),
+            )
+
+            # Build reranked list ordered by relevance_score descending
+            reranked: List[Dict[str, Any]] = []
+            for rr in rr_result.results:
+                ev = {**evidence[rr.index], "rerank_score": rr.relevance_score}
+                reranked.append(ev)
+
+            logger.info(
+                "route3_rerank_complete",
+                model=rerank_model,
+                input_count=len(evidence),
+                output_count=len(reranked),
+                top_score=round(reranked[0]["rerank_score"], 4) if reranked else 0,
+                bottom_score=round(reranked[-1]["rerank_score"], 4) if reranked else 0,
+            )
+            return reranked
+
+        except Exception as e:
+            logger.warning(
+                "route3_rerank_failed_fallback_to_vector_order",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            # Graceful fallback: return original order, just truncated
+            return evidence[:top_k]
 
     @staticmethod
     def _build_citations(

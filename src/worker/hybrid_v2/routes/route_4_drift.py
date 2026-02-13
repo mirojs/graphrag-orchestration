@@ -40,6 +40,11 @@ def _get_query_embedding(query: str) -> List[float]:
     from ..orchestrator import get_query_embedding
     return get_query_embedding(query)
 
+# Feature flag: use PPR instead of semantic beam for graph traversal (A/B testing)
+ROUTE4_USE_PPR = os.getenv("ROUTE4_USE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+if ROUTE4_USE_PPR:
+    logger.info("route4_using_ppr_mode")
+
 # Feature flag for LlamaIndex Workflow mode
 ROUTE4_WORKFLOW = os.getenv("ROUTE4_WORKFLOW", "0").strip().lower() in {"1", "true", "yes"}
 if ROUTE4_WORKFLOW:
@@ -168,19 +173,26 @@ class DRIFTHandler(BaseRouteHandler):
                    total_seeds=len(all_seeds),
                    num_results=len(intermediate_results))
         
-        # Stage 4.3: Consolidated HippoRAG PPR Tracing with Semantic Beam Search
-        # Uses query embedding at each hop to re-align traversal with query intent
-        logger.info("stage_4.3_consolidated_tracing_semantic_beam", knn_config=knn_config)
-        query_embedding = _get_query_embedding(query)
-        complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
-            query=query,
-            query_embedding=query_embedding,
-            seed_entities=all_seeds,
-            max_hops=3,
-            beam_width=30,
-            knn_config=knn_config,
-        )
-        logger.info("stage_4.3_complete", num_evidence=len(complete_evidence))
+        # Stage 4.3: Consolidated HippoRAG Tracing (PPR or Semantic Beam)
+        retrieval_mode = "ppr" if ROUTE4_USE_PPR else "beam"
+        logger.info("stage_4.3_consolidated_tracing", mode=retrieval_mode, knn_config=knn_config)
+        if ROUTE4_USE_PPR:
+            complete_evidence = await self.pipeline.tracer.trace(
+                query=query,
+                seed_entities=all_seeds,
+                top_k=30,
+            )
+        else:
+            query_embedding = _get_query_embedding(query)
+            complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
+                query=query,
+                query_embedding=query_embedding,
+                seed_entities=all_seeds,
+                max_hops=3,
+                beam_width=30,
+                knn_config=knn_config,
+            )
+        logger.info("stage_4.3_complete", mode=retrieval_mode, num_evidence=len(complete_evidence))
         
         # Stage 4.3.5: Confidence Check + Re-decomposition
         confidence_metrics = self._compute_subgraph_confidence(
@@ -245,16 +257,23 @@ class DRIFTHandler(BaseRouteHandler):
                     all_seeds = list(set(all_seeds + additional_seeds))
                     intermediate_results.extend(additional_results)
                     
-                    # Re-run tracing with expanded seeds (semantic beam for query alignment)
+                    # Re-run tracing with expanded seeds (PPR or beam)
                     if additional_seeds:
-                        additional_evidence = await self.pipeline.tracer.trace_semantic_beam(
-                            query=query,
-                            query_embedding=query_embedding,  # Reuse from Stage 4.3
-                            seed_entities=additional_seeds,
-                            max_hops=2,  # Shorter for refinement pass
-                            beam_width=15,
-                            knn_config=knn_config,
-                        )
+                        if ROUTE4_USE_PPR:
+                            additional_evidence = await self.pipeline.tracer.trace(
+                                query=query,
+                                seed_entities=additional_seeds,
+                                top_k=15,
+                            )
+                        else:
+                            additional_evidence = await self.pipeline.tracer.trace_semantic_beam(
+                                query=query,
+                                query_embedding=query_embedding,  # Reuse from Stage 4.3
+                                seed_entities=additional_seeds,
+                                max_hops=2,  # Shorter for refinement pass
+                                beam_width=15,
+                                knn_config=knn_config,
+                            )
                         
                         # Deduplicate
                         existing_ids = {self._extract_evidence_id(e) for e in complete_evidence}
@@ -508,18 +527,25 @@ Sub-questions:"""
             sub_entities = await self.pipeline.disambiguator.disambiguate(sub_q)
             all_seeds.extend(sub_entities)
             
-            # Run partial search for context (semantic beam for query alignment)
+            # Run partial search for context (PPR or beam)
             evidence_count = 0
             if sub_entities:
-                sub_q_embedding = _get_query_embedding(sub_q)
-                partial_evidence = await self.pipeline.tracer.trace_semantic_beam(
-                    query=sub_q,
-                    query_embedding=sub_q_embedding,
-                    seed_entities=sub_entities,
-                    max_hops=2,  # Shorter for sub-question context
-                    beam_width=5,
-                    knn_config=getattr(self, '_knn_config', None),
-                )
+                if ROUTE4_USE_PPR:
+                    partial_evidence = await self.pipeline.tracer.trace(
+                        query=sub_q,
+                        seed_entities=sub_entities,
+                        top_k=5,
+                    )
+                else:
+                    sub_q_embedding = _get_query_embedding(sub_q)
+                    partial_evidence = await self.pipeline.tracer.trace_semantic_beam(
+                        query=sub_q,
+                        query_embedding=sub_q_embedding,
+                        seed_entities=sub_entities,
+                        max_hops=2,  # Shorter for sub-question context
+                        beam_width=5,
+                        knn_config=getattr(self, '_knn_config', None),
+                    )
                 evidence_count = len(partial_evidence)
             
             intermediate_results.append({

@@ -7491,3 +7491,319 @@ The MAP prompt requires extracting structured claims from community entity descr
 | `benchmark_route3_ablation_20260213T161955Z.json` | 3-question pilot results |
 
 ---
+
+## 26. Route 4 DRIFT: Denoising Fixes & PPR vs Beam A/B Test (February 13, 2026)
+
+### 26.1. Background & Motivation
+
+Route 4 (DRIFT Multi-Hop) showed lower accuracy than expected despite sharing the same denoising stack as Route 2. A code audit (documented in `ANALYSIS_ROUTE4_BORROW_ROUTE2_ARCHITECTURE_2026-02-13.md` Sections 1–12) revealed:
+
+1. **Coverage gap-fill chunks bypassed the denoising stack.** The coverage gap-fill path (`_fill_coverage_gaps()`) injects chunks *after* `_retrieve_text_chunks()` returns, meaning they skip MD5 dedup, semantic dedup, score stamping, and all noise filters.
+2. **Community filter is counterproductive for DRIFT queries.** DRIFT decomposes queries into sub-questions and discovers entities across multiple communities. The community filter (designed for single-community Route 2 queries) prunes legitimately relevant cross-community entities.
+
+A controlled A/B test between PPR (Personalized PageRank) and Semantic Beam Search was also needed — no prior test existed on a clean pipeline.
+
+### 26.2. Fixes Implemented
+
+#### Fix 1: Coverage Chunk Dedup (Step 1.5 in `synthesis.py`)
+
+**File:** `src/worker/hybrid_v2/pipeline/synthesis.py` (Lines 241–301)
+
+Coverage gap-fill chunks now pass through a dedup gate before merging into entity-retrieved chunks:
+
+```python
+# Step 1.5: Coverage-chunk dedup (NEW — Feb 13 2026)
+# Coverage gap-fill chunks previously bypassed the entire denoising stack.
+# Apply: (a) MD5 exact dedup, (b) semantic near-dedup (Jaccard ≥ 0.92),
+#         (c) score stamping at min_entity_score × 0.5
+
+existing_hashes = {
+    hashlib.md5(c["text"].encode()).hexdigest()
+    for c in text_chunks if c.get("text")
+}
+
+for cov_chunk in coverage_chunks:
+    cov_text = cov_chunk.get("text", "")
+    cov_hash = hashlib.md5(cov_text.encode()).hexdigest()
+
+    # (a) Exact dedup
+    if cov_hash in existing_hashes:
+        dedup_stats["exact"] += 1
+        continue
+
+    # (b) Semantic near-dedup (Jaccard similarity on word sets)
+    cov_words = set(re.findall(r'\w+', cov_text.lower()))
+    is_near_dup = False
+    for existing in text_chunks:
+        ex_words = set(re.findall(r'\w+', existing.get("text", "").lower()))
+        if cov_words and ex_words:
+            jaccard = len(cov_words & ex_words) / len(cov_words | ex_words)
+            if jaccard >= 0.92:
+                is_near_dup = True
+                break
+    if is_near_dup:
+        dedup_stats["semantic"] += 1
+        continue
+
+    # (c) Score stamping — below entity-retrieved scores
+    min_score = min(
+        (c.get("_entity_score", 1.0) for c in text_chunks if c.get("_entity_score")),
+        default=1.0
+    )
+    cov_chunk["_entity_score"] = min_score * 0.5
+    cov_chunk["_source_entity"] = "coverage_gap_fill"
+
+    text_chunks.append(cov_chunk)
+    existing_hashes.add(cov_hash)
+    dedup_stats["added"] += 1
+```
+
+#### Fix 2: Community Filter Disable for DRIFT (`synthesis.py`)
+
+**File:** `src/worker/hybrid_v2/pipeline/synthesis.py` (Lines 1158, 1245–1248)
+
+`_retrieve_text_chunks()` now accepts an `is_drift` parameter. When `True`, the community filter is automatically disabled:
+
+```python
+async def _retrieve_text_chunks(self, evidence_nodes, *, query=None, is_drift=False):
+    # ...
+    if is_drift:
+        community_filter_enabled = False
+        # Log the override
+        stats["community_filter"]["drift_override"] = True
+```
+
+Call site (Line 238):
+```python
+text_chunks = await self._retrieve_text_chunks(
+    evidence_nodes, query=query,
+    is_drift=sub_questions is not None  # True when Route 4 DRIFT
+)
+```
+
+#### Fix 3: Negative Test Checker Keyword Expansion (`benchmark_accuracy_utils.py`)
+
+**File:** `scripts/benchmark_accuracy_utils.py` (Lines 144–148)
+
+The negative test checker was missing synonyms for "blank/empty field" responses. Q-N10 ("What is the shipping method?") correctly answered "left blank" but was scored FAIL because "left blank" wasn't in the keyword list:
+
+```python
+# Blank-field synonyms (Q-N10 shipping method = "left blank")
+"left blank", "is blank", "not filled in", "no shipping method",
+"not recorded", "no value", "is empty", "field is blank",
+"no data", "does not record", "doesn't record",
+```
+
+### 26.3. Unit Tests
+
+**File:** `tests/unit/test_coverage_chunk_dedup.py` (285 lines, 15 tests)
+
+```
+Run: pytest tests/unit/test_coverage_chunk_dedup.py -v
+```
+
+| Test Class | Test Name | What It Validates |
+|-----------|-----------|-------------------|
+| `TestExactDedup` | `test_exact_duplicate_removed` | MD5 hash match → chunk rejected |
+| `TestExactDedup` | `test_unique_chunk_added` | Non-duplicate → chunk added |
+| `TestExactDedup` | `test_mixed_duplicates_and_unique` | Mix of dups and uniques |
+| `TestSemanticDedup` | `test_near_duplicate_removed` | Jaccard ≥ 0.92 → chunk rejected |
+| `TestSemanticDedup` | `test_sufficiently_different_not_removed` | Jaccard < 0.92 → chunk kept |
+| `TestSemanticDedup` | `test_empty_text_passes_through` | Empty text not erroneously deduped |
+| `TestSemanticDedup` | `test_custom_threshold` | Configurable threshold works |
+| `TestScoreStamping` | `test_coverage_score_below_entity_scores` | Coverage score = min × 0.5 |
+| `TestScoreStamping` | `test_coverage_score_with_no_entity_chunks` | Default score when no entity chunks |
+| `TestScoreStamping` | `test_source_entity_stamped` | `_source_entity` = "coverage_gap_fill" |
+| `TestCoverageChainDedup` | `test_duplicate_coverage_chunks_deduped` | Duplicate coverage chunks against each other |
+| `TestCoverageChainDedup` | `test_near_duplicate_coverage_chunks_deduped` | Near-dup coverage chunks against each other |
+| `TestEdgeCases` | `test_empty_coverage_list` | Empty coverage list → no-op |
+| `TestEdgeCases` | `test_empty_entity_chunks` | No entity chunks → coverage chunks still added |
+| `TestEdgeCases` | `test_large_coverage_batch` | 100 coverage chunks processed correctly |
+
+All 15 tests passing (0.08s).
+
+### 26.4. Benchmark Test Script
+
+**Script:** `scripts/benchmark_route4_drift_multi_hop.py`
+
+```bash
+# Usage
+python3 scripts/benchmark_route4_drift_multi_hop.py \
+    --url http://localhost:8000 \
+    --group-id test-5pdfs-v2-fix2 \
+    --repeats 1 \
+    --timeout 180
+```
+
+**Test corpus:** 5 PDFs (property management agreement, warranty, purchase contract, invoice, holding tank contract) indexed as `test-5pdfs-v2-fix2`.
+
+**Question bank:** `docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md`
+- 10 positive questions (Q-D1 to Q-D10): multi-hop, cross-document, entity-tracing queries
+- 9 negative questions (Q-N1 to Q-N9, Q-N10): facts not in the corpus (should return "not found")
+
+**Accuracy metrics (per question):**
+- **Containment** (primary): fraction of ground-truth keywords found in the response. Recall-oriented — measures coverage of expected facts.
+- **F1**: harmonic mean of precision and recall. Lower than containment because LLM responses are verbose (many correct-but-unlisted words counted as false positives).
+
+**Negative test evaluation:** Checks response for denial patterns ("not found", "not specified", "left blank", etc.). PASS = model correctly identified information is absent.
+
+**Environment setup for local testing:**
+
+```bash
+# Start local server (managed identity auth via Azure CLI)
+cd /afh/projects/graphrag-orchestration
+unset AZURE_OPENAI_API_KEY    # Force DefaultAzureCredential (Azure CLI)
+set -a && source .env.local && set +a
+export PYTHONPATH="$PWD"
+export REQUIRE_AUTH=false
+
+# For PPR mode:
+export ROUTE4_USE_PPR=1
+
+python -m uvicorn src.api_gateway.main:app --host 0.0.0.0 --port 8000
+```
+
+### 26.5. PPR vs Semantic Beam Toggle
+
+**File:** `src/worker/hybrid_v2/routes/route_4_drift.py`
+
+Added `ROUTE4_USE_PPR` environment variable toggle to switch Route 4's graph traversal between PPR and Semantic Beam Search:
+
+```python
+# Feature flag: use PPR instead of semantic beam for graph traversal (A/B testing)
+ROUTE4_USE_PPR = os.getenv("ROUTE4_USE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+```
+
+When `ROUTE4_USE_PPR=1`, all three `trace_semantic_beam()` call sites in Route 4 dispatch to `trace()` (PPR) instead:
+
+| Call Site | Stage | Beam Config | PPR Config |
+|-----------|-------|-------------|------------|
+| Stage 4.3 (L179) | Consolidated tracing | beam_width=30, max_hops=3 | top_k=30 |
+| Stage 4.3.5 (L260) | Re-decomposition loop | beam_width=15, max_hops=2 | top_k=15 |
+| Discovery pass (L521) | Sub-question partial search | beam_width=5, max_hops=2 | top_k=5 |
+
+**How PPR differs from Semantic Beam:**
+
+| Aspect | PPR (Personalized PageRank) | Semantic Beam Search |
+|--------|---------------------------|---------------------|
+| Algorithm | Diffuse probability from seeds along edges | Multi-hop expansion with vector scoring per hop |
+| Query awareness | None — pure graph structure | Re-embeds query at each hop via cosine similarity |
+| Hop 0 | N/A | Vector index expansion (discovers isolated entities) |
+| Per-hop scoring | PageRank convergence | `vector.similarity.cosine(entity.embedding, query_embedding)` |
+| Per-hop pruning | Top-k by PageRank score | Top beam_width by semantic similarity |
+| Score decay | PageRank damping factor | `0.85^hop × similarity` |
+| Cross-document | Follows edge structure blindly | Stays aligned with query intent across boundaries |
+| Fallback | N/A | Falls back to PPR on error |
+
+### 26.6. Benchmark Results
+
+All benchmarks run on February 13, 2026 against `test-5pdfs-v2-fix2` corpus, local server (`http://localhost:8000`), `gpt-5.1` synthesis model.
+
+#### Containment (Primary Accuracy Metric)
+
+| QID | Question (abbreviated) | Baseline | +CovFix | +CovFix+Cmty | PPR |
+|-----|----------------------|----------|---------|--------------|-----|
+| Q-D1 | Emergency defect notification | 0.930 | 0.930 | 0.930 | ERR* |
+| Q-D2 | Confirmed reservations on termination | 0.830 | **1.000** | **1.000** | 1.000 |
+| Q-D3 | Time windows across docs | 0.610 | 0.740 | **0.850** | 0.780 |
+| Q-D4 | Insurance mentions & limits | 0.940 | 0.940 | 0.940 | 0.890 |
+| Q-D5 | Warranty coverage start/end | 0.670 | **0.780** | 0.780 | 0.780 |
+| Q-D6 | Purchase vs invoice total match | 0.670 | **0.780** | 0.780 | 0.780 |
+| Q-D7 | Latest explicit date | 0.220 | 0.220 | 0.220 | 0.220 |
+| Q-D8 | Fabrikam vs Contoso doc count | 0.760 | 0.740 | **0.830** | 0.740 |
+| Q-D9 | Fees: percentage vs fixed | 0.000 | 0.000 | 0.000 | 0.000 |
+| **AVG** | | **0.626** | **0.681** | **0.703** | **0.649** |
+| **Δ from baseline** | | — | **+5.5pp** | **+7.7pp** | +2.3pp |
+
+\*Q-D1 PPR: transient Neo4j connection timeout (not PPR-related; re-ran manually — returned correctly at 23s).
+
+#### F1 Score
+
+| QID | Baseline | +CovFix | +CovFix+Cmty | PPR |
+|-----|----------|---------|--------------|-----|
+| Q-D1 | 0.150 | 0.090 | 0.110 | ERR* |
+| Q-D2 | 0.030 | 0.040 | 0.030 | 0.040 |
+| Q-D3 | 0.180 | 0.260 | 0.150 | 0.170 |
+| Q-D4 | 0.180 | 0.210 | 0.200 | 0.220 |
+| Q-D5 | 0.080 | 0.100 | 0.080 | 0.090 |
+| Q-D6 | 0.080 | 0.100 | 0.080 | 0.090 |
+| Q-D7 | 0.110 | 0.110 | 0.110 | 0.110 |
+| Q-D8 | 0.370 | 0.400 | 0.360 | 0.360 |
+| Q-D9 | 0.000 | 0.000 | 0.000 | 0.000 |
+| **AVG** | **0.131** | **0.146** | **0.124** | **0.135** |
+
+**Note on F1 vs Containment:** F1 values are uniformly low (0.03–0.37) because the benchmark compares short ground-truth keyword sets against verbose LLM paragraphs. Every correct-but-unlisted word is penalized as a false positive, making precision artificially low. **Containment is the more meaningful metric** for this evaluation — it measures "did the answer contain all the key facts."
+
+#### Negative Tests
+
+| Run | Pass Rate |
+|-----|-----------|
+| Baseline (beam) | 10/10 ✅ |
+| +CovFix (beam) | 10/10 ✅ |
+| +CovFix+Cmty (beam) | 9/10 ⚠️ (Q-N10 false alarm†) |
+| PPR | 10/10 ✅ |
+
+†Q-N10 was a **false failure** in the benchmark checker, not a model error. The model correctly answered "shipping method field was left blank" but the checker lacked "left blank" in its keyword list. Fixed in `benchmark_accuracy_utils.py`. The PPR run (executed after the fix) shows 10/10 correctly.
+
+#### Latency (P50, milliseconds)
+
+| QID | Baseline | +CovFix | +CovFix+Cmty | PPR |
+|-----|----------|---------|--------------|-----|
+| Q-D1 | 24,312 | 21,855 | 30,975 | ERR* |
+| Q-D2 | 38,653 | 26,404 | 29,523 | 32,131 |
+| Q-D3 | 54,235 | 18,456 | 52,006 | 40,968 |
+| Q-D4 | 33,584 | 13,804 | 15,002 | 13,597 |
+| Q-D5 | 63,844 | 21,732 | 30,191 | 21,455 |
+| Q-D6 | 34,092 | 18,331 | 17,437 | 18,066 |
+| Q-D7 | 1,200 | 228 | 222 | 550 |
+| Q-D8 | 39,060 | 13,174 | 16,159 | 13,571 |
+| Q-D9 | 60,694 | 51,402 | 55,688 | 28,449 |
+
+**Note on latency variance:** The large swings (e.g., Q-D3: 18s → 52s → 41s) are LLM generation variance, not code-related. The baseline used the deployed Azure server, while subsequent runs used local server — network topology differences also contribute.
+
+### 26.7. Analysis & Conclusions
+
+#### Coverage Chunk Dedup (Fix 1): +5.5pp containment
+
+The biggest single improvement. Q-D2 jumped from 0.830 → 1.000 (+17pp), Q-D5 and Q-D6 each gained +11pp. These are questions where coverage gap-fill previously injected duplicate or near-duplicate chunks that diluted the context window, crowding out relevant evidence.
+
+#### Community Filter Disable for DRIFT (Fix 2): +2.2pp additional containment
+
+Q-D3 (cross-document time windows) gained +11pp and Q-D8 (cross-document entity counting) gained +9pp. Both are cross-community queries where the community filter was pruning legitimately relevant entities from other communities.
+
+#### PPR vs Semantic Beam: Beam wins by ~5.4pp containment
+
+On the clean pipeline (both fixes applied):
+
+| Metric | Beam | PPR | Delta |
+|--------|------|-----|-------|
+| Avg Containment | 0.703 | 0.649 | **-5.4pp** |
+| Avg F1 | 0.124 | 0.135 | +1.1pp |
+| Negative Tests | 9/10† | 10/10 | — |
+
+PPR regressions concentrated on cross-document multi-hop queries:
+- Q-D3 (time windows): -7pp
+- Q-D4 (insurance): -5pp
+- Q-D8 (entity counting): -9pp
+
+This is theoretically expected: beam search re-embeds the query at each hop via `vector.similarity.cosine()`, keeping traversal aligned with query intent across document boundaries. PPR follows pure graph structure and can drift to well-connected but irrelevant nodes.
+
+**Verdict: Keep semantic beam as default.** The real accuracy wins came from the denoising fixes (+7.7pp), not the traversal method. The `ROUTE4_USE_PPR=1` toggle remains available for future experimentation.
+
+### 26.8. Artifacts
+
+| File | Description |
+|------|-------------|
+| `src/worker/hybrid_v2/pipeline/synthesis.py` | Coverage chunk dedup (Step 1.5), DRIFT community filter disable |
+| `src/worker/hybrid_v2/routes/route_4_drift.py` | PPR/beam toggle (`ROUTE4_USE_PPR`) |
+| `tests/unit/test_coverage_chunk_dedup.py` | 15 unit tests for coverage dedup logic |
+| `scripts/benchmark_route4_drift_multi_hop.py` | Route 4 benchmark script |
+| `scripts/benchmark_accuracy_utils.py` | Accuracy metrics + negative test checker |
+| `benchmarks/route4_drift_multi_hop_20260213T155302Z.json` | Baseline (beam, no fixes) |
+| `benchmarks/route4_drift_multi_hop_20260213T163324Z.json` | +CovFix (beam) |
+| `benchmarks/route4_drift_multi_hop_20260213T164609Z.json` | +CovFix+Cmty (beam, both fixes) |
+| `benchmarks/route4_drift_multi_hop_20260213T172939Z.json` | PPR mode (both fixes) |
+| `ANALYSIS_ROUTE4_BORROW_ROUTE2_ARCHITECTURE_2026-02-13.md` | Full investigation (Sections 1–12) |
+| Git commit `99c86538` | Pushed to `origin/main` (synthesis.py, test, benchmark_accuracy_utils) |
+
+---

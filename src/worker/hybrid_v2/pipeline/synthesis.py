@@ -2142,19 +2142,22 @@ Evidence Context:
 {context}
 
 Instructions:
-1. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
-    - Question asks for "bank routing number" but evidence only has payment portal URL → Output: "The requested information was not found in the available documents."
-    - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Output: "The requested information was not found in the available documents."
-    - Question asks for "California law" but evidence shows Texas law → Output: "The requested information was not found in the available documents."
-   - Do NOT say "The invoice does not provide X, but here is Y" — Just refuse entirely.
-2. ONLY if the EXACT requested information IS present: provide a brief summary (2-3 paragraphs).
-3. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+1. Answer the question using ONLY information from the Evidence Context.
+2. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for "bank routing number" but evidence has no routing number → Refuse
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
+   - Question asks for "California law" but evidence shows a different state → Refuse
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
-4. Include citations [N] for factual claims (aim for every sentence that states a fact).
-5. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
-6. Prefer concrete obligations/thresholds over general paraphrases.
-7. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
+5. Include citations [N] for factual claims (aim for every sentence that states a fact).
+6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+7. Prefer concrete obligations/thresholds over general paraphrases.
+8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 {document_guidance}
 
 Respond using this format:

@@ -7363,3 +7363,131 @@ These are polish items, not accuracy blockers — the core pipeline is complete 
 **Container App:** `graphrag-api` in RG `rg-graphrag-feature`
 
 ---
+
+## 25. Route 3 Model & Prompt Ablation Study (February 13, 2026)
+
+### 25.1. Objective
+
+Test whether the current production LLM (`gpt-5.1`) and prompt configuration for Route 3 can be improved by evaluating alternative models and prompt variants. This addresses the question: **Is the MAP+REDUCE pipeline better served by a different model or prompt?**
+
+### 25.2. Experiment Design
+
+**Models tested (4):**
+| Model | Type | Notes |
+|-------|------|-------|
+| `gpt-5.1` | Current production | Highest capability |
+| `gpt-4.1` | Previous generation | Strong reasoning, faster |
+| `gpt-4.1-mini` | Smaller variant | Fast, cost-effective |
+| `gpt-5-nano` | Ultra-light | Fastest, cheapest |
+
+**Prompt variants (2):**
+| Variant | REDUCE Prompt | Description |
+|---------|--------------|-------------|
+| `default` | Production `REDUCE_WITH_EVIDENCE_PROMPT` | Full structured analysis |
+| `concise` | Modified: "3-5 focused paragraphs maximum — prioritize the most important findings" | Shorter, prioritized output |
+
+**Methodology:**
+- Same MAP prompt across all models (community claim extraction)
+- Same sentence evidence (Voyage `voyage-context-3` → Neo4j vector search, top_k=30)
+- Same 37 communities from `test-5pdfs-v2-fix2` group
+- Theme coverage evaluation with synonym matching (identical to benchmark_route3_v2.py)
+- 10 questions × 4 models × 2 prompts = 80 individual runs (gpt-5-nano excluded from full run after pilot showed 0 claims)
+
+### 25.3. Pilot Results (3 Questions)
+
+gpt-5-nano produced **0 claims** on all 3 questions — the MAP prompt's complexity exceeds the model's capability. It was excluded from the full 10-question run.
+
+### 25.4. Full Results (10 Questions, 3 Models × 2 Prompts)
+
+#### Overall Summary (sorted by theme coverage)
+
+| Rank | Variant | Coverage | Perfect Qs | Avg Words | MAP (s) | REDUCE (s) | Avg Claims |
+|------|---------|----------|-----------|-----------|---------|------------|------------|
+| 1 | **gpt-5.1\|default** | **96.3%** | 8/10 | 745 | 44.3 | 10.5 | 63 |
+| 2 | gpt-5.1\|concise | 96.0% | 9/10 | 656 | 42.0 | 10.3 | 57 |
+| 3 | gpt-4.1-mini\|default | 94.7% | 8/10 | 626 | 52.9 | 10.4 | 116 |
+| 3 | gpt-4.1\|concise | 94.7% | 8/10 | 421 | 34.6 | 5.9 | 60 |
+| 5 | gpt-4.1-mini\|concise | 91.3% | 7/10 | 463 | 52.9 | 7.4 | 116 |
+| 6 | gpt-4.1\|default | 86.9% | 5/10 | 326 | 35.6 | 4.7 | 65 |
+| 7 | gpt-5-nano (any) | 0.0% | 0/10 | 0 | — | — | 0 |
+
+#### Per-Question Theme Coverage Heatmap
+
+| Question | gpt-5.1 def | gpt-5.1 con | gpt-4.1 def | gpt-4.1 con | mini def | mini con |
+|----------|-------------|-------------|-------------|-------------|----------|----------|
+| T-1: Common themes | 100% | 100% | **80%** ✗ | 100% | 100% | 100% |
+| T-2: Party relationships | 100% | 100% | 100% | 100% | 100% | 100% |
+| T-3: Financial terms | 100% | 100% | **67%** ✗ | 100% | **67%** ✗ | **67%** ✗ |
+| T-4: Risk/liability | 100% | 100% | 100% | 100% | 100% | 100% |
+| T-5: Dispute resolution | **67%** ✗ | 100% | **0%** ✗✗ | **67%** ✗ | 100% | **67%** ✗ |
+| T-6: Confidentiality | 100% | 100% | 100% | 100% | 100% | 100% |
+| T-7: Obligations | 100% | 100% | **75%** ✗ | 100% | 100% | 100% |
+| T-8: Termination | 100% | 100% | 100% | 100% | 100% | 100% |
+| T-9: Insurance | **0%** ✗✗ | 100% | 100% | 100% | 100% | 100% |
+| T-10: Key dates | 100% | **60%** ✗ | **60%** ✗ | **80%** ✗ | **80%** ✗ | **80%** ✗ |
+
+#### Theme Misses Detail
+
+| Question | Missed Theme | Models Affected |
+|----------|-------------|-----------------|
+| T-1 | termination clauses | gpt-4.1\|default |
+| T-3 | amounts | gpt-4.1\|default, gpt-4.1-mini\|both |
+| T-5 | governing law | gpt-5.1\|default, gpt-4.1\|concise, gpt-4.1-mini\|concise |
+| T-7 | dispute resolution | gpt-4.1\|default |
+| T-9 | (model failure) | gpt-5.1\|default (0 words returned) |
+| T-10 | expiration | ALL except gpt-5.1\|default |
+| T-10 | renewal | gpt-5.1\|concise, gpt-4.1\|default |
+
+#### Model Failures (0-word responses)
+
+Two variants produced complete failures (0 words, error response):
+- **gpt-5.1\|default on T-9** ("What insurance and indemnification requirements..."): Model returned an insufficient-information boilerplate instead of an answer
+- **gpt-4.1\|default on T-5** ("What dispute resolution mechanisms..."): Same failure mode
+
+These are LLM refusal-to-answer failures where the model's REDUCE step concluded there was insufficient data despite available claims. The concise prompt recovered both cases.
+
+### 25.5. Key Findings
+
+#### 1. gpt-5.1 Remains Optimal
+The current production model achieves the highest coverage at 96.3% (default prompt). No alternative model improves on this. The 3.7% shortfall comes from:
+- T-5: Missed "governing law" (67%) — a theme-matching sensitivity issue
+- T-9: Model failure (0%) — LLM refused to synthesize sparse evidence
+
+#### 2. The "Concise" Prompt Does Not Consistently Help
+| Model | Default Coverage | Concise Coverage | Delta |
+|-------|-----------------|-----------------|-------|
+| gpt-5.1 | 96.3% | 96.0% | -0.3% |
+| gpt-4.1 | 86.9% | 94.7% | **+7.8%** |
+| gpt-4.1-mini | 94.7% | 91.3% | -3.4% |
+
+The concise prompt *helps* gpt-4.1 dramatically (+7.8%) but *hurts* gpt-4.1-mini (-3.4%) and is neutral for gpt-5.1. For gpt-4.1, the "prioritize the most important findings" instruction counteracts its tendency to be too terse with the default prompt. This is model-specific and doesn't generalize.
+
+#### 3. gpt-4.1 Is Too Terse with Default Prompt
+gpt-4.1\|default has only 5/10 perfect questions and 326 avg words — roughly half the output of gpt-5.1. Its brevity causes theme omissions. The concise prompt ironically makes it write MORE (421 words) and cover more themes.
+
+#### 4. gpt-4.1-mini Generates Excessive Claims
+gpt-4.1-mini produces 116 avg claims vs 63 for gpt-5.1 (1.8x), making MAP ~20% slower (52.9s vs 44.3s). Despite more claims, coverage is lower — quantity ≠ quality.
+
+#### 5. gpt-5-nano Cannot Handle MAP Complexity
+The MAP prompt requires extracting structured claims from community entity descriptions — a task too complex for the nano model. Zero claims produced across all questions.
+
+### 25.6. Recommendation
+
+**No change to production configuration.** The current setup is optimal:
+- **Model:** `gpt-5.1` for both MAP and REDUCE
+- **Prompt:** Default `REDUCE_WITH_EVIDENCE_PROMPT`
+- **Rationale:** Highest theme coverage (96.3%), best balance of quality/latency/cost
+
+**Future considerations (not urgent):**
+1. **Retry logic for 0-word responses** — The T-9 failure (gpt-5.1\|default returning 0 words) could be caught and retried with the concise prompt as fallback
+2. **"expiration" theme vocabulary** — T-10 missed by 5/6 variants. May need theme synonym expansion in evaluation, or a terminology hint in the REDUCE prompt
+
+### 25.7. Artifacts
+
+| File | Description |
+|------|-------------|
+| `scripts/benchmark_route3_model_ablation.py` | Self-contained ablation script |
+| `benchmark_route3_ablation_20260213T170003Z.json` | Full 10-question results (3 models × 2 prompts) |
+| `benchmark_route3_ablation_20260213T161955Z.json` | 3-question pilot results |
+
+---

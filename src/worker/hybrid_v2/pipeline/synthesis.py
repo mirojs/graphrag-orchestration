@@ -106,7 +106,7 @@ class EvidenceSynthesizer:
     # Chunks are added in PPR-score order until this limit is reached.
     DEFAULT_TOKEN_BUDGET: int = 32_000
 
-    _REFUSAL_MESSAGE = "The requested information was not found in the available documents."
+    _REFUSAL_MESSAGE = "Not found in the provided documents."
 
     def _detect_missing_field_refusal(
         self,

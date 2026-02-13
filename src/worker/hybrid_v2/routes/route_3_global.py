@@ -730,14 +730,9 @@ class GlobalSearchHandler(BaseRouteHandler):
             )
             return reranked
 
-        except Exception as e:
-            logger.warning(
-                "route3_rerank_failed_fallback_to_vector_order",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            # Graceful fallback: return original order, just truncated
-            return evidence[:top_k]
+        except Exception:
+            logger.exception("route3_rerank_failed")
+            raise
 
     @staticmethod
     def _build_citations(

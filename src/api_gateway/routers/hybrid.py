@@ -397,7 +397,7 @@ async def _get_or_create_pipeline(
                 if embedding_version == "v2":
                     from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
                     voyage_service = VoyageEmbedService()
-                    embedding_client = voyage_service.get_llama_index_model()
+                    embedding_client = voyage_service.get_llama_index_embed_model()
                     logger.info("hybrid_using_v2_voyage_embedder", group_id=group_id, 
                                reason="group has embedding_v2 data")
                 else:

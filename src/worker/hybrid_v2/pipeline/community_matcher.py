@@ -237,22 +237,51 @@ class CommunityMatcher:
             
             # Calculate similarities
             scored: List[Tuple[Dict[str, Any], float]] = []
+            dimension_mismatches = 0
             for community in self._communities:
                 community_id = community.get("id", community.get("title", ""))
                 community_emb = self._community_embeddings.get(community_id)
                 
                 if community_emb:
+                    if len(query_embedding) != len(community_emb):
+                        dimension_mismatches += 1
+                        continue
                     similarity = self._cosine_similarity(query_embedding, community_emb)
                     scored.append((community, similarity))
+            
+            if dimension_mismatches > 0:
+                logger.error(
+                    "semantic_match_dimension_mismatch",
+                    query_dim=len(query_embedding),
+                    community_dim=len(community_emb) if community_emb else 0,
+                    mismatches=dimension_mismatches,
+                    total_communities=len(self._communities),
+                    hint="Query embedding model may differ from community embedding model",
+                )
             
             # Sort by similarity
             scored.sort(key=lambda x: x[1], reverse=True)
             
+            # Filter out near-zero scores (indicates broken matching)
+            min_threshold = 0.05
+            meaningful = [(c, s) for c, s in scored if s >= min_threshold]
+            
+            if scored and not meaningful:
+                logger.warning(
+                    "semantic_match_all_below_threshold",
+                    threshold=min_threshold,
+                    max_score=scored[0][1] if scored else 0,
+                    num_communities=len(scored),
+                    hint="All community scores near zero — likely embedding mismatch",
+                )
+                return []  # Fall through to dynamic generation
+            
             logger.info("semantic_community_match",
                        query=query[:50],
-                       top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in scored[:top_k]])
+                       top_scores=[round(s, 4) for _, s in meaningful[:5]],
+                       top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in meaningful[:top_k]])
             
-            return scored[:top_k]
+            return meaningful[:top_k]
             
         except Exception as e:
             logger.error("semantic_match_failed", error=str(e))

@@ -1,16 +1,16 @@
-"""Route 3 v2: Map-Reduce prompts for LazyGraphRAG global search.
+"""Route 3 v3: Map-Reduce prompts for sentence-enriched global search.
 
-These prompts implement the core LazyGraphRAG insight: synthesize answers
-from community summaries (which already encode the full graph structure)
-rather than fetching and deduplicating raw chunks.
-
-Two-phase approach:
+These prompts implement a hybrid synthesis strategy:
   MAP  — One LLM call per community: extract claims relevant to the query.
-  REDUCE — One LLM call total: synthesize all community claims into a
-           coherent global answer.
+  REDUCE_WITH_EVIDENCE — One LLM call total: synthesize community claims
+           AND direct sentence evidence into a coherent global answer.
 
-Token budget: MAP outputs are bounded by max_claims to keep REDUCE input
-under control (~4K tokens for 3 communities × 10 claims each).
+v3 improvement: REDUCE now receives two evidence streams:
+  1. Community claims (thematic structure from graph summaries)
+  2. Sentence evidence (direct vector search on source sentences)
+
+This eliminates coverage gaps where themes are present in sentences
+but not surfaced through community abstraction layers.
 """
 
 # ─────────────────────────────────────────────────────────────────
@@ -78,6 +78,61 @@ summaries of a knowledge graph built from the user's document corpus.
 5. If no claims were extracted (empty input), respond with:
    "The requested information was not found in the available documents."
 6. Do NOT add information beyond what the claims state.
+
+**Response Type**: {response_type}
+- "summary": Concise overview (3-5 paragraphs)
+- "detailed_report": Comprehensive structured report with headings
+- "bullet_points": Organized bullet-point list
+- Otherwise: Adapt to the requested format
+
+**Response**:
+"""
+
+# ─────────────────────────────────────────────────────────────────
+# REDUCE WITH EVIDENCE PROMPT (v3)
+# ─────────────────────────────────────────────────────────────────
+# Input variables: {query}, {response_type}, {community_claims},
+#                  {sentence_evidence}
+# Expected output: final synthesized response
+
+REDUCE_WITH_EVIDENCE_PROMPT = """\
+You are an analytical assistant performing the REDUCE phase of a global search.
+
+**Task**: Synthesize TWO sources of evidence into a coherent {response_type}
+that comprehensively answers the user's query.
+
+**Query**: {query}
+
+---
+
+**SOURCE 1 — Community Claims** (extracted from knowledge graph community summaries):
+{community_claims}
+
+---
+
+**SOURCE 2 — Direct Sentence Evidence** (retrieved from source documents via semantic search):
+{sentence_evidence}
+
+---
+
+**Instructions**:
+1. Use BOTH sources to build the most complete answer possible.
+2. Community claims provide thematic structure — use them to organize topics.
+3. Sentence evidence provides direct factual content from source documents.
+   If a fact appears in sentence evidence but NOT in community claims,
+   you MUST still include it in your response.
+4. Organize thematically — group related facts together under clear headings
+   or logical sections.
+5. Preserve specific details: entity names, amounts, dates, percentages,
+   conditions, section references.
+6. If sources provide different levels of detail on the same topic, use
+   the more specific/detailed version.
+7. Note cross-document patterns and differences when applicable.
+8. If BOTH sources are empty, respond with:
+   "The requested information was not found in the available documents."
+9. Do NOT add information beyond what the evidence states.
+10. Do NOT mention or reference the two-source methodology in your response.
+    Write as if all information comes from a single comprehensive analysis.
 
 **Response Type**: {response_type}
 - "summary": Concise overview (3-5 paragraphs)

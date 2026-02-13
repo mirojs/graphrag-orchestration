@@ -297,6 +297,33 @@
   - **Next:** Integrate knn-1 as default KNN config for production indexing
   - Documentation: `HANDOVER_2026-01-31.md`, Scripts: `scripts/index_5pdfs_knn_test.py`, `scripts/rebuild_knn_groups_proper.py`
 
+**Recent Updates (February 13, 2026):**
+- 🚀 **Route 2 Extraction Prompt v2 (v1_concise):** Purpose-built extraction prompt replaces verbose detailed-report prompt
+  - **Problem:** Route 2 responses averaged ~700 chars with `## Answer` / `## Details` sections, citation chains (`[1][4][5]...[28]`), and question echoing — far too verbose for entity/fact lookup
+  - **Root Cause 1 (Prompt):** v1_concise prompt still allowed LLM citations and used 67-char refusal. Explicit "no bracket references like [1] or [2a]" rule added, refusal shortened to "Not found in the provided documents." (36 chars)
+  - **Root Cause 2 (Routing):** `_generate_response()` dispatched prompts by `response_type` — API default `detailed_report` bypassed `_get_summary_prompt()` entirely, so `prompt_variant=v1_concise` was ignored. Fixed: v1_concise now always routes to extraction prompt regardless of `response_type`
+  - **Root Cause 3 (Guard):** Route 2 only defaulted to v1_concise when `response_type=="summary"`. Removed the guard — Route 2 always uses v1_concise unless caller explicitly overrides
+  - **Post-processing:** `re.sub(r"\s*\[\d+[a-z]?\]", "", response)` strips residual bracket references the LLM may still emit
+  - **Citations:** LLM no longer produces citation markers. Top-3 retrieval chunks attached directly as `citation_type="retrieval"` — deterministic, zero LLM overhead
+  - **Results (live API, 8/8 correct):**
+
+    | Query | Before | After | Response |
+    |-------|--------|-------|----------|
+    | Who is the Agent? | 693 chars | 17 chars | Walt Flood Realty |
+    | Who is the Owner? | 655 chars | 12 chars | Contoso Ltd. |
+    | Property address? | 1209 chars | 40 chars | 456 Palm Tree Avenue, Honolulu, HI 96815 |
+    | Start date? | 563 chars | 10 chars | 2010-06-15 |
+    | Job location? | 522 chars | 43 chars | 811 Ocean Drive, Suite 405, Tampa, FL 33602 |
+    | Buyer/seller? | — | 47 chars | Buyer: Fabrikam Inc.; Seller: Contoso Lifts LLC |
+    | SWIFT code? (neg) | 67 chars | 36 chars | Not found in the provided documents. |
+    | Property tax? (neg) | 894 chars | 36 chars | Not found in the provided documents. |
+
+  - **Average response:** 30 chars (was ~700+). 100% accuracy preserved.
+  - **Model:** gpt-4.1-mini (unchanged — chosen Feb 10 for best accuracy/speed/cost balance)
+  - Files modified: `synthesis.py` (prompt, post-processing, citation logic, `_generate_response` routing, `_REFUSAL_MESSAGE`), `route_2_local.py` (removed `response_type` guard), `benchmark_route2_prompt_model_comparison.py`
+  - Commits: `1da0cad5`, `9b1ac310`, `a4804ac3`, `f08b0dfc`
+  - Deployed image: `extract-v3-final-1770988434`
+
 **Recent Updates (January 30, 2026):**
 - 🚀 **Semantic Beam Search for Route 4 DRIFT:** Query-aligned traversal at each hop prevents drift after 2-3 hops
   - **Problem:** Pure PPR loses alignment with original query after 2-3 hops (HippoRAG 2 known limitation)
@@ -520,13 +547,20 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 *   **Example:** "What is the invoice amount for transaction TX-12345?" or "What are all the contracts with Vendor ABC?"
 *   **Goal:** Comprehensive entity-centric retrieval via graph traversal
 *   **When to Use:** Direct questions, specific values, entity relationships
-*   **Engines:** NER (gpt-4o) → HippoRAG PPR (top_k=15) → Text Chunk Retrieval → LLM Synthesis
+*   **Engines:** NER (gpt-4o) → HippoRAG PPR (top_k=15) → Skeleton Enrichment → Text Chunk Retrieval → Extraction Synthesis (gpt-4.1-mini, v1_concise prompt)
+*   **Synthesis Model:** gpt-4.1-mini (overridden via `SKELETON_SYNTHESIS_MODEL` env var; ~10x cheaper, 1.2x faster than gpt-5.1)
+*   **Prompt Variant:** `v1_concise` — extraction-only prompt, always active regardless of `response_type` (Feb 13, 2026)
+*   **Output Style:** Direct values ("Walt Flood Realty", "2010-06-15"), avg 30 chars. No `## Answer` headers, no citation markers, no question echoing.
+*   **Citations:** Top-3 retrieval chunks attached deterministically (`citation_type="retrieval"`), not LLM-generated
+*   **Refusal:** "Not found in the provided documents." (36 chars)
 *   **Code:** `_execute_route_2_local_search()`
 *   **Profile:** Both profiles (default route for most queries)
 
 > **Note:** Local Search now handles all queries that previously went to Vector RAG. Testing showed identical answer quality with only 14% latency difference.
 
 > **Correction (February 9, 2026):** Engines updated from "Entity Extraction → LazyGraphRAG Iterative Deepening" to actual code path: NER (gpt-4o) → HippoRAG PPR. Route 2 does NOT use LazyGraphRAG. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2, §11.
+
+> **Update (February 13, 2026):** Synthesis prompt optimized for extraction. v1_concise now bypasses `response_type` routing — always uses extraction prompt. Post-processing strips residual bracket references. Average response reduced from ~700 chars to 30 chars with 100% accuracy (8/8 benchmark). See commits `1da0cad5` through `f08b0dfc`.
 
 ### Route 3: Global Search (Thematic Analysis)
 *   **Trigger:** Thematic queries without explicit entities, cross-document summaries
@@ -654,11 +688,24 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 
 > **Added (February 9, 2026):** This stage was missing from the original doc. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §4.
 
-#### Stage 2.3: Synthesis with Citations
+#### Stage 2.2.7: Skeleton Enrichment (Added February 11, 2026)
+*   **Engine:** `route_2_local.py` → skeleton graph traversal via `MENTIONS` edges
+*   **What:** For each entity from PPR, traverse `(:Entity)-[:MENTIONS]-(:TextChunk)` to find sentence-level chunks that cover the query topic. Adds precise context that PPR alone may miss.
+*   **Configuration:** `SKELETON_ENRICHMENT_ENABLED=true`, `SKELETON_GRAPH_TRAVERSAL_ENABLED=true`
+*   **Impact:** ~80% of retrieved chunks come from skeleton enrichment. Without it, retrieval coverage drops significantly.
+*   **Output:** `coverage_chunks` list merged into synthesis context
+
+#### Stage 2.3: Extraction Synthesis (Updated February 13, 2026)
 *   **Engine:** LLM via `synthesizer.synthesize()` → `_build_cited_context()` → `_generate_response()` (or deterministic extraction if `response_type="nlp_audit"`)
-*   **What:** Generate cited response from collected context
+*   **Prompt:** `v1_concise` extraction prompt (always active for Route 2 regardless of `response_type`):
+    - Rules: direct answer only, no question echoing, no bracket references, 1-2 sentences max
+    - Refusal: "Not found in the provided documents."
+    - Post-processing: `re.sub(r"\s*\[\d+[a-z]?\]", "", response)` strips residual markers
+*   **Model:** gpt-4.1-mini (via `SKELETON_SYNTHESIS_MODEL` env var)
+*   **Prompt Routing Fix (Feb 13):** `_generate_response()` now routes v1_concise directly to `_get_summary_prompt()`, bypassing the `response_type` dispatch map that previously ignored `prompt_variant` for `detailed_report` requests
+*   **Citations:** Top-3 retrieval chunks attached deterministically (`citation_type="retrieval"`). LLM never produces citation markers.
 *   **Known Issue (February 8, 2026):** **No token budget** on context assembly. Each chunk's full text (~1,150 tokens avg) is appended verbatim. With 42 chunks → ~49K tokens for a simple factual lookup. No re-ranking by query relevance. Fix planned: `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solution C Phase 1.
-*   **Output:** Detailed report with `[Source: doc.pdf, page 5]` citations
+*   **Output:** Direct extraction (avg 30 chars for fact lookups), with 3 retrieval-based citations
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, uses regex-based sentence extraction (no LLM) for 100% repeatability
 *   **Code:** `synthesis.py` L145 (`synthesize()`), L802 (`_build_cited_context()`)
 

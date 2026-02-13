@@ -2023,24 +2023,27 @@ Your response:"""
         return self._get_drift_synthesis_prompt(query, context, sub_questions, prompt_variant="v0")
     
     def _get_detailed_report_prompt(self, query: str, context: str) -> str:
-        return f"""You are an expert analyst generating a detailed report.
+        return f"""You are an expert analyst generating a detailed report based on document evidence.
 
-CRITICAL REQUIREMENTS:
-1. First, carefully evaluate if the Evidence Context contains the SPECIFIC information requested in the question.
-2. **REFUSE TO ANSWER** if the EXACT requested information is NOT in the evidence:
-   - If the question asks for "bank routing number" and the evidence shows payment portal URLs but NO routing number → REFUSE
-   - If the question asks for "VAT/Tax ID" and the evidence shows Tax IDs (U.S. Federal) but NO VAT number → REFUSE  
-   - If the question asks for "governed by California law" and the evidence shows Texas/other states → REFUSE
-    - When refusing, respond ONLY with: "The requested information was not found in the available documents."
-3. Do NOT be "helpful" by providing alternative/related information when the specific item is missing.
-4. ONLY if the EXACT requested information IS present: cite sources [N] for EVERY claim.
+REQUIREMENTS:
+1. Answer the question using ONLY information from the Evidence Context below.
+2. Cite sources with [N] markers for EVERY factual claim.
+3. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for a "bank routing number" but evidence has no routing number → REFUSE
+   - Question asks for "VAT/Tax ID" but evidence has no VAT number → REFUSE
+   - Question asks for "governed by California law" but evidence shows a different state → REFUSE
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+4. For general questions (warranty terms, agreement details, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+5. Do NOT fabricate information that is not in the evidence.
 
 Question: {query}
 
 Evidence Context:
 {context}
 
-If the requested information IS present, respond using this format:
+Respond using this format:
 
 ## Answer
 

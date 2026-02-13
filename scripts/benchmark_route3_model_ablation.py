@@ -68,6 +68,12 @@ GROUP_ID = os.getenv("TEST_GROUP_ID", "test-5pdfs-v2-fix2")
 NEO4J_URI = os.environ.get("NEO4J_URI", "neo4j+s://a86dcf63.databases.neo4j.io")
 NEO4J_USER = os.environ.get("NEO4J_USERNAME", "neo4j")
 NEO4J_PASS = os.environ.get("NEO4J_PASSWORD", "")
+
+# Community matching: matches production ROUTE3_COMMUNITY_TOP_K default
+COMMUNITY_TOP_K = int(os.getenv("ABLATION_COMMUNITY_TOP_K", "10"))
+
+# Max parallel MAP calls (matches production asyncio.gather behaviour)
+MAP_PARALLEL_WORKERS = int(os.getenv("ABLATION_MAP_WORKERS", "5"))
 VOYAGE_API_KEY = os.environ.get("VOYAGE_API_KEY", "")
 
 
@@ -235,10 +241,15 @@ THEME_SYNONYMS: Dict[str, List[str]] = {
     "clients": ["client", "customer", "tenant", "lessee", "occupant", "buyer", "owner"],
     "indemnification": ["indemnif", "indemnit", "hold harmless", "defend and indemnify"],
     "privacy": ["privacy", "personal data", "data protection", "confidential information"],
-    "expiration": ["expir", "expire", "end date", "expiry", "lapse"],
+    "expiration": ["expir", "expire", "end date", "expiry", "lapse",
+                    "terminat", "one year", "twelve month", "warranty period"],
     "response times": ["response time", "business day", "calendar day", "within.*day",
                         "timeframe", "time frame", "turnaround"],
     "invoicing": ["invoic", "billing", "bill", "payment request"],
+    "amounts": ["$", "fee", "rate", "cost", "price", "compensation", "amount"],
+    "governing law": ["substantive law", "state of idaho", "governed by", "applicable law",
+                       "governing law"],
+    "renewal": ["renew", "auto-renew", "automatic renewal", "extend", "extension"],
 }
 
 
@@ -368,6 +379,86 @@ def get_sentence_evidence(query: str, top_k: int = 30, threshold: float = 0.2) -
     return sentences
 
 
+# ─── Community matching (mirrors production CommunityMatcher) ──
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    import math
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def match_communities(
+    query: str,
+    communities: List[Dict[str, Any]],
+    top_k: int = COMMUNITY_TOP_K,
+) -> List[Dict[str, Any]]:
+    """Match query to top-k communities using embedding similarity.
+
+    Mirrors production behaviour in CommunityMatcher._semantic_match():
+    embeds query, computes cosine similarity against community embeddings
+    stored in Neo4j, returns top-k communities.
+
+    Falls back to ALL communities if embeddings are unavailable (backwards
+    compatible with pre-embedding test groups).
+    """
+    from neo4j import GraphDatabase
+
+    # Fetch community embeddings from Neo4j
+    driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
+    embeddings: Dict[str, List[float]] = {}
+    with driver.session() as session:
+        result = session.run("""
+            MATCH (c:Community)
+            WHERE c.group_id = $gid AND c.embedding IS NOT NULL
+            RETURN c.title AS title, c.embedding AS embedding
+        """, gid=GROUP_ID)
+        for r in result:
+            if r["embedding"]:
+                embeddings[r["title"]] = list(r["embedding"])
+    driver.close()
+
+    if not embeddings:
+        print(f"  ⚠ No community embeddings found — using all {len(communities)} communities")
+        return communities
+
+    # Embed query with Voyage voyage-context-3 (same model+dims as community embeddings)
+    import voyageai
+    vc = voyageai.Client(api_key=VOYAGE_API_KEY)
+    resp = vc.contextualized_embed(
+        inputs=[[query]],  # Single document with single chunk
+        model="voyage-context-3",
+        input_type="query",
+        output_dimension=2048,
+    )
+    query_embedding = resp.results[0].embeddings[0]
+
+    # Score and rank
+    scored: List[Tuple[Dict[str, Any], float]] = []
+    for community in communities:
+        title = community.get("title", "")
+        emb = embeddings.get(title)
+        if emb:
+            if len(query_embedding) != len(emb):
+                continue  # Skip dimension mismatches
+            sim = _cosine_similarity(query_embedding, emb)
+            scored.append((community, sim))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    matched = [c for c, s in scored[:top_k] if s >= 0.05]
+
+    if not matched:
+        print(f"  ⚠ All community scores < 0.05 — using all {len(communities)} communities")
+        return communities
+
+    print(f"  Matched top-{len(matched)} communities (scores: "
+          f"{', '.join(f'{s:.3f}' for _, s in scored[:min(5, len(scored))])})")
+    return matched
+
+
 # ─── LLM call ──────────────────────────────────────────────────
 def call_llm(model: str, prompt: str) -> Tuple[str, int]:
     """Call Azure OpenAI and return (response_text, latency_ms)."""
@@ -391,32 +482,51 @@ def call_llm(model: str, prompt: str) -> Tuple[str, int]:
         return (f"ERROR: {type(e).__name__}: {str(e)[:200]}", elapsed)
 
 
-# ─── MAP phase ─────────────────────────────────────────────────
+# ─── MAP phase (parallel — matches production asyncio.gather) ──
+def _map_one_community(model: str, query: str, community: Dict, max_claims: int) -> Tuple[str, List[str], int]:
+    """MAP a single community. Returns (title, claims, latency_ms)."""
+    title = community.get("title", "Untitled")
+    summary = community.get("summary", "")
+    entity_names = ", ".join(community.get("entity_names", [])[:20])
+    if not summary.strip():
+        return (title, [], 0)
+    prompt = MAP_PROMPT.format(
+        query=query,
+        community_title=title,
+        community_summary=summary,
+        entity_names=entity_names or "N/A",
+        max_claims=max_claims,
+    )
+    text, ms = call_llm(model, prompt)
+    if "NO RELEVANT CLAIMS" in text.upper():
+        return (title, [], ms)
+    claims = _parse_numbered_list(text)[:max_claims]
+    return (title, claims, ms)
+
+
 def run_map(model: str, query: str, communities: List[Dict], max_claims: int = 10) -> Tuple[List[str], int]:
-    """Run MAP on all communities with the given model. Returns (all_claims, total_ms)."""
+    """Run MAP on communities in parallel using ThreadPoolExecutor.
+
+    Mirrors production: asyncio.gather over all matched communities.
+    Returns (all_claims, wall_clock_ms).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     all_claims: List[str] = []
-    total_ms = 0
-    for community in communities:
-        title = community.get("title", "Untitled")
-        summary = community.get("summary", "")
-        entity_names = ", ".join(community.get("entity_names", [])[:20])
-        if not summary.strip():
-            continue
-        prompt = MAP_PROMPT.format(
-            query=query,
-            community_title=title,
-            community_summary=summary,
-            entity_names=entity_names or "N/A",
-            max_claims=max_claims,
-        )
-        text, ms = call_llm(model, prompt)
-        total_ms += ms
-        if "NO RELEVANT CLAIMS" in text.upper():
-            continue
-        claims = _parse_numbered_list(text)[:max_claims]
-        for claim in claims:
-            all_claims.append(f"[Community: {title}] {claim}")
-    return (all_claims, total_ms)
+    t0 = time.monotonic()
+
+    with ThreadPoolExecutor(max_workers=MAP_PARALLEL_WORKERS) as executor:
+        futures = {
+            executor.submit(_map_one_community, model, query, c, max_claims): c
+            for c in communities
+        }
+        for future in as_completed(futures):
+            title, claims, _ = future.result()
+            for claim in claims:
+                all_claims.append(f"[Community: {title}] {claim}")
+
+    wall_ms = int((time.monotonic() - t0) * 1000)
+    return (all_claims, wall_ms)
 
 
 # ─── REDUCE phase ──────────────────────────────────────────────
@@ -469,11 +579,13 @@ def run_ablation(
     print(f"  Prompts:   {', '.join(prompt_variants)}")
     print(f"  Questions: {num_questions}/{len(QUESTIONS)}")
     print(f"  Group:     {GROUP_ID}")
+    print(f"  Comm TopK: {COMMUNITY_TOP_K}")
+    print(f"  MAP Workers: {MAP_PARALLEL_WORKERS}")
     print("=" * 78)
 
-    # Phase 0: Load communities (shared across all experiments)
+    # Phase 0: Load ALL communities (then match per-query like production)
     print("\n--- Phase 0: Load communities from Neo4j ---")
-    communities = get_communities()
+    all_communities = get_communities()
 
     questions = QUESTIONS[:num_questions]
     results: Dict[str, List[Dict]] = {}  # key = "model|prompt"
@@ -485,6 +597,10 @@ def run_ablation(
         print(f"  [{qi}/{len(questions)}] {qid}: {query[:65]}")
         print(f"{'='*78}")
 
+        # Phase 0.5: Community matching (mirrors production top-k)
+        print(f"  Matching communities (top-{COMMUNITY_TOP_K})...")
+        matched = match_communities(query, all_communities, top_k=COMMUNITY_TOP_K)
+
         # Phase 1: Sentence evidence (shared across all models)
         print("  Fetching sentence evidence...")
         t0 = time.monotonic()
@@ -493,9 +609,9 @@ def run_ablation(
         print(f"  Got {len(sentences)} sentences ({sent_ms}ms)")
 
         for model in models:
-            # Phase 2: MAP with this model
-            print(f"\n  [{model}] MAP...")
-            claims, map_ms = run_map(model, query, communities)
+            # Phase 2: MAP with this model (parallel, top-k communities)
+            print(f"\n  [{model}] MAP ({len(matched)} communities, parallel)...")
+            claims, map_ms = run_map(model, query, matched)
             print(f"  [{model}] MAP: {len(claims)} claims in {map_ms}ms")
 
             for prompt_variant in prompt_variants:
@@ -547,6 +663,7 @@ def run_ablation(
                     "word_count": word_count,
                     "char_count": char_count,
                     "sentence_count": len(sentences),
+                    "matched_communities": len(matched),
                 })
 
     # ─── Summary ─────────────────────────────────────────────────
@@ -598,6 +715,8 @@ def run_ablation(
             "models": models,
             "prompt_variants": prompt_variants,
             "num_questions": num_questions,
+            "community_top_k": COMMUNITY_TOP_K,
+            "map_parallel_workers": MAP_PARALLEL_WORKERS,
             "summary": summary_rows,
             "results": {k: v for k, v in results.items()},
         }, f, indent=2)

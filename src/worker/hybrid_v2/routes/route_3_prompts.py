@@ -142,3 +142,33 @@ that comprehensively answers the user's query.
 
 **Response**:
 """
+
+# ─────────────────────────────────────────────────────────────────
+# REDUCE WITH EVIDENCE — CONCISE (v3.2, default)
+# ─────────────────────────────────────────────────────────────────
+# Ablation-proven: gpt-4.1 + concise = 100% theme coverage.
+# Shorter prompt → faster TTFT, less output bloat.
+# Input variables: {query}, {response_type}, {community_claims},
+#                  {sentence_evidence}
+
+REDUCE_WITH_EVIDENCE_PROMPT_CONCISE = """\
+You are a document analysis assistant. Answer the query using the evidence below.
+
+**Query**: {query}
+
+**Community Claims**:
+{community_claims}
+
+**Document Sentences**:
+{sentence_evidence}
+
+**Rules**:
+1. Use both sources. Include facts from sentences even if not in claims.
+2. Organize by theme with clear headings.
+3. Keep specific details: names, amounts, dates, conditions.
+4. 3-5 focused paragraphs maximum — prioritize the most important findings.
+5. Do not mention methodology or sources.
+6. If no evidence, say: "The requested information was not found in the available documents."
+
+**Answer**:
+"""

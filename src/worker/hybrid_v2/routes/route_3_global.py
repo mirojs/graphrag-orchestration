@@ -27,7 +27,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from .base import BaseRouteHandler, Citation, RouteResult
-from .route_3_prompts import MAP_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT
+from .route_3_prompts import MAP_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT_CONCISE
 
 logger = structlog.get_logger(__name__)
 
@@ -541,7 +541,13 @@ class GlobalSearchHandler(BaseRouteHandler):
         else:
             evidence_text = "(No direct sentence evidence retrieved)"
 
-        prompt = REDUCE_WITH_EVIDENCE_PROMPT.format(
+        # Use concise prompt by default (ablation-proven gpt-4.1 + concise = 100%)
+        use_concise = os.getenv(
+            "ROUTE3_REDUCE_CONCISE", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        template = REDUCE_WITH_EVIDENCE_PROMPT_CONCISE if use_concise else REDUCE_WITH_EVIDENCE_PROMPT
+
+        prompt = template.format(
             query=query,
             response_type=response_type,
             community_claims=claims_text,

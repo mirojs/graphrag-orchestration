@@ -30,18 +30,32 @@ from .route_3_prompts import MAP_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT
 
 logger = structlog.get_logger(__name__)
 
-# Voyage embedding service (lazy import — same pattern as Route 2)
+# Voyage embedding service (lazy singleton)
+# NOTE: We do NOT gate on is_voyage_v2_enabled() because that requires
+# VOYAGE_V2_ENABLED=true env var which isn't always set in all deployment
+# paths.  hybrid.py already checks settings.VOYAGE_API_KEY directly and
+# creates VoyageEmbedService — we mirror that pattern here.
 _voyage_service = None
+_voyage_init_attempted = False
 
 
 def _get_voyage_service():
-    """Get Voyage embedding service for sentence search."""
-    global _voyage_service
-    if _voyage_service is None:
+    """Get Voyage embedding service for sentence search.
+
+    Matches hybrid.py's init pattern: check VOYAGE_API_KEY directly,
+    skip the is_voyage_v2_enabled() gate that requires VOYAGE_V2_ENABLED.
+    """
+    global _voyage_service, _voyage_init_attempted
+    if not _voyage_init_attempted:
+        _voyage_init_attempted = True
         try:
-            from src.worker.hybrid_v2.embeddings import get_voyage_embed_service, is_voyage_v2_enabled
-            if is_voyage_v2_enabled():
-                _voyage_service = get_voyage_embed_service()
+            from src.core.config import settings
+            if settings.VOYAGE_API_KEY:
+                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                _voyage_service = VoyageEmbedService()
+                logger.info("route3_voyage_service_initialized")
+            else:
+                logger.warning("route3_voyage_service_no_api_key")
         except Exception as e:
             logger.warning("route3_voyage_service_init_failed", error=str(e))
     return _voyage_service
@@ -88,7 +102,7 @@ class GlobalSearchHandler(BaseRouteHandler):
 
         max_claims = int(os.getenv("ROUTE3_MAP_MAX_CLAIMS", "10"))
         community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "10"))
-        sentence_top_k = int(os.getenv("ROUTE3_SENTENCE_TOP_K", "20"))
+        sentence_top_k = int(os.getenv("ROUTE3_SENTENCE_TOP_K", "30"))
 
         logger.info(
             "route_3v3_start",
@@ -290,7 +304,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             logger.warning("route3_sentence_embed_failed", error=str(e))
             return []
 
-        threshold = float(os.getenv("ROUTE3_SENTENCE_THRESHOLD", "0.3"))
+        threshold = float(os.getenv("ROUTE3_SENTENCE_THRESHOLD", "0.2"))
         group_id = self.group_id
 
         # 2. Vector search on Sentence nodes + collect parent context

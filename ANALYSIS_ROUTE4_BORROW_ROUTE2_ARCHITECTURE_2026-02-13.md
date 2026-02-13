@@ -409,3 +409,177 @@ response = await synthesizer.synthesize(
 ```
 
 This gives Route 4 the best of both worlds: Route 2's clean retrieval + DRIFT's structured synthesis.
+---
+
+## 10. Reassessment: HippoRAG 2 Backbone & Purpose Gap
+
+Two objections to the "borrow Route 2" thesis deserve serious examination:
+
+1. **Route 4's backbone is HippoRAG 2** — will Route 2 improvements mis-align with the framework?
+2. **Route 2 and Route 4 serve different purposes** — local vs DRIFT search. Can the same medicine work?
+
+### 10.1 Objection 1: HippoRAG 2 Alignment
+
+**Route 4 already departed from HippoRAG 2.**
+
+The architecture doc records this explicitly:
+
+> **Jan 10, 2026:** "Keep as optional/experimental. Default pipeline remains PPR-based per HippoRAG 2 design."
+> **Jan 30, 2026:** Semantic beam search wired as Route 4's primary path. PPR (`trace()`) is now dead code in Route 4.
+
+| HippoRAG 2 Core Component | Route 2 Status | Route 4 Status |
+|---------------------------|----------------|----------------|
+| Knowledge graph construction | **Uses** | **Uses** |
+| PPR 5-path traversal | **Uses** (via `trace()`) | **Replaced** by `trace_semantic_beam()` |
+| Seed resolution (NER → graph) | **Uses** (2 NER seeds → graph) | **Uses** (but via decomposed sub-questions) |
+| Community detection (Louvain) | Not used | Not used (community augmentation is dead code) |
+| Score propagation to synthesis | **Route 2 implemented this** | Route 4 inherits same code path |
+
+Route 4's traversal engine is a **custom cosine-guided beam search**, not PPR. So the question is not "will Route 2 improvements break HippoRAG 2?" but "which improvements are traversal-algorithm-specific vs pipeline-general?"
+
+**Sorting the improvements:**
+
+| Improvement | Where It Acts | HippoRAG 2 Dependent? | Route 4 Compatible? |
+|------------|---------------|----------------------|---------------------|
+| MD5 chunk dedup | Post-retrieval | No — any retriever | **Yes** |
+| Token budget (32K cap) | Post-retrieval | No — any retriever | **Yes** |
+| Score-weighted allocation | Post-retrieval scoring | Depends on score type | **Yes, with recalibration** |
+| Community filter (0.3× penalty) | Post-retrieval scoring | Uses Louvain `community_id` | **Yes** — same graph property |
+| Score-gap pruning (0.5 threshold) | Post-retrieval scoring | Calibrated to PPR decay | **Needs recalibration** for beam cosine scores |
+| Semantic dedup (Jaccard 0.92) | Post-retrieval | No — any retriever | **Yes** |
+| NER-first (skip decomposition) | Pre-retrieval seed strategy | Affects HippoRAG 2's seed input | **See 10.2 below** |
+
+**Verdict on HippoRAG 2 alignment:** 6 of 7 improvements are POST-retrieval. They sit downstream of the graph backbone — whether that backbone is PPR or semantic beam or anything else. They don't touch the HippoRAG 2 framework at all. They're **pipeline hygiene**, not framework changes.
+
+The one improvement that touches the backbone — NER-first vs decompose-first — is examined below.
+
+### 10.2 Objection 2: Local Search ≠ DRIFT Search
+
+This is the stronger objection. The query types are genuinely different:
+
+**Route 2 queries (local search):**
+- "Who is the Agent in the property management agreement?" → NER extracts "Agent", "property management agreement"
+- "What is the invoice amount for transaction TX-12345?" → NER extracts "TX-12345", "invoice"
+- Every query mentions its target entities BY NAME
+
+**Route 4 queries (DRIFT search):**
+- "Compare time windows across the set and list all explicit day-based timeframes" → NER extracts... "time windows"? "timeframes"? These are CONCEPTS, not entity names in the graph.
+- "Analyze our risk exposure through subsidiaries" → NER extracts "risk exposure", "subsidiaries" — abstract concepts, not graph entities.
+- "If a pipe burst on Sunday, is certified mail valid notice?" → Requires conditional reasoning across clauses
+
+**The DRIFT pattern exists precisely because direct NER fails on these queries.** The LLM decomposes the vague question into concrete sub-questions that ARE entity-extractable:
+
+```
+Vague:    "Compare time windows across the set"
+          → NER: "time windows" (not a graph entity)
+
+DRIFT:    Sub-Q1: "What are the day-based deadlines in the warranty?"
+          → NER: "warranty" (exists in graph ✓)
+          
+          Sub-Q2: "What notice periods exist in the property management agreement?"
+          → NER: "property management agreement" (exists in graph ✓)
+```
+
+**This means the Section 8 recommendation — "use Route 2's NER directly on the original query, decompose only for synthesis" — is wrong for genuine DRIFT queries.** If the original query has no extractable entities, NER-first produces nothing, and there are no seeds to trace.
+
+### 10.3 Revised Assessment: Which Improvements Still Apply?
+
+| # | Improvement | Applies to Route 4? | Why |
+|---|------------|---------------------|-----|
+| 1 | **Chunk dedup** | ✅ YES | Universal. Route 4 has 56.5% duplication — same root cause as Route 2 pre-fix |
+| 2 | **Token budget** | ✅ YES | Universal. Route 4 context can hit 100K-460K tokens — worse than Route 2 |
+| 3 | **Score-weighted chunk allocation** | ✅ YES, with recalibration | Beam cosine scores have different distributions than PPR scores. `SCORE_GAP_THRESHOLD=0.5` needs benchmarking with beam scores |
+| 4 | **Community filter** | ✅ YES | Same Louvain `community_id` on same entity graph. Filter logic is framework-agnostic |
+| 5 | **Score-gap pruning** | ⚠️ YES, with new threshold | PPR creates natural score cliffs at community boundaries. Beam search cosine scores are flatter — the 0.5 threshold may over-prune. Needs empirical calibration |
+| 6 | **Semantic dedup** (Jaccard 0.92) | ✅ YES | Content-level filter, retriever-agnostic |
+| 7 | **NER-first (skip decomposition)** | ❌ NO for genuine DRIFT queries | Vague/comparative queries have no extractable entities without decomposition |
+| 8 | **Parse don't guess** (Azure DI sentences) | ✅ YES | Universal. Sentence-level evidence helps any synthesis task |
+
+**Score: 6 of 8 improvements fully apply, 1 applies with recalibration, 1 does NOT apply to DRIFT.**
+
+### 10.4 What DRIFT Genuinely Needs That Route 2 Doesn't
+
+Route 4's purpose (cross-document reasoning) creates requirements that don't exist for Route 2:
+
+| DRIFT-Specific Need | Why Route 2 Doesn't Need This | Current Implementation |
+|---------------------|------------------------------|----------------------|
+| Query decomposition | Route 2 queries already name their entities | `_drift_decompose()` — sound in principle |
+| Multi-document coverage | Route 2 answers from 1-2 documents | Coverage gap fill — but 200 lines is too complex |
+| Confidence assessment | Route 2 doesn't need to validate coverage breadth | `_compute_subgraph_confidence()` — reasonable |
+| Structured multi-part output | Route 2 outputs single facts (avg 30 chars) | Sub-question-guided synthesis — valuable |
+
+**These are legitimate architectural components that Route 2 doesn't possess and shouldn't.** The previous analysis overreached by suggesting Route 4 should be restructured to look like Route 2's "disambiguate → trace → synthesize" pipeline.
+
+### 10.5 The Correct Improvement Strategy
+
+The right approach is NOT "make Route 4 look like Route 2" but rather:
+
+**A. Import Route 2's post-retrieval hygiene (items 1-6) verbatim.**
+These are retriever-agnostic. They clean up the output of ANY retrieval pipeline — PPR, beam search, vector search, or DRIFT decomposition. This is not "borrowing from Route 2"; this is fixing shared infrastructure that Route 2 happened to fix first.
+
+**B. Keep DRIFT decomposition for retrieval — but fix the seed dilution.**
+DRIFT decomposition is correct for its purpose. The real problem is that decomposed sub-questions produce mutated entity names. The fix is not to remove decomposition but to:
+
+```python
+# Current (broken): NER runs on LLM-rephrased sub-questions
+sub_qs = await _drift_decompose(query)
+for sub_q in sub_qs:
+    entities = await disambiguate(sub_q)          # LLM-rephrased text produces bad entity names
+    seeds.extend(entities)
+
+# Fixed: NER runs on BOTH original + sub-questions, deduplicated
+original_entities = await disambiguate(query)     # Direct extraction — high precision
+sub_qs = await _drift_decompose(query)
+for sub_q in sub_qs:
+    sub_entities = await disambiguate(sub_q)      # Also extract — covers concepts after decomposition
+    seeds.extend(sub_entities)
+seeds = deduplicate_by_graph_id(original_entities + sub_entities)  # Union, no duplication
+```
+
+This preserves DRIFT's ability to extract entities from vague sub-questions while adding Route 2's "extract from exact query text" as a high-precision baseline. The union is always ≥ either alone.
+
+**C. Fix the double tracing.**
+Reuse Stage 4.2 discovery evidence in the consolidated trace. This doesn't change the DRIFT architecture — it's a pure efficiency fix:
+
+```python
+# Current: discovery evidence discarded
+discovery_evidence = {}
+for sub_q, sub_seeds in sub_question_entities.items():
+    traces = await tracer.trace_semantic_beam(sub_q, sub_seeds, top_k=5)
+    # traces used ONLY for confidence counting, then lost
+    
+# Consolidated trace starts from scratch
+all_evidence = await tracer.trace_semantic_beam(query, all_seeds, top_k=30)
+
+# Fix: carry discovery evidence forward
+all_evidence = merge(discovery_evidence, consolidated_trace)
+```
+
+**D. Simplify coverage gap fill.**
+The 200-line BM25 reranker exists because primary retrieval misses documents. With fixes A+B (cleaner seeds, denoised context), fewer documents will be missed. The gap fill can be reduced to a simple "fetch 1-2 chunks from any document not yet represented" — ~20 lines instead of 200.
+
+**E. Recalibrate score thresholds for beam cosine scores.**
+Route 2's thresholds (`SCORE_GAP_THRESHOLD=0.5`, `SCORE_GAP_MIN_KEEP=6`) were tuned for PPR score distributions. Beam search cosine scores have different characteristics:
+
+| Property | PPR Scores | Beam Cosine Scores |
+|----------|-----------|-------------------|
+| Range | 0-1 (decay from seeds) | -1 to 1 (cosine similarity) |
+| Distribution | Steep drop at community boundary | Gradual gradient, no structural cliff |
+| Top-to-bottom ratio | 10-50× | 2-5× |
+| Natural pruning point | Yes (community boundary cliff) | No clear cliff |
+
+Score-gap pruning with 0.5 threshold may prune too aggressively (if beam scores cluster 0.7-0.9, a 0.5 threshold keeps everything) or too weakly (if beam scores cluster 0.3-0.5, it prunes nothing). Empirical benchmarking required.
+
+### 10.6 Corrected Summary
+
+| Previous Recommendation | Status After Reassessment |
+|------------------------|--------------------------|
+| "NER-first, decompose only for synthesis" | ❌ **Retracted** — defeats DRIFT's purpose for vague queries. Replaced with "NER on original+decomposed, union" |
+| "Route 4 should look like Route 2's 3-stage pipeline" | ❌ **Retracted** — Route 4 needs decomposition, confidence loops, coverage fill. These are not defects for DRIFT |
+| "DRIFT decomposition is a fundamental defect" | ⚠️ **Revised** — decomposition is architecturally necessary. The defect is entity name mutation, not decomposition itself |
+| "Double tracing is wasteful" | ✅ **Confirmed** — still correct. Discovery evidence should be reused |
+| "Coverage gap fill is a band-aid" | ⚠️ **Revised** — some coverage fill is structurally necessary for DRIFT (cross-document queries NEED multi-document coverage). But 200 lines of BM25 reranking is still too complex |
+| "Enable Route 2's denoising stack" | ✅ **Confirmed** — post-retrieval hygiene is universal, not Route-2-specific. Threshold recalibration needed for beam scores |
+| "HippoRAG 2 alignment concern" | ✅ **Resolved** — Route 4 already departed from HippoRAG 2 (semantic beam, not PPR). Post-retrieval improvements don't touch the backbone |
+
+**Bottom line:** 6 of 7 concrete improvements still apply. The one correction is significant — DRIFT decomposition must be preserved for retrieval, not just synthesis — but the path forward is clear: fix the shared plumbing (denoising stack), fix the DRIFT-specific seed quality (union strategy), and recalibrate thresholds for beam scores.

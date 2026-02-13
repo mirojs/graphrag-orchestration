@@ -1907,12 +1907,18 @@ Response:"""
             # DRIFT mode: Use multi-question synthesis prompt
             prompt = self._get_drift_synthesis_prompt(query, context, sub_questions, prompt_variant=prompt_variant)
         else:
-            prompts = {
-                "detailed_report": self._get_detailed_report_prompt(query, context),
-                "summary": self._get_summary_prompt(query, context, prompt_variant=prompt_variant),
-                "audit_trail": self._get_audit_trail_prompt(query, context)
-            }
-            prompt = prompts.get(response_type, prompts["detailed_report"])
+            # v1_concise always uses the summary/extraction prompt builder
+            # regardless of response_type (Route 2 fact extraction).
+            effective_variant = (prompt_variant or "").lower().strip()
+            if effective_variant == "v1_concise":
+                prompt = self._get_summary_prompt(query, context, prompt_variant=prompt_variant)
+            else:
+                prompts = {
+                    "detailed_report": self._get_detailed_report_prompt(query, context),
+                    "summary": self._get_summary_prompt(query, context, prompt_variant=prompt_variant),
+                    "audit_trail": self._get_audit_trail_prompt(query, context)
+                }
+                prompt = prompts.get(response_type, prompts["detailed_report"])
         
         try:
             response = await llm.acomplete(prompt)

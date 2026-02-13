@@ -235,11 +235,74 @@ class EvidenceSynthesizer:
             text_chunks = pre_fetched_chunks
             entity_scores: Dict[str, float] = {name: score for name, score in evidence_nodes}
         else:
-            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes, query=query)
+            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes, query=query, is_drift=sub_questions is not None)
         
-        # Step 1.5: Merge coverage chunks if provided
+        # Step 1.5: Merge coverage chunks if provided — with dedup against entity-retrieved chunks.
+        # Coverage chunks bypass _retrieve_text_chunks() so they miss the denoising stack.
+        # Apply MD5 dedup + semantic dedup here to prevent duplicate content injection.
         if coverage_chunks:
-            text_chunks.extend(coverage_chunks)
+            import hashlib as _hl
+            import re as _re_cov
+
+            # Build hash set of existing entity-retrieved chunks
+            existing_hashes: set = set()
+            existing_word_sets: list = []
+            for ec in text_chunks:
+                t = ec.get("text", "")
+                existing_hashes.add(_hl.md5(t.encode("utf-8")).hexdigest())
+                existing_word_sets.append(set(_re_cov.findall(r'[a-z0-9]+', t.lower())))
+
+            semantic_dedup_threshold_cov = float(os.environ.get("SEMANTIC_DEDUP_THRESHOLD", "0.92"))
+            coverage_added = 0
+            coverage_deduped = 0
+
+            for cov_chunk in coverage_chunks:
+                cov_text = cov_chunk.get("text", "")
+                cov_hash = _hl.md5(cov_text.encode("utf-8")).hexdigest()
+
+                # 1. Exact MD5 dedup
+                if cov_hash in existing_hashes:
+                    coverage_deduped += 1
+                    continue
+
+                # 2. Semantic near-dedup (Jaccard) against existing chunks
+                cov_words = set(_re_cov.findall(r'[a-z0-9]+', cov_text.lower()))
+                is_near_dup = False
+                if cov_words:
+                    for ws in existing_word_sets:
+                        if ws:
+                            inter = len(cov_words & ws)
+                            union = len(cov_words | ws)
+                            if union > 0 and inter / union >= semantic_dedup_threshold_cov:
+                                is_near_dup = True
+                                coverage_deduped += 1
+                                break
+
+                if not is_near_dup:
+                    # Stamp coverage chunks with a low but non-zero score so they
+                    # sort after entity-retrieved chunks in the token budget.
+                    # Use the coverage hybrid reranking score if available, else a
+                    # baseline score that places them after entity-retrieved content.
+                    min_entity_score = min(
+                        (c.get("_entity_score", 0.0) for c in text_chunks),
+                        default=0.0,
+                    )
+                    # Coverage chunks rank below entity-retrieved chunks
+                    cov_chunk["_entity_score"] = min_entity_score * 0.5 if min_entity_score > 0 else 0.01
+                    cov_chunk["_source_entity"] = "__coverage_gap_fill__"
+
+                    text_chunks.append(cov_chunk)
+                    existing_hashes.add(cov_hash)
+                    existing_word_sets.append(cov_words)
+                    coverage_added += 1
+
+            if coverage_deduped > 0 or coverage_added > 0:
+                logger.info(
+                    "coverage_chunks_merged_with_dedup",
+                    original=len(coverage_chunks),
+                    added=coverage_added,
+                    deduped=coverage_deduped,
+                )
 
         # Route 4 often produces generic "evidence" strings when seed entities don't resolve.
         # If entity-based retrieval returns nothing, fall back to query-based chunk retrieval.
@@ -1096,6 +1159,7 @@ Response:"""
         self, 
         evidence_nodes: List[Tuple[str, float]],
         query: Optional[str] = None,
+        is_drift: bool = False,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         """Retrieve raw text chunks for the evidence nodes.
         
@@ -1174,8 +1238,14 @@ Response:"""
         # each entity's community_id and applies a score penalty to off-community
         # entities, which cascades into lower chunk budgets via score-weighted allocation.
         # Toggle: set DENOISE_COMMUNITY_FILTER=0 to disable.
+        # Disable community filter for DRIFT multi-hop queries (Route 4).
+        # DRIFT intentionally spans multiple Louvain communities to answer
+        # cross-document comparative questions. Penalising cross-community
+        # entities by 0.3× starves the synthesis of evidence it needs.
         community_filter_enabled = os.environ.get("DENOISE_COMMUNITY_FILTER", "1") == "1"
-        community_stats: Dict[str, Any] = {"enabled": community_filter_enabled}
+        if is_drift:
+            community_filter_enabled = False
+        community_stats: Dict[str, Any] = {"enabled": community_filter_enabled, "drift_override": is_drift}
 
         if community_filter_enabled and self.text_store and hasattr(self.text_store, 'get_entity_communities'):
             try:

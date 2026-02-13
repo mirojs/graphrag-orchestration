@@ -142,6 +142,10 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
             "nowhere in", "no vat", "no tax id", "no routing", "no account",
             "no wire transfer", "no ach", "no bank", "not include", "does not include",
             "doesn't include", "no such", "none of the", "not contain",
+            # Blank-field synonyms (Feb 13, 2026 — caught by Q-N10 false failure)
+            "left blank", "is blank", "not filled in", "no shipping method",
+            "not recorded", "no value", "is empty", "field is blank",
+            "no data", "does not record", "doesn't record",
         ]
         negative_test_pass = any(phrase in actual_lower for phrase in not_found_phrases)
         return {

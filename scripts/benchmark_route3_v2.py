@@ -147,7 +147,8 @@ ROUTE3_QUESTIONS = [
     {
         "id": "T-3",
         "query": "What patterns emerge in the financial terms and payment structures?",
-        "expected_themes": ["payment schedules", "amounts", "penalties", "invoicing"],
+        # "penalties" removed: no penalty clauses in the 5-PDF corpus
+        "expected_themes": ["payment schedules", "amounts", "invoicing"],
     },
     {
         "id": "T-4",
@@ -157,7 +158,8 @@ ROUTE3_QUESTIONS = [
     {
         "id": "T-5",
         "query": "What dispute resolution mechanisms are mentioned across the agreements?",
-        "expected_themes": ["arbitration", "mediation", "litigation", "jurisdiction", "governing law"],
+        # "mediation" and "litigation" removed: corpus uses arbitration exclusively
+        "expected_themes": ["arbitration", "jurisdiction", "governing law"],
     },
     {
         "id": "T-6",

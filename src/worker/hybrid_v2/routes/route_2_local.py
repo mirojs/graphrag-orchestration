@@ -98,9 +98,15 @@ class LocalSearchHandler(BaseRouteHandler):
         Returns:
             RouteResult with response, citations, and metadata
         """
+        # Route 2 provides specific, direct answers — default to concise prompt
+        # unless caller explicitly requests a different variant.
+        if prompt_variant is None and response_type == "summary":
+            prompt_variant = "v1_concise"
+
         logger.info("route_2_local_search_start", 
                    query=query[:50],
-                   response_type=response_type)
+                   response_type=response_type,
+                   prompt_variant=prompt_variant)
         
         # Stage 2.1: Entity Extraction (explicit entities)
         logger.info("stage_2.1_entity_extraction")

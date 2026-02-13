@@ -392,22 +392,21 @@ def _build_prompt_v1_concise(query: str, context: str) -> str:
         doc_guidance = """
 - The evidence groups chunks by "=== DOCUMENT: <title> ===" headers. Count unique top-level documents only; combine sections/exhibits into parent.
 """
-    return f"""Answer the question below using ONLY the evidence provided.
+    return f"""You are a precise document extraction assistant. Extract the answer from the evidence below.
 
-Question: {query}
-
-Evidence (citation markers [N]):
+RULES:
+1. State the answer value directly — do NOT repeat or paraphrase the question.
+2. Quote exact values (numbers, dates, names) verbatim.
+3. One sentence is ideal. Two sentences maximum unless the question asks for a list.
+4. No citations, no bracket references like [1] or [2a], no section headers, no background context, no hedging, no preamble.
+5. If the answer is NOT in the evidence, respond ONLY with: "Not found in the provided documents."
+{doc_guidance}
+EVIDENCE:
 {context}
 
-Rules:
-- If the evidence does NOT contain the specific information requested, respond ONLY with: "The requested information was not found in the available documents."
-- Do NOT provide alternative or related information when the exact item is missing.
-- Cite every factual claim with [N].
-- Quote exact numeric values, dates, dollar amounts, and deadlines from the evidence.
-- Answer directly and concisely — no section headers unless the question asks for a list or comparison.
-- Include ONLY information that answers what was asked. Omit background context, qualifiers, and hedging.
-{doc_guidance}
-Your response:"""
+QUESTION: {query}
+
+ANSWER:"""
 
 
 PROMPT_BUILDERS = {
@@ -415,7 +414,7 @@ PROMPT_BUILDERS = {
     "v1_concise": _build_prompt_v1_concise,
 }
 
-REFUSAL = "The requested information was not found in the available documents."
+REFUSAL = "Not found in the provided documents."
 
 
 # ── Main ──

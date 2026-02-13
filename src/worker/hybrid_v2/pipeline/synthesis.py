@@ -350,11 +350,30 @@ class EvidenceSynthesizer:
             synthesis_model=synthesis_model,
         )
         
-        # Step 5: Extract and validate citations
-        citations = self._extract_citations(
-            response, citation_map,
-            sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
-        )
+        # Step 4b: Post-process v1_concise — strip any residual bracket
+        # references the LLM may still emit despite "no citations" rule.
+        effective_variant = (prompt_variant or "v0").lower().strip()
+        if effective_variant == "v1_concise":
+            response = re.sub(r"\s*\[\d+[a-z]?\]", "", response).strip()
+
+        # Step 5: Build citations
+        if effective_variant == "v1_concise" and citation_map:
+            # v1_concise: LLM does pure extraction, no citation markup.
+            # Attach top retrieval chunks directly — they ARE the source sentences.
+            citations = []
+            for cite_key in sorted(citation_map.keys(),
+                                   key=lambda k: int(k.strip("[]")))[:3]:
+                citations.append({
+                    "citation": cite_key,
+                    "citation_type": "retrieval",
+                    **citation_map[cite_key],
+                })
+        else:
+            # v0 / other variants: parse LLM-produced [N] markers
+            citations = self._extract_citations(
+                response, citation_map,
+                sentence_citation_map=sentence_citation_map if sentence_citation_map else None,
+            )
         
         # Measure final context (after sparse-retrieval injection + sentence hints)
         final_context_chars = len(context)
@@ -2109,29 +2128,28 @@ IMPORTANT for Per-Document Queries:
         )
         
         # ---- V1: Concise, precision-optimised ----
-        # Targets the precision gap identified in Route 2 ablation study:
-        # - No forced section headers (## Summary / ## Key Points overhead)
-        # - No paragraph count instruction (avoids padding)
-        # - Direct-answer style — answer length scales with question complexity
-        # - Keeps refusal logic (critical for negative queries) but compressed
-        # - Keeps citation + numeric verbatim requirements
+        # Matches the skeleton benchmark prompt style that produced 42-130 char
+        # responses with gpt-4.1-mini (Feb 11 benchmark).  Key elements:
+        # - "Lead with a direct answer" — prevents padding/preamble
+        # - Evidence-then-Question order (matches benchmark layout)
+        # - Minimal rules to avoid LLM over-compliance verbosity
+        # - Explicit refusal template for negative queries
         if variant == "v1_concise":
-            return f"""Answer the question below using ONLY the evidence provided.
+            return f"""You are a precise document extraction assistant. Extract the answer from the evidence below.
 
-Question: {query}
-
-Evidence (citation markers [N]):
+RULES:
+1. State the answer value directly — do NOT repeat or paraphrase the question.
+2. Quote exact values (numbers, dates, names) verbatim.
+3. One sentence is ideal. Two sentences maximum unless the question asks for a list.
+4. No citations, no bracket references like [1] or [2a], no section headers, no background context, no hedging, no preamble.
+5. If the answer is NOT in the evidence, respond ONLY with: "Not found in the provided documents."
+{document_guidance}
+EVIDENCE:
 {context}
 
-Rules:
-- If the evidence does NOT contain the specific information requested, respond ONLY with: "The requested information was not found in the available documents."
-- Do NOT provide alternative or related information when the exact item is missing.
-- Cite every factual claim with [N].
-- Quote exact numeric values, dates, dollar amounts, and deadlines from the evidence.
-- Answer directly and concisely — no section headers unless the question asks for a list or comparison.
-- Include ONLY information that answers what was asked. Omit background context, qualifiers, and hedging.
-{document_guidance}
-Your response:"""
+QUESTION: {query}
+
+ANSWER:"""
         
         # ---- V0: Current production prompt ----
         return f"""You are an expert analyst generating a concise summary.

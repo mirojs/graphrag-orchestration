@@ -676,6 +676,7 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 
 > **Correction (February 9, 2026):** Engine updated from "NER / Embedding Match (deterministic)" to LLM-based NER. This is an LLM call, not deterministic. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §3.
 > **Updated (February 14, 2026):** NER model corrected from gpt-4o to gpt-5.1 (`HYBRID_NER_MODEL` env var).
+> **NER Model Evaluation (February 14, 2026):** Benchmarked gpt-5.1, gpt-4.1, gpt-4.1-mini, and gpt-5-nano across 8 queries × 2 repeats. All four achieved identical entity recall (93.8%). gpt-4.1-mini was fastest (487 ms avg) but returns more entities per query (4.8 avg vs gpt-5.1's 2.8 avg, always hitting the top_k=5 cap). gpt-5-nano was unusably slow (~11 s avg). **Decision: keep gpt-5.1** — its concise entity output (2–3 entities) reduces downstream graph lookups and retrieval noise while maintaining full recall. See `benchmarks/ner_model_comparison_20260214T*.json`.
 
 #### Stage 2.2: HippoRAG PPR Tracing
 *   **Engine:** HippoRAG 2 (Personalized PageRank) via `tracer.trace()`

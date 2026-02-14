@@ -20,6 +20,7 @@ Note: No HippoRAG in this route - entities are explicit in the query.
 
 import asyncio
 import os
+import time
 from typing import Dict, Any, List, Optional
 
 import structlog
@@ -100,59 +101,92 @@ class LocalSearchHandler(BaseRouteHandler):
         if prompt_variant is None:
             prompt_variant = "v1_concise"
 
+        enable_timings = os.getenv("ROUTE2_RETURN_TIMINGS", "1").strip().lower() in {"1", "true", "yes"}
+        timings_ms: Dict[str, int] = {}
+        t_route_start = time.perf_counter()
+
         logger.info("route_2_local_search_start", 
                    query=query[:50],
                    response_type=response_type,
-                   prompt_variant=prompt_variant)
+                   prompt_variant=prompt_variant,
+                   timings_enabled=enable_timings)
         
         # Stage 2.1: Entity Extraction (explicit entities)
         logger.info("stage_2.1_entity_extraction")
+        t0 = time.perf_counter()
         seed_entities = await self.pipeline.disambiguator.disambiguate(query)
-        logger.info("stage_2.1_complete", num_seeds=len(seed_entities))
+        timings_ms["stage_2.1_ner_ms"] = int((time.perf_counter() - t0) * 1000)
+        logger.info("stage_2.1_complete", num_seeds=len(seed_entities),
+                   duration_ms=timings_ms["stage_2.1_ner_ms"])
         
         # Stage 2.2: LazyGraphRAG Iterative Deepening
         logger.info("stage_2.2_iterative_deepening")
+        t0 = time.perf_counter()
         evidence_nodes = await self.pipeline.tracer.trace(
             query=query,
             seed_entities=seed_entities,
             top_k=15
         )
-        logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes))
+        timings_ms["stage_2.2_ppr_ms"] = int((time.perf_counter() - t0) * 1000)
+        logger.info("stage_2.2_complete", num_evidence=len(evidence_nodes),
+                   duration_ms=timings_ms["stage_2.2_ppr_ms"])
         
-        # Stage 2.2.5: Fetch language spans for sentence-level citations
+        # Stage 2.2.5 + 2.2.6: Run in PARALLEL — they are independent.
+        # 2.2.5 needs evidence_nodes → chunks → doc_ids → language spans
+        # 2.2.6 needs only the query (skeleton enrichment via Voyage vectors)
         enable_sentence_citations = os.getenv("ROUTE2_SENTENCE_CITATIONS", "1").strip().lower() in {"1", "true", "yes"}
-        doc_language_spans: Dict[str, List[Dict]] = {}
-        if enable_sentence_citations:
-            # Retrieve text chunks first to get document IDs
-            # _retrieve_text_chunks returns (deduped_chunks, entity_scores, retrieval_stats) tuple after de-noising changes
-            pre_chunks, _entity_scores, _retrieval_stats = await self.synthesizer._retrieve_text_chunks(evidence_nodes, query=query)
-            doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in pre_chunks} - {""})
-            if doc_ids:
-                doc_language_spans = await self._fetch_language_spans(doc_ids)
-                logger.info("stage_2.2.5_sentence_spans", num_docs=len(doc_ids), docs_with_spans=len(doc_language_spans))
 
-        # Stage 2.2.6: Skeleton sentence enrichment.
-        # Strategy A (flat vector search) or Strategy B (graph traversal).
-        # Both inject supplementary evidence chunks into the synthesis prompt.
-        skeleton_coverage_chunks: List[Dict[str, Any]] = []
-        if settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_API_KEY:
-            try:
-                if settings.SKELETON_GRAPH_TRAVERSAL_ENABLED:
-                    # Strategy B: graph traversal from seed sentences
-                    skeleton_coverage_chunks = await self._retrieve_skeleton_graph_traversal(query)
-                    strategy_label = "B_graph_traversal"
-                else:
-                    # Strategy A: flat vector search on sentence index
-                    skeleton_coverage_chunks = await self._retrieve_skeleton_sentences(query)
-                    strategy_label = "A_flat_search"
-                if skeleton_coverage_chunks:
-                    logger.info(
-                        "stage_2.2.6_skeleton_enrichment",
-                        strategy=strategy_label,
-                        sentences=len(skeleton_coverage_chunks),
-                    )
-            except Exception as e:
-                logger.warning("skeleton_enrichment_failed", error=str(e))
+        async def _run_stage_2_2_5() -> tuple:
+            """Chunk retrieval + language spans."""
+            _t = time.perf_counter()
+            _doc_spans: Dict[str, List[Dict]] = {}
+            _chunks: list = []
+            _escores: Dict[str, float] = {}
+            _rstats: Dict[str, Any] = {}
+            if enable_sentence_citations:
+                _chunks, _escores, _rstats = await self.synthesizer._retrieve_text_chunks(evidence_nodes, query=query)
+                _doc_ids = list({c.get("metadata", {}).get("document_id", "") for c in _chunks} - {""})
+                if _doc_ids:
+                    _doc_spans = await self._fetch_language_spans(_doc_ids)
+                    logger.info("stage_2.2.5_sentence_spans", num_docs=len(_doc_ids), docs_with_spans=len(_doc_spans))
+            _dur = int((time.perf_counter() - _t) * 1000)
+            return _chunks, _escores, _rstats, _doc_spans, _dur
+
+        async def _run_stage_2_2_6() -> tuple:
+            """Skeleton sentence enrichment."""
+            _t = time.perf_counter()
+            _skel_chunks: List[Dict[str, Any]] = []
+            if settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_API_KEY:
+                try:
+                    if settings.SKELETON_GRAPH_TRAVERSAL_ENABLED:
+                        _skel_chunks = await self._retrieve_skeleton_graph_traversal(query)
+                        _strategy = "B_graph_traversal"
+                    else:
+                        _skel_chunks = await self._retrieve_skeleton_sentences(query)
+                        _strategy = "A_flat_search"
+                    if _skel_chunks:
+                        logger.info(
+                            "stage_2.2.6_skeleton_enrichment",
+                            strategy=_strategy,
+                            sentences=len(_skel_chunks),
+                        )
+                except Exception as e:
+                    logger.warning("skeleton_enrichment_failed", error=str(e))
+            _dur = int((time.perf_counter() - _t) * 1000)
+            return _skel_chunks, _dur
+
+        t0_parallel = time.perf_counter()
+        (pre_chunks, _entity_scores, _retrieval_stats, doc_language_spans, dur_2_2_5), \
+            (skeleton_coverage_chunks, dur_2_2_6) = await asyncio.gather(
+                _run_stage_2_2_5(),
+                _run_stage_2_2_6(),
+            )
+        timings_ms["stage_2.2.5_chunks_spans_ms"] = dur_2_2_5
+        timings_ms["stage_2.2.6_skeleton_ms"] = dur_2_2_6
+        timings_ms["stage_2.2.5_2.2.6_parallel_ms"] = int((time.perf_counter() - t0_parallel) * 1000)
+        logger.info("stage_2.2.5_2.2.6_parallel_complete",
+                    wall_ms=timings_ms["stage_2.2.5_2.2.6_parallel_ms"],
+                    sum_sequential_ms=dur_2_2_5 + dur_2_2_6)
 
         # Stage 2.3: Synthesis with Citations
         # When skeleton enrichment provides precise sentence-level context,
@@ -164,6 +198,7 @@ class LocalSearchHandler(BaseRouteHandler):
                        model=effective_model,
                        skeleton_sentences=len(skeleton_coverage_chunks))
         logger.info("stage_2.3_synthesis", model=effective_model or "default")
+        t0 = time.perf_counter()
         synthesis_result = await self.synthesizer.synthesize(
             query=query,
             evidence_nodes=evidence_nodes,
@@ -175,7 +210,11 @@ class LocalSearchHandler(BaseRouteHandler):
             pre_fetched_chunks=pre_chunks if enable_sentence_citations else None,
             coverage_chunks=skeleton_coverage_chunks if skeleton_coverage_chunks else None,
         )
-        logger.info("stage_2.3_complete")
+        timings_ms["stage_2.3_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
+        timings_ms["total_ms"] = int((time.perf_counter() - t_route_start) * 1000)
+        logger.info("stage_2.3_complete",
+                   duration_ms=timings_ms["stage_2.3_synthesis_ms"],
+                   total_ms=timings_ms["total_ms"])
         
         # Merge retrieval stats when chunks were pre-fetched (retrieval happened in this handler)
         if enable_sentence_citations and _retrieval_stats:
@@ -208,7 +247,10 @@ class LocalSearchHandler(BaseRouteHandler):
                     "latency_estimate": "fast",
                     "precision_level": "high",
                     "route_description": "Entity-focused with post-synthesis negative detection",
-                    "negative_detection": True
+                    "negative_detection": True,
+                    **({
+                        "timings_ms": timings_ms,
+                    } if enable_timings else {}),
                 }
             )
         
@@ -259,6 +301,10 @@ class LocalSearchHandler(BaseRouteHandler):
                 } if synthesis_result.get("raw_extractions") else {}),
                 # Skeleton enrichment metadata (Strategy A)
                 **({"skeleton_sentences_injected": len(skeleton_coverage_chunks)} if skeleton_coverage_chunks else {}),
+                # Per-stage latency breakdown
+                **({
+                    "timings_ms": timings_ms,
+                } if enable_timings else {}),
             }
         )
 

@@ -551,7 +551,7 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 *   **Example:** "What is the invoice amount for transaction TX-12345?" or "What are all the contracts with Vendor ABC?"
 *   **Goal:** Comprehensive entity-centric retrieval via graph traversal
 *   **When to Use:** Direct questions, specific values, entity relationships
-*   **Engines:** NER (gpt-4o) → HippoRAG PPR (top_k=15) → Skeleton Enrichment → Text Chunk Retrieval → Extraction Synthesis (gpt-4.1-mini, v1_concise prompt)
+*   **Engines:** NER (gpt-5.1) → HippoRAG PPR (top_k=15) → [Chunk Retrieval ‖ Skeleton Enrichment] (parallel) → Extraction Synthesis (gpt-4.1-mini, v1_concise prompt)
 *   **Synthesis Model:** gpt-4.1-mini (overridden via `SKELETON_SYNTHESIS_MODEL` env var; ~10x cheaper, 1.2x faster than gpt-5.1)
 *   **Prompt Variant:** `v1_concise` — extraction-only prompt, always active regardless of `response_type` (Feb 13, 2026)
 *   **Output Style:** Direct values ("Walt Flood Realty", "2010-06-15"), avg 30 chars. No `## Answer` headers, no citation markers, no question echoing.
@@ -562,7 +562,7 @@ The new architecture provides **4 distinct routes**, each optimized for a specif
 
 > **Note:** Local Search now handles all queries that previously went to Vector RAG. Testing showed identical answer quality with only 14% latency difference.
 
-> **Correction (February 9, 2026):** Engines updated from "Entity Extraction → LazyGraphRAG Iterative Deepening" to actual code path: NER (gpt-4o) → HippoRAG PPR. Route 2 does NOT use LazyGraphRAG. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2, §11.
+> **Correction (February 9, 2026):** Engines updated from "Entity Extraction → LazyGraphRAG Iterative Deepening" to actual code path: NER (gpt-5.1) → HippoRAG PPR. Route 2 does NOT use LazyGraphRAG. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2, §11.
 
 > **Update (February 13, 2026):** Synthesis prompt optimized for extraction. v1_concise now bypasses `response_type` routing — always uses extraction prompt. Post-processing strips residual bracket references. Average response reduced from ~700 chars to 30 chars with 100% accuracy (8/8 benchmark). See commits `1da0cad5` through `f08b0dfc`.
 
@@ -669,12 +669,13 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 > **Correction (February 9, 2026):** Header updated from "LazyGraphRAG Only" to "HippoRAG PPR". Route 2 does NOT use LazyGraphRAG — it uses HippoRAG 2 PPR traversal. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2.
 
 #### Stage 2.1: Entity Extraction (NER)
-*   **Engine:** NER via LLM (gpt-4o) — extracts entity names from query
+*   **Engine:** NER via LLM (gpt-5.1 via `HYBRID_NER_MODEL`) — extracts entity names from query
 *   **What:** Extract explicit entity names from the query via LLM-based named entity recognition
 *   **Output:** `["Entity: ABC Corp", "Entity: Contract-2024-001"]`
-*   **Code:** `extraction_service.py` → gpt-4o NER prompt
+*   **Code:** `intent.py` → gpt-5.1 NER prompt
 
 > **Correction (February 9, 2026):** Engine updated from "NER / Embedding Match (deterministic)" to LLM-based NER. This is an LLM call, not deterministic. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §3.
+> **Updated (February 14, 2026):** NER model corrected from gpt-4o to gpt-5.1 (`HYBRID_NER_MODEL` env var).
 
 #### Stage 2.2: HippoRAG PPR Tracing
 *   **Engine:** HippoRAG 2 (Personalized PageRank) via `tracer.trace()`
@@ -685,17 +686,20 @@ This is the replacement for Microsoft GraphRAG's Local Search mode.
 
 > **Correction (February 9, 2026):** Completely rewritten. Previously described as "LazyGraphRAG Iterative Deepening" — this was factually wrong. Route 2 uses HippoRAG PPR, the same engine as Routes 3/4. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §2.
 
-#### Stage 2.2.5: Text Chunk Retrieval
-*   **Engine:** `synthesis.py` → `_retrieve_text_chunks()`
-*   **What:** For each evidence entity, fetch TextChunks via MENTIONS edges from Neo4j
+#### Stage 2.2.5 + 2.2.6: Chunk Retrieval ‖ Skeleton Enrichment (Parallelised February 14, 2026)
+
+These two stages are **independent** and run concurrently via `asyncio.gather()`. Wall-clock time equals `max(2.2.5, 2.2.6)` instead of their sum, saving ~1,000-1,200 ms per query.
+
+##### Stage 2.2.5: Text Chunk Retrieval + Language Spans
+*   **Engine:** `synthesis.py` → `_retrieve_text_chunks()`, then `_fetch_language_spans()`
+*   **What:** For each evidence entity, fetch TextChunks via MENTIONS edges from Neo4j. Then extract `document_id`s and fetch language spans for sentence-level citations.
+*   **Denoising stack (all enabled):** MD5 dedup → community filter → score-gap pruning → score-weighted allocation → semantic near-dedup (Jaccard ≥ 0.92)
 *   **Parameters:** `limit_per_entity=12`, `max_per_section=3`, `max_per_document=6` (via `text_store.get_chunks_for_entities()`)
-*   **Known Issue (February 8, 2026):** No cross-entity chunk deduplication — same chunk can appear multiple times when it MENTIONS multiple entities. Uses `chunks.extend()` without checking `chunk_id` uniqueness. **56.5% duplicate chunks measured.** Fix planned: `IMPLEMENTATION_PLAN_KNN_LOUVAIN_DENOISE_2026-02-09.md` Solution C Phase 1.
-*   **Known Issue (February 8, 2026):** PPR scores are **discarded** here — every entity gets uniform chunk allocation regardless of PPR rank. Fix planned: Solution B.1.
-*   **Output:** Flat list of text chunks (PPR scores NOT passed through)
+*   **Output:** Deduped text chunks + doc language spans. Pre-fetched chunks are passed to synthesis (which skips its own retrieval).
 
-> **Added (February 9, 2026):** This stage was missing from the original doc. See `ARCHITECTURE_CORRECTIONS_2026-02-08.md` §4.
+> **History:** Originally had 56.5% duplicate chunks (Feb 8). Fixed with full denoising stack (Feb 9). Parallelised with 2.2.6 (Feb 14).
 
-#### Stage 2.2.7: Skeleton Enrichment (Added February 11, 2026)
+##### Stage 2.2.6: Skeleton Enrichment (Added February 11, 2026)
 *   **Engine:** `route_2_local.py` → skeleton graph traversal via `MENTIONS` edges
 *   **What:** For each entity from PPR, traverse `(:Entity)-[:MENTIONS]-(:TextChunk)` to find sentence-level chunks that cover the query topic. Adds precise context that PPR alone may miss.
 *   **Configuration:** `SKELETON_ENRICHMENT_ENABLED=true`, `SKELETON_GRAPH_TRAVERSAL_ENABLED=true`

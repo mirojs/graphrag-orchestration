@@ -279,17 +279,18 @@ class EvidenceSynthesizer:
                                 break
 
                 if not is_near_dup:
-                    # Stamp coverage chunks with a low but non-zero score so they
-                    # sort after entity-retrieved chunks in the token budget.
-                    # Use the coverage hybrid reranking score if available, else a
-                    # baseline score that places them after entity-retrieved content.
-                    min_entity_score = min(
-                        (c.get("_entity_score", 0.0) for c in text_chunks),
-                        default=0.0,
-                    )
-                    # Coverage chunks rank below entity-retrieved chunks
-                    cov_chunk["_entity_score"] = min_entity_score * 0.5 if min_entity_score > 0 else 0.01
-                    cov_chunk["_source_entity"] = "__coverage_gap_fill__"
+                    # Stamp coverage chunks with a score for token-budget ordering.
+                    # If the chunk already has a score (e.g., sentence evidence with
+                    # rerank scores), preserve it — only set a default for raw
+                    # coverage gap-fill chunks.
+                    if "_entity_score" not in cov_chunk:
+                        min_entity_score = min(
+                            (c.get("_entity_score", 0.0) for c in text_chunks),
+                            default=0.0,
+                        )
+                        # Coverage chunks rank below entity-retrieved chunks
+                        cov_chunk["_entity_score"] = min_entity_score * 0.5 if min_entity_score > 0 else 0.01
+                    cov_chunk["_source_entity"] = cov_chunk.get("_source_entity", "__coverage_gap_fill__")
 
                     text_chunks.append(cov_chunk)
                     existing_hashes.add(cov_hash)

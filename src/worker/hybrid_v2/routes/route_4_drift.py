@@ -24,7 +24,9 @@ Performance Mode:
 - ROUTE4_WORKFLOW=0 (default): Sequential sub-questions (~2.1s for 3 questions)
 """
 
+import asyncio
 import os
+import re
 from typing import Dict, Any, List, Tuple, Optional, List
 
 import structlog
@@ -44,6 +46,36 @@ def _get_query_embedding(query: str) -> List[float]:
 ROUTE4_USE_PPR = os.getenv("ROUTE4_USE_PPR", "0").strip().lower() in {"1", "true", "yes"}
 if ROUTE4_USE_PPR:
     logger.info("route4_using_ppr_mode")
+
+# Feature flag: sentence vector search as parallel evidence path
+ROUTE4_SENTENCE_SEARCH = os.getenv("ROUTE4_SENTENCE_SEARCH", "1").strip().lower() in {"1", "true", "yes"}
+ROUTE4_SENTENCE_TOP_K = int(os.getenv("ROUTE4_SENTENCE_TOP_K", "30"))
+ROUTE4_SENTENCE_RERANK = os.getenv("ROUTE4_SENTENCE_RERANK", "1").strip().lower() in {"1", "true", "yes"}
+if ROUTE4_SENTENCE_SEARCH:
+    logger.info("route4_sentence_search_enabled", top_k=ROUTE4_SENTENCE_TOP_K, rerank=ROUTE4_SENTENCE_RERANK)
+
+# Voyage embedding service (lazy singleton — mirrors route_3_global.py pattern)
+_voyage_service = None
+_voyage_init_attempted = False
+
+
+def _get_voyage_service():
+    """Get Voyage embedding service for sentence search."""
+    global _voyage_service, _voyage_init_attempted
+    if not _voyage_init_attempted:
+        _voyage_init_attempted = True
+        try:
+            from src.core.config import settings
+            if settings.VOYAGE_API_KEY:
+                from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
+                _voyage_service = VoyageEmbedService()
+                logger.info("route4_voyage_service_initialized")
+            else:
+                logger.warning("route4_voyage_service_no_api_key")
+        except Exception as e:
+            logger.warning("route4_voyage_service_init_failed", error=str(e))
+    return _voyage_service
+
 
 # Feature flag for LlamaIndex Workflow mode
 ROUTE4_WORKFLOW = os.getenv("ROUTE4_WORKFLOW", "0").strip().lower() in {"1", "true", "yes"}
@@ -166,12 +198,56 @@ class DRIFTHandler(BaseRouteHandler):
         sub_questions = await self._drift_decompose(query)
         logger.info("stage_4.1_complete", num_sub_questions=len(sub_questions))
         
-        # Stage 4.2: Iterative Entity Discovery
+        # Stage 4.2: Iterative Entity Discovery + Sentence Search (parallel)
         logger.info("stage_4.2_iterative_discovery")
+
+        # Launch sentence vector search in background (overlaps with NER discovery)
+        sentence_evidence: List[Dict[str, Any]] = []
+        sentence_task = None
+        if ROUTE4_SENTENCE_SEARCH:
+            sentence_task = asyncio.ensure_future(
+                self._retrieve_sentence_evidence(query, top_k=ROUTE4_SENTENCE_TOP_K)
+            )
+
+        # Entity discovery over decomposed sub-questions
         all_seeds, intermediate_results = await self._execute_discovery_pass(sub_questions)
-        logger.info("stage_4.2_complete", 
+
+        # NER union: extract entities from original query (pre-decomposition)
+        # to catch exact entity names that DRIFT decomposition may mutate.
+        # E.g., "Property Management Agreement" → decomposed → "management terms"
+        original_entities = await self.pipeline.disambiguator.disambiguate(query)
+        if original_entities:
+            existing = set(all_seeds)
+            new_seeds = [e for e in original_entities if e not in existing]
+            all_seeds = all_seeds + new_seeds
+            logger.info("stage_4.2_ner_union",
+                       original_entities=original_entities,
+                       new_from_original=len(new_seeds),
+                       total_seeds=len(all_seeds))
+
+        # Collect sentence search results
+        if sentence_task:
+            try:
+                sentence_evidence = await sentence_task
+            except Exception as e:
+                logger.warning("stage_4.2_sentence_search_failed", error=str(e))
+                sentence_evidence = []
+            if sentence_evidence:
+                sentence_evidence = self._denoise_sentences(sentence_evidence)
+                if sentence_evidence and ROUTE4_SENTENCE_RERANK:
+                    try:
+                        sentence_evidence = await self._rerank_sentences(
+                            query, sentence_evidence
+                        )
+                    except Exception as e:
+                        logger.warning("stage_4.2_sentence_rerank_failed", error=str(e))
+            logger.info("stage_4.2_sentence_search_complete",
+                       num_sentences=len(sentence_evidence))
+
+        logger.info("stage_4.2_complete",
                    total_seeds=len(all_seeds),
-                   num_results=len(intermediate_results))
+                   num_results=len(intermediate_results),
+                   sentence_evidence=len(sentence_evidence))
         
         # Stage 4.3: Consolidated HippoRAG Tracing (PPR or Semantic Beam)
         retrieval_mode = "ppr" if ROUTE4_USE_PPR else "beam"
@@ -292,6 +368,29 @@ class DRIFTHandler(BaseRouteHandler):
             query, complete_evidence
         )
         
+        # Stage 4.S: Merge sentence evidence into coverage chunks for synthesis.
+        # Sentence evidence provides a direct query→source path that complements
+        # entity-based graph traversal. Rerank scores (0-1) determine ordering.
+        sentence_chunks_added = 0
+        if sentence_evidence:
+            sentence_as_chunks = []
+            for ev in sentence_evidence:
+                sentence_as_chunks.append({
+                    "text": ev.get("text", ""),
+                    "document_title": ev.get("document_title", "Unknown"),
+                    "document_id": ev.get("document_id", ""),
+                    "section_path": ev.get("section_path", ""),
+                    "page_number": ev.get("page"),
+                    "_entity_score": ev.get("rerank_score", ev.get("score", 0.5)),
+                    "_source_entity": "__sentence_search__",
+                })
+            sentence_chunks_added = len(sentence_as_chunks)
+            # Prepend sentence chunks (higher quality) before coverage gap-fill chunks
+            coverage_chunks = sentence_as_chunks + (coverage_chunks or [])
+            logger.info("stage_4.S_sentence_chunks_merged",
+                       sentence_chunks=sentence_chunks_added,
+                       total_coverage=len(coverage_chunks))
+        
         # Stage 4.4: Multi-Source Synthesis
         logger.info("stage_4.4_synthesis")
         synthesis_result = await self.pipeline.synthesizer.synthesize(
@@ -346,10 +445,12 @@ class DRIFTHandler(BaseRouteHandler):
                 "all_seeds_discovered": all_seeds,
                 "intermediate_results": intermediate_results,
                 "num_evidence_nodes": len(complete_evidence),
+                "sentence_evidence_count": len(sentence_evidence),
+                "sentence_chunks_merged": sentence_chunks_added,
                 "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
                 "latency_estimate": "thorough",
                 "precision_level": "maximum",
-                "route_description": "DRIFT iterative multi-hop with confidence loop",
+                "route_description": "DRIFT iterative multi-hop with confidence loop + sentence search",
                 **({"coverage_retrieval": coverage_metadata} if coverage_metadata else {}),
                 **({"context_stats": synthesis_result["context_stats"]} if synthesis_result.get("context_stats") else {}),
                 # Pass through raw_extractions from comprehensive mode (2-pass extraction)
@@ -1006,3 +1107,236 @@ Sub-questions:"""
             )
             return str(doc).strip().lower() if doc else None
         return None
+    # ==========================================================================
+    # SENTENCE VECTOR SEARCH (ported from Route 3)
+    # ==========================================================================
+
+    async def _retrieve_sentence_evidence(
+        self,
+        query: str,
+        top_k: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve sentence-level evidence via Voyage vector search.
+
+        Provides a direct query→source evidence path that bypasses entity
+        resolution and graph traversal. This is the parallel path that
+        compensates for DRIFT decomposition entity mutation.
+
+        Uses the same sentence_embeddings_v2 Neo4j index as Route 3.
+        """
+        voyage_service = _get_voyage_service()
+        if not voyage_service:
+            logger.warning("route4_sentence_search_no_voyage_service")
+            return []
+
+        if not self.neo4j_driver:
+            logger.warning("route4_sentence_search_no_neo4j_driver")
+            return []
+
+        # 1. Embed query with Voyage
+        try:
+            query_embedding = voyage_service.embed_query(query)
+        except Exception as e:
+            logger.warning("route4_sentence_embed_failed", error=str(e))
+            return []
+
+        threshold = float(os.getenv("ROUTE4_SENTENCE_THRESHOLD", "0.2"))
+        group_id = self.group_id
+
+        # 2. Vector search on Sentence nodes + collect parent context
+        cypher = """
+        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+        YIELD node AS sent, score
+        WHERE sent.group_id = $group_id AND score >= $threshold
+
+        // Get parent chunk + document context
+        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+
+        // Expand via NEXT for local context (1 hop each direction)
+        OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
+        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
+
+        RETURN sent.id AS sentence_id,
+               sent.text AS text,
+               sent.source AS source,
+               sent.section_path AS section_path,
+               sent.page AS page,
+               chunk.text AS chunk_text,
+               doc.title AS document_title,
+               doc.id AS document_id,
+               score,
+               prev_sent.text AS prev_text,
+               next_sent.text AS next_text
+        ORDER BY score DESC
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+            driver = self.neo4j_driver
+
+            def _run_search():
+                with driver.session() as session:
+                    records = session.run(
+                        cypher,
+                        embedding=query_embedding,
+                        group_id=group_id,
+                        top_k=top_k,
+                        threshold=threshold,
+                    )
+                    return [dict(r) for r in records]
+
+            results = await loop.run_in_executor(self._executor, _run_search)
+        except Exception as e:
+            logger.warning("route4_sentence_search_failed", error=str(e))
+            return []
+
+        if not results:
+            logger.info("route4_sentence_search_empty", query=query[:50])
+            return []
+
+        # 3. Deduplicate by sentence ID and build context passages
+        seen_sentences: set = set()
+        evidence: List[Dict[str, Any]] = []
+
+        for r in results:
+            sid = r.get("sentence_id", "")
+            if sid in seen_sentences:
+                continue
+            seen_sentences.add(sid)
+
+            # Build passage: prev + current + next for coherent context
+            parts = []
+            if r.get("prev_text"):
+                parts.append(r["prev_text"].strip())
+            parts.append(r.get("text", "").strip())
+            if r.get("next_text"):
+                parts.append(r["next_text"].strip())
+            passage = " ".join(parts)
+
+            evidence.append({
+                "text": passage,
+                "sentence_text": r.get("text", ""),
+                "score": r.get("score", 0),
+                "document_title": r.get("document_title", "Unknown"),
+                "document_id": r.get("document_id", ""),
+                "section_path": r.get("section_path", ""),
+                "page": r.get("page"),
+                "sentence_id": sid,
+            })
+
+        logger.info(
+            "route4_sentence_search_complete",
+            query=query[:50],
+            results_raw=len(results),
+            evidence_deduped=len(evidence),
+            top_scores=[round(e["score"], 4) for e in evidence[:5]],
+            top_docs=list(set(e["document_title"] for e in evidence[:10])),
+        )
+
+        return evidence
+
+    @staticmethod
+    def _denoise_sentences(
+        evidence: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """Remove noisy, non-informative sentences before reranking.
+
+        Filters out HTML fragments, signature blocks, tiny fragments,
+        and bare headings. Identical logic to Route 3.
+        """
+        cleaned: List[Dict[str, Any]] = []
+
+        for ev in evidence:
+            text = (ev.get("sentence_text") or ev.get("text", "")).strip()
+            passage = (ev.get("text", "")).strip()
+
+            # Rule 1: HTML / markup-heavy
+            tag_count = len(re.findall(r"<[^>]+>", text))
+            if tag_count >= 2:
+                continue
+
+            # Rule 2: Too short / fragment
+            if len(text) < 25:
+                continue
+
+            # Rule 3: Signature / form boilerplate
+            if re.search(
+                r"(?i)(signature|signed this|print\)|registration number"
+                r"|authorized representative)",
+                text,
+            ):
+                continue
+
+            # Rule 4: Bare label ending with colon
+            if len(text) < 60 and text.endswith(":"):
+                continue
+
+            # Rule 5: No sentence structure (heading-only)
+            if len(text) < 50 and not re.search(r"[.?!]", text):
+                continue
+
+            # Strip residual HTML tags from passage
+            if "<" in passage:
+                passage = re.sub(r"<[^>]+>", "", passage).strip()
+                ev = {**ev, "text": passage}
+
+            cleaned.append(ev)
+
+        logger.info(
+            "route4_denoise_sentences",
+            before=len(evidence),
+            after=len(cleaned),
+            removed=len(evidence) - len(cleaned),
+        )
+        return cleaned
+
+    async def _rerank_sentences(
+        self,
+        query: str,
+        evidence: List[Dict[str, Any]],
+        top_k: int = 15,
+    ) -> List[Dict[str, Any]]:
+        """Rerank denoised sentences using voyage-rerank-2.5.
+
+        Cross-encoder reranking produces a wider score spread than
+        bi-encoder vector search, enabling meaningful top-k selection.
+        """
+        rerank_model = os.getenv("ROUTE4_RERANK_MODEL", "rerank-2.5")
+
+        try:
+            import voyageai
+            from src.core.config import settings
+
+            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
+
+            loop = asyncio.get_event_loop()
+            rr_result = await loop.run_in_executor(
+                self._executor,
+                lambda: vc.rerank(
+                    query=query,
+                    documents=documents,
+                    model=rerank_model,
+                    top_k=min(top_k, len(documents)),
+                ),
+            )
+
+            reranked: List[Dict[str, Any]] = []
+            for rr in rr_result.results:
+                ev = {**evidence[rr.index], "rerank_score": rr.relevance_score}
+                reranked.append(ev)
+
+            logger.info(
+                "route4_rerank_complete",
+                model=rerank_model,
+                input_count=len(evidence),
+                output_count=len(reranked),
+                top_score=round(reranked[0]["rerank_score"], 4) if reranked else 0,
+                bottom_score=round(reranked[-1]["rerank_score"], 4) if reranked else 0,
+            )
+            return reranked
+
+        except Exception:
+            logger.exception("route4_rerank_failed")
+            raise

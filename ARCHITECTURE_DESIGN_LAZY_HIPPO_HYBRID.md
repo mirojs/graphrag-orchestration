@@ -7967,7 +7967,68 @@ If `top_k=10` does become insufficient, three strategies in order of complexity:
 
 **Current recommendation**: No change needed. Monitor `theme_coverage` in benchmarks as corpus grows. If coverage drops below 90%, implement Option B first.
 
-### 27.8. Artifacts
+### 27.8. Deployment Note: `azd deploy` vs `deploy-graphrag.sh`
+
+**`azd deploy`** builds the Docker image and pushes it to Azure Container Apps. It reads the service definitions from `azure.yaml` (Dockerfile paths, host type). It does **not** set or update environment variables on the container — it only replaces the container image. Existing env vars on the container app are preserved across deploys.
+
+**`deploy-graphrag.sh`** does the same Docker build/push but **also explicitly sets environment variables** via `az containerapp update --set-env-vars`. This includes all Route 3/4 tuning knobs (`ROUTE3_COMMUNITY_TOP_K`, `ROUTE3_SENTENCE_RERANK`, `VOYAGE_API_KEY`, etc.). If a new env var is added to the code, `deploy-graphrag.sh` must be updated to pass it.
+
+**When to use which:**
+- **`azd deploy`**: Quick code-only deploys when no env var changes are needed. Suitable for most development iterations.
+- **`deploy-graphrag.sh`**: Required when new environment variables must be set or existing ones changed. Also required for first-time setup.
+- **GitHub Actions** (`.github/workflows/deploy.yml`): Auto-deploys on push to `main` when `src/`, `Dockerfile*`, or `requirements*.txt` change.
+
+**Current state (Feb 14, 2026)**: Route 3 env vars (`ROUTE3_COMMUNITY_TOP_K=10`, `ROUTE3_SENTENCE_RERANK=1`) use code-level defaults, so `azd deploy` is sufficient. The env vars only need explicit setting if overriding the defaults.
+
+### 27.9. Cloud Validation Test
+
+Post-deploy cloud test (3 Route 3 queries against production API):
+
+```python
+# Usage: python3 test_route3_cloud.py
+import httpx, json, time
+from azure.identity import DefaultAzureCredential
+
+API = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
+cred = DefaultAzureCredential()
+token = cred.get_token("https://management.azure.com/.default").token
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {token}",
+    "X-Group-ID": "test-5pdfs-v2-fix2",
+}
+queries = [
+    ("T-1", "What are the common themes across all the contracts and agreements?"),
+    ("T-4", "Summarize the risk management and liability provisions across all documents."),
+    ("T-6", "How do the documents address confidentiality and data protection?"),
+]
+with httpx.Client(base_url=API, timeout=120.0) as client:
+    for qid, query in queries:
+        payload = {"query": query, "force_route": "global_search", "response_type": "summary"}
+        t0 = time.monotonic()
+        resp = client.post("/hybrid/query", json=payload, headers=headers)
+        elapsed = time.monotonic() - t0
+        if resp.status_code == 200:
+            data = resp.json()
+            meta = data.get("metadata", {})
+            print(f"{qid}: {elapsed:.1f}s | communities={len(meta.get('matched_communities',[]))} "
+                  f"claims={meta.get('total_claims')} sentences={meta.get('sentence_evidence_count')} "
+                  f"chars={len(data.get('response',''))}")
+        else:
+            print(f"{qid}: HTTP {resp.status_code}")
+```
+
+**Results (Feb 14, 2026 — post-deploy):**
+
+| Query | Wall-clock | Communities | Claims | Sentences | Response |
+|-------|-----------|-------------|--------|-----------|----------|
+| T-1 (broad themes) | 28.8s | 10 | 51 | 15 | 4,810 chars |
+| T-4 (risk/liability) | 12.0s | 10 | 36 | 15 | 4,645 chars |
+| T-6 (confidentiality) | 6.4s | 10 | 0 | 15 | 2,246 chars |
+
+Wall-clock includes network latency (VM → Azure Container App → Azure OpenAI → back) and cold-start on first request. Server-side processing is faster (enable `ROUTE3_RETURN_TIMINGS=1` to see breakdown).
+
+### 27.10. Artifacts
 
 | File | Description |
 |------|-------------|
@@ -7975,6 +8036,160 @@ If `top_k=10` does become insufficient, three strategies in order of complexity:
 | `src/worker/hybrid_v2/pipeline/community_matcher.py` | Community matching with 0.05 floor threshold |
 | `scripts/benchmark_route3_latency_ablation.py` | Latency ablation test script (4 configs) |
 | `benchmark_route3_latency_ablation_20260214T052740Z.json` | Ablation results: community reduction = 60× dominant factor |
-| This section | Scaling analysis and future-proofing strategies |
+| `deploy-graphrag.sh` | Full deploy script with env var management |
+| `azure.yaml` | `azd` service definitions (image-only deploy) |
+| This section | Scaling analysis, deployment notes, and cloud validation |
+
+---
+
+## 28. Route 4 Architectural Assessment & Dual-Path Upgrade (February 14, 2026)
+
+### 28.1. Context: Lessons from Routes 2 and 3
+
+Routes 2 and 3 converged on architectural principles that Route 4 has not yet adopted:
+
+- **Route 2** proved that clean graph edges + simple denoising pipeline (score-gap, community filter, dedup, token budget) produces perfect results. Every attempt to add complexity (smarter NER, vector fallback) made it worse.
+- **Route 3** proved that a **dual-path architecture** (community MAP + sentence vector search in parallel) is the dominant strategy for reliability. Sentence search provides a direct query→evidence path that bypasses all abstraction layers. This is why `ROUTE3_COMMUNITY_TOP_K=10` is safe — the sentence path catches anything communities miss.
+- **Feb 13 A/B test (Section 26)** showed that Route 4's denoising fixes (+7.7pp containment) mattered more than the traversal algorithm choice (beam +5.4pp over PPR). The shared pipeline hygiene is the bigger lever.
+
+### 28.2. Architectural Soundness Assessment
+
+**Route 4's 6-stage pipeline is sound at macro level:**
+
+```
+4.0 Date fast-path → 4.1 Decompose → 4.2 Discover → 4.3 Trace
+    → 4.3.5 Confidence → 4.3.6 Coverage → 4.4 Synthesize
+```
+
+DRIFT decomposition (4.1) is architecturally necessary. The Feb 13 analysis (§10.2 in `ANALYSIS_ROUTE4_BORROW_ROUTE2_ARCHITECTURE_2026-02-13.md`) correctly identified that Route 2's "NER-first, decompose for synthesis only" approach **breaks for genuine DRIFT queries** where the original query has no extractable entities (e.g., "Compare time windows across the set"). The self-correction was correct: DRIFT decomposition must remain for retrieval, not just synthesis.
+
+**The fundamental gap:** Route 4 relies solely on entity graph traversal (beam search) for evidence. When seed resolution fails or entities mutate during decomposition, there's no parallel path — only the 200-line coverage gap-fill band-aid (`_apply_coverage_gap_fill()`). Route 3 proved that a sentence vector search path running in parallel eliminates this single-point-of-failure.
+
+### 28.3. HippoRAG 2 Deviation Verdict
+
+**The deviation (semantic beam over PPR) is justified but secondary.**
+
+The Feb 13 A/B test (Section 26.7) showed beam beats PPR by 5.4pp containment on the clean pipeline. The advantage is concentrated on cross-document queries (Q-D3, Q-D4, Q-D8) where beam's per-hop cosine re-scoring keeps traversal aligned with query intent.
+
+However, the traversal algorithm is **not the dominant factor** for Route 4 quality:
+- `comprehensive_sentence` mode (bypasses graph entirely): **100% accuracy**
+- Best graph-based mode (PPR, Jan 28): **98.2%**
+- DRIFT with beam search + all fixes: **70.3%**
+
+Route 4's underperformance is NOT beam vs PPR — it's the DRIFT decomposition → entity resolution → graph traversal pipeline **losing information at every stage** with no compensating parallel path. Adding sentence search is the architectural fix, not switching traversal algorithms.
+
+**Decision: Keep semantic beam as default. `ROUTE4_USE_PPR=1` toggle available for future comparison after sentence search is added.**
+
+### 28.4. Improvement Plan (Prioritized)
+
+#### Tier 1A: Add Sentence Vector Search as Parallel Evidence Path
+
+**Impact:** Highest single improvement. Eliminates the single-point-of-failure in entity-only retrieval.
+
+**Design:** Run sentence vector search in parallel with discovery+trace, merge results into synthesis.
+
+```python
+# Current Route 4:
+4.1 Decompose → 4.2 NER+discover → 4.3 Beam trace → 4.4 Synthesize
+
+# Route 4 v2 (with sentence search):
+4.1 Decompose → [4.2 NER+discover → 4.3 Beam trace] ‖ [4.S Sentence search]
+             → 4.3.5 Confidence → 4.3.6 Coverage (simplified) → 4.4 Synthesize
+```
+
+Reuses Route 3's `_retrieve_sentence_evidence()` infrastructure: Voyage embedding → `sentence_embeddings_v2` Neo4j index → NEXT/PREV context expansion → denoise → rerank.
+
+**What sentence search provides for DRIFT specifically:**
+- Direct evidence for concepts missed by entity resolution (LLM decomposition mutates entity names — sentence search finds the content directly)
+- Cross-document breadth (sentence index spans ALL documents regardless of graph connectivity)
+- Substantially reduces need for coverage gap-fill (sentence search naturally covers documents entity traversal misses)
+
+**Toggle:** `ROUTE4_SENTENCE_SEARCH=1` (default ON), `ROUTE4_SENTENCE_TOP_K=30`, `ROUTE4_SENTENCE_RERANK=1`
+
+#### Tier 1B: Fix Seed Quality — NER on Original + Decomposed (Union)
+
+**Impact:** Fixes entity name mutation from DRIFT decomposition.
+
+```python
+# Current: NER runs only on LLM-rephrased sub-questions
+for sub_q in sub_questions:
+    entities = await disambiguate(sub_q)  # Rephrased text → mutated names
+
+# Fix: NER on BOTH original + decomposed, union
+original_entities = await disambiguate(query)     # High-precision, exact words
+for sub_q in sub_questions:
+    sub_entities = await disambiguate(sub_q)      # Covers decomposed concepts
+seeds = deduplicate(original_entities + sub_entities)
+```
+
+**Why this matters:** "Property Management Agreement" in original query becomes "management agreement terms" after decomposition. Direct NER catches the exact entity name; decomposed NER catches abstract concepts. Union is always ≥ either alone.
+
+#### Tier 2: Coverage Gap-Fill Simplification (After Tier 1A)
+
+With sentence search providing cross-document breadth, the 200-line coverage gap-fill can be simplified to a lightweight "ensure every doc has ≥1 chunk" check. The BM25-style hybrid reranker, unit-qualifier detection, and keyword scoring become unnecessary — sentence search handles this naturally.
+
+#### Tier 3: Score-Gap Threshold Recalibration (Future)
+
+Beam cosine scores cluster in a 0.3-0.9 band with 2-5× top-to-bottom ratios. The existing `SCORE_GAP_THRESHOLD=0.5` was tuned for PPR's steeper distributions (10-50× ratios). Empirical profiling of beam score distributions is needed — but lower priority than Tiers 1A/1B since the denoising stack is already functional.
+
+### 28.5. Implementation: Sentence Search for Route 4
+
+**Changes to `src/worker/hybrid_v2/routes/route_4_drift.py`:**
+
+1. Add `_retrieve_sentence_evidence()` method (ported from Route 3, identical logic)
+2. Add `_denoise_sentences()` and `_rerank_sentences()` (ported from Route 3)
+3. Run sentence search in parallel with discovery+trace (Stage 4.2/4.3)
+4. Pass sentence evidence to synthesis via `sentence_evidence` parameter
+5. Add env var toggles: `ROUTE4_SENTENCE_SEARCH`, `ROUTE4_SENTENCE_TOP_K`, `ROUTE4_SENTENCE_RERANK`
+
+**Changes to `src/worker/hybrid_v2/pipeline/synthesis.py`:**
+
+1. Accept `sentence_evidence` parameter in `synthesize()`
+2. Convert sentence evidence to chunk format for context assembly
+3. Stamp with sentence rerank scores for proper token budget ordering
+
+**Changes to seed resolution in `route_4_drift.py`:**
+
+1. Extract entities from original query before decomposition
+2. Union original + sub-question entities as consolidated seed set
+
+### 28.6. Feb 13 Benchmark Baseline (Pre-Improvement)
+
+From Section 26.6, the best Route 4 configuration (beam + both fixes):
+
+| Metric | Value |
+|--------|-------|
+| Avg Containment | **0.703** |
+| Avg F1 | 0.124 |
+| Negative Tests | 9/10 (Q-N10 checker bug, fixed) |
+| Config | Beam search, coverage dedup, community filter disabled for DRIFT |
+
+Per-question detail:
+
+| QID | Containment | Note |
+|-----|------------|------|
+| Q-D1 | 0.930 | Emergency defect notification |
+| Q-D2 | 1.000 | Reservations on termination |
+| Q-D3 | 0.850 | Time windows across docs |
+| Q-D4 | 0.940 | Insurance mentions |
+| Q-D5 | 0.780 | Warranty coverage |
+| Q-D6 | 0.780 | Purchase vs invoice total |
+| Q-D7 | 0.220 | Latest explicit date |
+| Q-D8 | 0.830 | Entity counting |
+| Q-D9 | 0.000 | Fees: percentage vs fixed |
+
+**Target after Tier 1A+1B:** ~0.80+ avg containment, with Q-D9 (currently 0.000) and Q-D7 (0.220) as the key improvement targets.
+
+### 28.7. Artifacts
+
+| File | Description |
+|------|-------------|
+| `src/worker/hybrid_v2/routes/route_4_drift.py` | Route 4 handler — sentence search, NER union |
+| `src/worker/hybrid_v2/pipeline/synthesis.py` | Synthesis — sentence evidence integration |
+| `ANALYSIS_ROUTE4_BORROW_ROUTE2_ARCHITECTURE_2026-02-13.md` | Full investigation (Sections 1–12) |
+| `ARCHITECTURE_ROUTE4_IMPROVEMENT_2026-02-12.md` | Improvement roadmap and code analysis |
+| `ANALYSIS_ROUTE3_IMPROVEMENTS_BENEFIT_ROUTE4_2026-02-12.md` | How Route 3 improvements benefit Route 4 |
+| `benchmarks/route4_drift_multi_hop_20260213T164609Z.json` | Best baseline: beam + both fixes (0.703 containment) |
+| This section | Architectural assessment, HippoRAG 2 verdict, improvement plan |
 
 ---

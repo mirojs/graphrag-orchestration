@@ -1768,13 +1768,19 @@ Response:"""
         doc_groups: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
         
         for i, chunk in enumerate(text_chunks):
-            # Extract document identity from metadata or source
+            # Extract document identity from metadata or top-level keys.
+            # Graph-retrieved chunks store info in chunk["metadata"][...],
+            # while sentence-search chunks use top-level keys.
             meta = chunk.get("metadata", {})
             # Primary: use document_id from graph (authoritative, no normalization needed)
-            doc_key = meta.get("document_id")
+            doc_key = meta.get("document_id") or chunk.get("document_id")
             if not doc_key:
                 # Fallback: normalize document_title or source to merge sub-parts
-                raw_doc_key = meta.get("document_title") or chunk.get("source", "Unknown")
+                raw_doc_key = (
+                    meta.get("document_title")
+                    or chunk.get("document_title")
+                    or chunk.get("source", "Unknown")
+                )
                 doc_key = _normalize_doc_key(raw_doc_key)
             doc_groups[doc_key].append((i, chunk))
         
@@ -1808,12 +1814,128 @@ Response:"""
         doc_groups_budgeted: Dict[str, List[Tuple[int, Dict[str, Any]]]] = defaultdict(list)
         for i, chunk in budgeted_chunks:
             meta = chunk.get("metadata", {})
-            doc_key = meta.get("document_id")
+            doc_key = meta.get("document_id") or chunk.get("document_id")
             if not doc_key:
-                raw_doc_key = meta.get("document_title") or chunk.get("source", "Unknown")
+                raw_doc_key = (
+                    meta.get("document_title")
+                    or chunk.get("document_title")
+                    or chunk.get("source", "Unknown")
+                )
                 doc_key = _normalize_doc_key(raw_doc_key)
             doc_groups_budgeted[doc_key].append((i, chunk))
-        
+
+        # --- Document-group gap pruning (February 14, 2026) ---
+        # Score each document group by sum of chunk _entity_score values.
+        # Drop document groups whose total score is below a gap threshold
+        # relative to the top-scoring document.  This removes irrelevant
+        # documents that leaked through PPR (e.g., "Owner" appearing in
+        # multiple docs pulls in unrelated contracts).
+        # Toggle: DOC_GROUP_PRUNING_ENABLED=0 to disable.
+        doc_group_pruning_enabled = os.environ.get("DOC_GROUP_PRUNING_ENABLED", "1") == "1"
+        doc_group_pruning_stats: Dict[str, Any] = {"enabled": doc_group_pruning_enabled}
+
+        if doc_group_pruning_enabled and len(doc_groups_budgeted) > 1:
+            # Score each document group by *unique entity PPR coverage*.
+            # Only entity-retrieved chunks carry signal — skeleton/coverage chunks
+            # (tagged __coverage_gap_fill__) are excluded from scoring because
+            # they all share a uniform low _entity_score that masks real
+            # document relevance differences.
+            #
+            # For each doc group we collect the set of unique _source_entity
+            # names and sum their PPR scores from entity_scores.  This way a
+            # document that attracted chunks from 3 high-PPR entities scores
+            # higher than one that shares a single common entity.
+            #
+            # Fallback: if NO entity-retrieved chunks exist in any doc group
+            # (i.e., all chunks are __coverage_gap_fill__ from skeleton
+            # enrichment), fall back to summing _entity_score directly.
+            _entity_scores_dict = entity_scores or {}
+            doc_group_scores: Dict[str, float] = {}
+            doc_group_entity_detail: Dict[str, Dict[str, float]] = {}
+            has_entity_chunks = False
+            for dkey, dchunks in doc_groups_budgeted.items():
+                # Collect unique entities (not coverage gap-fill) per doc group
+                entity_set: Dict[str, float] = {}
+                for _, c in dchunks:
+                    src_ent = c.get("_source_entity", "")
+                    if src_ent and src_ent != "__coverage_gap_fill__":
+                        has_entity_chunks = True
+                        # Use the PPR score from entity_scores dict (canonical);
+                        # fall back to chunk-level _entity_score if not in dict.
+                        ppr = _entity_scores_dict.get(src_ent, c.get("_entity_score", 0.0))
+                        # Keep highest score per entity (same entity might
+                        # map to multiple chunks with different scores).
+                        if src_ent not in entity_set or ppr > entity_set[src_ent]:
+                            entity_set[src_ent] = ppr
+                doc_group_scores[dkey] = sum(entity_set.values())
+                doc_group_entity_detail[dkey] = entity_set
+
+            # Fallback: if all chunks are coverage/skeleton (no entity-retrieved),
+            # score by raw _entity_score sum instead.
+            scoring_method = "entity_ppr"
+            if not has_entity_chunks:
+                scoring_method = "entity_score_sum_fallback"
+                for dkey, dchunks in doc_groups_budgeted.items():
+                    doc_group_scores[dkey] = sum(
+                        c.get("_entity_score", 0.0) for _, c in dchunks
+                    )
+
+            ranked_docs = sorted(doc_group_scores.items(), key=lambda kv: kv[1], reverse=True)
+            top_doc_key, top_doc_score = ranked_docs[0]
+
+            # Only prune when the top document has meaningful signal
+            doc_group_min_ratio = float(os.environ.get("DOC_GROUP_MIN_RATIO", "0.25"))
+            if top_doc_score > 0:
+                docs_to_keep = {top_doc_key}
+                docs_pruned = []
+                for dkey, dscore in ranked_docs[1:]:
+                    ratio = dscore / top_doc_score if top_doc_score > 0 else 0.0
+                    if ratio >= doc_group_min_ratio:
+                        docs_to_keep.add(dkey)
+                    else:
+                        docs_pruned.append((dkey, round(dscore, 4), round(ratio, 3)))
+
+                if docs_pruned:
+                    # Remove pruned document groups
+                    chunks_before_prune = sum(len(v) for v in doc_groups_budgeted.values())
+                    for dkey, _, _ in docs_pruned:
+                        del doc_groups_budgeted[dkey]
+                    chunks_after_prune = sum(len(v) for v in doc_groups_budgeted.values())
+
+                    doc_group_pruning_stats.update({
+                        "top_doc": top_doc_key,
+                        "top_score": round(top_doc_score, 4),
+                        "min_ratio": doc_group_min_ratio,
+                        "docs_kept": len(docs_to_keep),
+                        "docs_pruned": len(docs_pruned),
+                        "pruned_details": [(d, s, r) for d, s, r in docs_pruned],
+                        "entity_detail": {
+                            dk: {e: round(s, 4) for e, s in ev.items()}
+                            for dk, ev in doc_group_entity_detail.items()
+                        },
+                        "chunks_before": chunks_before_prune,
+                        "chunks_after": chunks_after_prune,
+                    })
+                    logger.info(
+                        "doc_group_pruning",
+                        kept=len(docs_to_keep),
+                        pruned=len(docs_pruned),
+                        top_doc=top_doc_key,
+                        top_score=round(top_doc_score, 4),
+                    )
+                else:
+                    doc_group_pruning_stats.update({
+                        "decision": "all_above_threshold",
+                        "ranked": [(dk, round(ds, 4)) for dk, ds in ranked_docs],
+                        "entity_detail": {
+                            dk: {e: round(s, 4) for e, s in ev.items()}
+                            for dk, ev in doc_group_entity_detail.items()
+                        },
+                        "min_ratio": doc_group_min_ratio,
+                    })
+            else:
+                doc_group_pruning_stats["decision"] = "no_signal"
+
         # Log document grouping for debugging
         logger.info(
             "build_cited_context_grouping",
@@ -1824,6 +1946,7 @@ Response:"""
             token_budget=token_budget,
             num_doc_groups=len(doc_groups_budgeted),
             doc_keys=list(doc_groups_budgeted.keys())[:10],
+            doc_group_pruning=doc_group_pruning_stats,
         )
         
         context_parts = []
@@ -1935,6 +2058,7 @@ Response:"""
             "token_budget": token_budget,
             "budget_enabled": budget_enabled,
             "num_doc_groups": len(doc_groups_budgeted),
+            "doc_group_pruning": doc_group_pruning_stats,
         }
         return context_string, citation_map, sentence_citation_map, context_stats
     

@@ -67,54 +67,57 @@ except ImportError:
 from src.core.config import settings
 
 def _is_v2_enabled() -> bool:
-    """Check if V2 Voyage embeddings are enabled."""
-    return settings.VOYAGE_V2_ENABLED and settings.VOYAGE_API_KEY
+    """Check if Voyage embeddings are available (API key present).
+
+    The old VOYAGE_V2_ENABLED gate has been removed — Voyage voyage-context-3
+    is the only embedding model.  The deprecated OpenAI text-embedding-3-large
+    fallback has been deleted (Feb 14 2026).
+    """
+    return bool(settings.VOYAGE_API_KEY)
 
 _v2_embedder = None  # Lazy-initialized VoyageEmbedService
 
 def _get_v2_embedder():
-    """Get or create the V2 Voyage embedder (singleton)."""
+    """Get or create the Voyage embedder (singleton)."""
     global _v2_embedder
     if _v2_embedder is None and _is_v2_enabled():
         try:
             from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
             _v2_embedder = VoyageEmbedService()
-            logger.info("v2_voyage_embedder_initialized")
+            logger.info("voyage_embedder_initialized")
         except Exception as e:
-            logger.warning("v2_voyage_embedder_init_failed", error=str(e))
+            logger.warning("voyage_embedder_init_failed", error=str(e))
     return _v2_embedder
 
 def get_query_embedding(query: str) -> List[float]:
     """
-    Get embedding for a query string.
-    
-    Uses V2 Voyage embedder if enabled (voyage-context-3 with input_type="query"),
-    otherwise falls back to V1 OpenAI embedder (text-embedding-3-large).
+    Get embedding for a query string using Voyage voyage-context-3.
     
     Args:
         query: The search query to embed
         
     Returns:
-        Embedding vector (2048d for V2, 3072d for V1)
+        Embedding vector (2048d)
+        
+    Raises:
+        RuntimeError: If VOYAGE_API_KEY is not configured.
     """
-    if _is_v2_enabled():
-        embedder = _get_v2_embedder()
-        if embedder:
-            return embedder.embed_query(query)
-    
-    # Fallback to V1 (OpenAI)
-    from src.worker.services.llm_service import LLMService
-    llm_service = LLMService()
-    return llm_service.embed_model.get_text_embedding(query)
+    embedder = _get_v2_embedder()
+    if embedder:
+        return embedder.embed_query(query)
+    raise RuntimeError(
+        "get_query_embedding() failed — VOYAGE_API_KEY not set. "
+        "The deprecated OpenAI text-embedding-3-large fallback has been removed."
+    )
 
 def get_vector_index_name() -> str:
     """
-    Get the appropriate vector index name based on V2 mode.
+    Get the vector index name.  Always returns the V2 Voyage index.
     
     Returns:
-        'chunk_embeddings_v2' if V2 enabled, 'chunk_embedding' otherwise
+        'chunk_embeddings_v2'
     """
-    return "chunk_embeddings_v2" if _is_v2_enabled() else "chunk_embedding"
+    return "chunk_embeddings_v2"
 
 logger = structlog.get_logger(__name__)
 

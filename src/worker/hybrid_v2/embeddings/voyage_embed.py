@@ -496,9 +496,11 @@ def get_voyage_embed_service() -> VoyageEmbedService:
 
 def is_voyage_v2_enabled() -> bool:
     """
-    Check if Voyage V2 pipeline is enabled.
+    Check if Voyage embeddings are available.
     
     Returns:
-        True if VOYAGE_V2_ENABLED=True and VOYAGE_API_KEY is set
+        True if VOYAGE_API_KEY is set.  The old VOYAGE_V2_ENABLED gate
+        has been removed — Voyage voyage-context-3 is the only embedding
+        model (Feb 14 2026).
     """
-    return settings.VOYAGE_V2_ENABLED and bool(settings.VOYAGE_API_KEY)
+    return bool(settings.VOYAGE_API_KEY)

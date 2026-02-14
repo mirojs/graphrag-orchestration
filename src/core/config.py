@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     # Docs: https://docs.voyageai.com/docs/contextualized-chunk-embeddings
     # ========================================================================
     VOYAGE_API_KEY: Optional[str] = None
-    VOYAGE_V2_ENABLED: bool = False  # Set to True to enable V2 pipeline
+    VOYAGE_V2_ENABLED: bool = True  # Legacy flag — always True (Voyage is the only embedder since Feb 14 2026)
     VOYAGE_MODEL_NAME: str = "voyage-context-3"  # Contextual embedding model
     VOYAGE_EMBEDDING_DIM: int = 2048  # voyage-context-3 with output_dimension=2048
     VOYAGE_V2_SIMILARITY_THRESHOLD: float = 0.87  # SIMILAR_TO edge threshold (raised from 0.85 for V2)

@@ -58,22 +58,19 @@ class LocalSearchHandler(BaseRouteHandler):
     ROUTE_NAME = "route_2_local_search"
 
     def _is_v2_enabled(self) -> bool:
-        """Check if V2 Voyage mode is enabled."""
-        return settings.VOYAGE_V2_ENABLED and bool(settings.VOYAGE_API_KEY)
+        """Check if Voyage embeddings are available (API key present)."""
+        return bool(settings.VOYAGE_API_KEY)
 
     async def _get_query_embedding(self, query: str):
-        """Get query embedding using V2 Voyage or V1 OpenAI based on config."""
-        if self._is_v2_enabled():
-            voyage_service = _get_voyage_service()
-            if voyage_service:
-                logger.info("route_2_using_voyage_embeddings")
-                return voyage_service.embed_query(query)
-        
-        # Fallback to V1 OpenAI embeddings via pipeline
-        if hasattr(self.pipeline, 'embed_model') and self.pipeline.embed_model:
-            return await self.pipeline.embed_model.aget_query_embedding(query)
-        
-        return None
+        """Get query embedding using Voyage voyage-context-3."""
+        voyage_service = _get_voyage_service()
+        if voyage_service:
+            logger.info("route_2_using_voyage_embeddings")
+            return voyage_service.embed_query(query)
+        raise RuntimeError(
+            "Route 2 embedding failed — VOYAGE_API_KEY not set. "
+            "The deprecated OpenAI text-embedding-3-large fallback has been removed."
+        )
 
     async def execute(
         self,
@@ -138,7 +135,7 @@ class LocalSearchHandler(BaseRouteHandler):
         # Strategy A (flat vector search) or Strategy B (graph traversal).
         # Both inject supplementary evidence chunks into the synthesis prompt.
         skeleton_coverage_chunks: List[Dict[str, Any]] = []
-        if settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_V2_ENABLED:
+        if settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_API_KEY:
             try:
                 if settings.SKELETON_GRAPH_TRAVERSAL_ENABLED:
                     # Strategy B: graph traversal from seed sentences

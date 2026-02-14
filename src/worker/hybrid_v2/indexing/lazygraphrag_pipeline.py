@@ -271,7 +271,7 @@ class LazyGraphRAGIndexingPipeline:
 
         # 4.1) Skeleton: Extract sentence nodes, embed, persist (Strategy A).
         # Guard: only run when feature flag is on AND Voyage V2 is enabled.
-        skeleton_enabled = settings.SKELETON_ENRICHMENT_ENABLED and settings.VOYAGE_V2_ENABLED
+        skeleton_enabled = settings.SKELETON_ENRICHMENT_ENABLED and bool(settings.VOYAGE_API_KEY)
         if skeleton_enabled:
             try:
                 skeleton_stats = await self._build_sentence_skeleton(
@@ -293,8 +293,8 @@ class LazyGraphRAGIndexingPipeline:
                 stats["skeleton_sentences"] = 0
                 stats["skeleton_error"] = str(e)
         else:
-            logger.debug("step_4.1_skeleton_skipped (SKELETON_ENRICHMENT_ENABLED=%s, VOYAGE_V2_ENABLED=%s)",
-                         settings.SKELETON_ENRICHMENT_ENABLED, settings.VOYAGE_V2_ENABLED)
+            logger.debug("step_4.1_skeleton_skipped (SKELETON_ENRICHMENT_ENABLED=%s, VOYAGE_API_KEY=%s)",
+                         settings.SKELETON_ENRICHMENT_ENABLED, bool(settings.VOYAGE_API_KEY))
 
         # 4.2) Phase 2: Sparse sentence-to-sentence RELATED_TO edges.
         # Separate from GDS KNN — bounded: threshold 0.90, max k=2, cross-chunk only.

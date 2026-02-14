@@ -721,6 +721,87 @@ These two stages are **independent** and run concurrently via `asyncio.gather()`
 *   **Deterministic Mode:** When `response_type="nlp_audit"`, uses regex-based sentence extraction (no LLM) for 100% repeatability
 *   **Code:** `synthesis.py` L145 (`synthesize()`), L802 (`_build_cited_context()`)
 
+#### Route 2 Context Efficiency Problem (Diagnosed February 14, 2026)
+
+**Root cause:** Skeleton enrichment (Stage 2.2.6) provides ~80% of all context, but it has **no document filtering**. It dumps full document sections for every document that shares any PPR entity, regardless of relevance to the query.
+
+**Measured impact (5-query benchmark on `test-5pdfs-v2-fix2`):**
+
+| Query | Entity chunks | Skeleton chunks | Doc groups | Context chars | Answer |
+|---|---|---|---|---|---|
+| Who is the Agent? | 1 | 0 | 1 | 780 | Walt Flood Realty |
+| What is the address of the property? | **0** | **all** | **4** | **24,203** | 480 Willow Glen Drive… |
+| What is the warranty period? | **0** | **all** | **2** | **14,093** | 90 days |
+| Who is the Owner? | **0** | **all** | **3** | **17,236** | Contoso Ltd. |
+| What is the monthly management fee? | **0** | **all** | **1** | **6,802** | $50.00/month |
+
+**Key finding:** For 4 of 5 queries, entity retrieval (Stage 2.2.5) returns **zero chunks**. All context comes from skeleton enrichment, which has no relevance scoring. The LLM reads 14-24K chars of unscored text to extract a single fact (a name, an address, a dollar amount).
+
+**What was tried and failed:**
+1. **Doc-group gap pruning in `_build_cited_context()`** — Attempted to score document groups by sum of chunk `_entity_score` and prune low-scoring docs. Failed because skeleton chunks all carry a uniform default score (`min_entity_score * 0.5`), producing no differentiation between documents.
+2. **Unique entity PPR scoring** — Refined to score by unique `_source_entity` PPR scores instead. Failed because skeleton chunks have `_source_entity = "__coverage_gap_fill__"` (not a real entity), so they contribute zero signal.
+3. **Both approaches share the same flaw:** They try to filter *after* context assembly, when the only chunks present have no relevance signal. The filtering must happen *upstream*, before skeleton content enters the pipeline.
+
+**Where the real signal exists:**
+*   `doc_scope` IDF-weighted scores (computed in `_resolve_target_documents()`) **do** differentiate documents reliably: e.g., PMA=9.417 vs HTC=1.417 vs BLW=0.917 for "Who is the Agent?"
+*   But `doc_scope` is computed inside `_retrieve_text_chunks()`, which runs in Stage 2.2.5 — **after** skeleton enrichment has already been dispatched in parallel via `asyncio.gather()`
+*   For queries where entity retrieval returns 0 chunks, `doc_scope` may not even run (no entities selected → no target documents resolved)
+
+**Correct fix direction:** Filter skeleton content by document relevance *before* merging into synthesis context. Options:
+1. **Run skeleton enrichment after entity retrieval** (sequential, not parallel) — use `doc_scope` results to select which documents get skeleton content. Trades ~1s latency for precision.
+2. **Independent document scoring for skeleton** — Run a lightweight doc-relevance check (query embedding vs document summary embeddings, or keyword overlap) inside skeleton enrichment itself, independent of entity retrieval.
+3. **Post-merge filtering using doc_scope** — Keep parallel execution, but after `asyncio.gather()` completes, use `doc_scope` scores from entity retrieval to filter skeleton chunks before passing to synthesis. Only works when entity retrieval produces results (fails for the 4/5 zero-entity case).
+
+**Fix implemented — upstream skeleton document filter (February 14, 2026):**
+
+`_filter_skeleton_by_document()` in `route_2_local.py` filters skeleton chunks by document *before* they reach synthesis. Groups skeleton chunks by `metadata.document_id`, scores each document by its MAX `skeleton_score` (Voyage seed similarity), and drops any document scoring below `SKELETON_DOC_MIN_RATIO` (default: 0.90) of the top document's best score.
+
+- **Toggle:** `SKELETON_DOC_FILTER_ENABLED=0` to disable (default: enabled)
+- **Threshold:** `SKELETON_DOC_MIN_RATIO=0.90` — only documents within 90% of the top doc's best seed score are kept
+- **Shared method:** Used by both Strategy A (embedding) and Strategy B (graph traversal)
+
+**Measured results (5-query benchmark, before → after):**
+
+| Query | Docs before | Chars before | Docs after | Chars after | Reduction | Answer |
+|---|---|---|---|---|---|---|
+| Who is the Agent? | 1 | 780 | 1 | 780 | — | identical |
+| Address of the property? | 4 | 24,203 | 3 | 20,193 | -17% | identical |
+| What is the warranty period? | 2 | 14,093 | 2 | 14,093 | — | identical |
+| Who is the Owner? | 3 | 17,236 | **1** | **3,677** | **-79%** | identical |
+| Monthly management fee? | 1 | 6,802 | 1 | 6,802 | — | identical |
+
+**Latency finding:** Synthesis LLM time (gpt-4.1-mini) is 554–697ms across 3.7K–20K context chars (only 26% variation across 5.4× context range). LLM latency is dominated by output token generation, not input reading. The context reduction delivers **cost/token savings**, not speed improvement. Average total Route 2 latency: ~1,930ms unchanged.
+
+Doc-group pruning in `synthesis.py` is now largely redundant (kept as secondary safety net).
+
+#### Route 2 Known Bug: `doc_scope` Seed Dilution (Identified February 14, 2026)
+
+**Bug:** `_resolve_target_documents()` in `synthesis.py` uses `total_seeds = len(seed_entities)` where `seed_entities` is actually the **PPR-expanded** entity list (13 entities after budget limit), not the original NER seeds (2 entities). This dilutes the cross-document check ratio:
+
+- **Current (broken):** `top_score / total_seeds = 5.833 / 13 = 0.449 < 0.5` → `skip_cross_document` (doc_scope never activates)
+- **Correct:** `top_score / ner_seed_count = 5.833 / 2 = 2.917 >> 0.5` → doc_scope would activate and filter documents
+
+**Root cause chain:**
+1. NER extracts 2 seed entities (e.g., "Agent", "property")
+2. PPR expands to 15 entity-score tuples
+3. `_retrieve_text_chunks()` applies `relevance_budget` (0.8) → `budget_limit = int(15 * 0.8) + 1 = 13`
+4. Passes `selected_entities[:13]` as `seed_entities` param to `_resolve_target_documents()`
+5. `total_seeds = len(seed_entities) = 13` — should be NER count (2)
+
+**Impact:** `doc_scope` is currently dead code for Route 2 — it never activates because the ratio check always fails. For the 1-of-5 queries that returns entity-retrieved chunks ("Who is the Agent?"), doc_scope *would* have filtered the single-doc context correctly if the denominator were the NER seed count.
+
+**Fix direction:** Pass original NER seed count from `route_2_local.py` through to synthesis. Either:
+1. Add `ner_seed_count` parameter to `synthesize()` → `_retrieve_text_chunks()` → `_resolve_target_documents()`
+2. Or use the count of distinct entities that actually matched documents (from `entity_doc_counts`) as the denominator
+
+#### Route 2 Further Improvement Opportunities
+
+1. **Fix `doc_scope` seed dilution** (above) — would activate document filtering for the entity-retrieved chunk path (currently dead code)
+2. **"Address" query still returns 3 docs / 20K chars** — the skeleton filter can't help here because "property address" has high semantic similarity across all real estate contracts. This is a fundamental limitation of embedding-based filtering for generic domain terms. Possible mitigation: document-summary re-ranking at synthesis time.
+3. **Strategy A skeleton filter call** — `_filter_skeleton_by_document()` method exists as a shared method but the explicit call in Strategy A's code path should be verified
+4. **Commit all changes** — skeleton doc filter in `route_2_local.py`, containment dedup + doc key fix + doc-group pruning in `synthesis.py` are all uncommitted
+5. **LLM necessity for simple extraction** — for queries like "Who is the Owner?" where skeleton returns a single document with 3.7K chars, a simpler extraction (regex, direct span selection) might replace the LLM synthesis entirely. However, the LLM handles ambiguity, multi-fact correlation, and citation formatting that simpler approaches cannot.
+
 ### Route 3: Global Search Equivalent (LazyGraphRAG + HippoRAG 2)
 
 This is the replacement for Microsoft GraphRAG's Global Search mode, enhanced with HippoRAG 2 for detail recovery.

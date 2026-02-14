@@ -219,3 +219,47 @@ Modified files (git diff --stat HEAD):
   ```
 - **Neo4j:** `neo4j+s://a86dcf63.databases.neo4j.io`, 177 sentences in group
   `test-5pdfs-v2-fix2`, all with correct `IN_DOCUMENT` and `PART_OF` relationships.
+
+---
+
+## 7. Route 2 — Skeleton Doc Filter & `doc_scope` Bug (February 14, 2026)
+
+### 7.1 Skeleton Document Filter — Implemented & Measured
+
+Route 2 skeleton enrichment (Stage 2.2.6) was dumping full document sections from ALL documents sharing any PPR entity, regardless of query relevance. For 4 of 5 benchmark queries, entity retrieval returned **zero chunks** — 100% of context came from unfiltered skeleton content (14–24K chars).
+
+**Fix:** `_filter_skeleton_by_document()` added to `route_2_local.py` — groups skeleton chunks by `metadata.document_id`, scores each document by MAX `skeleton_score` (Voyage seed similarity), drops documents below `SKELETON_DOC_MIN_RATIO=0.90` of the top document's best score.
+
+**Results (5-query benchmark on `test-5pdfs-v2-fix2`):**
+
+| Query | Docs before | Chars before | Docs after | Chars after | Reduction | Answer |
+|---|---|---|---|---|---|---|
+| Who is the Agent? | 1 | 780 | 1 | 780 | — | identical |
+| Address of the property? | 4 | 24,203 | 3 | 20,193 | -17% | identical |
+| What is the warranty period? | 2 | 14,093 | 2 | 14,093 | — | identical |
+| Who is the Owner? | 3 | 17,236 | **1** | **3,677** | **-79%** | identical |
+| Monthly management fee? | 1 | 6,802 | 1 | 6,802 | — | identical |
+
+**Latency:** Synthesis LLM time (gpt-4.1-mini) is 554–697ms across 3.7K–20K context chars (only 26% variation across 5.4× context range). Context reduction delivers **cost/token savings**, not speed improvement. Average Route 2 total: ~1,930ms unchanged.
+
+### 7.2 `doc_scope` Seed Dilution Bug — Confirmed
+
+`_resolve_target_documents()` in `synthesis.py` uses `total_seeds = len(seed_entities)` where `seed_entities` is the **PPR-expanded** entity list (13 entities after budget limit), not the original NER seeds (2 entities).
+
+- **Current (broken):** `top_score / total_seeds = 5.833 / 13 = 0.449 < 0.5` → `skip_cross_document` (doc_scope never activates)
+- **Correct:** `top_score / ner_seed_count = 5.833 / 2 = 2.917 >> 0.5` → doc_scope would activate
+
+**Root cause chain:**
+1. NER extracts 2 seed entities → PPR expands to 15 entity-score tuples
+2. `_retrieve_text_chunks()` applies `relevance_budget` (0.8) → `budget_limit = int(15 * 0.8) + 1 = 13`
+3. Passes `selected_entities[:13]` as `seed_entities` param to `_resolve_target_documents()`
+4. `total_seeds = 13` — should be NER count (2)
+
+**Impact:** `doc_scope` is dead code for Route 2 — it never activates. Fix requires passing original NER seed count from `route_2_local.py` through to synthesis.
+
+### 7.3 Route 2 TODO List
+
+- [ ] **Fix `doc_scope` seed dilution** — pass NER seed count through `synthesize()` → `_retrieve_text_chunks()` → `_resolve_target_documents()` as the denominator
+- [ ] **"Address" query still 3 docs / 20K chars** — embedding-based filter can't distinguish generic domain terms ("property address") across real estate contracts; consider document-summary re-ranking at synthesis time
+- [ ] **Verify Strategy A skeleton filter call** — `_filter_skeleton_by_document()` is a shared method; confirm Strategy A code path explicitly calls it
+- [ ] **Commit all Route 2 changes** — skeleton doc filter (`route_2_local.py`), containment dedup + doc key fix + doc-group pruning (`synthesis.py`) are all uncommitted

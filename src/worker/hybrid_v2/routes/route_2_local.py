@@ -309,6 +309,86 @@ class LocalSearchHandler(BaseRouteHandler):
         )
 
     # ================================================================
+    # SKELETON DOCUMENT FILTERING (shared by Strategy A & B)
+    # ================================================================
+
+    def _filter_skeleton_by_document(self, coverage_chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filter skeleton chunks to keep only the most relevant document(s).
+
+        Groups chunks by document_id, scores each document by its MAX
+        skeleton_score (highest seed-sentence similarity), and drops
+        documents whose max score falls below SKELETON_DOC_MIN_RATIO of
+        the top document's max score.
+
+        Returns the (possibly reduced) list of coverage_chunks.
+        """
+        skel_doc_filter_enabled = os.environ.get("SKELETON_DOC_FILTER_ENABLED", "1") == "1"
+        if not skel_doc_filter_enabled or len(coverage_chunks) <= 1:
+            return coverage_chunks
+
+        from collections import defaultdict as _dd
+        doc_max_score: Dict[str, float] = {}
+        doc_chunks: Dict[str, List[Dict]] = _dd(list)
+        for chunk in coverage_chunks:
+            doc_id = chunk.get("metadata", {}).get("document_id", "") or "unknown"
+            score = chunk.get("metadata", {}).get("skeleton_score", 0.0)
+            doc_chunks[doc_id].append(chunk)
+            if doc_id not in doc_max_score or score > doc_max_score[doc_id]:
+                doc_max_score[doc_id] = score
+
+        if len(doc_max_score) <= 1:
+            return coverage_chunks
+
+        skel_doc_min_ratio = float(os.environ.get("SKELETON_DOC_MIN_RATIO", "0.90"))
+        ranked = sorted(doc_max_score.items(), key=lambda kv: kv[1], reverse=True)
+        top_doc_id, top_score = ranked[0]
+        threshold = top_score * skel_doc_min_ratio
+
+        kept_ids = set()
+        dropped_info = []
+        for doc_id, max_s in ranked:
+            if max_s >= threshold:
+                kept_ids.add(doc_id)
+            else:
+                doc_title = next(
+                    (c.get("metadata", {}).get("document_title", doc_id)
+                     for c in doc_chunks[doc_id]),
+                    doc_id,
+                )
+                dropped_info.append((doc_title, len(doc_chunks[doc_id]), round(max_s, 3)))
+
+        if not dropped_info:
+            logger.info(
+                "skeleton_doc_filter_all_kept",
+                num_docs=len(doc_max_score),
+                scores=[(d, round(s, 3)) for d, s in ranked],
+                threshold=round(threshold, 3),
+            )
+            return coverage_chunks
+
+        before_count = len(coverage_chunks)
+        coverage_chunks = [c for c in coverage_chunks
+                           if (c.get("metadata", {}).get("document_id", "") or "unknown") in kept_ids]
+        top_title = next(
+            (c.get("metadata", {}).get("document_title", top_doc_id)
+             for c in doc_chunks[top_doc_id]),
+            top_doc_id,
+        )
+        logger.info(
+            "skeleton_doc_filter",
+            top_doc=top_title,
+            top_score=round(top_score, 3),
+            threshold=round(threshold, 3),
+            ratio=skel_doc_min_ratio,
+            docs_kept=len(kept_ids),
+            docs_dropped=len(dropped_info),
+            dropped=dropped_info,
+            chunks_before=before_count,
+            chunks_after=len(coverage_chunks),
+        )
+        return coverage_chunks
+
+    # ================================================================
     # SKELETON ENRICHMENT (Strategy A)
     # ================================================================
 
@@ -408,6 +488,9 @@ class LocalSearchHandler(BaseRouteHandler):
                 },
             })
         
+        # ── Document-level filtering (same logic as Strategy B) ──
+        coverage_chunks = self._filter_skeleton_by_document(coverage_chunks)
+
         logger.info(
             "skeleton_sentences_retrieved",
             total=len(sentence_results),
@@ -605,6 +688,9 @@ class LocalSearchHandler(BaseRouteHandler):
                 },
             })
         
+        # ── Document-level filtering (shared method) ──
+        coverage_chunks = self._filter_skeleton_by_document(coverage_chunks)
+
         logger.info(
             "strategy_b_graph_traversal_complete",
             seeds=sum(1 for r in traversal_results if "seed" in (r.get("sources") or [])),

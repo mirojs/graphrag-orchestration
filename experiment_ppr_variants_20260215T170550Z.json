@@ -1,0 +1,76 @@
+{
+  "top_k": 20,
+  "group_id": "test-5pdfs-v2-fix2",
+  "results": [
+    {
+      "qid": "Q-D3",
+      "seeds": [
+        "windows",
+        "warranty",
+        "holding tank",
+        "Property Management",
+        "contract"
+      ],
+      "coverage_a": 0.07112970711297072,
+      "coverage_b": 0.0794979079497908,
+      "coverage_c": 0.06694560669456066,
+      "coverage_d": 0.0794979079497908,
+      "rank_a": 0.84287428730014,
+      "rank_b": 0.9671350294324229,
+      "rank_c": 0.8444824233924927,
+      "rank_d": 0.9665625086152866,
+      "latency_a_ms": 389,
+      "latency_b_ms": 1586,
+      "latency_c_ms": 731,
+      "latency_d_ms": 1458,
+      "top10_a": [
+        "holding tank",
+        "contract",
+        "Property Management",
+        "windows",
+        "warranty",
+        "provisions of Warranty",
+        "Builder",
+        "Party",
+        "Contoso Ltd.",
+        "Limited Warranty"
+      ],
+      "top10_b": [
+        "Agreement",
+        "Limited Warranty",
+        "owner",
+        "Fabrikam Inc.",
+        "Contoso Ltd.",
+        "holding tank",
+        "Holding Tank Owner",
+        "property",
+        "Builder",
+        "holding tank(s)"
+      ],
+      "top10_c": [
+        "windows",
+        "holding tank",
+        "warranty",
+        "contract",
+        "sixty (60) days",
+        "Property Management",
+        "receptacles",
+        "dates on which the holding tank was serviced",
+        "cabinet work",
+        "2024-06-15"
+      ],
+      "top10_d": [
+        "Agreement",
+        "Limited Warranty",
+        "Contoso Ltd.",
+        "Fabrikam Inc.",
+        "owner",
+        "holding tank",
+        "Holding Tank Owner",
+        "holding tank(s)",
+        "name of the owner of the holding tank",
+        "location of the property on which the holding tank is installed"
+      ]
+    }
+  ]
+}

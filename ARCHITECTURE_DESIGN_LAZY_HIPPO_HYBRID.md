@@ -8273,3 +8273,76 @@ Per-question detail:
 | This section | Architectural assessment, HippoRAG 2 verdict, improvement plan |
 
 ---
+
+## 29. Architectural Decision: Sentence Search Reverted from Route 4 (February 15, 2026)
+
+### 29.1. What Was Tried
+
+Tiers 1A (sentence vector search) and 1B (NER union) from Section 28.4 were ported from the sequential handler to the workflow handler (`drift_workflow.py`).
+
+**19-Question Benchmark (×3 repeats):**
+
+| Metric | Before (graph-only) | After (+ sentence search) | Delta |
+|--------|---------------------|---------------------------|-------|
+| Avg containment | 0.81 | 0.88 | **+8.6%** |
+| Avg latency | ~19.3s | ~21.6s | **+12% (+2.3s)** |
+| Avg response length | ~6,900 chars | ~7,725 chars | **+12% (+825 chars)** |
+| Negative tests | 9/9 pass | 9/9 pass | — |
+
+**Per-question containment:**
+
+| QID | Before | After | Delta |
+|-----|--------|-------|-------|
+| Q-D1 | 0.93 | 0.93 | — |
+| Q-D2 | 1.00 | 1.00 | — |
+| Q-D3 | 0.78 | 0.81 | +0.03 |
+| Q-D4 | 0.94 | 0.89 | −0.05 |
+| Q-D5 | 0.78 | 0.92 | +0.14 |
+| Q-D6 | 0.67 | 0.78 | +0.11 |
+| Q-D7 | 0.69 | 0.87 | +0.18 |
+| Q-D8 | 0.57 | 0.72 | +0.15 |
+| Q-D9 | 0.81 | 0.91 | +0.10 |
+| Q-D10 | 0.93 | 0.97 | +0.04 |
+
+**Comprehensive Deep-Query Test (3 cross-document queries):**
+
+| Query | Latency (before → after) | Length (before → after) |
+|-------|--------------------------|------------------------|
+| C1 (invoice inconsistencies) | 81.1s → 70.6s (−13%) | 21,389 → 23,257 (+9%) |
+| C2 (liability/indemnification) | 36.8s → 70.0s (+90%) | 15,428 → 29,860 (+94%) |
+| C3 (monetary amounts) | 32.3s → 46.9s (+45%) | 13,393 → 13,050 (−3%) |
+| **Average** | **50.0s → 62.5s (+25%)** | **16,737 → 22,056 (+32%)** |
+
+The +8.6% containment gain came with +12% latency on standard queries and up to +90% latency on deep cross-document queries (C2). The response length increase (+12% to +32%) reflects sentence evidence padding the context rather than improving graph traversal precision.
+
+### 29.2. Why It Was Reverted
+
+Sentence search is **not part of HippoRAG 2**. It bypasses the graph entirely — a direct Voyage vector search on raw sentences that runs in parallel with the DRIFT pipeline. While it improved containment, it does so by working around the graph rather than strengthening it.
+
+Route 4's architecture is built on HippoRAG 2's iterative PPR traversal. Route 2 demonstrates that PPR achieves **98.2% accuracy** with pure graph retrieval. Route 4's lower performance (0.81) is caused by DRIFT's decomposition mutating entity names before they reach PPR — not by PPR itself being inadequate.
+
+**Architectural principle:** Strengthen the HippoRAG 2 foundation rather than bypassing it. The correct fix is to improve seed quality and traversal intelligence so PPR receives better inputs.
+
+### 29.3. What Remains
+
+- **Tier 1B (NER union):** Reverted from workflow handler. To be re-ported independently — this is a legitimate seed quality fix that feeds better entities to PPR, fully within the HippoRAG 2 paradigm.
+- **Tier 1A (sentence search):** Available in sequential handler behind `ROUTE4_SENTENCE_SEARCH` flag but NOT active in workflow path. May be reconsidered after Phase 3 if graph-only improvements plateau.
+
+### 29.4. Next Steps: Strengthen HippoRAG 2 Core
+
+The improvement path is Phase 3 (GPS-Enhanced PPR), which improves the graph traversal itself:
+
+1. **Query-biased teleportation** — cosine similarity between query embedding and KNN neighbors of seeds → weighted auxiliary seeds
+2. **EPIC-style passage enrichment** — weight sections in PPR by `section_embedding · query_embedding` cosine similarity
+3. **Adaptive path weights** — per-query `PPR_WEIGHT_ENTITY` based on query type (factual → higher entity weight, comparative → higher SHARES_ENTITY weight)
+
+These keep Route 4 architecturally pure HippoRAG 2 while addressing the root cause: DRIFT feeds bad seeds to PPR.
+
+### 29.5. Baseline
+
+Current Route 4 performance (workflow handler, no sentence search):
+- **0.81 avg containment** (19-question benchmark, 3 repeats)
+- 9/9 negative tests pass
+- Config: `ROUTE4_WORKFLOW=1`, `ROUTE4_USE_PPR=1`
+
+---

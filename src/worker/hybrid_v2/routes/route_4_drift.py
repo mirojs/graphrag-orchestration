@@ -269,7 +269,23 @@ class DRIFTHandler(BaseRouteHandler):
                 knn_config=knn_config,
             )
         logger.info("stage_4.3_complete", mode=retrieval_mode, num_evidence=len(complete_evidence))
-        
+
+        # Merge discovery-pass evidence into consolidated results.
+        # Sub-question traces may surface nodes that the diluted all-seeds
+        # consolidated trace misses (seed dilution effect).
+        consolidated_entities = {name for name, _ in complete_evidence}
+        discovery_merged = 0
+        for ir in intermediate_results:
+            for name, score in ir.get("evidence", []):
+                if name not in consolidated_entities:
+                    complete_evidence.append((name, score))
+                    consolidated_entities.add(name)
+                    discovery_merged += 1
+        if discovery_merged:
+            logger.info("stage_4.3_discovery_merge",
+                       merged=discovery_merged,
+                       total_evidence=len(complete_evidence))
+
         # Stage 4.3.5: Confidence Check + Re-decomposition
         confidence_metrics = self._compute_subgraph_confidence(
             sub_questions, intermediate_results, complete_evidence
@@ -629,7 +645,7 @@ Sub-questions:"""
             all_seeds.extend(sub_entities)
             
             # Run partial search for context (PPR or beam)
-            evidence_count = 0
+            partial_evidence: List[Tuple[str, float]] = []
             if sub_entities:
                 if ROUTE4_USE_PPR:
                     partial_evidence = await self.pipeline.tracer.trace(
@@ -647,12 +663,12 @@ Sub-questions:"""
                         beam_width=5,
                         knn_config=getattr(self, '_knn_config', None),
                     )
-                evidence_count = len(partial_evidence)
             
             intermediate_results.append({
                 "question": sub_q,
                 "entities": sub_entities,
-                "evidence_count": evidence_count
+                "evidence_count": len(partial_evidence),
+                "evidence": partial_evidence,
             })
         
         all_seeds = list(set(all_seeds))

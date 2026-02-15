@@ -29,9 +29,14 @@
 **Recent Updates (February 5, 2026):**
 - ✅ **Route 3 Sentence-Level Citation Enrichment (February 5, 2026):** Enriches Route 3 global search with sentence-level `[Na]` citation markers using Azure DI `language_spans`, bringing Route 4's word-level precision to Route 3's graph-enriched summaries. See [Section 22](#22-route-3-sentence-level-citation-enrichment-february-5-2026).
 
+**Recent Updates (February 15, 2026):**
+- ✅ **Phase 2: PPR Default + Beam Fallback** — Switched `ROUTE4_USE_PPR` default from `0` to `1`. PPR is now the default graph traversal for Route 4 DRIFT, with automatic fallback to beam search on Neo4j SSL timeout errors.
+- ✅ **PPR vs Beam Benchmark (19 questions):** PPR matches beam search accuracy (avg containment 0.51 vs 0.50, neg 9/9 both). PPR improved Q-D3 (+22pp) and Q-D4 (+6pp) while being equivalent elsewhere. Added retry-on-500 to benchmark script.
+- ✅ **Synthesis Noise Reduction:** Removed `_enrich_context_for_drift()` — was injecting redundant sub-question metadata into LLM context. Response 4.9% shorter, same 18/18 accuracy.
+
 **Recent Updates (February 4, 2026):**
 - ✅ **Route 4 Challenging Test: 18/18 Accuracy (100%)** - Invoice-Contract Consistency Detection
-  - **Test:** Single comprehensive query exercising full DRIFT pipeline: decomposition → NER → graph traversal (beam search) → multi-source synthesis.
+  - **Test:** Single comprehensive query exercising full DRIFT pipeline: decomposition → NER → graph traversal → multi-source synthesis.
   - **Query:** "Analyze the invoice and contract documents to find all inconsistencies, discrepancies, or conflicts between them." Route 4 auto-decomposes into 3 sub-questions.
   - **Ground Truth (18 items = 16 core + 2 observations):**
     | Category | Items | Description |
@@ -40,18 +45,18 @@
     | Medium (B1-B7) | 7 | Hall call spec, door height, WR-500 lock, outdoor terminology, self-contradiction, opener, power system |
     | Minor (C1-C6) | 6 | Malformed URL, John Doe contact, Contoso Ltd/LLC, Bayfront site, address number, price decimal |
     | Observation (D1-D2) | 2 | Tax field N/A, entity role variation across corpus (bonus — not strict inconsistencies) |
-  - **Results (Feb 15, 2026 — post-bugfix, beam search, gpt-5.1):**
-    | Metric | Value |
-    |--------|-------|
-    | Core Accuracy | **16/16 = 100%** |
-    | With Observations | **18/18 = 100%** |
-    | Response length | 15,491 characters |
-    | Latency | ~53 seconds |
-    | Citations | 5 documents |
-    | Evidence Path | 30 entities |
+  - **Results (Feb 15, 2026 — Beam vs PPR comparison, gpt-5.1):**
+    | Metric | Beam (baseline) | Beam − noise | PPR (Phase 2) |
+    |--------|----------------|--------------|---------------|
+    | Core Accuracy | **16/16 = 100%** | **16/16 = 100%** | **16/16 = 100%** |
+    | With Observations | **18/18 = 100%** | **18/18 = 100%** | **18/18 = 100%** |
+    | Response length | 15,491 chars | 14,731 chars | 15,003 chars |
+    | Latency | 53.43s | 54.06s | 53.94s |
+    | Citations | 5 documents | 5 documents | 5 documents |
+    | Evidence Path | 30 entities | 30 entities | 30 entities |
   - **Test Script:** `scripts/test_route4_comprehensive_sentence.py` (supports `--url` for local testing)
-  - **Benchmark File:** `benchmarks/bench_route4_comprehensive_sentence_20260215_094717.json`
-  - **History:** 14/14 (Feb 4) → 12/16 (Feb 7, expanded GT) → 18/18 (Feb 15, post-bugfix)
+  - **Benchmark Files:** `benchmarks/bench_route4_comprehensive_sentence_20260215_094717.json` (beam), `benchmarks/bench_route4_comprehensive_sentence_20260215_100356.json` (PPR)
+  - **History:** 14/14 (Feb 4) → 12/16 (Feb 7, expanded GT) → 18/18 (Feb 15, post-bugfix) → 18/18 (Feb 15, PPR default)
   - **Test Documents (5 PDFs):**
     1. `contoso_lifts_invoice.pdf` - Invoice from Contoso Lifts LLC
     2. `purchase_contract.pdf` - Contract with Fabrikam Inc.
@@ -7857,7 +7862,7 @@ PPR regressions concentrated on cross-document multi-hop queries:
 
 This is theoretically expected: beam search re-embeds the query at each hop via `vector.similarity.cosine()`, keeping traversal aligned with query intent across document boundaries. PPR follows pure graph structure and can drift to well-connected but irrelevant nodes.
 
-**Verdict: Keep semantic beam as default.** The real accuracy wins came from the denoising fixes (+7.7pp), not the traversal method. The `ROUTE4_USE_PPR=1` toggle remains available for future experimentation.
+**Verdict (Updated Feb 15, 2026): PPR is now the default.** After adding sentence search as a parallel evidence path and fixing 5 DRIFT bugs, PPR matches beam search on the full 19-question benchmark (avg containment 0.51 vs 0.50) and passes the 18/18 challenging test identically. PPR improved Q-D3 (+22pp) and Q-D4 (+6pp). Automatic fallback to beam search on Neo4j SSL timeouts ensures resilience. Set `ROUTE4_USE_PPR=0` to revert.
 
 ### 26.8. Artifacts
 
@@ -8147,7 +8152,7 @@ However, the traversal algorithm is **not the dominant factor** for Route 4 qual
 
 Route 4's underperformance is NOT beam vs PPR — it's the DRIFT decomposition → entity resolution → graph traversal pipeline **losing information at every stage** with no compensating parallel path. Adding sentence search is the architectural fix, not switching traversal algorithms.
 
-**Decision: Keep semantic beam as default. `ROUTE4_USE_PPR=1` toggle available for future comparison after sentence search is added.**
+**Decision (Updated Feb 15, 2026): PPR is now the default** (`ROUTE4_USE_PPR` defaults to `1`). After adding sentence search and fixing DRIFT bugs, PPR matches beam on the 19-question benchmark (0.51 vs 0.50 containment, 9/9 negative tests). PPR improved Q-D3 time-windows (+22pp to 0.78) and Q-D4 insurance (+6pp to 0.94). Automatic beam fallback on Neo4j SSL timeout. Set `ROUTE4_USE_PPR=0` to revert.
 
 ### 28.4. Improvement Plan (Prioritized)
 

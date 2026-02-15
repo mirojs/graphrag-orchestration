@@ -42,8 +42,8 @@ def _get_query_embedding(query: str) -> List[float]:
     from ..orchestrator import get_query_embedding
     return get_query_embedding(query)
 
-# Feature flag: use PPR instead of semantic beam for graph traversal (A/B testing)
-ROUTE4_USE_PPR = os.getenv("ROUTE4_USE_PPR", "0").strip().lower() in {"1", "true", "yes"}
+# Feature flag: use PPR instead of semantic beam for graph traversal (default ON)
+ROUTE4_USE_PPR = os.getenv("ROUTE4_USE_PPR", "1").strip().lower() in {"1", "true", "yes"}
 if ROUTE4_USE_PPR:
     logger.info("route4_using_ppr_mode")
 
@@ -252,14 +252,26 @@ class DRIFTHandler(BaseRouteHandler):
         # Stage 4.3: Consolidated HippoRAG Tracing (PPR or Semantic Beam)
         retrieval_mode = "ppr" if ROUTE4_USE_PPR else "beam"
         logger.info("stage_4.3_consolidated_tracing", mode=retrieval_mode, knn_config=knn_config)
+        query_embedding = _get_query_embedding(query)
         if ROUTE4_USE_PPR:
-            complete_evidence = await self.pipeline.tracer.trace(
-                query=query,
-                seed_entities=all_seeds,
-                top_k=30,
-            )
+            try:
+                complete_evidence = await self.pipeline.tracer.trace(
+                    query=query,
+                    seed_entities=all_seeds,
+                    top_k=30,
+                )
+            except Exception as ppr_err:
+                logger.warning("stage_4.3_ppr_failed_fallback_beam", error=str(ppr_err))
+                retrieval_mode = "beam (ppr-fallback)"
+                complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
+                    query=query,
+                    query_embedding=query_embedding,
+                    seed_entities=all_seeds,
+                    max_hops=3,
+                    beam_width=30,
+                    knn_config=knn_config,
+                )
         else:
-            query_embedding = _get_query_embedding(query)
             complete_evidence = await self.pipeline.tracer.trace_semantic_beam(
                 query=query,
                 query_embedding=query_embedding,
@@ -342,11 +354,22 @@ class DRIFTHandler(BaseRouteHandler):
                     # Re-run tracing with expanded seeds (PPR or beam)
                     if additional_seeds:
                         if ROUTE4_USE_PPR:
-                            additional_evidence = await self.pipeline.tracer.trace(
-                                query=query,
-                                seed_entities=additional_seeds,
-                                top_k=15,
-                            )
+                            try:
+                                additional_evidence = await self.pipeline.tracer.trace(
+                                    query=query,
+                                    seed_entities=additional_seeds,
+                                    top_k=15,
+                                )
+                            except Exception as ppr_err:
+                                logger.warning("stage_4.3.5_ppr_refinement_failed_fallback_beam", error=str(ppr_err))
+                                additional_evidence = await self.pipeline.tracer.trace_semantic_beam(
+                                    query=query,
+                                    query_embedding=query_embedding,
+                                    seed_entities=additional_seeds,
+                                    max_hops=2,
+                                    beam_width=15,
+                                    knn_config=knn_config,
+                                )
                         else:
                             additional_evidence = await self.pipeline.tracer.trace_semantic_beam(
                                 query=query,

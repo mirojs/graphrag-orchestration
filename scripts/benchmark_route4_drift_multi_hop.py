@@ -317,6 +317,17 @@ def benchmark_scenario(
                 timeout_s=timeout_s,
             )
 
+            # Retry once on 500 (transient Neo4j SSL timeouts)
+            if status == 500:
+                print(f"  [{rep}/{repeats}] HTTP 500 — retrying in 5s...")
+                time.sleep(5)
+                status, resp, elapsed, err = _http_post_json(
+                    url=url,
+                    headers=headers,
+                    payload=payload,
+                    timeout_s=timeout_s,
+                )
+
             if status != 200:
                 print(f"  [{rep}/{repeats}] HTTP {status} - {err or resp.get('error', 'unknown')}")
                 continue

@@ -245,7 +245,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 7. **Q-D7:** Which document has the latest explicit date, and what is it?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** `Signed this 04/30/2025` in the purchase contract Exhibit A.
+   - **Expected:** purchase contract latest date 2025-04-30 holding tank 2024-06-15 contoso_lifts_invoice 2015-12-17 warranty 2010-06-15 property management agreement 2010-06-15
    - **Source:** purchase_contract.pdf (chunk 1)
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
@@ -253,10 +253,14 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
    - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same number of documents (4 each - they are tied). Fabrikam appears in: warranty (as Builder), holding tank (as Pumper), property management (referenced), and purchase contract (as Customer). Contoso appears in: warranty (as Buyer/Owner), holding tank (as Owner), property management (as Owner), and purchase contract (as Contractor). Note: The invoice lists "Contoso Lifts LLC" which is a different entity.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
-9. **Q-D9:** Compare the “fees” concepts: which doc has a percentage-based fee structure and which has fixed installment payments?   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20k/$7k/$2.9k).
+9. **Q-D9:** Compare the "fees" concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
+   - **Expected Route:** Route 4 (DRIFT)
+   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20,000/$7,000/$2,900 totaling $29,900).
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)
 
-10. **Q-D10:** List the three different “risk allocation” statements across the set (risk of loss, liability limitations, non-transferability).   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** Purchase contract shifts risk after delivery; PMA limits agent liability except gross negligence/willful misconduct; warranty is not transferable (terminates if first purchaser sells/moves out).
+10. **Q-D10:** List the three different "risk allocation" statements across the set (risk of loss, liability limitations, non-transferability).
+   - **Expected Route:** Route 4 (DRIFT)
+   - **Expected:** Purchase contract shifts risk after delivery; PMA limits agent liability except gross negligence/willful misconduct; warranty is not transferable (terminates if first purchaser sells/moves out).
    - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
 
 ---

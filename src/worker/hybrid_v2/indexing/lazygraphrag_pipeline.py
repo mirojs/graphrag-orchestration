@@ -728,12 +728,16 @@ class LazyGraphRAGIndexingPipeline:
                 f"sentences per doc: {[len(dc) for dc in document_chunks]}"
             )
             
-            # Embed with proper per-document context
+            # Embed with proper per-document context using VoyageEmbedService
+            # (self.embedder is a LlamaIndex VoyageEmbedding wrapper which lacks
+            # embed_documents_contextualized — use the native service directly)
             import asyncio
+            from src.worker.hybrid_v2.embeddings.voyage_embed import get_voyage_embed_service
+            voyage_svc = get_voyage_embed_service()
             loop = asyncio.get_event_loop()
             all_doc_embeddings = await loop.run_in_executor(
                 None,
-                lambda: self.embedder.embed_documents_contextualized(document_chunks)
+                lambda: voyage_svc.embed_documents_contextualized(document_chunks)
             )
             
             # Map embeddings back to original sentence order
@@ -750,8 +754,8 @@ class LazyGraphRAGIndexingPipeline:
             logger.info(f"skeleton_embedded: {stats['sentences_embedded']}/{len(raw_sentences)} sentences "
                         f"across {len(document_chunks)} documents")
         except Exception as e:
-            logger.warning(f"skeleton_embedding_failed: {e}")
-            # Continue without embeddings — nodes are still useful for graph traversal
+            logger.exception(f"skeleton_embedding_failed: {e}")
+            raise
         
         # Convert to Sentence dataclass instances
         sentence_objects: List[Sentence] = []

@@ -13,6 +13,7 @@ Flow:
     → check_confidence → synthesize | redecompose → StopEvent
 """
 
+import asyncio
 import os
 import time
 from typing import Dict, Any, List, Optional, Tuple
@@ -108,14 +109,30 @@ class DRIFTWorkflow(Workflow):
                 await ctx.store.set("deterministic_result", result)
                 return DecomposeEvent(query=query, response_type=response_type)
         
-        # Decompose query
-        sub_questions = await self.pipeline._drift_decompose(query)
+        # Run decomposition and original-query NER in PARALLEL.
+        # NER union: extract entities from the original query (pre-decomposition)
+        # to catch exact entity names that DRIFT decomposition may mutate.
+        # E.g., "Property Management Agreement" → decomposed → "management terms"
+        decompose_task = asyncio.ensure_future(
+            self.pipeline._drift_decompose(query)
+        )
+        ner_original_task = asyncio.ensure_future(
+            self.pipeline.disambiguator.disambiguate(query)
+        )
+        sub_questions, original_entities = await asyncio.gather(
+            decompose_task, ner_original_task
+        )
+        
+        # Store original-query entities for union in collect_and_check
+        await ctx.store.set("original_query_entities", original_entities or [])
         
         timings = await ctx.store.get("timings_ms", {})
         timings["stage_4.1_ms"] = int((time.perf_counter() - t0) * 1000)
         await ctx.store.set("timings_ms", timings)
         
-        logger.info("drift_decompose_complete", num_sub_questions=len(sub_questions))
+        logger.info("drift_decompose_complete",
+                   num_sub_questions=len(sub_questions),
+                   original_ner_entities=len(original_entities or []))
         
         # Store sub-questions count for collection
         await ctx.store.set("num_sub_questions", len(sub_questions))
@@ -250,6 +267,19 @@ class DRIFTWorkflow(Workflow):
                 "entities": r.entities,
                 "evidence_count": r.evidence_count,
             })
+        
+        # NER union: merge entities from original query (extracted in parallel
+        # with decomposition) to recover exact entity names that sub-question
+        # NER may have missed due to DRIFT name mutation.
+        original_query_entities = await ctx.store.get("original_query_entities", [])
+        if original_query_entities:
+            existing = set(all_seeds)
+            new_from_original = [e for e in original_query_entities if e not in existing]
+            all_seeds.extend(new_from_original)
+            logger.info("drift_ner_union",
+                       original_entities=original_query_entities,
+                       new_from_original=len(new_from_original),
+                       total_seeds=len(all_seeds))
         
         # Deduplicate seeds
         all_seeds = list(set(all_seeds))

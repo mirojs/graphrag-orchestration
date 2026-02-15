@@ -698,18 +698,59 @@ class LazyGraphRAGIndexingPipeline:
         
         logger.info(f"skeleton_extracted_sentences: {len(raw_sentences)} from {len(chunks)} chunks")
         
-        # Embed sentences with Voyage (contextualized)
-        sentence_texts = [s["text"] for s in raw_sentences]
-        sentence_embeddings: List[Optional[List[float]]] = [None] * len(sentence_texts)
+        # Embed sentences with Voyage (contextualized), grouped by document_id.
+        # CRITICAL: Each document's sentences must be embedded together so that
+        # Voyage's contextualized_embed sees only intra-document context.
+        # Previously all 177 sentences were treated as one document — this caused
+        # cross-document contamination in embeddings (sentences from doc A got
+        # contextual influence from docs B/C/D/E, distorting similarity scores).
+        sentence_embeddings: List[Optional[List[float]]] = [None] * len(raw_sentences)
         
         try:
-            # Use the pipeline's embedder (Voyage V2 via aget_text_embedding_batch)
-            embeddings = await self.embedder.aget_text_embedding_batch(sentence_texts)
-            for i, emb in enumerate(embeddings):
-                if emb and isinstance(emb, list) and len(emb) > 0:
-                    sentence_embeddings[i] = emb
+            from collections import OrderedDict
+            
+            # Group sentences by document_id, preserving original indices
+            doc_groups: OrderedDict[str, List[int]] = OrderedDict()
+            for idx, s in enumerate(raw_sentences):
+                doc_id = s.get("document_id", "unknown")
+                if doc_id not in doc_groups:
+                    doc_groups[doc_id] = []
+                doc_groups[doc_id].append(idx)
+            
+            # Build per-document chunk lists for embed_documents_contextualized
+            document_chunks: List[List[str]] = []
+            index_maps: List[List[int]] = []  # Maps back to original indices
+            for doc_id, indices in doc_groups.items():
+                doc_texts = [raw_sentences[i]["text"] for i in indices]
+                document_chunks.append(doc_texts)
+                index_maps.append(indices)
+            
+            logger.info(
+                f"skeleton_embedding_grouped: {len(document_chunks)} documents, "
+                f"sentences per doc: {[len(dc) for dc in document_chunks]}"
+            )
+            
+            # Embed with proper per-document context
+            import asyncio
+            loop = asyncio.get_event_loop()
+            all_doc_embeddings = await loop.run_in_executor(
+                None,
+                lambda: self.embedder.embed_documents_contextualized(document_chunks)
+            )
+            
+            # Map embeddings back to original sentence order
+            for doc_idx, (doc_embs, orig_indices) in enumerate(
+                zip(all_doc_embeddings, index_maps)
+            ):
+                for chunk_idx, orig_idx in enumerate(orig_indices):
+                    emb = doc_embs[chunk_idx]
+                    if emb and isinstance(emb, list) and len(emb) > 0:
+                        sentence_embeddings[orig_idx] = emb
+            
             stats["sentences_embedded"] = sum(1 for e in sentence_embeddings if e is not None)
-            logger.info(f"skeleton_embedded: {stats['sentences_embedded']}/{len(sentence_texts)} sentences")
+            stats["documents_embedded"] = len(document_chunks)
+            logger.info(f"skeleton_embedded: {stats['sentences_embedded']}/{len(raw_sentences)} sentences "
+                        f"across {len(document_chunks)} documents")
         except Exception as e:
             logger.warning(f"skeleton_embedding_failed: {e}")
             # Continue without embeddings — nodes are still useful for graph traversal

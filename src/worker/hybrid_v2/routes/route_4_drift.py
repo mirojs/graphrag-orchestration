@@ -270,21 +270,11 @@ class DRIFTHandler(BaseRouteHandler):
             )
         logger.info("stage_4.3_complete", mode=retrieval_mode, num_evidence=len(complete_evidence))
 
-        # Merge discovery-pass evidence into consolidated results.
-        # Sub-question traces may surface nodes that the diluted all-seeds
-        # consolidated trace misses (seed dilution effect).
-        consolidated_entities = {name for name, _ in complete_evidence}
-        discovery_merged = 0
-        for ir in intermediate_results:
-            for name, score in ir.get("evidence", []):
-                if name not in consolidated_entities:
-                    complete_evidence.append((name, score))
-                    consolidated_entities.add(name)
-                    discovery_merged += 1
-        if discovery_merged:
-            logger.info("stage_4.3_discovery_merge",
-                       merged=discovery_merged,
-                       total_evidence=len(complete_evidence))
+        # Back-fill evidence_count for each sub-question from consolidated
+        # trace results.  A sub-question is "satisfied" if ≥2 of its NER
+        # entities appear in the consolidated evidence set.  This replaced
+        # the per-sub-question discovery traces (Bug 5 — double-trace).
+        self._backfill_evidence_counts(intermediate_results, complete_evidence)
 
         # Stage 4.3.5: Confidence Check + Re-decomposition
         confidence_metrics = self._compute_subgraph_confidence(
@@ -634,42 +624,31 @@ Sub-questions:"""
     async def _execute_discovery_pass(
         self, sub_questions: List[str]
     ) -> Tuple[List[str], List[Dict[str, Any]]]:
-        """Execute entity discovery for sub-questions."""
+        """Execute NER-only entity discovery for sub-questions.
+
+        Previously this method also ran a per-sub-question trace (PPR or
+        beam), but that was redundant with the consolidated Stage 4.3 trace
+        and added 3-4 extra graph round-trips.  Now we only disambiguate
+        entities and defer tracing to the single consolidated call.
+
+        evidence_count for the confidence metric is back-filled after
+        Stage 4.3 by _backfill_evidence_counts().
+        """
         all_seeds: List[str] = []
         intermediate_results: List[Dict[str, Any]] = []
         
         for i, sub_q in enumerate(sub_questions):
             logger.info(f"processing_sub_question_{i+1}", question=sub_q[:50])
             
-            # Get entities for this sub-question
+            # NER disambiguation only — no per-sub-question trace
             sub_entities = await self.pipeline.disambiguator.disambiguate(sub_q)
             all_seeds.extend(sub_entities)
-            
-            # Run partial search for context (PPR or beam)
-            partial_evidence: List[Tuple[str, float]] = []
-            if sub_entities:
-                if ROUTE4_USE_PPR:
-                    partial_evidence = await self.pipeline.tracer.trace(
-                        query=sub_q,
-                        seed_entities=sub_entities,
-                        top_k=5,
-                    )
-                else:
-                    sub_q_embedding = _get_query_embedding(sub_q)
-                    partial_evidence = await self.pipeline.tracer.trace_semantic_beam(
-                        query=sub_q,
-                        query_embedding=sub_q_embedding,
-                        seed_entities=sub_entities,
-                        max_hops=2,  # Shorter for sub-question context
-                        beam_width=5,
-                        knn_config=getattr(self, '_knn_config', None),
-                    )
             
             intermediate_results.append({
                 "question": sub_q,
                 "entities": sub_entities,
-                "evidence_count": len(partial_evidence),
-                "evidence": partial_evidence,
+                "evidence_count": 0,    # back-filled after Stage 4.3
+                "evidence": [],          # kept for API compat (Bug 1 merge)
             })
         
         all_seeds = list(set(all_seeds))
@@ -679,6 +658,27 @@ Sub-questions:"""
     # CONFIDENCE METRICS
     # ==========================================================================
     
+    @staticmethod
+    def _backfill_evidence_counts(
+        intermediate_results: List[Dict[str, Any]],
+        complete_evidence: List[Tuple[str, float]],
+    ) -> None:
+        """Back-fill ``evidence_count`` in *intermediate_results* using the
+        consolidated trace output.
+
+        For each sub-question we count how many of its NER entities appear
+        (case-insensitive) in the consolidated evidence set.  This replaces
+        the per-sub-question discovery traces that were removed in Bug 5
+        and gives the confidence metric a realistic signal.
+        """
+        evidence_names = {name.lower().strip() for name, _ in complete_evidence}
+        for ir in intermediate_results:
+            entities = ir.get("entities", [])
+            matched = sum(
+                1 for e in entities if e.lower().strip() in evidence_names
+            )
+            ir["evidence_count"] = matched
+
     def _compute_subgraph_confidence(
         self,
         sub_questions: List[str],

@@ -6,9 +6,9 @@ Best for thematic/cross-document queries:
 - "Compare termination clauses across agreements"
 
 Architecture (v3 — 4 steps):
-  1. Community Match   — reuse existing CommunityMatcher (top_k=10)
-  1B. Sentence Search  — parallel Voyage vector search on Sentence nodes
+  1 + 1B. Community Match + Sentence Search (parallel — overlapped)
   2. MAP               — parallel LLM calls: extract claims per community
+  2B. Denoise + Rerank — clean and reorder sentence evidence
   3. REDUCE            — single LLM call: synthesize claims + sentence evidence
 
 v3 improvement over v2:
@@ -79,9 +79,9 @@ class GlobalSearchHandler(BaseRouteHandler):
         """Execute Route 3 v3: Sentence-enriched Map-Reduce global search.
 
         Steps:
-          1. Community matching
-          1B. Sentence vector search (parallel with step 2)
-          2. MAP — parallel LLM calls per community
+          1 + 1B. Community matching + Sentence vector search (parallel)
+          2. MAP — parallel LLM calls per community (overlapped with 1B)
+          2B. Denoise + Rerank sentence evidence
           3. REDUCE — synthesize claims + sentence evidence
 
         Args:
@@ -115,9 +115,21 @@ class GlobalSearchHandler(BaseRouteHandler):
         )
 
         # ================================================================
-        # Step 1: Community Matching (reuse CommunityMatcher)
+        # Step 1 + 1B: Community Matching + Sentence Search (PARALLEL)
+        # ================================================================
+        # Sentence search is independent of community matching — it only
+        # needs the query string and hits Neo4j's sentence vector index
+        # directly. By starting both concurrently, we hide the community
+        # match latency (~100-300ms) behind sentence search I/O.
         # ================================================================
         t0 = time.perf_counter()
+
+        # Fire off sentence search immediately (doesn't depend on communities)
+        sentence_search_task = asyncio.create_task(
+            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+        )
+
+        # Run community matching concurrently
         matched_communities = await self.pipeline.community_matcher.match_communities(
             query, top_k=community_top_k,
         )
@@ -135,22 +147,20 @@ class GlobalSearchHandler(BaseRouteHandler):
         )
 
         # ================================================================
-        # Steps 1B + 2: Sentence search + MAP (parallel)
+        # Step 2: MAP (parallel) — communities are now available
+        # Sentence search is already in-flight from Step 1 above
         # ================================================================
-        t0 = time.perf_counter()
+        t_map_start = time.perf_counter()
 
-        # Build MAP tasks
+        # Build MAP tasks (need community data from Step 1)
         map_tasks = [
             self._map_community(query, community, max_claims)
             for community in community_data
         ] if community_data else []
 
-        # Run sentence search + MAP in parallel
-        sentence_task = self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
-
-        # Gather all: sentence search + all MAP calls
+        # Gather sentence search (already running) + all MAP calls
         all_results = await asyncio.gather(
-            sentence_task,
+            sentence_search_task,
             *map_tasks,
             return_exceptions=True,
         )

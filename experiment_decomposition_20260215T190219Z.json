@@ -1,0 +1,1018 @@
+{
+  "top_k": 20,
+  "group_id": "test-5pdfs-v2-fix2",
+  "results": [
+    {
+      "qid": "Q-D1",
+      "query": "If an emergency defect occurs under the warranty (e.g., burst pipe), what is the required notification channel and consequence of delay?",
+      "ner_direct": [
+        "Warranty Agreement",
+        "Emergency Defect",
+        "Burst Pipe",
+        "Notification Channel",
+        "Consequence of Delay"
+      ],
+      "seeds_f": [
+        "warranty",
+        "Defect",
+        "Delay"
+      ],
+      "sub_questions": [
+        ", what specific notification channel(s) are required to report the emergency defect?",
+        ", are there any specified timeframes or deadlines for using the required notification channel(s) to report the emergency defect?",
+        ", what are the stated consequences if there is a delay in using the required notification channel(s) to report the emergency defect?",
+        ", does a delay in using the required notification channel(s) affect the homeowner\u2019s rights to warranty coverage, and if so, how?"
+      ],
+      "sq_ner": [
+        [
+          "emergency defect"
+        ],
+        [
+          "required notification channel(s)",
+          "emergency defect"
+        ],
+        [
+          "Emergency Defect Notification Procedure",
+          "Emergency Defect Reporting Policy",
+          "Required Notification Channels",
+          "Emergency Defect Clause",
+          "Defect Reporting Procedure"
+        ],
+        [
+          "Notification Channel",
+          "Required Notification Channel",
+          "Homeowner\u2019s Warranty Coverage",
+          "Warranty Coverage Rights",
+          "Warranty Claim Notification Procedure"
+        ]
+      ],
+      "union_ner": [
+        "Warranty Agreement",
+        "Emergency Defect",
+        "Burst Pipe",
+        "Notification Channel",
+        "Consequence of Delay",
+        "required notification channel(s)",
+        "Emergency Defect Notification Procedure",
+        "Emergency Defect Reporting Policy",
+        "Required Notification Channels",
+        "Emergency Defect Clause",
+        "Defect Reporting Procedure",
+        "Required Notification Channel",
+        "Homeowner\u2019s Warranty Coverage",
+        "Warranty Coverage Rights",
+        "Warranty Claim Notification Procedure"
+      ],
+      "seeds_g": [
+        "warranty",
+        "Defect",
+        "Delay",
+        "report",
+        "home",
+        "rights",
+        "claim",
+        "provide Agent with written notification"
+      ],
+      "added_by_decompose": [
+        "report",
+        "provide Agent with written notification",
+        "rights",
+        "claim",
+        "home"
+      ],
+      "coverage_f": 0.1391304347826087,
+      "coverage_g": 0.13043478260869565,
+      "delta": -0.008695652173913049,
+      "num_seeds_f": 3,
+      "num_seeds_g": 8,
+      "top20_f": [
+        "Delay",
+        "warranty",
+        "Defect",
+        "Defects",
+        "Small Claims Court of the State of Idaho",
+        "warping and deflection of wood",
+        "Warranty Coverage",
+        "warranty period",
+        "provisions of Warranty",
+        "construction or purchase of the home",
+        "court",
+        "any of the Parties",
+        "related agreements, documents, or instruments",
+        "Statement of Non-Warranted Conditions",
+        "Manufacturer's Warranty",
+        "Warranties of merchantability",
+        "any action, dispute, claim or controversy of any kind",
+        "Limited Warranty",
+        "Dispute",
+        "Damage"
+      ],
+      "top20_g": [
+        "Defect",
+        "rights",
+        "provide Agent with written notification",
+        "Delay",
+        "warranty",
+        "home",
+        "report",
+        "claim",
+        "Fabrikam Inc.",
+        "Small Claims Court of the State of Idaho",
+        "owner",
+        "any of the Parties",
+        "related agreements, documents, or instruments",
+        "Builder",
+        "construction or purchase of the home",
+        "Manufacturer's Warranty",
+        "provisions of Warranty",
+        "Statement of Non-Warranted Conditions",
+        "Dispute",
+        "any action, dispute, claim or controversy of any kind"
+      ]
+    },
+    {
+      "qid": "Q-D2",
+      "query": "In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?",
+      "ner_direct": [
+        "Property Management Agreement",
+        "Confirmed Reservations Clause",
+        "Termination Clause",
+        "Sale of Property Clause",
+        "Agreement Termination Provision"
+      ],
+      "seeds_f": [
+        "property",
+        "Agreement",
+        "Owner to honor all confirmed reservations",
+        "termination of agreement"
+      ],
+      "sub_questions": [
+        "In the property management agreement, how are \u201cconfirmed reservations\u201d defined and identified, specifically in the context of situations where the agreement is terminated or the property is sold?",
+        ", including whether those reservations are honored, canceled, or transferred, and who is responsible for fulfilling them?",
+        "In the property management agreement, what clauses describe what happens to confirmed reservations if the property is sold, including whether those reservations are honored, canceled, or transferred, and whether the buyer assumes responsibility for them?",
+        "related to confirmed reservations allocated between the owner, the property manager, and (if applicable) a buyer when the agreement is terminated or the property is sold?",
+        "In the property management agreement, are there any notice, consent, or disclosure requirements to guests or third-party booking platforms regarding the status of confirmed reservations when the agreement is terminated or the property is sold, and how are these obligations allocated between the parties?"
+      ],
+      "sq_ner": [
+        [
+          "Property Management Agreement",
+          "Confirmed Reservations",
+          "Termination Clause",
+          "Sale of Property Clause",
+          "Reservation Definition Clause"
+        ],
+        [],
+        [
+          "Property Management Agreement",
+          "Confirmed Reservations",
+          "Property Sale",
+          "Buyer",
+          "Reservation Transfer Clause"
+        ],
+        [
+          "Confirmed Reservations Allocation Clause",
+          "Owner-Property Manager-Buyer Reservation Allocation",
+          "Termination of Agreement Reservation Provision",
+          "Property Sale Reservation Allocation Clause",
+          "Reservation Distribution on Termination and Sale"
+        ],
+        [
+          "Property Management Agreement",
+          "Notice Requirements",
+          "Consent Requirements",
+          "Disclosure Requirements",
+          "Confirmed Reservations"
+        ]
+      ],
+      "union_ner": [
+        "Property Management Agreement",
+        "Confirmed Reservations Clause",
+        "Termination Clause",
+        "Sale of Property Clause",
+        "Agreement Termination Provision",
+        "Confirmed Reservations",
+        "Reservation Definition Clause",
+        "Property Sale",
+        "Buyer",
+        "Reservation Transfer Clause",
+        "Confirmed Reservations Allocation Clause",
+        "Owner-Property Manager-Buyer Reservation Allocation",
+        "Termination of Agreement Reservation Provision",
+        "Property Sale Reservation Allocation Clause",
+        "Reservation Distribution on Termination and Sale",
+        "Notice Requirements",
+        "Consent Requirements",
+        "Disclosure Requirements"
+      ],
+      "seeds_g": [
+        "property",
+        "Agreement",
+        "Owner to honor all confirmed reservations",
+        "Buyer/Owner",
+        "owner",
+        "termination of agreement",
+        "successors and assigns of Owner or Agent",
+        "property is sold",
+        "provide Agent with written notification",
+        "written consent",
+        "include the following in the report"
+      ],
+      "added_by_decompose": [
+        "property is sold",
+        "provide Agent with written notification",
+        "owner",
+        "include the following in the report",
+        "Buyer/Owner",
+        "written consent",
+        "successors and assigns of Owner or Agent"
+      ],
+      "coverage_f": 0.12698412698412698,
+      "coverage_g": 0.09523809523809523,
+      "delta": -0.031746031746031744,
+      "num_seeds_f": 4,
+      "num_seeds_g": 11,
+      "top20_f": [
+        "Owner to honor all confirmed reservations",
+        "termination of agreement",
+        "Agreement",
+        "property",
+        "Contoso Ltd.",
+        "property maintenance",
+        "short term and/or vacation rentals",
+        "holding tank(s)",
+        "property is sold",
+        "responsibility for obligations or expenses incurred by Agent",
+        "Agent",
+        "location of the property on which the holding tank is installed",
+        "Holding Tank Owner",
+        "Property Management",
+        "Pumper",
+        "owner",
+        "name of the owner of the holding tank",
+        "holding tank",
+        "Fabrikam Inc.",
+        "Walt Flood Realty"
+      ],
+      "top20_g": [
+        "owner",
+        "Agreement",
+        "provide Agent with written notification",
+        "termination of agreement",
+        "property is sold",
+        "property",
+        "Buyer/Owner",
+        "successors and assigns of Owner or Agent",
+        "written consent",
+        "include the following in the report",
+        "Owner to honor all confirmed reservations",
+        "Registration Number REG-54321",
+        "report",
+        "2024-06-15",
+        "Contoso Ltd.",
+        "location of the property on which the holding tank is installed",
+        "contract",
+        "Fabrikam Inc.",
+        "holding tank(s)",
+        "holding tank"
+      ]
+    },
+    {
+      "qid": "Q-D3",
+      "query": "Compare \"time windows\" across the set: list all explicit day-based timeframes.",
+      "ner_direct": [],
+      "seeds_f": [],
+      "sub_questions": [
+        ", while still focusing only on day-based time windows?",
+        "and their functional purpose, considering only those timeframes that are explicitly expressed in days?"
+      ],
+      "sq_ner": [
+        [],
+        []
+      ],
+      "union_ner": [],
+      "seeds_g": [],
+      "added_by_decompose": [],
+      "coverage_f": 0.0,
+      "coverage_g": 0.0,
+      "delta": 0.0,
+      "num_seeds_f": 0,
+      "num_seeds_g": 0,
+      "top20_f": [],
+      "top20_g": []
+    },
+    {
+      "qid": "Q-D4",
+      "query": "Which documents mention insurance and what limits are specified?",
+      "ner_direct": [
+        "Insurance Policy",
+        "Insurance Agreement",
+        "Certificate of Insurance",
+        "Insurance Coverage Limits",
+        "Liability Insurance Limits"
+      ],
+      "seeds_f": [
+        "insurance policy",
+        "Agreement",
+        "certificate of insurance",
+        "minimum limits of $300,000 for bodily injury"
+      ],
+      "sub_questions": [
+        "Which documents mention insurance, explicitly using the term \u201cinsurance\u201d or closely related insurance terminology?",
+        "are specified in that document?"
+      ],
+      "sq_ner": [
+        [
+          "Insurance Policy",
+          "Insurance Agreement",
+          "Insurance Contract",
+          "Insurance Certificate",
+          "Insurance Rider"
+        ],
+        []
+      ],
+      "union_ner": [
+        "Insurance Policy",
+        "Insurance Agreement",
+        "Certificate of Insurance",
+        "Insurance Coverage Limits",
+        "Liability Insurance Limits",
+        "Insurance Contract",
+        "Insurance Certificate",
+        "Insurance Rider"
+      ],
+      "seeds_g": [
+        "insurance policy",
+        "Agreement",
+        "certificate of insurance",
+        "contract",
+        "minimum limits of $300,000 for bodily injury"
+      ],
+      "added_by_decompose": [
+        "contract"
+      ],
+      "coverage_f": 0.23809523809523808,
+      "coverage_g": 0.23809523809523808,
+      "delta": 0.0,
+      "num_seeds_f": 4,
+      "num_seeds_g": 5,
+      "top20_f": [
+        "minimum limits of $300,000 for bodily injury",
+        "Agreement",
+        "certificate of insurance",
+        "insurance policy",
+        "start-up fee",
+        "contract for services",
+        "Contoso Ltd.",
+        "short term and/or vacation rentals",
+        "provision",
+        "insured financial institution",
+        "Hawaii",
+        "$25,000 for property damage to others",
+        "Walt Flood Realty",
+        "Liability Insurance coverage",
+        "owner",
+        "U.S. Federal Tax Id",
+        "invalid",
+        "Fabrikam Inc.",
+        "Agent",
+        "date of last signature"
+      ],
+      "top20_g": [
+        "certificate of insurance",
+        "Agreement",
+        "minimum limits of $300,000 for bodily injury",
+        "insurance policy",
+        "contract",
+        "contract for services",
+        "start-up fee",
+        "Contoso Ltd.",
+        "short term and/or vacation rentals",
+        "Pumper",
+        "insured financial institution",
+        "$25,000 for property damage to others",
+        "U.S. Federal Tax Id",
+        "Liability Insurance coverage",
+        "Hawaii",
+        "Walt Flood Realty",
+        "owner",
+        "Fabrikam Inc.",
+        "Agent",
+        "provision"
+      ]
+    },
+    {
+      "qid": "Q-D5",
+      "query": "In the warranty, explain how the \"coverage start\" is defined and what must happen before coverage ends.",
+      "ner_direct": [
+        "Warranty",
+        "Coverage Start",
+        "Coverage End",
+        "Warranty Coverage Period",
+        "Warranty Terms"
+      ],
+      "seeds_f": [
+        "warranty"
+      ],
+      "sub_questions": [
+        "In the warranty, how is the \"coverage start\" specifically defined, including any conditions, dates, events, or actions that determine when warranty coverage begins?",
+        "In the warranty, what specific events, conditions, time limits, or actions must occur before warranty coverage ends, and how are these end-of-coverage triggers described?"
+      ],
+      "sq_ner": [
+        [
+          "Warranty",
+          "Coverage Start",
+          "Warranty Coverage",
+          "Warranty Agreement",
+          "Coverage Start Date"
+        ],
+        [
+          "Warranty Agreement",
+          "Warranty Coverage",
+          "End-of-Coverage Triggers",
+          "Warranty Termination Conditions",
+          "Warranty Expiration Date"
+        ]
+      ],
+      "union_ner": [
+        "Warranty",
+        "Coverage Start",
+        "Coverage End",
+        "Warranty Coverage Period",
+        "Warranty Terms",
+        "Warranty Coverage",
+        "Warranty Agreement",
+        "Coverage Start Date",
+        "End-of-Coverage Triggers",
+        "Warranty Termination Conditions",
+        "Warranty Expiration Date"
+      ],
+      "seeds_g": [
+        "warranty",
+        "Warranty Coverage",
+        "Termination upon sale or move out"
+      ],
+      "added_by_decompose": [
+        "Termination upon sale or move out",
+        "Warranty Coverage"
+      ],
+      "coverage_f": 0.1565217391304348,
+      "coverage_g": 0.13043478260869565,
+      "delta": -0.026086956521739146,
+      "num_seeds_f": 1,
+      "num_seeds_g": 3,
+      "top20_f": [
+        "warranty",
+        "Warranties of merchantability",
+        "Statement of Non-Warranted Conditions",
+        "warranty period",
+        "Small Claims Court of the State of Idaho",
+        "court",
+        "Warranty Coverage",
+        "provisions of Warranty",
+        "Dispute",
+        "construction or purchase of the home",
+        "any action, dispute, claim or controversy of any kind",
+        "any of the Parties",
+        "related agreements, documents, or instruments",
+        "First purchaser",
+        "remedies preserved herein",
+        "Arbitrator",
+        "prior communications",
+        "disputes",
+        "Builder's Limited Warranty",
+        "integrated agreement"
+      ],
+      "top20_g": [
+        "Warranty Coverage",
+        "Termination upon sale or move out",
+        "warranty",
+        "provisions of Warranty",
+        "manufacturers' warranties on appliances and equipment",
+        "cabinet work",
+        "Magnuson-Moss Warranty Act",
+        "Limited Warranty",
+        "warranty period",
+        "construction or purchase of the home",
+        "Small Claims Court of the State of Idaho",
+        "any of the Parties",
+        "related agreements, documents, or instruments",
+        "court",
+        "Warranties of merchantability",
+        "Limited Warranty Agreement",
+        "any action, dispute, claim or controversy of any kind",
+        "Statement of Non-Warranted Conditions",
+        "Dispute",
+        "Manufacturer's Warranty"
+      ]
+    },
+    {
+      "qid": "Q-D6",
+      "query": "Do the purchase contract total price and the invoice total match? If so, what is that amount?",
+      "ner_direct": [
+        "Purchase Contract",
+        "Invoice"
+      ],
+      "seeds_f": [
+        "contract",
+        "invoice"
+      ],
+      "sub_questions": [
+        "What is the total price specified in the purchase contract, considering all relevant terms, line items, and adjustments that contribute to the overall contract total price?",
+        "What is the total amount specified on the invoice, considering all relevant line items, taxes, fees, discounts, and adjustments that contribute to the overall invoice total?",
+        "Do the purchase contract total price and the invoice total amount match exactly when comparing the overall totals derived in the previous two questions?",
+        "If the purchase contract total price and the invoice total amount do match exactly, what is that matching total amount?"
+      ],
+      "sq_ner": [
+        [
+          "Purchase Contract",
+          "Total Contract Price",
+          "Line Items",
+          "Contract Adjustments",
+          "Overall Contract Total Price"
+        ],
+        [
+          "Invoice Total"
+        ],
+        [
+          "Purchase Contract Total Price",
+          "Invoice Total Amount",
+          "Purchase Contract",
+          "Invoice",
+          "Overall Totals"
+        ],
+        [
+          "Purchase Contract",
+          "Invoice"
+        ]
+      ],
+      "union_ner": [
+        "Purchase Contract",
+        "Invoice",
+        "Total Contract Price",
+        "Line Items",
+        "Contract Adjustments",
+        "Overall Contract Total Price",
+        "Invoice Total",
+        "Purchase Contract Total Price",
+        "Invoice Total Amount",
+        "Overall Totals"
+      ],
+      "seeds_g": [
+        "contract",
+        "invoice",
+        "Total: 2000.00"
+      ],
+      "added_by_decompose": [
+        "Total: 2000.00"
+      ],
+      "coverage_f": 0.20588235294117646,
+      "coverage_g": 0.20588235294117646,
+      "delta": 0.0,
+      "num_seeds_f": 2,
+      "num_seeds_g": 3,
+      "top20_f": [
+        "invoice",
+        "contract",
+        "Flush-mount Hall Call stations (upper & lower)",
+        "Vertical Platform Lift (AscendPro VPX200)",
+        "Contractor",
+        "Aluminum door with plexi-glass inserts & automatic opener",
+        "Contract between Contractor and Fabrikam Inc.",
+        "owner",
+        "Fabrikam Inc.",
+        "Holding Tank Owner",
+        "risk",
+        "90 days",
+        "Pumper",
+        "Outdoor configuration package",
+        "Delivery",
+        "Special Size 42\" x 62\" cab with 90 degree Type 3",
+        "2024-06-15",
+        "Power system: 110 VAC 60 Hz up, 12 VAC down",
+        "Party",
+        "labor"
+      ],
+      "top20_g": [
+        "Total: 2000.00",
+        "invoice",
+        "contract",
+        "Aluminum door with plexi-glass inserts & automatic opener",
+        "90 days",
+        "Outdoor configuration package",
+        "Delivery",
+        "Power system: 110 VAC 60 Hz up, 12 VAC down",
+        "Fabrikam Inc.",
+        "Outdoor fitting",
+        "labor",
+        "risk",
+        "Pumper",
+        "Contractor",
+        "owner",
+        "Special Size 42\" x 62\" cab with 90 degree Type 3",
+        "Holding Tank Owner",
+        "2024-06-15",
+        "Party",
+        "Contract between Contractor and Fabrikam Inc."
+      ]
+    },
+    {
+      "qid": "Q-D7",
+      "query": "Which document has the latest explicit date, and what is it?",
+      "ner_direct": [
+        "latest explicit date",
+        "explicit date"
+      ],
+      "seeds_f": [
+        "2024-06-15"
+      ],
+      "sub_questions": [
+        "Among all the documents under consideration, which explicit dates are mentioned in each document, and which document does each explicit date belong to?",
+        "Considering only the explicit dates identified in the previous step, which of these explicit dates is the latest in time?",
+        "Which document contains this latest explicit date, and what exactly is that latest explicit date?"
+      ],
+      "sq_ner": [
+        [
+          "explicit dates"
+        ],
+        [
+          "explicit dates"
+        ],
+        [
+          "latest explicit date"
+        ]
+      ],
+      "union_ner": [
+        "latest explicit date",
+        "explicit date",
+        "explicit dates"
+      ],
+      "seeds_g": [
+        "dates",
+        "2024-06-15"
+      ],
+      "added_by_decompose": [
+        "dates"
+      ],
+      "coverage_f": 0.07196969696969698,
+      "coverage_g": 0.07575757575757576,
+      "delta": 0.0037878787878787845,
+      "num_seeds_f": 1,
+      "num_seeds_g": 2,
+      "top20_f": [
+        "2024-06-15",
+        "name of the owner of the holding tank",
+        "location of the property on which the holding tank is installed",
+        "sanitary permit number issued for the holding tank",
+        "Holding Tank Owner",
+        "dates on which the holding tank was serviced",
+        "Pumper",
+        "include the following in the report",
+        "contract",
+        "Contract between Contractor and Fabrikam Inc.",
+        "property",
+        "Contoso Ltd.",
+        "report",
+        "holding tank(s)",
+        "Power system: 110 VAC 60 Hz up, 12 VAC down",
+        "Special Size 42\" x 62\" cab with 90 degree Type 3",
+        "owner",
+        "Contractor",
+        "name and address of the person responsible for servicing the holding tank",
+        "holding tank"
+      ],
+      "top20_g": [
+        "dates",
+        "2024-06-15",
+        "location of the property on which the holding tank is installed",
+        "dates on which the holding tank was serviced",
+        "include the following in the report",
+        "sanitary permit number issued for the holding tank",
+        "Pumper",
+        "contract",
+        "Holding Tank Owner",
+        "holding tank",
+        "name of the owner of the holding tank",
+        "name and address of the person responsible for servicing the holding tank",
+        "property",
+        "report",
+        "holding tank(s)",
+        "Special Size 42\" x 62\" cab with 90 degree Type 3",
+        "Party",
+        "Fabrikam Inc.",
+        "inspection",
+        "contents"
+      ]
+    },
+    {
+      "qid": "Q-D8",
+      "query": "Across the set, which entity appears in the most different documents: Fabrikam Inc. or Contoso Ltd.?",
+      "ner_direct": [
+        "Fabrikam Inc.",
+        "Contoso Ltd."
+      ],
+      "seeds_f": [
+        "Fabrikam Inc.",
+        "Contoso Ltd."
+      ],
+      "sub_questions": [
+        "Across the set, in how many different documents does the entity **\u201cFabrikam Inc.\u201d** appear?",
+        "Across the set, in how many different documents does the entity **\u201cContoso Ltd.\u201d** appear?",
+        "Across the set, comparing your answers to sub-questions 1 and 2, which entity appears in the **greater number of different documents**, **\u201cFabrikam Inc.\u201d** or **\u201cContoso Ltd.\u201d**?"
+      ],
+      "sq_ner": [
+        [
+          "Fabrikam Inc."
+        ],
+        [
+          "Contoso Ltd."
+        ],
+        [
+          "Fabrikam Inc.",
+          "Contoso Ltd."
+        ]
+      ],
+      "union_ner": [
+        "Fabrikam Inc.",
+        "Contoso Ltd."
+      ],
+      "seeds_g": [
+        "Fabrikam Inc.",
+        "Contoso Ltd."
+      ],
+      "added_by_decompose": [],
+      "coverage_f": 0.06694560669456066,
+      "coverage_g": 0.06694560669456066,
+      "delta": 0.0,
+      "num_seeds_f": 2,
+      "num_seeds_g": 2,
+      "top20_f": [
+        "Fabrikam Inc.",
+        "Contoso Ltd.",
+        "Authorized Representative",
+        "contract",
+        "Registration Number REG-54321",
+        "Fabrikam Construction",
+        "Contractor",
+        "Agreement",
+        "owner",
+        "Builder",
+        "Buyer/Owner",
+        "Limited Warranty",
+        "Pumper",
+        "Contoso Lifts LLC",
+        "Agent",
+        "Contract between Contractor and Fabrikam Inc.",
+        "Walt Flood Realty",
+        "home",
+        "Jim Contoso",
+        "04/30/2025"
+      ],
+      "top20_g": [
+        "Fabrikam Inc.",
+        "Contoso Ltd.",
+        "Authorized Representative",
+        "contract",
+        "Registration Number REG-54321",
+        "Fabrikam Construction",
+        "Contractor",
+        "Agreement",
+        "owner",
+        "Builder",
+        "Buyer/Owner",
+        "Limited Warranty",
+        "Pumper",
+        "Contoso Lifts LLC",
+        "Agent",
+        "Contract between Contractor and Fabrikam Inc.",
+        "Walt Flood Realty",
+        "home",
+        "Jim Contoso",
+        "04/30/2025"
+      ]
+    },
+    {
+      "qid": "Q-D9",
+      "query": "Compare the \"fees\" concepts: which doc has a percentage-based fee structure and which has fixed installment payments?",
+      "ner_direct": [
+        "Fees Clause",
+        "Percentage-Based Fee Structure",
+        "Fixed Installment Payment Schedule",
+        "Fee Schedule",
+        "Payment Terms Clause"
+      ],
+      "seeds_f": [
+        "fee/commission of 25% of gross revenues",
+        "3 installments payment schedule"
+      ],
+      "sub_questions": [
+        "In the provided documents, which specific document describes a \"fees\" concept that uses a percentage-based fee structure, and what is that percentage-based structure as stated in the document?",
+        "In the provided documents, which specific document describes a \"fees\" concept that uses fixed installment payments, and what are those fixed installment payment terms as stated in the document?",
+        "Based on the identified \"fees\" concepts in the provided documents, how do the percentage-based fee structure and the fixed installment payment structure compare to each other in terms of how fees are calculated and paid?"
+      ],
+      "sq_ner": [
+        [
+          "Fees Clause",
+          "Percentage-Based Fee Structure",
+          "Fee Schedule",
+          "Pricing Terms",
+          "Commission Structure"
+        ],
+        [
+          "Fees",
+          "Fixed Installment Payments",
+          "Installment Payment Terms",
+          "Fees Clause",
+          "Fixed Installment Fee Schedule"
+        ],
+        [
+          "Fees Concepts"
+        ]
+      ],
+      "union_ner": [
+        "Fees Clause",
+        "Percentage-Based Fee Structure",
+        "Fixed Installment Payment Schedule",
+        "Fee Schedule",
+        "Payment Terms Clause",
+        "Pricing Terms",
+        "Commission Structure",
+        "Fees",
+        "Fixed Installment Payments",
+        "Installment Payment Terms",
+        "Fixed Installment Fee Schedule",
+        "Fees Concepts"
+      ],
+      "seeds_g": [
+        "AGENT'S FEES",
+        "fee/commission of 25% of gross revenues",
+        "3 installments payment schedule"
+      ],
+      "added_by_decompose": [
+        "AGENT'S FEES"
+      ],
+      "coverage_f": 0.125,
+      "coverage_g": 0.125,
+      "delta": 0.0,
+      "num_seeds_f": 2,
+      "num_seeds_g": 3,
+      "top20_f": [
+        "3 installments payment schedule",
+        "fee/commission of 25% of gross revenues",
+        "advertising for short-term (vacation rentals)",
+        "management services for long term leases",
+        "management services for short term and/or vacation rentals",
+        "pro-ration charge at $75.00/month",
+        "Contract between Contractor and Fabrikam Inc.",
+        "credit cards",
+        "8-10 weeks after drawing approval",
+        "AGENT'S FEES",
+        "fee of 10% on total charge",
+        "bankcard fees",
+        "bulletin board",
+        "Internet",
+        "rental unit",
+        "local newspapers",
+        "short term and/or vacation rentals",
+        "Principal Broker",
+        "rent",
+        "Rental Agent"
+      ],
+      "top20_g": [
+        "AGENT'S FEES",
+        "3 installments payment schedule",
+        "fee/commission of 25% of gross revenues",
+        "Rental Agent",
+        "Contract between Contractor and Fabrikam Inc.",
+        "Agent",
+        "management services for long term leases",
+        "Principal Broker",
+        "short term and/or vacation rentals",
+        "bankcard fees",
+        "fee of 10% on total charge",
+        "advertising for short-term (vacation rentals)",
+        "management services for short term and/or vacation rentals",
+        "8-10 weeks after drawing approval",
+        "credit cards",
+        "Agreement",
+        "pro-ration charge at $75.00/month",
+        "interest",
+        "Pacific View Retreat",
+        "contract for services"
+      ]
+    },
+    {
+      "qid": "Q-D10",
+      "query": "List the three different \"risk allocation\" statements across the set (risk of loss, liability limitations, non-transferability).",
+      "ner_direct": [
+        "Risk of Loss",
+        "Liability Limitations",
+        "Non-Transferability"
+      ],
+      "seeds_f": [
+        "risk"
+      ],
+      "sub_questions": [
+        "risk of loss, (b) liability limitations, and (c) non-transferability?",
+        "For each of the three different \"risk allocation\" statements across the set, how is the risk of loss allocated between the parties, and what specific language is used to describe that allocation?",
+        ", and how are these limitations expressed?",
+        ", and what specific terms are used to define these non-transferability constraints?",
+        "Considering all three different \"risk allocation\" statements across the set together, how do the provisions on risk of loss, liability limitations, and non-transferability compare or differ in scope, strength, and effect among the three statements?"
+      ],
+      "sq_ner": [
+        [
+          "Risk of Loss",
+          "Limitation of Liability",
+          "Non-Transferability Clause",
+          "Liability Limitations",
+          "Non-Transferability Provision"
+        ],
+        [
+          "Risk Allocation Statement 1",
+          "Risk Allocation Statement 2",
+          "Risk Allocation Statement 3",
+          "Risk of Loss Clause",
+          "Risk Allocation Provision"
+        ],
+        [],
+        [],
+        [
+          "Risk Allocation Statement 1",
+          "Risk Allocation Statement 2",
+          "Risk Allocation Statement 3",
+          "Risk of Loss Clause",
+          "Limitation of Liability Clause"
+        ]
+      ],
+      "union_ner": [
+        "Risk of Loss",
+        "Liability Limitations",
+        "Non-Transferability",
+        "Limitation of Liability",
+        "Non-Transferability Clause",
+        "Non-Transferability Provision",
+        "Risk Allocation Statement 1",
+        "Risk Allocation Statement 2",
+        "Risk Allocation Statement 3",
+        "Risk of Loss Clause",
+        "Risk Allocation Provision",
+        "Limitation of Liability Clause"
+      ],
+      "seeds_g": [
+        "risk",
+        "provision"
+      ],
+      "added_by_decompose": [
+        "provision"
+      ],
+      "coverage_f": 0.07511737089201878,
+      "coverage_g": 0.07511737089201878,
+      "delta": 0.0,
+      "num_seeds_f": 1,
+      "num_seeds_g": 2,
+      "top20_f": [
+        "risk",
+        "contract",
+        "compliance costs",
+        "Contractor",
+        "Delivery",
+        "8-10 weeks after drawing approval",
+        "Contract between Contractor and Fabrikam Inc.",
+        "Power system: 110 VAC 60 Hz up, 12 VAC down",
+        "Special Size 42\" x 62\" cab with 90 degree Type 3",
+        "full refund",
+        "Vertical Platform Lift (AscendPro VPX200)",
+        "labor",
+        "contract for services",
+        "90 days",
+        "Delay",
+        "Holding Tank Owner",
+        "3 installments payment schedule",
+        "Customer",
+        "Pumper",
+        "Party"
+      ],
+      "top20_g": [
+        "provision",
+        "risk",
+        "contract",
+        "date of last signature",
+        "invalid, illegal, or unenforceable provisions",
+        "provisions",
+        "invalid",
+        "compliance costs",
+        "Contractor",
+        "Delivery",
+        "provisions of Warranty",
+        "remaining provisions of Agreement",
+        "Implied warranties",
+        "disclosures of information",
+        "Arbitration Program",
+        "8-10 weeks after drawing approval",
+        "warranty period",
+        "Agreement",
+        "90 days",
+        "Contract between Contractor and Fabrikam Inc."
+      ]
+    }
+  ]
+}

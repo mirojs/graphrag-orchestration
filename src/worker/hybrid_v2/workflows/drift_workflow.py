@@ -13,9 +13,7 @@ Flow:
     → check_confidence → synthesize | redecompose → StopEvent
 """
 
-import asyncio
 import os
-import re
 import time
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -27,11 +25,6 @@ from llama_index.core.workflow import (
     StartEvent, 
     StopEvent,
 )
-
-# Import sentence search env vars from route handler
-ROUTE4_SENTENCE_SEARCH = os.getenv("ROUTE4_SENTENCE_SEARCH", "1").strip().lower() in {"1", "true", "yes"}
-ROUTE4_SENTENCE_TOP_K = int(os.getenv("ROUTE4_SENTENCE_TOP_K", "30"))
-ROUTE4_SENTENCE_RERANK = os.getenv("ROUTE4_SENTENCE_RERANK", "1").strip().lower() in {"1", "true", "yes"}
 
 from .events import (
     DecomposeEvent,
@@ -260,26 +253,10 @@ class DRIFTWorkflow(Workflow):
         
         # Deduplicate seeds
         all_seeds = list(set(all_seeds))
-
-        # NER Union: extract entities from original query (pre-decomposition)
-        # to catch exact entity names that DRIFT decomposition may mutate.
-        original_query = await ctx.store.get("original_query", "")
-        try:
-            original_entities = await self.pipeline.disambiguator.disambiguate(original_query)
-            if original_entities:
-                existing = set(all_seeds)
-                new_seeds = [e for e in original_entities if e not in existing]
-                all_seeds = all_seeds + new_seeds
-                logger.info("drift_ner_union",
-                           original_entities=original_entities,
-                           new_from_original=len(new_seeds),
-                           total_seeds=len(all_seeds))
-        except Exception as e:
-            logger.warning("drift_ner_union_failed", error=str(e))
-
         await ctx.store.set("all_seeds", all_seeds)
         await ctx.store.set("intermediate_results", intermediate_results)
         
+        original_query = await ctx.store.get("original_query", "")
         response_type = await ctx.store.get("response_type", "detailed_report")
         
         return ConfidenceCheckEvent(
@@ -308,15 +285,6 @@ class DRIFTWorkflow(Workflow):
         all_seeds = await ctx.store.get("all_seeds", [])
         redecompose_count = await ctx.store.get("redecompose_count", 0)
         
-        # Launch sentence search in parallel with consolidated trace
-        sentence_task = None
-        if ROUTE4_SENTENCE_SEARCH:
-            sentence_task = asyncio.ensure_future(
-                self._retrieve_sentence_evidence(
-                    ev.original_query, top_k=ROUTE4_SENTENCE_TOP_K
-                )
-            )
-
         # Stage 4.3: Consolidated tracing with all seeds
         logger.info("drift_consolidated_tracing", num_seeds=len(all_seeds))
         complete_evidence = await self.pipeline.tracer.trace(
@@ -325,27 +293,6 @@ class DRIFTWorkflow(Workflow):
             top_k=30
         )
         await ctx.store.set("complete_evidence", complete_evidence)
-
-        # Collect sentence search results
-        sentence_evidence: List[Dict[str, Any]] = []
-        if sentence_task:
-            try:
-                sentence_evidence = await sentence_task
-            except Exception as e:
-                logger.warning("drift_sentence_search_failed", error=str(e))
-                sentence_evidence = []
-            if sentence_evidence:
-                sentence_evidence = self._denoise_sentences(sentence_evidence)
-                if sentence_evidence and ROUTE4_SENTENCE_RERANK:
-                    try:
-                        sentence_evidence = await self._rerank_sentences(
-                            ev.original_query, sentence_evidence
-                        )
-                    except Exception as e:
-                        logger.warning("drift_sentence_rerank_failed", error=str(e))
-            logger.info("drift_sentence_search_complete",
-                       num_sentences=len(sentence_evidence))
-        await ctx.store.set("sentence_evidence", sentence_evidence)
         
         timings = await ctx.store.get("timings_ms", {})
         timings["stage_4.3_ms"] = int((time.perf_counter() - t0) * 1000)
@@ -481,28 +428,6 @@ class DRIFTWorkflow(Workflow):
         coverage_chunks = await self._apply_coverage_gap_fill(
             original_query, complete_evidence
         )
-
-        # Stage 4.S: Merge sentence evidence into coverage chunks
-        sentence_evidence = await ctx.store.get("sentence_evidence", [])
-        sentence_chunks_added = 0
-        if sentence_evidence:
-            sentence_as_chunks = []
-            for ev_item in sentence_evidence:
-                sentence_as_chunks.append({
-                    "text": ev_item.get("text", ""),
-                    "document_title": ev_item.get("document_title", "Unknown"),
-                    "document_id": ev_item.get("document_id", ""),
-                    "section_path": ev_item.get("section_path", ""),
-                    "page_number": ev_item.get("page"),
-                    "_entity_score": ev_item.get("rerank_score", ev_item.get("score", 0.5)),
-                    "_source_entity": "__sentence_search__",
-                })
-            sentence_chunks_added = len(sentence_as_chunks)
-            # Prepend sentence chunks (higher quality) before coverage gap-fill chunks
-            coverage_chunks = sentence_as_chunks + (coverage_chunks or [])
-            logger.info("drift_sentence_chunks_merged",
-                       sentence_chunks=sentence_chunks_added,
-                       total_coverage=len(coverage_chunks))
         
         # Stage 4.4: Synthesis
         logger.info("drift_synthesis_start")
@@ -532,8 +457,6 @@ class DRIFTWorkflow(Workflow):
                 "parallel_sub_questions": True,
                 "timings_ms": timings,
                 "redecompose_attempts": await ctx.store.get("redecompose_count", 0),
-                "sentence_evidence_count": len(sentence_evidence),
-                "sentence_chunks_merged": sentence_chunks_added,
             }
         }
         
@@ -592,208 +515,6 @@ class DRIFTWorkflow(Workflow):
         # No date metadata found - return empty to trigger normal flow
         return {}
     
-    # =========================================================================
-    # Sentence Search (ported from DRIFTHandler)
-    # =========================================================================
-
-    async def _retrieve_sentence_evidence(
-        self,
-        query: str,
-        top_k: int = 30,
-    ) -> List[Dict[str, Any]]:
-        """Retrieve sentence-level evidence via Voyage vector search.
-
-        Provides a direct query->source evidence path that bypasses entity
-        resolution and graph traversal.
-        """
-        from ..routes.route_4_drift import _get_voyage_service
-
-        voyage_service = _get_voyage_service()
-        if not voyage_service:
-            logger.warning("drift_wf_sentence_search_no_voyage_service")
-            return []
-
-        neo4j_driver = getattr(self.pipeline, "neo4j_driver", None)
-        if not neo4j_driver:
-            logger.warning("drift_wf_sentence_search_no_neo4j_driver")
-            return []
-
-        try:
-            query_embedding = voyage_service.embed_query(query)
-        except Exception as e:
-            logger.warning("drift_wf_sentence_embed_failed", error=str(e))
-            return []
-
-        threshold = float(os.getenv("ROUTE4_SENTENCE_THRESHOLD", "0.2"))
-        group_id = getattr(self.pipeline, "group_id", "")
-
-        cypher = """
-        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
-        YIELD node AS sent, score
-        WHERE sent.group_id = $group_id AND score >= $threshold
-
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
-        OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
-        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
-
-        RETURN sent.id AS sentence_id,
-               sent.text AS text,
-               sent.source AS source,
-               sent.section_path AS section_path,
-               sent.page AS page,
-               chunk.text AS chunk_text,
-               doc.title AS document_title,
-               doc.id AS document_id,
-               score,
-               prev_sent.text AS prev_text,
-               next_sent.text AS next_text
-        ORDER BY score DESC
-        """
-
-        try:
-            loop = asyncio.get_event_loop()
-            executor = getattr(self.pipeline, "_executor", None)
-
-            def _run_search():
-                with neo4j_driver.session() as session:
-                    records = session.run(
-                        cypher,
-                        embedding=query_embedding,
-                        group_id=group_id,
-                        top_k=top_k,
-                        threshold=threshold,
-                    )
-                    return [dict(r) for r in records]
-
-            results = await loop.run_in_executor(executor, _run_search)
-        except Exception as e:
-            logger.warning("drift_wf_sentence_search_failed", error=str(e))
-            return []
-
-        if not results:
-            return []
-
-        seen_sentences: set = set()
-        evidence: List[Dict[str, Any]] = []
-
-        for r in results:
-            sid = r.get("sentence_id", "")
-            if sid in seen_sentences:
-                continue
-            seen_sentences.add(sid)
-
-            parts = []
-            if r.get("prev_text"):
-                parts.append(r["prev_text"].strip())
-            parts.append(r.get("text", "").strip())
-            if r.get("next_text"):
-                parts.append(r["next_text"].strip())
-            passage = " ".join(parts)
-
-            evidence.append({
-                "text": passage,
-                "sentence_text": r.get("text", ""),
-                "score": r.get("score", 0),
-                "document_title": r.get("document_title", "Unknown"),
-                "document_id": r.get("document_id", ""),
-                "section_path": r.get("section_path", ""),
-                "page": r.get("page"),
-                "sentence_id": sid,
-            })
-
-        logger.info(
-            "drift_wf_sentence_search_complete",
-            query=query[:50],
-            results_raw=len(results),
-            evidence_deduped=len(evidence),
-        )
-        return evidence
-
-    @staticmethod
-    def _denoise_sentences(
-        evidence: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        """Remove noisy, non-informative sentences. Same logic as DRIFTHandler."""
-        cleaned: List[Dict[str, Any]] = []
-
-        for ev_item in evidence:
-            text = (ev_item.get("sentence_text") or ev_item.get("text", "")).strip()
-            passage = (ev_item.get("text", "")).strip()
-
-            if len(re.findall(r"<[^>]+>", text)) >= 2:
-                continue
-            if len(text) < 25:
-                continue
-            if re.search(
-                r"(?i)(signature|signed this|print\)|registration number"
-                r"|authorized representative)",
-                text,
-            ):
-                continue
-            if len(text) < 60 and text.endswith(":"):
-                continue
-            if len(text) < 50 and not re.search(r"[.?!]", text):
-                continue
-
-            if "<" in passage:
-                passage = re.sub(r"<[^>]+>", "", passage).strip()
-                ev_item = {**ev_item, "text": passage}
-
-            cleaned.append(ev_item)
-
-        logger.info(
-            "drift_wf_denoise_sentences",
-            before=len(evidence),
-            after=len(cleaned),
-        )
-        return cleaned
-
-    async def _rerank_sentences(
-        self,
-        query: str,
-        evidence: List[Dict[str, Any]],
-        top_k: int = 15,
-    ) -> List[Dict[str, Any]]:
-        """Rerank denoised sentences using voyage-rerank-2.5."""
-        rerank_model = os.getenv("ROUTE4_RERANK_MODEL", "rerank-2.5")
-
-        try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-            documents = [ev_item.get("sentence_text") or ev_item.get("text", "") for ev_item in evidence]
-
-            loop = asyncio.get_event_loop()
-            executor = getattr(self.pipeline, "_executor", None)
-            rr_result = await loop.run_in_executor(
-                executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
-            )
-
-            reranked: List[Dict[str, Any]] = []
-            for rr in rr_result.results:
-                ev_item = {**evidence[rr.index], "rerank_score": rr.relevance_score}
-                reranked.append(ev_item)
-
-            logger.info(
-                "drift_wf_rerank_complete",
-                model=rerank_model,
-                input_count=len(evidence),
-                output_count=len(reranked),
-            )
-            return reranked
-
-        except Exception:
-            logger.exception("drift_wf_rerank_failed")
-            raise
-
     async def _apply_coverage_gap_fill(
         self, query: str, evidence: List[Any]
     ) -> List[Dict[str, Any]]:

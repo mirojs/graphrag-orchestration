@@ -419,6 +419,7 @@ class DRIFTHandler(BaseRouteHandler):
             prompt_variant=prompt_variant,
             synthesis_model=synthesis_model,
             include_context=include_context,
+            ner_seed_count=len(all_seeds),
         )
         logger.info("stage_4.4_complete")
         

@@ -210,6 +210,7 @@ class EvidenceSynthesizer:
         include_context: bool = False,
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         pre_fetched_chunks: Optional[List[Dict[str, Any]]] = None,
+        ner_seed_count: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -235,7 +236,10 @@ class EvidenceSynthesizer:
             text_chunks = pre_fetched_chunks
             entity_scores: Dict[str, float] = {name: score for name, score in evidence_nodes}
         else:
-            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(evidence_nodes, query=query, is_drift=sub_questions is not None)
+            text_chunks, entity_scores, retrieval_stats = await self._retrieve_text_chunks(
+                evidence_nodes, query=query, is_drift=sub_questions is not None,
+                ner_seed_count=ner_seed_count,
+            )
         
         # Step 1.5: Merge coverage chunks if provided — with dedup against entity-retrieved chunks.
         # Coverage chunks bypass _retrieve_text_chunks() so they miss the denoising stack.
@@ -1069,6 +1073,7 @@ Response:"""
     def _resolve_target_documents(
         seed_entities: List[str],
         doc_coverage: List[Dict[str, Any]],
+        ner_seed_count: Optional[int] = None,
     ) -> Tuple[Optional[List[str]], Dict[str, Any]]:
         """IDF-weighted entity→document voting to determine target document(s).
 
@@ -1120,6 +1125,9 @@ Response:"""
             "min_score_threshold": min_score,
             "entity_doc_counts": entity_doc_counts,
         }
+        # Carry NER seed count into the ratio check below
+        if ner_seed_count is not None:
+            stats["_ner_seed_count"] = ner_seed_count
 
         # Decision logic
         if top_score < min_score:
@@ -1128,7 +1136,12 @@ Response:"""
             logger.info("doc_scope_skip", reason="low_confidence", top_score=round(top_score, 3))
             return None, stats
 
-        total_seeds = len(seed_entities)
+        # Use ner_seed_count (original NER entity count) when available
+        # for the ratio check.  selected_entities is PPR-expanded and much
+        # larger, which dilutes the ratio and causes doc_scope to always
+        # skip ("cross_document").  The NER seed count reflects the
+        # actual number of query-derived entities.
+        total_seeds = stats.get("_ner_seed_count") or len(seed_entities)
         if total_seeds > 0 and top_score / total_seeds < 0.5:
             # No dominant document — cross-document question
             stats["decision"] = "skip_cross_document"
@@ -1161,6 +1174,7 @@ Response:"""
         evidence_nodes: List[Tuple[str, float]],
         query: Optional[str] = None,
         is_drift: bool = False,
+        ner_seed_count: Optional[int] = None,
     ) -> Tuple[List[Dict[str, Any]], Dict[str, float], Dict[str, Any]]:
         """Retrieve raw text chunks for the evidence nodes.
         
@@ -1227,7 +1241,8 @@ Response:"""
                 doc_coverage = await self.text_store.get_entity_document_coverage(selected_entities)
                 if doc_coverage:
                     target_document_ids, doc_scope_stats = self._resolve_target_documents(
-                        selected_entities, doc_coverage
+                        selected_entities, doc_coverage,
+                        ner_seed_count=ner_seed_count,
                     )
             except Exception as exc:
                 logger.warning("doc_scope_resolution_failed", error=str(exc))
@@ -1239,14 +1254,13 @@ Response:"""
         # each entity's community_id and applies a score penalty to off-community
         # entities, which cascades into lower chunk budgets via score-weighted allocation.
         # Toggle: set DENOISE_COMMUNITY_FILTER=0 to disable.
-        # Disable community filter for DRIFT multi-hop queries (Route 4).
-        # DRIFT intentionally spans multiple Louvain communities to answer
-        # cross-document comparative questions. Penalising cross-community
-        # entities by 0.3× starves the synthesis of evidence it needs.
+        # Route 4 (DRIFT) no longer blanket-disables the community filter.
+        # The majority-vote mechanism naturally handles cross-document queries:
+        # only entities outside the dominant community are penalised, so
+        # a query spanning two communities keeps most evidence from both.
+        # If cross-doc queries regress, set DENOISE_COMMUNITY_FILTER=0.
         community_filter_enabled = os.environ.get("DENOISE_COMMUNITY_FILTER", "1") == "1"
-        if is_drift:
-            community_filter_enabled = False
-        community_stats: Dict[str, Any] = {"enabled": community_filter_enabled, "drift_override": is_drift}
+        community_stats: Dict[str, Any] = {"enabled": community_filter_enabled}
 
         if community_filter_enabled and self.text_store and hasattr(self.text_store, 'get_entity_communities'):
             try:

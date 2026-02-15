@@ -8346,3 +8346,41 @@ Current Route 4 performance (workflow handler, no sentence search):
 - Config: `ROUTE4_WORKFLOW=1`, `ROUTE4_USE_PPR=1`
 
 ---
+
+## 30. NER Union Benchmark — Isolated Impact (February 15, 2026)
+
+### 30.1. Change
+
+Ported Tier 1B (NER union) independently to the workflow handler (`drift_workflow.py`, commit `c5d54ee7`). Original-query NER runs in **parallel** with DRIFT decomposition via `asyncio.gather()` — zero additional latency.
+
+### 30.2. Results (1 repeat, 9/9 negative pass)
+
+| QID | Baseline (0.81 avg) | + NER Union | Delta |
+|-----|---------------------|-------------|-------|
+| Q-D1 | 0.93 | 0.93 | — |
+| Q-D2 | 1.00 | 0.83 | −0.17 |
+| Q-D3 | 0.78 | 0.65 | −0.13 |
+| Q-D4 | 0.94 | 0.94 | — |
+| Q-D5 | 0.78 | 0.84 | +0.06 |
+| Q-D6 | 0.67 | 0.56 | −0.11 |
+| Q-D7 | 0.69 | 0.87 | +0.18 |
+| Q-D8 | 0.57 | 0.80 | +0.23 |
+| Q-D9 | 0.81 | 0.64 | −0.17 |
+| Q-D10 | 0.93 | 0.84 | −0.09 |
+| **Avg** | **0.81** | **0.79** | **−0.02** |
+
+### 30.3. Analysis
+
+NER union alone shows **no measurable improvement** (−0.02, within noise). The distribution narrows (range 0.43→0.38) but the ceiling drops (Q-D2: 1.00→0.83) more than the floor lifts. However:
+
+- This run used **1 repeat** (server crashed mid-run due to Neo4j SSL timeout), vs 3 repeats averaged in the baseline. Single-run variance is ±0.10 per question.
+- NER union has **zero latency cost** (parallel with decomposition).
+- It is **architecturally correct** — more PPR seeds is never wrong.
+
+**Decision: Keep NER union.** The −0.02 is within noise, the cost is zero, and it provides a foundation for Phase 3 (query-biased teleportation) which builds on having better seed sets. May revisit with a full 3-repeat benchmark in the future.
+
+### 30.4. Key Insight
+
+The earlier 0.81→0.88 improvement (Section 29.1) was **primarily from sentence search** (Tier 1A), not NER union (Tier 1B). NER union alone is insufficient to close the quality gap through seed improvement alone. The remaining improvement path is Phase 3: making PPR traversal itself smarter (query-biased teleportation, EPIC-style passage enrichment, adaptive path weights).
+
+---

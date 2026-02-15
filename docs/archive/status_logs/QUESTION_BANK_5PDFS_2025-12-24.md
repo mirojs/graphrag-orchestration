@@ -255,7 +255,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 9. **Q-D9:** Compare the "fees" concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** PMA has percentage-based commissions (25%/10% + add-ons); purchase contract has fixed installment payments ($20,000/$7,000/$2,900 totaling $29,900).
+   - **Expected:** Property management agreement percentage-based commissions 25% 10% gross revenues short term long term; purchase contract fixed installment payments $20,000 $7,000 $2,900 totaling $29,900.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)
 
 10. **Q-D10:** List the three different "risk allocation" statements across the set (risk of loss, liability limitations, non-transferability).

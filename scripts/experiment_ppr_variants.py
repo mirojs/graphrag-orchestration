@@ -615,6 +615,157 @@ async def ppr_biased_plus_epic(
 
 
 # ---------------------------------------------------------------------------
+# PPR Variant E: True Matrix PPR (scipy sparse power iteration)
+# ---------------------------------------------------------------------------
+async def ppr_matrix(
+    neo4j: Neo4jClient,
+    group_id: str,
+    seed_ids: List[str],
+    top_k: int = 20,
+    damping: float = 0.85,
+    max_iterations: int = 40,
+    tol: float = 1e-6,
+) -> List[Tuple[str, float]]:
+    """
+    True Personalized PageRank using scipy sparse matrix power iteration.
+
+    Loads ALL entities + edges for the group, builds a weighted adjacency
+    matrix across 5 edge types, runs standard PPR power iteration.
+    """
+    from scipy import sparse
+
+    # Edge type weights
+    W_RELATED = 1.0
+    W_SEMANTIC = 0.8
+    W_SECTION_BRIDGE = 0.6
+    W_HUB = 0.5
+    W_SHARES = 0.5
+
+    # --- Step 1: Load all Entity nodes ---
+    node_recs = await neo4j.run("""
+        MATCH (e:Entity)
+        WHERE e.group_id = $group_id
+        RETURN e.id AS id, e.name AS name
+    """, group_id=group_id)
+
+    if not node_recs:
+        return []
+
+    id_to_idx: Dict[str, int] = {}
+    idx_to_name: Dict[int, str] = {}
+    for i, rec in enumerate(node_recs):
+        id_to_idx[rec["id"]] = i
+        idx_to_name[i] = rec["name"]
+    n = len(node_recs)
+
+    rows: List[int] = []
+    cols: List[int] = []
+    vals: List[float] = []
+
+    def _add(si: int, di: int, w: float):
+        rows.extend([si, di])
+        cols.extend([di, si])
+        vals.extend([w, w])
+
+    # --- Edge 1: RELATED_TO ---
+    for e in await neo4j.run("""
+        MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity)
+        WHERE a.group_id = $group_id AND b.group_id = $group_id
+        RETURN a.id AS src, b.id AS dst
+    """, group_id=group_id):
+        si, di = id_to_idx.get(e["src"]), id_to_idx.get(e["dst"])
+        if si is not None and di is not None:
+            _add(si, di, W_RELATED)
+
+    # --- Edge 2: SEMANTICALLY_SIMILAR (entity↔entity) ---
+    for e in await neo4j.run("""
+        MATCH (a:Entity)-[r:SEMANTICALLY_SIMILAR]->(b:Entity)
+        WHERE a.group_id = $group_id AND b.group_id = $group_id
+        RETURN a.id AS src, b.id AS dst, coalesce(r.similarity, 0.6) AS sim
+    """, group_id=group_id):
+        si, di = id_to_idx.get(e["src"]), id_to_idx.get(e["dst"])
+        if si is not None and di is not None:
+            _add(si, di, W_SEMANTIC * e["sim"])
+
+    # --- Edge 3: Section bridge (entity→section→sim→section→entity) ---
+    for e in await neo4j.run("""
+        MATCH (a:Entity)-[:APPEARS_IN_SECTION]->(s1:Section)
+              -[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
+              <-[:APPEARS_IN_SECTION]-(b:Entity)
+        WHERE a.group_id = $group_id AND b.group_id = $group_id
+          AND a.id <> b.id AND coalesce(sim.similarity, 0.5) >= 0.5
+        RETURN DISTINCT a.id AS src, b.id AS dst,
+               max(coalesce(sim.similarity, 0.5)) AS sim
+    """, group_id=group_id):
+        si, di = id_to_idx.get(e["src"]), id_to_idx.get(e["dst"])
+        if si is not None and di is not None:
+            _add(si, di, W_SECTION_BRIDGE * e["sim"])
+
+    # --- Edge 4: HUB_ENTITY ---
+    for e in await neo4j.run("""
+        MATCH (a:Entity)-[:APPEARS_IN_SECTION]->(s:Section)
+              -[hub:HAS_HUB_ENTITY]->(b:Entity)
+        WHERE a.group_id = $group_id AND b.group_id = $group_id
+          AND a.id <> b.id
+        RETURN DISTINCT a.id AS src, b.id AS dst,
+               max(coalesce(hub.mention_count, 1)) / 10.0 AS hw
+    """, group_id=group_id):
+        si, di = id_to_idx.get(e["src"]), id_to_idx.get(e["dst"])
+        if si is not None and di is not None:
+            _add(si, di, W_HUB * min(e["hw"], 1.0))
+
+    # --- Edge 5: SHARES_ENTITY cross-document ---
+    for e in await neo4j.run("""
+        MATCH (a:Entity)-[:APPEARS_IN_SECTION]->(s1:Section)
+              -[se:SHARES_ENTITY]-(s2:Section)
+              <-[:APPEARS_IN_SECTION]-(b:Entity)
+        WHERE a.group_id = $group_id AND b.group_id = $group_id
+          AND a.id <> b.id AND coalesce(se.shared_entities, 1) >= 2
+        RETURN DISTINCT a.id AS src, b.id AS dst,
+               max(coalesce(se.shared_entities, 1)) / 10.0 AS sew
+    """, group_id=group_id):
+        si, di = id_to_idx.get(e["src"]), id_to_idx.get(e["dst"])
+        if si is not None and di is not None:
+            _add(si, di, W_SHARES * min(e["sew"], 1.0))
+
+    if not rows:
+        return []
+
+    # --- Step 3: Sparse transition matrix ---
+    A = sparse.coo_matrix(
+        (np.array(vals), (np.array(rows), np.array(cols))),
+        shape=(n, n),
+    ).tocsr()
+    row_sums = np.array(A.sum(axis=1)).flatten()
+    row_sums[row_sums == 0] = 1.0
+    M = sparse.diags(1.0 / row_sums) @ A
+
+    # --- Step 4: Personalization vector ---
+    p = np.zeros(n)
+    for sid in seed_ids:
+        idx = id_to_idx.get(sid)
+        if idx is not None:
+            p[idx] = 1.0
+    if p.sum() == 0:
+        return []
+    p /= p.sum()
+
+    # --- Step 5: Power iteration ---
+    Mt = M.T.tocsr()
+    v = p.copy()
+    for _ in range(max_iterations):
+        v_new = damping * Mt.dot(v) + (1 - damping) * p
+        if np.abs(v_new - v).sum() < tol:
+            v = v_new
+            break
+        v = v_new
+
+    # --- Step 6: Top-K ---
+    top_idx = np.argsort(-v)[:top_k]
+    return [(idx_to_name[i], float(v[i])) for i in top_idx if v[i] > 0]
+
+
+# ---------------------------------------------------------------------------
 # Ground Truth: which entities SHOULD appear for each question
 # ---------------------------------------------------------------------------
 async def get_ground_truth_entities(
@@ -833,6 +984,10 @@ async def run_experiment(top_k: int = 20, filter_qid: Optional[str] = None):
             results_d = await ppr_biased_plus_epic(neo4j, GROUP_ID, seed_ids, query_emb, top_k=top_k)
             dt_d = time.perf_counter() - t_d
             
+            t_e = time.perf_counter()
+            results_e = await ppr_matrix(neo4j, GROUP_ID, seed_ids, top_k=top_k)
+            dt_e = time.perf_counter() - t_e
+            
             # Step 4: Compute metrics
             gt_entities = gt.get(qid, set())
             
@@ -840,16 +995,19 @@ async def run_experiment(top_k: int = 20, filter_qid: Optional[str] = None):
             names_b = [n for n, _ in results_b]
             names_c = [n for n, _ in results_c]
             names_d = [n for n, _ in results_d]
+            names_e = [n for n, _ in results_e]
             
             cov_a = coverage_score(names_a, gt_entities)
             cov_b = coverage_score(names_b, gt_entities)
             cov_c = coverage_score(names_c, gt_entities)
             cov_d = coverage_score(names_d, gt_entities)
+            cov_e = coverage_score(names_e, gt_entities)
             
             rw_a = rank_weighted_score(results_a, gt_entities)
             rw_b = rank_weighted_score(results_b, gt_entities)
             rw_c = rank_weighted_score(results_c, gt_entities)
             rw_d = rank_weighted_score(results_d, gt_entities)
+            rw_e = rank_weighted_score(results_e, gt_entities)
             
             # Print per-question results
             print(f"\n  {'Variant':<25} {'Coverage':>10} {'RankScore':>10} {'Time':>8}")
@@ -858,17 +1016,17 @@ async def run_experiment(top_k: int = 20, filter_qid: Optional[str] = None):
             print(f"  {'B) Query-biased teleport':<25} {cov_b:>10.3f} {rw_b:>10.3f} {dt_b*1000:>7.0f}ms")
             print(f"  {'C) Uniform + EPIC':<25} {cov_c:>10.3f} {rw_c:>10.3f} {dt_c*1000:>7.0f}ms")
             print(f"  {'D) Biased + EPIC':<25} {cov_d:>10.3f} {rw_d:>10.3f} {dt_d*1000:>7.0f}ms")
+            print(f"  {'E) True Matrix PPR':<25} {cov_e:>10.3f} {rw_e:>10.3f} {dt_e*1000:>7.0f}ms")
             
-            # Show ranking differences (B vs A)
-            shared, only_a, only_b = entity_overlap(names_a[:10], names_b[:10])
-            if only_a > 0 or only_b > 0:
-                print(f"\n  Top-10 diff (A vs B): {shared} shared, {only_a} only-uniform, {only_b} only-biased")
-                only_in_b = set(names_b[:10]) - set(names_a[:10])
-                if only_in_b:
-                    # Show which new entities appeared with biased teleportation
-                    for name in list(only_in_b)[:5]:
+            # Show ranking differences (E vs A)
+            shared, only_a, only_e = entity_overlap(names_a[:10], names_e[:10])
+            if only_a > 0 or only_e > 0:
+                print(f"\n  Top-10 diff (A vs E): {shared} shared, {only_a} only-cypher, {only_e} only-matrix")
+                only_in_e = set(names_e[:10]) - set(names_a[:10])
+                if only_in_e:
+                    for name in list(only_in_e)[:5]:
                         in_gt = "✓ GT" if name in gt_entities else "  —"
-                        print(f"    NEW in biased: {name} {in_gt}")
+                        print(f"    NEW in matrix PPR: {name} {in_gt}")
             
             # Store result
             results.append({
@@ -878,18 +1036,22 @@ async def run_experiment(top_k: int = 20, filter_qid: Optional[str] = None):
                 "coverage_b": cov_b,
                 "coverage_c": cov_c,
                 "coverage_d": cov_d,
+                "coverage_e": cov_e,
                 "rank_a": rw_a,
                 "rank_b": rw_b,
                 "rank_c": rw_c,
                 "rank_d": rw_d,
+                "rank_e": rw_e,
                 "latency_a_ms": int(dt_a * 1000),
                 "latency_b_ms": int(dt_b * 1000),
                 "latency_c_ms": int(dt_c * 1000),
                 "latency_d_ms": int(dt_d * 1000),
+                "latency_e_ms": int(dt_e * 1000),
                 "top10_a": names_a[:10],
                 "top10_b": names_b[:10],
                 "top10_c": names_c[:10],
                 "top10_d": names_d[:10],
+                "top10_e": names_e[:10],
             })
         
         # ===================================================================
@@ -908,27 +1070,29 @@ async def run_experiment(top_k: int = 20, filter_qid: Optional[str] = None):
             print(f"  {'B) Query-biased teleport':<25} {avg('coverage_b'):>12.3f} {avg('rank_b'):>14.3f} {avg('latency_b_ms'):>11.0f}ms")
             print(f"  {'C) Uniform + EPIC':<25} {avg('coverage_c'):>12.3f} {avg('rank_c'):>14.3f} {avg('latency_c_ms'):>11.0f}ms")
             print(f"  {'D) Biased + EPIC':<25} {avg('coverage_d'):>12.3f} {avg('rank_d'):>14.3f} {avg('latency_d_ms'):>11.0f}ms")
+            print(f"  {'E) True Matrix PPR':<25} {avg('coverage_e'):>12.3f} {avg('rank_e'):>14.3f} {avg('latency_e_ms'):>11.0f}ms")
             
             # Per-question delta table
             print(f"\n  Per-question coverage delta (vs A=Uniform):")
-            print(f"  {'QID':<8} {'A':>8} {'B−A':>8} {'C−A':>8} {'D−A':>8}")
-            print(f"  {'─' * 36}")
+            print(f"  {'QID':<8} {'A':>8} {'B−A':>8} {'C−A':>8} {'D−A':>8} {'E−A':>8}")
+            print(f"  {'─' * 46}")
             for r in results:
                 da = r["coverage_a"]
                 db = r["coverage_b"] - da
                 dc = r["coverage_c"] - da
                 dd = r["coverage_d"] - da
-                print(f"  {r['qid']:<8} {da:>8.3f} {db:>+8.3f} {dc:>+8.3f} {dd:>+8.3f}")
+                de = r["coverage_e"] - da
+                print(f"  {r['qid']:<8} {da:>8.3f} {db:>+8.3f} {dc:>+8.3f} {dd:>+8.3f} {de:>+8.3f}")
             
-            # Verdict
-            b_wins = sum(1 for r in results if r["coverage_b"] > r["coverage_a"])
-            b_ties = sum(1 for r in results if r["coverage_b"] == r["coverage_a"])
-            b_loses = sum(1 for r in results if r["coverage_b"] < r["coverage_a"])
+            # Verdict: E vs A
+            e_wins = sum(1 for r in results if r["coverage_e"] > r["coverage_a"])
+            e_ties = sum(1 for r in results if r["coverage_e"] == r["coverage_a"])
+            e_loses = sum(1 for r in results if r["coverage_e"] < r["coverage_a"])
             
-            print(f"\n  Query-biased teleportation vs Uniform:")
-            print(f"    Wins: {b_wins}, Ties: {b_ties}, Losses: {b_loses}")
-            print(f"    Avg coverage delta: {avg('coverage_b') - avg('coverage_a'):+.3f}")
-            print(f"    Avg latency delta:  {avg('latency_b_ms') - avg('latency_a_ms'):+.0f}ms")
+            print(f"\n  True Matrix PPR vs Cypher Approximation:")
+            print(f"    Wins: {e_wins}, Ties: {e_ties}, Losses: {e_loses}")
+            print(f"    Avg coverage delta: {avg('coverage_e') - avg('coverage_a'):+.3f}")
+            print(f"    Avg latency delta:  {avg('latency_e_ms') - avg('latency_a_ms'):+.0f}ms")
         
         # Save results
         out_path = Path(f"experiment_ppr_variants_{time.strftime('%Y%m%dT%H%M%SZ')}.json")

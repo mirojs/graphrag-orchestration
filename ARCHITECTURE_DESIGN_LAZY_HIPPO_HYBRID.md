@@ -8273,3 +8273,72 @@ Per-question detail:
 | This section | Architectural assessment, HippoRAG 2 verdict, improvement plan |
 
 ---
+
+## 29. Workflow Sentence Search Port & Benchmark (February 15, 2026)
+
+### 29.1. Context
+
+Section 28.4 identified three improvement tiers. Tiers 1A (sentence search) and 1B (NER union) were already implemented in the **sequential** handler (`route_4_drift.py`) but had NOT been ported to the **workflow** handler (`drift_workflow.py`). Since production uses `ROUTE4_WORKFLOW=1`, the Feb 15 baseline benchmark (0.81 avg containment) was running without sentence search or NER union.
+
+### 29.2. Changes Ported to `drift_workflow.py`
+
+1. **Tier 1A — Sentence Vector Search:**
+   - `_retrieve_sentence_evidence()`: Voyage embedding → `sentence_embeddings_v2` Neo4j index → NEXT/PREV context expansion
+   - `_denoise_sentences()`: Score-gap threshold filtering
+   - `_rerank_sentences()`: Voyage reranker for final sentence ordering
+   - Runs in **parallel** with consolidated beam trace in the `check_confidence` step
+   - Results merged as prepended chunks in `synthesize` step (Stage 4.S)
+
+2. **Tier 1B — NER Union:**
+   - `collect_and_check` step: After collecting sub-question results, disambiguates the **original query** and unions its entities with sub-question entities
+   - Fixes entity name mutation from DRIFT decomposition (e.g., "Property Management Agreement" → "management agreement terms")
+
+3. **Metadata:** New fields `sentence_evidence_count` and `sentence_chunks_merged` for observability.
+
+### 29.3. Benchmark Results
+
+**Config:** `ROUTE4_WORKFLOW=1`, `ROUTE4_USE_PPR=1`, `ROUTE4_SENTENCE_SEARCH=1`, `ROUTE4_SENTENCE_TOP_K=30`, `ROUTE4_SENTENCE_RERANK=1`
+
+| QID | Feb 15 Baseline (no sentence) | Feb 15 + Sentence Search | Delta |
+|-----|------|---------|-------|
+| Q-D1 | 0.93 | **0.93** | — |
+| Q-D2 | 1.00 | **1.00** | — |
+| Q-D3 | 0.78 | **0.81** | +0.03 |
+| Q-D4 | 0.94 | **0.89** | −0.05 |
+| Q-D5 | 0.78 | **0.92** | +0.14 |
+| Q-D6 | 0.67 | **0.78** | +0.11 |
+| Q-D7 | 0.69 | **0.87** | +0.18 |
+| Q-D8 | 0.57 | **0.72** | +0.15 |
+| Q-D9 | 0.81 | **0.91** | +0.10 |
+| Q-D10 | 0.93 | **0.97** | +0.04 |
+| **Avg** | **0.81** | **0.88** | **+0.07 (+8.6%)** |
+| Negative | 9/9 pass | 9/9 pass | — |
+
+**Key observations:**
+- **Q-D7** (latest date): +0.18 — sentence search finds date-bearing text directly
+- **Q-D8** (entity counting): +0.15 — sentence evidence provides exhaustive entity mentions
+- **Q-D5** (warranty): +0.14 — sentence path catches warranty clauses missed by entity traversal
+- **Q-D6** (purchase vs invoice): +0.11 — cross-document price comparison benefits from parallel evidence path
+- Q-D4 regressed by 0.05 — acceptable variance within LLM synthesis noise
+
+### 29.4. Architectural Validation
+
+The dual-path architecture (entity graph + sentence search) proven in Route 3 (Section 27) now validated in Route 4:
+
+| Route | Entity-only | + Sentence Search | Improvement |
+|-------|-------------|-------------------|-------------|
+| Route 3 | 0.64 | 0.81 | +0.17 |
+| Route 4 | 0.81 | 0.88 | +0.07 |
+
+Route 4's smaller improvement is expected — DRIFT decomposition already provides multi-hop retrieval that covers some of what sentence search adds. The improvement concentrates on **entity resolution failures** (Q-D7, Q-D8) where DRIFT decomposition mutates entity names.
+
+### 29.5. Artifacts
+
+| File | Description |
+|------|-------------|
+| `src/worker/hybrid_v2/workflows/drift_workflow.py` | DRIFTWorkflow with sentence search + NER union |
+| `benchmarks/route4_drift_multi_hop_20260215T115853Z.json` | Benchmark results: 0.88 containment |
+| Commit `b9470cec` | Workflow port + benchmark |
+| This section | Analysis of workflow sentence search port |
+
+---

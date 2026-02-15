@@ -1,30 +1,45 @@
 #!/usr/bin/env python3
-"""Test Route 4 (drift_multi_hop) with comprehensive_sentence response type.
+"""Route 4 Challenging Test — Invoice-Contract Consistency (18 ground truth items).
 
-Tests the newly deployed comprehensive_sentence mode which uses:
-- Single LLM call (not 2-pass like comprehensive)
-- Azure Document Intelligence sentence spans for precise text boundaries
-- Raw evidence approach (sentences + tables + HippoRAG chunks)
+Single comprehensive query that exercises Route 4 DRIFT multi-hop reasoning
+end-to-end: query decomposition → NER → graph traversal → synthesis.
 
-Evaluates against 16 ground truth items + 2 bonus observations (18 total).
-Ground truth: 3 major + 7 medium + 6 minor = 16 strict inconsistencies.
-Observations (D): 2 cross-document findings that are not direct invoice-vs-contract
-  inconsistencies but demonstrate deep analytical capability (e.g. Tax N/A from
-  structured Table nodes, entity role differences across the 5-doc corpus).
+The query asks the LLM to find ALL inconsistencies between a Contoso Lifts
+invoice and the corresponding purchase contract across 5 PDF documents.
+Route 4 automatically decomposes this into 3 sub-questions (payment,
+specifications, billing/admin) and synthesizes findings.
 
-History: 14 → 15 (B6 opener) → 16 (B7 power system) → 16+2 obs (D1 tax, D2 roles).
+Ground Truth (18 items = 16 core + 2 observations):
+  A (major, 3):  lift model mismatch, payment conflict, customer entity
+  B (medium, 7): hall call, door height, WR-500 lock, outdoor term,
+                 invoice self-contradiction, opener, power system
+  C (minor, 6):  malformed URL, John Doe, Contoso Ltd/LLC, Bayfront site,
+                 address number, price decimal
+  D (observation, 2): Tax N/A, entity role variation across corpus
+
+History: 14 → 15 (B6) → 16 (B7) → 16+2 obs (D1, D2).
+Best: 18/18 (100%) on Feb 15 2026 post-bugfix (beam search, gpt-5.1).
+
+Usage:
+  python scripts/test_route4_comprehensive_sentence.py                 # cloud
+  python scripts/test_route4_comprehensive_sentence.py --url http://localhost:8000  # local
 """
 
+import argparse
 import json
+import os
 import time
 import urllib.request
 import urllib.error
 import subprocess
 from typing import Any, Dict, List, Tuple
 
-# Cloud API configuration
-CLOUD_URL = "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io"
-GROUP_ID = "test-5pdfs-v2-fix2"  # Indexed on Feb 2, 2026 at 14:11
+# ── Defaults (overridable via CLI or env) ─────────────────────────────────────
+CLOUD_URL = os.getenv(
+    "GRAPHRAG_CLOUD_URL",
+    "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+)
+GROUP_ID = os.getenv("TEST_GROUP_ID", "test-5pdfs-v2-fix2")
 
 # Invoice/Contract inconsistency query
 QUERY = """Analyze the invoice and contract documents to find all inconsistencies, discrepancies, or conflicts between them. 
@@ -194,14 +209,25 @@ def score_response(response_text: str) -> Dict[str, Any]:
 
 
 def main():
+    global CLOUD_URL, GROUP_ID
+
+    parser = argparse.ArgumentParser(description="Route 4 Challenging Test — Invoice-Contract Consistency")
+    parser.add_argument("--url", default=CLOUD_URL, help="API base URL (default: cloud)")
+    parser.add_argument("--group-id", default=GROUP_ID, help="Group ID to test")
+    parser.add_argument("--response-type", default="comprehensive_sentence",
+                        help="Response type (default: comprehensive_sentence)")
+    args = parser.parse_args()
+    CLOUD_URL = args.url
+    GROUP_ID = args.group_id
+
     print("=" * 80)
-    print("ROUTE 4 + COMPREHENSIVE_SENTENCE TEST")
+    print("ROUTE 4 CHALLENGING TEST — Invoice-Contract Consistency")
     print("=" * 80)
-    print(f"Cloud API: {CLOUD_URL}")
-    print(f"Group ID: {GROUP_ID}")
-    print(f"Response Type: comprehensive_sentence")
-    print(f"Force Route: drift_multi_hop")
-    print(f"Query: {QUERY[:100]}...")
+    print(f"API:           {CLOUD_URL}")
+    print(f"Group ID:      {GROUP_ID}")
+    print(f"Response Type: {args.response_type}")
+    print(f"Force Route:   drift_multi_hop")
+    print(f"Query:         {QUERY[:100]}...")
     print("=" * 80)
     print()
     
@@ -209,7 +235,7 @@ def main():
     status, data, elapsed, raw = make_request(
         query=QUERY,
         group_id=GROUP_ID,
-        response_type="comprehensive_sentence",
+        response_type=args.response_type,
         force_route="drift_multi_hop",
     )
     
@@ -228,9 +254,9 @@ def main():
     
     # Extract response details
     response_text = data.get("response", "") if isinstance(data, dict) else ""
-    raw_extractions = data.get("raw_extractions", []) if isinstance(data, dict) else []
-    citations = data.get("citations", []) if isinstance(data, dict) else []
-    evidence_path = data.get("evidence_path", []) if isinstance(data, dict) else []
+    raw_extractions = data.get("raw_extractions") or [] if isinstance(data, dict) else []
+    citations = data.get("citations") or [] if isinstance(data, dict) else []
+    evidence_path = data.get("evidence_path") or [] if isinstance(data, dict) else []
     text_chunks_used = data.get("text_chunks_used", 0) if isinstance(data, dict) else 0
     processing_mode = data.get("processing_mode", "") if isinstance(data, dict) else ""
     sentence_based = data.get("sentence_based", False) if isinstance(data, dict) else False

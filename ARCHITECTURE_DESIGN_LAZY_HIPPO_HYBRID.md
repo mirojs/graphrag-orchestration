@@ -30,53 +30,36 @@
 - ✅ **Route 3 Sentence-Level Citation Enrichment (February 5, 2026):** Enriches Route 3 global search with sentence-level `[Na]` citation markers using Azure DI `language_spans`, bringing Route 4's word-level precision to Route 3's graph-enriched summaries. See [Section 22](#22-route-3-sentence-level-citation-enrichment-february-5-2026).
 
 **Recent Updates (February 4, 2026):**
-- ✅ **comprehensive_sentence Mode: 14/14 Accuracy (100%)** - Sentence-Level Evidence Eliminates LLM Data Selection Errors
-  - **Problem Solved:** Route 4's entity disambiguation returns hallucinated entity names (e.g., "Invoice", "Contract") that don't exist in Neo4j, causing "No documents found" errors. The LLM is unreliable at **data selection** (entity naming).
-  - **Solution:** `comprehensive_sentence` mode bypasses entity disambiguation entirely. Instead of asking the LLM to select entities, it retrieves **ALL documents** with Azure Document Intelligence sentence boundaries, then passes everything to the LLM for **synthesis only**.
-  - **Key Insight:** The LLM is excellent at synthesis/analysis but unreliable at data selection. By giving it all sentence-level evidence upfront, we let it do what it's good at while bypassing what it's bad at.
-  - **Architecture Flow:**
-    ```
-    [BEFORE - Entity-Based (broken)]
-    Query → LLM disambiguates entities → Returns fake names → Neo4j lookup fails → 0% accuracy
-    
-    [AFTER - Sentence-Level (works)]
-    Query → Skip entity disambiguation → get_all_documents_with_sentences() → Pass to LLM → 100% accuracy
-    ```
-  - **Test Configuration:**
-    - **Test Script:** `scripts/test_route4_comprehensive_sentence.py`
-    - **Group ID:** `test-5pdfs-v2-fix2` (indexed Feb 2, 2026)
-    - **Index Script:** `scripts/index_4_new_groups_v2.py` (commit `476540d3`, Feb 2, 2026)
-    - **KNN Configuration:** `default` (K=5, cutoff=0.60) → 548 SEMANTICALLY_SIMILAR edges
-    - **Route:** `drift_multi_hop` (Route 4)
-    - **Response Type:** `comprehensive_sentence` (1 LLM call)
+- ✅ **Route 4 Challenging Test: 18/18 Accuracy (100%)** - Invoice-Contract Consistency Detection
+  - **Test:** Single comprehensive query exercising full DRIFT pipeline: decomposition → NER → graph traversal (beam search) → multi-source synthesis.
+  - **Query:** "Analyze the invoice and contract documents to find all inconsistencies, discrepancies, or conflicts between them." Route 4 auto-decomposes into 3 sub-questions.
+  - **Ground Truth (18 items = 16 core + 2 observations):**
+    | Category | Items | Description |
+    |----------|-------|-------------|
+    | Major (A1-A3) | 3 | Lift model mismatch, payment structure conflict, customer entity mismatch |
+    | Medium (B1-B7) | 7 | Hall call spec, door height, WR-500 lock, outdoor terminology, self-contradiction, opener, power system |
+    | Minor (C1-C6) | 6 | Malformed URL, John Doe contact, Contoso Ltd/LLC, Bayfront site, address number, price decimal |
+    | Observation (D1-D2) | 2 | Tax field N/A, entity role variation across corpus (bonus — not strict inconsistencies) |
+  - **Results (Feb 15, 2026 — post-bugfix, beam search, gpt-5.1):**
+    | Metric | Value |
+    |--------|-------|
+    | Core Accuracy | **16/16 = 100%** |
+    | With Observations | **18/18 = 100%** |
+    | Response length | 15,491 characters |
+    | Latency | ~53 seconds |
+    | Citations | 5 documents |
+    | Evidence Path | 30 entities |
+  - **Test Script:** `scripts/test_route4_comprehensive_sentence.py` (supports `--url` for local testing)
+  - **Benchmark File:** `benchmarks/bench_route4_comprehensive_sentence_20260215_094717.json`
+  - **History:** 14/14 (Feb 4) → 12/16 (Feb 7, expanded GT) → 18/18 (Feb 15, post-bugfix)
   - **Test Documents (5 PDFs):**
     1. `contoso_lifts_invoice.pdf` - Invoice from Contoso Lifts LLC
     2. `purchase_contract.pdf` - Contract with Fabrikam Inc.
     3. `BUILDERS LIMITED WARRANTY.pdf` - Idaho home warranty
     4. `HOLDING TANK SERVICING CONTRACT.pdf` - Wisconsin tank service
     5. `PROPERTY MANAGEMENT AGREEMENT.pdf` - Hawaii property management
-  - **Ground Truth (14 items for invoice/contract inconsistency detection):**
-    | Category | Items | Description |
-    |----------|-------|-------------|
-    | Major (A1-A3) | 3 | Lift model, payment structure, customer entity mismatch |
-    | Medium (B1-B5) | 5 | Hall call spec, door height, WR-500 lock, outdoor terminology, self-contradiction |
-    | Minor (C1-C6) | 6 | Malformed URL, John Doe contact, Contoso Ltd/LLC, Bayfront site, address, price decimal |
-  - **Results:**
-    | Metric | Value |
-    |--------|-------|
-    | Accuracy | **14/14 = 100%** |
-    | Response length | 16,431 characters |
-    | LLM calls | 1 (vs 2 for `comprehensive`) |
-    | Latency | ~45 seconds |
-    | Processing mode | `comprehensive_sentence_level` |
-  - **Critical Code Changes:**
-    1. `src/worker/hybrid_v2/pipeline/synthesis.py`:
-       - `_comprehensive_sentence_level_extract()` now uses `get_all_documents_with_sentences()` instead of entity traversal
-       - Removed fallback to `_comprehensive_two_pass_extract()` that was masking the real bug
-    2. `src/api_gateway/middleware/auth.py`:
-       - `GROUP_ID_OVERRIDE` env var now forces group override regardless of JWT claims (for testing)
-  - **Files Modified & Committed:** Git commit `3bfb116b` (Feb 4, 2026)
-  - **Note:** Mock data files (Seattle real estate) deleted as they confused ground truth. Original ground truth had 16 items but 2 (C6: zip 98101/98104, C7: phone 9870/9877) were from mock data not in the actual 5 PDFs.
+  - **Group ID:** `test-5pdfs-v2-fix2` (indexed Feb 2, 2026)
+  - **Configuration:** `drift_multi_hop` route, `comprehensive_sentence` response type
 
 - ✅ **Enhanced Citation Structure with Span Data (February 4, 2026):** Frontend-Ready Document Navigation & Highlighting
   - **Motivation:** Enable rich user experience - users should see LLM analysis WITH clickable citations that jump to exact locations in source documents

@@ -389,11 +389,13 @@ class EvidenceSynthesizer:
             except Exception as e:
                 logger.warning("global_document_overview_injection_failed", error=str(e))
         
-        # Step 3: For Route 3, add sub-question context
-        if sub_questions and intermediate_context:
-            context = self._enrich_context_for_drift(
-                context, sub_questions, intermediate_context
-            )
+        # Step 3: Sub-question metadata for DRIFT.
+        # Previously injected entity names + evidence counts into the context
+        # via _enrich_context_for_drift().  Removed Feb 15 2026 — the DRIFT
+        # synthesis prompt already lists the sub-questions, and internal graph
+        # labels (entity names) plus bare counts add noise without helping the
+        # LLM synthesise better.  The actual evidence text is already in the
+        # cited context blocks above.
         
         # Step 3.5: Add sentence-level citation guidance when language spans are available
         # NOTE: After the structural strip above, sentence_citation_map is empty

@@ -1037,10 +1037,12 @@ class AsyncNeo4jService:
         dt_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
             "community_peers_found",
-            group_id=group_id,
-            num_seeds=len(seed_entity_ids),
-            num_peers=len(records),
-            duration_ms=dt_ms,
+            extra={
+                "group_id": group_id,
+                "num_seeds": len(seed_entity_ids),
+                "num_peers": len(records),
+                "duration_ms": dt_ms,
+            },
         )
         return records
 

@@ -22,6 +22,7 @@ import asyncio
 import os
 import re
 import time
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
@@ -322,6 +323,15 @@ class GlobalSearchHandler(BaseRouteHandler):
         This provides a direct query→source path that bypasses community
         abstraction layers.
 
+        Document diversity: over-fetches and then guarantees that every
+        document with at least one relevant sentence gets a minimum
+        number of representatives (ROUTE3_SENTENCE_MIN_PER_DOC, default 2),
+        **provided** the document's best sentence scores at least
+        ROUTE3_SENTENCE_SCORE_GATE (default 0.85) × top-1 score.
+        This prevents a single long document from monopolising the
+        evidence window while avoiding forced inclusion of irrelevant
+        documents.
+
         Args:
             query: User query to embed and search.
             top_k: Max sentences to retrieve.
@@ -346,6 +356,14 @@ class GlobalSearchHandler(BaseRouteHandler):
             return []
 
         threshold = float(os.getenv("ROUTE3_SENTENCE_THRESHOLD", "0.2"))
+        min_per_doc = int(os.getenv("ROUTE3_SENTENCE_MIN_PER_DOC", "2"))
+        score_gate = float(os.getenv("ROUTE3_SENTENCE_SCORE_GATE", "0.85"))
+        diversity_enabled = os.getenv(
+            "ROUTE3_SENTENCE_DIVERSITY", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        # Over-fetch when diversity is enabled so we have enough
+        # candidates from minority documents.
+        fetch_k = top_k * 3 if diversity_enabled else top_k
         group_id = self.group_id
 
         # 2. Vector search on Sentence nodes + collect parent context
@@ -386,7 +404,7 @@ class GlobalSearchHandler(BaseRouteHandler):
                         cypher,
                         embedding=query_embedding,
                         group_id=group_id,
-                        top_k=top_k,
+                        top_k=fetch_k,
                         threshold=threshold,
                     )
                     return [dict(r) for r in records]
@@ -400,7 +418,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             logger.info("route3_sentence_search_empty", query=query[:50])
             return []
 
-        # 3. Deduplicate by chunk and build context passages
+        # 3. Deduplicate by sentence_id and build context passages
         seen_sentences: set = set()
         evidence: List[Dict[str, Any]] = []
 
@@ -439,7 +457,117 @@ class GlobalSearchHandler(BaseRouteHandler):
             top_docs=list(set(e["document_title"] for e in evidence[:10])),
         )
 
+        # 4. Document diversification — ensure minority docs get representation
+        if diversity_enabled and len(evidence) > top_k:
+            evidence = self._diversify_by_document(
+                evidence, top_k=top_k, min_per_doc=min_per_doc,
+                score_gate=score_gate,
+            )
+
         return evidence
+
+    # ==================================================================
+    # Document diversification
+    # ==================================================================
+
+    @staticmethod
+    def _diversify_by_document(
+        evidence: List[Dict[str, Any]],
+        top_k: int,
+        min_per_doc: int = 2,
+        score_gate: float = 0.85,
+    ) -> List[Dict[str, Any]]:
+        """Ensure every document with relevant sentences gets representation.
+
+        Without diversification, a single long document (e.g. a 80-sentence
+        warranty) can monopolise all 30 slots, drowning out 1-sentence
+        contributions from other documents.
+
+        Algorithm:
+          1. Group sentences by document_id (preserving score order).
+          2. **Score-gate**: only reserve from a minority document if its
+             top sentence scores ≥ ``score_gate`` × top-1 global score.
+             This prevents forcing in completely irrelevant documents.
+          3. Reserve the top ``min_per_doc`` sentences from each qualifying
+             document.
+          4. Fill remaining slots with globally highest-scoring sentences
+             that were not already reserved.
+          5. Sort final list by score descending.
+
+        Args:
+            evidence: Full pool of deduplicated sentence dicts.
+            top_k: Max sentences to return.
+            min_per_doc: Minimum sentences guaranteed per document.
+            score_gate: Minimum ratio of a document's best score to the
+                global top-1 score required to qualify for reservation
+                (0.0–1.0).  Default 0.85 = document's best sentence must
+                be at least 85% of the top score.
+
+        Returns:
+            Diversified list capped at top_k, sorted by score descending.
+        """
+        # Group by doc
+        by_doc: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        for ev in evidence:
+            doc_id = ev.get("document_id") or ev.get("document_title") or "unknown"
+            by_doc[doc_id].append(ev)
+
+        # Compute score floor from top-1 sentence
+        top_score = evidence[0].get("score", 0) if evidence else 0
+        score_floor = top_score * score_gate
+
+        selected_ids: set = set()
+        selected: List[Dict[str, Any]] = []
+        gated_out_docs: List[str] = []
+
+        # Phase 1: reserve min_per_doc from each document (score-gated)
+        for doc_id, doc_evidence in by_doc.items():
+            best_doc_score = doc_evidence[0].get("score", 0) if doc_evidence else 0
+            if best_doc_score < score_floor:
+                gated_out_docs.append(doc_id[:30])
+                continue  # skip — this doc is too far from the best score
+            for ev in doc_evidence[:min_per_doc]:
+                sid = ev.get("sentence_id", id(ev))
+                if sid not in selected_ids:
+                    selected_ids.add(sid)
+                    selected.append(ev)
+
+        # Phase 2: fill remaining slots with globally highest-scoring
+        remaining = top_k - len(selected)
+        if remaining > 0:
+            for ev in evidence:  # already sorted by score desc
+                sid = ev.get("sentence_id", id(ev))
+                if sid not in selected_ids:
+                    selected_ids.add(sid)
+                    selected.append(ev)
+                    remaining -= 1
+                    if remaining <= 0:
+                        break
+
+        # Sort by score descending for consistent ordering
+        selected.sort(key=lambda e: e.get("score", 0), reverse=True)
+
+        # Log diversity change
+        original_docs = len(by_doc)
+        final_docs = len(set(
+            e.get("document_id") or e.get("document_title") or "unknown"
+            for e in selected
+        ))
+        logger.info(
+            "route3_sentence_diversity_applied",
+            pool_size=len(evidence),
+            selected=len(selected),
+            top_k=top_k,
+            min_per_doc=min_per_doc,
+            score_gate=score_gate,
+            score_floor=round(score_floor, 4),
+            top_score=round(top_score, 4),
+            docs_in_pool=original_docs,
+            docs_in_selected=final_docs,
+            docs_gated_out=gated_out_docs or None,
+        )
+
+        return selected[:top_k]
 
     # ==================================================================
     # MAP: extract claims from one community

@@ -787,10 +787,13 @@ class GlobalSearchHandler(BaseRouteHandler):
         offset = len(citations)
         seen_docs: set = set()
         for ev in sentence_evidence:
+            doc_id = ev.get("document_id", "")
             doc_title = ev.get("document_title", "Unknown")
-            if doc_title in seen_docs:
+            # Dedup by document_id (not title) to avoid merging different docs with same name
+            dedup_key = doc_id or doc_title
+            if dedup_key in seen_docs:
                 continue
-            seen_docs.add(doc_title)
+            seen_docs.add(dedup_key)
             offset += 1
             citations.append(
                 Citation(

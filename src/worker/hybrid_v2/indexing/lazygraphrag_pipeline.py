@@ -277,7 +277,6 @@ class LazyGraphRAGIndexingPipeline:
                 skeleton_stats = await self._build_sentence_skeleton(
                     group_id=group_id,
                     chunks=all_chunks,
-                    chunk_to_doc_id=chunk_to_doc_id,
                 )
                 stats["skeleton_sentences"] = skeleton_stats.get("sentences_created", 0)
                 stats["skeleton_sentences_embedded"] = skeleton_stats.get("sentences_embedded", 0)
@@ -665,7 +664,6 @@ class LazyGraphRAGIndexingPipeline:
         self,
         group_id: str,
         chunks: List[TextChunk],
-        chunk_to_doc_id: Dict[str, str],
     ) -> Dict[str, Any]:
         """Step 4.1: Extract sentence nodes, embed with Voyage, persist in Neo4j.
         

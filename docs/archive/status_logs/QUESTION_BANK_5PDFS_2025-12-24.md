@@ -235,7 +235,9 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
    - **Expected:** Property management requires liability insurance with minimum limits `$300,000` bodily injury and `$25,000` property damage; agent named additional insured.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1)
 
-5. **Q-D5:** In the warranty, explain how the “coverage start” is defined and what must happen before coverage ends.   - **Expected Route:** Route 4 (DRIFT)   - **Expected:** Coverage begins on date of final settlement or first occupancy (whichever first); claims must be made in writing within the 1-year or 60-day period.
+5. **Q-D5:** In the warranty, explain how the "coverage start" is defined and what must happen before coverage ends.
+   - **Expected Route:** Route 4 (DRIFT)
+   - **Expected:** Coverage begins on date of final settlement or first occupancy whichever comes first; claims must be made in writing within the 1-year or 60-day period before coverage ends.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0)
 
 6. **Q-D6:** Do the purchase contract total price and the invoice total match? If so, what is that amount?
@@ -260,7 +262,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 10. **Q-D10:** List the three different "risk allocation" statements across the set (risk of loss, liability limitations, non-transferability).
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Purchase contract shifts risk after delivery; PMA limits agent liability except gross negligence/willful misconduct; warranty is not transferable (terminates if first purchaser sells/moves out).
+   - **Expected:** Purchase contract shifts risk of loss after delivery; property management agreement limits agent liability except gross negligence willful misconduct; warranty is not transferable terminates if first purchaser sells or moves out.
    - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
 
 ---

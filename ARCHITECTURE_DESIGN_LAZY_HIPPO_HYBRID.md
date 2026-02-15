@@ -8342,3 +8342,51 @@ Route 4's smaller improvement is expected — DRIFT decomposition already provid
 | This section | Analysis of workflow sentence search port |
 
 ---
+
+## 30. Comprehensive Deep-Query Test: Sentence Search Impact (February 15, 2026)
+
+### 30.1. Test Design
+
+Three deep, cross-document queries designed to stress multi-hop retrieval — run once with `ROUTE4_SENTENCE_SEARCH=0` (baseline) and once with `ROUTE4_SENTENCE_SEARCH=1` (current default). Both runs use `ROUTE4_WORKFLOW=1`, `ROUTE4_USE_PPR=1`.
+
+| ID | Query | Focus |
+|----|-------|-------|
+| C1 | Analyze invoice and contract documents for all inconsistencies, discrepancies, or conflicts (major/medium/minor items) | Cross-document inconsistency detection |
+| C2 | Compare all five documents — identify every clause dealing with LIABILITY, INDEMNIFICATION, or LIMITATION OF DAMAGES; quote text and explain risk allocation | Cross-document legal clause extraction |
+| C3 | List every monetary amount, fee, percentage, or financial figure across all five documents with exact values and source | Exhaustive financial figure enumeration |
+
+### 30.2. Results
+
+| Query | Baseline (no sentence search) | + Sentence Search | Latency Delta | Length Delta |
+|-------|------|---------|-------|-------|
+| **C1** | 81.1s / 21,389 ch | 70.6s / 23,257 ch | **−10.5s (−13%)** | +1,868 ch (+9%) |
+| **C2** | 36.8s / 15,428 ch | 70.0s / 29,860 ch | **+33.2s (+90%)** | +14,432 ch (+94%) |
+| **C3** | 32.3s / 13,393 ch | 46.9s / 13,050 ch | **+14.6s (+45%)** | −343 ch (−3%) |
+| **AVG** | **50.0s / 16,737 ch** | **62.5s / 22,056 ch** | **+12.5s (+25%)** | **+5,319 ch (+32%)** |
+
+Sentence evidence merged: 15 sentences per query (with sentence search ON), 0 without.
+
+### 30.3. Analysis
+
+**C1 (invoice/contract inconsistencies):** Actually *faster* with sentence search (−13%). Sentence evidence provided direct invoice line items and contract terms, reducing the LLM's need for speculative traversal. Output 9% longer with slightly more detail.
+
+**C2 (liability/indemnification):** Largest impact. Sentence search found 15 matching liability/indemnification sentences across all 5 documents, nearly doubling the output (+94% to 29,860 chars). The 90% latency increase is almost entirely from LLM synthesis time on the much larger context window. This is the ideal use case — cross-document legal clause extraction where entity graph traversal cannot reach all relevant text.
+
+**C3 (monetary amounts):** 45% slower, but response length barely changed (−3%). Monetary figures were already well-captured by entity graph traversal; sentence search added little incremental evidence.
+
+### 30.4. Combined Assessment with 19-Question Benchmark
+
+| Metric | Benchmark (19Q, ×3 repeats) | Comprehensive (3 deep queries) |
+|--------|------|---------|
+| Containment improvement | +8.6% (0.81 → 0.88) | N/A (no GT for comprehensive) |
+| Latency overhead | +12% (+2.3s avg) | +25% (+12.5s avg) |
+| Response length change | +12% (+825 chars) | +32% (+5,319 chars) |
+
+The comprehensive test shows a larger latency and length impact than the benchmark because:
+1. Deep cross-document queries produce more sentence evidence that survives denoising/reranking
+2. Longer context → longer LLM synthesis → higher wall-clock time
+3. The benchmark's simpler queries often have sentence evidence that overlaps with entity-retrieved chunks, so the marginal increase is smaller
+
+**Trade-off verdict:** The +12% latency on the benchmark (the representative workload) is acceptable for +8.6pp containment. The +25% on deep queries is the price of significantly richer output (C2: +94% more content covering all five documents' liability clauses).
+
+---

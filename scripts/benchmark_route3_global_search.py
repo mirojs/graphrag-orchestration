@@ -459,6 +459,9 @@ def main() -> int:
     ap.add_argument("--max-questions", type=int, default=0)
     ap.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis model (e.g. gpt-4.1, gpt-4.1-mini)")
     ap.add_argument("--include-context", action="store_true", default=False, help="Include full LLM context (retrieved evidence) in benchmark output for debugging")
+    ap.add_argument("--force-route", default="global_search",
+                    choices=["global_search", "unified_search"],
+                    help="Route to force (global_search=Route3, unified_search=Route5)")
     args = ap.parse_args()
 
     base_url = str(args.url).rstrip("/")
@@ -489,21 +492,25 @@ def main() -> int:
     print(f"Loaded {len(ground_truth)} ground truth answers")
 
     # Single scenario: summary mode
-    scenario_name = "hybrid_global_summary"
+    force_route = str(args.force_route)
+    route_label = "Route 5 (Unified)" if "unified" in force_route else "Route 3 (Global)"
+    scenario_name = f"hybrid_{'unified' if 'unified' in force_route else 'global'}_summary"
     response_type = "summary"
 
     stamp = _now_utc_stamp()
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_json = out_dir / f"route3_global_search_{stamp}.json"
-    out_md = out_dir / f"route3_global_search_{stamp}.md"
+    route_prefix = "route5" if "unified" in force_route else "route3"
+    out_json = out_dir / f"{route_prefix}_global_search_{stamp}.json"
+    out_md = out_dir / f"{route_prefix}_global_search_{stamp}.md"
 
     print(
         "\n".join(
             [
-                "=== Route 3: Global Search (LazyGraphRAG) ===",
+                f"=== {route_label}: Search Benchmark ===",
                 f"url={base_url}",
                 f"group_id={group_id}",
+                f"force_route={force_route}",
                 f"repeats={int(args.repeats)} timeout={float(args.timeout)}s",
                 f"questions={len(questions)} question_bank={qbank}",
                 f"scenario={scenario_name} response_type={response_type}",
@@ -539,7 +546,7 @@ def main() -> int:
             )
             payload = {
                 "query": effective_query,
-                "force_route": "global_search",
+                "force_route": force_route,
                 "response_type": response_type,
             }
             if args.synthesis_model:

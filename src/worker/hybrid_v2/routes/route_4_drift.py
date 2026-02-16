@@ -1184,10 +1184,12 @@ Sub-questions:"""
         group_id = self.group_id
 
         # 2. Vector search on Sentence nodes + collect parent context
-        cypher = """
-        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
-        YIELD node AS sent, score
-        WHERE sent.group_id = $group_id AND score >= $threshold
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        cypher = """CYPHER 25
+        MATCH (sent:Sentence)
+        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        WITH sent, score WHERE score >= $threshold
 
         // Get parent chunk + document context
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)

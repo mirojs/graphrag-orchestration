@@ -593,10 +593,9 @@ class BaseRouteHandler:
                  embedding, group_id, vector_k, rrf_k, top_k
 
             CALL (embedding, group_id) {{
-                CALL db.index.vector.queryNodes('{vector_index}', $vector_k * 10, embedding)
-                YIELD node, score
-                WHERE node.group_id = group_id
-                WITH node, score ORDER BY score DESC LIMIT $vector_k
+                MATCH (node:TextChunk)
+                SEARCH node IN (VECTOR INDEX {vector_index} FOR embedding WHERE node.group_id = group_id LIMIT $vector_k)
+                SCORE AS score
                 WITH collect(node) AS nodes
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank

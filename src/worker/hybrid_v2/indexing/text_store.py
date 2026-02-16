@@ -594,17 +594,13 @@ class Neo4jTextUnitStore:
         top_k: int,
         index_name: str,
     ) -> list:
-        # Over-fetch to compensate for the group_id filter (index has all groups).
-        fetch_k = top_k * 5
-
-        query = """
-        CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
-        YIELD node AS t, score
-        WHERE t.group_id = $group_id
-        WITH t, score
-        ORDER BY score DESC
-        LIMIT $top_k
-        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # Note: SEARCH requires literal index name, not a $parameter.
+        query = f"""CYPHER 25
+        MATCH (t:TextChunk)
+        SEARCH t IN (VECTOR INDEX {index_name} FOR $embedding WHERE t.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
         RETURN t, d, score
         """
 
@@ -613,8 +609,6 @@ class Neo4jTextUnitStore:
             with self._driver.session() as session:
                 records = session.run(
                     query,
-                    index_name=index_name,
-                    fetch_k=int(fetch_k),
                     embedding=embedding,
                     group_id=self._group_id,
                     top_k=int(top_k),

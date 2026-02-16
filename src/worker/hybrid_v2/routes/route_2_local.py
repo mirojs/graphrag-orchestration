@@ -409,10 +409,12 @@ class LocalSearchHandler(BaseRouteHandler):
         threshold = settings.SKELETON_SIMILARITY_THRESHOLD
         group_id = self.group_id
         
-        cypher = """
-        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
-        YIELD node AS sent, score
-        WHERE sent.group_id = $group_id AND score >= $threshold
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        cypher = """CYPHER 25
+        MATCH (sent:Sentence)
+        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        WHERE score >= $threshold
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
@@ -534,11 +536,13 @@ class LocalSearchHandler(BaseRouteHandler):
         
         # 2. Graph traversal query: seed → RELATED_TO → NEXT expansion → parent context
         # Single Cypher query that does the anchor + expand + collect in one round trip.
-        cypher = """
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        cypher = """CYPHER 25
         // ANCHOR: Vector search for seed sentences
-        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
-        YIELD node AS seed, score
-        WHERE seed.group_id = $group_id AND score >= $threshold
+        MATCH (seed:Sentence)
+        SEARCH seed IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE seed.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        WITH seed, score WHERE score >= $threshold
         
         // EXPAND: Traverse RELATED_TO edges (cross-chunk semantic links)
         OPTIONAL MATCH (seed)-[rel:RELATED_TO {source: 'knn_sentence'}]-(related:Sentence)

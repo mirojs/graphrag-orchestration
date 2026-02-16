@@ -681,15 +681,16 @@ class Neo4jStoreV3:
         embedding: List[float],
         top_k: int = 10,
     ) -> List[Tuple[Entity, float]]:
-        """Vector similarity search for entities using native vector index."""
-        fetch_k = min(max(int(top_k) * 10, int(top_k)), 500)
-        query = """
-        CALL db.index.vector.queryNodes('entity_embedding', $fetch_k, $embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
+        """Vector similarity search for entities using native vector index.
+        
+        Uses SEARCH clause with in-index group_id pre-filtering (Cypher 25).
+        """
+        query = """CYPHER 25
+        MATCH (node:Entity)
+        SEARCH node IN (VECTOR INDEX entity_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
         RETURN node, score
         ORDER BY score DESC
-        LIMIT $top_k
         """
         
         results = []
@@ -698,7 +699,6 @@ class Neo4jStoreV3:
                 query,
                 embedding=embedding,
                 top_k=top_k,
-                fetch_k=fetch_k,
                 group_id=group_id,
             )
             for record in result:

@@ -1804,15 +1804,13 @@ Instructions:
 
         def _run_sync():
             q = """
-            // Vector candidates (global topK -> tenant filter)
+            CYPHER 25
+            // Vector candidates (in-index group_id filtering via SEARCH clause)
                         CALL () {
-                            WITH $candidate_k AS candidate_k, $embedding AS embedding, $group_id AS group_id
-              CALL db.index.vector.queryNodes('chunk_embedding', candidate_k, embedding)
-              YIELD node, score
-              WHERE node.group_id = group_id
-              WITH node, score
-              ORDER BY score DESC
-                            LIMIT $vector_k
+                            WITH $embedding AS embedding, $group_id AS group_id
+              MATCH (node:TextChunk)
+              SEARCH node IN (VECTOR INDEX chunk_embedding FOR embedding WHERE node.group_id = group_id LIMIT $vector_k)
+              SCORE AS score
               WITH collect(node) AS nodes
               UNWIND range(0, size(nodes)-1) AS i
               RETURN nodes[i] AS node, (i + 1) AS rank
@@ -2228,14 +2226,11 @@ Instructions:
             }
             WITH collect({node: node, rank: rank}) AS bm25List, embedding, group_id, vector_k, rrf_k, top_k
             
-            // Step 2: Vector Search (semantic matching)
+            // Step 2: Vector Search (in-index group_id filtering via SEARCH clause)
             CALL (embedding, group_id) {
-                CALL db.index.vector.queryNodes('chunk_embedding', $vector_k * 10, embedding)
-                YIELD node, score
-                WHERE node.group_id = group_id
-                WITH node, score
-                ORDER BY score DESC
-                LIMIT $vector_k
+                MATCH (node:TextChunk)
+                SEARCH node IN (VECTOR INDEX chunk_embedding FOR embedding WHERE node.group_id = group_id LIMIT $vector_k)
+                SCORE AS score
                 WITH collect(node) AS nodes
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank
@@ -2472,13 +2467,11 @@ Instructions:
         
         def _run_sync_query():
             """Execute Neo4j vector search synchronously in thread pool."""
-            # Use native vector index API (Neo4j 5.11+)
-            # Index name: chunk_embedding (created during schema initialization)
-            # HNSW index provides efficient approximate nearest neighbor search
-            query = """
-                 CALL db.index.vector.queryNodes('chunk_embedding', $candidate_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id
+            # SEARCH clause with in-index group_id filtering (Cypher 25)
+            query = """CYPHER 25
+            MATCH (node:TextChunk)
+            SEARCH node IN (VECTOR INDEX chunk_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
             OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             RETURN node.id AS id,
                    node.text AS text,
@@ -2488,24 +2481,20 @@ Instructions:
                    d.source AS document_source,
                    score
             ORDER BY score DESC
-                 LIMIT $top_k
             """
             
             results = []
             with self.neo4j_driver.session() as session:
-                # First, check if there are ANY results from the vector search
                 logger.info("vector_search_executing",
                            group_id=group_id,
                            embedding_len=len(embedding),
-                           top_k=top_k,
-                           candidate_k=candidate_k)
+                           top_k=top_k)
                 
                 result = session.run(
                     query,
                     group_id=group_id,
                     embedding=embedding,
                     top_k=top_k,
-                    candidate_k=candidate_k
                 )
                 
                 for record in result:

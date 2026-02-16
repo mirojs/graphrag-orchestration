@@ -335,9 +335,11 @@ class Neo4jStoreV3:
             }}
             """,
             # V2: Entity embeddings with Voyage (2048-dim)
+            # WITH [e.group_id] enables SEARCH clause pre-filtering for group isolation
             """
             CREATE VECTOR INDEX entity_embedding_v2 IF NOT EXISTS
             FOR (e:Entity) ON (e.embedding_v2)
+            WITH [e.group_id]
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
@@ -347,6 +349,7 @@ class Neo4jStoreV3:
             """
             CREATE VECTOR INDEX entity_embedding_v2_internal IF NOT EXISTS
             FOR (e:`__Entity__`) ON (e.embedding_v2)
+            WITH [e.group_id]
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
@@ -356,6 +359,7 @@ class Neo4jStoreV3:
             """
             CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
             FOR (t:TextChunk) ON (t.embedding_v2)
+            WITH [t.group_id]
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
@@ -366,6 +370,7 @@ class Neo4jStoreV3:
             """
             CREATE VECTOR INDEX sentence_embeddings_v2 IF NOT EXISTS
             FOR (s:Sentence) ON (s.embedding_v2)
+            WITH [s.group_id]
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
@@ -813,15 +818,16 @@ class Neo4jStoreV3:
         embedding: List[float],
         top_k: int = 10,
     ) -> List[Tuple[Entity, float]]:
-        """Vector similarity search for entities using native vector index."""
-        fetch_k = min(max(int(top_k) * 10, int(top_k)), 500)
-        query = """
-        CALL db.index.vector.queryNodes('entity_embedding', $fetch_k, $embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
+        """Vector similarity search for entities using native vector index.
+        
+        Uses SEARCH clause with in-index group_id pre-filtering (Cypher 25).
+        """
+        query = """CYPHER 25
+        MATCH (node:Entity)
+        SEARCH node IN (VECTOR INDEX entity_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
         RETURN node, score
         ORDER BY score DESC
-        LIMIT $top_k
         """
         
         results = []
@@ -830,7 +836,6 @@ class Neo4jStoreV3:
                 query,
                 embedding=embedding,
                 top_k=top_k,
-                fetch_k=fetch_k,
                 group_id=group_id,
             )
             for record in result:
@@ -2017,10 +2022,11 @@ class Neo4jStoreV3:
         Returns sentence text + parent chunk context for LLM prompt injection.
         Uses the sentence_embeddings_v2 vector index.
         """
-        query = """
-        CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
-        YIELD node AS sent, score
-        WHERE sent.group_id = $group_id AND score >= $threshold
+        query = """CYPHER 25
+        MATCH (sent:Sentence)
+        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
+        WITH sent, score WHERE score >= $threshold
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)

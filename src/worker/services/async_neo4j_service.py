@@ -423,13 +423,16 @@ class AsyncNeo4jService:
         if not seed_embedding:
             return []
         
-        # Query vector index with group filtering
-        # Note: Neo4j vector search returns top-k globally, we filter by group after
-        # Use parameterized index name - try both Entity and __Entity__ labels
+        # Determine the label for SEARCH clause based on index name
+        _label = "`__Entity__`" if "internal" in index_name else "Entity"
+        
+        # SEARCH clause with in-index group_id filtering (Neo4j 5.18+, Cypher 25)
+        # The WHERE inside SEARCH is pushed into the vector index scan via WITH [group_id],
+        # guaranteeing exact top_k results for the target group without oversampling.
         query = cypher25_query(f"""
-        CALL db.index.vector.queryNodes('{index_name}', $top_k_oversample, $embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
+        MATCH (node:{_label})
+        SEARCH node IN (VECTOR INDEX {index_name} FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
         RETURN
             node.id AS id,
             node.name AS name,
@@ -440,7 +443,6 @@ class AsyncNeo4jService:
             $seed_text AS matched_seed,
             'vector_similarity' AS match_strategy
         ORDER BY score DESC
-        LIMIT $top_k
         """)
         
         try:
@@ -450,7 +452,6 @@ class AsyncNeo4jService:
                     group_id=group_id,
                     embedding=seed_embedding,
                     top_k=top_k,
-                    top_k_oversample=top_k * 3,  # Oversample to account for group filtering
                     seed_text=seed_text,
                 )
                 records = await result.data()
@@ -656,7 +657,279 @@ class AsyncNeo4jService:
 
         # Return as (name, score) tuples for compatibility
         return [(r["name"], r["score"]) for r in records]
-    
+
+    async def personalized_pagerank_weighted(
+        self,
+        group_id: str,
+        weighted_seeds: Dict[str, float],
+        damping: float = 0.85,
+        top_k: int = 30,
+        per_seed_limit: int = 50,
+        per_neighbor_limit: int = 20,
+        include_section_graph: bool = True,
+        weight_entity: float = 1.0,
+        weight_section: float = 1.0,
+        weight_similar: float = 1.0,
+        weight_shares: float = 1.0,
+        weight_hub: float = 1.0,
+    ) -> List[Tuple[str, float]]:
+        """PPR with per-seed teleportation weights (Route 5 — Unified Search).
+
+        Unlike ``personalized_pagerank_native`` which treats all seeds equally,
+        this variant accepts a ``weighted_seeds`` dict mapping entity IDs to
+        their teleportation probability mass.  Each seed's graph contribution
+        is scaled by its weight, enabling multi-tier seed fusion.
+
+        Released constraints (compared to the flat-seed version):
+          - per_seed_limit  default 50  (was 25)
+          - per_neighbor_limit default 20  (was 10)
+          - top_k default 30 (was 20)
+
+        The Cypher query structure is identical to the section-graph variant;
+        only the initial seed weighting differs.
+        """
+        if not weighted_seeds:
+            return []
+
+        # Convert weighted_seeds dict to list-of-maps for Cypher UNWIND
+        seed_weights_list = [
+            {"id": sid, "weight": w}
+            for sid, w in weighted_seeds.items()
+        ]
+
+        query = self._build_ppr_query_weighted_section_graph()
+
+        import time
+        t0 = time.perf_counter()
+
+        async with self._get_session() as session:
+            result = await session.run(
+                query,
+                group_id=group_id,
+                seed_weights=seed_weights_list,
+                damping=damping,
+                top_k=top_k,
+                per_seed_limit=per_seed_limit,
+                per_neighbor_limit=per_neighbor_limit,
+                weight_entity=weight_entity,
+                weight_section=weight_section,
+                weight_similar=weight_similar,
+                weight_shares=weight_shares,
+                weight_hub=weight_hub,
+            )
+            records = await result.data()
+
+        dt_ms = int((time.perf_counter() - t0) * 1000)
+        logger.info(
+            "ppr_weighted_complete",
+            group_id=group_id,
+            seeds=len(weighted_seeds),
+            top_k=top_k,
+            damping=damping,
+            duration_ms=dt_ms,
+            per_seed_limit=per_seed_limit,
+            per_neighbor_limit=per_neighbor_limit,
+            results=len(records),
+        )
+
+        return [(r["name"], r["score"]) for r in records]
+
+    def _build_ppr_query_weighted_section_graph(self) -> str:
+        """PPR Cypher with per-seed teleportation weights.
+
+        Identical to ``_build_ppr_query_with_section_graph`` except the UNWIND
+        clause reads from ``$seed_weights`` (list of {id, weight}) instead of
+        ``$seed_ids`` and multiplies each path score by the seed's weight.
+        """
+        return cypher25_query("""
+            UNWIND $seed_weights AS sw
+            MATCH (seed {id: sw.id})
+            WHERE seed.group_id = $group_id
+              AND (seed:Entity OR seed:`__Entity__`)
+
+            WITH seed,
+                 sw.id AS seed_id,
+                 sw.weight AS seed_weight,
+                 $group_id AS group_id,
+                 $per_seed_limit AS per_seed_limit,
+                 $per_neighbor_limit AS per_neighbor_limit,
+                 $damping AS damping,
+                 $weight_entity AS w_entity,
+                 $weight_section AS w_section,
+                 $weight_similar AS w_similar,
+                 $weight_shares AS w_shares,
+                 $weight_hub AS w_hub
+
+            // Path 1: Standard Entity-to-Entity relationships
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[r1]-(n1)
+                WHERE n1.group_id = group_id
+                    AND (n1:Entity OR n1:`__Entity__`)
+                    AND NOT (type(r1) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
+                WITH n1
+                ORDER BY coalesce(n1.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect(n1) AS entity_hop1
+            }
+
+            // Path 2: Section-based thematic hops
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (chunk)-[:MENTIONS]->(seed)
+                WHERE chunk.group_id = group_id
+                    AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
+                MATCH (chunk)-[:IN_SECTION]->(s1:Section)
+                WHERE s1.group_id = group_id
+                MATCH (s1)-[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
+                WHERE s2.group_id = group_id
+                  AND coalesce(sim.similarity, 0.5) >= 0.5
+                MATCH (chunk2)-[:IN_SECTION]->(s2)
+                WHERE chunk2.group_id = group_id
+                    AND (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`)
+                MATCH (chunk2)-[:MENTIONS]->(neighbor)
+                WHERE neighbor.group_id = group_id
+                    AND (neighbor:Entity OR neighbor:`__Entity__`)
+                    AND neighbor.id <> seed.id
+                WITH neighbor, max(coalesce(sim.similarity, 0.5)) AS sim_weight
+                ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: neighbor, weight: sim_weight, path: 'semantic_similar'}) AS section_hop1
+            }
+
+            // Path 3: SEMANTICALLY_SIMILAR entity edges (GDS KNN)
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[sim:SEMANTICALLY_SIMILAR|SIMILAR_TO]-(neighbor)
+                WHERE neighbor.group_id = group_id
+                    AND (neighbor:Entity OR neighbor:`__Entity__`)
+                    AND coalesce(sim.similarity, 0.60) >= 0.60
+                WITH neighbor, max(coalesce(sim.similarity, 0.60)) AS sim_weight
+                ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: neighbor, weight: sim_weight, path: 'semantically_similar'}) AS similar_entities
+            }
+
+            // Path 4: SHARES_ENTITY edges (cross-document)
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[:APPEARS_IN_SECTION]->(s1:Section)
+                WHERE s1.group_id = group_id
+                MATCH (s1)-[se:SHARES_ENTITY]-(s2:Section)
+                WHERE s2.group_id = group_id
+                  AND coalesce(se.shared_entities, 1) >= 2
+                OPTIONAL MATCH (s2)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
+                WHERE hub_entity.group_id = group_id
+                OPTIONAL MATCH (chunk2)-[:IN_SECTION]->(s2)
+                WHERE chunk2.group_id = group_id
+                OPTIONAL MATCH (chunk2)-[:MENTIONS]->(chunk_entity)
+                WHERE chunk_entity.group_id = group_id
+                    AND (chunk_entity:Entity OR chunk_entity:`__Entity__`)
+                    AND chunk_entity.id <> seed.id
+                WITH coalesce(hub_entity, chunk_entity) AS neighbor,
+                     coalesce(se.shared_entities, 1) AS shared_count,
+                     CASE WHEN hub_entity IS NOT NULL THEN coalesce(hub.mention_count, 1) / 10.0 ELSE 0.3 END AS hub_weight
+                WHERE neighbor IS NOT NULL
+                WITH neighbor, max(shared_count * hub_weight / 10.0) AS se_weight
+                ORDER BY se_weight * coalesce(neighbor.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: neighbor, weight: se_weight, path: 'shares_entity'}) AS shares_entity_hop
+            }
+
+            // Path 5: HAS_HUB_ENTITY direct traversal
+            CALL (seed, group_id, per_seed_limit) {
+                MATCH (seed)-[:APPEARS_IN_SECTION]->(s:Section)
+                WHERE s.group_id = group_id
+                MATCH (s)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
+                WHERE hub_entity.group_id = group_id
+                    AND hub_entity.id <> seed.id
+                WITH hub_entity, max(coalesce(hub.mention_count, 1) / 10.0) AS hub_weight
+                ORDER BY hub_weight * coalesce(hub_entity.degree, 0) DESC
+                LIMIT $per_seed_limit
+                RETURN collect({node: hub_entity, weight: hub_weight, path: 'hub_entity'}) AS hub_entities
+            }
+
+            // Aggregate all paths with 2-hop entity expansion
+            WITH seed, seed_weight, entity_hop1, section_hop1, similar_entities,
+                 shares_entity_hop, hub_entities,
+                 group_id, per_neighbor_limit, damping,
+                 w_entity, w_section, w_similar, w_shares, w_hub
+
+            UNWIND (entity_hop1 + [seed]) AS hop1_node
+            WITH seed, seed_weight, hop1_node, entity_hop1, section_hop1,
+                 similar_entities, shares_entity_hop, hub_entities,
+                 group_id, per_neighbor_limit, damping,
+                 w_entity, w_section, w_similar, w_shares, w_hub
+
+            CALL (seed, hop1_node, group_id, per_neighbor_limit) {
+                MATCH (hop1_node)-[r2]-(n2)
+                WHERE n2.group_id = group_id
+                    AND (n2:Entity OR n2:`__Entity__`)
+                    AND NOT (type(r2) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
+                WITH n2
+                ORDER BY coalesce(n2.degree, 0) DESC
+                LIMIT $per_neighbor_limit
+                RETURN collect(n2) AS hop2
+            }
+
+            WITH seed, seed_weight, hop1_node, hop2, entity_hop1,
+                 section_hop1, similar_entities, shares_entity_hop, hub_entities,
+                 damping,
+                 w_entity, w_section, w_similar, w_shares, w_hub,
+                 [e IN entity_hop1 | e.id] AS hop1_ids,
+                 [e IN hop2 | e.id] AS hop2_ids
+
+            WITH seed, seed_weight, hop1_node, hop2, section_hop1,
+                 similar_entities, shares_entity_hop, hub_entities,
+                 damping, hop1_ids, hop2_ids,
+                 w_entity, w_section, w_similar, w_shares, w_hub,
+                 [item IN section_hop1 | item.node] AS section_nodes,
+                 [item IN similar_entities | item.node] AS similar_nodes,
+                 [item IN shares_entity_hop | item.node] AS shares_nodes,
+                 [item IN hub_entities | item.node] AS hub_nodes
+
+            UNWIND (hop2 + [hop1_node] + section_nodes + similar_nodes + shares_nodes + hub_nodes) AS entity
+
+            WITH DISTINCT entity, seed, seed_weight, hop1_node,
+                 section_hop1, similar_entities, shares_entity_hop, hub_entities,
+                 damping, hop1_ids, hop2_ids,
+                 w_entity, w_section, w_similar, w_shares, w_hub,
+                 // Scale all path scores by seed_weight (teleportation weight)
+                 seed_weight * w_entity * CASE
+                     WHEN entity.id = seed.id THEN 1.0
+                     WHEN entity.id = hop1_node.id THEN damping
+                     WHEN entity.id IN hop1_ids THEN damping
+                     WHEN entity.id IN hop2_ids THEN damping * damping
+                     ELSE 0.0
+                 END AS entity_path_score,
+                 [item IN section_hop1 WHERE item.node.id = entity.id] AS section_matches,
+                 [item IN similar_entities WHERE item.node.id = entity.id] AS similar_matches,
+                 [item IN shares_entity_hop WHERE item.node.id = entity.id] AS shares_matches,
+                 [item IN hub_entities WHERE item.node.id = entity.id] AS hub_matches
+
+            WITH entity, seed, seed_weight, damping, entity_path_score,
+                 section_matches, similar_matches, shares_matches, hub_matches,
+                 seed_weight * w_section * CASE WHEN size(section_matches) > 0
+                      THEN section_matches[0].weight * damping * damping
+                      ELSE 0.0 END AS section_path_score,
+                 seed_weight * w_similar * CASE WHEN size(similar_matches) > 0
+                      THEN similar_matches[0].weight * damping
+                      ELSE 0.0 END AS similar_to_score,
+                 seed_weight * w_shares * CASE WHEN size(shares_matches) > 0
+                      THEN shares_matches[0].weight * damping * damping
+                      ELSE 0.0 END AS shares_entity_score,
+                 seed_weight * w_hub * CASE WHEN size(hub_matches) > 0
+                      THEN hub_matches[0].weight * damping
+                      ELSE 0.0 END AS hub_entity_score
+
+            WITH entity.id AS id,
+                 entity.name AS name,
+                 entity_path_score + section_path_score + similar_to_score +
+                 shares_entity_score + hub_entity_score AS score,
+                 coalesce(entity.degree, 0) AS importance
+            WHERE score > 0
+
+            RETURN id, name, max(score) AS score, importance
+            ORDER BY score DESC
+            LIMIT $top_k
+        """)
+
     def _build_ppr_query_entity_only(self) -> str:
         """Build the original Entity-only PPR query."""
         return cypher25_query("""
@@ -1397,16 +1670,15 @@ class AsyncNeo4jService:
         # Vector expansion query (hop 0) - finds semantically similar entities
         # regardless of relationship edges. Critical for isolated entities like
         # Exhibit A details that may not have edges to other entities.
+        # SEARCH clause with in-index group_id filtering (no oversampling needed).
         vector_expansion_query = cypher25_query("""
-        CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $query_embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
-          AND (node:Entity OR node:`__Entity__`)
+        MATCH (node:Entity)
+        SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $query_embedding WHERE node.group_id = $group_id LIMIT $beam_width)
+        SCORE AS score
         RETURN node.id AS id,
                node.name AS name,
                score AS similarity
         ORDER BY score DESC
-        LIMIT $beam_width
         """)
 
         import time
@@ -1427,7 +1699,6 @@ class AsyncNeo4jService:
                     vector_expansion_query,
                     query_embedding=query_embedding,
                     group_id=group_id,
-                    top_k=beam_width * 2,  # Oversample for filtering
                     beam_width=beam_width,
                 )
                 vector_records = await result.data()

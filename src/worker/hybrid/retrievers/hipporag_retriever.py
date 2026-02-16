@@ -323,20 +323,18 @@ class HippoRAGRetriever(BaseRetriever):
             if driver is None:
                 return []
             
-            # Query vector index - try embedding_v2 first (V2), then embedding (V1)
-            # Use group_id filter for multi-tenant isolation
-            query = """
-            CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id
+            # Query vector index - SEARCH clause with in-index group_id filtering (Cypher 25)
+            query = """CYPHER 25
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX entity_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
             RETURN node.id AS node_id, score
             ORDER BY score DESC
-            LIMIT $top_k
             """
             
             params = {
                 "embedding": seed_embedding,
-                "top_k": top_k * 2,  # Oversample to account for group filtering
+                "top_k": top_k,
                 "group_id": self.group_id,
             }
             
@@ -347,8 +345,6 @@ class HippoRAGRetriever(BaseRetriever):
                     node_id = record.get("node_id")
                     if node_id:
                         results.append(node_id)
-                        if len(results) >= top_k:
-                            break
             
             if results:
                 logger.info(

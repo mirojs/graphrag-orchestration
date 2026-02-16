@@ -413,27 +413,25 @@ class Neo4jHybridSearchService:
         Results are merged and deduplicated by entity_id.
         """
         results = []
-        fetch_k = min(max(int(top_k) * 10, int(top_k)), 500)
         
         # Search entity vector index
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # Note: SEARCH requires literal index name, so we use f-string interpolation.
         try:
-            entity_cypher = """
-            CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id
+            entity_cypher = f"""CYPHER 25
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX {self.vector_index_name} FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
             RETURN node.id AS entity_id, node.name AS name, node.text AS text, score, 'entity' AS source_type
             ORDER BY score DESC
-            LIMIT $top_k
             """
             
             entity_result = store.structured_query(
                 entity_cypher,
                 param_map={
-                    "index_name": self.vector_index_name,
                     "embedding": query_embedding,
                     "group_id": group_id,
                     "top_k": top_k,
-                    "fetch_k": fetch_k,
                 }
             )
             
@@ -451,23 +449,20 @@ class Neo4jHybridSearchService:
         
         # Search chunk vector index
         try:
-            chunk_cypher = """
-            CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id
+            chunk_cypher = f"""CYPHER 25
+            MATCH (node:TextChunk)
+            SEARCH node IN (VECTOR INDEX {self.chunk_vector_index_name} FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
             RETURN node.id AS entity_id, node.text AS text, score, 'chunk' AS source_type
             ORDER BY score DESC
-            LIMIT $top_k
             """
             
             chunk_result = store.structured_query(
                 chunk_cypher,
                 param_map={
-                    "index_name": self.chunk_vector_index_name,
                     "embedding": query_embedding,
                     "group_id": group_id,
                     "top_k": top_k,
-                    "fetch_k": fetch_k,
                 }
             )
             

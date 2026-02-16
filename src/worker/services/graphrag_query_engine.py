@@ -216,21 +216,18 @@ class GraphRAGQueryEngine(CustomQueryEngine):
 
         query_embedding = llm_service.embed_model.get_text_embedding(query_str)
         
-        # Search Neo4j vector index (oversample then filter+limit within group)
-        fetch_k = min(max(int(self.similarity_top_k) * 10, int(self.similarity_top_k)), 500)
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
         result = self.graph_store.structured_query(
-            """
-            CALL db.index.vector.queryNodes('entity', $fetch_k, $embedding)
-            YIELD node, score
-            WHERE node.group_id = $group_id
+            """CYPHER 25
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX entity FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
             RETURN node.id AS entity_name, node.name AS name, score
             ORDER BY score DESC
-            LIMIT $top_k
             """,
             param_map={
                 "embedding": query_embedding,
                 "top_k": self.similarity_top_k,
-                "fetch_k": fetch_k,
                 "group_id": self.graph_store.group_id
             }
         )

@@ -349,23 +349,31 @@ class StandaloneNeo4jStore:
         # Convert embedding for native Vector support
         query_embedding = self._convert_to_vector(embedding)
         
-        # Cypher 25 vector query with group_id filter.
-        # NOTE: Neo4j vector indexes don't support WHERE filtering inside the index.
-        # We oversample, then filter by group_id, then take top_k.
-        query = """
-        CALL db.index.vector.queryNodes($index_name, $fetch_k, $embedding)
-        YIELD node, score
-        WHERE node.group_id = $group_id
+        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # Note: SEARCH requires literal index name, not a $parameter.
+        # Infer node label from index name for the MATCH clause.
+        _label_map = {
+            "entity_embedding": "Entity",
+            "entity_embedding_v2": "Entity",
+            "entity_embedding_v2_internal": "`__Entity__`",
+            "chunk_embedding": "TextChunk",
+            "chunk_embeddings_v2": "TextChunk",
+            "sentence_embeddings_v2": "Sentence",
+            "raptor_embedding": "RaptorNode",
+        }
+        node_label = _label_map.get(index_name, "Entity")
+        
+        query = f"""CYPHER 25
+        MATCH (node:{node_label})
+        SEARCH node IN (VECTOR INDEX {index_name} FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+        SCORE AS score
         RETURN node, score
         ORDER BY score DESC
-        LIMIT $top_k
         """
         
         results = self.structured_query(
             query,
             param_map={
-                "index_name": index_name,
-                "fetch_k": min(max(top_k * 10, top_k), 500),
                 "top_k": top_k,
                 "embedding": query_embedding,
             }

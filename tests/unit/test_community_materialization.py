@@ -184,13 +184,16 @@ class TestCommunityMatcherLoading:
         neo4j_service=None,
         group_id: str = "test-group",
         communities_path: Optional[Path] = None,
+        embedding_client=None,
     ):
         from src.worker.hybrid_v2.pipeline.community_matcher import CommunityMatcher
 
         matcher = CommunityMatcher.__new__(CommunityMatcher)
         matcher.neo4j_service = neo4j_service
         matcher.group_id = group_id
+        matcher.folder_id = None
         matcher.communities_path = communities_path
+        matcher.embedding_client = embedding_client
         matcher._communities = []
         matcher._community_embeddings = {}
         matcher._loaded = False
@@ -199,25 +202,24 @@ class TestCommunityMatcherLoading:
     def _mock_neo4j_records(self, records_data: List[Dict]):
         """Create a mock neo4j service that returns the given records."""
         mock_service = MagicMock()
-        mock_session = MagicMock()
 
-        mock_records = []
+        # Build record dicts for result.data() return value
+        mock_data = []
         for rd in records_data:
-            rec = MagicMock()
-            rec.__getitem__ = MagicMock(side_effect=lambda k, d=rd: d[k])
-            mock_records.append(rec)
+            mock_data.append(dict(rd))  # plain dicts
 
-        mock_result = MagicMock()
-        mock_result.__iter__ = MagicMock(return_value=iter(mock_records))
-        # list(result) pattern
-        mock_session.run.return_value = MagicMock()
-        mock_session.run.return_value.__iter__ = MagicMock(return_value=iter(mock_records))
+        # Mock async session with async run() and result.data()
+        mock_result = AsyncMock()
+        mock_result.data = AsyncMock(return_value=mock_data)
 
-        mock_session.__enter__ = MagicMock(return_value=mock_session)
-        mock_session.__exit__ = MagicMock(return_value=False)
+        mock_session = AsyncMock()
+        mock_session.run = AsyncMock(return_value=mock_result)
 
-        mock_service.driver.session.return_value = mock_session
-        mock_service.database = "neo4j"
+        # _get_session() returns an async context manager
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_service._get_session = MagicMock(return_value=mock_ctx)
 
         return mock_service
 

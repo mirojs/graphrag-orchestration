@@ -91,6 +91,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        weight_profile: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 5: Unified Hierarchical Seed PPR.
 
@@ -103,6 +104,12 @@ class UnifiedSearchHandler(BaseRouteHandler):
           5. Denoise + Rerank sentence evidence
           6. Merge PPR chunks + sentence evidence
           7. Synthesis (single LLM call)
+
+        Args:
+            weight_profile: Optional weight profile name (e.g.
+                ``"fact_extraction"``, ``"thematic_survey"``).  When
+                provided by the router/orchestrator this takes precedence
+                over the ``ROUTE5_WEIGHT_PROFILE`` env var.
         """
         enable_timings = os.getenv(
             "ROUTE5_RETURN_TIMINGS", "0"
@@ -129,7 +136,8 @@ class UnifiedSearchHandler(BaseRouteHandler):
             resolve_all_tiers,
         )
 
-        profile_name = os.getenv("ROUTE5_WEIGHT_PROFILE", "balanced")
+        # Priority: explicit parameter > env var > balanced default
+        profile_name = weight_profile or os.getenv("ROUTE5_WEIGHT_PROFILE", "balanced")
         profile = WEIGHT_PROFILES.get(profile_name, DEFAULT_PROFILE)
 
         logger.info(

@@ -14,11 +14,25 @@ Note: Vector RAG (formerly Route 1) was removed after comprehensive testing show
 """
 
 from enum import Enum
-from typing import Optional, Any, List, Literal
+from typing import Optional, Any, Dict, List, Literal, Tuple
 import structlog
 import json
 
 logger = structlog.get_logger(__name__)
+
+
+# =========================================================================
+# Route → Weight Profile mapping for Route 5 seed weighting
+# =========================================================================
+
+# Default mapping from router classification → weight profile name.
+# Profiles are defined in seed_resolver.py (WEIGHT_PROFILES dict).
+_ROUTE_TO_WEIGHT_PROFILE: Dict[str, str] = {
+    "local_search": "fact_extraction",      # Entity-heavy, precise lookup
+    "global_search": "thematic_survey",     # Community-heavy, broad coverage
+    "drift_multi_hop": "multi_hop",         # Entity-heavy, graph traversal
+    "unified_search": "balanced",           # Explicit Route 5 → balanced default
+}
 
 
 # Route classification prompt - generic for any document corpus (3 routes)
@@ -74,10 +88,11 @@ Respond with JSON: {{"route": "<route_name>", "reasoning": "<brief explanation>"
 
 
 class QueryRoute(Enum):
-    """Available routing destinations (3 routes)."""
+    """Available routing destinations (4 routes)."""
     LOCAL_SEARCH = "local_search"           # Route 2: Factual lookup & entity-focused (LazyGraphRAG)
     GLOBAL_SEARCH = "global_search"         # Route 3: Thematic (LazyGraphRAG + HippoRAG)
     DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 4: Iterative multi-hop reasoning
+    UNIFIED_SEARCH = "unified_search"       # Route 5: Unified hierarchical seed PPR
     # Legacy alias for backward compatibility
     VECTOR_RAG = "local_search"             # Deprecated: maps to LOCAL_SEARCH
 
@@ -167,6 +182,36 @@ class HybridRouter:
                        profile=self.profile.value)
         
         return final_route
+
+    async def route_with_profile(self, query: str) -> Tuple[QueryRoute, str]:
+        """Route a query and return the corresponding weight profile name.
+
+        This is the primary entry point when Route 5 is active — the router
+        classifies the query *and* selects the seed weight profile in one call.
+
+        Returns:
+            Tuple of (QueryRoute, weight_profile_name).
+            The weight_profile_name maps to a key in
+            ``seed_resolver.WEIGHT_PROFILES``.
+        """
+        route = await self.route(query)
+        profile_name = self.get_weight_profile(route)
+        logger.info(
+            "route_with_profile",
+            query=query[:50],
+            route=route.value,
+            weight_profile=profile_name,
+        )
+        return route, profile_name
+
+    @staticmethod
+    def get_weight_profile(route: QueryRoute) -> str:
+        """Map a QueryRoute to a Route 5 weight profile name.
+
+        Returns:
+            Profile key for ``seed_resolver.WEIGHT_PROFILES``.
+        """
+        return _ROUTE_TO_WEIGHT_PROFILE.get(route.value, "balanced")
     
     async def _llm_classify(self, query: str) -> tuple[QueryRoute, str]:
         """

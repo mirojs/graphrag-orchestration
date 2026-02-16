@@ -53,7 +53,7 @@ from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
 # Modular route handlers (Jan 2026 refactor)
-from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler
+from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler
 
 # Import async Neo4j service for native async operations
 try:
@@ -287,6 +287,7 @@ class HybridPipeline:
             QueryRoute.LOCAL_SEARCH: LocalSearchHandler(self),
             QueryRoute.GLOBAL_SEARCH: GlobalSearchHandler(self),
             QueryRoute.DRIFT_MULTI_HOP: DRIFTHandler(self),
+            QueryRoute.UNIFIED_SEARCH: UnifiedSearchHandler(self),
         }
         
         logger.info("hybrid_pipeline_initialized",
@@ -367,15 +368,27 @@ class HybridPipeline:
             - evidence_path: Entity path (if Routes 2/3/4).
             - metadata: Additional execution metadata.
         """
-        # Step 0: Route the query
-        route = await self.router.route(query)
+        # Step 0: Route the query and determine weight profile
+        route, weight_profile = await self.router.route_with_profile(query)
         
         # =======================================================================
         # Modular Handler Dispatch (Jan 2026 refactor)
         # =======================================================================
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model, include_context=include_context)
+            # Pass weight profile to Route 5 (other routes ignore keyword args
+            # they don't accept via **kwargs, but Route 5 uses it for seed weighting)
+            extra_kwargs: Dict[str, Any] = {}
+            if route == QueryRoute.UNIFIED_SEARCH:
+                extra_kwargs["weight_profile"] = weight_profile
+            result = await handler.execute(
+                query, response_type,
+                knn_config=knn_config,
+                prompt_variant=prompt_variant,
+                synthesis_model=synthesis_model,
+                include_context=include_context,
+                **extra_kwargs,
+            )
             # Convert RouteResult to dict for API compatibility
             return result.to_dict()
         
@@ -2186,6 +2199,7 @@ Sub-questions:"""
         prompt_variant: Optional[str] = None,
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
+        weight_profile: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2197,11 +2211,25 @@ Sub-questions:"""
                                   If False, use legacy inline methods (for A/B testing).
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
             synthesis_model: Optional override for synthesis LLM deployment name.
+            weight_profile: Optional Route 5 weight profile name override.
         """
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            result = await handler.execute(query, response_type, knn_config=knn_config, prompt_variant=prompt_variant, synthesis_model=synthesis_model, include_context=include_context)
+            extra_kwargs: Dict[str, Any] = {}
+            if route == QueryRoute.UNIFIED_SEARCH:
+                # Use explicit profile if provided, otherwise derive from route
+                extra_kwargs["weight_profile"] = (
+                    weight_profile or HybridRouter.get_weight_profile(route)
+                )
+            result = await handler.execute(
+                query, response_type,
+                knn_config=knn_config,
+                prompt_variant=prompt_variant,
+                synthesis_model=synthesis_model,
+                include_context=include_context,
+                **extra_kwargs,
+            )
             return result.to_dict()
         
         # Legacy fallback

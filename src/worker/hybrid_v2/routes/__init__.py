@@ -7,6 +7,7 @@ and implements a specific retrieval strategy:
 - Route 2 (LocalSearchHandler): Entity-focused with LazyGraphRAG
 - Route 3 (GlobalSearchHandler): LazyGraphRAG map-reduce for thematic queries
 - Route 4 (DRIFTHandler): Multi-hop iterative reasoning
+- Route 5 (UnifiedSearchHandler): Unified hierarchical seed PPR (merges Routes 3+4)
 
 Usage:
     from src.worker.hybrid_v2.routes import VectorRAGHandler, RouteResult
@@ -20,6 +21,7 @@ from .route_1_vector import VectorRAGHandler
 from .route_2_local import LocalSearchHandler
 from .route_3_global import GlobalSearchHandler
 from .route_4_drift import DRIFTHandler
+from .route_5_unified import UnifiedSearchHandler
 
 __all__ = [
     # Base classes
@@ -31,4 +33,5 @@ __all__ = [
     "LocalSearchHandler",
     "GlobalSearchHandler",
     "DRIFTHandler",
+    "UnifiedSearchHandler",
 ]

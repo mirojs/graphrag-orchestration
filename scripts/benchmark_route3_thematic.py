@@ -325,8 +325,11 @@ def evaluate_response_quality(response: Dict[str, Any], question: Dict[str, Any]
     evidence_path = response.get("evidence_path", [])
     route_used = response.get("route_used", "")
     
-    # Check if Route 3 was actually used
-    is_route_3 = "route_3" in route_used or "global" in route_used
+    # Check if an acceptable route was used (Route 3 or Route 5)
+    is_route_3 = (
+        "route_3" in route_used or "global" in route_used
+        or "route_5" in route_used or "unified" in route_used
+    )
     
     # Theme coverage
     theme_score = evaluate_theme_coverage(text, question.get("expected_themes", []))
@@ -395,8 +398,9 @@ def run_benchmark(
     group_id: str,
     timeout: float = 180.0,
     token: Optional[str] = None,
+    force_route: str = "global_search",
 ) -> Dict[str, Any]:
-    """Run the thematic benchmark for Route 3."""
+    """Run the thematic benchmark (Route 3 or Route 5)."""
     
     headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
     bearer = _get_bearer_token(token)
@@ -410,11 +414,13 @@ def run_benchmark(
     all_questions = THEMATIC_QUESTIONS + CROSS_DOC_QUESTIONS
     results = []
     
+    route_label = "Route 5 (Unified)" if "unified" in force_route else "Route 3 (Global)"
     print(f"\n{'='*60}")
-    print("Route 3 Thematic Benchmark")
+    print(f"{route_label} Thematic Benchmark")
     print(f"{'='*60}")
     print(f"URL: {base_url}")
     print(f"Group ID: {group_id}")
+    print(f"Force Route: {force_route}")
     print(f"Questions: {len(all_questions)}")
     print(f"{'='*60}\n")
     
@@ -423,7 +429,7 @@ def run_benchmark(
         
         payload = {
             "query": question["query"],
-            "force_route": "global_search",
+            "force_route": force_route,
             "response_type": "summary",
         }
         
@@ -447,7 +453,7 @@ def run_benchmark(
         
         # Print summary
         score = eval_result["overall_score"]
-        route = "✓ Route 3" if eval_result["is_route_3"] else "✗ Wrong route"
+        route = "✓ Correct Route" if eval_result["is_route_3"] else "✗ Wrong route"
         theme = f"Theme: {eval_result['theme_coverage']:.0%}"
         evidence = f"Evidence: {eval_result['evidence']['evidence_node_count']} nodes"
         print(f"  {route} | {theme} | {evidence} | Score: {score}/100 | {eval_result['elapsed_ms']}ms")
@@ -473,10 +479,11 @@ def run_benchmark(
     
     return {
         "meta": {
-            "benchmark": "route3_thematic",
+            "benchmark": f"{'route5' if 'unified' in force_route else 'route3'}_thematic",
             "timestamp": _now_utc_stamp(),
             "url": base_url,
             "group_id": group_id,
+            "force_route": force_route,
         },
         "summary": summary,
         "results": results,
@@ -491,7 +498,7 @@ def print_summary(data: Dict[str, Any]) -> None:
     print(f"{'='*60}")
     print(f"Questions: {s['successful']}/{s['total_questions']} successful")
     print(f"Average Score: {s['avg_score']:.1f}/100")
-    print(f"Route 3 Usage: {s['route_3_rate']:.0%}")
+    print(f"Correct Route Usage: {s['route_3_rate']:.0%}")
     print(f"Theme Coverage: {s['avg_theme_coverage']:.0%}")
     print(f"Evidence Threshold Met: {s['evidence_threshold_met_rate']:.0%}")
     print(f"Avg Hub Entities: {s['avg_hub_entities']:.1f}")
@@ -508,6 +515,9 @@ def main():
     parser.add_argument("--url", default=DEFAULT_URL, help="Base URL of the API")
     parser.add_argument("--group-id", default=_default_group_id(), help="Group ID")
     parser.add_argument("--timeout", type=float, default=180.0, help="Request timeout")
+    parser.add_argument("--force-route", default="global_search",
+                        choices=["global_search", "unified_search"],
+                        help="Route to force (global_search=Route3, unified_search=Route5)")
     parser.add_argument("--token", default=None, help="Bearer token (or set GRAPHRAG_API_TOKEN env var)")
     parser.add_argument("--output", help="Output JSON file path")
     args = parser.parse_args()
@@ -517,6 +527,7 @@ def main():
         group_id=args.group_id,
         timeout=args.timeout,
         token=args.token,
+        force_route=args.force_route,
     )
     
     print_summary(results)
@@ -528,7 +539,8 @@ def main():
     if args.output:
         out_path = Path(args.output)
     else:
-        out_path = out_dir / f"route3_thematic_{results['meta']['timestamp']}.json"
+        prefix = "route5" if "unified" in args.force_route else "route3"
+        out_path = out_dir / f"{prefix}_thematic_{results['meta']['timestamp']}.json"
     
     out_path.write_text(json.dumps(results, indent=2))
     print(f"\nResults saved to: {out_path}")

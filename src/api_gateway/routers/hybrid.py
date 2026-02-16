@@ -173,6 +173,7 @@ class RouteEnum(str, Enum):
     LOCAL_SEARCH = "local_search"       # Route 2: Entity-focused (LazyGraphRAG)
     GLOBAL_SEARCH = "global_search"     # Route 3: Thematic (LazyGraphRAG + HippoRAG)
     DRIFT_MULTI_HOP = "drift_multi_hop" # Route 4: Multi-hop iterative
+    UNIFIED_SEARCH = "unified_search"   # Route 5: Unified hierarchical seed PPR
 
 
 class HybridQueryRequest(BaseModel):
@@ -484,12 +485,13 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
         
         pipeline = await _get_or_create_pipeline(group_id)
         
-        # Handle forced routing (Routes 2, 3, 4 only)
+        # Handle forced routing (Routes 2, 3, 4, 5)
         if body.force_route:
             route_map: Dict[RouteEnum, QueryRoute] = {
                 RouteEnum.LOCAL_SEARCH: QueryRoute.LOCAL_SEARCH,
                 RouteEnum.GLOBAL_SEARCH: QueryRoute.GLOBAL_SEARCH,
                 RouteEnum.DRIFT_MULTI_HOP: QueryRoute.DRIFT_MULTI_HOP,
+                RouteEnum.UNIFIED_SEARCH: QueryRoute.UNIFIED_SEARCH,
             }
             forced_route = route_map[body.force_route]
             result = await pipeline.force_route(

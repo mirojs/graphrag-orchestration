@@ -536,9 +536,9 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
         cypher = """CYPHER 25
         MATCH (sent:Sentence)
-        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding LIMIT $top_k)
         SCORE AS score
-        WITH sent, score WHERE score >= $threshold
+        WHERE sent.group_id = $group_id AND score >= $threshold
 
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)

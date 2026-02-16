@@ -138,6 +138,11 @@ class Settings(BaseSettings):
     # These caps bound how much history we serialize into a single prompt.
     V3_DRIFT_MAX_HISTORY_CHARS: int = Field(default=120_000)
     V3_DRIFT_MAX_HISTORY_MESSAGE_CHARS: int = Field(default=40_000)
+
+    # Route 3 sentence reranking toggle (0=off, 1=on)
+    ROUTE3_SENTENCE_RERANK: int = Field(default=0)
+    # Route 4 LlamaIndex Workflow toggle (0=sequential, 1=parallel workflow)
+    ROUTE4_WORKFLOW: int = Field(default=0)
     
     class Config:
         env_file = ".env"

@@ -108,9 +108,12 @@ async def lifespan(app: FastAPI):
                        model=llm_service.config.get("AZURE_OPENAI_DEPLOYMENT_NAME"))
             if llm_service.embed_model:
                 logger.info(
-                    "embedder_initialized",
-                    deployment=llm_service.config.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
-                    endpoint=llm_service.config.get("AZURE_OPENAI_ENDPOINT"),
+                    "v1_fallback_embedder_initialized",
+                    v1_deployment=llm_service.config.get("AZURE_OPENAI_EMBEDDING_DEPLOYMENT"),
+                    v1_endpoint=llm_service.config.get("AZURE_OPENAI_ENDPOINT"),
+                    primary_embedder=app_settings.VOYAGE_MODEL_NAME,
+                    primary_dimensions=app_settings.VOYAGE_EMBEDDING_DIM,
+                    note="V1 Azure OpenAI embedding is a fallback; primary embedder is Voyage (selected per-group at query time)",
                 )
         else:
             logger.warning("llm_not_configured",

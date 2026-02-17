@@ -23,6 +23,11 @@ import neo4j
 from neo4j import GraphDatabase, AsyncGraphDatabase
 from neo4j import Query
 
+from src.worker.hybrid_v2.services.neo4j_retry import (
+    retry_session,
+    async_retry_session,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -197,7 +202,23 @@ class Neo4jStoreV3:
             )
             logger.info(f"Connected to Neo4j (async) at {self.uri}")
         return self._async_driver
-    
+
+    def get_retry_session(self):
+        """Return a context manager that yields a retry-enabled sync session.
+
+        Drop-in replacement for ``with self.driver.session(database=...) as s:``.
+        Retries on TransientError, ServiceUnavailable, SessionExpired with
+        exponential backoff (3 attempts, 1-30 s).
+        """
+        return retry_session(self.driver, database=self.database)
+
+    def get_async_retry_session(self):
+        """Return an async context manager yielding a retry-enabled session.
+
+        Drop-in replacement for ``async with self.async_driver.session(...) as s:``.
+        """
+        return async_retry_session(self.async_driver, database=self.database)
+
     def close(self):
         """Close the Neo4j driver."""
         if self._driver:
@@ -228,7 +249,7 @@ class Neo4jStoreV3:
                 return
 
             try:
-                async with self.async_driver.session(database=self.database) as session:
+                async with self.get_async_retry_session() as session:
                     await session.run(
                         "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE"
                     )
@@ -378,7 +399,7 @@ class Neo4jStoreV3:
             """,
         ]
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             for query in schema_queries:
                 try:
                     session.run(Query(query))  # type: ignore[arg-type]
@@ -420,7 +441,7 @@ class Neo4jStoreV3:
         RETURN k AS key, c['payload'] AS payload
         """
 
-        async with self.async_driver.session(database=self.database) as session:
+        async with self.get_async_retry_session() as session:
             result = await session.run(query, keys=keys)
             out: Dict[str, str] = {}
             async for record in result:
@@ -461,7 +482,7 @@ class Neo4jStoreV3:
         RETURN count(c) AS count
         """
 
-        async with self.async_driver.session(database=self.database) as session:
+        async with self.get_async_retry_session() as session:
             result = await session.run(query, items=items)
             record = await result.single()
             return cast(int, record["count"]) if record and record.get("count") is not None else 0
@@ -484,7 +505,7 @@ class Neo4jStoreV3:
         RETURN e.id AS id
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 id=entity.id,
@@ -563,7 +584,7 @@ class Neo4jStoreV3:
             for e in entities
         ]
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, entities=entity_data, group_id=group_id)
             record = result.single()
             count = cast(int, record["count"]) if record else 0
@@ -604,7 +625,7 @@ class Neo4jStoreV3:
         """
 
         try:
-            with self.driver.session(database=self.database) as session:
+            with self.get_retry_session() as session:
                 session.run(query, group_id=group_id).consume()
         except Exception as e:
             logger.warning(f"Failed to compute entity importance (continuing): {e}")
@@ -681,7 +702,7 @@ class Neo4jStoreV3:
             if sample['embedding_v2']:
                 logger.warning(f"   embedding_v2 dim: {len(sample['embedding_v2'])}")
         
-        async with self.async_driver.session(database=self.database) as session:
+        async with self.get_async_retry_session() as session:
             result = await session.run(query, entities=entity_data, group_id=group_id)
             record = await result.single()
             count = cast(int, record["count"]) if record else 0
@@ -704,7 +725,7 @@ class Neo4jStoreV3:
         RETURN e
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, id=entity_id, group_id=group_id)
             record = result.single()
             if record:
@@ -783,7 +804,7 @@ class Neo4jStoreV3:
         """
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             try:
                 result = session.run(
                     query,
@@ -831,7 +852,7 @@ class Neo4jStoreV3:
         """
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 embedding=embedding,
@@ -884,7 +905,7 @@ class Neo4jStoreV3:
         """
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 group_id=group_id,
@@ -921,7 +942,7 @@ class Neo4jStoreV3:
         RETURN r.id AS id
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 source_id=relationship.source_id,
@@ -960,7 +981,7 @@ class Neo4jStoreV3:
             for r in relationships
         ]
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, relationships=rel_data, group_id=group_id)
             record = result.single()
             return cast(int, record["count"]) if record else 0
@@ -981,7 +1002,7 @@ class Neo4jStoreV3:
         RETURN c.id AS id
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 id=community.id,
@@ -1018,7 +1039,7 @@ class Neo4jStoreV3:
         MATCH (c:Community {id: $community_id, group_id: $group_id})
         SET c.title = $title, c.summary = $summary, c.updated_at = datetime()
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, community_id=community_id, group_id=group_id, title=title, summary=summary)
 
     def update_community_embedding(self, group_id: str, community_id: str, embedding: List[float]) -> None:
@@ -1027,7 +1048,7 @@ class Neo4jStoreV3:
         MATCH (c:Community {id: $community_id, group_id: $group_id})
         SET c.embedding = $embedding
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, community_id=community_id, group_id=group_id, embedding=embedding)
 
     def get_communities_by_level(self, group_id: str, level: int) -> List[Community]:
@@ -1041,7 +1062,7 @@ class Neo4jStoreV3:
         """
         
         communities = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id, level=level)
             for record in result:
                 c = record["c"]
@@ -1064,7 +1085,7 @@ class Neo4jStoreV3:
         RETURN DISTINCT c.level AS level
         ORDER BY level ASC
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id)
             levels: list[int] = []
             for record in result:
@@ -1088,7 +1109,7 @@ class Neo4jStoreV3:
         if len(levels) < 2:
             return
 
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             # Clear existing edges for deterministic rebuild.
             session.run(
                 """
@@ -1134,7 +1155,7 @@ class Neo4jStoreV3:
         RETURN child AS c, collect(DISTINCT e.id) AS entity_ids
         ORDER BY child.rank DESC
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 group_id=group_id,
@@ -1171,7 +1192,7 @@ class Neo4jStoreV3:
         RETURN DISTINCT e
         LIMIT $limit
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, raptor_id=raptor_node_id, group_id=group_id, limit=limit)
             entities = []
             for record in result:
@@ -1204,7 +1225,7 @@ class Neo4jStoreV3:
         RETURN comm, collect(DISTINCT e2.id) AS entity_ids
         LIMIT 20
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id, raptor_ids=raptor_node_ids)
             communities = []
             for record in result:
@@ -1231,7 +1252,7 @@ class Neo4jStoreV3:
         ORDER BY r.level ASC
         LIMIT 1
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id, entity_id=entity_id)
             record = result.single()
             if record:
@@ -1271,7 +1292,7 @@ class Neo4jStoreV3:
         RETURN r.id AS id
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 id=node.id,
@@ -1342,7 +1363,7 @@ class Neo4jStoreV3:
             for n in nodes
         ]
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, nodes=node_data, group_id=group_id)
             record = result.single()
             return cast(int, record["count"]) if record else 0
@@ -1379,7 +1400,7 @@ class Neo4jStoreV3:
             params = {"group_id": group_id, "embedding": embedding, "top_k": top_k}
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, **params)
             for record in result:
                 r = record["r"]
@@ -1420,7 +1441,7 @@ class Neo4jStoreV3:
         """
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id, embedding=embedding, top_k=top_k)
             for record in result:
                 t = record["t"]
@@ -1480,7 +1501,7 @@ class Neo4jStoreV3:
         """
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id, embedding=embedding, top_k=top_k)
             for record in result:
                 t = record["t"]
@@ -1563,7 +1584,7 @@ class Neo4jStoreV3:
         """
 
         results: list[tuple[TextChunk, float]] = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 group_id=group_id,
@@ -1669,7 +1690,7 @@ class Neo4jStoreV3:
                 }
             )
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, chunks=chunk_data, group_id=group_id)
             record = result.single()
             count = cast(int, record["count"]) if record else 0
@@ -1743,7 +1764,7 @@ class Neo4jStoreV3:
         RETURN count(table) AS count
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, tables=tables_to_create, group_id=group_id)
     
     def _create_keyvalue_nodes(self, group_id: str, chunks: List[TextChunk]) -> None:
@@ -1825,7 +1846,7 @@ class Neo4jStoreV3:
         RETURN count(keyvalue) AS count
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, kvps=kvps_to_create, group_id=group_id)
             count = result.single()["count"]
             logger.info(f"Created {count} KeyValue nodes for group {group_id}")
@@ -1844,7 +1865,7 @@ class Neo4jStoreV3:
                s.document_id AS document_id, s.source AS source
         ORDER BY s.document_id, s.chunk_id, s.index_in_chunk
         """
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id)
             sentences = [
                 {
@@ -1929,7 +1950,7 @@ class Neo4jStoreV3:
                 "embedding_v2": s.embedding_v2,
             })
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, sentences=sentence_data, group_id=group_id)
             record = result.single()
             count = cast(int, record["count"]) if record else 0
@@ -1968,7 +1989,7 @@ class Neo4jStoreV3:
         MERGE (a)-[:NEXT]->(b)
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, pairs=next_pairs)
     
     def create_sentence_related_to_edges(
@@ -2003,7 +2024,7 @@ class Neo4jStoreV3:
         RETURN count(r) AS count
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, edges=edges, group_id=group_id)
             count = result.single()["count"]
         
@@ -2046,7 +2067,7 @@ class Neo4jStoreV3:
         """
         
         results = []
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             records = session.run(
                 query,
                 embedding=query_embedding,
@@ -2091,7 +2112,7 @@ class Neo4jStoreV3:
         # Serialize metadata to JSON string as Neo4j doesn't support nested maps
         metadata_json = json.dumps(document.metadata) if document.metadata else "{}"
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(
                 query,
                 id=document.id,
@@ -2120,7 +2141,7 @@ class Neo4jStoreV3:
         RETURN g.group_id AS group_id
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, group_id=group_id)
             logger.info(f"Initialized GroupMeta for {group_id}")
     
@@ -2136,7 +2157,7 @@ class Neo4jStoreV3:
             g.gds_stale_reason = $reason
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, group_id=group_id, reason=reason)
     
     def clear_gds_stale(self, group_id: str) -> None:
@@ -2148,7 +2169,7 @@ class Neo4jStoreV3:
             g.gds_stale_reason = null
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             session.run(query, group_id=group_id)
     
     # ==================== Cleanup Operations ====================
@@ -2170,7 +2191,7 @@ class Neo4jStoreV3:
         ]
         
         deleted: Dict[str, int] = {}
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             for name, query in queries:
                 result = session.run(Query(query), group_id=group_id)  # type: ignore[arg-type]
                 record = result.single()
@@ -2196,7 +2217,7 @@ class Neo4jStoreV3:
         RETURN entities, communities, raptor_nodes, text_chunks, documents, count(rel) AS relationships
         """
         
-        with self.driver.session(database=self.database) as session:
+        with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id)
             record = result.single()
             if record:

@@ -319,6 +319,10 @@ class LazyGraphRAGIndexingPipeline:
         section_embed_stats = await self._embed_section_nodes(group_id)
         stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
         
+        # 4.6.1) Embed Section nodes structurally (title + path only, for Source 2 header matching).
+        structural_embed_stats = await self._embed_section_structural(group_id)
+        stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
+        
         # 4.7) Build SEMANTICALLY_SIMILAR edges between Sections (HippoRAG 2 improvement).
         similarity_stats = await self._build_section_similarity_edges(group_id)
         stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
@@ -606,7 +610,42 @@ class LazyGraphRAGIndexingPipeline:
                 "Check LLMService initialization and AZURE_OPENAI_EMBEDDING_DEPLOYMENT settings."
             )
 
-        texts = [c.text for c in chunks]
+        # ── Content-Aware Label Prefix for Chunk Embeddings ──────────────
+        # Same principle as sentence embeddings: prepend document title +
+        # section path so that Voyage (or any embedder) encodes structural
+        # identity into the vector.  The raw chunk.text stored in Neo4j is
+        # NOT modified — the label is added only for the embedding call.
+        # ─────────────────────────────────────────────────────────────────
+        def _chunk_label_prefix(chunk: TextChunk) -> str:
+            meta = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+            if isinstance(chunk.metadata, str):
+                import json as _json
+                try:
+                    meta = _json.loads(chunk.metadata)
+                except (ValueError, TypeError):
+                    meta = {}
+            doc_title = meta.get("title", "") or ""
+            section_path_key = meta.get("section_path_key", "") or ""
+            if not section_path_key:
+                sp = meta.get("section_path")
+                if isinstance(sp, list) and sp:
+                    section_path_key = " > ".join(str(s) for s in sp)
+            parts: List[str] = []
+            if doc_title:
+                parts.append(f"Document: {doc_title}")
+            if section_path_key:
+                parts.append(f"Section: {section_path_key}")
+            if parts:
+                return f"[{' | '.join(parts)}] "
+            return ""
+
+        texts = [_chunk_label_prefix(c) + c.text for c in chunks]
+
+        _sample_labelled = texts[:2] if texts else []
+        logger.info(
+            f"chunk_label_prefix_enabled: sample={[t[:120] + '...' if len(t) > 120 else t for t in _sample_labelled]}"
+        )
+
         try:
             logger.info(f"Calling embedder.aget_text_embedding_batch with {len(texts)} texts...")
             embeddings = await self.embedder.aget_text_embedding_batch(texts)
@@ -696,6 +735,70 @@ class LazyGraphRAGIndexingPipeline:
         
         logger.info(f"skeleton_extracted_sentences: {len(raw_sentences)} from {len(chunks)} chunks")
         
+        # ── Content-Aware Label Prefix ──────────────────────────────────
+        # Voyage's contextualized_embed() gives inter-sentence positional
+        # context (sibling awareness within the same document), but it has
+        # NO awareness of document identity or section hierarchy.
+        #
+        # Two identical sentences in different documents (e.g. "This
+        # agreement shall commence on the Effective Date.") would get
+        # nearly identical embeddings because Voyage only sees surrounding
+        # sentences, not *where* in the document hierarchy they sit.
+        #
+        # Solution: prepend a structural label to EACH sentence BEFORE
+        # embedding.  The label is Voyage/Anthropic "contextual retrieval"
+        # style — it encodes document title + section path so that:
+        #   • Embeddings become document- and section-aware
+        #   • Vector search naturally separates cross-document duplicates
+        #   • Structural seed derivation (Route 5 Tier 2) gets sharper
+        #     section clustering because sections are baked into vectors
+        #
+        # IMPORTANT: The label is prepended only for EMBEDDING.  The raw
+        # sentence text stored on the :Sentence node stays clean (for
+        # synthesis/citation).  Voyage's asymmetric search (input_type=
+        # "query" vs "document") handles the mismatch — the query doesn't
+        # need labels since Voyage's encoder is trained for this.
+        # ────────────────────────────────────────────────────────────────
+        
+        # Build doc_id → document title map from chunk metadata
+        doc_title_map: Dict[str, str] = {}
+        for chunk in chunks:
+            if chunk.document_id and chunk.document_id not in doc_title_map:
+                meta = chunk.metadata if isinstance(chunk.metadata, dict) else {}
+                if isinstance(chunk.metadata, str):
+                    import json as _json
+                    try:
+                        meta = _json.loads(chunk.metadata)
+                    except (ValueError, TypeError):
+                        meta = {}
+                title = meta.get("title", "") or ""
+                if title:
+                    doc_title_map[chunk.document_id] = title
+        
+        def _build_label_prefix(sentence: Dict[str, Any]) -> str:
+            """Build Voyage/Anthropic-style structural label for a sentence.
+            
+            Format: [Document: <title> | Section: <section_path>] <text>
+            
+            Falls back gracefully when metadata is missing:
+              • Both present:  [Document: Contract A | Section: Warranties > Limited]
+              • Title only:    [Document: Contract A]
+              • Section only:  [Section: Warranties > Limited]
+              • Neither:       (no prefix — raw text)
+            """
+            doc_title = doc_title_map.get(sentence.get("document_id", ""), "")
+            section_path = sentence.get("section_path", "")
+            
+            parts: List[str] = []
+            if doc_title:
+                parts.append(f"Document: {doc_title}")
+            if section_path:
+                parts.append(f"Section: {section_path}")
+            
+            if parts:
+                return f"[{' | '.join(parts)}] "
+            return ""
+        
         # Embed sentences with Voyage (contextualized), grouped by document_id.
         # CRITICAL: Each document's sentences must be embedded together so that
         # Voyage's contextualized_embed sees only intra-document context.
@@ -715,17 +818,26 @@ class LazyGraphRAGIndexingPipeline:
                     doc_groups[doc_id] = []
                 doc_groups[doc_id].append(idx)
             
-            # Build per-document chunk lists for embed_documents_contextualized
+            # Build per-document chunk lists for embed_documents_contextualized.
+            # Each sentence text is PREFIXED with its structural label so that
+            # Voyage encodes document/section identity into the vector.
             document_chunks: List[List[str]] = []
             index_maps: List[List[int]] = []  # Maps back to original indices
             for doc_id, indices in doc_groups.items():
-                doc_texts = [raw_sentences[i]["text"] for i in indices]
+                doc_texts = [
+                    _build_label_prefix(raw_sentences[i]) + raw_sentences[i]["text"]
+                    for i in indices
+                ]
                 document_chunks.append(doc_texts)
                 index_maps.append(indices)
             
+            # Log sample of labelled sentences for visibility
+            _sample_labelled = document_chunks[0][:2] if document_chunks else []
             logger.info(
                 f"skeleton_embedding_grouped: {len(document_chunks)} documents, "
-                f"sentences per doc: {[len(dc) for dc in document_chunks]}"
+                f"sentences per doc: {[len(dc) for dc in document_chunks]}, "
+                f"label_prefix_enabled=True, "
+                f"sample_labelled={[s[:120] + '...' if len(s) > 120 else s for s in _sample_labelled]}"
             )
             
             # Embed with proper per-document context using VoyageEmbedService
@@ -811,7 +923,7 @@ class LazyGraphRAGIndexingPipeline:
         # This ensures re-indexing doesn't leave orphan edges from changed/deleted sentences.
         # Match on both source and method properties for backward compatibility
         # (edges created before Feb 12 2026 only had source, not method).
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 MATCH (:Sentence {group_id: $group_id})-[r:RELATED_TO]->(:Sentence)
@@ -826,7 +938,7 @@ class LazyGraphRAGIndexingPipeline:
                 logger.info(f"step_4.2_cleanup: deleted {deleted} stale RELATED_TO edges")
         
         # Fetch all sentences with embeddings for this group
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 MATCH (s:Sentence {group_id: $group_id})
@@ -1950,7 +2062,7 @@ Output:
                 }
             )
             
-            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            with self.neo4j_store.get_retry_session() as session:
                 # 1. Create Barcode nodes and FOUND_IN edges
                 if barcodes:
                     barcode_data = []
@@ -2192,7 +2304,7 @@ Output:
             "kvps_processed": 0,
         }
         
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             # 1. Get Figure nodes needing embeddings (have caption, no embedding_v2)
             figure_result = session.run(
                 """
@@ -2245,7 +2357,7 @@ Output:
             if (kvp_start_idx + i) < len(embeddings) and embeddings[kvp_start_idx + i]
         ]
         
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             if fig_updates:
                 session.run("""
                     UNWIND $updates AS u
@@ -2327,12 +2439,22 @@ Output:
             )
             sessions = GdsSessions(api_credentials=api_creds)
             
-            # Pre-cleanup: delete any expired/orphaned sessions to free resources
+            # Pre-cleanup: delete any expired/orphaned/stuck sessions to free resources
+            # AuraDB has a single-job concurrency limit — a stuck Running session
+            # blocks ALL subsequent GDS operations until cleaned up.
             try:
                 for stale in sessions.list():
                     if stale.status in ('Expired', 'Failed'):
                         sessions.delete(session_name=stale.name)
                         logger.info(f"🧹 Cleaned up stale GDS session: {stale.name} ({stale.status})")
+                    elif stale.status == 'Ready' and stale.name != session_name:
+                        # Ready sessions from prior runs that were never cleaned up
+                        # (they hold the single-job slot even though idle)
+                        try:
+                            sessions.delete(session_name=stale.name)
+                            logger.info(f"🧹 Cleaned up idle GDS session: {stale.name} ({stale.status})")
+                        except Exception as idle_err:
+                            logger.debug(f"Could not delete idle session {stale.name}: {idle_err}")
             except Exception as cleanup_err:
                 logger.debug(f"Pre-cleanup check: {cleanup_err}")
             
@@ -2412,9 +2534,43 @@ Output:
                 }})
             '''
             
-            # Project the graph
-            G, result = gds.graph.project(projection_name, projection_query)
-            logger.info(f"✅ GDS projection created: {G.name()} ({G.node_count()} nodes, {G.relationship_count()} rels)")
+            # Project the graph — with retry for AuraDB single-job concurrency limit.
+            # AuraDB GDS allows only one job at a time. If another job is running
+            # (from a prior session or concurrent indexing), the projection call
+            # fails with "There's already a job running". We retry with exponential
+            # backoff to wait for the blocking job to finish.
+            max_retries = 5
+            base_delay = 10  # seconds
+            G = None
+            for attempt in range(max_retries + 1):
+                try:
+                    G, result = gds.graph.project(projection_name, projection_query)
+                    logger.info(f"✅ GDS projection created: {G.name()} ({G.node_count()} nodes, {G.relationship_count()} rels)")
+                    break
+                except Exception as proj_err:
+                    err_msg = str(proj_err)
+                    is_concurrent = "already a job running" in err_msg.lower()
+                    if is_concurrent and attempt < max_retries:
+                        delay = base_delay * (2 ** attempt)  # 10, 20, 40, 80, 160s
+                        logger.warning(
+                            f"⏳ GDS concurrent job detected (attempt {attempt + 1}/{max_retries + 1}), "
+                            f"retrying in {delay}s... Error: {err_msg[:120]}"
+                        )
+                        await asyncio.sleep(delay)
+                        # Re-generate unique names to avoid job ID collision on retry
+                        timestamp = int(time.time() * 1000)
+                        random_suffix = random.randint(1000, 9999)
+                        projection_name = f"graphrag_{group_id.replace('-', '_')}_{timestamp}_{random_suffix}"
+                        # Re-build projection query with new timestamp for unique job ID
+                        projection_query = projection_query.replace(
+                            projection_query.split('// Timestamp: ')[1].split(' - ')[0],
+                            f"{timestamp}_{random_suffix}"
+                        )
+                    else:
+                        raise  # Non-concurrent error or retries exhausted
+            
+            if G is None:
+                raise RuntimeError("GDS projection failed after all retries")
             
             if G.node_count() == 0:
                 logger.warning(f"⚠️  No nodes in projection - skipping algorithms (check embedding_v2 exists)")
@@ -2445,7 +2601,7 @@ Output:
                 if n1 < n2:  # Pre-filter dedup (symmetric similarity)
                     edge_batch.append({"node1": n1, "node2": n2, "similarity": float(row["similarity"])})
             
-            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            with self.neo4j_store.get_retry_session() as session:
                 if edge_batch:
                     if knn_config:
                         result = session.run("""
@@ -2491,7 +2647,7 @@ Output:
                 updates.append({"nodeId": node_id, "communityId": community_id})
                 community_ids.add(community_id)
             
-            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            with self.neo4j_store.get_retry_session() as session:
                 if updates:
                     session.run("""
                         UNWIND $updates AS u
@@ -2511,7 +2667,7 @@ Output:
                 for _, row in pagerank_df.iterrows()
             ]
             
-            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            with self.neo4j_store.get_retry_session() as session:
                 if pr_updates:
                     session.run("""
                         UNWIND $updates AS u
@@ -2603,7 +2759,7 @@ Output:
         RETURN cid, members
         ORDER BY size(members) DESC
         """
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(community_query, group_id=group_id, min_size=min_community_size)
             community_groups = [(record["cid"], record["members"]) for record in result]
 
@@ -2693,7 +2849,7 @@ Output:
         LIMIT 50
         """
         relationships = []
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(rel_query, group_id=group_id, community_id=community_id)
             relationships = [dict(record) for record in result]
 
@@ -3111,7 +3267,7 @@ SUMMARY: <summary>"""
         # Create Section nodes via Neo4j
         section_data = list(all_sections.values())
         
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             # Create sections
             result = session.run(
                 """
@@ -3207,13 +3363,19 @@ SUMMARY: <summary>"""
         }
 
     async def _embed_section_nodes(self, group_id: str) -> Dict[str, Any]:
-        """Embed Section nodes for semantic similarity computation.
+        """Embed Section nodes for semantic similarity computation (content-rich).
         
-        Creates embeddings for Section nodes by concatenating:
+        Creates content-rich embeddings for Section nodes by concatenating:
         - Section title
         - Aggregated text from linked TextChunks (first 500 chars each, max 3 chunks)
         
-        This enables SEMANTICALLY_SIMILAR edge creation for "soft" thematic hops.
+        These embeddings capture what the section *contains* and are used for
+        SEMANTICALLY_SIMILAR edge creation ("soft" thematic hops in PPR).
+        
+        Stored in: Section.embedding (2048-dim Voyage via self.embedder)
+        
+        NOTE: This is distinct from structural_embedding (title + path only)
+        which is used for Source 2 header matching. See _embed_section_structural().
         
         Args:
             group_id: Tenant identifier
@@ -3226,7 +3388,7 @@ SUMMARY: <summary>"""
             return {"sections_embedded": 0, "skipped": "no_embedder"}
         
         # Fetch sections with their linked chunk texts
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 MATCH (s:Section {group_id: $group_id})
@@ -3275,7 +3437,7 @@ SUMMARY: <summary>"""
             if emb is not None
         ]
         
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             session.run(
                 """
                 UNWIND $updates AS u
@@ -3288,6 +3450,102 @@ SUMMARY: <summary>"""
         
         logger.info(
             "section_nodes_embedded",
+            extra={"group_id": group_id, "sections_embedded": len(updates)},
+        )
+        
+        return {"sections_embedded": len(updates)}
+
+    async def _embed_section_structural(self, group_id: str) -> Dict[str, Any]:
+        """Embed Section nodes structurally (title + path_key only) for Source 2.
+        
+        Creates structure-only embeddings that capture what the section *is about*
+        based purely on its header hierarchy, NOT its content. This enables
+        Source 2 (structural seed) to match queries against document structure
+        independently of Source 1 (content sentence search).
+        
+        Why separate from Section.embedding:
+        - Section.embedding includes chunk text samples → behaves like content search.
+          Using it for Source 2 would return the same sections as Source 1 sentence
+          search, providing no additive signal.
+        - structural_embedding embeds ONLY title + path_key → captures the document
+          author's description of what the section covers. A query about "warranty
+          coverage" would match a section titled "Overview of limited warranty terms
+          and coverage periods" even if no sentence in that section contains the
+          exact query terms.
+        
+        Stored in: Section.structural_embedding (2048-dim Voyage)
+        Used by: search_sections_by_vector() for Route 5 Source 2 structural seeds.
+        
+        Args:
+            group_id: Tenant identifier
+            
+        Returns:
+            Stats dict with sections_embedded count
+        """
+        if self.embedder is None:
+            logger.warning("section_structural_embedding_skipped_no_embedder")
+            return {"sections_embedded": 0, "skipped": "no_embedder"}
+        
+        # Fetch sections without structural embeddings
+        with self.neo4j_store.get_retry_session() as session:
+            result = session.run(
+                """
+                MATCH (s:Section {group_id: $group_id})
+                WHERE s.structural_embedding IS NULL
+                RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key
+                """,
+                group_id=group_id,
+            )
+            sections_to_embed = [
+                {
+                    "id": record["section_id"],
+                    "title": record["title"] or "",
+                    "path_key": record["path_key"] or "",
+                }
+                for record in result
+            ]
+        
+        if not sections_to_embed:
+            return {"sections_embedded": 0}
+        
+        # Build structural-only texts: title + path_key, NO chunk content
+        texts_to_embed = []
+        for sec in sections_to_embed:
+            parts = [p for p in [sec["title"], sec["path_key"]] if p]
+            # Deduplicate: if title == last segment of path_key, use path_key only
+            if sec["path_key"] and sec["title"] and sec["path_key"].endswith(sec["title"]):
+                combined = sec["path_key"]
+            else:
+                combined = " | ".join(parts) if parts else "[Untitled Section]"
+            texts_to_embed.append(combined)
+        
+        # Generate embeddings via Voyage (self.embedder is VoyageEmbedding in V2)
+        try:
+            embeddings = await self.embedder.aget_text_embedding_batch(texts_to_embed)
+        except Exception as e:
+            logger.warning("section_structural_embedding_failed", extra={"error": str(e)})
+            return {"sections_embedded": 0, "error": str(e)}
+        
+        # Update Section nodes with structural_embedding
+        updates = [
+            {"id": sec["id"], "embedding": emb}
+            for sec, emb in zip(sections_to_embed, embeddings)
+            if emb is not None
+        ]
+        
+        with self.neo4j_store.get_retry_session() as session:
+            session.run(
+                """
+                UNWIND $updates AS u
+                MATCH (s:Section {id: u.id, group_id: $group_id})
+                SET s.structural_embedding = u.embedding
+                """,
+                updates=updates,
+                group_id=group_id,
+            )
+        
+        logger.info(
+            "section_structural_nodes_embedded",
             extra={"group_id": group_id, "sections_embedded": len(updates)},
         )
         
@@ -3320,7 +3578,7 @@ SUMMARY: <summary>"""
             Stats dict with edges_created count
         """
         # Fetch all sections with embeddings
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 MATCH (s:Section {group_id: $group_id})
@@ -3386,7 +3644,7 @@ SUMMARY: <summary>"""
             return {"edges_created": 0}
         
         # Create SEMANTICALLY_SIMILAR edges in Neo4j
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 UNWIND $edges AS e
@@ -3432,7 +3690,7 @@ SUMMARY: <summary>"""
             return {"kvps_total": 0, "unique_keys": 0, "keys_embedded": 0, "skipped": "no_embedder"}
         
         # Fetch all KeyValue nodes without embeddings
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 MATCH (kv:KeyValue {group_id: $group_id})
@@ -3445,7 +3703,7 @@ SUMMARY: <summary>"""
         
         if not kvps_to_embed:
             # Count total KVPs for stats
-            with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+            with self.neo4j_store.get_retry_session() as session:
                 result = session.run(
                     "MATCH (kv:KeyValue {group_id: $group_id}) RETURN count(kv) AS count",
                     group_id=group_id,
@@ -3483,7 +3741,7 @@ SUMMARY: <summary>"""
             return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0}
         
         # Update KeyValue nodes with embeddings
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             session.run(
                 """
                 UNWIND $updates AS u
@@ -3535,7 +3793,7 @@ SUMMARY: <summary>"""
             "has_hub_entity": 0,
         }
         
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
             # Phase B: Sentences reach Section via PART_OF→TextChunk→IN_SECTION
             result = session.run(
@@ -3632,7 +3890,7 @@ SUMMARY: <summary>"""
             "shares_entity": 0,
         }
         
-        with self.neo4j_store.driver.session(database=self.neo4j_store.database) as session:
+        with self.neo4j_store.get_retry_session() as session:
             # Create SHARES_ENTITY edges (Section ↔ Section)
             # Connects sections that discuss the same entities across documents
             # Threshold: at least 2 shared entities to reduce noise

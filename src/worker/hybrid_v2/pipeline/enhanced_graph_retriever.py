@@ -34,6 +34,8 @@ import structlog
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from src.worker.hybrid_v2.services.neo4j_retry import retry_session
+
 logger = structlog.get_logger(__name__)
 
 # Regex pattern to detect internal chunk-ID shaped entity names
@@ -365,7 +367,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         entity_names=entity_names,
@@ -458,7 +460,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return [dict(record) for record in result]
             
@@ -515,7 +517,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         section_ids=section_ids,
@@ -579,7 +581,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -680,7 +682,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return [dict(record) for record in result]
             
@@ -905,7 +907,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -1084,7 +1086,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -1139,7 +1141,7 @@ class EnhancedGraphRetriever:
                             "probe_limit": probe_limit,
                         }
                         fallback_params.update(self._get_folder_params())
-                        with self.driver.session() as session:
+                        with retry_session(self.driver) as session:
                             result = session.run(fallback_query, **fallback_params)
                             return list(result)
 
@@ -1420,7 +1422,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
 
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     params = {
                         "group_id": self.group_id,
                         "keyword_needles": keyword_needles,
@@ -1546,7 +1548,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
 
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
 
@@ -1677,7 +1679,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
 
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         group_id=self.group_id,
@@ -1802,7 +1804,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
 
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         group_id=self.group_id,
@@ -2035,7 +2037,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         entity_inputs=entity_names,
@@ -2048,7 +2050,7 @@ class EnhancedGraphRetriever:
 
             if not records:
                 def _run_fallback():
-                    with self.driver.session() as session:
+                    with retry_session(self.driver) as session:
                         result = session.run(
                             fallback_query,
                             entity_inputs=entity_names,
@@ -2098,7 +2100,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, entity_names=entity_names, group_id=self.group_id)
                     return list(result)
             
@@ -2135,7 +2137,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, group_id=self.group_id, top_k=top_k)
                     return list(result)
             
@@ -2176,7 +2178,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         group_id=self.group_id,
@@ -2227,7 +2229,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -2296,7 +2298,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -2405,7 +2407,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -2562,7 +2564,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -2732,7 +2734,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     # Only pass max_per_section when using sampling mode
                     params = {"group_id": self.group_id}
                     params.update(self._get_folder_params())
@@ -2792,23 +2794,18 @@ class EnhancedGraphRetriever:
         top_k: int = 10,
         score_threshold: float = 0.7,
     ) -> List[Dict[str, Any]]:
-        """Vector search against Section embeddings for direct section-level retrieval.
+        """Vector search against Section structural embeddings for Source 2 header matching.
         
-        This method searches the existing Section.embedding vectors (created during indexing)
-        to find sections semantically related to the query. It returns section metadata
-        without fetching chunks, allowing for hierarchical retrieval patterns:
+        Searches Section.structural_embedding vectors (title + path_key only, no chunk
+        content) to find sections whose *headers* semantically match the query. This is
+        distinct from sentence search (Source 1) which matches against content.
         
-        1. Find relevant sections via vector search
-        2. Fetch chunks from those sections
-        3. Optionally traverse SEMANTICALLY_SIMILAR edges for expansion
-        
-        Use cases:
-        - Structural queries: "Show me all methodology sections"
-        - Coarse-to-fine retrieval: Fast section filter → chunk refinement
-        - Hierarchical navigation: Browse by section, drill into chunks
+        The structural embedding enables navigational matching — e.g. a query about
+        "warranty coverage" matches a section titled "Overview of limited warranty
+        terms and coverage periods" via header semantics, not content overlap.
         
         Args:
-            query_embedding: Query vector (3072-dim for text-embedding-3-large)
+            query_embedding: Query vector (2048-dim Voyage voyage-context-3)
             top_k: Maximum number of sections to return
             score_threshold: Minimum cosine similarity (0-1). Default 0.7 for high precision.
             
@@ -2832,9 +2829,9 @@ class EnhancedGraphRetriever:
         
         query = f"""
         MATCH (s:Section {{group_id: $group_id}})
-        WHERE s.embedding IS NOT NULL
+        WHERE s.structural_embedding IS NOT NULL
         OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:TextChunk)-[:IN_DOCUMENT]->(d:Document)
-        WITH s, d, vector.similarity.cosine(s.embedding, $query_embedding) AS score
+        WITH s, d, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
         WHERE score >= $score_threshold {folder_filter_clause}
         WITH s, d, score
         ORDER BY score DESC
@@ -2861,7 +2858,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
             
@@ -2960,7 +2957,7 @@ class EnhancedGraphRetriever:
             params.update(self._get_folder_params())
 
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(query, **params)
                     return list(result)
 
@@ -3067,7 +3064,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             def _run_query():
-                with self.driver.session() as session:
+                with retry_session(self.driver) as session:
                     result = session.run(
                         query,
                         group_id=self.group_id,

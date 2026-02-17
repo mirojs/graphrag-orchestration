@@ -35,6 +35,7 @@ from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
 from neo4j.exceptions import Neo4jError
 
 from src.core.config import settings
+from src.worker.hybrid_v2.services.neo4j_retry import AsyncRetrySession
 
 logger = logging.getLogger(__name__)
 
@@ -140,10 +141,16 @@ class AsyncNeo4jService:
         await self.close()
     
     def _get_session(self) -> AsyncSession:
-        """Get an async session from the driver."""
+        """Get a retry-enabled async session from the driver.
+
+        Returns an ``AsyncRetrySession`` that transparently retries on
+        transient Neo4j errors (ServiceUnavailable, SessionExpired, etc.)
+        with exponential backoff (3 attempts, 1-30 s).
+        """
         if not self._driver:
             raise RuntimeError("AsyncNeo4jService not connected. Call connect() first.")
-        return self._driver.session(database=self._database)
+        raw_session = self._driver.session(database=self._database)
+        return AsyncRetrySession(raw_session)  # type: ignore[return-value]
     
     # =========================================================================
     # Entity Retrieval (Route 2 Hot Path)

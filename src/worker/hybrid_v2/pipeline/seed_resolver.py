@@ -12,8 +12,10 @@ teleportation weights.  A single PPR pass then handles both "global"
 and "local" retrieval depending on the weight distribution.
 
 Design principles (from ARCHITECTURE_ROUTE5_UNIFIED_HIPPORAG_2026-02-16):
-  • Section titles are metadata-only — no separate embeddings.
-  • Structural seeds are derived bottom-up from sentence search hits.
+  • Section nodes have two embeddings:
+    - Section.embedding: content-rich (title + path + chunk samples) for SEMANTICALLY_SIMILAR edges.
+    - Section.structural_embedding: structure-only (title + path_key) for Source 2 header matching.
+  • Structural seeds use Section.structural_embedding for semantic header matching.
   • Weight redistribution when a tier returns empty results.
   • Dynamic damping: 0.70 + 0.20 × w₁ (entity weight).
 """

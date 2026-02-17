@@ -299,9 +299,11 @@ Enriched: "[Title: 2024 Logistics][Header: SE Asia Expansion] The company shifte
 
 Our system already has this metadata on Sentence nodes via `section_path`. The enrichment happens at synthesis time in `_build_cited_context()` (synthesis.py ~L1770).
 
-**Important:** We should NOT re-embed sentences with breadcrumb context just for Tier 2 seeds. The structural seed derivation (bottom-up from sentence search) already captures which sections are relevant without needing structurally-aware embeddings. Re-embedding 177+ sentences would be costly and the benefit is marginal when `section_path` metadata achieves the same routing effect.
+**UPDATE 2026-02-17: Content-aware label prefix NOW IMPLEMENTED.** Both sentence and chunk embeddings are now computed with a `[Document: <title> | Section: <section_path>]` prefix prepended to the raw text before calling Voyage `contextualized_embed()`. The stored `.text` on Sentence/TextChunk nodes remains raw (clean for synthesis/citation). This is the Voyage/Anthropic "contextual retrieval" approach — explicit structural labels baked into the embedding vector. Requires re-indexing to take effect.
 
-**Future consideration (Phase 1b only if needed):** If cross-document confusion persists (Q-D3/Q-D8 regressions), then `contextualized_embed()` with `section_path` as the document context could improve sentence disambiguation. But this requires full re-indexing and should be validated by ablation first — it's an optimization, not a prerequisite for Route 5.
+**Previous note (superseded):** ~~We should NOT re-embed sentences with breadcrumb context just for Tier 2 seeds.~~ The content-aware label prefix is now recognized as a foundational piece — the entire retrieval system (sentence search, structural seed derivation, PPR evidence quality) benefits from embeddings that are inherently document- and section-aware.
+
+**Future consideration (Phase 1b only if needed):** If cross-document confusion persists (Q-D3/Q-D8 regressions), the label format can be tuned (e.g., adding page number or chunk index) and validated by ablation.
 
 ### 3.3 How Sentences Complement PPR Seeds
 

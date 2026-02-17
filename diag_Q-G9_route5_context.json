@@ -1,0 +1,318 @@
+{
+  "response": "## Summary\n\nAcross the documents, there are two explicit non\u2011refundable / forfeiture terms:  \n1) A \u201cnon\u2011refundable start\u2011up fee\u201d of $250.00 in the Property Management Agreement.  \n2) A forfeiture of the customer\u2019s deposit if cancellation occurs after 3 business days in the Purchase Contract.  \n\nNo other clauses in the provided texts explicitly use \u201cnon\u2011refundable,\u201d \u201cforfeited,\u201d or equivalent language indicating loss of paid amounts.\n\n## Key Points\n\n- **Non\u2011refundable agency start\u2011up fee (Property Management Agreement)**  \n  - Upon execution of the Property Management Agreement, the Owner must pay the Agent \u201ctwo hundred fifty dollars ($250.00) \u2026 as a non-refundable start-up fee.\u201d [1]  \n  - The Agreement states that the Agent will use this fee for initial administrative expenses, inventory, condition/inspection report, and other initial sums required to perform its duties. [1][8]\n\n- **Forfeiture of deposit after 3\u2011day cancellation window (Purchase Contract)**  \n  - The Purchase Contract gives the Customer a \u201cRight to Cancel\u201d: the Customer \u201cmay cancel within 3 business days for full refund.\u201d [6][10][21]  \n  - It then states that \u201cAfterward, deposit is forfeited,\u201d explicitly providing that amounts paid as deposit are lost if cancellation occurs after the 3\u2011business\u2011day period. [6]",
+  "route_used": "route_5_unified",
+  "citations": [
+    {
+      "index": 1,
+      "chunk_id": "doc_1dbd2b5c11ec4af498f70f3191292772_chunk_0",
+      "document_id": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+      "document_url": "https://neo4jstorage21224.blob.core.windows.net/test-docs/PROPERTY%20MANAGEMENT%20AGREEMENT.pdf",
+      "score": 0.0,
+      "text_preview": "# PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and...",
+      "page_number": 1,
+      "end_offset": 6165
+    },
+    {
+      "index": 2,
+      "chunk_id": "doc_b89381a472b54bc6a4cf7d7320d7c464_chunk_0",
+      "document_id": "doc_b89381a472b54bc6a4cf7d7320d7c464",
+      "document_title": "purchase_contract",
+      "document_url": "https://neo4jstorage21224.blob.core.windows.net/test-docs/purchase_contract.pdf",
+      "score": 0.0,
+      "text_preview": "# PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), l...",
+      "page_number": 1,
+      "end_offset": 1791
+    },
+    {
+      "index": 3,
+      "chunk_id": "chunk_7",
+      "document_id": "",
+      "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) o..."
+    },
+    {
+      "index": 4,
+      "chunk_id": "chunk_9",
+      "document_id": "",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Customer bears any additional compliance costs. Customer may cancel within 3 business days for full ..."
+    },
+    {
+      "index": 5,
+      "chunk_id": "chunk_20",
+      "document_id": "",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "PageBreak -->\n\nContractor assists with permitting. Customer bears any additional compliance costs. C..."
+    }
+  ],
+  "evidence_path": [
+    "Agent",
+    "Owner",
+    "Builder",
+    "Contract",
+    "Dispute",
+    "holding tank",
+    "Initial payment in accordance with contract",
+    "Pumper",
+    "Party",
+    "Special Size 42\" x 62\" cab with 90 degree Type 3",
+    "Buyer/Owner",
+    "property",
+    "Contractor",
+    "resolution of Dispute",
+    "consolidated proceeding",
+    "compelling arbitration of Dispute",
+    "exercise of rights",
+    "obtaining stay of pending judicial proceeding",
+    "Dispute Resolution Method",
+    "bear costs and expenses if fails to submit to arbitration"
+  ],
+  "metadata": {
+    "profile": "balanced",
+    "weights": {
+      "w1_entity": 0.5,
+      "w2_structural": 0.3,
+      "w3_thematic": 0.2
+    },
+    "damping": 0.8,
+    "ner_entities": [
+      "Non-Refundable Deposit Clause",
+      "Forfeiture of Deposit Provision",
+      "Non-Refundable Fees Clause",
+      "Forfeiture of Payments Clause",
+      "Non-Refundable / Forfeiture Terms Section"
+    ],
+    "tier1_seed_count": 16,
+    "tier2_seed_count": 28,
+    "tier3_seed_count": 0,
+    "total_unique_seeds": 41,
+    "structural_sections": [
+      "PURCHASE CONTRACT",
+      "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)",
+      "BUILDERS LIMITED WARRANTY WITH ARBITRATION"
+    ],
+    "num_ppr_evidence": 30,
+    "sentence_evidence_count": 15,
+    "text_chunks_used": 22,
+    "route_description": "Unified hierarchical seed PPR (v5)",
+    "version": "v5.0",
+    "ppr_top_entities": [
+      {
+        "entity": "Agent",
+        "score": 2.975
+      },
+      {
+        "entity": "Owner",
+        "score": 2.72
+      },
+      {
+        "entity": "Builder",
+        "score": 2.1675
+      },
+      {
+        "entity": "Contract",
+        "score": 2.0681
+      },
+      {
+        "entity": "Dispute",
+        "score": 1.955
+      },
+      {
+        "entity": "holding tank",
+        "score": 1.9406
+      },
+      {
+        "entity": "Initial payment in accordance with contract",
+        "score": 1.8988
+      },
+      {
+        "entity": "Pumper",
+        "score": 1.8981
+      },
+      {
+        "entity": "Party",
+        "score": 1.7
+      },
+      {
+        "entity": "Special Size 42\" x 62\" cab with 90 degree Type 3",
+        "score": 1.6863
+      }
+    ],
+    "sentence_evidence": [
+      {
+        "text": "(h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) on all the above fees, commissions and charges. Upon the execution of this Agreement, the Owner shall",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6465
+      },
+      {
+        "text": "Upon\ntermination, Owner shall continue to be responsible or shall cause to be completed all obligations\nor expenses incurred hereunder by the Agent. In the event this agreement is terminated, or the\np",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6055
+      },
+      {
+        "text": "Customer bears any additional compliance costs. Customer may cancel within 3 business days for full refund.",
+        "source": "purchase_contract",
+        "score": 0.6539
+      },
+      {
+        "text": "Legal fees are recoverable by Contractor. Contractor holds risk until delivery. Delivery expected 8-10 weeks after drawing approval.",
+        "source": "purchase_contract",
+        "score": 0.6335
+      },
+      {
+        "text": "This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warran",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6024
+      },
+      {
+        "text": "A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Smal",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6022
+      },
+      {
+        "text": "1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n1 Outdoor configuration package\n\n1 Aluminum door with plexi-glass inserts & automatic opener\n\n2 Flush-mount Hall Call stations (upper & lower)\n\nTot",
+        "source": "purchase_contract",
+        "score": 0.6655
+      },
+      {
+        "text": "This contract shall be governed by the laws of the State of Florida. Neither party may assign this contract without the other's written consent. Contractor warrants labor for 90 days.",
+        "source": "purchase_contract",
+        "score": 0.6422
+      },
+      {
+        "text": "Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)\n\n1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree acce",
+        "source": "purchase_contract",
+        "score": 0.6287
+      },
+      {
+        "text": "BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6063
+      }
+    ],
+    "context_stats": {
+      "chunks_before_budget": 22,
+      "chunks_after_budget": 22,
+      "chunks_dropped": 0,
+      "context_tokens": 9224,
+      "context_chars": 34729,
+      "token_budget": 32000,
+      "budget_enabled": true,
+      "num_doc_groups": 4,
+      "doc_group_pruning": {
+        "enabled": true,
+        "top_doc": "doc_7abd558372ff4627b7d0ff27c22f1c5b",
+        "top_score": 3.6867,
+        "min_ratio": 0.25,
+        "docs_kept": 4,
+        "docs_pruned": 1,
+        "pruned_details": [
+          [
+            "doc_f9726bb080134793b36b817097b3baab",
+            0.5696,
+            0.155
+          ]
+        ],
+        "entity_detail": {
+          "doc_1dbd2b5c11ec4af498f70f3191292772": {
+            "Agent": 2.975,
+            "__sentence_search__": 0.543
+          },
+          "doc_7abd558372ff4627b7d0ff27c22f1c5b": {
+            "Owner": 2.72,
+            "Builder": 0.6502,
+            "__sentence_search__": 0.3164
+          },
+          "doc_d83867cd24a9402ab15f58cdfbb36462": {
+            "Owner": 2.72
+          },
+          "doc_b89381a472b54bc6a4cf7d7320d7c464": {
+            "Contract": 0.6204,
+            "__sentence_search__": 0.3496
+          },
+          "doc_f9726bb080134793b36b817097b3baab": {
+            "Initial payment in accordance with contract": 0.5696
+          }
+        },
+        "chunks_before": 22,
+        "chunks_after": 21
+      },
+      "final_context_chars": 34729,
+      "final_context_tokens": 8683,
+      "retrieval": {
+        "chunks_raw": 26,
+        "chunks_after_dedup": 7,
+        "duplicates_removed": 19,
+        "dedup_ratio": 73.1,
+        "noise_filters": {
+          "total_penalised": 0,
+          "form_label": 0,
+          "bare_heading": 0,
+          "min_content": 0
+        },
+        "entities_selected": 25,
+        "dedup_enabled": true,
+        "noise_enabled": true,
+        "score_weighted_enabled": true,
+        "entity_budgets": {
+          "Agent": 12,
+          "Owner": 11,
+          "Builder": 3,
+          "Contract": 3,
+          "Dispute": 2,
+          "holding tank": 8,
+          "Initial payment in accordance with contract": 2,
+          "Pumper": 8,
+          "Party": 2,
+          "Special Size 42\" x 62\" cab with 90 degree Type 3": 2
+        },
+        "community_filter": {
+          "enabled": true,
+          "target_community": 331,
+          "entities_in_target": 5,
+          "entities_penalised": 20,
+          "penalty_factor": 0.3,
+          "top_entities_used": [
+            "Agent",
+            "Owner",
+            "Builder"
+          ]
+        },
+        "score_gap": {
+          "enabled": true,
+          "gap_found": false,
+          "entities_before": 25,
+          "entities_after": 25,
+          "reason": "no_drop_exceeds_0.5"
+        },
+        "semantic_dedup": {
+          "enabled": true,
+          "chunks_before": 7,
+          "chunks_after": 7,
+          "near_duplicates_removed": 0,
+          "threshold": 0.92
+        },
+        "vector_fallback": {
+          "enabled": false
+        },
+        "doc_scope": {
+          "enabled": true,
+          "decision": "skip_cross_document_query",
+          "matched_pattern": "across\\s+(?:all\\s+)?(?:the\\s+)?documents?"
+        },
+        "doc_coherence": {
+          "enabled": true
+        }
+      }
+    },
+    "llm_context": "=== DOCUMENT: PROPERTY MANAGEMENT AGREEMENT ===\n\n[1] # PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)\n\nTHIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietorship (hereinafter called \"Agent\"), wherein the\nparties hereby agree as follows:\n\nAGENCY. Owner exclusively appoints Agent to rent, lease, operate, and manage on the owner's\nbehalf the property located at: 456 Palm Tree Avenue, Honolulu, HI 96815\n\nProperty Name: Pacific View Retreat\nUnit #: B202\n\nTERM. This agreement shall be for an initial period of twelve months beginning on: 2010-06-15\nand shall be automatically renewed for successive one year terms thereafter. However, either party\nupon sixty (60) days written notice may terminate this agreement. Termination of this agreement\ndoes not invalidate any existing rental agreements made by Agent on Owner's behalf. Upon\ntermination, Owner shall continue to be responsible or shall cause to be completed all obligations\nor expenses incurred hereunder by the Agent. In the event this agreement is terminated, or the\nproperty is sold, the Owner shall honor all confirmed reservations.\n\nRESPONSIBILITIES OF AGENT. Agent agrees to and shall:\n\n(a) Complete an initial property inspection and prepare a condition report of the unit. If\nnecessary, make recommendations to Owner and prepare unit for occupancy.\n\n(b) Advertise the rental unit in the local newspapers, bulletin board, and on the Internet.\nProvide the invoice(s) from the media, and pay the charges and pass on the cost to the Owner, on\nthe monthly proceeds statements.\n\n(c) Collect all rents for property and deposit same in a special trust account in an insured\nfinancial institution authorized to do business in the State of Hawaii. Owner understands and\nagrees that all finds may be placed in an interest bearing account and the interest shall accrue to\nthe benefit of the Rental Agent.\n\n(d) Provide Owner with a monthly statement of income and expenses for the property. To\nthe extent there are amounts available for distribution to the owner; agent shall distribute the\namount to the owner or as owner may direct.\n\n(e) Contract for services and authorize expenditures on Owner's behalf for housekeeping\nand regular maintenance. Agent shall obtain prior written approval from Owner for any expenditure\nin excess of Three Hundred Dollars ($300.00) except for what the Agent shall in its best judgment\nconsider an emergency\n\nRESPONSIBILITIES OF OWNER. Owner agrees to and shall:\n\n(a) Furnish and maintain unit in accordance with recommended inventory and maintenance\nstandards as may be established from time to time by Agent.\n\n(b) Allow Agent to establish rental rates for the property.\n\n(c) Provide Agent with written notification within five (5) business days of a listing agreement\nif the property is for sale. And to notify Agent prior to authorizing access to the property to anyone.\n\n(d) Provide Agent with Owner's General Excise Tax License.\n\n(e) Provide Agent with Owner's U.S. Federal Tax Id, or Social Security number.\n\n(f) Provide Liability Insurance coverage for the property with minimum limits of $300,000 for\nbodily injury and $25,000 for property damage to others. The Agent shall be named as additional\ninsured and shall be furnished with a copy of the insurance policy and a certificate of insurance.\n\n<!-- PageBreak -->\n\n<!-- PageNumber=\"(Page 2/2)\" -->\n\n\n## PROPERTY MANAGEMENT AGREEMENT:\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards and to deduct for credit card and/or\nbankcard fees from the Owner's proceeds.\n\n(b) A fee/commission of twenty five percent (25%) of the gross revenues for management\nservices for short term and/or vacation rentals (reservations of less than 180 days).\n\n(c) A fee/commission of ten percent (10%) of the gross revenues for management services\nfor long term leases (leases of more than 180 days).\n\n(d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month.\n\n(e) A minimum charge for administration and accounting, at $50.00/month (not to include\ntax preparation/returns/forms).\n\n(f) A fee of ten percent (10%) on the total charge for repairs, upgrades, and/or renovations.\n\n(g) A charge of $35/hour to schedule repairs, upgrades, renovations, replacement of\nappliances, carpets, curtains, drapes, and/or to escort the contractors, repair persons,\ntechnicians and handymen.\n\n(h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) on all the above fees, commissions and charges.\n\nAGENCY START-UP FEE. Upon the execution of this Agreement, the Owner shall pay two\nhundred fifty dollars ($250.00) to the Agent as a non-refundable start-up fee. The Agent shall use\nsuch fee to pay initial administrative expenses of including the premises (property) in its rental\nprogram, to conduct a complete inventory of all furniture and furnishings in the rental unit, to\nproduce a condition/inspection report of the premises, appliances and contents, and to pay other\nsums initially required for the performance of its duties under this agreement.\n\nDISCLAIMER OF GUARANTEES. The Owner understands and agrees that Agent has\nmade no guarantees (written or verbal) of occupancy or income levels for the property.\n\nHOLD HARMLESS. The Owner agrees that Agent shall not be liable for any claim for loss\nor injury to any person or property located on the property subject to this agreement, except for\nloss or injury caused by Agent's gross negligence or wilful misconduct, and Owner shall hold Agent\nharmless and indemnify Agent for any such claim or liability.\n\nGOVERNING LAW. This is the entire Agreement between the parties and shall be\ngoverned by the laws of the State of Hawaii. This Agreement shall be binding upon the successors\nand assigns of Owner or Agent.\n\nSIGNED in duplicate this _15th day of June_2010.\nBoth parties acknowledge receipt of a copy of this Agreement.\n\nOWNER:\n\nAGENT: Walt Flood Realty\n\nBy:\n\nContoso Ltd.\n\nBy:\n\nFabrikam Inc.\n\nIt's Owner\n\nIt's Principal Broker\n\nDate:\n\n2010-06-15\n\nDate:\n\n2010-06-15\n\n[8] (h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) on all the above fees, commissions and charges. Upon the execution of this Agreement, the Owner shall pay two\nhundred fifty dollars ($250.00) to the Agent as a non-refundable start-up fee. The Agent shall use\nsuch fee to pay initial administrative expenses of including the premises (property) in its rental\nprogram, to conduct a complete inventory of all furniture and furnishings in the rental unit, to\nproduce a condition/inspection report of the premises, appliances and contents, and to pay other\nsums initially required for the performance of its duties under this agreement.\n\n[9] Upon\ntermination, Owner shall continue to be responsible or shall cause to be completed all obligations\nor expenses incurred hereunder by the Agent. In the event this agreement is terminated, or the\nproperty is sold, the Owner shall honor all confirmed reservations.\n\nRESPONSIBILITIES OF AGENT. Agent agrees to and shall:\n\n(a) Complete an initial property inspection and prepare a condition report of the unit.\n\n[18] Termination of this agreement\ndoes not invalidate any existing rental agreements made by Agent on Owner's behalf. Upon\ntermination, Owner shall continue to be responsible or shall cause to be completed all obligations\nor expenses incurred hereunder by the Agent. In the event this agreement is terminated, or the\nproperty is sold, the Owner shall honor all confirmed reservations.\n\nRESPONSIBILITIES OF AGENT.\n\n[22] (e) Contract for services and authorize expenditures on Owner's behalf for housekeeping\nand regular maintenance. Agent shall obtain prior written approval from Owner for any expenditure\nin excess of Three Hundred Dollars ($300.00) except for what the Agent shall in its best judgment\nconsider an emergency\n\nRESPONSIBILITIES OF OWNER. Owner agrees to and shall:\n\n(a) Furnish and maintain unit in accordance with recommended inventory and maintenance\nstandards as may be established from time to time by Agent.\n\n\n\n=== DOCUMENT: BUILDERS LIMITED WARRANTY ===\n\n[2] # BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended by Fabrikam Inc.\n,and is accepted and agreed\n(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201\n\nto by Contoso Ltd.\n(the Buyer/Owner), who is the original\nBuyer/Owner of the property at the following address: 480 Willow Glen Drive, Chubbuck, ID 83202\n.\n\n## 1. Builder's Limited Warranty.\n\nA. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of the home ; the plumbing (including the septic tank if Builder\ninstalled), heating, and electric wiring systems; and the roof will be free of defects in materials or workmanship. Such Limited\nWarranty is subject to the terms hereof including specific provisions for other features of the home and appliances which provisions\nare controlling.\n\nB. The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days\nthat the following items will be free of defects in materials or workmanship: doors (including hardware), windows, electric switches,\nreceptacles, and fixtures; caulking around exterior openings, plumbing fixtures and cabinet work.\n\n## 2. Term.\n\nA. The terms of the various coverages of this Builder's Limited Warranty begin on the date of final settlement or the date\nwhen the Buyer/Owner first occupies the home, whichever comes first.\n\nB. Except as otherwise provided herein, the terms of this Limited Warranty terminate one (1) year or sixty (60) days as\napplicable after commencement. ANY CLAIMS WHICH HAVE NOT BEEN MADE IN WRITING AS PROVIDED HEREIN,\nWITHIN ONE (1) YEAR OR SIXTY (60) AS APPLICABLE, REGARDLESS OF DISCOVERABILITY, ARE NOT COVERED.\n\n3\\.\nManufacturers' Warranties. The Builder assigns and passes through to the Buyer/Owner (to the extent they exist and\nare assignable), the manufacturers' warranties on all appliances and equipment supplied by Builder. The following items are examples\nof such appliances and equipment, although not every house includes all of these items and some houses may include appliances or\nequipment not in this list: range, furnace or heat pump, dishwasher, garbage disposal, ventilating fan, air conditioner.\n\n4\\.\nExclusions from Coverage. The Builder does not assume responsibility for any of the following,\nall of which are excluded from the coverage of this limited warranty.\n\nA. CONSEQUENTIAL OR INCIDENTAL DAMAGES. (SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION\nOF INCIDENTAL OR CONSEQUENTIAL DAMAGES, SO THE LIMITATION OR EXCLUSION MAY NOT APPLY TO YOU).\n\nB. This Warranty does not cover any appliance, piece of equipment, or other items which is a consumer product for purposes of the\nMagnuson-Moss Warranty Act (15 U.S.C. Sec. 2301 through 2312.)\n\nC. Any defect or damage which is covered by a manufacturers' warranty. (Manufactures warranties will be assigned to Owner under\nparagraph 2 of this Limited Warranty).\n\nD. Damage resulting from ordinary wear and tear, abuse, neglect, or lack of due care or proper maintenance of the house or from non-\nresidential use of the home.\n\nE. Defects that result from characteristics common to the materials used, such as (but not limited to) warping and deflection of wood;\nfacing, chalking, and checking of paint from exposure to sunlight; cracks that occurred in the drying and curing of concrete, stucco, plaster,\nbricks, and masonry; drying,shrinking and cracking of caulking and weather stripping.\n\nF. Defects in materials or items installed by the Buyer/Owner or anyone other than the Builder or subcontractors selected by Builder.\n\nG. Work by the Buyer/Owner or anyone other than the Builder or by subcontractors selected by Builder.\n\nH. Loss or damage caused by insects or animals, fire, explosion, smoke, water escape, change or movement of ground water or soils, glass\nbreakage, wind storm, hail, lightening, falling trees, aircraft, vehicles, flood, earthquakes or acts of God.\n\nI. Conditions resulting from condensation on, expansion of, or contraction of materials.\n\nJ. Any and all claims not made in writing as provided herein prior to one (1) year or sixty (60) day warranty period, as applicable.\n\nK. Damages which could have been avoided by prompt notification to the Builder.\n\nL. Defects in any item which was not part of the original home as constructed by the Builder. Any defect caused by or worsened by\nnegligence, improper maintenance, lack of maintenance, improper action or inaction, willful or malicious acts by any party other than the\nBuilder, its employees, agents or subcontractors.\n\nM. Bodily injury or damage to personal property or damage to real property which is not part of the original home as\nconstruction by Builder.\n\nN. Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty.\n\n5\\.\nNo Other Warranties. This expressed limited warranty is the only warranty provided by Builder. ALL OTHER WARRANTIES INCLUDING\nIMPLIED WARRANTIES WHICH INCLUDE (BUT IS NOT LIMITED TO) WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR\nPURPOSE, HABITABILITY, AND GOOD WORKMANSHIP AND ANY WARRANTY THAT MIGHT BE CONSTRUED TO COVER THE PRESENCE OF\nRADON OR OTHER ENVIRONMENTAL POLLUTANTS ARE HEREBY DISCLAIMED.\n\n6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period as applicable, write a letter describing the defect to the\nBuilder and send it by certified mail return receipt requested to the Builder at the Builder's office address below:\n\nRepresentative John Smith\nCompany Fabrikam Inc.\nStreet_1820 Summit Ridge Dr.\nCity, State, Zip_Pocatello, ID 83201\nEmergency Number ( 208 ) 555-2311\n\nThe Buyer/Owner must tell the Builder in writing what times during the day that the Buyer/Owner will be at home, so that the\nBuilder can schedule service calls appropriately. If an emergency exists or if a delay will cause extra damage (for instance, a defective\npipe has burst), the Buyer/Owner must telephone the Builder immediately. Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all other damages.\n\n7\\.\nRepairs. Upon receipt of the buyer's or owner's written report of a defect, if the defective item is covered by this warranty,\n\n<!-- PageFooter=\"NOVEMBER 2005 BUILDRS LIMITED WARRANTY PAGE - 1 PROPERTY OF THE BUILDING CONTRACTORS ASSOCIATION OF SOUTH EAST IDAHO AND MEMBER OF GOOD STANDING\" -->\n<!-- PageBreak -->\n\nthe Builder will repair or replace it at no charge to the Buyer/Owner within sixty (60) days (longer if weather conditions, labor\nproblems, or materials shortages cause delays). The work will be done by the Builder or subcontractors chosen by the Builder. The\nBuilder has sole discretion to choose between repair or replacement.\n\n8\\.\nNot Transferable. This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates.\n\n9\\. Arbitration.\nA.\nBinding Arbitration. With exception of the remedies preserved herein (which includes claims for money within the jurisdiction\nlimits of the small claims court of the State of Idaho) all disputes are subject to binding arbitration. Upon the demand of a party hereto made before\nthe institution of any judicial proceeding or not more than 60 days after service of a complaint, third party complaint, cross-claim or counterclaim or\nany answer thereto or any amendment to any of the above, any Dispute (as defined below) shall be resolved by binding arbitration in accordance\nwith the terms of this Arbitration Program. A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Small Claims Court of the State of Idaho, now existing\nor hereafter arising between any of the Parties arising out of, pertaining to or in connection with the construction or purchase of the home or this\nwarranty or any related agreements, documents, or instruments (\"Documents\"). Any Party who fails to submit to binding arbitration following a\nlawful demand by another Party shall bear all costs and expenses, including reasonable attorneys' fees, (including those incurred in any trial,\nbankruptcy proceeding or on appeal) incurred by the other Party in obtaining a stay of any pending judicial proceeding and compelling arbitration of\nany Dispute. THE PARTIES UNDERSTAND THAT BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO\nENFORCE DECISION OF THE ARBITRATOR.\n\n[4] arbitration of any Dispute. THE PARTIES UNDERSTAND THAT BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR DISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED BY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO ENFORCE DECISION OF THE ARBITRATOR.\n\nB.\nGoverning Rules. Arbitration conducted pursuant to this Arbitration Program shall be administered by the American Arbitration\nAssociation (\"AAA\"), or other mutually agreeable administrator (\"Administrator\") in accordance with the terms of this Arbitration Program and\nBuilding Arbitration Rules of the AAA or other rules mutually agreeable. Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the\nState of Idaho. Judgment upon any award rendered hereunder may be entered in any court having jurisdiction.\n\nC.\nPreservation of Remedies. No provision of, nor the exercise of any rights under this arbitration clause shall limit the right of any\nParty to: (1) pursue a claim within the venue and jurisdiction of the Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Code \u00a7 1-2301, for claims for money which do not exceed $3,000; (2) pursue claims of lien or to foreclose a lien\nor mortgage against any real or personal property collateral or security, as necessary to preserve such remedy or to enforce any arbitration award, or\nobtain a personal or deficiency award; (3) exercise self-help remedies (including repossession and set-off rights); or (4) obtain provisional or\nancillary remedies such as injunctive relief, sequestration, attachment, claim & delivery. replevin, garnishment, or the appointment of a receiver\nfrom a court having jurisdiction. Such rights can be exercised at any time except to the extent such action is contrary to a final award or decision in\nany arbitration proceeding and shall not constitute a waiver of the right of any Party to Arbitration. Any claim or Dispute related to exercise of any\nself-help, auxiliary or other rights under this paragraph shall be a Dispute hereunder.\n\nD.\nArbitrator Powers and Qualifications; Awards. The Parties agree to select a neutral \"qualified\" arbitrator to resolve any Dispute\nhereunder. In the event the parties cannot agree then the parties shall proceed as provided by the provisions of the AAA, except as provided herein.\nThe arbitrator(s) shall be empowered to, at the written request of any Party in any Dispute, (1) to consolidate in a single proceeding any multiple\nparty claims that are substantially identical or based upon the same underlying transaction; and (2) to consolidate any claims and Disputes between\nother Parties which arise out of or relate to the subject matter hereof, including all claims by or against subcontractors or suppliers. In any\nconsolidated proceeding the first arbitrator(s) selected in any proceeding shall conduct the consolidated proceeding unless disqualified due to conflict\nof interest. The arbitrator(s) shall be empowered to resolve any dispute regarding the terms of this arbitration clause, including questions about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of this Arbitration Program. Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and their respective costs including attorneys' fees in any arbitration. The award of the\narbitrator(s) shall be in writing and shall set forth the factual and legal basis for the award.\nE.\nMiscellaneous. All statutes of limitation applicable to any Dispute shall apply to any proceeding in accordance with this\narbitration clause. The Parties agree, to the maximum extent practicable, to take any action necessary to conclude an arbitration hereunder within\n180 days of the filing of a Dispute with the Administrator. The arbitrator(s) shall be empowered to impose sanctions for any Party's failure to\nproceed within the times established herein. Arbitrations shall be conducted in Pocatello, Idaho. The provisions of this Arbitration Program shall\nsurvive any termination, amendment, or expiration hereof or of the Documents unless the Parties otherwise expressly agree in writing. Each Party\nagrees to keep all Disputes and arbitration proceedings strictly confidential, except for disclosures of information required in the ordinary course of\nbusiness of the Parties or as required by applicable law or regulation. If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall not be affected thereby and shall remain fully enforceable.\n\n10\\. Entire Agreement. This Builder's Limited Warranty and Statement of Non-Warranted Conditions constitute the entire\nintegrated agreement and understanding between the parties, superseding all prior communications, oral or written. No statements,\npromises, or inducements made by either party or agent of either party, express or implied, shall be valid or binding if not contained in\nthis written agreement. No modifications to the Agreement shall be effective or binding unless in writing over the duly authorized\nsignatures of the parties hereto. This section shall not be deemed waived by any modification or alteration which does not conform to\nthe above provisions of this section.\n\n11\\.\nInvalidity. In the event that any one or more of the provisions of this Warranty shall for any reason be held to be invalid,\nillegal, or unenforceable, the remaining provisions of this Agreement shall be unaffected thereby and any implied warranties construed\nto be applicable or not disclaimable by a court of competent jurisdiction shall be deemed limited to the warranty period (term) set forth\nherein.\n\nEntered into as of date of last signature of the parties hereto.\n\nContoso Ltd.\n\nFabrikam Inc.\n\n(Buyer/Owner)\n\nBuilder\n\nContoso Ltd.\n\nBy\nFabrikam Inc.\n\n(Buyer/Owner)\n\n2010-06-15\n\nAuthorized Representative\n\nDate\n\nTitle\n\n2010-06-15\n\nDate\n\n[5] ## 1. Builder's Limited Warranty.\n\nA. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of the home ; the plumbing (including the septic tank if Builder\ninstalled), heating, and electric wiring systems; and the roof will be free of defects in materials or workmanship. Such Limited\nWarranty is subject to the terms hereof including specific provisions for other features of the home and appliances which provisions\nare controlling.\n\nB. The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days\nthat the following items will be free of defects in materials or workmanship: doors (including hardware), windows, electric switches,\nreceptacles, and fixtures; caulking around exterior openings, plumbing fixtures and cabinet work.\n\n[12] This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates. With exception of the remedies preserved herein (which includes claims for money within the jurisdiction\nlimits of the small claims court of the State of Idaho) all disputes are subject to binding arbitration.\n\n[13] A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Small Claims Court of the State of Idaho, now existing\nor hereafter arising between any of the Parties arising out of, pertaining to or in connection with the construction or purchase of the home or this\nwarranty or any related agreements, documents, or instruments (\"Documents\"). Any Party who fails to submit to binding arbitration following a\nlawful demand by another Party shall bear all costs and expenses, including reasonable attorneys' fees, (including those incurred in any trial,\nbankruptcy proceeding or on appeal) incurred by the other Party in obtaining a stay of any pending judicial proceeding and compelling arbitration of\nany Dispute. BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION\n\n[17] BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO\nENFORCE DECISION OF THE ARBITRATOR.\n\n\n\n=== DOCUMENT: HOLDING TANK SERVICING CONTRACT ===\n\n[3] # HOLDING TANK SERVICING CONTRACT\n\nContract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper.\n\n\n<figure>\n\nHolding Tank Owner(s) Name(s):\nContoso Ltd.\n\nPumper's Name:\nFabrikam Inc.\n\nWe acknowledge the installation of (a) holding tank(s) on the following property\naddress: 123 Mockup Lane, Washburn County, WI\n\nLegal Description:\n\nTownship\nHillview\nNW 1/4, SW 1/4, Gov't Lot\n5\nSection 12 ,T 46_N, R 19 W\n\nLot 7_Block 2_Subdivision or CSM Meadow Estates\n\nParcel ID # 65- 081 -0-10 - 11-12 -1-13 - 123 - 123456\n\nTax ID# 0098765\n\n</figure>\n\n\n1\\. The owner agrees to file a copy of this contract with the County of Washburn, as required under WI\nCode SPS 383.21(2)5.\n\n2\\.\nThe owner agrees to have the holding tank(s) serviced by the pumper and guarantees to permit the\npumper to have access and to enter upon the property for the purpose of servicing the holding tank(s).\nThe owner agrees to maintain the all-weather access road or drive so that the pumper can service the\nholding tank(s) with the pumping equipment. The owner further agrees to pay the pumper for a\ncharges incurred in servicing the holding tank(s) as mutually agreed upon by the owner and pumper.\n\n3\\.\nThe pumper agrees to submit to the County, reports for the servicing of the holding tank(s) in manner\nspecified by the County. The pumper further agrees to include the following in the report:\n\na. The name and address of the person responsible for servicing the holding tank;\n\nb. The name of the owner of the holding tank;\n\nc. The location of the property on which the holding tank is installed;\n\nd. The sanitary permit number issued for the holding tank;\n\ne. The dates on which the holding tank was serviced;\n\nf. The volumes in gallons of the contents pumped from the holding tank for each servicing;\n\ng. The disposal sites to which the contents from the holding tank were delivered.\n\nh. Condition of holding tank and components at time of inspection.\n\n4\\. This agreement will remain in effect until the owner or pumper terminates this contract. In the event\nof a change in this contract, the owner agrees to file a copy of any changes to this service contract or a\ncopy of a new service contract with the municipality and the County named above within ten (10)\nbusiness days from the date of change to this service contract.\n\n\n<table>\n<tr>\n<th>Owner(s) Names(s) (Print)</th>\n<th>Owner's Signature(s)</th>\n</tr>\n<tr>\n<td>Contoso Ltd.</td>\n<td>Contoso</td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n</tr>\n<tr>\n<td>Pumper's Name (Print) Fabrikam Inc.</td>\n<td>Pumper's Signature Fabrikam</td>\n</tr>\n<tr>\n<td>Pumper's Registration Number REG-54321</td>\n<td></td>\n</tr>\n</table>\n\n\n\n=== DOCUMENT: purchase_contract ===\n\n[6] # PURCHASE CONTRACT\n\nThis contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box 123567 Key West, FL. 33304-0708, and Fabrikam Inc. (Customer), located at 61 S 34th Street,\nDayton, FL 33155. This contract is effective upon mutual signature and initial payment.\n\n\n## 1. Scope of Work\n\nContractor agrees to furnish and install the following:\n\n\u00b7 1 Vertical Platform Lift (AscendPro VPX200)\n\n\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n\u00b7 1 Outdoor configuration package\n\n\u00b7 1 Aluminum door with plexi-glass inserts & automatic opener\n\n\u00b7 2 Flush-mount Hall Call stations (upper & lower)\n\n\n## 2. Payment Terms\n\nTotal contract price is $29,900.00, payable in 3 installments:\n\n\u00b7 $20,000.00 upon signing\n\n\u00b7 $7,000.00 upon delivery\n\n\u00b7 $2,900.00 upon completion\n\n\n## 3. Changes\n\nAny changes must be agreed to in writing and will affect the next payment milestone.\n\n\n### 4. Customer Default\n\nFailure to pay may result in legal action. Legal fees are recoverable by Contractor.\n\n\n### 5. Risk of Loss\n\nContractor holds risk until delivery. Customer holds risk thereafter.\n\n\n## 6. Delivery\n\nDelivery expected 8-10 weeks after drawing approval. Delay causes include factory and permits.\n\n\n## 7. Applicable Law\n\nThis contract shall be governed by the laws of the State of Florida.\n\n\n## 8. Assignment\n\nNeither party may assign this contract without the other's written consent.\n\n\n## 9. Warranty\n\nManufacturer warranty applies. Contractor warrants labor for 90 days.\n\n<!-- PageBreak -->\n\n\n## 10. Permitting\n\nContractor assists with permitting. Customer bears any additional compliance costs.\n\n\n### 11. Right to Cancel\n\nCustomer may cancel within 3 business days for full refund. Afterward, deposit is forfeited.\n\n## 1. Scope of Work\n\nContractor agrees to furnish and install the following:\n\n\u00b7 1 Vertical Platform Lift (AscendPro VPX200)\n\n\u00b7 1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n\u00b7 1 Outdoor configuration package\n\n\u00b7 1 Aluminum door with plexi-glass inserts & automatic opener\n\n\u00b7 2 Flush-mount Hall Call stations (upper & lower)\n\n## 2. Payment Terms\n\nTotal contract price is $29,900.00, payable in 3 installments:\n\n\u00b7 $20,000.00 upon signing\n\n\u00b7 $7,000.00 upon delivery\n\n\u00b7 $2,900.00 upon completion\n\n## 3. Changes\n\nAny changes must be agreed to in writing and will affect the next payment milestone.\n\n\n### 4. Customer Default\n\nFailure to pay may result in legal action. Legal fees are recoverable by Contractor.\n\n\n### 5. Risk of Loss\n\nContractor holds risk until delivery. Customer holds risk thereafter.\n\n### 4. Customer Default\n\nFailure to pay may result in legal action. Legal fees are recoverable by Contractor.\n\n### 5. Risk of Loss\n\nContractor holds risk until delivery. Customer holds risk thereafter.\n\n## 6. Delivery\n\nDelivery expected 8-10 weeks after drawing approval. Delay causes include factory and permits.\n\n## 7. Applicable Law\n\nThis contract shall be governed by the laws of the State of Florida.\n\n## 8. Assignment\n\nNeither party may assign this contract without the other's written consent.\n\n## 9. Warranty\n\nManufacturer warranty applies. Contractor warrants labor for 90 days.\n\n## 10. Permitting\n\nContractor assists with permitting. Customer bears any additional compliance costs.\n\n\n### 11. Right to Cancel\n\nCustomer may cancel within 3 business days for full refund. Afterward, deposit is forfeited.\n\n### 11. Right to Cancel\n\nCustomer may cancel within 3 business days for full refund. Afterward, deposit is forfeited.\n\n[10] Customer bears any additional compliance costs. Customer may cancel within 3 business days for full refund.\n\n[11] Legal fees are recoverable by Contractor. Contractor holds risk until delivery. Delivery expected 8-10 weeks after drawing approval.\n\n[14] 1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n1 Outdoor configuration package\n\n1 Aluminum door with plexi-glass inserts & automatic opener\n\n2 Flush-mount Hall Call stations (upper & lower)\n\nTotal contract price is $29,900.00, payable in 3 installments:\n\n$20,000.00 upon signing\n\n$7,000.00 upon delivery\n\n$2,900.00 upon completion\n\nAny changes must be agreed to in writing and will affect the next payment milestone. Failure to pay may result in legal action. Legal fees are recoverable by Contractor.\n\n[15] This contract shall be governed by the laws of the State of Florida. Neither party may assign this contract without the other's written consent. Contractor warrants labor for 90 days.\n\n[16] Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)\n\n1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n1 Outdoor configuration package\n\n1 Aluminum door with plexi-glass inserts & automatic opener\n\n2 Flush-mount Hall Call stations (upper & lower)\n\nTotal contract price is $29,900.00, payable in 3 installments:\n\n$20,000.00 upon signing\n\n$7,000.00 upon delivery\n\n$2,900.00 upon completion\n\nAny changes must be agreed to in writing and will affect the next payment milestone. Failure to pay may result in legal action.\n\n[19] Failure to pay may result in legal action. Legal fees are recoverable by Contractor. Contractor holds risk until delivery.\n\n[20] Neither party may assign this contract without the other's written consent. Contractor warrants labor for 90 days. PageBreak -->\n\nContractor assists with permitting.\n\n[21] PageBreak -->\n\nContractor assists with permitting. Customer bears any additional compliance costs. Customer may cancel within 3 business days for full refund.\n\n"
+  },
+  "raw_extractions": null
+}

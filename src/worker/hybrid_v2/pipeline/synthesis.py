@@ -1133,11 +1133,15 @@ Response:"""
         # --- Cross-document query detection ---
         # Explicit multi-document intent signals  → skip scoping entirely.
         _CROSS_DOC_PATTERNS = [
-            r"across\s+(?:all\s+)?(?:the\s+)?documents?",
+            r"across\s+(?:all\s+)?(?:the\s+)?(?:documents?|contracts?|agreements?)",
             r"(?:all|every|each)\s+(?:of\s+the\s+)?(?:documents?|contracts?|agreements?|files?)",
             r"compare\s+(?:the\s+)?(?:documents?|contracts?|agreements?)",
             r"(?:the|this)\s+(?:entire\s+)?set\b",
             r"summarize\s+(?:all|everything)",
+            # Topical inventory queries — ask "what X provisions/clauses/…"
+            # without referencing a specific document.  Implicitly cross-doc.
+            r"what\s+are\s+(?:the\s+|all\s+)?[\w\s/*-]*?(?:provisions?|mechanisms?|clauses?|requirements?|obligations?|terms?|conditions?)",
+            r"what\s+[\w\s/*-]*?(?:provisions?|mechanisms?|clauses?|requirements?|obligations?|terms?|conditions?)\s*(?:\([^)]*\)\s*)?(?:are\b|exist\b)",
         ]
         if query:
             query_lower = query.lower()

@@ -1,0 +1,397 @@
+{
+  "response": "## Summary\n\nThe agreement provides that most disputes must be resolved by binding arbitration administered by the American Arbitration Association (AAA) or another mutually agreed administrator, under AAA Building Arbitration Rules or other mutually agreed rules, applying Idaho substantive law, with any arbitration award enforceable in court. [1][2][9][12][13][15][16] Certain remedies are expressly preserved outside arbitration: (1) small-claims court actions in Idaho for money claims not exceeding \u201c$3,000\u201d; (2) lien and mortgage foreclosure actions to preserve or enforce security interests or arbitration awards; (3) self-help remedies (including repossession and set-off); and (4) provisional or ancillary judicial remedies such as injunctive relief, sequestration, attachment, claim and delivery, replevin, garnishment, or appointment of a receiver. [4] The arbitrator may consolidate related claims, decide questions about arbitrability, impose sanctions for delay, and must issue a written award stating the factual and legal basis; each party pays half of the arbitration costs and its own attorneys\u2019 fees. [7][8][11][14] A party that refuses to submit to arbitration after a lawful demand must pay the other party\u2019s costs and reasonable attorneys\u2019 fees incurred to stay court proceedings and compel arbitration. [10] All statutes of limitation apply to arbitration, the parties aim to conclude arbitration within \u201c180 days\u201d of filing, arbitrations occur in Pocatello, Idaho, and proceedings are to be kept confidential subject to legal or ordinary-course-of-business disclosures. [14][15]\n\n## Key Points\n\n- All disputes that cannot be brought in Idaho small-claims court and that arise out of the construction or purchase of the home, the warranty, or related documents must be resolved by binding arbitration if demanded within the specified time window. [1][6][10][16]  \n- Arbitration is administered by the AAA or another mutually agreed administrator, under AAA Building Arbitration Rules or other mutually agreed rules, applying the substantive law of the State of Idaho. [2][9][12][13][15]  \n- Judgment on any arbitration award may be entered in any court having jurisdiction. [2][4][13]  \n- Preserved non-arbitration remedies:  \n  - Small-claims actions in the Small Claims Department of the Magistrate Division of the Idaho District Courts for money claims not exceeding \u201c$3,000.\u201d [4]  \n  - Actions to pursue or foreclose liens or mortgages on real or personal property collateral, including to enforce an arbitration award or obtain a personal or deficiency award. [4]  \n  - Self-help remedies, including repossession and set-off rights. [4]  \n  - Provisional or ancillary judicial remedies: injunctive relief, sequestration, attachment, claim and delivery, replevin, garnishment, or appointment of a receiver. [4]  \n- A party that fails to submit to arbitration after a lawful demand must bear all costs and expenses, including reasonable attorneys\u2019 fees (including those incurred at trial, in bankruptcy, or on appeal), that the other party incurs to stay judicial proceedings and compel arbitration. [10]  \n- Arbitrator powers and procedures:  \n  - Neutral \u201cqualified\u201d arbitrator to be selected; if parties cannot agree, selection follows AAA provisions. [7][8]  \n  - Power to consolidate substantially identical or transaction-related multiple-party claims, including claims involving subcontractors or suppliers; the first selected arbitrator conducts any consolidated proceeding unless disqualified. [8][11]  \n  - Power to resolve disputes about the arbitration clause itself, including arbitrability, but not to change the arbitration program\u2019s terms. [11]  \n  - Must issue a written award stating the factual and legal basis. [11]  \n  - May impose sanctions for failure to proceed within established time limits. [14]  \n- Cost allocation: each party pays one-half of the arbitration costs and fees and its own costs, including attorneys\u2019 fees, in the arbitration. [11]  \n- Timing and limitations: applicable statutes of limitation apply; parties agree to take necessary action to conclude arbitration within \u201c180 days\u201d of filing with the administrator. [14]  \n- Location and confidentiality: arbitrations are conducted in Pocatello, Idaho; parties agree to keep disputes and arbitration proceedings strictly confidential, subject to disclosures required by law or in the ordinary course of business. [14][15]",
+  "route_used": "route_5_unified",
+  "citations": [
+    {
+      "index": 1,
+      "chunk_id": "doc_7abd558372ff4627b7d0ff27c22f1c5b_chunk_0",
+      "document_id": "doc_7abd558372ff4627b7d0ff27c22f1c5b",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS%20LIMITED%20WARRANTY.pdf",
+      "score": 0.0,
+      "text_preview": "# BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction...",
+      "page_number": 1,
+      "end_offset": 15068
+    },
+    {
+      "index": 2,
+      "chunk_id": "doc_7abd558372ff4627b7d0ff27c22f1c5b_chunk_1",
+      "document_id": "doc_7abd558372ff4627b7d0ff27c22f1c5b",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "https://neo4jstorage21224.blob.core.windows.net/test-docs/BUILDERS%20LIMITED%20WARRANTY.pdf",
+      "score": 0.0,
+      "text_preview": "arbitration of any Dispute. THE PARTIES UNDERSTAND THAT BY THIS AGREEMENT THEY HAVE DECIDED THAT THE...",
+      "page_number": 1
+    },
+    {
+      "index": 3,
+      "chunk_id": "chunk_3",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Judgment upon any award rendered hereunder may be entered in any court having jurisdiction. No provi..."
+    },
+    {
+      "index": 4,
+      "chunk_id": "chunk_5",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "With exception of the remedies preserved herein (which includes claims for money within the jurisdic..."
+    },
+    {
+      "index": 5,
+      "chunk_id": "chunk_6",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "D.\nArbitrator Powers and Qualifications; Awards. The Parties agree to select a neutral \"qualified\" a..."
+    },
+    {
+      "index": 6,
+      "chunk_id": "chunk_7",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "In the event the parties cannot agree then the parties shall proceed as provided by the provisions o..."
+    },
+    {
+      "index": 7,
+      "chunk_id": "chunk_8",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO ENFORCE DECISION OF THE ARBITRA..."
+    },
+    {
+      "index": 8,
+      "chunk_id": "chunk_9",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\n..."
+    },
+    {
+      "index": 9,
+      "chunk_id": "chunk_10",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "In any\nconsolidated proceeding the first arbitrator(s) selected in any proceeding shall conduct the ..."
+    },
+    {
+      "index": 10,
+      "chunk_id": "chunk_11",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "shall be governed by the provisions of the AAA or other rules agreed to by the parties. The arbitrat..."
+    },
+    {
+      "index": 11,
+      "chunk_id": "chunk_12",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the..."
+    },
+    {
+      "index": 12,
+      "chunk_id": "chunk_13",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "All statutes of limitation applicable to any Dispute shall apply to any proceeding in accordance wit..."
+    },
+    {
+      "index": 13,
+      "chunk_id": "chunk_14",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Arbitration conducted pursuant to this Arbitration Program shall be administered by the American Arb..."
+    },
+    {
+      "index": 14,
+      "chunk_id": "chunk_15",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR DISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RAT..."
+    }
+  ],
+  "evidence_path": [
+    "Agent",
+    "Owner",
+    "Builder",
+    "Dispute",
+    "Party",
+    "holding tank",
+    "Pumper",
+    "Buyer/Owner",
+    "property",
+    "Resolving Disputes",
+    "Disputes",
+    "claims and Disputes",
+    "repair or replacement",
+    "sole discretion",
+    "arbitrator(s)",
+    "obtain provisional or ancillary remedies",
+    "pursue claims of lien",
+    "compelling arbitration of Dispute",
+    "binding arbitration",
+    "responsibility to pay attorneys' fees"
+  ],
+  "metadata": {
+    "profile": "balanced",
+    "weights": {
+      "w1_entity": 0.5,
+      "w2_structural": 0.3,
+      "w3_thematic": 0.2
+    },
+    "damping": 0.8,
+    "ner_entities": [
+      "Remedies Clause",
+      "Dispute Resolution Clause",
+      "Arbitration Agreement",
+      "Mediation Clause",
+      "Governing Law and Dispute Resolution Provision"
+    ],
+    "tier1_seed_count": 15,
+    "tier2_seed_count": 11,
+    "tier3_seed_count": 0,
+    "total_unique_seeds": 22,
+    "structural_sections": [
+      "BUILDERS LIMITED WARRANTY WITH ARBITRATION",
+      "BUILDERS LIMITED WARRANTY WITH ARBITRATION > 2. Term."
+    ],
+    "num_ppr_evidence": 30,
+    "sentence_evidence_count": 15,
+    "text_chunks_used": 17,
+    "route_description": "Unified hierarchical seed PPR (v5)",
+    "version": "v5.0",
+    "ppr_top_entities": [
+      {
+        "entity": "Agent",
+        "score": 2.975
+      },
+      {
+        "entity": "Owner",
+        "score": 2.72
+      },
+      {
+        "entity": "Builder",
+        "score": 2.295
+      },
+      {
+        "entity": "Dispute",
+        "score": 1.955
+      },
+      {
+        "entity": "Party",
+        "score": 1.7
+      },
+      {
+        "entity": "holding tank",
+        "score": 1.5725
+      },
+      {
+        "entity": "Pumper",
+        "score": 1.53
+      },
+      {
+        "entity": "Buyer/Owner",
+        "score": 1.53
+      },
+      {
+        "entity": "property",
+        "score": 1.445
+      },
+      {
+        "entity": "Resolving Disputes",
+        "score": 1.36
+      }
+    ],
+    "sentence_evidence": [
+      {
+        "text": "Judgment upon any award rendered hereunder may be entered in any court having jurisdiction. No provision of, nor the exercise of any rights under this arbitration clause shall limit the right of any\nP",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6682
+      },
+      {
+        "text": "In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates. With exception of the remedies preserved herein (which includes claims for money wit",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6593
+      },
+      {
+        "text": "With exception of the remedies preserved herein (which includes claims for money within the jurisdiction\nlimits of the small claims court of the State of Idaho) all disputes are subject to binding arb",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.654
+      },
+      {
+        "text": "D.\nArbitrator Powers and Qualifications; Awards. The Parties agree to select a neutral \"qualified\" arbitrator to resolve any Dispute\nhereunder. In the event the parties cannot agree then the parties s",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6377
+      },
+      {
+        "text": "In the event the parties cannot agree then the parties shall proceed as provided by the provisions of the AAA, except as provided herein. The arbitrator(s) shall be empowered to, at the written reques",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6461
+      },
+      {
+        "text": "NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO ENFORCE DECISION OF THE ARBITRATOR. Arbitration conducted pursuant to this Arbitration Program shall be administered by the America",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6422
+      },
+      {
+        "text": "A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Smal",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6515
+      },
+      {
+        "text": "In any\nconsolidated proceeding the first arbitrator(s) selected in any proceeding shall conduct the consolidated proceeding unless disqualified due to conflict\nof interest. The arbitrator(s) shall be ",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6444
+      },
+      {
+        "text": "shall be governed by the provisions of the AAA or other rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the ",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6675
+      },
+      {
+        "text": "Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable s",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6564
+      }
+    ],
+    "context_stats": {
+      "chunks_before_budget": 17,
+      "chunks_after_budget": 17,
+      "chunks_dropped": 0,
+      "context_tokens": 6159,
+      "context_chars": 24752,
+      "token_budget": 32000,
+      "budget_enabled": true,
+      "num_doc_groups": 1,
+      "doc_group_pruning": {
+        "enabled": true
+      },
+      "final_context_chars": 24752,
+      "final_context_tokens": 6189,
+      "retrieval": {
+        "chunks_raw": 21,
+        "chunks_after_dedup": 3,
+        "duplicates_removed": 18,
+        "dedup_ratio": 85.7,
+        "noise_filters": {
+          "total_penalised": 0,
+          "form_label": 0,
+          "bare_heading": 0,
+          "min_content": 0
+        },
+        "entities_selected": 25,
+        "dedup_enabled": true,
+        "noise_enabled": true,
+        "score_weighted_enabled": true,
+        "entity_budgets": {
+          "Agent": 12,
+          "Owner": 11,
+          "Builder": 3,
+          "Dispute": 2,
+          "Party": 2,
+          "holding tank": 6,
+          "Pumper": 6,
+          "Buyer/Owner": 2,
+          "property": 6,
+          "Resolving Disputes": 2
+        },
+        "community_filter": {
+          "enabled": true,
+          "target_community": 331,
+          "entities_in_target": 5,
+          "entities_penalised": 20,
+          "penalty_factor": 0.3,
+          "top_entities_used": [
+            "Agent",
+            "Owner",
+            "Builder"
+          ]
+        },
+        "score_gap": {
+          "enabled": true,
+          "gap_found": false,
+          "entities_before": 25,
+          "entities_after": 25,
+          "reason": "no_drop_exceeds_0.5"
+        },
+        "semantic_dedup": {
+          "enabled": true,
+          "chunks_before": 3,
+          "chunks_after": 3,
+          "near_duplicates_removed": 0,
+          "threshold": 0.92
+        },
+        "vector_fallback": {
+          "enabled": false
+        },
+        "doc_scope": {
+          "enabled": true,
+          "scores": {
+            "BUILDERS LIMITED WARRANTY": 14.333,
+            "HOLDING TANK SERVICING CONTRACT": 2.833,
+            "PROPERTY MANAGEMENT AGREEMENT": 1.833
+          },
+          "top_doc": "BUILDERS LIMITED WARRANTY",
+          "top_score": 14.333,
+          "second_score": 2.833,
+          "min_score_threshold": 1.5,
+          "entity_doc_counts": {
+            "Agent": 1,
+            "Owner": 3,
+            "Builder": 1,
+            "Dispute": 1,
+            "Party": 1,
+            "holding tank": 1,
+            "Pumper": 1,
+            "Buyer/Owner": 1,
+            "property": 2,
+            "Disputes": 1,
+            "claims and Disputes": 1,
+            "repair or replacement": 1,
+            "sole discretion": 1,
+            "arbitrator(s)": 1,
+            "pursue claims of lien": 1,
+            "binding arbitration": 1,
+            "self-help remedies": 1,
+            "remedies preserved herein": 1,
+            "Building Arbitration Rules": 1
+          },
+          "_ner_seed_count": 5,
+          "decision": "single_document"
+        },
+        "doc_coherence": {
+          "enabled": true,
+          "target_docs": [
+            "doc_7abd558372ff4627b7d0ff27c22f1c5b"
+          ],
+          "chunks_penalised": 0,
+          "penalty": 0.2
+        }
+      }
+    },
+    "llm_context": "=== DOCUMENT: BUILDERS LIMITED WARRANTY ===\n\n[1] # BUILDERS LIMITED WARRANTY WITH ARBITRATION\n\nIn consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended by Fabrikam Inc.\n,and is accepted and agreed\n(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201\n\nto by Contoso Ltd.\n(the Buyer/Owner), who is the original\nBuyer/Owner of the property at the following address: 480 Willow Glen Drive, Chubbuck, ID 83202\n.\n\n## 1. Builder's Limited Warranty.\n\nA. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of the home ; the plumbing (including the septic tank if Builder\ninstalled), heating, and electric wiring systems; and the roof will be free of defects in materials or workmanship. Such Limited\nWarranty is subject to the terms hereof including specific provisions for other features of the home and appliances which provisions\nare controlling.\n\nB. The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days\nthat the following items will be free of defects in materials or workmanship: doors (including hardware), windows, electric switches,\nreceptacles, and fixtures; caulking around exterior openings, plumbing fixtures and cabinet work.\n\n## 2. Term.\n\nA. The terms of the various coverages of this Builder's Limited Warranty begin on the date of final settlement or the date\nwhen the Buyer/Owner first occupies the home, whichever comes first.\n\nB. Except as otherwise provided herein, the terms of this Limited Warranty terminate one (1) year or sixty (60) days as\napplicable after commencement. ANY CLAIMS WHICH HAVE NOT BEEN MADE IN WRITING AS PROVIDED HEREIN,\nWITHIN ONE (1) YEAR OR SIXTY (60) AS APPLICABLE, REGARDLESS OF DISCOVERABILITY, ARE NOT COVERED.\n\n3\\.\nManufacturers' Warranties. The Builder assigns and passes through to the Buyer/Owner (to the extent they exist and\nare assignable), the manufacturers' warranties on all appliances and equipment supplied by Builder. The following items are examples\nof such appliances and equipment, although not every house includes all of these items and some houses may include appliances or\nequipment not in this list: range, furnace or heat pump, dishwasher, garbage disposal, ventilating fan, air conditioner.\n\n4\\.\nExclusions from Coverage. The Builder does not assume responsibility for any of the following,\nall of which are excluded from the coverage of this limited warranty.\n\nA. CONSEQUENTIAL OR INCIDENTAL DAMAGES. (SOME STATES DO NOT ALLOW THE EXCLUSION OR LIMITATION\nOF INCIDENTAL OR CONSEQUENTIAL DAMAGES, SO THE LIMITATION OR EXCLUSION MAY NOT APPLY TO YOU).\n\nB. This Warranty does not cover any appliance, piece of equipment, or other items which is a consumer product for purposes of the\nMagnuson-Moss Warranty Act (15 U.S.C. Sec. 2301 through 2312.)\n\nC. Any defect or damage which is covered by a manufacturers' warranty. (Manufactures warranties will be assigned to Owner under\nparagraph 2 of this Limited Warranty).\n\nD. Damage resulting from ordinary wear and tear, abuse, neglect, or lack of due care or proper maintenance of the house or from non-\nresidential use of the home.\n\nE. Defects that result from characteristics common to the materials used, such as (but not limited to) warping and deflection of wood;\nfacing, chalking, and checking of paint from exposure to sunlight; cracks that occurred in the drying and curing of concrete, stucco, plaster,\nbricks, and masonry; drying,shrinking and cracking of caulking and weather stripping.\n\nF. Defects in materials or items installed by the Buyer/Owner or anyone other than the Builder or subcontractors selected by Builder.\n\nG. Work by the Buyer/Owner or anyone other than the Builder or by subcontractors selected by Builder.\n\nH. Loss or damage caused by insects or animals, fire, explosion, smoke, water escape, change or movement of ground water or soils, glass\nbreakage, wind storm, hail, lightening, falling trees, aircraft, vehicles, flood, earthquakes or acts of God.\n\nI. Conditions resulting from condensation on, expansion of, or contraction of materials.\n\nJ. Any and all claims not made in writing as provided herein prior to one (1) year or sixty (60) day warranty period, as applicable.\n\nK. Damages which could have been avoided by prompt notification to the Builder.\n\nL. Defects in any item which was not part of the original home as constructed by the Builder. Any defect caused by or worsened by\nnegligence, improper maintenance, lack of maintenance, improper action or inaction, willful or malicious acts by any party other than the\nBuilder, its employees, agents or subcontractors.\n\nM. Bodily injury or damage to personal property or damage to real property which is not part of the original home as\nconstruction by Builder.\n\nN. Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty.\n\n5\\.\nNo Other Warranties. This expressed limited warranty is the only warranty provided by Builder. ALL OTHER WARRANTIES INCLUDING\nIMPLIED WARRANTIES WHICH INCLUDE (BUT IS NOT LIMITED TO) WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR\nPURPOSE, HABITABILITY, AND GOOD WORKMANSHIP AND ANY WARRANTY THAT MIGHT BE CONSTRUED TO COVER THE PRESENCE OF\nRADON OR OTHER ENVIRONMENTAL POLLUTANTS ARE HEREBY DISCLAIMED.\n\n6\\.\nNotification of Defects. If Buyer/Owner believes a defect is covered by this limited warranty, the Buyer/Owner must,\nprior to the termination of the one (1) year or sixty (60) day warranty period as applicable, write a letter describing the defect to the\nBuilder and send it by certified mail return receipt requested to the Builder at the Builder's office address below:\n\nRepresentative John Smith\nCompany Fabrikam Inc.\nStreet_1820 Summit Ridge Dr.\nCity, State, Zip_Pocatello, ID 83201\nEmergency Number ( 208 ) 555-2311\n\nThe Buyer/Owner must tell the Builder in writing what times during the day that the Buyer/Owner will be at home, so that the\nBuilder can schedule service calls appropriately. If an emergency exists or if a delay will cause extra damage (for instance, a defective\npipe has burst), the Buyer/Owner must telephone the Builder immediately. Only emergency reports will be taken by phone. Failure to\npromptly notify the Builder of an emergency under this limited warranty relieves the Builder of all liability for replacement, repair,\nand all other damages.\n\n7\\.\nRepairs. Upon receipt of the buyer's or owner's written report of a defect, if the defective item is covered by this warranty,\n\n<!-- PageFooter=\"NOVEMBER 2005 BUILDRS LIMITED WARRANTY PAGE - 1 PROPERTY OF THE BUILDING CONTRACTORS ASSOCIATION OF SOUTH EAST IDAHO AND MEMBER OF GOOD STANDING\" -->\n<!-- PageBreak -->\n\nthe Builder will repair or replace it at no charge to the Buyer/Owner within sixty (60) days (longer if weather conditions, labor\nproblems, or materials shortages cause delays). The work will be done by the Builder or subcontractors chosen by the Builder. The\nBuilder has sole discretion to choose between repair or replacement.\n\n8\\.\nNot Transferable. This limited warranty is extended to the Buyer/Owner as the first purchaser of the home and is not\ntransferable. In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates.\n\n9\\. Arbitration.\nA.\nBinding Arbitration. With exception of the remedies preserved herein (which includes claims for money within the jurisdiction\nlimits of the small claims court of the State of Idaho) all disputes are subject to binding arbitration. Upon the demand of a party hereto made before\nthe institution of any judicial proceeding or not more than 60 days after service of a complaint, third party complaint, cross-claim or counterclaim or\nany answer thereto or any amendment to any of the above, any Dispute (as defined below) shall be resolved by binding arbitration in accordance\nwith the terms of this Arbitration Program. A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Small Claims Court of the State of Idaho, now existing\nor hereafter arising between any of the Parties arising out of, pertaining to or in connection with the construction or purchase of the home or this\nwarranty or any related agreements, documents, or instruments (\"Documents\"). Any Party who fails to submit to binding arbitration following a\nlawful demand by another Party shall bear all costs and expenses, including reasonable attorneys' fees, (including those incurred in any trial,\nbankruptcy proceeding or on appeal) incurred by the other Party in obtaining a stay of any pending judicial proceeding and compelling arbitration of\nany Dispute. THE PARTIES UNDERSTAND THAT BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO\nENFORCE DECISION OF THE ARBITRATOR.\n\n[2] arbitration of any Dispute. THE PARTIES UNDERSTAND THAT BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR DISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED BY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO ENFORCE DECISION OF THE ARBITRATOR.\n\nB.\nGoverning Rules. Arbitration conducted pursuant to this Arbitration Program shall be administered by the American Arbitration\nAssociation (\"AAA\"), or other mutually agreeable administrator (\"Administrator\") in accordance with the terms of this Arbitration Program and\nBuilding Arbitration Rules of the AAA or other rules mutually agreeable. Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the\nState of Idaho. Judgment upon any award rendered hereunder may be entered in any court having jurisdiction.\n\nC.\nPreservation of Remedies. No provision of, nor the exercise of any rights under this arbitration clause shall limit the right of any\nParty to: (1) pursue a claim within the venue and jurisdiction of the Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Code \u00a7 1-2301, for claims for money which do not exceed $3,000; (2) pursue claims of lien or to foreclose a lien\nor mortgage against any real or personal property collateral or security, as necessary to preserve such remedy or to enforce any arbitration award, or\nobtain a personal or deficiency award; (3) exercise self-help remedies (including repossession and set-off rights); or (4) obtain provisional or\nancillary remedies such as injunctive relief, sequestration, attachment, claim & delivery. replevin, garnishment, or the appointment of a receiver\nfrom a court having jurisdiction. Such rights can be exercised at any time except to the extent such action is contrary to a final award or decision in\nany arbitration proceeding and shall not constitute a waiver of the right of any Party to Arbitration. Any claim or Dispute related to exercise of any\nself-help, auxiliary or other rights under this paragraph shall be a Dispute hereunder.\n\nD.\nArbitrator Powers and Qualifications; Awards. The Parties agree to select a neutral \"qualified\" arbitrator to resolve any Dispute\nhereunder. In the event the parties cannot agree then the parties shall proceed as provided by the provisions of the AAA, except as provided herein.\nThe arbitrator(s) shall be empowered to, at the written request of any Party in any Dispute, (1) to consolidate in a single proceeding any multiple\nparty claims that are substantially identical or based upon the same underlying transaction; and (2) to consolidate any claims and Disputes between\nother Parties which arise out of or relate to the subject matter hereof, including all claims by or against subcontractors or suppliers. In any\nconsolidated proceeding the first arbitrator(s) selected in any proceeding shall conduct the consolidated proceeding unless disqualified due to conflict\nof interest. The arbitrator(s) shall be empowered to resolve any dispute regarding the terms of this arbitration clause, including questions about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of this Arbitration Program. Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and their respective costs including attorneys' fees in any arbitration. The award of the\narbitrator(s) shall be in writing and shall set forth the factual and legal basis for the award.\nE.\nMiscellaneous. All statutes of limitation applicable to any Dispute shall apply to any proceeding in accordance with this\narbitration clause. The Parties agree, to the maximum extent practicable, to take any action necessary to conclude an arbitration hereunder within\n180 days of the filing of a Dispute with the Administrator. The arbitrator(s) shall be empowered to impose sanctions for any Party's failure to\nproceed within the times established herein. Arbitrations shall be conducted in Pocatello, Idaho. The provisions of this Arbitration Program shall\nsurvive any termination, amendment, or expiration hereof or of the Documents unless the Parties otherwise expressly agree in writing. Each Party\nagrees to keep all Disputes and arbitration proceedings strictly confidential, except for disclosures of information required in the ordinary course of\nbusiness of the Parties or as required by applicable law or regulation. If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall not be affected thereby and shall remain fully enforceable.\n\n10\\. Entire Agreement. This Builder's Limited Warranty and Statement of Non-Warranted Conditions constitute the entire\nintegrated agreement and understanding between the parties, superseding all prior communications, oral or written. No statements,\npromises, or inducements made by either party or agent of either party, express or implied, shall be valid or binding if not contained in\nthis written agreement. No modifications to the Agreement shall be effective or binding unless in writing over the duly authorized\nsignatures of the parties hereto. This section shall not be deemed waived by any modification or alteration which does not conform to\nthe above provisions of this section.\n\n11\\.\nInvalidity. In the event that any one or more of the provisions of this Warranty shall for any reason be held to be invalid,\nillegal, or unenforceable, the remaining provisions of this Agreement shall be unaffected thereby and any implied warranties construed\nto be applicable or not disclaimable by a court of competent jurisdiction shall be deemed limited to the warranty period (term) set forth\nherein.\n\nEntered into as of date of last signature of the parties hereto.\n\nContoso Ltd.\n\nFabrikam Inc.\n\n(Buyer/Owner)\n\nBuilder\n\nContoso Ltd.\n\nBy\nFabrikam Inc.\n\n(Buyer/Owner)\n\n2010-06-15\n\nAuthorized Representative\n\nDate\n\nTitle\n\n2010-06-15\n\nDate\n\n[3] ## 1. Builder's Limited Warranty.\n\nA. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of the home ; the plumbing (including the septic tank if Builder\ninstalled), heating, and electric wiring systems; and the roof will be free of defects in materials or workmanship. Such Limited\nWarranty is subject to the terms hereof including specific provisions for other features of the home and appliances which provisions\nare controlling.\n\nB. The Builder warrants that by the standards of construction relevant in Pocatello/Chubbuck for a period of sixty (60) days\nthat the following items will be free of defects in materials or workmanship: doors (including hardware), windows, electric switches,\nreceptacles, and fixtures; caulking around exterior openings, plumbing fixtures and cabinet work.\n\n[4] Judgment upon any award rendered hereunder may be entered in any court having jurisdiction. No provision of, nor the exercise of any rights under this arbitration clause shall limit the right of any\nParty to: (1) pursue a claim within the venue and jurisdiction of the Small Claims Department of the Magistrate Division of the District Courts of the\nState of Idaho as defined at Idaho Code \u00a7 1-2301, for claims for money which do not exceed $3,000; (2) pursue claims of lien or to foreclose a lien\nor mortgage against any real or personal property collateral or security, as necessary to preserve such remedy or to enforce any arbitration award, or\nobtain a personal or deficiency award; (3) exercise self-help remedies (including repossession and set-off rights); or (4) obtain provisional or\nancillary remedies such as injunctive relief, sequestration, attachment, claim & delivery. replevin, garnishment, or the appointment of a receiver\nfrom a court having jurisdiction.\n\n[5] In the event the first purchaser sells the home or moves out of it, this limited warranty automatically terminates. With exception of the remedies preserved herein (which includes claims for money within the jurisdiction\nlimits of the small claims court of the State of Idaho) all disputes are subject to binding arbitration. Upon the demand of a party hereto made before\nthe institution of any judicial proceeding or not more than 60 days after service of a complaint, third party complaint, cross-claim or counterclaim or\nany answer thereto or any amendment to any of the above, any Dispute (as defined below) shall be resolved by binding arbitration in accordance\nwith the terms of this Arbitration Program.\n\n[6] With exception of the remedies preserved herein (which includes claims for money within the jurisdiction\nlimits of the small claims court of the State of Idaho) all disputes are subject to binding arbitration. Upon the demand of a party hereto made before\nthe institution of any judicial proceeding or not more than 60 days after service of a complaint, third party complaint, cross-claim or counterclaim or\nany answer thereto or any amendment to any of the above, any Dispute (as defined below) shall be resolved by binding arbitration in accordance\nwith the terms of this Arbitration Program. A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Small Claims Court of the State of Idaho, now existing\nor hereafter arising between any of the Parties arising out of, pertaining to or in connection with the construction or purchase of the home or this\nwarranty or any related agreements, documents, or instruments (\"Documents\").\n\n[7] D.\nArbitrator Powers and Qualifications; Awards. The Parties agree to select a neutral \"qualified\" arbitrator to resolve any Dispute\nhereunder. In the event the parties cannot agree then the parties shall proceed as provided by the provisions of the AAA, except as provided herein.\n\n[8] In the event the parties cannot agree then the parties shall proceed as provided by the provisions of the AAA, except as provided herein. The arbitrator(s) shall be empowered to, at the written request of any Party in any Dispute, (1) to consolidate in a single proceeding any multiple\nparty claims that are substantially identical or based upon the same underlying transaction; and (2) to consolidate any claims and Disputes between\nother Parties which arise out of or relate to the subject matter hereof, including all claims by or against subcontractors or suppliers. In any\nconsolidated proceeding the first arbitrator(s) selected in any proceeding shall conduct the consolidated proceeding unless disqualified due to conflict\nof interest.\n\n[9] NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO ENFORCE DECISION OF THE ARBITRATOR. Arbitration conducted pursuant to this Arbitration Program shall be administered by the American Arbitration\nAssociation (\"AAA\"), or other mutually agreeable administrator (\"Administrator\") in accordance with the terms of this Arbitration Program and\nBuilding Arbitration Rules of the AAA or other rules mutually agreeable. Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the parties.\n\n[10] A \"Dispute\" shall include any action, dispute, claim or controversy of any kind, whether founded in\ncontract, tort, statutory or common law, equity, or otherwise, that can not be litigated in the Small Claims Court of the State of Idaho, now existing\nor hereafter arising between any of the Parties arising out of, pertaining to or in connection with the construction or purchase of the home or this\nwarranty or any related agreements, documents, or instruments (\"Documents\"). Any Party who fails to submit to binding arbitration following a\nlawful demand by another Party shall bear all costs and expenses, including reasonable attorneys' fees, (including those incurred in any trial,\nbankruptcy proceeding or on appeal) incurred by the other Party in obtaining a stay of any pending judicial proceeding and compelling arbitration of\nany Dispute. BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION\n\n[11] In any\nconsolidated proceeding the first arbitrator(s) selected in any proceeding shall conduct the consolidated proceeding unless disqualified due to conflict\nof interest. The arbitrator(s) shall be empowered to resolve any dispute regarding the terms of this arbitration clause, including questions about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of this Arbitration Program. Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and their respective costs including attorneys' fees in any arbitration.\n\n[12] shall be governed by the provisions of the AAA or other rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the State of Idaho.\n\n[13] Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the\nState of Idaho. Judgment upon any award rendered hereunder may be entered in any court having jurisdiction.\n\n[14] All statutes of limitation applicable to any Dispute shall apply to any proceeding in accordance with this\narbitration clause. The Parties agree, to the maximum extent practicable, to take any action necessary to conclude an arbitration hereunder within\n180 days of the filing of a Dispute with the Administrator. The arbitrator(s) shall be empowered to impose sanctions for any Party's failure to\nproceed within the times established herein.\n\n[15] Arbitration conducted pursuant to this Arbitration Program shall be administered by the American Arbitration\nAssociation (\"AAA\"), or other mutually agreeable administrator (\"Administrator\") in accordance with the terms of this Arbitration Program and\nBuilding Arbitration Rules of the AAA or other rules mutually agreeable. Proceedings hereunder shall be governed by the provisions of the AAA or\nother rules agreed to by the parties. The arbitrator(s) shall otherwise resolve all Disputes in accordance with the applicable substantive law of the\nState of Idaho.\n\n[16] BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR DISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED BY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO ENFORCE DECISION OF THE ARBITRATOR. Arbitration conducted pursuant to this Arbitration Program shall be administered by the American Arbitration\nAssociation (\"AAA\"), or other mutually agreeable administrator (\"Administrator\") in accordance with the terms of this Arbitration Program and\nBuilding Arbitration Rules of the AAA or other rules mutually agreeable.\n\n[17] BY THIS AGREEMENT THEY HAVE DECIDED THAT THEIR\nDISPUTES SHALL BE RESOLVED BY BINDING ARBITRATION RATHER THAN IN COURT, AND ONCE DECIDED\nBY ARBITRATION NO DISPUTE CAN LATER BE BROUGHT, FILED OR PURSUED IN COURT EXCEPT TO\nENFORCE DECISION OF THE ARBITRATOR.\n\n"
+  },
+  "raw_extractions": null
+}

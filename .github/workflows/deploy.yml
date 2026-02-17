@@ -186,6 +186,35 @@ jobs:
             --revision-suffix "r${{ github.run_id }}" \
             --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO"
       
+      - name: Ensure worker Single revision mode & cleanup
+        run: |
+          # Ensure Single revision mode (prevents stale revision accumulation that breaks log stream)
+          az containerapp revision set-mode \
+            --name ${{ env.WORKER_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --mode Single
+
+          # Deactivate all non-latest revisions
+          LATEST=$(az containerapp show \
+            --name ${{ env.WORKER_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "properties.latestReadyRevisionName" -o tsv)
+          echo "Latest ready revision: $LATEST"
+
+          STALE=$(az containerapp revision list \
+            --name ${{ env.WORKER_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --query "[?properties.active && name != '$LATEST'].name" -o tsv)
+
+          for REV in $STALE; do
+            echo "Deactivating stale revision: $REV"
+            az containerapp revision deactivate \
+              --name ${{ env.WORKER_APP_NAME }} \
+              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+              --revision "$REV" 2>/dev/null || true
+          done
+          echo "Worker revision cleanup complete"
+      
       - name: Wait for startup
         run: sleep 30
       

@@ -1,0 +1,467 @@
+{
+  "response": "## Summary\n\nAcross the documents, owners/customers generally pay the commercial charges, fees, and taxes, while certain costs are split in arbitration, and legal fees may be shifted after non\u2011payment. John Doe/Fabrikam Construction must pay Contoso Lifts LLC the full invoice amount of **$29,900.00** (no tax listed) as an initial payment per contract, with checks payable to Contoso Lifts LLC or via its online portal.[1][2] In the related lift contract, the customer must pay the **$29,900.00** contract price in three installments: **$20,000.00 upon signing**, **$7,000.00 upon delivery**, and **$2,900.00 upon completion**, and may be liable for the contractor\u2019s legal fees if they fail to pay.[6][14] In the property management agreement, the Owner must pay the Agent a non\u2011refundable **$250.00** start\u2011up fee at execution, a **25%** commission on gross revenues for short\u2011term rentals and **10%** for long\u2011term leases, a **$75.00/month** advertising charge for short\u2011term rentals, a **$50.00/month** minimum administration/accounting charge, a **10%** fee on the total charge for repairs/upgrades/renovations, **$35/hour** for scheduling/escorting contractors, and Hawaii Gross Excise tax of **4.712%** on all these fees, commissions, and charges; the Agent may also deduct credit card/bankcard fees from the Owner\u2019s proceeds.[4][5][9][10][11][12][13][16][17] In arbitration, each party must pay one\u2011half of the arbitration costs and fees and their own respective costs, including attorneys\u2019 fees.[3] For holding tank servicing, the owner must pay the pumper for charges incurred as mutually agreed.[8]\n\n## Key Points\n\n- John Doe/Fabrikam Construction is invoiced **$29,900.00** by Contoso Lifts LLC (subtotal, total, and amount due all **$29,900.00**, tax \u201cN/A\u201d), payable to Contoso Lifts LLC or via its online portal; payment is due on contract signing as an initial payment.[1][2]\n- The lift contract sets a total contract price of **$29,900.00**, payable by the customer in three installments: **$20,000.00 upon signing**, **$7,000.00 upon delivery**, and **$2,900.00 upon completion**.[6]\n- Failure to pay under the lift contract may result in legal action, and legal fees are recoverable by the Contractor from the non\u2011paying party.[14]\n- In arbitration, each party must pay one\u2011half (**1/2**) of the cost and fees of the arbitration and their own respective costs, including attorneys\u2019 fees.[3]\n- In the property management agreement, the Owner must pay:\n  - A non\u2011refundable start\u2011up fee of **$250.00** upon execution of the agreement.[4][13]\n  - A **25%** fee/commission on gross revenues for short\u2011term/vacation rentals (less than 180 days).[9][11][12]\n  - A **10%** fee/commission on gross revenues for long\u2011term leases (more than 180 days).[11][12][17]\n  - A pro\u2011ration advertising charge of **$75.00/month** for short\u2011term rentals.[10][11][17]\n  - A minimum administration and accounting charge of **$50.00/month** (excluding tax preparation/returns/forms).[10][16][17]\n  - A **10%** fee on the total charge for repairs, upgrades, and/or renovations.[10][16]\n  - A **$35/hour** charge to schedule repairs/upgrades/renovations and to escort contractors/repair persons/technicians/handymen.[5][16]\n  - Hawaii Gross Excise tax of **4.712%** on all the above fees, commissions, and charges.[4][5]\n- The Owner authorizes the Agent to accept credit cards and to deduct credit card/bankcard fees from the Owner\u2019s proceeds (i.e., the Owner ultimately bears these fees).[9][12]\n- The Agent pays advertising invoices initially but passes the advertising cost on to the Owner via monthly proceeds statements.[7]\n- For holding tank servicing, the owner must pay the pumper for charges incurred in servicing the holding tank(s), as mutually agreed between owner and pumper.[8]",
+  "route_used": "route_5_unified",
+  "citations": [
+    {
+      "index": 1,
+      "chunk_id": "doc_f9726bb080134793b36b817097b3baab_chunk_0",
+      "document_id": "doc_f9726bb080134793b36b817097b3baab",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "https://neo4jstorage21224.blob.core.windows.net/test-docs/contoso_lifts_invoice.pdf",
+      "score": 0.0,
+      "text_preview": "Contoso Lifts LLC\nYour elevator and lift experts\n\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33...",
+      "page_number": 1,
+      "start_offset": 329,
+      "end_offset": 2107
+    },
+    {
+      "index": 2,
+      "chunk_id": "doc_f9726bb080134793b36b817097b3baab_chunk_1",
+      "document_id": "doc_f9726bb080134793b36b817097b3baab",
+      "document_title": "contoso_lifts_invoice",
+      "document_url": "https://neo4jstorage21224.blob.core.windows.net/test-docs/contoso_lifts_invoice.pdf",
+      "score": 0.0,
+      "text_preview": "# INVOICE\n\nINVOICE # 1256003\n\nCUSTOMER ID #: 4905201\n\nDATE: 12/17/2015\n\nSHIP TO:\n\nJohn Doe\n\nFabrikam...",
+      "page_number": 1,
+      "start_offset": 329,
+      "end_offset": 2107
+    },
+    {
+      "index": 3,
+      "chunk_id": "chunk_2",
+      "document_id": "",
+      "document_title": "doc_7abd558372ff4627b7d0ff27c22f1c5b",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "The arbitrator(s) shall be empowered to resolve any dispute regarding the terms of this arbitration ..."
+    },
+    {
+      "index": 4,
+      "chunk_id": "chunk_3",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) o..."
+    },
+    {
+      "index": 5,
+      "chunk_id": "chunk_4",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(g) A charge of $35/hour to schedule repairs, upgrades, renovations, replacement of\nappliances, carp..."
+    },
+    {
+      "index": 6,
+      "chunk_id": "chunk_5",
+      "document_id": "",
+      "document_title": "doc_b89381a472b54bc6a4cf7d7320d7c464",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)..."
+    },
+    {
+      "index": 7,
+      "chunk_id": "chunk_6",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(b) Advertise the rental unit in the local newspapers, bulletin board, and on the Internet. Provide ..."
+    },
+    {
+      "index": 8,
+      "chunk_id": "chunk_7",
+      "document_id": "",
+      "document_title": "doc_d83867cd24a9402ab15f58cdfbb36462",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "The owner agrees to maintain the all-weather access road or drive so that the pumper can service the..."
+    },
+    {
+      "index": 9,
+      "chunk_id": "chunk_8",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "PageBreak -->\n\n\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and ag..."
+    },
+    {
+      "index": 10,
+      "chunk_id": "chunk_9",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. (e) A mi..."
+    },
+    {
+      "index": 11,
+      "chunk_id": "chunk_10",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(b) A fee/commission of twenty five percent (25%) of the gross revenues for management\nservices for ..."
+    },
+    {
+      "index": 12,
+      "chunk_id": "chunk_11",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit ca..."
+    },
+    {
+      "index": 13,
+      "chunk_id": "chunk_12",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Upon the execution of this Agreement, the Owner shall pay two\nhundred fifty dollars ($250.00) to the..."
+    },
+    {
+      "index": 14,
+      "chunk_id": "chunk_13",
+      "document_id": "",
+      "document_title": "doc_b89381a472b54bc6a4cf7d7320d7c464",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Failure to pay may result in legal action. Legal fees are recoverable by Contractor. Contractor hold..."
+    },
+    {
+      "index": 15,
+      "chunk_id": "chunk_15",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(e) A minimum charge for administration and accounting, at $50.00/month (not to include\ntax preparat..."
+    },
+    {
+      "index": 16,
+      "chunk_id": "chunk_16",
+      "document_id": "",
+      "document_title": "doc_1dbd2b5c11ec4af498f70f3191292772",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "(c) A fee/commission of ten percent (10%) of the gross revenues for management services\nfor long ter..."
+    }
+  ],
+  "evidence_path": [
+    "Agent",
+    "Owner",
+    "Contract",
+    "Builder",
+    "Power system: 110 VAC 60 Hz up, 12 VAC down",
+    "holding tank",
+    "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+    "Jim Contoso",
+    "Initial payment in accordance with contract",
+    "Pumper",
+    "Contractor",
+    "Elizabeth Nolasco",
+    "Contact",
+    "Contoso Ltd.",
+    "Special Size 42\" x 62\" cab with 90 degree Type 3",
+    "property",
+    "Fabrikam Inc.",
+    "110 VAC 60 Hz up, 12 VAC down operation parts",
+    "Hall Call stations for bottom and upper landing",
+    "Outdoor fitting"
+  ],
+  "metadata": {
+    "profile": "balanced",
+    "weights": {
+      "w1_entity": 0.5,
+      "w2_structural": 0.3,
+      "w3_thematic": 0.2
+    },
+    "damping": 0.8,
+    "ner_entities": [
+      "Who Pays What",
+      "Fees",
+      "Charges",
+      "Payments",
+      "Taxes"
+    ],
+    "tier1_seed_count": 13,
+    "tier2_seed_count": 20,
+    "tier3_seed_count": 0,
+    "total_unique_seeds": 33,
+    "structural_sections": [
+      "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)",
+      "PURCHASE CONTRACT"
+    ],
+    "num_ppr_evidence": 30,
+    "sentence_evidence_count": 15,
+    "text_chunks_used": 17,
+    "route_description": "Unified hierarchical seed PPR (v5)",
+    "version": "v5.0",
+    "ppr_top_entities": [
+      {
+        "entity": "Agent",
+        "score": 2.975
+      },
+      {
+        "entity": "Owner",
+        "score": 2.72
+      },
+      {
+        "entity": "Contract",
+        "score": 2.2388
+      },
+      {
+        "entity": "Builder",
+        "score": 2.1675
+      },
+      {
+        "entity": "Power system: 110 VAC 60 Hz up, 12 VAC down",
+        "score": 2.0688
+      },
+      {
+        "entity": "holding tank",
+        "score": 1.9406
+      },
+      {
+        "entity": "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+        "score": 1.8988
+      },
+      {
+        "entity": "Jim Contoso",
+        "score": 1.8988
+      },
+      {
+        "entity": "Initial payment in accordance with contract",
+        "score": 1.8988
+      },
+      {
+        "entity": "Pumper",
+        "score": 1.8981
+      }
+    ],
+    "sentence_evidence": [
+      {
+        "text": "The arbitrator(s) shall be empowered to resolve any dispute regarding the terms of this arbitration clause, including questions about the\narbitrability of any Dispute, but shall have no power to chang",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.624
+      },
+      {
+        "text": "(h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) on all the above fees, commissions and charges. Upon the execution of this Agreement, the Owner shall",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6501
+      },
+      {
+        "text": "(g) A charge of $35/hour to schedule repairs, upgrades, renovations, replacement of\nappliances, carpets, curtains, drapes, and/or to escort the contractors, repair persons,\ntechnicians and handymen. (",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6715
+      },
+      {
+        "text": "Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)\n\n1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree acce",
+        "source": "purchase_contract",
+        "score": 0.6179
+      },
+      {
+        "text": "(b) Advertise the rental unit in the local newspapers, bulletin board, and on the Internet. Provide the invoice(s) from the media, and pay the charges and pass on the cost to the Owner, on\nthe monthly",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6251
+      },
+      {
+        "text": "The owner agrees to maintain the all-weather access road or drive so that the pumper can service the\nholding tank(s) with the pumping equipment. The owner further agrees to pay the pumper for a\ncharge",
+        "source": "HOLDING TANK SERVICING CONTRACT",
+        "score": 0.66
+      },
+      {
+        "text": "PageBreak -->\n\n\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards and to deduct for c",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6604
+      },
+      {
+        "text": "(d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. (e) A minimum charge for administration and accounting, at $50.00/month (not to include\ntax preparation/retu",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6531
+      },
+      {
+        "text": "(b) A fee/commission of twenty five percent (25%) of the gross revenues for management\nservices for short term and/or vacation rentals (reservations of less than 180 days). (c) A fee/commission of ten",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6449
+      },
+      {
+        "text": "Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards and to deduct for credit card and/or\nbankcard fees from the Owner's proceeds. (b) A fee/commissi",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.6449
+      }
+    ],
+    "context_stats": {
+      "chunks_before_budget": 17,
+      "chunks_after_budget": 17,
+      "chunks_dropped": 0,
+      "context_tokens": 2687,
+      "context_chars": 11085,
+      "token_budget": 32000,
+      "budget_enabled": true,
+      "num_doc_groups": 5,
+      "doc_group_pruning": {
+        "enabled": true,
+        "decision": "all_above_threshold",
+        "ranked": [
+          [
+            "doc_f9726bb080134793b36b817097b3baab",
+            0.931
+          ],
+          [
+            "doc_7abd558372ff4627b7d0ff27c22f1c5b",
+            0.5078
+          ],
+          [
+            "doc_1dbd2b5c11ec4af498f70f3191292772",
+            0.4922
+          ],
+          [
+            "doc_b89381a472b54bc6a4cf7d7320d7c464",
+            0.4473
+          ],
+          [
+            "doc_d83867cd24a9402ab15f58cdfbb36462",
+            0.4082
+          ]
+        ],
+        "entity_detail": {
+          "doc_f9726bb080134793b36b817097b3baab": {
+            "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator": 0.5696,
+            "__sentence_search__": 0.3613
+          },
+          "doc_7abd558372ff4627b7d0ff27c22f1c5b": {
+            "__sentence_search__": 0.5078
+          },
+          "doc_1dbd2b5c11ec4af498f70f3191292772": {
+            "__sentence_search__": 0.4922
+          },
+          "doc_b89381a472b54bc6a4cf7d7320d7c464": {
+            "__sentence_search__": 0.4473
+          },
+          "doc_d83867cd24a9402ab15f58cdfbb36462": {
+            "__sentence_search__": 0.4082
+          }
+        },
+        "min_ratio": 0.25
+      },
+      "final_context_chars": 11085,
+      "final_context_tokens": 2772,
+      "retrieval": {
+        "chunks_raw": 21,
+        "chunks_after_dedup": 2,
+        "duplicates_removed": 19,
+        "dedup_ratio": 90.5,
+        "noise_filters": {
+          "total_penalised": 0,
+          "form_label": 0,
+          "bare_heading": 0,
+          "min_content": 0
+        },
+        "entities_selected": 25,
+        "dedup_enabled": true,
+        "noise_enabled": true,
+        "score_weighted_enabled": true,
+        "entity_budgets": {
+          "Agent": 12,
+          "Owner": 11,
+          "Contract": 3,
+          "Builder": 3,
+          "Power system: 110 VAC 60 Hz up, 12 VAC down": 3,
+          "holding tank": 8,
+          "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator": 2,
+          "Jim Contoso": 2,
+          "Initial payment in accordance with contract": 2,
+          "Pumper": 8
+        },
+        "community_filter": {
+          "enabled": true,
+          "target_community": 331,
+          "entities_in_target": 5,
+          "entities_penalised": 20,
+          "penalty_factor": 0.3,
+          "top_entities_used": [
+            "Agent",
+            "Owner",
+            "Contract"
+          ]
+        },
+        "score_gap": {
+          "enabled": true,
+          "gap_found": false,
+          "entities_before": 25,
+          "entities_after": 25,
+          "reason": "no_drop_exceeds_0.5"
+        },
+        "semantic_dedup": {
+          "enabled": true,
+          "chunks_before": 2,
+          "chunks_after": 2,
+          "near_duplicates_removed": 0,
+          "threshold": 0.92
+        },
+        "vector_fallback": {
+          "enabled": false
+        },
+        "doc_scope": {
+          "enabled": true,
+          "scores": {
+            "contoso_lifts_invoice": 10.5,
+            "purchase_contract": 5.5,
+            "HOLDING TANK SERVICING CONTRACT": 3.833,
+            "PROPERTY MANAGEMENT AGREEMENT": 2.333,
+            "BUILDERS LIMITED WARRANTY": 1.833
+          },
+          "top_doc": "contoso_lifts_invoice",
+          "top_score": 10.5,
+          "second_score": 5.5,
+          "min_score_threshold": 1.5,
+          "entity_doc_counts": {
+            "Agent": 1,
+            "Owner": 3,
+            "Contract": 2,
+            "Builder": 1,
+            "Power system: 110 VAC 60 Hz up, 12 VAC down": 1,
+            "holding tank": 1,
+            "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator": 1,
+            "Jim Contoso": 1,
+            "Initial payment in accordance with contract": 1,
+            "Pumper": 1,
+            "Contractor": 1,
+            "Elizabeth Nolasco": 1,
+            "Contact": 1,
+            "Contoso Ltd.": 4,
+            "Special Size 42\" x 62\" cab with 90 degree Type 3": 2,
+            "property": 2,
+            "Fabrikam Inc.": 4,
+            "110 VAC 60 Hz up, 12 VAC down operation parts": 1,
+            "Hall Call stations for bottom and upper landing": 1,
+            "Outdoor fitting": 1,
+            "Vertical Platform Lift (Savaria V1504)": 1,
+            "Fabrikam Construction": 1,
+            "Contoso Lifts LLC": 1,
+            "John Doe": 1
+          },
+          "_ner_seed_count": 5,
+          "decision": "single_document"
+        },
+        "doc_coherence": {
+          "enabled": true,
+          "target_docs": [
+            "doc_f9726bb080134793b36b817097b3baab"
+          ],
+          "chunks_penalised": 0,
+          "penalty": 0.2
+        }
+      }
+    },
+    "llm_context": "=== DOCUMENT: contoso_lifts_invoice ===\n\n[1] Contoso Lifts LLC\nYour elevator and lift experts\n\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33304-0708\nPhone: (561) 353-5111 Fax: (561) 211-7333\n\nTO:\n\nJohn Doe\n\nFabrikam Construction\n\n61 S 34th Street\n\nDayton, FL 33155\n\nPhone: (305) 490-5237\n\nCOMMENTS OR SPECIAL INSTRUCTIONS:\nInitial payment in accordance with contract\n\n# INVOICE\n\nINVOICE # 1256003\n\nCUSTOMER ID #: 4905201\n\nDATE: 12/17/2015\n\nSHIP TO:\n\nJohn Doe\n\nFabrikam Construction\n\n61 S 34th Street\n\nDayton, FL 33155\n\nPhone: (305) 490-5237\n\n\n<table>\n<tr>\n<th>SALESPERSON</th>\n<th>P.O. NUMBER</th>\n<th>REQUISITIONER</th>\n<th>SHIPPED VIA</th>\n<th>DUE DATE</th>\n<th>TERMS</th>\n</tr>\n<tr>\n<td>Jim Contoso</td>\n<td>30060204</td>\n<td></td>\n<td></td>\n<td>12/17/2015</td>\n<td>Due on contract signing</td>\n</tr>\n</table>\n\n\n<table>\n<tr>\n<th>QUANTITY</th>\n<th>DESCRIPTION</th>\n<th>UNIT PRICE</th>\n<th>TOTAL</th>\n</tr>\n<tr>\n<td>1</td>\n<td>Vertical Platform Lift (Savaria V1504)</td>\n<td>11200.00</td>\n<td>11200.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>110 VAC 60 Hz up, 12 VAC down operation parts</td>\n<td>3000.00</td>\n<td>3000.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>Special Size 42\" x 62\" cab with 90 degree Type 3</td>\n<td>5800.00</td>\n<td>5800.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>Outdoor fitting</td>\n<td>2000.00</td>\n<td>2000.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator</td>\n<td>5000.00</td>\n<td>5000.00</td>\n</tr>\n<tr>\n<td>2</td>\n<td>Hall Call stations for bottom and upper landing</td>\n<td>1450.00</td>\n<td>2900.00</td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n<td></td>\n<td></td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n<td></td>\n<td></td>\n</tr>\n</table>\n\n\n<table>\n<tr>\n<td>SUBTOTAL</td>\n<td>29900.00</td>\n</tr>\n<tr>\n<td>TAX</td>\n<td>N/A</td>\n</tr>\n<tr>\n<td>TOTAL</td>\n<td>29900.00</td>\n</tr>\n<tr>\n<td>AMOUNT DUE</td>\n<td>29900.00</td>\n</tr>\n</table>\n\n\nMake all checks payable to Contoso Lifts LLC\nIf you have any questions concerning this invoice, contact Jim Contoso, (305) 490-5997, jim@contosolifts.com\nPayments can also be made via our online portal: https://ww.contosolifts.com/portal/pay\n\nContoso Lifts LLC\nYour elevator and lift experts\n\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33304-0708\nPhone: (561) 353-5111 Fax: (561) 211-7333\n\nTO:\n\nJohn Doe\n\nFabrikam Construction\n\n61 S 34th Street\n\nDayton, FL 33155\n\nPhone: (305) 490-5237\n\nCOMMENTS OR SPECIAL INSTRUCTIONS:\nInitial payment in accordance with contract\n\n[2] # INVOICE\n\nINVOICE # 1256003\n\nCUSTOMER ID #: 4905201\n\nDATE: 12/17/2015\n\nSHIP TO:\n\nJohn Doe\n\nFabrikam Construction\n\n61 S 34th Street\n\nDayton, FL 33155\n\nPhone: (305) 490-5237\n\n\n<table>\n<tr>\n<th>SALESPERSON</th>\n<th>P.O. NUMBER</th>\n<th>REQUISITIONER</th>\n<th>SHIPPED VIA</th>\n<th>DUE DATE</th>\n<th>TERMS</th>\n</tr>\n<tr>\n<td>Jim Contoso</td>\n<td>30060204</td>\n<td></td>\n<td></td>\n<td>12/17/2015</td>\n<td>Due on contract signing</td>\n</tr>\n</table>\n\n\n<table>\n<tr>\n<th>QUANTITY</th>\n<th>DESCRIPTION</th>\n<th>UNIT PRICE</th>\n<th>TOTAL</th>\n</tr>\n<tr>\n<td>1</td>\n<td>Vertical Platform Lift (Savaria V1504)</td>\n<td>11200.00</td>\n<td>11200.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>110 VAC 60 Hz up, 12 VAC down operation parts</td>\n<td>3000.00</td>\n<td>3000.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>Special Size 42\" x 62\" cab with 90 degree Type 3</td>\n<td>5800.00</td>\n<td>5800.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>Outdoor fitting</td>\n<td>2000.00</td>\n<td>2000.00</td>\n</tr>\n<tr>\n<td>1</td>\n<td>80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator</td>\n<td>5000.00</td>\n<td>5000.00</td>\n</tr>\n<tr>\n<td>2</td>\n<td>Hall Call stations for bottom and upper landing</td>\n<td>1450.00</td>\n<td>2900.00</td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n<td></td>\n<td></td>\n</tr>\n<tr>\n<td></td>\n<td></td>\n<td></td>\n<td></td>\n</tr>\n</table>\n\n\n<table>\n<tr>\n<td>SUBTOTAL</td>\n<td>29900.00</td>\n</tr>\n<tr>\n<td>TAX</td>\n<td>N/A</td>\n</tr>\n<tr>\n<td>TOTAL</td>\n<td>29900.00</td>\n</tr>\n<tr>\n<td>AMOUNT DUE</td>\n<td>29900.00</td>\n</tr>\n</table>\n\n\nMake all checks payable to Contoso Lifts LLC\nIf you have any questions concerning this invoice, contact Jim Contoso, (305) 490-5997, jim@contosolifts.com\nPayments can also be made via our online portal: https://ww.contosolifts.com/portal/pay\n\n[15] QUANTITY: 2 | DESCRIPTION: Hall Call stations for bottom and upper landing | UNIT PRICE: 1450.00 | TOTAL: 2900.00 SUBTOTAL: TAX | 29900.00: N/A SUBTOTAL: TOTAL | 29900.00: 29900.00\n\n\n\n=== DOCUMENT: doc_7abd558372ff4627b7d0ff27c22f1c5b ===\n\n[3] The arbitrator(s) shall be empowered to resolve any dispute regarding the terms of this arbitration clause, including questions about the\narbitrability of any Dispute, but shall have no power to change or alter the terms of this Arbitration Program. Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and their respective costs including attorneys' fees in any arbitration. The award of the\narbitrator(s) shall be in writing and shall set forth the factual and legal basis for the award.\n\n\n\n=== DOCUMENT: doc_1dbd2b5c11ec4af498f70f3191292772 ===\n\n[4] (h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) on all the above fees, commissions and charges. Upon the execution of this Agreement, the Owner shall pay two\nhundred fifty dollars ($250.00) to the Agent as a non-refundable start-up fee. The Agent shall use\nsuch fee to pay initial administrative expenses of including the premises (property) in its rental\nprogram, to conduct a complete inventory of all furniture and furnishings in the rental unit, to\nproduce a condition/inspection report of the premises, appliances and contents, and to pay other\nsums initially required for the performance of its duties under this agreement.\n\n[5] (g) A charge of $35/hour to schedule repairs, upgrades, renovations, replacement of\nappliances, carpets, curtains, drapes, and/or to escort the contractors, repair persons,\ntechnicians and handymen. (h) Plus, the Agent will assess/charge the Owner the Hawaii Gross Excise tax (currently at\n4.712%) on all the above fees, commissions and charges. Upon the execution of this Agreement, the Owner shall pay two\nhundred fifty dollars ($250.00) to the Agent as a non-refundable start-up fee.\n\n[7] (b) Advertise the rental unit in the local newspapers, bulletin board, and on the Internet. Provide the invoice(s) from the media, and pay the charges and pass on the cost to the Owner, on\nthe monthly proceeds statements. (c) Collect all rents for property and deposit same in a special trust account in an insured\nfinancial institution authorized to do business in the State of Hawaii.\n\n[9] PageBreak -->\n\n\n\n(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards and to deduct for credit card and/or\nbankcard fees from the Owner's proceeds. (b) A fee/commission of twenty five percent (25%) of the gross revenues for management\nservices for short term and/or vacation rentals (reservations of less than 180 days).\n\n[10] (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. (e) A minimum charge for administration and accounting, at $50.00/month (not to include\ntax preparation/returns/forms). (f) A fee of ten percent (10%) on the total charge for repairs, upgrades, and/or renovations.\n\n[11] (b) A fee/commission of twenty five percent (25%) of the gross revenues for management\nservices for short term and/or vacation rentals (reservations of less than 180 days). (c) A fee/commission of ten percent (10%) of the gross revenues for management services\nfor long term leases (leases of more than 180 days). (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month.\n\n[12] Owner is advised and agrees to pay the following:\n\n(a) Agent is allowed by Owner to accept credit cards and to deduct for credit card and/or\nbankcard fees from the Owner's proceeds. (b) A fee/commission of twenty five percent (25%) of the gross revenues for management\nservices for short term and/or vacation rentals (reservations of less than 180 days). (c) A fee/commission of ten percent (10%) of the gross revenues for management services\nfor long term leases (leases of more than 180 days).\n\n[13] Upon the execution of this Agreement, the Owner shall pay two\nhundred fifty dollars ($250.00) to the Agent as a non-refundable start-up fee. The Agent shall use\nsuch fee to pay initial administrative expenses of including the premises (property) in its rental\nprogram, to conduct a complete inventory of all furniture and furnishings in the rental unit, to\nproduce a condition/inspection report of the premises, appliances and contents, and to pay other\nsums initially required for the performance of its duties under this agreement. The Owner understands and agrees that Agent has\nmade no guarantees (written or verbal) of occupancy or income levels for the property.\n\n[16] (e) A minimum charge for administration and accounting, at $50.00/month (not to include\ntax preparation/returns/forms). (f) A fee of ten percent (10%) on the total charge for repairs, upgrades, and/or renovations. (g) A charge of $35/hour to schedule repairs, upgrades, renovations, replacement of\nappliances, carpets, curtains, drapes, and/or to escort the contractors, repair persons,\ntechnicians and handymen.\n\n[17] (c) A fee/commission of ten percent (10%) of the gross revenues for management services\nfor long term leases (leases of more than 180 days). (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. (e) A minimum charge for administration and accounting, at $50.00/month (not to include\ntax preparation/returns/forms).\n\n\n\n=== DOCUMENT: doc_b89381a472b54bc6a4cf7d7320d7c464 ===\n\n[6] Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)\n\n1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n1 Outdoor configuration package\n\n1 Aluminum door with plexi-glass inserts & automatic opener\n\n2 Flush-mount Hall Call stations (upper & lower)\n\nTotal contract price is $29,900.00, payable in 3 installments:\n\n$20,000.00 upon signing\n\n$7,000.00 upon delivery\n\n$2,900.00 upon completion\n\nAny changes must be agreed to in writing and will affect the next payment milestone. Failure to pay may result in legal action.\n\n[14] Failure to pay may result in legal action. Legal fees are recoverable by Contractor. Contractor holds risk until delivery.\n\n\n\n=== DOCUMENT: doc_d83867cd24a9402ab15f58cdfbb36462 ===\n\n[8] The owner agrees to maintain the all-weather access road or drive so that the pumper can service the\nholding tank(s) with the pumping equipment. The owner further agrees to pay the pumper for a\ncharges incurred in servicing the holding tank(s) as mutually agreed upon by the owner and pumper. The pumper agrees to submit to the County, reports for the servicing of the holding tank(s) in manner\nspecified by the County.\n\n"
+  },
+  "raw_extractions": null
+}

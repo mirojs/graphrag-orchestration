@@ -687,13 +687,17 @@ class AsyncNeo4jService:
         their teleportation probability mass.  Each seed's graph contribution
         is scaled by its weight, enabling multi-tier seed fusion.
 
-        Released constraints (compared to the flat-seed version):
+        Nominal constraints (compared to the flat-seed version):
           - per_seed_limit  default 50  (was 25)
           - per_neighbor_limit default 20  (was 10)
           - top_k default 30 (was 20)
 
-        The Cypher query structure is identical to the section-graph variant;
-        only the initial seed weighting differs.
+        **Adaptive memory guard** — when the seed count is large the method
+        automatically (a) caps total seeds to ``ROUTE5_MAX_PPR_SEEDS``
+        (default 25, keeping highest-weight seeds) and (b) scales
+        ``per_seed_limit`` / ``per_neighbor_limit`` inversely with seed count
+        to keep intermediate Cypher cardinality within AuraDB's per-transaction
+        memory budget (~278 MiB).
         """
         if not weighted_seeds:
             return []
@@ -703,6 +707,52 @@ class AsyncNeo4jService:
             {"id": sid, "weight": w}
             for sid, w in weighted_seeds.items()
         ]
+
+        # -----------------------------------------------------------------
+        # Adaptive memory guard
+        # -----------------------------------------------------------------
+        # The PPR Cypher query has intermediate cardinality roughly:
+        #   seeds × (per_seed_limit + 1) × per_neighbor_limit × 5_paths
+        # AuraDB enforces ~278 MiB per-transaction memory.  With many seeds
+        # (common when Tier-2 structural seeds are added), the combinatorial
+        # expansion can exceed this limit and trigger
+        # MemoryPoolOutOfMemoryError.
+        #
+        # Guard 1: Cap total seed count (keep highest-weight seeds).
+        # Guard 2: Scale per_seed_limit / per_neighbor_limit inversely
+        #          with seed count so total intermediate rows stay bounded.
+        # -----------------------------------------------------------------
+        import os as _os
+        max_ppr_seeds = int(_os.getenv("ROUTE5_MAX_PPR_SEEDS", "25"))
+        n_seeds = len(seed_weights_list)
+
+        if n_seeds > max_ppr_seeds:
+            seed_weights_list.sort(key=lambda sw: sw["weight"], reverse=True)
+            dropped = seed_weights_list[max_ppr_seeds:]
+            seed_weights_list = seed_weights_list[:max_ppr_seeds]
+            logger.info(
+                "ppr_seeds_capped",
+                original=n_seeds,
+                kept=max_ppr_seeds,
+                dropped=len(dropped),
+                min_kept_weight=round(seed_weights_list[-1]["weight"], 6),
+                max_dropped_weight=round(dropped[0]["weight"], 6),
+            )
+            n_seeds = max_ppr_seeds
+
+        # Adaptive per-seed scaling: target ≤ ~8 000 intermediate rows
+        eff_per_seed = min(per_seed_limit, max(10, 500 // n_seeds))
+        eff_per_neighbor = min(per_neighbor_limit, max(5, 200 // n_seeds))
+
+        if eff_per_seed != per_seed_limit or eff_per_neighbor != per_neighbor_limit:
+            logger.info(
+                "ppr_adaptive_limits",
+                seeds=n_seeds,
+                per_seed_limit=f"{per_seed_limit}->{eff_per_seed}",
+                per_neighbor_limit=f"{per_neighbor_limit}->{eff_per_neighbor}",
+            )
+            per_seed_limit = eff_per_seed
+            per_neighbor_limit = eff_per_neighbor
 
         query = self._build_ppr_query_weighted_section_graph()
 

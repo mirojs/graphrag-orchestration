@@ -29,6 +29,7 @@ Key improvements over Routes 3/4 separately:
   • Multi-tier seeds → PPR is "sighted", not blind
   • Dynamic damping adjusts exploration breadth per query type
   • Released PPR constraints (per_seed_limit 50, per_neighbor_limit 20)
+    with adaptive memory guard to stay within AuraDB tx-memory budget
   • No decomposition hallucination (38% rate eliminated)
 """
 

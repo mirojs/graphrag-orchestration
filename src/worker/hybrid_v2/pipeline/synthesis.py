@@ -732,10 +732,46 @@ class EvidenceSynthesizer:
                             })
             return sentences
         
+        # --- Build doc_id → title lookup from ALL chunks (February 17, 2026) ---
+        # Some chunks have document_title populated while others from the same
+        # document don't (e.g. OPTIONAL MATCH on Document returned NULL).
+        # Build a lookup so we can resolve titles even when the first chunk
+        # in a group is missing its title.  This prevents raw hash IDs
+        # (like "doc_1dbd2b5c11ec4af498f70f3191292772") from leaking into
+        # === DOCUMENT: === headers.
+        _doc_id_to_title: Dict[str, str] = {}
+        for _chunk in graph_context.source_chunks:
+            _did = _chunk.document_id or ""
+            _dtitle = (_chunk.document_title or "").strip()
+            if _did and _dtitle and _did not in _doc_id_to_title:
+                _doc_id_to_title[_did] = _dtitle
+
+        def _resolve_doc_title_route3(chunk, fallback_key: str) -> str:
+            """Resolve a human-readable document title, never returning a raw hash ID."""
+            title = (chunk.document_title or "").strip()
+            if title:
+                return title
+            # Try the cross-chunk lookup by document_id
+            if chunk.document_id and chunk.document_id in _doc_id_to_title:
+                return _doc_id_to_title[chunk.document_id]
+            # Try document_source (URL/path) — extract filename as readable name
+            source = (chunk.document_source or "").strip()
+            if source:
+                # Extract filename from URL/path and humanize
+                name = source.rsplit("/", 1)[-1]
+                name = name.rsplit(".", 1)[0]  # strip extension
+                name = name.replace("_", " ").replace("-", " ").strip()
+                if name:
+                    return name
+            # Last resort: if fallback_key looks like a hash ID, return generic name
+            if fallback_key and not re.match(r'^[a-f0-9]{24,}$', fallback_key.replace("doc_", "").replace("-", "")):
+                return fallback_key
+            return "Unknown Document"
+
         # Add unique document count header to help LLM with document-counting questions
         # This prevents LLM from counting sections/chunks as separate documents
         unique_doc_names = [
-            (chunks[0][1].document_title or chunks[0][1].document_source or key)
+            _resolve_doc_title_route3(chunks[0][1], key)
             for key, chunks in doc_groups.items()
         ]
         context_parts.append(f"## Retrieved from {len(doc_groups)} unique source document(s): {', '.join(unique_doc_names)}\n")
@@ -743,7 +779,7 @@ class EvidenceSynthesizer:
         # Build context grouped by document
         for doc_key, chunks_with_idx in doc_groups.items():
             first_chunk = chunks_with_idx[0][1]
-            doc_title = first_chunk.document_title or first_chunk.document_source or doc_key
+            doc_title = _resolve_doc_title_route3(first_chunk, doc_key)
             
             # Add document header for clearer LLM reasoning
             context_parts.append(f"=== DOCUMENT: {doc_title} ===")
@@ -2027,13 +2063,53 @@ Response:"""
         )
         
         context_parts = []
-        
+
+        # --- Build doc_id → title lookup from ALL budgeted chunks (February 17, 2026) ---
+        # Prevents raw hash IDs (e.g. "doc_1dbd2b5c11ec4af498f70f3191292772")
+        # from appearing in === DOCUMENT: === headers when a chunk's own
+        # document_title is empty but another chunk from the same document
+        # has the title populated.
+        _doc_id_to_title: Dict[str, str] = {}
+        for _, _c in budgeted_chunks:
+            _m = _c.get("metadata", {})
+            _did = _m.get("document_id") or _c.get("document_id") or ""
+            _dtitle = (_m.get("document_title") or _c.get("document_title") or "").strip()
+            if _did and _dtitle and _did not in _doc_id_to_title:
+                _doc_id_to_title[_did] = _dtitle
+
+        def _resolve_doc_title_route2(meta: Dict[str, Any], chunk: Dict[str, Any], fallback_key: str) -> str:
+            """Resolve a human-readable document title, never returning a raw hash ID."""
+            title = (meta.get("document_title") or chunk.get("document_title") or "").strip()
+            if title:
+                return title
+            # Try the cross-chunk lookup by document_id
+            did = meta.get("document_id") or chunk.get("document_id") or ""
+            if did and did in _doc_id_to_title:
+                return _doc_id_to_title[did]
+            # Try source URL/path — extract filename as readable name
+            source = (
+                chunk.get("document_source", "")
+                or chunk.get("source", "")
+                or meta.get("url", "")
+                or meta.get("document_source", "")
+            ).strip()
+            if source:
+                name = source.rsplit("/", 1)[-1]
+                name = name.rsplit(".", 1)[0]
+                name = name.replace("_", " ").replace("-", " ").strip()
+                if name:
+                    return name
+            # Last resort: if fallback_key looks like a hash ID, return generic name
+            if fallback_key and not re.match(r'^[a-f0-9]{24,}$', fallback_key.replace("doc_", "").replace("-", "")):
+                return fallback_key
+            return "Unknown Document"
+
         # Build context with document headers
         for doc_key, chunks_with_idx in doc_groups_budgeted.items():
             # Extract document metadata from first chunk
             first_chunk = chunks_with_idx[0][1]
             meta = first_chunk.get("metadata", {})
-            doc_title = meta.get("document_title") or doc_key
+            doc_title = _resolve_doc_title_route2(meta, first_chunk, doc_key)
             doc_date = meta.get("document_date", "")
             
             # Add document header

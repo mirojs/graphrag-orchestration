@@ -217,10 +217,34 @@ def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> D
                 matched.append(term)
                 continue
 
+        # Special-case: "legal fees" is synonymous with "attorneys' fees",
+        # "attorney's fees", etc.
+        if term_norm == "legal fees":
+            if "attorneys fees" in text_norm or "attorney fees" in text_norm:
+                matched.append(term)
+                continue
+
+        # --- Exact substring match ---
         if term_norm and term_norm in text_norm:
             matched.append(term)
-        else:
-            missing.append(term)
+            continue
+
+        # --- Singular/plural fallback ---
+        # Handle cases like "3 business days" matching "3 business day"
+        # (LLM often uses adjective form "3‑business‑day").
+        if term_norm and len(term_norm) > 2:
+            # Try stripping trailing 's' from the expected term
+            if term_norm.endswith("s") and not term_norm.endswith("ss"):
+                singular = term_norm[:-1]
+                if singular in text_norm:
+                    matched.append(term)
+                    continue
+            # Try adding 's' (expected singular, response plural)
+            if (term_norm + "s") in text_norm:
+                matched.append(term)
+                continue
+
+        missing.append(term)
     
     coverage = len(matched) / len(expected_terms) if expected_terms else 0.0
     

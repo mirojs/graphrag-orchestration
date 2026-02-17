@@ -508,6 +508,13 @@ def main() -> int:
         print("No Q-N* negative questions found in question bank")
     
     questions = positive_questions + negative_questions
+
+    # --skip-before: skip questions before this QID (e.g. Q-G5)
+    skip_before = os.environ.get("BENCH_SKIP_BEFORE", "")
+    if skip_before:
+        idx = next((i for i, q in enumerate(questions) if q.qid == skip_before), 0)
+        questions = questions[idx:]
+        print(f"Skipping to {skip_before} (dropping {idx} earlier questions)")
     
     if args.max_questions and args.max_questions > 0:
         questions = questions[: int(args.max_questions)]

@@ -150,7 +150,9 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
    - **Note:** "Pocatello" is the builder's mailing address (1820 Summit Ridge Dr., Pocatello, ID 83201), not a jurisdiction reference.
    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2)
 
-3. **Q-G3:** Summarize “who pays what” across the set (fees/charges/taxes).   - **Expected Route:** Route 3 (Global Search)   - **Expected:**
+3. **Q-G3:** Summarize "who pays what" across the set (fees/charges/taxes).
+   - **Expected Route:** Route 3 (Global Search)
+   - **Expected:**
      - Invoice: `TOTAL/AMOUNT DUE 29900.00`.
      - Purchase contract: $29,900 in 3 installments.
      - Property management: 25%/10% commissions + $75/month advertising + $50/month admin + 10% repair fee + $35/hour scheduling + Hawaii excise tax on fees.
@@ -201,7 +203,9 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
        - Purchase contract: after 3 business days, `deposit is forfeited`
     - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); purchase_contract.pdf (chunk 0/1)
 
-10. **Q-G10:** Summarize each document’s main purpose in one sentence.    - **Expected Route:** Route 3 (Global Search)    - **Expected:**
+10. **Q-G10:** Summarize each document's main purpose in one sentence.
+    - **Expected Route:** Route 3 (Global Search)
+    - **Expected:**
        - Warranty: limited warranty + arbitration process and exclusions
        - Holding tank: servicing/reporting obligations between owner and pumper
        - PMA: agent manages/rents property, fees, responsibilities, and termination

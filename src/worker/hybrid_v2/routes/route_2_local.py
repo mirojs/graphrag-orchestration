@@ -411,10 +411,13 @@ class LocalSearchHandler(BaseRouteHandler):
         
         # SEARCH clause with in-index group_id filtering (Cypher 25)
         cypher = """CYPHER 25
-        MATCH (sent:Sentence)
-        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
-        SCORE AS score
-        WHERE score >= $threshold
+        CALL () {
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+        }
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)

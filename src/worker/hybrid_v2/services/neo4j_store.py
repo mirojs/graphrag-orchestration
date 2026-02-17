@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 
 import neo4j
 from neo4j import GraphDatabase, AsyncGraphDatabase
-from neo4j import Query
 
 from src.worker.hybrid_v2.services.neo4j_retry import (
     retry_session,
@@ -399,10 +398,13 @@ class Neo4jStoreV3:
             """,
         ]
         
-        with self.get_retry_session() as session:
+        # DDL statements (CREATE INDEX/CONSTRAINT) require auto-commit transactions.
+        # They CANNOT run inside managed transactions (execute_write), so we use
+        # a raw session.run() here instead of the retry wrapper.
+        with self.driver.session(database=self.database) as session:
             for query in schema_queries:
                 try:
-                    session.run(Query(query))  # type: ignore[arg-type]
+                    session.run(query)
                     logger.debug(f"Executed: {query[:50]}...")
                 except Exception as e:
                     logger.warning(f"Schema query failed (may already exist): {e}")
@@ -416,7 +418,7 @@ class Neo4jStoreV3:
             # Create vector indexes with correct dimensions
             for query in vector_indexes:
                 try:
-                    session.run(Query(query))  # type: ignore[arg-type]
+                    session.run(query)
                     logger.info(f"Created vector index with 3072 dimensions")
                 except Exception as e:
                     logger.warning(f"Vector index creation failed: {e}")
@@ -2044,10 +2046,13 @@ class Neo4jStoreV3:
         Uses the sentence_embeddings_v2 vector index.
         """
         query = """CYPHER 25
-        MATCH (sent:Sentence)
-        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
-        SCORE AS score
-        WITH sent, score WHERE score >= $threshold
+        CALL () {
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+        }
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
@@ -2193,7 +2198,7 @@ class Neo4jStoreV3:
         deleted: Dict[str, int] = {}
         with self.get_retry_session() as session:
             for name, query in queries:
-                result = session.run(Query(query), group_id=group_id)  # type: ignore[arg-type]
+                result = session.run(query, group_id=group_id)
                 record = result.single()
                 deleted[name] = cast(int, record["count"]) if record else 0
         

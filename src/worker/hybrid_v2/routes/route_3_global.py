@@ -369,10 +369,13 @@ class GlobalSearchHandler(BaseRouteHandler):
         # 2. Vector search on Sentence nodes + collect parent context
         # SEARCH clause with in-index group_id filtering (Cypher 25)
         cypher = """CYPHER 25
-        MATCH (sent:Sentence)
-        SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
-        SCORE AS score
-        WITH sent, score WHERE score >= $threshold
+        CALL () {
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+        }
 
         // Get parent chunk + document context
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)

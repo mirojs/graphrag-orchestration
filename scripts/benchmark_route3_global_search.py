@@ -351,12 +351,17 @@ def _http_post_json(
 
 def _read_question_bank(path: Path, *, prefix: str = "Q-G") -> List[BankQuestion]:
     pattern = re.compile(rf"\*\*({re.escape(prefix)}\d+):\*\*\s*(.+?)\s*$")
+    # Strip inline metadata that may appear on the same line as the query
+    # e.g. "query text   - **Expected Route:** ...   - **Expected:**"
+    metadata_pattern = re.compile(r"\s+-\s+\*\*Expected.*$")
     questions: List[BankQuestion] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         m = pattern.search(line)
         if not m:
             continue
         qid, qtext = m.group(1).strip(), m.group(2).strip()
+        # Remove any inline metadata from the query text
+        qtext = metadata_pattern.sub("", qtext).strip()
         if qid and qtext:
             questions.append(BankQuestion(qid=qid, query=qtext))
     if not questions:

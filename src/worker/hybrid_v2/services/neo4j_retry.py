@@ -97,6 +97,50 @@ class _EagerResult:
         return bool(self._records)
 
 
+class _AsyncEagerResult(_EagerResult):
+    """Async-compatible variant of ``_EagerResult``.
+
+    The async Neo4j driver's ``Result`` has awaitable ``.data()``,
+    ``.single()``, ``.values()`` and ``.consume()``.  This subclass
+    provides coroutine wrappers so callers can ``await result.data()``
+    without change.
+    """
+
+    async def single(self, strict: bool = False):  # type: ignore[override]
+        return super().single(strict)
+
+    async def data(self, *keys: str) -> List[dict]:  # type: ignore[override]
+        return super().data(*keys)
+
+    async def values(self, *keys: str) -> list:  # type: ignore[override]
+        return super().values(*keys)
+
+    async def consume(self):  # type: ignore[override]
+        return None
+
+    # Async iteration support — callers may use ``async for record in result``
+    def __aiter__(self):
+        return _AsyncRecordIter(self._records)
+
+
+class _AsyncRecordIter:
+    """Minimal async iterator over pre-fetched records."""
+
+    def __init__(self, records: list):
+        self._records = records
+        self._index = 0
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._index >= len(self._records):
+            raise StopAsyncIteration
+        rec = self._records[self._index]
+        self._index += 1
+        return rec
+
+
 # ── Sync Retry Session ──────────────────────────────────────────────────────
 
 class RetrySession:
@@ -169,7 +213,7 @@ class AsyncRetrySession:
 
         try:
             records, keys = await self._session.execute_write(_tx_func)
-            return _EagerResult(records, keys)
+            return _AsyncEagerResult(records, keys)
         except Exception as e:
             q_preview = str(query)[:80].replace("\n", " ")
             logger.debug("Neo4j async execute_write failed: %s | query: %s", e, q_preview)

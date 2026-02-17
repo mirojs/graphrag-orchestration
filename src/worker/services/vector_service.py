@@ -110,7 +110,7 @@ class LanceDBProvider(VectorStoreProvider):
         Attempts a lazy reconnect if initialization previously failed.
         """
         if self._db is None:
-            logger.warning("lancedb_lazy_reconnect_attempt", path=self.base_path)
+            logger.warning("lancedb_lazy_reconnect_attempt path=%s", self.base_path)
             self._initialize()
             if self._db is None:
                 raise RuntimeError("LanceDB connection failed after retry")

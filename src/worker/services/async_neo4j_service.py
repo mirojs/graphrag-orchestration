@@ -731,12 +731,9 @@ class AsyncNeo4jService:
             dropped = seed_weights_list[max_ppr_seeds:]
             seed_weights_list = seed_weights_list[:max_ppr_seeds]
             logger.info(
-                "ppr_seeds_capped",
-                original=n_seeds,
-                kept=max_ppr_seeds,
-                dropped=len(dropped),
-                min_kept_weight=round(seed_weights_list[-1]["weight"], 6),
-                max_dropped_weight=round(dropped[0]["weight"], 6),
+                "ppr_seeds_capped original=%d kept=%d dropped=%d min_kept=%.6f max_dropped=%.6f",
+                n_seeds, max_ppr_seeds, len(dropped),
+                seed_weights_list[-1]["weight"], dropped[0]["weight"],
             )
             n_seeds = max_ppr_seeds
 
@@ -746,10 +743,9 @@ class AsyncNeo4jService:
 
         if eff_per_seed != per_seed_limit or eff_per_neighbor != per_neighbor_limit:
             logger.info(
-                "ppr_adaptive_limits",
-                seeds=n_seeds,
-                per_seed_limit=f"{per_seed_limit}->{eff_per_seed}",
-                per_neighbor_limit=f"{per_neighbor_limit}->{eff_per_neighbor}",
+                "ppr_adaptive_limits seeds=%d per_seed_limit=%s per_neighbor_limit=%s",
+                n_seeds, f"{per_seed_limit}->{eff_per_seed}",
+                f"{per_neighbor_limit}->{eff_per_neighbor}",
             )
             per_seed_limit = eff_per_seed
             per_neighbor_limit = eff_per_neighbor
@@ -778,15 +774,9 @@ class AsyncNeo4jService:
 
         dt_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
-            "ppr_weighted_complete",
-            group_id=group_id,
-            seeds=len(weighted_seeds),
-            top_k=top_k,
-            damping=damping,
-            duration_ms=dt_ms,
-            per_seed_limit=per_seed_limit,
-            per_neighbor_limit=per_neighbor_limit,
-            results=len(records),
+            "ppr_weighted_complete group_id=%s seeds=%d top_k=%d damping=%.4f duration_ms=%d per_seed=%d per_neighbor=%d results=%d",
+            group_id, len(weighted_seeds), top_k, damping, dt_ms,
+            per_seed_limit, per_neighbor_limit, len(records),
         )
 
         return [(r["name"], r["score"]) for r in records]
@@ -1513,11 +1503,8 @@ class AsyncNeo4jService:
             exists = record["exists"] if record else False
             
             logger.info(
-                "pattern_based_negative_detection",
-                group_id=group_id,
-                doc_url=doc_url,
-                pattern=pattern[:50],  # Truncate for logging
-                found=exists,
+                "pattern_based_negative_detection group_id=%s doc_url=%s pattern=%s found=%s",
+                group_id, doc_url, pattern[:50], exists,
             )
             
             return exists
@@ -1595,19 +1582,14 @@ class AsyncNeo4jService:
                     fallback_exists = record2["exists"] if record2 else False
                     if fallback_exists:
                         logger.info(
-                            "pattern_exists_in_docs_by_keyword_fallback_hit",
-                            group_id=group_id,
-                            doc_keyword=doc_keyword,
-                            pattern=pattern[:60],
+                            "pattern_exists_in_docs_by_keyword_fallback_hit group_id=%s keyword=%s pattern=%s",
+                            group_id, doc_keyword, pattern[:60],
                         )
                         exists = True
 
             logger.info(
-                "pattern_exists_in_docs_by_keyword",
-                group_id=group_id,
-                doc_keyword=doc_keyword,
-                pattern=pattern[:60],
-                found=exists,
+                "pattern_exists_in_docs_by_keyword group_id=%s keyword=%s pattern=%s found=%s",
+                group_id, doc_keyword, pattern[:60], exists,
             )
             return exists
     
@@ -1820,14 +1802,9 @@ class AsyncNeo4jService:
 
         dt_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
-            "semantic_multihop_beam_complete",
-            group_id=group_id,
-            seeds=len(seed_entity_ids),
-            max_hops=max_hops,
-            beam_width=beam_width,
-            results=len(scores),
-            duration_ms=dt_ms,
-            knn_config=knn_config or "baseline",
+            "semantic_multihop_beam_complete group_id=%s seeds=%d hops=%d beam=%d results=%d duration_ms=%d knn=%s",
+            group_id, len(seed_entity_ids), max_hops, beam_width,
+            len(scores), dt_ms, knn_config or "baseline",
         )
 
         # Return sorted by accumulated score
@@ -1986,14 +1963,13 @@ class AsyncNeo4jService:
                 rec["entity_doc_counts"] = entity_doc_counts
 
             logger.info(
-                "entity_document_coverage",
-                num_entities=len(entity_names),
-                num_docs=len(records),
-                top_doc=records[0]["doc_title"] if records else None,
-                top_coverage=records[0]["seed_coverage"] if records else 0,
+                "entity_document_coverage num_entities=%d num_docs=%d top_doc=%s top_coverage=%s",
+                len(entity_names), len(records),
+                records[0]["doc_title"] if records else None,
+                records[0]["seed_coverage"] if records else 0,
             )
             return records
 
         except Exception as e:
-            logger.warning("entity_document_coverage_failed", error=str(e))
+            logger.warning("entity_document_coverage_failed: %s", str(e))
             return []

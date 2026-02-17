@@ -50,7 +50,7 @@ class IngestionService:
 
         # If PDF
         if ("application/pdf" in ctype) or url.lower().endswith(".pdf"):
-            logger.info("ingestion_pdf_detected", url=url)
+            logger.info("ingestion_pdf_detected url=%s", url)
             return self._extract_pdf_text(resp.content)
 
         # Textual content types

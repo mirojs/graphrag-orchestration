@@ -1537,10 +1537,8 @@ class Neo4jStoreV3:
                 )
                 results.append((chunk, record["score"]))
         
-        logger.info("search_text_chunks_v2_complete",
-                   group_id=group_id,
-                   top_k=top_k,
-                   results=len(results))
+        logger.info("search_text_chunks_v2_complete group_id=%s top_k=%d results=%d",
+                   group_id, top_k, len(results))
         return results
 
     def search_text_chunks_by_terms(

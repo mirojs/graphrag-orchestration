@@ -231,6 +231,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
             profile=profile,
             folder_id=self.folder_id,
             embed_model=self.pipeline.tracer.embed_model if hasattr(self.pipeline, 'tracer') else None,
+            llm_client=getattr(self.pipeline.disambiguator, 'llm', None) if hasattr(self.pipeline, 'disambiguator') else None,
         )
 
         weighted_seeds = resolver_result["weighted_seeds"]

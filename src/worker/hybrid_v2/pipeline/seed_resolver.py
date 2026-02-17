@@ -3,7 +3,7 @@ Route 5: Multi-Tier Seed Resolver for Unified HippoRAG PPR.
 
 Orchestrates three seed tiers in parallel:
   Tier 1 — Entity seeds (NER on original query)
-  Tier 2 — Structural seeds (derived bottom-up from sentence search results)
+  Tier 2 — Structural seeds (section header matching → entities in those sections)
   Tier 3 — Thematic seeds (community entity resolution)
 
 Each tier is weighted via a *weight profile* that the router selects.
@@ -11,11 +11,16 @@ The resolver emits a ``Dict[str, float]`` mapping entity IDs → PPR
 teleportation weights.  A single PPR pass then handles both "global"
 and "local" retrieval depending on the weight distribution.
 
-Design principles (from ARCHITECTURE_ROUTE5_UNIFIED_HIPPORAG_2026-02-16):
-  • Section nodes have two embeddings:
-    - Section.embedding: content-rich (title + path + chunk samples) for SEMANTICALLY_SIMILAR edges.
-    - Section.structural_embedding: structure-only (title + path_key) for Source 2 header matching.
-  • Structural seeds use Section.structural_embedding for semantic header matching.
+Tier 2 modes (``ROUTE5_TIER2_MODE`` env var):
+  • ``embedding`` — Embed section titles with Voyage at query time, cosine-match
+    against query embedding.  No LLM call.  Fast, deterministic.
+  • ``llm`` — Give the LLM the full list of section headers and ask which sections
+    are relevant to the query.  More flexible but LLM-dependent.
+  • ``hybrid`` (default) — Run both in parallel, union the matched sections.
+  • ``bottom_up`` — Legacy mode: derive sections bottom-up from sentence hits
+    (circular — only finds sections already in sentence results).
+
+Design principles:
   • Weight redistribution when a tier returns empty results.
   • Dynamic damping: 0.70 + 0.20 × w₁ (entity weight).
 """
@@ -117,6 +122,173 @@ def derive_structural_seeds(
         top_sections=structural_seeds[:5],
     )
     return structural_seeds
+
+
+# =========================================================================
+# Tier 2 Option A: Embedding-based section matching
+# =========================================================================
+
+async def match_sections_by_embedding(
+    async_neo4j: "AsyncNeo4jService",
+    query: str,
+    group_id: str,
+    top_k: int = 5,
+    min_similarity: float = 0.25,
+) -> List[str]:
+    """Match query against section structural embeddings stored in Neo4j.
+
+    Each Section node already has a ``structural_embedding`` (voyage-context-3,
+    2048d) computed at index time from title + path_key.  We embed only the
+    *query* at request time and compute cosine similarity against the stored
+    vectors — no need to re-embed section titles.
+
+    Returns:
+        List of section title strings that match the query.
+    """
+    # Embed query with Voyage
+    try:
+        from src.worker.hybrid_v2.routes.route_5_unified import _get_voyage_service
+
+        voyage = _get_voyage_service()
+        if not voyage:
+            logger.warning("tier2_embedding_no_voyage_service")
+            return []
+
+        query_emb = voyage.embed_query(query)
+        if not query_emb:
+            logger.warning("tier2_embedding_query_embed_failed")
+            return []
+    except Exception as e:
+        logger.warning("tier2_embedding_query_embed_error", error=str(e))
+        return []
+
+    # Fetch sections with stored structural_embedding and compute cosine
+    # similarity server-side in Neo4j (brute-force — typically <20 sections).
+    try:
+        cypher = """
+        MATCH (s:Section {group_id: $group_id})
+        WHERE s.structural_embedding IS NOT NULL
+        WITH s, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
+        WHERE score >= $min_similarity
+        RETURN s.title AS title, score
+        ORDER BY score DESC
+        LIMIT $top_k
+        """
+        async with async_neo4j._get_session() as session:
+            result = await session.run(
+                cypher,
+                group_id=group_id,
+                query_embedding=query_emb,
+                min_similarity=min_similarity,
+                top_k=top_k,
+            )
+            records = await result.data()
+    except Exception as e:
+        logger.warning("tier2_embedding_neo4j_cosine_failed", error=str(e))
+        return []
+
+    matched = [r["title"] for r in records if r.get("title")]
+
+    logger.info(
+        "tier2_embedding_match",
+        query=query[:60],
+        matched=len(matched),
+        top_scores=[(r["title"][:30], round(r["score"], 4)) for r in records],
+    )
+    return matched
+
+
+# =========================================================================
+# Tier 2 Option B: LLM-based section matching
+# =========================================================================
+
+async def match_sections_by_llm(
+    async_neo4j: "AsyncNeo4jService",
+    query: str,
+    group_id: str,
+    llm_client: Optional[Any] = None,
+) -> List[str]:
+    """Ask LLM which document sections are relevant to the query.
+
+    Fetches all Section titles, presents them to the LLM, and asks it to
+    select the relevant ones.  More flexible than embedding match for short
+    or ambiguous titles, but depends on LLM quality.
+
+    Returns:
+        List of section title strings selected by the LLM.
+    """
+    if not llm_client:
+        logger.warning("tier2_llm_no_client")
+        return []
+
+    # Fetch section titles from Neo4j
+    try:
+        cypher = """
+        MATCH (s:Section {group_id: $group_id})
+        OPTIONAL MATCH (s)<-[:IN_SECTION]-(chunk)
+        WITH s, count(chunk) AS chunk_count
+        RETURN s.title AS title, s.id AS id, chunk_count
+        ORDER BY s.title
+        """
+        async with async_neo4j._get_session() as session:
+            result = await session.run(cypher, group_id=group_id)
+            records = await result.data()
+    except Exception as e:
+        logger.warning("tier2_llm_fetch_sections_failed", error=str(e))
+        return []
+
+    if not records:
+        return []
+
+    # Build numbered list for LLM
+    section_list = []
+    title_map: Dict[int, str] = {}
+    for i, r in enumerate(records, 1):
+        title = r.get("title", "").strip()
+        if title:
+            section_list.append(f"{i}. {title}")
+            title_map[i] = title
+
+    if not section_list:
+        return []
+
+    prompt = f"""You are selecting relevant document sections for a retrieval query.
+
+Query: "{query}"
+
+Here are all section headers available in the document corpus:
+{chr(10).join(section_list)}
+
+Which sections could contain information relevant to this query?
+Return ONLY the numbers of relevant sections, comma-separated.
+If none are relevant, return "NONE".
+
+Example: 1, 4, 7"""
+
+    try:
+        response = await llm_client.acomplete(prompt)
+        text = response.text.strip()
+
+        if text.upper() == "NONE":
+            return []
+
+        # Parse comma-separated numbers
+        import re as _re
+        numbers = [int(n) for n in _re.findall(r"\d+", text)]
+        matched = [title_map[n] for n in numbers if n in title_map]
+
+        logger.info(
+            "tier2_llm_match",
+            query=query[:60],
+            sections_total=len(section_list),
+            matched=len(matched),
+            selected=matched[:10],
+        )
+        return matched
+
+    except Exception as e:
+        logger.warning("tier2_llm_match_failed", error=str(e))
+        return []
 
 
 async def resolve_section_entities(
@@ -420,6 +592,7 @@ async def resolve_all_tiers(
     profile: WeightProfile = DEFAULT_PROFILE,
     folder_id: Optional[str] = None,
     embed_model: Optional[Any] = None,
+    llm_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Orchestrate all three seed tiers in parallel and build unified seed dict.
 
@@ -493,12 +666,59 @@ async def resolve_all_tiers(
             return []
 
     # ------------------------------------------------------------------
-    # Tier 2: Structural seeds (bottom-up from sentence evidence)
+    # Tier 2: Structural seeds (section header matching → entities)
     # ------------------------------------------------------------------
+    tier2_mode = os.getenv("ROUTE5_TIER2_MODE", "hybrid").strip().lower()
+
     async def _resolve_tier2() -> Tuple[List[str], List[str]]:
-        structural_sections = derive_structural_seeds(
-            sentence_evidence, min_sentences=min_sentences,
-        )
+        structural_sections: List[str] = []
+
+        if tier2_mode == "bottom_up":
+            # Legacy: derive from sentence hits (circular but stable)
+            structural_sections = derive_structural_seeds(
+                sentence_evidence, min_sentences=min_sentences,
+            )
+
+        elif tier2_mode == "embedding":
+            structural_sections = await match_sections_by_embedding(
+                async_neo4j=async_neo4j, query=query, group_id=group_id,
+            )
+
+        elif tier2_mode == "llm":
+            structural_sections = await match_sections_by_llm(
+                async_neo4j=async_neo4j, query=query,
+                group_id=group_id, llm_client=llm_client,
+            )
+
+        else:  # hybrid (default): embedding + LLM in parallel, union results
+            emb_task = asyncio.create_task(
+                match_sections_by_embedding(
+                    async_neo4j=async_neo4j, query=query, group_id=group_id,
+                )
+            )
+            llm_task = asyncio.create_task(
+                match_sections_by_llm(
+                    async_neo4j=async_neo4j, query=query,
+                    group_id=group_id, llm_client=llm_client,
+                )
+            )
+            emb_sections, llm_sections = await asyncio.gather(
+                emb_task, llm_task
+            )
+            # Union — deduplicate by title
+            seen: set = set()
+            for s in (emb_sections or []) + (llm_sections or []):
+                if s not in seen:
+                    structural_sections.append(s)
+                    seen.add(s)
+
+            logger.info(
+                "tier2_hybrid_union",
+                embedding_sections=len(emb_sections or []),
+                llm_sections=len(llm_sections or []),
+                union_sections=len(structural_sections),
+            )
+
         if not structural_sections:
             return [], []
 

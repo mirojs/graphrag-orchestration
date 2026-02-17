@@ -215,6 +215,11 @@ pip install --upgrade neo4j-graphrag-python==1.10.1
 
 ## 📚 Documentation
 
+### Concepts
+- [Task vs Agent: Quick Reference](TASK_VS_AGENT_QUICK_REFERENCE.md) - Understanding the difference between tasks and agents
+- [Task vs Agent: Detailed Guide](docs/TASK_VS_AGENT_CONCEPTS.md) - In-depth explanation with code references
+
+### External Resources
 - [Neo4j GraphRAG Python Docs](https://neo4j.com/docs/graphrag-python/)
 - [Azure OpenAI Service](https://learn.microsoft.com/azure/ai-services/openai/)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)

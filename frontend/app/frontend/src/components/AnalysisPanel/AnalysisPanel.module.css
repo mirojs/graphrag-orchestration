@@ -277,3 +277,45 @@
     text-align: left;
     max-width: 100%;
 }
+
+/* ----- Sentence Highlight Panel (for non-PDF/image formats) ----- */
+.sentencePanel {
+    background: #f9f7e8;
+    border: 1px solid #e6d99e;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 10px;
+}
+
+.sentencePanelHeader {
+    font-weight: 600;
+    font-size: 0.85em;
+    color: #7a6e2a;
+    margin-bottom: 8px;
+}
+
+.sentenceItem {
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+    font-size: 0.88em;
+    line-height: 1.5;
+}
+
+.sentenceItem:last-child {
+    border-bottom: none;
+}
+
+.sentencePageBadge {
+    display: inline-block;
+    background: #e6d99e;
+    color: #5a5020;
+    font-size: 0.78em;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-right: 6px;
+}
+
+.sentenceText {
+    color: #333;
+}

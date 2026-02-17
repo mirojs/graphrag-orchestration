@@ -127,7 +127,30 @@ export const Answer = ({
                                     </span>
                                 );
                             } else {
-                                const path = getCitationFilePath(reference);
+                                // Look up structured citation to get document title + page for URL building
+                                const structuredCitations = answer.context.data_points.structured_citations || [];
+                                const strippedRef = reference.replace(/[[\]]/g, "");
+                                const matchedCit = structuredCitations.find(sc => {
+                                    const scKey = (sc.citation || "").replace(/[[\]]/g, "");
+                                    return (
+                                        sc.source === reference ||
+                                        sc.document_title === reference ||
+                                        scKey === strippedRef
+                                    );
+                                });
+
+                                // Build file path: prefer document_title (real filename), fallback to reference
+                                const docName = matchedCit?.document_title || reference;
+                                let path = getCitationFilePath(docName);
+                                // Add #page= for direct page navigation
+                                if (matchedCit?.page_number) {
+                                    path += `#page=${matchedCit.page_number}`;
+                                }
+
+                                // Display label: document title + page info
+                                const label = matchedCit?.document_title || reference;
+                                const pageInfo = matchedCit?.page_number ? ` (p.${matchedCit.page_number})` : "";
+
                                 return (
                                     <span key={`${reference}-${displayIndex}`} className={styles.citationEntry}>
                                         <a
@@ -138,7 +161,7 @@ export const Answer = ({
                                                 onCitationClicked(path);
                                             }}
                                         >
-                                            {`${displayIndex}. ${reference}`}
+                                            {`${displayIndex}. ${label}${pageInfo}`}
                                         </a>
                                     </span>
                                 );

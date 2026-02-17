@@ -8,6 +8,7 @@ import appLogo from "../../assets/applogo.svg";
 import styles from "./Chat.module.css";
 
 import { chatApi, configApi, RetrievalMode, ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, ResponseMessage, SpeechConfig } from "../../api";
+import { StructuredCitation } from "../../api/models";
 import { Answer, AnswerError, AnswerLoading } from "../../components/Answer";
 import { QuestionInput } from "../../components/QuestionInput";
 import { ExampleList } from "../../components/Example";
@@ -63,6 +64,7 @@ const Chat = () => {
     const [error, setError] = useState<unknown>();
 
     const [activeCitation, setActiveCitation] = useState<string>();
+    const [activeCitationObj, setActiveCitationObj] = useState<StructuredCitation[] | undefined>();
     const [activeAnalysisPanelTab, setActiveAnalysisPanelTab] = useState<AnalysisPanelTabs | undefined>(undefined);
 
     const [selectedAnswer, setSelectedAnswer] = useState<number>(0);
@@ -501,9 +503,26 @@ const Chat = () => {
     const onShowCitation = (citation: string, index: number) => {
         if (activeCitation === citation && activeAnalysisPanelTab === AnalysisPanelTabs.CitationTab && selectedAnswer === index) {
             setActiveAnalysisPanelTab(undefined);
+            setActiveCitationObj(undefined);
         } else {
             setActiveCitation(citation);
             setActiveAnalysisPanelTab(AnalysisPanelTabs.CitationTab);
+
+            // Look up structured citation data for highlighting
+            const answer = (isStreaming ? streamedAnswers : answers)[index]?.[1];
+            const structured = answer?.context?.data_points?.structured_citations;
+            if (structured && structured.length > 0) {
+                // Extract document name from citation URL: /content/docname.pdf#page=N
+                const pathPart = citation.split("#")[0];
+                const docName = decodeURIComponent(pathPart.replace(/^.*\/content\//, ""));
+                // Find ALL structured citations for this document
+                const matched = structured.filter(
+                    sc => sc.document_title === docName || sc.source === docName
+                );
+                setActiveCitationObj(matched.length > 0 ? matched : structured.length > 0 ? [structured[0]] : undefined);
+            } else {
+                setActiveCitationObj(undefined);
+            }
         }
 
         setSelectedAnswer(index);
@@ -671,6 +690,7 @@ const Chat = () => {
                     <AnalysisPanel
                         className={styles.chatAnalysisPanel}
                         activeCitation={activeCitation}
+                        activeCitationObj={activeCitationObj}
                         onActiveTabChanged={x => onToggleTab(x, selectedAnswer)}
                         citationHeight="810px"
                         answer={answers[selectedAnswer][1]}

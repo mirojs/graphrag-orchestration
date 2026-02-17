@@ -261,6 +261,13 @@ class ChatGraphRAGApproach(Approach):
         - structured_citations: rich citation dicts with document_id, page_number,
           section_path, sentence_text, polygons, etc. for frontend rendering
         
+        Citation names are built so the frontend AnswerParser can match inline
+        [citation] markers in the answer text.  The LLM generates markers like
+        ``[1]``, ``[1a]``, ``[2b]`` whose inner text (``1``, ``1a``, ``2b``)
+        maps to an entry in ``citation_names``.  For chunk-level citations we
+        also keep the document source name to support ``[filename.pdf]`` style
+        markers.
+        
         Args:
             citations: List of citation dicts from GraphRAG backend
             
@@ -288,9 +295,26 @@ class ChatGraphRAGApproach(Approach):
             # Legacy format: "source: text"
             if source:
                 text_sources.append(f"{source}: {text}")
-                citation_names.append(source)
             else:
                 text_sources.append(text)
+            
+            # Build citation name for inline matching.
+            # Priority:
+            #   1. Raw citation key (e.g. "1a" from "[1a]") — matches LLM-generated markers
+            #   2. Source / document title — matches [filename.pdf] markers
+            #   3. Truncated text preview as last resort
+            raw_key = citation.get("citation", "").strip("[]").strip()
+            if raw_key:
+                citation_names.append(raw_key)
+            elif source:
+                citation_names.append(source)
+            else:
+                citation_names.append(text[:80] if text else "unknown")
+            
+            # Also add the source name if it differs from raw_key so both
+            # "[1a]" and "[filename.pdf]" can resolve to this citation.
+            if raw_key and source and source != raw_key and source not in citation_names:
+                citation_names.append(source)
             
             # Build structured citation with all available metadata
             structured_citation: dict = {

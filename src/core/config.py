@@ -41,11 +41,13 @@ class Settings(BaseSettings):
     HYBRID_INTERMEDIATE_MODEL: str = "gpt-5.1"  # Good balance of speed/quality
     AZURE_OPENAI_MODEL_VERSION: str = "2025-11-13"  # gpt-5.1 (2025-11-13)
     
-    # Embeddings (Switzerland North - Separate resource)
+    # Embeddings — V1 Legacy (Switzerland North - Separate resource)
+    # NOTE: Primary embedder is now Voyage voyage-context-3 (see below).
+    # This Azure OpenAI embedding is kept as a V1 fallback for groups not yet migrated.
     AZURE_OPENAI_EMBEDDING_ENDPOINT: Optional[str] = None  # Switzerland North endpoint
     AZURE_OPENAI_EMBEDDING_API_KEY: Optional[str] = None  # Separate key for embedding resource
-    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-large"
-    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 3072  # text-embedding-3-large dimensions
+    AZURE_OPENAI_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-large"  # V1 legacy fallback
+    AZURE_OPENAI_EMBEDDING_DIMENSIONS: int = 3072  # V1 text-embedding-3-large dimensions
     AZURE_OPENAI_API_VERSION: str = "2024-10-21"  # Latest stable version
     
     # ========================================================================

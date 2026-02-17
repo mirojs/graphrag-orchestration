@@ -146,15 +146,15 @@ class Neo4jGraphRAGService:
     
     @property
     def embedder(self) -> "DimensionAwareAzureEmbeddings":
-        """Lazy initialization of Azure OpenAI embeddings (text-embedding-3-large with 3072 dimensions)."""
+        """Lazy initialization of V1 legacy Azure OpenAI embeddings (fallback for groups not yet on Voyage V2)."""
         if self._embedder is None:
             # Wrap AzureOpenAIEmbeddings to always pass dimensions parameter
             self._embedder = DimensionAwareAzureEmbeddings(
-                model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # text-embedding-3-large
+                model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,  # V1 legacy: text-embedding-3-large
                 azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
                 api_key=settings.AZURE_OPENAI_API_KEY,
                 api_version=settings.AZURE_OPENAI_API_VERSION or "2024-10-21",
-                dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,  # 3072 for text-embedding-3-large
+                dimensions=settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS,  # 3072 for V1 text-embedding-3-large
             )
         return self._embedder
     

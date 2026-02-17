@@ -1076,6 +1076,7 @@ Response:"""
         seed_entities: List[str],
         doc_coverage: List[Dict[str, Any]],
         ner_seed_count: Optional[int] = None,
+        query: Optional[str] = None,
     ) -> Tuple[Optional[List[str]], Dict[str, Any]]:
         """IDF-weighted entity→document voting to determine target document(s).
 
@@ -1083,10 +1084,41 @@ Response:"""
         is inversely proportional to how many documents it spans (IDF-like).
         A single-doc entity votes 1.0; a 4-doc super-connector votes 0.25.
 
+        Cross-document detection: when the query explicitly references multiple
+        documents (e.g. "across all documents", "compare the contracts"),
+        scoping is skipped to preserve cross-document evidence.
+
         Returns:
             (target_document_ids, stats_dict)
             target_document_ids is None when scoping is inconclusive.
         """
+        import re as _re_scope
+
+        # --- Cross-document query detection ---
+        # Explicit multi-document intent signals  → skip scoping entirely.
+        _CROSS_DOC_PATTERNS = [
+            r"across\s+(?:all\s+)?(?:the\s+)?documents?",
+            r"(?:all|every|each)\s+(?:of\s+the\s+)?(?:documents?|contracts?|agreements?|files?)",
+            r"compare\s+(?:the\s+)?(?:documents?|contracts?|agreements?)",
+            r"(?:the|this)\s+(?:entire\s+)?set\b",
+            r"summarize\s+(?:all|everything)",
+        ]
+        if query:
+            query_lower = query.lower()
+            for pat in _CROSS_DOC_PATTERNS:
+                if _re_scope.search(pat, query_lower):
+                    logger.info(
+                        "doc_scope_skip",
+                        reason="cross_document_query_detected",
+                        pattern=pat,
+                        query_snippet=query[:80],
+                    )
+                    return None, {
+                        "enabled": True,
+                        "decision": "skip_cross_document_query",
+                        "matched_pattern": pat,
+                    }
+
         min_score = float(os.environ.get("DOC_SCOPE_MIN_SCORE", "1.5"))
 
         if not doc_coverage:
@@ -1245,6 +1277,7 @@ Response:"""
                     target_document_ids, doc_scope_stats = self._resolve_target_documents(
                         selected_entities, doc_coverage,
                         ner_seed_count=ner_seed_count,
+                        query=query,
                     )
             except Exception as exc:
                 logger.warning("doc_scope_resolution_failed", error=str(exc))
@@ -1906,8 +1939,36 @@ Response:"""
                 docs_pruned = []
                 for dkey, dscore in ranked_docs[1:]:
                     ratio = dscore / top_doc_score if top_doc_score > 0 else 0.0
+
+                    # --- Sentence-search floor (February 17, 2026) ---
+                    # Documents whose ONLY signal is __sentence_search__
+                    # (no PPR entity chunks) represent direct vector-search
+                    # hits — the query is semantically relevant to that doc.
+                    # Pruning these loses cross-document evidence that the
+                    # sentence search intentionally retrieved.
+                    # Keep them unless the scoring method fell back to
+                    # entity_score_sum_fallback (no entity chunks at all).
+                    doc_entities = doc_group_entity_detail.get(dkey, {})
+                    is_sentence_only = (
+                        scoring_method == "entity_ppr"
+                        and doc_entities
+                        and all(
+                            e == "__sentence_search__" or e == "__coverage_gap_fill__"
+                            for e in doc_entities
+                        )
+                    )
+
                     if ratio >= doc_group_min_ratio:
                         docs_to_keep.add(dkey)
+                    elif is_sentence_only:
+                        # Exempt: sentence-search-only docs survive pruning
+                        docs_to_keep.add(dkey)
+                        logger.info(
+                            "doc_group_pruning_sentence_exempt",
+                            doc=dkey,
+                            score=round(dscore, 4),
+                            ratio=round(ratio, 3),
+                        )
                     else:
                         docs_pruned.append((dkey, round(dscore, 4), round(ratio, 3)))
 

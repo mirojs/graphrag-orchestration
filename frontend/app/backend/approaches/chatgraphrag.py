@@ -256,26 +256,84 @@ class ChatGraphRAGApproach(Approach):
         """
         Format GraphRAG citations into DataPoints format.
         
+        Produces both:
+        - text: legacy "source: text" strings for backward compatibility
+        - structured_citations: rich citation dicts with document_id, page_number,
+          section_path, sentence_text, polygons, etc. for frontend rendering
+        
         Args:
-            citations: List of citation dicts from GraphRAG
+            citations: List of citation dicts from GraphRAG backend
             
         Returns:
-            DataPoints object with formatted citations
+            DataPoints object with formatted citations and structured metadata
         """
         if not citations:
             return None
         
         text_sources = []
+        citation_names = []  # For inline [citation] matching
+        structured = []  # Rich citation metadata
         
         for citation in citations:
-            # Extract text content
-            text = citation.get("text", citation.get("content", ""))
+            # Extract text — backend sends "text_preview", fall back to "text"/"content"
+            text = (
+                citation.get("text_preview")
+                or citation.get("sentence_text")
+                or citation.get("text")
+                or citation.get("content")
+                or ""
+            )
             source = citation.get("source", citation.get("document", ""))
             
-            # Format as "source: text"
+            # Legacy format: "source: text"
             if source:
                 text_sources.append(f"{source}: {text}")
+                citation_names.append(source)
             else:
                 text_sources.append(text)
+            
+            # Build structured citation with all available metadata
+            structured_citation: dict = {
+                "citation": citation.get("citation", ""),
+                "citation_type": citation.get("citation_type", "chunk"),
+                "source": source,
+                "document_id": citation.get("document_id", ""),
+                "document_title": citation.get("document_title", citation.get("document", "")),
+                "document_url": citation.get("document_url", ""),
+                "chunk_id": citation.get("chunk_id", ""),
+                "section_path": citation.get("section_path", citation.get("section", "")),
+                "text_preview": text,
+                "score": citation.get("score", 0.0),
+            }
+            
+            # Optional location fields
+            if citation.get("page_number") is not None:
+                structured_citation["page_number"] = citation["page_number"]
+            if citation.get("start_offset") is not None:
+                structured_citation["start_offset"] = citation["start_offset"]
+            if citation.get("end_offset") is not None:
+                structured_citation["end_offset"] = citation["end_offset"]
+            
+            # Sentence-level fields
+            if citation.get("sentence_text"):
+                structured_citation["sentence_text"] = citation["sentence_text"]
+            if citation.get("sentence_offset") is not None:
+                structured_citation["sentence_offset"] = citation["sentence_offset"]
+            if citation.get("sentence_length") is not None:
+                structured_citation["sentence_length"] = citation["sentence_length"]
+            if citation.get("sentence_confidence") is not None:
+                structured_citation["sentence_confidence"] = citation["sentence_confidence"]
+            
+            # Polygon geometry for pixel-accurate highlighting
+            if citation.get("sentences"):
+                structured_citation["sentences"] = citation["sentences"]
+            if citation.get("page_dimensions"):
+                structured_citation["page_dimensions"] = citation["page_dimensions"]
+            
+            structured.append(structured_citation)
         
-        return DataPoints(text=text_sources)
+        return DataPoints(
+            text=text_sources,
+            citations=citation_names if citation_names else None,
+            structured_citations=structured,
+        )

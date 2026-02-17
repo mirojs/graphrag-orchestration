@@ -184,6 +184,7 @@ class DataPoints:
     citations: Optional[list[str]] = None
     external_results_metadata: Optional[list[dict[str, Any]]] = None
     citation_activity_details: Optional[dict[str, dict[str, Any]]] = None
+    structured_citations: Optional[list[dict[str, Any]]] = None  # Rich citation metadata from GraphRAG
 
 
 @dataclass

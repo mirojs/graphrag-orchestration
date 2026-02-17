@@ -68,12 +68,35 @@ export type CitationActivityDetail = {
     query?: string;
 };
 
+export type StructuredCitation = {
+    citation?: string;
+    citation_type?: string;
+    source?: string;
+    document_id?: string;
+    document_title?: string;
+    document_url?: string;
+    chunk_id?: string;
+    section_path?: string;
+    text_preview?: string;
+    score?: number;
+    page_number?: number;
+    start_offset?: number;
+    end_offset?: number;
+    sentence_text?: string;
+    sentence_offset?: number;
+    sentence_length?: number;
+    sentence_confidence?: number;
+    sentences?: Array<Record<string, any>>;
+    page_dimensions?: Array<Record<string, any>>;
+};
+
 export type DataPoints = {
     text: string[];
     images: string[];
     citations: string[];
     citation_activity_details?: Record<string, CitationActivityDetail>;
     external_results_metadata?: ExternalResultMetadata[];
+    structured_citations?: StructuredCitation[];
 };
 
 export type ResponseContext = {

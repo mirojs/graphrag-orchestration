@@ -361,6 +361,7 @@ class EvidenceSynthesizer:
         context, citation_map, sentence_citation_map, context_stats = self._build_cited_context(
             text_chunks, language_spans_by_doc=language_spans_by_doc,
             entity_scores=entity_scores,
+            query=query,
         )
 
         # ── Structural fix: strip sentence-level markers ──────────────
@@ -1760,6 +1761,7 @@ Response:"""
         text_chunks: List[Dict[str, Any]],
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         entity_scores: Optional[Dict[str, float]] = None,
+        query: Optional[str] = None,
     ) -> Tuple[str, Dict[str, Dict[str, str]], Dict[str, Dict[str, Any]], Dict[str, Any]]:
         """
         Build a context string with citation markers, grouped by document.
@@ -1922,6 +1924,33 @@ Response:"""
         # Toggle: DOC_GROUP_PRUNING_ENABLED=0 to disable.
         doc_group_pruning_enabled = os.environ.get("DOC_GROUP_PRUNING_ENABLED", "1") == "1"
         doc_group_pruning_stats: Dict[str, Any] = {"enabled": doc_group_pruning_enabled}
+
+        # --- Cross-document query bypass (February 17, 2026) ---
+        # When the query explicitly asks about all/every/each document,
+        # doc_group_pruning must be skipped to avoid discarding low-signal
+        # documents that the user specifically asked about.
+        import re as _re_dgp
+        _CROSS_DOC_PATTERNS_DGP = [
+            r"across\s+(?:all\s+)?(?:the\s+)?(?:documents?|contracts?|agreements?)",
+            r"(?:all|every|each)\s+(?:of\s+the\s+)?(?:documents?|contracts?|agreements?|files?)",
+            r"compare\s+(?:the\s+)?(?:documents?|contracts?|agreements?)",
+            r"summarize\s+(?:all|everything)",
+        ]
+        is_cross_doc_query = False
+        if query:
+            query_lower = query.lower()
+            for pat in _CROSS_DOC_PATTERNS_DGP:
+                if _re_dgp.search(pat, query_lower):
+                    is_cross_doc_query = True
+                    break
+
+        if is_cross_doc_query:
+            doc_group_pruning_enabled = False
+            doc_group_pruning_stats["decision"] = "skip_cross_document_query"
+            logger.info(
+                "doc_group_pruning skipped for cross-document query: %s",
+                query[:80] if query else "",
+            )
 
         if doc_group_pruning_enabled and len(doc_groups_budgeted) > 1:
             # Score each document group by *unique entity PPR coverage*.

@@ -1,0 +1,280 @@
+{
+  "response": "## Answer\n\n- The **purchase_contract** sets out the terms under which a contractor will furnish and install a specified vertical platform lift system, including equipment details, total price, and installment payment schedule. [7]\n- The **HOLDING TANK SERVICING CONTRACT** establishes an ongoing service agreement between a holding tank owner and a pumper, defining servicing obligations, reporting requirements to the county, access and maintenance duties, payment terms, and conditions for contract changes or termination. [2] [8] [10] [11] [13] [14]\n- The **contoso_lifts_invoice** document\u2019s specific purpose is not described in the available excerpts, so its main purpose cannot be determined from the provided text.\n- The **BUILDERS LIMITED WARRANTY** defines the builder\u2019s one\u2011year limited warranty for a home\u2019s structural components and systems, disclaims other warranties, allocates arbitration costs, and states that the warranty and non-warranted conditions form the entire agreement between builder and buyer/owner. [4] [5] [6] [9] [12]\n- The **PROPERTY MANAGEMENT AGREEMENT** outlines the responsibilities of a rental agent and property owner, including the agent\u2019s duties to inspect the property, prepare it for occupancy, manage funds and provide monthly statements, and the owner\u2019s obligation to honor confirmed reservations upon termination or sale. [1] [3]\n\n## Details\n\n- The purchase contract specifies the lift model (AscendPro VPX200), power system, cab size and configuration, outdoor package, door type, hall call stations, total price of $29,900, and three payment milestones, and notes that changes must be in writing and affect the next payment. [7]\n- The holding tank contract requires the owner to file the contract with Washburn County under WI Code SPS 383.21(2)5, maintain access for the pumper, and keep an all\u2011weather access road, while the pumper must service the tank, report volumes pumped, disposal sites, and tank condition to the County, and the agreement continues until terminated or changed with notice to the municipality and County. [2] [8] [10] [11] [13] [14]\n- The builder\u2019s limited warranty is extended by Fabrikam Inc. to Contoso Ltd. for a specific property in Idaho, covers defects in materials or workmanship for certain structural and system components for one year, excludes various non\u2011warrantable conditions, disclaims implied warranties, requires each party to pay half of arbitration costs, and states that the warranty and Statement of Non\u2011Warranted Conditions are the entire integrated agreement. [4] [5] [6] [9] [12] [15]\n- The property management agreement allows the rental agent to place funds in an interest\u2011bearing account with interest accruing to the agent, requires monthly income/expense statements and distributions to the owner when available, obligates the owner to honor confirmed reservations if the agreement ends or the property is sold, and requires the agent to perform an initial inspection, prepare a condition report, and ready the unit for occupancy. [1] [3]",
+  "route_used": "route_5_unified",
+  "citations": [
+    {
+      "index": 1,
+      "chunk_id": "chunk_0",
+      "document_id": "",
+      "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Owner understands and\nagrees that all finds may be placed in an interest bearing account and the int..."
+    },
+    {
+      "index": 2,
+      "chunk_id": "chunk_1",
+      "document_id": "",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "The owner agrees to file a copy of this contract with the County of Washburn, as required under WI\nC..."
+    },
+    {
+      "index": 3,
+      "chunk_id": "chunk_2",
+      "document_id": "",
+      "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "In the event this agreement is terminated, or the\nproperty is sold, the Owner shall honor all confir..."
+    },
+    {
+      "index": 4,
+      "chunk_id": "chunk_3",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and..."
+    },
+    {
+      "index": 5,
+      "chunk_id": "chunk_4",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "In consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuy..."
+    },
+    {
+      "index": 6,
+      "chunk_id": "chunk_5",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "A. The Builder warrants for a period of one (1) year that by the standards of construction relevant ..."
+    },
+    {
+      "index": 7,
+      "chunk_id": "chunk_6",
+      "document_id": "",
+      "document_title": "purchase_contract",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "This contract is effective upon mutual signature and initial payment. Contractor agrees to furnish a..."
+    },
+    {
+      "index": 8,
+      "chunk_id": "chunk_7",
+      "document_id": "",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "The volumes in gallons of the contents pumped from the holding tank for each servicing;\n\ng. The disp..."
+    },
+    {
+      "index": 9,
+      "chunk_id": "chunk_8",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided..."
+    },
+    {
+      "index": 10,
+      "chunk_id": "chunk_9",
+      "document_id": "",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "The owner further agrees to pay the pumper for a\ncharges incurred in servicing the holding tank(s) a..."
+    },
+    {
+      "index": 11,
+      "chunk_id": "chunk_10",
+      "document_id": "",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "Contract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper. The ..."
+    },
+    {
+      "index": 12,
+      "chunk_id": "chunk_11",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisi..."
+    },
+    {
+      "index": 13,
+      "chunk_id": "chunk_12",
+      "document_id": "",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "h. Condition of holding tank and components at time of inspection. This agreement will remain in eff..."
+    },
+    {
+      "index": 14,
+      "chunk_id": "chunk_13",
+      "document_id": "",
+      "document_title": "HOLDING TANK SERVICING CONTRACT",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "The disposal sites to which the contents from the holding tank were delivered. h. Condition of holdi..."
+    },
+    {
+      "index": 15,
+      "chunk_id": "chunk_14",
+      "document_id": "",
+      "document_title": "BUILDERS LIMITED WARRANTY",
+      "document_url": "",
+      "score": 0.0,
+      "text_preview": "D. Damage resulting from ordinary wear and tear, abuse, neglect, or lack of due care or proper maint..."
+    }
+  ],
+  "evidence_path": [],
+  "metadata": {
+    "profile": "balanced",
+    "weights": {
+      "w1_entity": 0.5,
+      "w2_structural": 0.3,
+      "w3_thematic": 0.2
+    },
+    "damping": 0.8,
+    "ner_entities": [],
+    "tier1_seed_count": 0,
+    "tier2_seed_count": 56,
+    "tier3_seed_count": 0,
+    "total_unique_seeds": 56,
+    "structural_sections": [
+      "2. Term.",
+      "EXHIBIT A - SCOPE OF WORK",
+      "1. Builder's Limited Warranty.",
+      "BUILDERS LIMITED WARRANTY WITH ARBITRATION",
+      "HOLDING TANK SERVICING CONTRACT",
+      "INVOICE",
+      "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)",
+      "PROPERTY MANAGEMENT AGREEMENT:",
+      "PURCHASE CONTRACT"
+    ],
+    "num_ppr_evidence": 0,
+    "sentence_evidence_count": 15,
+    "text_chunks_used": 15,
+    "route_description": "Unified hierarchical seed PPR (v5)",
+    "version": "v5.0",
+    "ppr_top_entities": [],
+    "sentence_evidence": [
+      {
+        "text": "Owner understands and\nagrees that all finds may be placed in an interest bearing account and the interest shall accrue to\nthe benefit of the Rental Agent. (d) Provide Owner with a monthly statement of",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.5919
+      },
+      {
+        "text": "The owner agrees to file a copy of this contract with the County of Washburn, as required under WI\nCode SPS 383.21(2)5. The owner agrees to have the holding tank(s) serviced by the pumper and guarante",
+        "source": "HOLDING TANK SERVICING CONTRACT",
+        "score": 0.5849
+      },
+      {
+        "text": "In the event this agreement is terminated, or the\nproperty is sold, the Owner shall honor all confirmed reservations.\n\nRESPONSIBILITIES OF AGENT. Agent agrees to and shall:\n\n(a) Complete an initial pr",
+        "source": "PROPERTY MANAGEMENT AGREEMENT",
+        "score": 0.587
+      },
+      {
+        "text": "Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and their respective costs including attorneys' fees in any arbitration. The award of the\narbitrator(s)",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.5859
+      },
+      {
+        "text": "In consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended by Fabrikam Inc.\n,and is accepted and agreed\n(",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.5984
+      },
+      {
+        "text": "A. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of t",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.6011
+      },
+      {
+        "text": "This contract is effective upon mutual signature and initial payment. Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)\n\n1 Power system: 110 VAC 60 H",
+        "source": "purchase_contract",
+        "score": 0.5956
+      },
+      {
+        "text": "The volumes in gallons of the contents pumped from the holding tank for each servicing;\n\ng. The disposal sites to which the contents from the holding tank were delivered. h. Condition of holding tank ",
+        "source": "HOLDING TANK SERVICING CONTRACT",
+        "score": 0.6091
+      },
+      {
+        "text": "Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty. This expressed limited warranty is the only warran",
+        "source": "BUILDERS LIMITED WARRANTY",
+        "score": 0.5849
+      },
+      {
+        "text": "The owner further agrees to pay the pumper for a\ncharges incurred in servicing the holding tank(s) as mutually agreed upon by the owner and pumper. The pumper agrees to submit to the County, reports f",
+        "source": "HOLDING TANK SERVICING CONTRACT",
+        "score": 0.5909
+      }
+    ],
+    "context_stats": {
+      "chunks_before_budget": 15,
+      "chunks_after_budget": 15,
+      "chunks_dropped": 0,
+      "context_tokens": 1709,
+      "context_chars": 7084,
+      "token_budget": 32000,
+      "budget_enabled": true,
+      "num_doc_groups": 4,
+      "doc_group_pruning": {
+        "enabled": true,
+        "decision": "all_above_threshold",
+        "ranked": [
+          [
+            "doc_1dbd2b5c11ec4af498f70f3191292772",
+            0.5742
+          ],
+          [
+            "doc_d83867cd24a9402ab15f58cdfbb36462",
+            0.4883
+          ],
+          [
+            "doc_7abd558372ff4627b7d0ff27c22f1c5b",
+            0.4746
+          ],
+          [
+            "doc_b89381a472b54bc6a4cf7d7320d7c464",
+            0.4551
+          ]
+        ],
+        "entity_detail": {
+          "doc_1dbd2b5c11ec4af498f70f3191292772": {
+            "__sentence_search__": 0.5742
+          },
+          "doc_d83867cd24a9402ab15f58cdfbb36462": {
+            "__sentence_search__": 0.4883
+          },
+          "doc_7abd558372ff4627b7d0ff27c22f1c5b": {
+            "__sentence_search__": 0.4746
+          },
+          "doc_b89381a472b54bc6a4cf7d7320d7c464": {
+            "__sentence_search__": 0.4551
+          }
+        },
+        "min_ratio": 0.25
+      },
+      "final_context_chars": 7455,
+      "final_context_tokens": 1864,
+      "retrieval": {
+        "chunks_raw": 0,
+        "entities_selected": 0
+      }
+    },
+    "llm_context": "## Available Documents in Corpus:\n\n1. **purchase_contract** (Date: 2025-04-30) [24 sections]\n2. **HOLDING TANK SERVICING CONTRACT** (Date: 2024-06-15) [34 sections]\n3. **contoso_lifts_invoice** (Date: 2015-12-17) [23 sections]\n4. **BUILDERS LIMITED WARRANTY** (Date: 2010-06-15) [104 sections]\n5. **PROPERTY MANAGEMENT AGREEMENT** (Date: 2010-06-15) [61 sections]\n\n---\n\n\n=== DOCUMENT: PROPERTY MANAGEMENT AGREEMENT ===\n\n[1] Owner understands and\nagrees that all finds may be placed in an interest bearing account and the interest shall accrue to\nthe benefit of the Rental Agent. (d) Provide Owner with a monthly statement of income and expenses for the property. To\nthe extent there are amounts available for distribution to the owner; agent shall distribute the\namount to the owner or as owner may direct.\n\n[3] In the event this agreement is terminated, or the\nproperty is sold, the Owner shall honor all confirmed reservations.\n\nRESPONSIBILITIES OF AGENT. Agent agrees to and shall:\n\n(a) Complete an initial property inspection and prepare a condition report of the unit. If\nnecessary, make recommendations to Owner and prepare unit for occupancy.\n\n\n\n=== DOCUMENT: HOLDING TANK SERVICING CONTRACT ===\n\n[2] The owner agrees to file a copy of this contract with the County of Washburn, as required under WI\nCode SPS 383.21(2)5. The owner agrees to have the holding tank(s) serviced by the pumper and guarantees to permit the\npumper to have access and to enter upon the property for the purpose of servicing the holding tank(s). The owner agrees to maintain the all-weather access road or drive so that the pumper can service the\nholding tank(s) with the pumping equipment.\n\n[8] The volumes in gallons of the contents pumped from the holding tank for each servicing;\n\ng. The disposal sites to which the contents from the holding tank were delivered. h. Condition of holding tank and components at time of inspection.\n\n[10] The owner further agrees to pay the pumper for a\ncharges incurred in servicing the holding tank(s) as mutually agreed upon by the owner and pumper. The pumper agrees to submit to the County, reports for the servicing of the holding tank(s) in manner\nspecified by the County. The pumper further agrees to include the following in the report:\n\na.\n\n[11] Contract Date: 2024-06-15\n\nThis contract is made between the Holding Tank Owner and the Pumper. The owner agrees to file a copy of this contract with the County of Washburn, as required under WI\nCode SPS 383.21(2)5.\n\n[13] h. Condition of holding tank and components at time of inspection. This agreement will remain in effect until the owner or pumper terminates this contract. In the event\nof a change in this contract, the owner agrees to file a copy of any changes to this service contract or a\ncopy of a new service contract with the municipality and the County named above within ten (10)\nbusiness days from the date of change to this service contract.\n\n[14] The disposal sites to which the contents from the holding tank were delivered. h. Condition of holding tank and components at time of inspection. This agreement will remain in effect until the owner or pumper terminates this contract.\n\n\n\n=== DOCUMENT: BUILDERS LIMITED WARRANTY ===\n\n[4] Each party shall be responsible to pay\nfor one-half (1/2) of the cost and fees of the argtration and their respective costs including attorneys' fees in any arbitration. The award of the\narbitrator(s) shall be in writing and shall set forth the factual and legal basis for the award. All statutes of limitation applicable to any Dispute shall apply to any proceeding in accordance with this\narbitration clause.\n\n[5] In consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended by Fabrikam Inc.\n,and is accepted and agreed\n(the Builder), whose address is 1820 Summit Ridge Dr., Pocatello, ID 83201\n\nto by Contoso Ltd.\n(the Buyer/Owner), who is the original\nBuyer/Owner of the property at the following address: 480 Willow Glen Drive, Chubbuck, ID 83202\n. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of the home ; the plumbing (including the septic tank if Builder\ninstalled), heating, and electric wiring systems; and the roof will be free of defects in materials or workmanship. Such Limited\nWarranty is subject to the terms hereof including specific provisions for other features of the home and appliances which provisions\nare controlling.\n\n[6] A. The Builder warrants for a period of one (1) year that by the standards of construction relevant in Pocatello/Chubbuck,\nIdaho, floors, ceilings, walls, and other internal structural components of the home ; the plumbing (including the septic tank if Builder\ninstalled), heating, and electric wiring systems; and the roof will be free of defects in materials or workmanship.\n\n[9] Any item listed as a non-warrantable condition on the Statement of Non-Warranted Conditions provided herewiththat is\nincorporated into this warranty. This expressed limited warranty is the only warranty provided by Builder. ALL OTHER WARRANTIES INCLUDING\nIMPLIED WARRANTIES WHICH INCLUDE (BUT IS NOT LIMITED TO) WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR\nPURPOSE, HABITABILITY, AND GOOD WORKMANSHIP AND ANY WARRANTY THAT MIGHT BE CONSTRUED TO COVER THE PRESENCE OF\nRADON OR OTHER ENVIRONMENTAL POLLUTANTS ARE HEREBY DISCLAIMED.\n\n[12] If any provision of this Arbitration Program is declared invalid by any court,\nthe remaining provisions shall not be affected thereby and shall remain fully enforceable. This Builder's Limited Warranty and Statement of Non-Warranted Conditions constitute the entire\nintegrated agreement and understanding between the parties, superseding all prior communications, oral or written. No statements,\npromises, or inducements made by either party or agent of either party, express or implied, shall be valid or binding if not contained in\nthis written agreement.\n\n[15] D. Damage resulting from ordinary wear and tear, abuse, neglect, or lack of due care or proper maintenance of the house or from non-\nresidential use of the home. E. Defects that result from characteristics common to the materials used, such as (but not limited to) warping and deflection of wood;\nfacing, chalking, and checking of paint from exposure to sunlight; cracks that occurred in the drying and curing of concrete, stucco, plaster,\nbricks, and masonry; drying,shrinking and cracking of caulking and weather stripping. F. Defects in materials or items installed by the Buyer/Owner or anyone other than the Builder or subcontractors selected by Builder.\n\n\n\n=== DOCUMENT: purchase_contract ===\n\n[7] This contract is effective upon mutual signature and initial payment. Contractor agrees to furnish and install the following:\n\n1 Vertical Platform Lift (AscendPro VPX200)\n\n1 Power system: 110 VAC 60 Hz up, 12 VAC down\n\n. 1 Custom cab 42\" x 62\" with Type 3 90-degree access\n\n1 Outdoor configuration package\n\n1 Aluminum door with plexi-glass inserts & automatic opener\n\n2 Flush-mount Hall Call stations (upper & lower)\n\nTotal contract price is $29,900.00, payable in 3 installments:\n\n$20,000.00 upon signing\n\n$7,000.00 upon delivery\n\n$2,900.00 upon completion\n\nAny changes must be agreed to in writing and will affect the next payment milestone.\n\n"
+  },
+  "raw_extractions": null
+}

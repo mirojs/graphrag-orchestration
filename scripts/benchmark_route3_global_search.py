@@ -228,6 +228,13 @@ def calculate_theme_coverage(response_text: str, expected_terms: List[str]) -> D
                 matched.append(term)
                 continue
 
+        # Special-case: "arbitration" should also match "arbitrator(s)",
+        # "arbitrate", etc. — all share the stem "arbitrat".
+        if term_norm == "arbitration":
+            if "arbitrat" in text_norm:
+                matched.append(term)
+                continue
+
         # --- Exact substring match ---
         if term_norm and term_norm in text_norm:
             matched.append(term)

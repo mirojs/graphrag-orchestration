@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -84,18 +85,53 @@ JUDGE_USER_PROMPT_TEMPLATE = """
 {actual}
 """
 
+def _get_aad_token() -> Optional[str]:
+    """Get Azure AD access token for Azure OpenAI."""
+    try:
+        result = subprocess.run(
+            [
+                "az", "account", "get-access-token",
+                "--resource", "https://cognitiveservices.azure.com",
+                "--query", "accessToken", "-o", "tsv",
+            ],
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout.strip()
+    except Exception as e:
+        logger.warning(f"Failed to get AAD token: {e}")
+        return None
+
+
 def _get_client() -> AzureOpenAI:
-    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "https://graphrag-openai-8476.openai.azure.com/")
     api_key = os.getenv("AZURE_OPENAI_API_KEY")
     api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
     
-    if not endpoint or not api_key:
-        raise ValueError(f"Missing Azure OpenAI credentials in {ENV_PATH}")
-        
-    return AzureOpenAI(
-        azure_endpoint=endpoint,
-        api_key=api_key,
-        api_version=api_version,
+    if not endpoint:
+        raise ValueError(f"Missing AZURE_OPENAI_ENDPOINT in {ENV_PATH}")
+
+    # Prefer API key if available, otherwise use Azure AD token
+    if api_key:
+        logger.info("Using API key authentication")
+        return AzureOpenAI(
+            azure_endpoint=endpoint,
+            api_key=api_key,
+            api_version=api_version,
+        )
+
+    # Try Azure AD token auth
+    token = _get_aad_token()
+    if token:
+        logger.info("Using Azure AD token authentication")
+        return AzureOpenAI(
+            azure_endpoint=endpoint,
+            azure_ad_token=token,
+            api_version=api_version,
+        )
+
+    raise ValueError(
+        f"No credentials found. Set AZURE_OPENAI_API_KEY in {ENV_PATH} "
+        "or login with 'az login' for token auth."
     )
 
 def evaluate_single_run(client: AzureOpenAI, deployment: str, query: str, expected: str, actual: str) -> Dict[str, Any]:
@@ -189,7 +225,7 @@ def main():
         
     # 2. Setup Client
     client = _get_client()
-    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4o") # Should default to what we set in ENV
+    deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5.1") # Match production deployment
     logger.info(f"Using Judge Model: {deployment_name}")
     
     # 3. Evaluate

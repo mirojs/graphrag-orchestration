@@ -319,7 +319,11 @@ class LazyGraphRAGIndexingPipeline:
         section_embed_stats = await self._embed_section_nodes(group_id)
         stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
         
-        # 4.6.1) Embed Section nodes structurally (title + path only, for Source 2 header matching).
+        # 4.6.1) Generate LLM summaries for Section nodes (enriches structural matching).
+        section_summary_stats = await self._generate_section_summaries(group_id)
+        stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
+
+        # 4.6.2) Embed Section nodes structurally (title + path + summary, for Source 2 header matching).
         structural_embed_stats = await self._embed_section_structural(group_id)
         stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
         
@@ -3455,26 +3459,143 @@ SUMMARY: <summary>"""
         
         return {"sections_embedded": len(updates)}
 
+    async def _generate_section_summaries(self, group_id: str) -> Dict[str, Any]:
+        """Generate LLM summaries for Section nodes.
+
+        Each summary is a concise 1-2 sentence description of the section's
+        content derived from its linked TextChunks.  Summaries are stored on
+        ``Section.summary`` and used by:
+        - ``_embed_section_structural()`` — richer embedding signal
+        - ``match_sections_by_llm()`` — LLM sees content context, not bare titles
+
+        Summaries are only generated for sections that have linked chunks and
+        do not already have a summary (idempotent).
+
+        Args:
+            group_id: Tenant identifier
+
+        Returns:
+            Stats dict with sections_summarised count
+        """
+        if self.llm is None:
+            logger.warning("section_summary_skipped_no_llm")
+            return {"sections_summarised": 0, "skipped": "no_llm"}
+
+        # Fetch sections without summaries, with their chunk text
+        with self.neo4j_store.get_retry_session() as session:
+            result = session.run(
+                """
+                MATCH (s:Section {group_id: $group_id})
+                WHERE s.summary IS NULL
+                OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
+                WITH s, collect(t.text)[0..6] AS chunk_texts
+                WHERE size(chunk_texts) > 0
+                RETURN s.id AS section_id,
+                       s.title AS title,
+                       s.path_key AS path_key,
+                       chunk_texts
+                """,
+                group_id=group_id,
+            )
+            sections = [
+                {
+                    "id": record["section_id"],
+                    "title": record["title"] or "",
+                    "path_key": record["path_key"] or "",
+                    "chunk_texts": record["chunk_texts"] or [],
+                }
+                for record in result
+            ]
+
+        if not sections:
+            return {"sections_summarised": 0}
+
+        logger.info(
+            "section_summary_starting",
+            extra={"group_id": group_id, "sections_to_summarise": len(sections)},
+        )
+
+        from llama_index.core.llms import ChatMessage
+
+        updates: list[dict] = []
+        for sec in sections:
+            # Build content sample from linked chunks
+            content_sample = "\n---\n".join(
+                ct[:600] for ct in sec["chunk_texts"] if ct
+            )[:3000]
+
+            prompt = (
+                f"You are summarising a document section for a retrieval index.\n\n"
+                f"Section title: {sec['title']}\n"
+                f"Section path:  {sec['path_key']}\n\n"
+                f"Content sample from this section:\n{content_sample}\n\n"
+                f"Write a concise 1-2 sentence summary describing what this "
+                f"section covers, including the key topics, terms, parties, "
+                f"time periods, and obligations mentioned.  Focus on details "
+                f"that would help a search system decide whether this section "
+                f"is relevant to a user query.  Return ONLY the summary text."
+            )
+
+            try:
+                response = await self.llm.achat(
+                    [ChatMessage(role="user", content=prompt)]
+                )
+                summary = response.message.content.strip()
+                if summary:
+                    updates.append({"id": sec["id"], "summary": summary})
+            except Exception as e:
+                logger.warning(
+                    "section_summary_llm_failed",
+                    extra={"section_id": sec["id"], "error": str(e)},
+                )
+
+        if not updates:
+            return {"sections_summarised": 0}
+
+        # Persist summaries
+        BATCH = 200
+        for i in range(0, len(updates), BATCH):
+            batch = updates[i : i + BATCH]
+            with self.neo4j_store.get_retry_session() as session:
+                session.run(
+                    """
+                    UNWIND $updates AS u
+                    MATCH (s:Section {id: u.id, group_id: $group_id})
+                    SET s.summary = u.summary
+                    """,
+                    updates=batch,
+                    group_id=group_id,
+                )
+
+        logger.info(
+            "section_summaries_generated",
+            extra={"group_id": group_id, "sections_summarised": len(updates)},
+        )
+        return {"sections_summarised": len(updates)}
+
     async def _embed_section_structural(self, group_id: str) -> Dict[str, Any]:
-        """Embed Section nodes structurally (title + path_key only) for Source 2.
+        """Embed Section nodes structurally (title + path_key + summary) for Source 2.
         
-        Creates structure-only embeddings that capture what the section *is about*
-        based purely on its header hierarchy, NOT its content. This enables
-        Source 2 (structural seed) to match queries against document structure
-        independently of Source 1 (content sentence search).
+        Creates structural embeddings that capture what the section *is about*
+        using its header hierarchy and an LLM-generated summary (if available).
+        This enables Source 2 (structural seed) to match queries against document
+        structure independently of Source 1 (content sentence search).
         
         Why separate from Section.embedding:
-        - Section.embedding includes chunk text samples → behaves like content search.
+        - Section.embedding includes raw chunk text → behaves like content search.
           Using it for Source 2 would return the same sections as Source 1 sentence
           search, providing no additive signal.
-        - structural_embedding embeds ONLY title + path_key → captures the document
-          author's description of what the section covers. A query about "warranty
-          coverage" would match a section titled "Overview of limited warranty terms
-          and coverage periods" even if no sentence in that section contains the
-          exact query terms.
+        - structural_embedding uses title + path_key + *summary* → captures the
+          document author's heading AND a concise distillation of the section's
+          content.  A query about "cancellation window deadlines" would match a
+          Purchase Contract section whose summary mentions "3 business day
+          cancellation window" even though the title is just "PURCHASE CONTRACT".
+        
+        If no summary exists (e.g., section has no linked chunks), falls back
+        to title + path_key only.
         
         Stored in: Section.structural_embedding (2048-dim Voyage)
-        Used by: search_sections_by_vector() for Route 5 Source 2 structural seeds.
+        Used by: match_sections_by_embedding() for Route 5 Source 2 structural seeds.
         
         Args:
             group_id: Tenant identifier
@@ -3486,13 +3607,14 @@ SUMMARY: <summary>"""
             logger.warning("section_structural_embedding_skipped_no_embedder")
             return {"sections_embedded": 0, "skipped": "no_embedder"}
         
-        # Fetch sections without structural embeddings
+        # Fetch sections without structural embeddings (include summary if present)
         with self.neo4j_store.get_retry_session() as session:
             result = session.run(
                 """
                 MATCH (s:Section {group_id: $group_id})
                 WHERE s.structural_embedding IS NULL
-                RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key
+                RETURN s.id AS section_id, s.title AS title,
+                       s.path_key AS path_key, s.summary AS summary
                 """,
                 group_id=group_id,
             )
@@ -3501,6 +3623,7 @@ SUMMARY: <summary>"""
                     "id": record["section_id"],
                     "title": record["title"] or "",
                     "path_key": record["path_key"] or "",
+                    "summary": record["summary"] or "",
                 }
                 for record in result
             ]
@@ -3508,16 +3631,21 @@ SUMMARY: <summary>"""
         if not sections_to_embed:
             return {"sections_embedded": 0}
         
-        # Build structural-only texts: title + path_key, NO chunk content
+        # Build structural texts: title + path_key + summary (when available)
         texts_to_embed = []
         for sec in sections_to_embed:
             parts = [p for p in [sec["title"], sec["path_key"]] if p]
             # Deduplicate: if title == last segment of path_key, use path_key only
             if sec["path_key"] and sec["title"] and sec["path_key"].endswith(sec["title"]):
-                combined = sec["path_key"]
+                header_text = sec["path_key"]
             else:
-                combined = " | ".join(parts) if parts else "[Untitled Section]"
-            texts_to_embed.append(combined)
+                header_text = " | ".join(parts) if parts else "[Untitled Section]"
+            # Append summary for richer semantic signal
+            if sec["summary"]:
+                combined = f"{header_text} — {sec['summary']}"
+            else:
+                combined = header_text
+            texts_to_embed.append(combined[:600])  # Cap for embedding model
         
         # Generate embeddings via Voyage (self.embedder is VoyageEmbedding in V2)
         try:

@@ -221,13 +221,14 @@ async def match_sections_by_llm(
         logger.warning("tier2_llm_no_client")
         return []
 
-    # Fetch section titles from Neo4j
+    # Fetch section titles + summaries from Neo4j
     try:
         cypher = """
         MATCH (s:Section {group_id: $group_id})
         OPTIONAL MATCH (s)<-[:IN_SECTION]-(chunk)
         WITH s, count(chunk) AS chunk_count
-        RETURN s.title AS title, s.id AS id, chunk_count
+        RETURN s.title AS title, s.id AS id, chunk_count,
+               s.summary AS summary
         ORDER BY s.title
         """
         async with async_neo4j._get_session() as session:
@@ -240,13 +241,17 @@ async def match_sections_by_llm(
     if not records:
         return []
 
-    # Build numbered list for LLM
+    # Build numbered list for LLM — include summary when available
     section_list = []
     title_map: Dict[int, str] = {}
     for i, r in enumerate(records, 1):
         title = r.get("title", "").strip()
         if title:
-            section_list.append(f"{i}. {title}")
+            summary = (r.get("summary") or "").strip()
+            if summary:
+                section_list.append(f"{i}. {title} — {summary}")
+            else:
+                section_list.append(f"{i}. {title}")
             title_map[i] = title
 
     if not section_list:
@@ -256,7 +261,7 @@ async def match_sections_by_llm(
 
 Query: "{query}"
 
-Here are all section headers available in the document corpus:
+Here are all section headers (with content summaries) available in the document corpus:
 {chr(10).join(section_list)}
 
 Which sections could contain information relevant to this query?
@@ -478,7 +483,7 @@ def build_unified_seeds(
     structural_entity_ids: List[str],
     thematic_entity_ids: List[str],
     profile: WeightProfile,
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], Dict[str, Any]]:
     """Build weighted seed dictionary for PPR teleportation vector.
 
     Each entity ID is assigned a per-seed weight = tier_weight / tier_size.
@@ -492,10 +497,13 @@ def build_unified_seeds(
         profile: Weight profile specifying w1/w2/w3.
 
     Returns:
-        Dict mapping entity_id → teleportation weight.
+        Tuple of:
+        - Dict mapping entity_id → teleportation weight.
+        - Dict with tier_contribution breakdown.
     """
     # Determine effective weights with redistribution
-    w1, w2, w3 = profile.w1, profile.w2, profile.w3
+    w1_orig, w2_orig, w3_orig = profile.w1, profile.w2, profile.w3
+    w1, w2, w3 = w1_orig, w2_orig, w3_orig
 
     # Redistribute from empty tiers
     if not structural_entity_ids and not thematic_entity_ids:
@@ -515,7 +523,7 @@ def build_unified_seeds(
 
     if not entity_seeds and not structural_entity_ids and not thematic_entity_ids:
         logger.warning("unified_seeds_all_tiers_empty")
-        return {}
+        return {}, {"error": "all_tiers_empty"}
 
     # Handle empty Tier 1 — redistribute to remaining tiers
     if not entity_seeds:
@@ -554,17 +562,60 @@ def build_unified_seeds(
     if total > 0:
         seeds = {k: v / total for k, v in seeds.items()}
 
+    # Compute per-tier contribution (sum of normalised weights per tier)
+    tier1_mass = sum(seeds.get(eid, 0) for eid in entity_seeds) if entity_seeds else 0.0
+    tier2_mass = sum(seeds.get(eid, 0) for eid in structural_entity_ids) if structural_entity_ids else 0.0
+    tier3_mass = sum(seeds.get(eid, 0) for eid in thematic_entity_ids) if thematic_entity_ids else 0.0
+
+    # Identify entities that appear in multiple tiers
+    t1_set = set(entity_seeds or [])
+    t2_set = set(structural_entity_ids or [])
+    t3_set = set(thematic_entity_ids or [])
+    overlap_12 = t1_set & t2_set
+    overlap_13 = t1_set & t3_set
+    overlap_23 = t2_set & t3_set
+    overlap_123 = t1_set & t2_set & t3_set
+
+    tier_contribution: Dict[str, Any] = {
+        "config_weights": {"w1": round(w1_orig, 3), "w2": round(w2_orig, 3), "w3": round(w3_orig, 3)},
+        "effective_weights": {"w1": round(w1, 3), "w2": round(w2, 3), "w3": round(w3, 3)},
+        "tier1_entity": {
+            "count": len(entity_seeds),
+            "weight_mass": round(tier1_mass, 4),
+            "per_seed_weight": round(w1 / len(entity_seeds), 5) if entity_seeds else 0,
+        },
+        "tier2_structural": {
+            "count": len(structural_entity_ids),
+            "weight_mass": round(tier2_mass, 4),
+            "per_seed_weight": round(w2 / len(structural_entity_ids), 5) if structural_entity_ids else 0,
+        },
+        "tier3_thematic": {
+            "count": len(thematic_entity_ids),
+            "weight_mass": round(tier3_mass, 4),
+            "per_seed_weight": round(w3 / len(thematic_entity_ids), 5) if thematic_entity_ids else 0,
+        },
+        "overlap": {
+            "tier1_tier2": len(overlap_12),
+            "tier1_tier3": len(overlap_13),
+            "tier2_tier3": len(overlap_23),
+            "all_three": len(overlap_123),
+        },
+    }
+
     logger.info(
         "unified_seeds_built",
         tier1_count=len(entity_seeds),
         tier2_count=len(structural_entity_ids),
         tier3_count=len(thematic_entity_ids),
         effective_weights=f"w1={w1:.2f} w2={w2:.2f} w3={w3:.2f}",
+        tier1_mass=round(tier1_mass, 4),
+        tier2_mass=round(tier2_mass, 4),
+        tier3_mass=round(tier3_mass, 4),
         unique_seeds=len(seeds),
         profile=profile.label,
     )
 
-    return seeds
+    return seeds, tier_contribution
 
 
 def compute_dynamic_damping(profile: WeightProfile) -> float:
@@ -759,7 +810,7 @@ async def resolve_all_tiers(
     # ------------------------------------------------------------------
     # Build unified weighted seed dict
     # ------------------------------------------------------------------
-    weighted_seeds = build_unified_seeds(
+    weighted_seeds, tier_contribution = build_unified_seeds(
         entity_seeds=tier1_ids,
         structural_entity_ids=tier2_ids,
         thematic_entity_ids=tier3_ids,
@@ -784,6 +835,7 @@ async def resolve_all_tiers(
         "tier1_ids": tier1_ids,
         "tier2_ids": tier2_ids,
         "tier3_ids": tier3_ids,
+        "tier_contribution": tier_contribution,
         "profile": profile,
         "community_data": community_data,
         "structural_sections": structural_sections,

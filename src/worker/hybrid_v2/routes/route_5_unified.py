@@ -431,6 +431,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
             "tier2_seed_count": len(resolver_result["tier2_ids"]),
             "tier3_seed_count": len(resolver_result["tier3_ids"]),
             "total_unique_seeds": len(weighted_seeds),
+            "tier_contribution": resolver_result.get("tier_contribution", {}),
             "structural_sections": structural_sections,
             "num_ppr_evidence": len(ppr_evidence),
             "sentence_evidence_count": len(sentence_evidence),

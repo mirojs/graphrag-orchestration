@@ -62,7 +62,11 @@ EXPECTED_TERMS: Dict[str, List[str]] = {
     "Q-G2": ["idaho", "florida", "hawaii", "arbitration", "governing law"],
     "Q-G3": ["29900", "25%", "10%", "installment", "commission", "$75", "$50", "tax"],
     "Q-G4": ["pumper", "county", "monthly statement", "income", "expenses", "volumes"],
-    "Q-G5": ["arbitration", "binding", "small claims", "legal fees", "contractor", "default"],
+    # Note: "default" removed — "customer default" is a breach consequence, not a
+    # dispute-resolution mechanism.  Previous matches were false positives where
+    # the LLM used "default" to mean "standard/primary forum".
+    # "attorneys' fees" added — compel-arbitration fee-shifting is a real mechanism.
+    "Q-G5": ["arbitration", "binding", "small claims", "legal fees", "contractor", "attorneys' fees"],
     "Q-G6": ["fabrikam", "contoso", "walt flood", "contoso lifts", "builder", "owner", "agent", "pumper"],
     "Q-G7": ["60 days", "written notice", "certified mail", "phone", "emergency"],
     "Q-G8": ["$300,000", "$25,000", "liability insurance", "hold harmless", "indemnify", "gross negligence"],
@@ -653,10 +657,15 @@ def main() -> int:
             )
         
         # Calculate theme coverage for Q-G* questions
+        # Use worst-case (min) across all runs to surface real regressions,
+        # not just LLM variance on a single run.
         theme_coverage_metrics = {}
         if q.qid.startswith("Q-G") and q.qid in EXPECTED_TERMS and runs:
-            actual_answer = runs[0].get("text", "")
-            theme_coverage_metrics = calculate_theme_coverage(actual_answer, EXPECTED_TERMS[q.qid])
+            per_run = [
+                calculate_theme_coverage(run.get("text", ""), EXPECTED_TERMS[q.qid])
+                for run in runs
+            ]
+            theme_coverage_metrics = min(per_run, key=lambda c: c["coverage"])
         
         results[scenario_name][q.qid] = {
             "qid": q.qid,

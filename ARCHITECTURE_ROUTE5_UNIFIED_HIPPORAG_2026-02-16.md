@@ -1,7 +1,7 @@
 # Architecture Proposal: Route 5 — Unified HippoRAG Search
 
 **Date:** 2026-02-16  
-**Status:** Proposal  
+**Status:** Implemented — initial benchmark validated 2026-02-18  
 **Origin:** Gemini discussion on HippoRAG 2 seed unification + Route 3/4 convergence analysis  
 **Prerequisite reading:** HANDOVER_2026-02-15.md, ANALYSIS_ROUTE3_FURTHER_IMPROVEMENT_2026-02-13.md, ANALYSIS_ROUTE3_IMPROVEMENTS_BENEFIT_ROUTE4_2026-02-12.md
 
@@ -443,7 +443,65 @@ The bottom-up approach (derive sections from sentence hits) has a potential blin
 
 ---
 
-## 7. Expected Outcomes
+## 7. Benchmark Results (Updated 2026-02-18)
+
+### 7.1 Route 3 Global Search Benchmark on Route 5 (unified_search)
+
+**Benchmark script:** `scripts/benchmark_route3_global_search.py --force-route unified_search --repeats 3`  
+**Run date:** 2026-02-18  
+**Results file:** `benchmarks/route5_global_search_20260218T160713Z.json` / `.md`  
+**Comparison baseline:** `benchmarks/route3_global_search_20260205T154441Z.json` (Route 3 global_search, same script, 3 repeats)
+
+#### Positive Questions (Q-G1 through Q-G10): Theme Coverage
+
+| Question | Route 3 Theme | Route 5 Theme | Route 3 Contain | Route 5 Contain | Route 3 p50 | Route 5 p50 |
+|---|---|---|---|---|---|---|
+| Q-G1 | 100% (7/7) | 100% (7/7) | 0.95 | 0.86 | 33.0s | 13.8s |
+| Q-G2 | 100% (5/5) | 100% (5/5) | 0.65 | 0.76 | 23.0s | 11.4s |
+| Q-G3 | 100% (8/8) | 100% (8/8) | — | 0.61 | 40.6s | 16.5s |
+| Q-G4 | 100% (6/6) | 100% (6/6) | 0.72 | 0.76 | 24.2s | 12.4s |
+| Q-G5 | 100% (6/6) | 100% (6/6) | 0.95 | 0.60 | 52.1s | 21.1s |
+| Q-G6 | 100% (8/8) | 100% (8/8) | 0.82 | 0.82 | 45.4s | 18.5s |
+| Q-G7 | 100% (5/5) | 100% (5/5) | 0.88 | 0.85 | 43.8s | 20.1s |
+| Q-G8 | 100% (6/6) | 100% (6/6) | 0.68 | 0.68 | 37.6s | 12.4s |
+| Q-G9 | 100% (6/6) | 100% (6/6) | 0.73 | 0.80 | 29.3s | 12.3s |
+| Q-G10 | 100% (6/6) | 100% (6/6) | — | 0.76 | 11.8s | 16.3s |
+| **Avg** | **100%** | **100%** | **0.80** | **0.75** | **34.1s** | **15.5s** |
+
+#### Negative Questions (Q-N): All PASS on Both Routes
+
+| Question | Route 3 | Route 5 | Route 3 p50 | Route 5 p50 |
+|---|---|---|---|---|
+| Q-N1 | PASS | PASS | 3.9s | 7.2s |
+| Q-N2 | PASS | PASS | 3.6s | 6.5s |
+| Q-N3 | PASS | PASS | 4.0s | 7.3s |
+| Q-N5 | PASS | PASS | 3.7s | 6.8s |
+| Q-N6 | PASS | PASS | 6.0s | 6.5s |
+| Q-N7 | PASS | PASS | 4.3s | 7.3s |
+| Q-N8 | PASS | PASS | 3.5s | 7.4s |
+| Q-N9 | PASS | PASS | 4.4s | 7.0s |
+| Q-N10 | PASS | PASS | 6.3s | 7.4s |
+
+#### Key Findings
+
+1. **Theme coverage: Equal (100% vs 100%).** Route 5 matches Route 3 perfectly — all 10 thematic questions hit every expected theme.
+2. **Containment: Slight decrease (0.80 → 0.75).** Route 5's answers contain slightly fewer ground-truth terms on average. Notable regressions on Q-G1 (0.95→0.86) and Q-G5 (0.95→0.60). Improvements on Q-G2 (0.65→0.76), Q-G4 (0.72→0.76), Q-G9 (0.73→0.80).
+3. **Latency: 2.2× faster (34.1s → 15.5s).** Route 5 eliminates the MAP step (10 parallel LLM calls), cutting latency by ~55%. Every positive question is faster except Q-G10 (11.8s→16.3s).
+4. **Negative tests: All pass on both routes.** No regression in false-positive detection.
+5. **Negative test latency: ~2× slower on Route 5** (4.4s avg → 7.1s avg). Route 5's unified pipeline runs more infrastructure than Route 3's early-exit path for negatives.
+
+### 7.2 Projected vs. Actual Comparison
+
+| Metric | Original Projection | Actual (Route 5) | Assessment |
+|---|---|---|---|
+| Theme coverage (Q-G) | >85% | **100%** | Exceeds projection |
+| Containment (Q-G avg) | — | **0.75** | Baseline for future improvements |
+| Latency (Q-G avg) | ~10-15s | **15.5s** | At upper bound of projection |
+| Negative test pass | 9/9 | **9/9** | As projected |
+| LLM calls per query | 2 | TBD (not measured) | — |
+| Cost per query | ~$0.01 | TBD (not measured) | — |
+
+### 7.3 Original Projections (Pre-Benchmark)
 
 | Metric | Route 3 (current) | Route 4 (current) | Route 5 (projected) |
 |---|---|---|---|

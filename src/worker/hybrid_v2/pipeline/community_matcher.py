@@ -13,6 +13,7 @@ Used in: Route 3 (Global Search), Route 5 (Unified Search — Tier 3 seeds)
 """
 
 from typing import List, Dict, Any, Optional, Tuple
+import hashlib
 import structlog
 import json
 from pathlib import Path
@@ -57,6 +58,7 @@ class CommunityMatcher:
         
         self._communities: List[Dict[str, Any]] = []
         self._community_embeddings: Dict[str, List[float]] = {}
+        self._summary_hashes: Dict[str, str] = {}  # community_id -> hash of text that was embedded
         self._loaded = False
         
         logger.info("community_matcher_created",
@@ -130,6 +132,7 @@ class CommunityMatcher:
                    coalesce(c.rank, 0.0) AS rank,
                    coalesce(c.level, 0) AS level,
                    c.embedding AS embedding,
+                   c.embedding_text_hash AS embedding_text_hash,
                    entity_names
             ORDER BY c.rank DESC
             """
@@ -143,6 +146,7 @@ class CommunityMatcher:
 
             communities = []
             embeddings = {}
+            summary_hashes = {}
             for rec in records:
                 community = {
                     "id": rec["id"],
@@ -155,9 +159,12 @@ class CommunityMatcher:
                 communities.append(community)
                 if rec["embedding"]:
                     embeddings[rec["id"]] = list(rec["embedding"])
+                if rec.get("embedding_text_hash"):
+                    summary_hashes[rec["id"]] = rec["embedding_text_hash"]
 
             self._communities = communities
             self._community_embeddings = embeddings
+            self._summary_hashes = summary_hashes
             self._loaded = True
 
             logger.info(
@@ -356,13 +363,35 @@ class CommunityMatcher:
     # Embedding Repair
     # ==================================================================
 
+    def _compute_text_hash(self, community: Dict[str, Any]) -> str:
+        """Compute hash of the text that would be embedded for a community.
+
+        Used to detect when a community's summary has changed but the stored
+        embedding is stale (e.g., generated from fallback entity-name text
+        before an LLM summary was added).
+
+        Returns:
+            First 16 chars of SHA256 hex digest of the embedding source text.
+        """
+        text = community.get("summary", "").strip()
+        if not text:
+            title = community.get("title", "")
+            enames = community.get("entity_names", [])
+            text = f"{title}. Entities: {', '.join(enames[:15])}" if enames else title
+        return hashlib.sha256(text.encode()).hexdigest()[:16]
+
     async def _ensure_embeddings(self) -> None:
-        """Re-embed community summaries whose stored embedding is missing or dimension-mismatched.
+        """Re-embed community summaries whose stored embedding is missing, dimension-mismatched, or stale.
 
         After this method completes, every community in ``self._communities``
         has a corresponding entry in ``self._community_embeddings`` whose
         dimension matches the current embedding model.  Communities that
         cannot be embedded (empty summary) are skipped.
+
+        Staleness detection: each embedding is paired with a hash of the text
+        that was embedded.  If the current text hash differs from the stored
+        hash (e.g., summary was updated from empty to an LLM summary), the
+        community is re-embedded even if the dimension is correct.
 
         Optionally writes the fresh embeddings back to Neo4j so future
         loads don't need another round-trip to the Voyage API.  Controlled
@@ -379,6 +408,7 @@ class CommunityMatcher:
 
         # Identify communities needing (re-)embedding
         needs_embedding: List[int] = []  # indices into self._communities
+        stale_count = 0
         for idx, community in enumerate(self._communities):
             cid = community.get("id", community.get("title", ""))
             existing = self._community_embeddings.get(cid)
@@ -386,6 +416,19 @@ class CommunityMatcher:
                 needs_embedding.append(idx)
             elif expected_dim and len(existing) != expected_dim:
                 needs_embedding.append(idx)
+            else:
+                # Check if the source text has changed since last embedding
+                current_hash = self._compute_text_hash(community)
+                stored_hash = self._summary_hashes.get(cid, "")
+                if current_hash != stored_hash:
+                    needs_embedding.append(idx)
+                    stale_count += 1
+                    logger.info(
+                        "community_embedding_stale_content_changed",
+                        community_id=cid,
+                        stored_hash=stored_hash[:8] if stored_hash else "(none)",
+                        current_hash=current_hash[:8],
+                    )
 
         if not needs_embedding:
             logger.info("ensure_embeddings_all_ok",
@@ -396,6 +439,7 @@ class CommunityMatcher:
         logger.info(
             "ensure_embeddings_re_embedding",
             communities_to_embed=len(needs_embedding),
+            stale_content=stale_count,
             total_communities=len(self._communities),
             expected_dim=expected_dim,
         )
@@ -454,27 +498,45 @@ class CommunityMatcher:
             await self._writeback_embeddings(cids_refreshed)
 
     async def _writeback_embeddings(self, community_ids: List[str]) -> None:
-        """Persist refreshed community embeddings back to Neo4j.
+        """Persist refreshed community embeddings and text hashes back to Neo4j.
 
         This avoids the need to re-embed on subsequent application restarts.
+        The text hash enables stale-embedding detection when summaries are
+        updated after the embedding was generated.
         """
         try:
             cypher = """
             UNWIND $rows AS row
             MATCH (c:Community {group_id: $group_id})
             WHERE c.id = row.id
-            SET c.embedding = row.embedding
+            SET c.embedding = row.embedding,
+                c.embedding_text_hash = row.text_hash
             """
-            rows = [
-                {"id": cid, "embedding": self._community_embeddings[cid]}
-                for cid in community_ids
-                if cid in self._community_embeddings
-            ]
+            rows = []
+            for cid in community_ids:
+                if cid not in self._community_embeddings:
+                    continue
+                # Find the community dict to compute the hash
+                community = next(
+                    (c for c in self._communities
+                     if c.get("id", c.get("title", "")) == cid),
+                    None,
+                )
+                text_hash = self._compute_text_hash(community) if community else ""
+                rows.append({
+                    "id": cid,
+                    "embedding": self._community_embeddings[cid],
+                    "text_hash": text_hash,
+                })
             if not rows:
                 return
 
             async with self.neo4j_service._get_session() as session:
                 await session.run(cypher, rows=rows, group_id=self.group_id)
+
+            # Update in-memory hashes
+            for row in rows:
+                self._summary_hashes[row["id"]] = row["text_hash"]
 
             logger.info("community_embeddings_written_back", count=len(rows))
         except Exception as e:

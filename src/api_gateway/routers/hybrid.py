@@ -174,6 +174,7 @@ class RouteEnum(str, Enum):
     GLOBAL_SEARCH = "global_search"     # Route 3: Thematic (LazyGraphRAG + HippoRAG)
     DRIFT_MULTI_HOP = "drift_multi_hop" # Route 4: Multi-hop iterative
     UNIFIED_SEARCH = "unified_search"   # Route 5: Unified hierarchical seed PPR
+    CONCEPT_SEARCH = "concept_search"   # Route 6: Concept search (direct community synthesis)
 
 
 class HybridQueryRequest(BaseModel):
@@ -492,6 +493,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                 RouteEnum.GLOBAL_SEARCH: QueryRoute.GLOBAL_SEARCH,
                 RouteEnum.DRIFT_MULTI_HOP: QueryRoute.DRIFT_MULTI_HOP,
                 RouteEnum.UNIFIED_SEARCH: QueryRoute.UNIFIED_SEARCH,
+                RouteEnum.CONCEPT_SEARCH: QueryRoute.CONCEPT_SEARCH,
             }
             forced_route = route_map[body.force_route]
             result = await pipeline.force_route(

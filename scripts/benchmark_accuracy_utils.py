@@ -111,10 +111,16 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
 
 
 def normalize_text(text: str) -> str:
-    """Normalize text for comparison."""
+    """Normalize text for comparison.
+
+    Keeps only alphanumeric, spaces, and currency/percentage symbols.
+    Strips punctuation like . : / - that would otherwise glue to tokens
+    and cause false mismatches (e.g. 'pumper' vs 'pumper.').
+    """
     t = (text or "").strip().lower()
     t = re.sub(r"\s+", " ", t)
-    t = re.sub(r"[^a-z0-9 $%./:-]", "", t)
+    t = re.sub(r"[^a-z0-9 $%]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
     return t
 
 

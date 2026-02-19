@@ -32,6 +32,7 @@ _ROUTE_TO_WEIGHT_PROFILE: Dict[str, str] = {
     "global_search": "thematic_survey",     # Community-heavy, broad coverage
     "drift_multi_hop": "multi_hop",         # Entity-heavy, graph traversal
     "unified_search": "balanced",           # Explicit Route 5 → balanced default
+    "concept_search": "thematic_survey",    # Route 6: community-driven concept search
 }
 
 
@@ -88,11 +89,12 @@ Respond with JSON: {{"route": "<route_name>", "reasoning": "<brief explanation>"
 
 
 class QueryRoute(Enum):
-    """Available routing destinations (4 routes)."""
+    """Available routing destinations (5 routes)."""
     LOCAL_SEARCH = "local_search"           # Route 2: Factual lookup & entity-focused (LazyGraphRAG)
     GLOBAL_SEARCH = "global_search"         # Route 3: Thematic (LazyGraphRAG + HippoRAG)
     DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 4: Iterative multi-hop reasoning
     UNIFIED_SEARCH = "unified_search"       # Route 5: Unified hierarchical seed PPR
+    CONCEPT_SEARCH = "concept_search"       # Route 6: Concept search (direct community synthesis)
     # Legacy alias for backward compatibility
     VECTOR_RAG = "local_search"             # Deprecated: maps to LOCAL_SEARCH
 

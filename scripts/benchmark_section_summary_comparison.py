@@ -98,25 +98,46 @@ def fetch_sections(driver, group_id: str) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Voyage embedding helpers
+# Voyage embedding helpers (uses voyageai client directly to avoid
+# importing the full pipeline which requires structlog, llama_index, etc.)
 # ---------------------------------------------------------------------------
 
+VOYAGE_MODEL = "voyage-context-3"
+VOYAGE_DIM = 2048
+
+
 def init_voyage():
-    """Initialize VoyageEmbedService."""
-    from src.worker.hybrid_v2.embeddings.voyage_embed import VoyageEmbedService
-    return VoyageEmbedService()
+    """Initialize native Voyage AI client."""
+    import voyageai
+    api_key = os.environ.get("VOYAGE_API_KEY")
+    if not api_key:
+        print("ERROR: VOYAGE_API_KEY must be set")
+        sys.exit(1)
+    return voyageai.Client(api_key=api_key)
 
 
 def embed_texts(voyage, texts: List[str]) -> List[List[float]]:
-    """Embed a batch of texts as documents."""
+    """Embed a batch of texts as documents via contextualized_embed."""
     if not texts:
         return []
-    return voyage.embed_documents(texts)
+    # contextualized_embed expects List[List[str]] — each inner list is
+    # chunks from one document. We treat each text as a single-chunk doc.
+    inputs = [[t] for t in texts]
+    result = voyage.contextualized_embed(
+        inputs, model=VOYAGE_MODEL, input_type="document",
+        output_dimension=VOYAGE_DIM,
+    )
+    # result.results[i].embeddings[0] for each document's single chunk
+    return [r.embeddings[0] for r in result.results]
 
 
 def embed_query(voyage, query: str) -> List[float]:
-    """Embed a single query string."""
-    return voyage.embed_query(query)
+    """Embed a single query string via contextualized_embed."""
+    result = voyage.contextualized_embed(
+        [[query]], model=VOYAGE_MODEL, input_type="query",
+        output_dimension=VOYAGE_DIM,
+    )
+    return result.results[0].embeddings[0]
 
 
 # ---------------------------------------------------------------------------

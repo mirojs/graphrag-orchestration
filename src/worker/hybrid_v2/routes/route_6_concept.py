@@ -456,9 +456,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             RETURN sent, score
         }
 
-        // Get parent chunk + document context
+        // Get parent chunk + document + section context
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
 
         // Expand via NEXT for local context (1 hop each direction)
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
@@ -468,6 +469,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                sent.text AS text,
                sent.source AS source,
                sent.section_path AS section_path,
+               sec.path_key AS section_key,
                sent.page AS page,
                chunk.text AS chunk_text,
                doc.title AS document_title,
@@ -527,7 +529,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 "score": r.get("score", 0),
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
-                "section_path": r.get("section_path", ""),
+                "section_path": r.get("section_key") or r.get("section_path", ""),
                 "page": r.get("page"),
                 "sentence_id": sid,
             })

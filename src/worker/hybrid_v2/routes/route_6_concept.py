@@ -281,6 +281,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 {
                     "text": s.get("text", "")[:200],
                     "source": s.get("document_title", ""),
+                    "section_path": s.get("section_path", ""),
                     "score": round(s.get("score", 0), 4),
                 }
                 for s in sentence_evidence[:10]

@@ -500,8 +500,8 @@ def main() -> int:
     ap.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis model (e.g. gpt-4.1, gpt-4.1-mini)")
     ap.add_argument("--include-context", action="store_true", default=False, help="Include full LLM context (retrieved evidence) in benchmark output for debugging")
     ap.add_argument("--force-route", default="global_search",
-                    choices=["global_search", "unified_search"],
-                    help="Route to force (global_search=Route3, unified_search=Route5)")
+                    choices=["global_search", "unified_search", "concept_search"],
+                    help="Route to force (global_search=Route3, unified_search=Route5, concept_search=Route6)")
     args = ap.parse_args()
 
     base_url = str(args.url).rstrip("/")
@@ -540,14 +540,26 @@ def main() -> int:
 
     # Single scenario: summary mode
     force_route = str(args.force_route)
-    route_label = "Route 5 (Unified)" if "unified" in force_route else "Route 3 (Global)"
-    scenario_name = f"hybrid_{'unified' if 'unified' in force_route else 'global'}_summary"
+    if "concept" in force_route:
+        route_label = "Route 6 (Concept)"
+        scenario_name = "hybrid_concept_summary"
+    elif "unified" in force_route:
+        route_label = "Route 5 (Unified)"
+        scenario_name = "hybrid_unified_summary"
+    else:
+        route_label = "Route 3 (Global)"
+        scenario_name = "hybrid_global_summary"
     response_type = "summary"
 
     stamp = _now_utc_stamp()
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
-    route_prefix = "route5" if "unified" in force_route else "route3"
+    if "concept" in force_route:
+        route_prefix = "route6"
+    elif "unified" in force_route:
+        route_prefix = "route5"
+    else:
+        route_prefix = "route3"
     out_json = out_dir / f"{route_prefix}_global_search_{stamp}.json"
     out_md = out_dir / f"{route_prefix}_global_search_{stamp}.md"
 

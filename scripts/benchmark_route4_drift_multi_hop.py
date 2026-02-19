@@ -274,6 +274,7 @@ def benchmark_scenario(
     ground_truth: Dict[str, GroundTruth],
     synthesis_model: Optional[str] = None,
     include_context: bool = False,
+    force_route: str = "drift_multi_hop",
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -302,7 +303,7 @@ def benchmark_scenario(
             payload = {
                 "group_id": group_id,
                 "query": query,
-                "force_route": "drift_multi_hop",  # Route 4
+                "force_route": force_route,
                 "response_type": response_type,
             }
             if synthesis_model:
@@ -537,6 +538,13 @@ def main():
         default=False,
         help="Include full LLM context (retrieved evidence) in benchmark output for debugging/replay",
     )
+    parser.add_argument(
+        "--force-route",
+        type=str,
+        default="drift_multi_hop",
+        choices=["drift_multi_hop", "concept_search"],
+        help="Route to force (drift_multi_hop=Route4, concept_search=Route6). Default: drift_multi_hop",
+    )
 
     args = parser.parse_args()
 
@@ -568,7 +576,9 @@ def main():
 
     # Scenario configuration
     response_type = args.response_type
-    scenario_name = f"hybrid_route4_{response_type}"
+    force_route = args.force_route
+    route_label = "Route 6 (Concept)" if force_route == "concept_search" else "Route 4 (Drift)"
+    scenario_name = f"hybrid_{force_route}_{response_type}"
 
     timestamp = _now_utc_stamp()
 
@@ -591,14 +601,16 @@ def main():
         ground_truth=ground_truth,
         synthesis_model=synthesis_model,
         include_context=include_context,
+        force_route=force_route,
     )
 
     # Write outputs
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_json = out_dir / f"route4_drift_multi_hop_{timestamp}.json"
-    out_md = out_dir / f"route4_drift_multi_hop_{timestamp}.md"
+    route_prefix = "route6" if force_route == "concept_search" else "route4"
+    out_json = out_dir / f"{route_prefix}_drift_multi_hop_{timestamp}.json"
+    out_md = out_dir / f"{route_prefix}_drift_multi_hop_{timestamp}.md"
 
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(
@@ -606,7 +618,7 @@ def main():
                 "timestamp": timestamp,
                 "api_base_url": args.url,
                 "group_id": args.group_id,
-                "force_route": "drift_multi_hop",
+                "force_route": force_route,
                 "response_type": response_type,
                 "synthesis_model": synthesis_model or "default (gpt-5.1)",
                 "scenario": result,

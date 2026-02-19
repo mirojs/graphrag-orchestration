@@ -6,14 +6,15 @@ Best for thematic/cross-document concept queries:
 - "Compare termination clauses across agreements"
 
 Architecture (3 steps, 1 LLM call):
-  1. Community Match + Sentence Search  (parallel)
+  1. Community Match + Sentence Search + Section Heading Search  (parallel)
   2. Denoise + Rerank sentence evidence
-  3. Synthesize community summaries + sentence evidence (single LLM call)
+  3. Synthesize community summaries + section headings + sentence evidence (single LLM call)
 
 Key difference from Route 3 (MAP-REDUCE):
 - No MAP phase: community summaries are passed directly to synthesis
 - 1 LLM call total instead of N+1
 - Community summaries provide thematic framing, not extracted claims
+- Section headings provide document structure (via structural_embedding)
 - Validated by benchmarks: MAP adds +41% latency for +1% containment
 
 Design rationale:
@@ -102,6 +103,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
+        section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
         logger.info(
             "route_6_start",
@@ -109,15 +111,19 @@ class ConceptSearchHandler(BaseRouteHandler):
             response_type=response_type,
             community_top_k=community_top_k,
             sentence_top_k=sentence_top_k,
+            section_top_k=section_top_k,
         )
 
         # ================================================================
-        # Step 1: Community Matching + Sentence Search (PARALLEL)
+        # Step 1: Community Match + Sentence Search + Section Heading Search (PARALLEL)
         # ================================================================
         t0 = time.perf_counter()
 
         sentence_search_task = asyncio.create_task(
             self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+        )
+        section_search_task = asyncio.create_task(
+            self._retrieve_section_headings(query, top_k=section_top_k)
         )
 
         matched_communities = await self.pipeline.community_matcher.match_communities(
@@ -143,6 +149,13 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_sentence_search_failed", error=str(e))
             sentence_evidence = []
 
+        # Await section heading search
+        try:
+            section_headings = await section_search_task
+        except Exception as e:
+            logger.warning("route6_section_search_failed", error=str(e))
+            section_headings = []
+
         timings_ms["step_1_parallel_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -151,6 +164,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "route6_step_1_complete",
             communities=len(community_data),
             sentences_raw=len(sentence_evidence),
+            sections=len(section_headings),
         )
 
         # ================================================================
@@ -183,9 +197,9 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         # ================================================================
-        # Negative detection: no communities AND no sentences
+        # Negative detection: no communities AND no sentences AND no sections
         # ================================================================
-        if not community_data and not sentence_evidence:
+        if not community_data and not sentence_evidence and not section_headings:
             logger.info("route_6_negative_no_evidence")
             return RouteResult(
                 response="The requested information was not found in the available documents.",
@@ -203,7 +217,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # ================================================================
         t0 = time.perf_counter()
         response_text = await self._synthesize(
-            query, community_data, sentence_evidence,
+            query, community_data, section_headings, sentence_evidence,
         )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
@@ -234,9 +248,14 @@ class ConceptSearchHandler(BaseRouteHandler):
                 c.get("title", "?"): round(s, 4)
                 for c, s in zip(community_data, community_scores)
             },
+            "matched_sections": [s.get("title", "?") for s in section_headings],
+            "section_scores": {
+                s.get("title", "?"): round(s.get("score", 0), 4)
+                for s in section_headings
+            },
             "sentence_evidence_count": len(sentence_evidence),
-            "route_description": "Concept search — direct community synthesis (v1)",
-            "version": "v1",
+            "route_description": "Concept search — direct community synthesis (v2 + section headings)",
+            "version": "v2",
         }
 
         if include_context:
@@ -247,6 +266,16 @@ class ConceptSearchHandler(BaseRouteHandler):
                     "score": round(s, 4),
                 }
                 for c, s in zip(community_data, community_scores)
+            ]
+            metadata["section_headings"] = [
+                {
+                    "title": s.get("title", ""),
+                    "summary": s.get("summary", "")[:300],
+                    "path_key": s.get("path_key", ""),
+                    "document_title": s.get("document_title", ""),
+                    "score": round(s.get("score", 0), 4),
+                }
+                for s in section_headings
             ]
             metadata["sentence_evidence"] = [
                 {
@@ -276,9 +305,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         self,
         query: str,
         communities: List[Dict[str, Any]],
+        section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
     ) -> str:
-        """Synthesize community summaries + sentence evidence in one LLM call.
+        """Synthesize community summaries + section headings + sentence evidence in one LLM call.
 
         Unlike Route 3's MAP-REDUCE, community summaries are passed directly
         as thematic context — no per-community claim extraction.
@@ -286,6 +316,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         Args:
             query: User query.
             communities: Matched community dicts with title/summary.
+            section_headings: Matched section dicts with title/summary/path_key.
             sentence_evidence: Denoised + reranked sentence dicts.
 
         Returns:
@@ -308,6 +339,30 @@ class ConceptSearchHandler(BaseRouteHandler):
         else:
             summaries_text = "(No thematic context available)"
 
+        # Format section headings as document structure context
+        if section_headings:
+            heading_lines = []
+            for i, sec in enumerate(section_headings, 1):
+                title = sec.get("title", f"Section {i}")
+                doc_title = sec.get("document_title", "")
+                summary = sec.get("summary", "").strip()
+                path_key = sec.get("path_key", "").strip()
+                parts = []
+                if doc_title:
+                    parts.append(f"[{doc_title}]")
+                if path_key and path_key != title:
+                    parts.append(f"{path_key} > {title}")
+                else:
+                    parts.append(title)
+                label = " ".join(parts)
+                if summary:
+                    heading_lines.append(f"{i}. **{label}**: {summary}")
+                else:
+                    heading_lines.append(f"{i}. **{label}**")
+            headings_text = "\n".join(heading_lines)
+        else:
+            headings_text = "(No document structure available)"
+
         # Format sentence evidence
         if sentence_evidence:
             evidence_lines = []
@@ -325,6 +380,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         prompt = CONCEPT_SYNTHESIS_PROMPT.format(
             query=query,
             community_summaries=summaries_text,
+            section_headings=headings_text,
             sentence_evidence=evidence_text,
         )
 
@@ -491,6 +547,104 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
         return evidence
+
+    # ==================================================================
+    # Section Heading Search (via structural_embedding, Route 5 Tier 2)
+    # ==================================================================
+
+    async def _retrieve_section_headings(
+        self,
+        query: str,
+        top_k: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve section headings via structural embedding cosine similarity.
+
+        Uses the same Section.structural_embedding (Voyage 2048d) that Route 5
+        Tier 2 uses.  This surfaces document structure like section titles
+        ("EXHIBIT A - SCOPE OF WORK") that sentence search misses because
+        headings are sparse text without sentence structure.
+
+        Args:
+            query: User query to embed and match against section headings.
+            top_k: Max sections to retrieve.
+
+        Returns:
+            List of section dicts with title, summary, path_key, document_title, score.
+        """
+        voyage_service = _get_voyage_service()
+        if not voyage_service:
+            logger.warning("route6_section_search_no_voyage_service")
+            return []
+
+        if not self.neo4j_driver:
+            logger.warning("route6_section_search_no_neo4j_driver")
+            return []
+
+        # 1. Embed query with Voyage
+        try:
+            query_embedding = voyage_service.embed_query(query)
+        except Exception as e:
+            logger.warning("route6_section_embed_failed", error=str(e))
+            return []
+
+        min_similarity = float(os.getenv("ROUTE6_SECTION_MIN_SIMILARITY", "0.25"))
+        group_id = self.group_id
+
+        # 2. Cosine similarity against Section.structural_embedding
+        cypher = """
+        MATCH (s:Section {group_id: $group_id})
+        WHERE s.structural_embedding IS NOT NULL
+        WITH s, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
+        WHERE score >= $min_similarity
+
+        // Get parent document title
+        OPTIONAL MATCH (s)<-[:HAS_SECTION]-(doc:Document)
+
+        RETURN s.title AS title,
+               s.summary AS summary,
+               s.path_key AS path_key,
+               s.depth AS depth,
+               doc.title AS document_title,
+               score
+        ORDER BY score DESC
+        LIMIT $top_k
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+            driver = self.neo4j_driver
+
+            def _run_search():
+                with driver.session() as session:
+                    records = session.run(
+                        cypher,
+                        query_embedding=query_embedding,
+                        group_id=group_id,
+                        min_similarity=min_similarity,
+                        top_k=top_k,
+                    )
+                    return [dict(r) for r in records]
+
+            results = await loop.run_in_executor(self._executor, _run_search)
+        except Exception as e:
+            logger.warning("route6_section_search_failed", error=str(e))
+            return []
+
+        if not results:
+            logger.info("route6_section_search_empty", query=query[:50])
+            return []
+
+        logger.info(
+            "route6_section_search_complete",
+            query=query[:50],
+            matched=len(results),
+            top_sections=[
+                (r.get("title", "?")[:40], round(r.get("score", 0), 4))
+                for r in results[:5]
+            ],
+        )
+
+        return results
 
     # ==================================================================
     # Document diversification (reused from Route 3)

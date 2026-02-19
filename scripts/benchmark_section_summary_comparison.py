@@ -54,6 +54,8 @@ DEFAULT_QUESTION_BANK = (
     / "QUESTION_BANK_5PDFS_2025-12-24.md"
 )
 
+AZURE_OPENAI_API_VERSION = "2024-10-21"
+
 # Sections expected in top-k results for known problem queries
 EXPECTED_SECTIONS: Dict[str, List[str]] = {
     "Q-D3": ["PURCHASE CONTRACT"],
@@ -95,6 +97,110 @@ def fetch_sections(driver, group_id: str) -> List[Dict[str, Any]]:
             group_id=group_id,
         )
         return [dict(r) for r in result]
+
+
+# ---------------------------------------------------------------------------
+# LLM summary generation (mirrors lazygraphrag_pipeline.py:3462-3574)
+# ---------------------------------------------------------------------------
+
+def get_azure_openai_token() -> str:
+    """Get Azure AD token for Azure OpenAI."""
+    import subprocess
+    result = subprocess.run(
+        ["az", "account", "get-access-token",
+         "--resource", "https://cognitiveservices.azure.com/",
+         "--query", "accessToken", "-o", "tsv"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        print(f"ERROR: az CLI token acquisition failed: {result.stderr}")
+        sys.exit(1)
+    return result.stdout.strip()
+
+
+def generate_llm_summaries(
+    sections: List[Dict[str, Any]],
+    endpoint: str,
+    deployment: str = "gpt-4.1",
+) -> Dict[str, str]:
+    """Generate LLM summaries for sections using Azure OpenAI.
+
+    Mirrors the prompt and logic from lazygraphrag_pipeline.py:3462-3574.
+    Uses the openai SDK directly (no llama_index dependency).
+    """
+    import openai
+
+    token = get_azure_openai_token()
+    client = openai.AzureOpenAI(
+        azure_endpoint=endpoint,
+        azure_ad_token=token,
+        api_version=AZURE_OPENAI_API_VERSION,
+    )
+
+    summaries: Dict[str, str] = {}
+    for i, sec in enumerate(sections):
+        sid = sec["section_id"]
+        title = sec["title"] or "(untitled)"
+        path_key = sec.get("path_key", "") or ""
+        chunk_texts = sec.get("chunk_texts") or []
+
+        if not chunk_texts:
+            continue
+
+        # Build content sample (matches pipeline: first 6 chunks, 600 chars each, 3000 total)
+        content_sample = "\n---\n".join(
+            ct[:600] for ct in chunk_texts[:6] if ct
+        )[:3000]
+
+        prompt = (
+            f"You are summarising a document section for a retrieval index.\n\n"
+            f"Section title: {title}\n"
+            f"Section path:  {path_key}\n\n"
+            f"Content sample from this section:\n{content_sample}\n\n"
+            f"Write a concise 1-2 sentence summary describing what this "
+            f"section covers, including the key topics, terms, parties, "
+            f"time periods, and obligations mentioned.  Focus on details "
+            f"that would help a search system decide whether this section "
+            f"is relevant to a user query.  Return ONLY the summary text."
+        )
+
+        try:
+            response = client.chat.completions.create(
+                model=deployment,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.0,
+                max_tokens=200,
+            )
+            summary = response.choices[0].message.content.strip()
+            if summary:
+                summaries[sid] = summary
+                print(f"  [{i+1}/{len(sections)}] {title[:40]}: {summary[:60]}...")
+        except Exception as e:
+            print(f"  [{i+1}/{len(sections)}] {title[:40]}: ERROR - {e}")
+
+    return summaries
+
+
+def store_llm_summaries(
+    driver,
+    group_id: str,
+    summaries: Dict[str, str],
+):
+    """Write LLM summaries back to Neo4j Section nodes."""
+    updates = [{"id": sid, "summary": s} for sid, s in summaries.items()]
+    if not updates:
+        return
+    with driver.session() as session:
+        session.run(
+            """
+            UNWIND $updates AS u
+            MATCH (s:Section {id: u.id, group_id: $group_id})
+            SET s.summary = u.summary
+            """,
+            updates=updates,
+            group_id=group_id,
+        )
+    print(f"  Stored {len(updates)} summaries in Neo4j")
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +548,19 @@ def main():
         "--prefixes", type=str, default="Q-D,Q-G",
         help="Comma-separated question prefixes to load (default: Q-D,Q-G)",
     )
+    parser.add_argument(
+        "--generate-llm-summaries", action="store_true",
+        help="Generate LLM summaries via Azure OpenAI and store in Neo4j",
+    )
+    parser.add_argument(
+        "--azure-endpoint", type=str,
+        default="https://graphrag-openai-8476.openai.azure.com/",
+        help="Azure OpenAI endpoint",
+    )
+    parser.add_argument(
+        "--azure-deployment", type=str, default="gpt-4.1",
+        help="Azure OpenAI deployment for summarization (default: gpt-4.1)",
+    )
     args = parser.parse_args()
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -466,13 +585,40 @@ def main():
     driver = connect_neo4j()
     try:
         sections = fetch_sections(driver, args.group_id)
+
+        if not sections:
+            print("ERROR: No sections found in Neo4j")
+            sys.exit(1)
+        print(f"  {len(sections)} sections fetched")
+
+        # ------------------------------------------------------------------
+        # Step 2.5: Generate LLM summaries if requested
+        # ------------------------------------------------------------------
+        if args.generate_llm_summaries:
+            sections_needing_summary = [
+                s for s in sections if not s.get("llm_summary")
+            ]
+            if sections_needing_summary:
+                print(f"\nGenerating LLM summaries for {len(sections_needing_summary)} sections...")
+                llm_summaries = generate_llm_summaries(
+                    sections_needing_summary,
+                    endpoint=args.azure_endpoint,
+                    deployment=args.azure_deployment,
+                )
+                print(f"  Generated {len(llm_summaries)} summaries")
+
+                # Store in Neo4j
+                store_llm_summaries(driver, args.group_id, llm_summaries)
+
+                # Update local section data with new summaries
+                for sec in sections:
+                    sid = sec["section_id"]
+                    if sid in llm_summaries:
+                        sec["llm_summary"] = llm_summaries[sid]
+            else:
+                print("\nAll sections already have LLM summaries — skipping generation")
     finally:
         driver.close()
-
-    if not sections:
-        print("ERROR: No sections found in Neo4j")
-        sys.exit(1)
-    print(f"  {len(sections)} sections fetched")
 
     # ------------------------------------------------------------------
     # Step 3: Generate NLP summaries

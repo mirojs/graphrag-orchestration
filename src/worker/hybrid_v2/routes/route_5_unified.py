@@ -128,28 +128,45 @@ class UnifiedSearchHandler(BaseRouteHandler):
         rerank_top_k = int(os.getenv("ROUTE5_RERANK_TOP_K", "15"))
 
         # ------------------------------------------------------------------
-        # Step 0: Select weight profile
+        # Step 0: Select seed mode + weight profile
         # ------------------------------------------------------------------
-        from ..pipeline.seed_resolver import (
-            DEFAULT_PROFILE,
-            WEIGHT_PROFILES,
-            WeightProfile,
-            resolve_all_tiers,
-        )
+        seed_mode = os.getenv("ROUTE5_SEED_MODE", "weighted").strip().lower()
 
-        # Priority: explicit parameter > env var > balanced default
-        profile_name = weight_profile or os.getenv("ROUTE5_WEIGHT_PROFILE", "balanced")
-        profile = WEIGHT_PROFILES.get(profile_name, DEFAULT_PROFILE)
+        if seed_mode == "flat":
+            from ..pipeline.seed_resolver import resolve_flat_seed_pool
 
-        logger.info(
-            "route_5_unified_start",
-            query=query[:80],
-            response_type=response_type,
-            profile=profile.label,
-            weights=f"w1={profile.w1} w2={profile.w2} w3={profile.w3}",
-            sentence_top_k=sentence_top_k,
-            ppr_top_k=ppr_top_k,
-        )
+            profile_label = "flat"
+            logger.info(
+                "route_5_unified_start",
+                query=query[:80],
+                response_type=response_type,
+                seed_mode="flat",
+                sentence_top_k=sentence_top_k,
+                ppr_top_k=ppr_top_k,
+            )
+        else:
+            from ..pipeline.seed_resolver import (
+                DEFAULT_PROFILE,
+                WEIGHT_PROFILES,
+                WeightProfile,
+                resolve_all_tiers,
+            )
+
+            # Priority: explicit parameter > env var > balanced default
+            profile_name = weight_profile or os.getenv("ROUTE5_WEIGHT_PROFILE", "balanced")
+            profile = WEIGHT_PROFILES.get(profile_name, DEFAULT_PROFILE)
+            profile_label = profile.label
+
+            logger.info(
+                "route_5_unified_start",
+                query=query[:80],
+                response_type=response_type,
+                seed_mode="weighted",
+                profile=profile.label,
+                weights=f"w1={profile.w1} w2={profile.w2} w3={profile.w3}",
+                sentence_top_k=sentence_top_k,
+                ppr_top_k=ppr_top_k,
+            )
 
         # ------------------------------------------------------------------
         # Step 1: Parallel — NER + Sentence search + Community match
@@ -213,7 +230,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
             )
 
         # ------------------------------------------------------------------
-        # Step 3: Resolve all three seed tiers (parallel internally)
+        # Step 3: Resolve seeds (mode-dependent)
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
 
@@ -221,65 +238,148 @@ class UnifiedSearchHandler(BaseRouteHandler):
             logger.error("route5_no_async_neo4j")
             return self._empty_result("AsyncNeo4jService required for Route 5")
 
-        resolver_result = await resolve_all_tiers(
-            query=query,
-            sentence_evidence=sentence_evidence,
-            async_neo4j=self._async_neo4j,
-            community_matcher=self.pipeline.community_matcher,
-            group_id=self.group_id,
-            entity_seed_names=entity_seed_names,
-            profile=profile,
-            folder_id=self.folder_id,
-            embed_model=self.pipeline.tracer.embed_model if hasattr(self.pipeline, 'tracer') else None,
-            llm_client=getattr(self.pipeline.disambiguator, 'llm', None) if hasattr(self.pipeline, 'disambiguator') else None,
-        )
+        # Variables populated by whichever branch runs
+        community_data: List[Dict[str, Any]] = []
+        structural_sections: List[str] = []
 
-        weighted_seeds = resolver_result["weighted_seeds"]
-        damping = resolver_result["damping"]
-        community_data = resolver_result["community_data"]
-        structural_sections = resolver_result["structural_sections"]
+        if seed_mode == "flat":
+            # Flat pool: NER + 3 addon seeds → deduped flat list
+            pool_result = await resolve_flat_seed_pool(
+                query=query,
+                sentence_evidence=sentence_evidence,
+                async_neo4j=self._async_neo4j,
+                community_matcher=self.pipeline.community_matcher,
+                group_id=self.group_id,
+                entity_seed_names=entity_seed_names,
+                folder_id=self.folder_id,
+                embed_model=self.pipeline.tracer.embed_model if hasattr(self.pipeline, 'tracer') else None,
+                llm_client=getattr(self.pipeline.disambiguator, 'llm', None) if hasattr(self.pipeline, 'disambiguator') else None,
+            )
 
-        timings_ms["step_3_seed_resolution_ms"] = int(
-            (time.perf_counter() - t0) * 1000
-        )
+            flat_seed_ids = pool_result["seed_ids"]
+            community_data = pool_result["community_data"]
+            structural_sections = pool_result["structural_sections"]
+            pool_metadata = pool_result["pool_metadata"]
 
-        logger.info(
-            "step_3_seed_resolution_complete",
-            total_seeds=len(weighted_seeds),
-            tier1=len(resolver_result["tier1_ids"]),
-            tier2=len(resolver_result["tier2_ids"]),
-            tier3=len(resolver_result["tier3_ids"]),
-            damping=damping,
-            structural_sections=structural_sections[:5],
-        )
+            timings_ms["step_3_seed_resolution_ms"] = int(
+                (time.perf_counter() - t0) * 1000
+            )
+
+            logger.info(
+                "step_3_flat_pool_complete",
+                pool_total=len(flat_seed_ids),
+                ner=len(pool_result["ner_ids"]),
+                community_addon=len(pool_result["community_addon_ids"]),
+                structural_addon=len(pool_result["structural_addon_ids"]),
+                semantic_addon=len(pool_result["semantic_addon_ids"]),
+                structural_sections=structural_sections[:5],
+            )
+
+        else:
+            # Weighted tiers: T1/T2/T3 → weighted teleportation vector
+            resolver_result = await resolve_all_tiers(
+                query=query,
+                sentence_evidence=sentence_evidence,
+                async_neo4j=self._async_neo4j,
+                community_matcher=self.pipeline.community_matcher,
+                group_id=self.group_id,
+                entity_seed_names=entity_seed_names,
+                profile=profile,
+                folder_id=self.folder_id,
+                embed_model=self.pipeline.tracer.embed_model if hasattr(self.pipeline, 'tracer') else None,
+                llm_client=getattr(self.pipeline.disambiguator, 'llm', None) if hasattr(self.pipeline, 'disambiguator') else None,
+            )
+
+            weighted_seeds = resolver_result["weighted_seeds"]
+            damping = resolver_result["damping"]
+            community_data = resolver_result["community_data"]
+            structural_sections = resolver_result["structural_sections"]
+
+            timings_ms["step_3_seed_resolution_ms"] = int(
+                (time.perf_counter() - t0) * 1000
+            )
+
+            logger.info(
+                "step_3_seed_resolution_complete",
+                total_seeds=len(weighted_seeds),
+                tier1=len(resolver_result["tier1_ids"]),
+                tier2=len(resolver_result["tier2_ids"]),
+                tier3=len(resolver_result["tier3_ids"]),
+                damping=damping,
+                structural_sections=structural_sections[:5],
+            )
 
         # ------------------------------------------------------------------
-        # Step 4: Unified PPR traversal (weighted seeds, dynamic damping)
+        # Step 4: PPR traversal (mode-dependent)
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
         ppr_evidence: List[Tuple[str, float]] = []
 
-        if weighted_seeds:
-            try:
-                ppr_evidence = await self._async_neo4j.personalized_pagerank_weighted(
-                    group_id=self.group_id,
-                    weighted_seeds=weighted_seeds,
-                    damping=damping,
-                    top_k=ppr_top_k,
-                    per_seed_limit=per_seed_limit,
-                    per_neighbor_limit=per_neighbor_limit,
-                )
-            except Exception as e:
-                logger.warning("route5_ppr_failed", error=str(e))
-                # Fall back to flat PPR with seed IDs
-                try:
-                    ppr_evidence = await self.pipeline.tracer.trace(
-                        query=query,
-                        seed_entities=entity_seed_names,
-                        top_k=ppr_top_k,
+        if seed_mode == "flat":
+            # Flat pool: equal weight, fixed damping 0.85
+            if flat_seed_ids:
+                # Cap seeds if pool is too large
+                max_flat_seeds = int(os.getenv("ROUTE5_MAX_FLAT_SEEDS", "30"))
+                if len(flat_seed_ids) > max_flat_seeds:
+                    # Priority order: NER > semantic > structural > community
+                    priority_ids: List[str] = []
+                    seen: set = set()
+                    for source in [
+                        pool_result["ner_ids"],
+                        pool_result["semantic_addon_ids"],
+                        pool_result["structural_addon_ids"],
+                        pool_result["community_addon_ids"],
+                    ]:
+                        for eid in source:
+                            if eid not in seen:
+                                priority_ids.append(eid)
+                                seen.add(eid)
+                    flat_seed_ids = priority_ids[:max_flat_seeds]
+                    logger.info(
+                        "flat_seeds_capped",
+                        original=pool_metadata["pool_total"],
+                        kept=len(flat_seed_ids),
                     )
-                except Exception as e2:
-                    logger.error("route5_ppr_fallback_failed", error=str(e2))
+
+                # Adaptive limits based on seed count
+                n_seeds = len(flat_seed_ids)
+                eff_per_seed = min(per_seed_limit, max(10, 500 // max(n_seeds, 1)))
+                eff_per_neighbor = min(per_neighbor_limit, max(5, 200 // max(n_seeds, 1)))
+
+                try:
+                    ppr_evidence = await self._async_neo4j.personalized_pagerank_native(
+                        group_id=self.group_id,
+                        seed_entity_ids=flat_seed_ids,
+                        damping=0.85,
+                        top_k=ppr_top_k,
+                        per_seed_limit=eff_per_seed,
+                        per_neighbor_limit=eff_per_neighbor,
+                    )
+                except Exception as e:
+                    logger.warning("route5_flat_ppr_failed", error=str(e))
+        else:
+            # Weighted PPR (existing logic)
+            if weighted_seeds:
+                try:
+                    ppr_evidence = await self._async_neo4j.personalized_pagerank_weighted(
+                        group_id=self.group_id,
+                        weighted_seeds=weighted_seeds,
+                        damping=damping,
+                        top_k=ppr_top_k,
+                        per_seed_limit=per_seed_limit,
+                        per_neighbor_limit=per_neighbor_limit,
+                    )
+                except Exception as e:
+                    logger.warning("route5_ppr_failed", error=str(e))
+                    # Fall back to flat PPR with seed IDs
+                    try:
+                        ppr_evidence = await self.pipeline.tracer.trace(
+                            query=query,
+                            seed_entities=entity_seed_names,
+                            top_k=ppr_top_k,
+                        )
+                    except Exception as e2:
+                        logger.error("route5_ppr_fallback_failed", error=str(e2))
 
         timings_ms["step_4_ppr_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -306,7 +406,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                     "negative_detection": True,
                     "detection_reason": "no_ppr_evidence_and_no_sentences",
                     "ner_entities": entity_seed_names,
-                    "profile": profile.label,
+                    "profile": profile_label,
                 },
             )
 
@@ -418,27 +518,47 @@ class UnifiedSearchHandler(BaseRouteHandler):
         # ------------------------------------------------------------------
         # Assemble metadata
         # ------------------------------------------------------------------
-        metadata: Dict[str, Any] = {
-            "profile": profile.label,
-            "weights": {
-                "w1_entity": profile.w1,
-                "w2_structural": profile.w2,
-                "w3_thematic": profile.w3,
-            },
-            "damping": damping,
-            "ner_entities": entity_seed_names,
-            "tier1_seed_count": len(resolver_result["tier1_ids"]),
-            "tier2_seed_count": len(resolver_result["tier2_ids"]),
-            "tier3_seed_count": len(resolver_result["tier3_ids"]),
-            "total_unique_seeds": len(weighted_seeds),
-            "tier_contribution": resolver_result.get("tier_contribution", {}),
-            "structural_sections": structural_sections,
-            "num_ppr_evidence": len(ppr_evidence),
-            "sentence_evidence_count": len(sentence_evidence),
-            "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
-            "route_description": "Unified hierarchical seed PPR (v5)",
-            "version": "v5.0",
-        }
+        if seed_mode == "flat":
+            metadata: Dict[str, Any] = {
+                "seed_mode": "flat",
+                "ner_entities": entity_seed_names,
+                "ner_seed_count": len(pool_result["ner_ids"]),
+                "community_addon_count": len(pool_result["community_addon_ids"]),
+                "structural_addon_count": len(pool_result["structural_addon_ids"]),
+                "semantic_addon_count": len(pool_result["semantic_addon_ids"]),
+                "pool_total_seeds": len(flat_seed_ids),
+                "pool_metadata": pool_metadata,
+                "damping": 0.85,
+                "structural_sections": structural_sections,
+                "num_ppr_evidence": len(ppr_evidence),
+                "sentence_evidence_count": len(sentence_evidence),
+                "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
+                "route_description": "Unified flat-pool PPR (v5-flat)",
+                "version": "v5.1-flat",
+            }
+        else:
+            metadata: Dict[str, Any] = {
+                "seed_mode": "weighted",
+                "profile": profile.label,
+                "weights": {
+                    "w1_entity": profile.w1,
+                    "w2_structural": profile.w2,
+                    "w3_thematic": profile.w3,
+                },
+                "damping": damping,
+                "ner_entities": entity_seed_names,
+                "tier1_seed_count": len(resolver_result["tier1_ids"]),
+                "tier2_seed_count": len(resolver_result["tier2_ids"]),
+                "tier3_seed_count": len(resolver_result["tier3_ids"]),
+                "total_unique_seeds": len(weighted_seeds),
+                "tier_contribution": resolver_result.get("tier_contribution", {}),
+                "structural_sections": structural_sections,
+                "num_ppr_evidence": len(ppr_evidence),
+                "sentence_evidence_count": len(sentence_evidence),
+                "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
+                "route_description": "Unified hierarchical seed PPR (v5)",
+                "version": "v5.0",
+            }
 
         if community_data:
             metadata["matched_communities"] = [

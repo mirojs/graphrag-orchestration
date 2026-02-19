@@ -840,3 +840,241 @@ async def resolve_all_tiers(
         "community_data": community_data,
         "structural_sections": structural_sections,
     }
+
+
+# =========================================================================
+# Flat-Pool Seed Resolution (ROUTE5_SEED_MODE=flat)
+# =========================================================================
+
+async def resolve_flat_seed_pool(
+    query: str,
+    sentence_evidence: List[Dict[str, Any]],
+    async_neo4j: "AsyncNeo4jService",
+    community_matcher: "CommunityMatcher",
+    group_id: str,
+    entity_seed_names: List[str],
+    folder_id: Optional[str] = None,
+    embed_model: Optional[Any] = None,
+    llm_client: Optional[Any] = None,
+    max_semantic_sentences: int = 10,
+) -> Dict[str, Any]:
+    """Resolve seeds into a flat deduped pool for equal-weight PPR.
+
+    NER is the primary seed source.  Three lightweight addons fill gaps
+    when NER underperforms (concept queries with zero named entities):
+
+      1. Community addon (macro): embedding-match communities, extract
+         member entities via BELONGS_TO.
+      2. Structural addon (meso): embedding-match sections, extract
+         entities via IN_SECTION → MENTIONS.
+      3. Semantic addon (micro): extract entities from top reranked
+         sentences via Sentence -[:MENTIONS]-> Entity.
+
+    All seeds go into a flat set (union, deduped by entity ID).
+    No per-seed weights — caller uses ``personalized_pagerank_native()``
+    with equal weight and fixed damping 0.85.
+
+    Returns dict with keys:
+        seed_ids: List[str] — flat deduped entity IDs for PPR
+        ner_ids, community_addon_ids, structural_addon_ids,
+        semantic_addon_ids: per-source ID lists for diagnostics
+        pool_metadata: Dict — counts, exclusive counts, overlaps
+        community_data: List[Dict] — matched communities for synthesis
+        structural_sections: List[str] — matched section titles
+    """
+
+    # ------------------------------------------------------------------
+    # NER: primary seed source (identical to _resolve_tier1 logic)
+    # ------------------------------------------------------------------
+    async def _resolve_ner() -> List[str]:
+        if not entity_seed_names:
+            return []
+        try:
+            result = await async_neo4j.get_entities_by_names(
+                group_id=group_id,
+                entity_names=entity_seed_names,
+                return_unmatched=True,
+            )
+            if isinstance(result, tuple):
+                seed_records, unmatched = result
+            else:
+                seed_records = result
+                unmatched = []
+
+            seed_ids = [r["id"] for r in seed_records]
+
+            # Strategy 6: vector fallback for unmatched seeds
+            if unmatched and embed_model:
+                for seed in unmatched:
+                    try:
+                        if hasattr(embed_model, 'get_query_embedding'):
+                            embedding = embed_model.get_query_embedding(seed)
+                        elif hasattr(embed_model, 'embed_query'):
+                            embedding = embed_model.embed_query(seed)
+                        else:
+                            continue
+                        if not embedding:
+                            continue
+                        index_name = (
+                            "entity_embedding_v2"
+                            if len(embedding) <= 2048
+                            else "entity_embedding"
+                        )
+                        vector_records = await async_neo4j.get_entities_by_vector_similarity(
+                            group_id=group_id,
+                            seed_text=seed,
+                            seed_embedding=embedding,
+                            top_k=3,
+                            index_name=index_name,
+                        )
+                        for rec in vector_records:
+                            if rec["id"] not in seed_ids:
+                                seed_ids.append(rec["id"])
+                    except Exception:
+                        continue
+
+            return seed_ids
+        except Exception as e:
+            logger.warning("flat_pool_ner_failed", error=str(e))
+            return []
+
+    # ------------------------------------------------------------------
+    # Community addon (macro): embedding-match communities → entities
+    # ------------------------------------------------------------------
+    async def _resolve_community_addon() -> Tuple[List[str], List[Dict[str, Any]]]:
+        try:
+            entity_records, community_data = await resolve_thematic_seeds(
+                community_matcher=community_matcher,
+                async_neo4j=async_neo4j,
+                query=query,
+                group_id=group_id,
+                folder_id=folder_id,
+            )
+            entity_ids = list({r["id"] for r in entity_records})
+            return entity_ids, community_data
+        except Exception as e:
+            logger.warning("flat_pool_community_addon_failed", error=str(e))
+            return [], []
+
+    # ------------------------------------------------------------------
+    # Structural addon (meso): embedding-match sections → entities
+    # ------------------------------------------------------------------
+    async def _resolve_structural_addon() -> Tuple[List[str], List[str]]:
+        try:
+            structural_sections = await match_sections_by_embedding(
+                async_neo4j=async_neo4j, query=query, group_id=group_id,
+            )
+            if not structural_sections:
+                return [], []
+            records = await resolve_section_entities(
+                async_neo4j=async_neo4j,
+                section_paths=structural_sections,
+                group_id=group_id,
+                folder_id=folder_id,
+            )
+            entity_ids = list({r["id"] for r in records})
+            return entity_ids, structural_sections
+        except Exception as e:
+            logger.warning("flat_pool_structural_addon_failed", error=str(e))
+            return [], []
+
+    # ------------------------------------------------------------------
+    # Semantic addon (micro): reranked sentences → MENTIONS → entities
+    # ------------------------------------------------------------------
+    async def _resolve_semantic_addon() -> List[str]:
+        if not sentence_evidence:
+            return []
+        sentence_ids = [
+            ev["sentence_id"]
+            for ev in sentence_evidence[:max_semantic_sentences]
+            if ev.get("sentence_id")
+        ]
+        if not sentence_ids:
+            return []
+        try:
+            records = await async_neo4j.get_entities_by_sentence_ids(
+                group_id=group_id,
+                sentence_ids=sentence_ids,
+            )
+            return list({r["id"] for r in records})
+        except Exception as e:
+            logger.warning("flat_pool_semantic_addon_failed", error=str(e))
+            return []
+
+    # ------------------------------------------------------------------
+    # Run all 4 sources in parallel
+    # ------------------------------------------------------------------
+    ner_task = asyncio.create_task(_resolve_ner())
+    community_task = asyncio.create_task(_resolve_community_addon())
+    structural_task = asyncio.create_task(_resolve_structural_addon())
+    semantic_task = asyncio.create_task(_resolve_semantic_addon())
+
+    ner_ids, (community_addon_ids, community_data), \
+        (structural_addon_ids, structural_sections), \
+        semantic_addon_ids = await asyncio.gather(
+            ner_task, community_task, structural_task, semantic_task
+        )
+
+    # ------------------------------------------------------------------
+    # Flat union (dedup by entity ID)
+    # ------------------------------------------------------------------
+    pool: set = set()
+    pool.update(ner_ids)
+    pool.update(community_addon_ids)
+    pool.update(structural_addon_ids)
+    pool.update(semantic_addon_ids)
+    seed_ids = list(pool)
+
+    # ------------------------------------------------------------------
+    # Build metadata for diagnostics
+    # ------------------------------------------------------------------
+    ner_set = set(ner_ids)
+    comm_set = set(community_addon_ids)
+    struct_set = set(structural_addon_ids)
+    sem_set = set(semantic_addon_ids)
+
+    pool_metadata = {
+        "mode": "flat",
+        "ner": {
+            "count": len(ner_ids),
+            "exclusive": len(ner_set - comm_set - struct_set - sem_set),
+        },
+        "community_addon": {
+            "count": len(community_addon_ids),
+            "exclusive": len(comm_set - ner_set - struct_set - sem_set),
+        },
+        "structural_addon": {
+            "count": len(structural_addon_ids),
+            "exclusive": len(struct_set - ner_set - comm_set - sem_set),
+        },
+        "semantic_addon": {
+            "count": len(semantic_addon_ids),
+            "exclusive": len(sem_set - ner_set - comm_set - struct_set),
+        },
+        "pool_total": len(seed_ids),
+        "overlap": {
+            "ner_community": len(ner_set & comm_set),
+            "ner_structural": len(ner_set & struct_set),
+            "ner_semantic": len(ner_set & sem_set),
+        },
+    }
+
+    logger.info(
+        "flat_seed_pool_resolved",
+        ner=len(ner_ids),
+        community_addon=len(community_addon_ids),
+        structural_addon=len(structural_addon_ids),
+        semantic_addon=len(semantic_addon_ids),
+        pool_total=len(seed_ids),
+    )
+
+    return {
+        "seed_ids": seed_ids,
+        "ner_ids": ner_ids,
+        "community_addon_ids": community_addon_ids,
+        "structural_addon_ids": structural_addon_ids,
+        "semantic_addon_ids": semantic_addon_ids,
+        "pool_metadata": pool_metadata,
+        "community_data": community_data,
+        "structural_sections": structural_sections,
+    }

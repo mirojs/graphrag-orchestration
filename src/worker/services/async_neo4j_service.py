@@ -1367,6 +1367,72 @@ class AsyncNeo4jService:
         return records
 
     # =========================================================================
+    # Sentence → Entity Resolution (Route 5 flat-pool semantic addon)
+    # =========================================================================
+
+    async def get_entities_by_sentence_ids(
+        self,
+        group_id: str,
+        sentence_ids: List[str],
+        max_entities_per_sentence: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Get entities mentioned by specific Sentence nodes.
+
+        Traverses ``(Sentence)-[:MENTIONS]->(Entity)`` edges created at
+        index time.  Used by Route 5 flat-pool semantic addon: reranked
+        sentences surface the entities they mention, providing micro-level
+        seed grounding without requiring NER to find them first.
+
+        Args:
+            group_id: Tenant isolation key.
+            sentence_ids: List of Sentence node IDs (from sentence search).
+            max_entities_per_sentence: Cap entities per sentence to prevent
+                high-mention sentences from flooding the pool.
+
+        Returns:
+            List of dicts with keys ``id``, ``name``, ``sentence_id``.
+            Entities are deduped across sentences.
+        """
+        if not sentence_ids:
+            return []
+
+        query = cypher25_query("""
+        UNWIND $sentence_ids AS sid
+        MATCH (s:Sentence {group_id: $group_id})
+        WHERE s.id = sid
+        MATCH (s)-[:MENTIONS]->(e)
+        WHERE e.group_id = $group_id
+          AND (e:Entity OR e:`__Entity__`)
+        WITH sid, e, coalesce(e.degree, 0) AS importance
+        ORDER BY importance DESC
+        WITH sid, collect({id: e.id, name: e.name})[..$max_per_sentence] AS top_entities
+        UNWIND top_entities AS te
+        RETURN DISTINCT te.id AS id, te.name AS name, sid AS sentence_id
+        """)
+
+        import time as _time
+        t0 = _time.perf_counter()
+        async with self._get_session() as session:
+            result = await session.run(
+                query,
+                group_id=group_id,
+                sentence_ids=sentence_ids,
+                max_per_sentence=max_entities_per_sentence,
+            )
+            records = await result.data()
+        dt_ms = int((_time.perf_counter() - t0) * 1000)
+        logger.info(
+            "entities_by_sentence_ids",
+            extra={
+                "group_id": group_id,
+                "num_sentences": len(sentence_ids),
+                "num_entities": len(records),
+                "duration_ms": dt_ms,
+            },
+        )
+        return records
+
+    # =========================================================================
     # Chunk Retrieval (Route 2/3)
     # =========================================================================
     

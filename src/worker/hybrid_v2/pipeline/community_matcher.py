@@ -407,11 +407,18 @@ class CommunityMatcher:
             c = self._communities[idx]
             text = c.get("summary", "").strip()
             if not text:
-                # Construct a synthetic summary from title + entities
+                # Fallback: construct synthetic summary from title + entities.
+                # This produces a lower-quality embedding than a real summary.
                 title = c.get("title", "")
                 enames = c.get("entity_names", [])
                 if title or enames:
                     text = f"{title}. Entities: {', '.join(enames[:15])}" if enames else title
+                    logger.warning(
+                        "community_embedding_fallback_no_summary",
+                        community_id=c.get("id", ""),
+                        community_title=title,
+                        entity_count=len(enames),
+                    )
             if not text:
                 continue  # Skip communities with no content to embed
             texts.append(text)

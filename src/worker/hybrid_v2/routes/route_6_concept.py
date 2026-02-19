@@ -339,40 +339,41 @@ class ConceptSearchHandler(BaseRouteHandler):
         else:
             summaries_text = "(No thematic context available)"
 
-        # Format section headings as document structure context
+        # Format section headings as compact document structure (titles only, no summaries)
         if section_headings:
             heading_lines = []
             for i, sec in enumerate(section_headings, 1):
                 title = sec.get("title", f"Section {i}")
                 doc_title = sec.get("document_title", "")
-                summary = sec.get("summary", "").strip()
                 path_key = sec.get("path_key", "").strip()
                 parts = []
                 if doc_title:
                     parts.append(f"[{doc_title}]")
                 if path_key and path_key != title:
-                    parts.append(f"{path_key} > {title}")
+                    parts.append(path_key)
                 else:
                     parts.append(title)
-                label = " ".join(parts)
-                if summary:
-                    heading_lines.append(f"{i}. **{label}**: {summary}")
-                else:
-                    heading_lines.append(f"{i}. **{label}**")
+                heading_lines.append(f"- {' '.join(parts)}")
             headings_text = "\n".join(heading_lines)
         else:
             headings_text = "(No document structure available)"
 
-        # Format sentence evidence
+        # Format sentence evidence (with section header labels)
         if sentence_evidence:
             evidence_lines = []
             for i, ev in enumerate(sentence_evidence, 1):
                 doc = ev.get("document_title", "Unknown")
                 score = ev.get("score", 0)
                 text = ev.get("text", "")
-                evidence_lines.append(
-                    f"{i}. [Source: {doc}, relevance: {score:.2f}] {text}"
-                )
+                section = ev.get("section_path", "")
+                if section:
+                    evidence_lines.append(
+                        f"{i}. [{doc} > {section}] {text}"
+                    )
+                else:
+                    evidence_lines.append(
+                        f"{i}. [{doc}] {text}"
+                    )
             evidence_text = "\n".join(evidence_lines)
         else:
             evidence_text = "(No document evidence retrieved)"

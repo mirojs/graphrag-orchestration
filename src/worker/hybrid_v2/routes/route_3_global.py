@@ -171,7 +171,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         if isinstance(all_results[0], list):
             sentence_evidence = all_results[0]
         elif isinstance(all_results[0], Exception):
-            logger.warning("sentence_search_failed", error=str(all_results[0]))
+            logger.error("sentence_search_failed", error=str(all_results[0]))
 
         map_results: List[Tuple[str, List[str]]] = []
         for r in all_results[1:]:
@@ -341,19 +341,21 @@ class GlobalSearchHandler(BaseRouteHandler):
         """
         voyage_service = _get_voyage_service()
         if not voyage_service:
-            logger.warning("route3_sentence_search_no_voyage_service")
-            return []
+            raise RuntimeError(
+                "Voyage service unavailable — sentence search cannot run. "
+                "Check VOYAGE_API_KEY and VOYAGE_V2_ENABLED in environment."
+            )
 
         if not self.neo4j_driver:
-            logger.warning("route3_sentence_search_no_neo4j_driver")
-            return []
+            raise RuntimeError(
+                "Neo4j driver unavailable — sentence search cannot run."
+            )
 
         # 1. Embed query with Voyage
         try:
             query_embedding = voyage_service.embed_query(query)
         except Exception as e:
-            logger.warning("route3_sentence_embed_failed", error=str(e))
-            return []
+            raise RuntimeError(f"Voyage embedding failed in sentence search: {e}") from e
 
         threshold = float(os.getenv("ROUTE3_SENTENCE_THRESHOLD", "0.2"))
         min_per_doc = int(os.getenv("ROUTE3_SENTENCE_MIN_PER_DOC", "2"))
@@ -416,8 +418,7 @@ class GlobalSearchHandler(BaseRouteHandler):
 
             results = await loop.run_in_executor(self._executor, _run_search)
         except Exception as e:
-            logger.warning("route3_sentence_search_failed", error=str(e))
-            return []
+            raise RuntimeError(f"Neo4j sentence vector search failed: {e}") from e
 
         if not results:
             logger.info("route3_sentence_search_empty", query=query[:50])

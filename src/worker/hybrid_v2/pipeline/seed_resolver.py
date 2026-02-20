@@ -318,7 +318,7 @@ async def resolve_section_entities(
     if folder_id is not None:
         folder_filter = (
             "AND EXISTS { "
-            "  MATCH (chunk)-[:PART_OF]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
+            "  MATCH (chunk)-[:PART_OF|IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
             "  WHERE f.id = $folder_id AND f.group_id = $group_id "
             "} "
         )
@@ -426,8 +426,8 @@ async def resolve_thematic_seeds(
                 folder_filter = (
                     "AND EXISTS { "
                     "  MATCH (chunk2)-[:MENTIONS]->(e) "
-                    "  WHERE (chunk2:Chunk OR chunk2:TextChunk) "
-                    "  MATCH (chunk2)-[:PART_OF]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
+                    "  WHERE (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`) "
+                    "  MATCH (chunk2)-[:PART_OF|IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
                     "  WHERE f.id = $folder_id AND f.group_id = $group_id "
                     "} "
                 )

@@ -523,18 +523,23 @@ class LazyGraphRAGIndexingPipeline:
             return normalized
 
         di_service = DocumentIntelligenceService()
-        extracted = await di_service.extract_documents(
-            group_id=group_id,
-            input_items=cast(List[str | Dict[str, Any]], url_inputs),
-            fail_fast=True,
-            model_strategy="auto",
-        )
 
-        # Build per-source DI units.
+        # Process one URL at a time to guarantee per-document isolation.
+        # Passing all URLs in one batch risks cross-document contamination: if Azure DI
+        # does not reliably tag returned LlamaDocuments with their source URL, the
+        # metadata-based by_source grouping below collapses all files under the empty-
+        # string key "", and none of them get matched back to their correct document.
+        # One call per URL eliminates that dependency entirely.
         by_source: Dict[str, List[LlamaDocument]] = {}
-        for d in extracted:
-            src = (d.metadata or {}).get("url", "")
-            by_source.setdefault(src, []).append(d)
+        for url in url_inputs:
+            url_extracted = await di_service.extract_documents(
+                group_id=group_id,
+                input_items=cast(List[str | Dict[str, Any]], [url]),
+                fail_fast=True,
+                model_strategy="auto",
+            )
+            by_source[url] = url_extracted
+            logger.info(f"DI extracted {len(url_extracted)} units for {url.split('/')[-1]}")
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:

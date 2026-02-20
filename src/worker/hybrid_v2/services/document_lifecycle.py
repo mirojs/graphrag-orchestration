@@ -320,7 +320,7 @@ class DocumentLifecycleService:
                         // Step 1: Collect chunk IDs and check folder relationship
                         MATCH (d:Document {id: $doc_id, group_id: $group_id})
                         OPTIONAL MATCH (d)-[folder_rel:IN_FOLDER]->(:Folder)
-                        OPTIONAL MATCH (c:TextChunk)-[:PART_OF]->(d)
+                        OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
                         WITH d, folder_rel IS NOT NULL AS had_folder, collect(c.id) AS chunk_ids, count(c) AS chunk_count
                         
                         // Step 2: Find entities mentioned ONLY in these chunks
@@ -338,7 +338,7 @@ class DocumentLifecycleService:
                         WITH d, had_folder, chunk_ids, chunk_count, collect(DISTINCT e) AS orphaned_entities
                         
                         // Step 3: Delete document and chunks
-                        OPTIONAL MATCH (c:TextChunk)-[:PART_OF]->(d)
+                        OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
                         WITH d, had_folder, chunk_ids, chunk_count, orphaned_entities, collect(c) AS chunks_to_delete
                         
                         // Delete sections
@@ -387,7 +387,7 @@ class DocumentLifecycleService:
                         """
                         MATCH (d:Document {id: $doc_id, group_id: $group_id})
                         OPTIONAL MATCH (d)-[folder_rel:IN_FOLDER]->(:Folder)
-                        OPTIONAL MATCH (c:TextChunk)-[:PART_OF]->(d)
+                        OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
                         OPTIONAL MATCH (s:Section {doc_id: d.id, group_id: $group_id})
                         WITH d, folder_rel IS NOT NULL AS had_folder, 
                              count(c) AS chunk_count, count(s) AS section_count, 

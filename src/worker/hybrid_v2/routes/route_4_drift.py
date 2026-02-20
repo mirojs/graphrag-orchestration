@@ -230,7 +230,7 @@ class DRIFTHandler(BaseRouteHandler):
             try:
                 sentence_evidence = await sentence_task
             except Exception as e:
-                logger.warning("stage_4.2_sentence_search_failed", error=str(e))
+                logger.error("stage_4.2_sentence_search_failed", error=str(e))
                 sentence_evidence = []
             if sentence_evidence:
                 sentence_evidence = self._denoise_sentences(sentence_evidence)
@@ -240,7 +240,7 @@ class DRIFTHandler(BaseRouteHandler):
                             query, sentence_evidence
                         )
                     except Exception as e:
-                        logger.warning("stage_4.2_sentence_rerank_failed", error=str(e))
+                        logger.error("stage_4.2_sentence_rerank_failed", error=str(e))
             logger.info("stage_4.2_sentence_search_complete",
                        num_sentences=len(sentence_evidence))
 
@@ -1166,19 +1166,21 @@ Sub-questions:"""
         """
         voyage_service = _get_voyage_service()
         if not voyage_service:
-            logger.warning("route4_sentence_search_no_voyage_service")
-            return []
+            raise RuntimeError(
+                "Voyage service unavailable — sentence search cannot run. "
+                "Check VOYAGE_API_KEY and VOYAGE_V2_ENABLED in environment."
+            )
 
         if not self.neo4j_driver:
-            logger.warning("route4_sentence_search_no_neo4j_driver")
-            return []
+            raise RuntimeError(
+                "Neo4j driver unavailable — sentence search cannot run."
+            )
 
         # 1. Embed query with Voyage
         try:
             query_embedding = voyage_service.embed_query(query)
         except Exception as e:
-            logger.warning("route4_sentence_embed_failed", error=str(e))
-            return []
+            raise RuntimeError(f"Voyage embedding failed in sentence search: {e}") from e
 
         threshold = float(os.getenv("ROUTE4_SENTENCE_THRESHOLD", "0.2"))
         group_id = self.group_id
@@ -1233,8 +1235,7 @@ Sub-questions:"""
 
             results = await loop.run_in_executor(self._executor, _run_search)
         except Exception as e:
-            logger.warning("route4_sentence_search_failed", error=str(e))
-            return []
+            raise RuntimeError(f"Neo4j sentence vector search failed: {e}") from e
 
         if not results:
             logger.info("route4_sentence_search_empty", query=query[:50])

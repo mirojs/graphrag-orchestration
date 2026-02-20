@@ -226,7 +226,7 @@ class DualIndexService:
         # Schema note: chunks often point to entities via (:TextChunk)-[:MENTIONS]->(:Entity)
 
         query = """
-        MATCH (c)-[m:MENTIONS]-(e)
+        MATCH (c)-[m:MENTIONS]->(e)
         WHERE (c:TextChunk OR c:Chunk OR c:__Node__)
             AND (e:Entity OR e:__Entity__)
             AND c.group_id = $group_id

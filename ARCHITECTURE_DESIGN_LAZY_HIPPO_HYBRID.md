@@ -2805,15 +2805,22 @@ python3 check_edges.py test-5pdfs-v2-fix2 --expected-docs 5
 python3 check_edges.py test-5pdfs-v2-fix2 --json
 ```
 
-**Deprecated Scripts (kept for reference only):**
+**Deprecated Scripts (archived to `scripts/archive/`):**
 
 | Script | Status | Notes |
 |--------|--------|-------|
 | `scripts/index_5pdfs_v2_cloud.py` | DEPRECATED | Uses API server; replaced by local script |
 | `scripts/index_5pdfs_v2_enhanced_examples.py` | DEPRECATED | One-off enhanced entity extraction test |
 | `scripts/index_4_new_groups_v2.py` | DEPRECATED | Multi-group batch script; replaced by local script |
-| `scripts/index_5pdfs.py` | DEPRECATED (V1) | Uses V1 OpenAI embeddings in `embedding` property |
+| `scripts/index_5pdfs.py` | ARCHIVED (V1) | V1 OpenAI embeddings, no Sentence nodes — **do not use** |
 | `scripts/index_5pdfs_knn_test.py` | DEPRECATED | One-off KNN parameter test |
+| `scripts/full_reindex_cypher25.py` | ARCHIVED (V1) | V1 `hybrid` pipeline, 512-token chunks, no Sentence skeleton — accidentally used for recent re-indexings, root cause of missing `Sentence→Entity` MENTIONS |
+| `scripts/index_with_hybrid_pipeline.py` | ARCHIVED (V1) | V1 `hybrid` pipeline, same missing-skeleton problem |
+| `scripts/reindex_with_cypher25.py` | ARCHIVED | Legacy `GraphService`-based, pre-hybrid architecture |
+| `run_reindex.sh` | ARCHIVED | Called `index_with_hybrid_pipeline.py` — wrong pipeline |
+| `run_reindex_correct.sh` | ARCHIVED | Despite the name, called `index_5pdfs.py` — also wrong |
+
+> **Root cause note (2026-02-20):** `full_reindex_cypher25.py` was mistakenly used during recent re-indexings instead of `index_5pdfs_v2_local.py`. This produced a graph with `TextChunk→Entity` MENTIONS only and zero `Sentence` nodes, causing Routes 3/4 sentence search to silently return empty and Route 5 semantic addon to return 0 seeds. All scripts using the V1 `hybrid` pipeline are now archived to `scripts/archive/`.
 
 **V2 Configuration (.env):**
 
@@ -2822,6 +2829,11 @@ VOYAGE_V2_ENABLED=true
 VOYAGE_API_KEY=your-api-key
 VOYAGE_MODEL_NAME=voyage-context-3
 VOYAGE_EMBEDDING_DIM=2048
+
+# Sentence skeleton — MUST be True to create Sentence nodes
+# (required for Routes 3/4 sentence search and Route 5 semantic addon)
+SKELETON_ENRICHMENT_ENABLED=True
+SKELETON_MIN_SENTENCE_WORDS=3        # lowered from 5 in commit 019e584 — do not increase
 ```
 
 **How Users Know Indexing Is Done:**

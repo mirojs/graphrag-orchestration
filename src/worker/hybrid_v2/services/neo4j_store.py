@@ -1697,7 +1697,10 @@ class Neo4jStoreV3:
             
             # Create Table nodes for chunks with table data
             self._create_table_nodes(group_id, chunks)
-            
+
+            # Create SignatureBlock nodes for chunks with signature block data
+            self._create_signature_block_nodes(group_id, chunks)
+
             # Create KeyValue nodes for chunks with KVP data
             self._create_keyvalue_nodes(group_id, chunks)
             
@@ -1766,7 +1769,67 @@ class Neo4jStoreV3:
         
         with self.get_retry_session() as session:
             session.run(query, tables=tables_to_create, group_id=group_id)
-    
+
+    def _create_signature_block_nodes(self, group_id: str, chunks: List[TextChunk]) -> None:
+        """Create SignatureBlock nodes from chunks with signature block metadata.
+
+        Mirrors _create_table_nodes() — same relationship pattern:
+          (:SignatureBlock)-[:IN_CHUNK]->(:TextChunk)
+          (:SignatureBlock)-[:IN_SECTION]->(:Section)   [optional]
+          (:SignatureBlock)-[:IN_DOCUMENT]->(:Document)
+        """
+        blocks_to_create = []
+
+        for chunk in chunks:
+            if not chunk.metadata or not isinstance(chunk.metadata, dict):
+                continue
+            sig = chunk.metadata.get("signature_block")
+            if not sig or not isinstance(sig, dict):
+                continue
+            parties = sig.get("parties") or []
+            if not parties:
+                continue
+
+            block_id = f"{chunk.id}_sigblock"
+            blocks_to_create.append({
+                "id": block_id,
+                "chunk_id": chunk.id,
+                "parties": json.dumps(parties),
+                "signed_date": sig.get("signed_date") or "",
+                "party_count": len(parties),
+            })
+
+        if not blocks_to_create:
+            return
+
+        query = """
+        UNWIND $blocks AS b
+        MERGE (sb:SignatureBlock {id: b.id, group_id: $group_id})
+        SET sb.parties     = b.parties,
+            sb.signed_date = b.signed_date,
+            sb.party_count = b.party_count,
+            sb.updated_at  = datetime()
+
+        WITH sb, b
+        MATCH (chunk:TextChunk {id: b.chunk_id, group_id: $group_id})
+        MERGE (sb)-[:IN_CHUNK]->(chunk)
+
+        WITH sb, chunk
+        OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
+        FOREACH (_ IN CASE WHEN s IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sb)-[:IN_SECTION]->(s)
+        )
+
+        WITH sb, chunk
+        MATCH (chunk)-[:IN_DOCUMENT]->(d:Document)
+        MERGE (sb)-[:IN_DOCUMENT]->(d)
+
+        RETURN count(sb) AS count
+        """
+
+        with self.get_retry_session() as session:
+            session.run(query, blocks=blocks_to_create, group_id=group_id)
+
     def _create_keyvalue_nodes(self, group_id: str, chunks: List[TextChunk]) -> None:
         """Create KeyValue nodes from chunks with key-value pair metadata.
         
@@ -2186,6 +2249,7 @@ class Neo4jStoreV3:
             ("key_values", "MATCH (kv:KeyValue {group_id: $group_id}) DETACH DELETE kv RETURN count(*) AS count"),
             ("key_value_pairs", "MATCH (kvp:KeyValuePair {group_id: $group_id}) DETACH DELETE kvp RETURN count(*) AS count"),
             ("tables", "MATCH (t:Table {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
+            ("signature_blocks", "MATCH (sb:SignatureBlock {group_id: $group_id}) DETACH DELETE sb RETURN count(*) AS count"),
             ("sections", "MATCH (s:Section {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("sentences", "MATCH (s:Sentence {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("figures", "MATCH (f:Figure {group_id: $group_id}) DETACH DELETE f RETURN count(*) AS count"),

@@ -409,13 +409,15 @@ def _write_analysis_md(
     api_base_url: str,
     group_id: str,
     scenario_results: List[Dict[str, Any]],
+    force_route: str = "drift_multi_hop",
 ):
+    route_label = "Route 6 (Concept)" if force_route == "concept_search" else ("Route 5 (Unified)" if force_route == "unified_search" else "Route 4 (Drift Multi-Hop)")
     with out_md.open("w", encoding="utf-8") as f:
-        f.write(f"# Route 4 (Drift Multi-Hop) Repeatability Benchmark\n\n")
+        f.write(f"# {route_label} Repeatability Benchmark\n\n")
         f.write(f"**Timestamp:** {timestamp}\n\n")
         f.write(f"**API Base URL:** `{api_base_url}`\n\n")
         f.write(f"**Group ID:** `{group_id}`\n\n")
-        f.write(f"**Force Route:** `drift_multi_hop`\n\n")
+        f.write(f"**Force Route:** `{force_route}`\n\n")
         f.write("---\n\n")
 
         for sc in scenario_results:
@@ -542,8 +544,8 @@ def main():
         "--force-route",
         type=str,
         default="drift_multi_hop",
-        choices=["drift_multi_hop", "concept_search"],
-        help="Route to force (drift_multi_hop=Route4, concept_search=Route6). Default: drift_multi_hop",
+        choices=["drift_multi_hop", "concept_search", "unified_search"],
+        help="Route to force (drift_multi_hop=Route4, concept_search=Route6, unified_search=Route5). Default: drift_multi_hop",
     )
 
     args = parser.parse_args()
@@ -577,7 +579,7 @@ def main():
     # Scenario configuration
     response_type = args.response_type
     force_route = args.force_route
-    route_label = "Route 6 (Concept)" if force_route == "concept_search" else "Route 4 (Drift)"
+    route_label = "Route 6 (Concept)" if force_route == "concept_search" else ("Route 5 (Unified)" if force_route == "unified_search" else "Route 4 (Drift)")
     scenario_name = f"hybrid_{force_route}_{response_type}"
 
     timestamp = _now_utc_stamp()
@@ -608,7 +610,7 @@ def main():
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    route_prefix = "route6" if force_route == "concept_search" else "route4"
+    route_prefix = "route6" if force_route == "concept_search" else ("route5" if force_route == "unified_search" else "route4")
     out_json = out_dir / f"{route_prefix}_drift_multi_hop_{timestamp}.json"
     out_md = out_dir / f"{route_prefix}_drift_multi_hop_{timestamp}.md"
 
@@ -634,6 +636,7 @@ def main():
         api_base_url=args.url,
         group_id=args.group_id,
         scenario_results=[result],
+        force_route=force_route,
     )
 
     print(f"\n{'=' * 70}")

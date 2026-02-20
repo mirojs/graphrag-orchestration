@@ -148,9 +148,10 @@ def extract_sentences_from_chunk(
       section_path, page, confidence, tokens, parent_text
 
     Sources:
-      - "paragraph": spaCy-split body text sentences
-      - "table_row": linearized DI table rows
-      - "figure_caption": DI figure caption text
+      - "paragraph":       spaCy-split body text sentences
+      - "table_row":       linearized DI table rows
+      - "figure_caption":  DI figure caption text
+      - "signature_party": party name + role from DI signature block
     """
     sentences: List[Dict[str, Any]] = []
     idx = 0
@@ -240,6 +241,56 @@ def extract_sentences_from_chunk(
                 "page": fig.get("page_number") or metadata.get("page_number"),
                 "confidence": 1.0,
                 "tokens": len(caption.split()),
+                "parent_text": "",
+            })
+            idx += 1
+
+    # ─── Source D: Signature block parties from DI metadata ──────
+    sig_block = metadata.get("signature_block", {})
+    if isinstance(sig_block, dict):
+        parties = sig_block.get("parties", [])
+        signed_date = sig_block.get("signed_date", "")
+        for party in parties:
+            if not isinstance(party, dict):
+                continue
+            role = (party.get("role") or "").strip()
+            name = (party.get("name") or "").strip()
+            if not name:
+                continue
+            # Linearise as "role: name" so NER sees a meaningful phrase;
+            # falls back to just the name when role is absent.
+            text = f"{role}: {name}" if role else name
+            if _is_noise_sentence(text, min_chars=5, min_words=1):
+                continue
+            sentences.append({
+                "id": f"{chunk_id}_sent_{idx}",
+                "text": text,
+                "chunk_id": chunk_id,
+                "document_id": document_id,
+                "source": "signature_party",
+                "index_in_chunk": idx,
+                "section_path": section_path,
+                "page": metadata.get("page_number"),
+                "confidence": 1.0,
+                "tokens": len(text.split()),
+                "parent_text": "",  # Signature parties are self-contained
+            })
+            idx += 1
+        # Emit the signed date as a standalone sentence so extract_document_date()
+        # and the NER pipeline both see it regardless of body-text coverage.
+        if signed_date:
+            date_text = f"Signed date: {signed_date}"
+            sentences.append({
+                "id": f"{chunk_id}_sent_{idx}",
+                "text": date_text,
+                "chunk_id": chunk_id,
+                "document_id": document_id,
+                "source": "signature_party",
+                "index_in_chunk": idx,
+                "section_path": section_path,
+                "page": metadata.get("page_number"),
+                "confidence": 1.0,
+                "tokens": len(date_text.split()),
                 "parent_text": "",
             })
             idx += 1

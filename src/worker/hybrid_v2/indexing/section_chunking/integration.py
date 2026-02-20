@@ -164,8 +164,26 @@ async def chunk_di_units_section_aware(
         doc_title=doc_title,
         doc_language=language,
     )
-    
-    return section_chunks_to_text_chunks(section_chunks)
+
+    text_chunks = section_chunks_to_text_chunks(section_chunks)
+
+    # Propagate document-level add-on metadata from the first DI unit into the
+    # first TextChunk.  The section chunker only copies explicit structural fields
+    # (tables, key_value_pairs, page_number, …) to SectionNode; richer document-
+    # scoped metadata (signature_block, barcodes, figures, selection_marks) stored
+    # by _build_section_aware_documents on the first DI unit would otherwise be
+    # lost.  This mirrors the is_first_unit pattern in document_intelligence_service.
+    _DOC_LEVEL_KEYS = ("signature_block", "barcodes", "figures", "selection_marks")
+    if text_chunks:
+        for unit in di_units:
+            first_meta = getattr(unit, "metadata", None) or {}
+            extras = {k: first_meta[k] for k in _DOC_LEVEL_KEYS if k in first_meta and first_meta[k]}
+            if extras:
+                if isinstance(text_chunks[0].metadata, dict):
+                    text_chunks[0].metadata.update(extras)
+                break  # Only first unit carries doc-level metadata
+
+    return text_chunks
 
 
 def get_summary_chunks(text_chunks: List[TextChunk]) -> List[TextChunk]:

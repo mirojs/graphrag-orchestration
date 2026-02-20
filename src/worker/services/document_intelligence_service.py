@@ -34,7 +34,7 @@ import re
 from bisect import bisect_left, bisect_right
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import unquote
 
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
@@ -617,48 +617,39 @@ class DocumentIntelligenceService:
         content: str,
     ) -> List[Dict[str, Any]]:
         """Extract sentence-level text with synthesized polygon geometry.
-        
+
         Uses paragraph spans from Azure DI as sentence boundaries and
         synthesizes multi-polygon geometry for each sentence.
-        
+
         Args:
             result: AnalyzeResult from Document Intelligence
             word_index: Pre-built WordOffsetIndex for word lookups
             content: Full document content string
-            
+
         Returns:
             List of sentence dicts with text, offset, length, page, confidence, polygons
         """
         sentences: List[Dict[str, Any]] = []
-        
+
         paragraphs = getattr(result, "paragraphs", None) or []
-        
+
         for para in paragraphs:
-            # Skip headers/footers
             role = getattr(para, "role", "") or ""
             if role in ("pageHeader", "pageFooter", "pageNumber"):
                 continue
-            
-            para_content = getattr(para, "content", "") or ""
-            if len(para_content.strip()) < 5:
+
+            para_content = (getattr(para, "content", "") or "").strip()
+            if len(para_content) < 5:
                 continue
-            
-            # Get span information
+
             spans = getattr(para, "spans", None) or []
             if not spans:
                 continue
-            
-            # Use first span for offset/length
-            first_span = spans[0]
-            offset = getattr(first_span, "offset", 0) or 0
-            length = getattr(first_span, "length", len(para_content)) or len(para_content)
-            
-            # For long paragraphs, split into sentences
-            # Simple sentence detection: split on ". ", "? ", "! "
-            import re
+            offset = getattr(spans[0], "offset", 0) or 0
+
             sentence_pattern = r'(?<=[.!?])\s+'
             sentence_texts = re.split(sentence_pattern, para_content)
-            
+
             current_offset = offset
             for sent_text in sentence_texts:
                 sent_text = sent_text.strip()
@@ -881,9 +872,205 @@ class DocumentIntelligenceService:
         
         return "BARCODE"
 
+    # Typed-signature anchor patterns (fallback when no handwritten spans).
+    _SIG_ANCHOR_RE = re.compile(
+        r'^[_\-=\s]{5,}$'                                    # underscore/dash signature line
+        r'|Signed\s+this'                                     # "Signed this DD/MM/YYYY:"
+        r'|(?:Authorized\s+Representative|Contractor|Owner'
+        r'|Tenant|Landlord|Buyer|Seller|Lessee|Lessor'
+        r'|Client|Vendor|Service\s+Provider)\s*:',
+        re.IGNORECASE,
+    )
+
+    def _detect_signature_block_paragraphs(self, result: AnalyzeResult) -> Set[int]:
+        """Detect paragraph indices within signature block windows.
+
+        Primary path: uses Azure DI is_handwritten style spans as spatial anchors.
+        Fallback path: uses keyword/pattern anchors for typed/printed signature blocks
+        (underscore lines, "Signed this …", role-label lines).
+
+        Each anchor is bounded by the nearest sectionHeading/title above and
+        pageFooter/pageNumber below (in document span-offset order).
+
+        Returns:
+            Set of paragraph indices that belong to a signature block window.
+        """
+        paragraphs = getattr(result, "paragraphs", None) or []
+        if not paragraphs:
+            return set()
+
+        # 1a. Collect start-offsets of every handwritten span as primary anchors.
+        anchor_offsets: List[int] = []
+        used_fallback = False
+        styles = getattr(result, "styles", None) or []
+        for style in styles:
+            if not getattr(style, "is_handwritten", False):
+                continue
+            for span in (getattr(style, "spans", None) or []):
+                offset = getattr(span, "offset", 0) or 0
+                length = getattr(span, "length", 0) or 0
+                if length > 0:
+                    anchor_offsets.append(offset)
+
+        # 1b. Fallback: scan paragraph text for typed-signature patterns.
+        if not anchor_offsets:
+            used_fallback = True
+            for para in paragraphs:
+                spans = getattr(para, "spans", None) or []
+                if not spans:
+                    continue
+                text = (getattr(para, "content", "") or "").strip()
+                if self._SIG_ANCHOR_RE.search(text):
+                    offset = getattr(spans[0], "offset", 0) or 0
+                    anchor_offsets.append(offset)
+
+        if not anchor_offsets:
+            return set()
+
+        # 2. Build a sorted index: (para_idx, first_span_offset, role).
+        indexed: List[Tuple[int, int, str]] = []
+        for i, para in enumerate(paragraphs):
+            spans = getattr(para, "spans", None) or []
+            if not spans:
+                continue
+            first_offset = getattr(spans[0], "offset", 0) or 0
+            role = getattr(para, "role", "") or ""
+            indexed.append((i, first_offset, role))
+        indexed.sort(key=lambda x: x[1])
+        sorted_offsets = [x[1] for x in indexed]
+
+        sig_indices: Set[int] = set()
+
+        for anchor_offset in anchor_offsets:
+            # Locate the nearest paragraph at-or-before this anchor.
+            pos = bisect_right(sorted_offsets, anchor_offset) - 1
+            if pos < 0:
+                pos = 0
+
+            # Upward bound: for handwritten spans expand to nearest section heading;
+            # for typed (fallback) anchors start the window AT the anchor paragraph
+            # to avoid sweeping in preceding scope/content paragraphs.
+            if used_fallback:
+                upper_pos = pos  # include only anchor + paragraphs below it
+            else:
+                upper_pos = 0
+                for j in range(pos, -1, -1):
+                    _, _, role = indexed[j]
+                    if role in ("sectionHeading", "title"):
+                        upper_pos = j + 1  # exclusive: start after the heading
+                        break
+
+            # Walk downward → stop at first pageFooter or pageNumber.
+            lower_pos = len(indexed)
+            for j in range(pos, len(indexed)):
+                _, _, role = indexed[j]
+                if role in ("pageFooter", "pageNumber"):
+                    lower_pos = j  # exclusive: stop before the footer
+                    break
+
+            # Tag every non-boundary paragraph in the window.
+            for j in range(upper_pos, lower_pos):
+                para_idx, _, role = indexed[j]
+                if role not in ("pageHeader", "pageFooter", "pageNumber"):
+                    sig_indices.add(para_idx)
+
+        logger.debug(
+            "signature_block_detection",
+            extra={"anchors": len(anchor_offsets), "sig_paragraphs": len(sig_indices)},
+        )
+        return sig_indices
+
+    def _extract_signature_block_metadata(self, result: AnalyzeResult) -> Dict[str, Any]:
+        """Extract structured metadata from signature block windows.
+
+        Parses paragraphs identified by _detect_signature_block_paragraphs() into:
+          - parties:     [{role, name}]  e.g. [{role: "Authorized Representative",
+                                                 name: "Contoso Ltd."}]
+          - signed_date: ISO-ish date string extracted from "Signed this …" lines
+          - raw_lines:   raw text lines in offset order (for audit / full-text search)
+
+        Returns an empty dict when no signature block is found.
+        """
+        sig_indices = self._detect_signature_block_paragraphs(result)
+        if not sig_indices:
+            return {}
+
+        paragraphs = getattr(result, "paragraphs", None) or []
+
+        # Collect the relevant paragraphs in document (span) order.
+        sig_paras: List[Tuple[int, str]] = []
+        for i, para in enumerate(paragraphs):
+            if i not in sig_indices:
+                continue
+            text = (getattr(para, "content", "") or "").strip()
+            if not text:
+                continue
+            spans = getattr(para, "spans", None) or []
+            if not spans:
+                continue
+            sig_paras.append((getattr(spans[0], "offset", 0) or 0, text))
+        sig_paras.sort(key=lambda x: x[0])
+
+        # Parsing patterns.
+        _UNDERSCORE = re.compile(r'^[_\-=\s]{3,}$')
+        _SIGNED_DATE = re.compile(
+            r'(?:signed\s+this|date[d]?)\s*[:=]?\s*(.+)', re.IGNORECASE
+        )
+        _DATE_EXTRACT = [
+            re.compile(r'(\d{2}/\d{2}/\d{4})'),   # 04/30/2025
+            re.compile(r'(\d{4}-\d{2}-\d{2})'),   # 2025-04-30
+            re.compile(r'(\d{1,2}\s+\w+\s+\d{4})'), # 30 April 2025
+        ]
+        _ROLE_LABEL = re.compile(
+            r'authorized\s+(representative|signatory)|by\s*:|title\s*:|print\s+name\s*:',
+            re.IGNORECASE,
+        )
+
+        parties: List[Dict[str, str]] = []
+        signed_date = ""
+        raw_lines = [text for _, text in sig_paras]
+        pending_role = ""
+
+        for _, text in sig_paras:
+            if _UNDERSCORE.match(text):
+                continue
+
+            m = _SIGNED_DATE.match(text)
+            if m:
+                candidate = m.group(1).strip()
+                for pat in _DATE_EXTRACT:
+                    dm = pat.search(candidate)
+                    if dm:
+                        signed_date = dm.group(1)
+                        break
+                continue
+
+            if _ROLE_LABEL.search(text):
+                m_role = _ROLE_LABEL.search(text)
+                remainder = text[m_role.end():].strip().lstrip(':').strip()
+                if remainder and 2 < len(remainder) < 80:
+                    # Inline "Authorized Representative Contoso Ltd." form.
+                    role_str = text[:m_role.end()].strip()
+                    parties.append({"role": role_str, "name": remainder})
+                    pending_role = ""
+                else:
+                    # Role-only line; name follows on the next paragraph.
+                    pending_role = text[:m_role.end()].strip() or text
+                continue
+
+            # Short remaining text → entity name (company/person).
+            if len(text) < 80:
+                parties.append({"role": pending_role or "Signatory", "name": text})
+                pending_role = ""
+
+        if not parties and not signed_date:
+            return {}
+
+        return {"parties": parties, "signed_date": signed_date, "raw_lines": raw_lines}
+
     def _extract_languages(self, result: AnalyzeResult) -> List[Dict[str, Any]]:
         """Extract detected languages from document (FREE add-on).
-        
+
         Returns:
             List of language dicts with locale, confidence, span_count, and spans
             (spans contain offset/length for sentence-level boundaries)
@@ -1132,14 +1319,20 @@ class DocumentIntelligenceService:
     def _build_markdown_from_result(self, result: AnalyzeResult) -> str:
         """
         Convert Document Intelligence result to clean markdown.
-        
+
         Uses paragraph roles to create proper heading hierarchy.
         Includes tables as markdown tables.
+        Signature block content (detected via is_handwritten style spans) is
+        appended under a "## Signature Block" heading so party names and dates
+        are visible in the stored document text.
         """
         lines = []
 
         if result.paragraphs:
-            for para in result.paragraphs:
+            sig_block_indices = self._detect_signature_block_paragraphs(result)
+            in_sig_block = False
+
+            for i, para in enumerate(result.paragraphs):
                 if not para.content:
                     continue
 
@@ -1148,7 +1341,17 @@ class DocumentIntelligenceService:
 
                 # Skip headers/footers (noise)
                 if role in ("pageHeader", "pageFooter", "pageNumber"):
+                    in_sig_block = False
                     continue
+
+                is_sig = i in sig_block_indices
+
+                # Emit a heading when first entering a signature block window.
+                if is_sig and not in_sig_block:
+                    lines.append("\n## Signature Block")
+                    in_sig_block = True
+                elif not is_sig:
+                    in_sig_block = False
 
                 # Convert to markdown based on role
                 if role == "title":
@@ -1394,6 +1597,7 @@ class DocumentIntelligenceService:
         languages = self._extract_languages(result)
         figures = self._extract_figures(result)
         selection_marks = self._extract_selection_marks(result)
+        signature_block = self._extract_signature_block_metadata(result)
         
         # Build section_idx -> KVPs mapping for efficient lookup
         kvps_by_section: Dict[int, List[Dict[str, Any]]] = {}
@@ -1559,6 +1763,7 @@ class DocumentIntelligenceService:
                             **({"languages": languages} if is_first_unit and languages else {}),
                             **({"figures": figures} if is_first_unit and figures else {}),
                             **({"selection_marks": selection_marks} if is_first_unit and selection_marks else {}),
+                            **({"signature_block": signature_block} if is_first_unit and signature_block else {}),
                         },
                     )
                 )
@@ -1844,6 +2049,7 @@ class DocumentIntelligenceService:
                                 # Document-level metadata (first unit only)
                                 **({"languages": page_languages} if is_first_page_unit and page_languages else {}),
                                 **({"barcodes": page_barcodes} if is_first_page_unit and page_barcodes else {}),
+                                **({"signature_block": self._extract_signature_block_metadata(result)} if is_first_page_unit else {}),
                             },
                         )
                         documents.append(doc)

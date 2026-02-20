@@ -63,6 +63,15 @@ _FORM_LABEL_RE = re.compile(
     re.MULTILINE,
 )
 
+# Regex for FILLED label-value lines:
+#   "By: Contoso Ltd." or "Authorized Representative: Fabrikam Inc."
+#   Matches "Label: NonBlankValue" where the value starts with a word character.
+#   Used to exempt short-but-meaningful structured content from _min_content_penalty.
+_FILLED_LABEL_RE = re.compile(
+    r"[A-Za-z][A-Za-z0-9 /\-()']+:\s*[A-Za-z0-9]",
+    re.MULTILINE,
+)
+
 # Regex for purely structural/whitespace content
 _STRUCTURAL_RE = re.compile(r"^[\s_\-\.=:|\[\]()]+$")
 
@@ -102,12 +111,21 @@ def _bare_heading_penalty(text: str) -> float:
 
 
 def _min_content_penalty(text: str) -> float:
-    """Return penalty if estimated token count is below MIN_CONTENT_TOKENS."""
+    """Return penalty if estimated token count is below MIN_CONTENT_TOKENS.
+
+    Short chunks that contain filled label-value pairs (e.g. ``By: Contoso Ltd.``,
+    ``Authorized Representative: Fabrikam Inc.``) are **exempted** from the
+    penalty.  These are entity-bearing structured content (signature blocks,
+    populated form fields), not blank form noise.
+    """
     # Fast estimate: ~4 chars per token
     est_tokens = len(text) // 4 + 1
-    if est_tokens < MIN_CONTENT_TOKENS:
-        return LOW_CONTENT_PENALTY
-    return 1.0
+    if est_tokens >= MIN_CONTENT_TOKENS:
+        return 1.0
+    # Exempt short chunks that carry filled structured content
+    if _FILLED_LABEL_RE.search(text):
+        return 1.0
+    return LOW_CONTENT_PENALTY
 
 
 # ---------------------------------------------------------------------------

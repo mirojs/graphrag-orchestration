@@ -757,12 +757,28 @@ class UnifiedSearchHandler(BaseRouteHandler):
     def _denoise_sentences(
         evidence: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        """Remove noisy, non-informative sentences before reranking."""
+        """Remove noisy, non-informative sentences before reranking.
+
+        Structured source sentences (signature_party, table_row, figure_caption)
+        are curated by the ingestion pipeline and bypass all content-heuristic
+        filters.  Only residual HTML is stripped from them.
+        """
         cleaned: List[Dict[str, Any]] = []
+
+        # Sources that carry structured content — skip content heuristics.
+        _STRUCTURED_SOURCES = {"signature_party", "table_row", "figure_caption"}
 
         for ev in evidence:
             text = (ev.get("sentence_text") or ev.get("text", "")).strip()
             passage = ev.get("text", "").strip()
+
+            # Structured-source sentences: skip all content heuristics.
+            if ev.get("source") in _STRUCTURED_SOURCES:
+                if "<" in passage:
+                    passage = re.sub(r"<[^>]+>", "", passage).strip()
+                    ev = {**ev, "text": passage}
+                cleaned.append(ev)
+                continue
 
             # HTML / markup-heavy
             if len(re.findall(r"<[^>]+>", text)) >= 2:

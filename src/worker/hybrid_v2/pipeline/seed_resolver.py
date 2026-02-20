@@ -372,6 +372,71 @@ async def resolve_section_entities(
 
 
 # =========================================================================
+# Tier 2+: SignatureBlock Structural Seeds
+# =========================================================================
+
+async def resolve_signatureblock_entities(
+    async_neo4j: "AsyncNeo4jService",
+    group_id: str,
+    folder_id: Optional[str] = None,
+) -> List[str]:
+    """Resolve entities reachable from signature-block sentence nodes.
+
+    Signature blocks are *not* Section nodes, so they are invisible to the
+    standard Tier 2 Section → TextChunk → Entity traversal.  This function
+    queries sentence nodes with ``source = "signature_party"`` directly and
+    follows their MENTIONS edges to Entity nodes.
+
+    Including signature-party entities in Tier 2 ensures that cross-document
+    comparison queries ("which documents did Contoso sign?") seed PPR on the
+    correct contracting parties even when NER misses them.
+
+    Returns:
+        List of unique entity IDs extracted from signature blocks.
+    """
+    folder_filter = ""
+    folder_params: Dict[str, Any] = {}
+    if folder_id is not None:
+        folder_filter = (
+            "AND EXISTS { "
+            "  MATCH (s)-[:IN_DOCUMENT|PART_OF*1..2]->(doc:Document)-[:IN_FOLDER]->(f:Folder) "
+            "  WHERE f.id = $folder_id AND f.group_id = $group_id "
+            "} "
+        )
+        folder_params["folder_id"] = folder_id
+
+    cypher = f"""
+    MATCH (s:Sentence {{group_id: $group_id}})
+    WHERE s.source = "signature_party"
+      {folder_filter}
+    MATCH (s)-[:MENTIONS]->(e)
+    WHERE e.group_id = $group_id
+      AND (e:Entity OR e:`__Entity__`)
+    RETURN DISTINCT e.id AS id, e.name AS name
+    """
+
+    try:
+        async with async_neo4j._get_session() as session:
+            result = await session.run(
+                cypher,
+                group_id=group_id,
+                **folder_params,
+            )
+            records = await result.data()
+
+        entity_ids = list({r["id"] for r in records if r.get("id")})
+        logger.info(
+            "signatureblock_entities_resolved",
+            entities_found=len(entity_ids),
+        )
+        return entity_ids
+
+    except Exception as e:
+        logger.warning("signatureblock_entity_resolution_failed", error=str(e))
+        return []
+
+
+# =========================================================================
 # Tier 3: Thematic Seed Resolution (community → entities)
 # =========================================================================
 
@@ -770,16 +835,29 @@ async def resolve_all_tiers(
                 union_sections=len(structural_sections),
             )
 
-        if not structural_sections:
-            return [], []
-
-        records = await resolve_section_entities(
-            async_neo4j=async_neo4j,
-            section_paths=structural_sections,
-            group_id=group_id,
-            folder_id=folder_id,
+        # Run section-entity resolution and SignatureBlock resolution in parallel.
+        # SignatureBlock entities are always fetched regardless of whether any
+        # section match was found — they represent contracting parties that are
+        # structurally present but not captured by Section-node traversal.
+        # resolve_section_entities() handles empty section_paths gracefully.
+        section_task = asyncio.create_task(
+            resolve_section_entities(
+                async_neo4j=async_neo4j,
+                section_paths=structural_sections,
+                group_id=group_id,
+                folder_id=folder_id,
+            )
         )
-        entity_ids = list({r["id"] for r in records})
+        sigblock_task = asyncio.create_task(
+            resolve_signatureblock_entities(
+                async_neo4j=async_neo4j,
+                group_id=group_id,
+                folder_id=folder_id,
+            )
+        )
+        section_records, sigblock_ids = await asyncio.gather(section_task, sigblock_task)
+
+        entity_ids = list({r["id"] for r in section_records} | set(sigblock_ids))
         return entity_ids, structural_sections
 
     # ------------------------------------------------------------------
@@ -957,22 +1035,34 @@ async def resolve_flat_seed_pool(
             return [], []
 
     # ------------------------------------------------------------------
-    # Structural addon (meso): embedding-match sections → entities
+    # Structural addon (meso): embedding-match sections + SignatureBlock → entities
     # ------------------------------------------------------------------
     async def _resolve_structural_addon() -> Tuple[List[str], List[str]]:
         try:
             structural_sections = await match_sections_by_embedding(
                 async_neo4j=async_neo4j, query=query, group_id=group_id,
             )
-            if not structural_sections:
-                return [], []
-            records = await resolve_section_entities(
-                async_neo4j=async_neo4j,
-                section_paths=structural_sections,
-                group_id=group_id,
-                folder_id=folder_id,
+            # Run section-entity resolution and SignatureBlock resolution in
+            # parallel; resolve_section_entities handles empty list gracefully.
+            section_task = asyncio.create_task(
+                resolve_section_entities(
+                    async_neo4j=async_neo4j,
+                    section_paths=structural_sections,
+                    group_id=group_id,
+                    folder_id=folder_id,
+                )
             )
-            entity_ids = list({r["id"] for r in records})
+            sigblock_task = asyncio.create_task(
+                resolve_signatureblock_entities(
+                    async_neo4j=async_neo4j,
+                    group_id=group_id,
+                    folder_id=folder_id,
+                )
+            )
+            section_records, sigblock_ids = await asyncio.gather(
+                section_task, sigblock_task
+            )
+            entity_ids = list({r["id"] for r in section_records} | set(sigblock_ids))
             return entity_ids, structural_sections
         except Exception as e:
             logger.warning("flat_pool_structural_addon_failed", error=str(e))

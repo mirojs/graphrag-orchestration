@@ -534,7 +534,7 @@ class Neo4jTextUnitStore:
                     )
                 
                 results[entity_name] = rows
-                
+
                 if not rows:
                     logger.debug("neo4j_text_store_no_chunks", entity=entity_name)
                 elif section_graph_enabled:
@@ -545,7 +545,117 @@ class Neo4jTextUnitStore:
                         unique_sections=len(per_section_counts),
                         unique_docs=len(per_doc_counts),
                     )
-        
+
+        # ------------------------------------------------------------------
+        # Signature-block injection (always-include for entity-bearing sig chunks)
+        # ------------------------------------------------------------------
+        # The main query sorts chunks globally by chunk_index, so late-indexed
+        # signature-block chunks (e.g. Exhibit A on the last page) can be cut
+        # off by the per-entity limit.  This supplementary query specifically
+        # fetches TextChunks that contain a signature_party Sentence mentioning
+        # the entity, and appends them to the results — bypassing the limit.
+        sigblock_injection_query = """
+        UNWIND $entity_names AS entity_name
+        MATCH (e {group_id: $group_id})
+        WHERE (e:Entity OR e:`__Entity__`)
+          AND (toLower(e.name) = toLower(entity_name)
+               OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
+        MATCH (s:Sentence {group_id: $group_id})-[:MENTIONS]->(e)
+        WHERE s.source = "signature_party"
+        MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        OPTIONAL MATCH (c)-[:IN_SECTION]->(sec:Section)
+        RETURN entity_name, c, d AS doc, sec AS section
+        """
+        try:
+            with self._driver.session() as sig_session:
+                sig_result = sig_session.run(
+                    sigblock_injection_query,
+                    group_id=self._group_id,
+                    entity_names=names,
+                )
+                injected_total = 0
+                for sig_record in sig_result:
+                    entity_name = sig_record.get("entity_name")
+                    c = sig_record.get("c")
+                    d = sig_record.get("doc")
+                    sec = sig_record.get("section")
+                    if not entity_name or not c:
+                        continue
+
+                    chunk_id = str(c.get("id") or "")
+                    existing_ids = {r["id"] for r in results.get(entity_name, [])}
+                    if chunk_id in existing_ids:
+                        continue  # already retrieved by main query
+
+                    # Build chunk dict using same structure as main query
+                    raw_meta = c.get("metadata")
+                    meta: Dict[str, Any] = {}
+                    if raw_meta:
+                        if isinstance(raw_meta, str):
+                            try:
+                                import json as _json
+                                meta = _json.loads(raw_meta)
+                            except Exception:
+                                meta = {}
+                        elif isinstance(raw_meta, dict):
+                            meta = dict(raw_meta)
+
+                    for prop_key in ("page_number", "section_path", "di_section_path", "document_id", "url"):
+                        if prop_key not in meta:
+                            try:
+                                v = c.get(prop_key)
+                            except Exception:
+                                v = None
+                            if v is not None and v != "":
+                                meta[prop_key] = v
+
+                    doc_id = (d.get("id") if d else "") or meta.get("document_id") or ""
+                    doc_title = (d.get("title") if d else "") or meta.get("document_title") or ""
+                    doc_source = (d.get("source") if d else "") or meta.get("document_source") or ""
+                    section_id = (sec.get("id") if sec else "") or ""
+                    section_path_key = (sec.get("path_key") if sec else "") or ""
+                    section_path = meta.get("section_path")
+                    section_label = ""
+                    if section_path_key:
+                        section_label = section_path_key
+                    elif isinstance(section_path, list) and section_path:
+                        section_label = " > ".join(str(x) for x in section_path if x)
+                    elif isinstance(section_path, str) and section_path:
+                        section_label = section_path
+
+                    source_label = doc_title or doc_source or doc_id or "neo4j"
+                    if section_label:
+                        source_label = f"{source_label} — {section_label}"
+
+                    # Prepend so signature-block chunks survive the per-entity
+                    # budget slice ([:limit]) in the synthesis step.
+                    results.setdefault(entity_name, []).insert(0,
+                        {
+                            "id": chunk_id,
+                            "source": str(source_label),
+                            "text": str(c.get("text") or ""),
+                            "entity": entity_name,
+                            "metadata": {
+                                **meta,
+                                "document_id": str(doc_id),
+                                "document_title": str(doc_title),
+                                "document_source": str(doc_source),
+                                "section_id": str(section_id),
+                                "section_path_key": str(section_path_key),
+                            },
+                        }
+                    )
+                    injected_total += 1
+
+                if injected_total > 0:
+                    logger.info(
+                        "sigblock_chunks_injected",
+                        total_injected=injected_total,
+                    )
+        except Exception as _sig_exc:
+            logger.warning("sigblock_injection_failed", error=str(_sig_exc))
+
         # Summary log for Route 2 chunk retrieval
         total_chunks = sum(len(v) for v in results.values())
         entities_with_chunks = sum(1 for v in results.values() if v)

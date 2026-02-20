@@ -90,26 +90,25 @@ class CommunityMatcher:
 
         # Fall back to JSON file
         if self.communities_path and self.communities_path.exists():
-            try:
-                with open(self.communities_path) as f:
-                    data = json.load(f)
+            with open(self.communities_path) as f:
+                data = json.load(f)
 
-                self._communities = data.get("communities", [])
-                self._community_embeddings = data.get("embeddings", {})
-                self._loaded = True
+            self._communities = data.get("communities", [])
+            self._community_embeddings = data.get("embeddings", {})
+            self._loaded = True
 
-                logger.info("communities_loaded_from_json",
-                           num_communities=len(self._communities))
-                await self._ensure_embeddings()
-                return True
+            logger.info("communities_loaded_from_json",
+                       num_communities=len(self._communities))
+            await self._ensure_embeddings()
+            return True
 
-            except Exception as e:
-                logger.error("community_load_failed", error=str(e))
-                return False
-
-        logger.warning("no_community_data_found",
+        logger.error("no_community_data_found",
                       path=str(self.communities_path))
-        return False
+        raise RuntimeError(
+            f"No community data found — Neo4j returned no communities for group '{self.group_id}' "
+            f"and no JSON fallback exists at {self.communities_path}. "
+            "Run the V2 indexing pipeline with run_community_detection=True."
+        )
 
     async def _load_from_neo4j(self) -> bool:
         """Load materialized Louvain communities from Neo4j.
@@ -120,64 +119,59 @@ class CommunityMatcher:
         Returns:
             True if communities were loaded successfully (at least 1 found).
         """
-        try:
-            query = """
-            MATCH (c:Community {group_id: $group_id})
-            WHERE c.title IS NOT NULL AND c.title <> ''
-            OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity)
-            WITH c, collect(e.name) AS entity_names
-            RETURN c.id AS id,
-                   c.title AS title,
-                   coalesce(c.summary, '') AS summary,
-                   coalesce(c.rank, 0.0) AS rank,
-                   coalesce(c.level, 0) AS level,
-                   c.embedding AS embedding,
-                   c.embedding_text_hash AS embedding_text_hash,
-                   entity_names
-            ORDER BY c.rank DESC
-            """
-            async with self.neo4j_service._get_session() as session:
-                result = await session.run(query, group_id=self.group_id)
-                records = await result.data()
+        query = """
+        MATCH (c:Community {group_id: $group_id})
+        WHERE c.title IS NOT NULL AND c.title <> ''
+        OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity)
+        WITH c, collect(e.name) AS entity_names
+        RETURN c.id AS id,
+               c.title AS title,
+               coalesce(c.summary, '') AS summary,
+               coalesce(c.rank, 0.0) AS rank,
+               coalesce(c.level, 0) AS level,
+               c.embedding AS embedding,
+               c.embedding_text_hash AS embedding_text_hash,
+               entity_names
+        ORDER BY c.rank DESC
+        """
+        async with self.neo4j_service._get_session() as session:
+            result = await session.run(query, group_id=self.group_id)
+            records = await result.data()
 
-            if not records:
-                logger.info("no_neo4j_communities_found", group_id=self.group_id)
-                return False
-
-            communities = []
-            embeddings = {}
-            summary_hashes = {}
-            for rec in records:
-                community = {
-                    "id": rec["id"],
-                    "title": rec["title"],
-                    "summary": rec["summary"],
-                    "rank": rec["rank"],
-                    "level": rec["level"],
-                    "entity_names": rec["entity_names"],
-                }
-                communities.append(community)
-                if rec["embedding"]:
-                    embeddings[rec["id"]] = list(rec["embedding"])
-                if rec.get("embedding_text_hash"):
-                    summary_hashes[rec["id"]] = rec["embedding_text_hash"]
-
-            self._communities = communities
-            self._community_embeddings = embeddings
-            self._summary_hashes = summary_hashes
-            self._loaded = True
-
-            logger.info(
-                "communities_loaded_from_neo4j",
-                num_communities=len(communities),
-                num_with_embeddings=len(embeddings),
-                group_id=self.group_id,
-            )
-            return True
-
-        except Exception as e:
-            logger.warning("neo4j_community_load_failed", error=str(e))
+        if not records:
+            logger.info("no_neo4j_communities_found", group_id=self.group_id)
             return False
+
+        communities = []
+        embeddings = {}
+        summary_hashes = {}
+        for rec in records:
+            community = {
+                "id": rec["id"],
+                "title": rec["title"],
+                "summary": rec["summary"],
+                "rank": rec["rank"],
+                "level": rec["level"],
+                "entity_names": rec["entity_names"],
+            }
+            communities.append(community)
+            if rec["embedding"]:
+                embeddings[rec["id"]] = list(rec["embedding"])
+            if rec.get("embedding_text_hash"):
+                summary_hashes[rec["id"]] = rec["embedding_text_hash"]
+
+        self._communities = communities
+        self._community_embeddings = embeddings
+        self._summary_hashes = summary_hashes
+        self._loaded = True
+
+        logger.info(
+            "communities_loaded_from_neo4j",
+            num_communities=len(communities),
+            num_with_embeddings=len(embeddings),
+            group_id=self.group_id,
+        )
+        return True
     
     async def match_communities(
         self,
@@ -199,20 +193,22 @@ class CommunityMatcher:
             await self.load_communities()
 
         if not self._communities:
-            logger.warning("community_matching_no_communities_loaded")
-            return []
+            raise RuntimeError(
+                f"No communities loaded for group '{self.group_id}'. "
+                "Check that the V2 indexing pipeline ran with run_community_detection=True."
+            )
 
         if not self.embedding_client:
-            logger.warning("community_matching_no_embedding_client")
-            return []
+            raise RuntimeError(
+                "CommunityMatcher has no embedding client — cannot embed query. "
+                "Pass a Voyage embedding client at construction time."
+            )
 
         if not self._community_embeddings:
-            logger.warning(
-                "community_matching_no_embeddings",
-                num_communities=len(self._communities),
-                hint="_ensure_embeddings may not have been called or failed",
+            raise RuntimeError(
+                f"Communities loaded ({len(self._communities)}) but none have embeddings. "
+                "_ensure_embeddings must have failed — check VOYAGE_API_KEY."
             )
-            return []
 
         results = await self._semantic_match(query, top_k)
         if not results:
@@ -229,113 +225,97 @@ class CommunityMatcher:
         top_k: int
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Match using embedding similarity."""
-        try:
-            # Embed the query
-            query_embedding = await self._get_embedding(query)
-            if not query_embedding:
-                logger.warning("semantic_match_no_query_embedding", query=query[:50])
-                return []
-            
-            # Calculate similarities
-            scored: List[Tuple[Dict[str, Any], float]] = []
-            dimension_mismatches = 0
-            for community in self._communities:
-                community_id = community.get("id", community.get("title", ""))
-                community_emb = self._community_embeddings.get(community_id)
-                
-                if community_emb:
-                    if len(query_embedding) != len(community_emb):
-                        dimension_mismatches += 1
-                        continue
-                    similarity = self._cosine_similarity(query_embedding, community_emb)
-                    scored.append((community, similarity))
-            
-            if dimension_mismatches > 0:
-                logger.error(
-                    "semantic_match_dimension_mismatch",
-                    query_dim=len(query_embedding),
-                    community_dim=len(community_emb) if community_emb else 0,
-                    mismatches=dimension_mismatches,
-                    total_communities=len(self._communities),
-                    hint="Query embedding model may differ from community embedding model",
-                )
-            
-            # Sort by similarity
-            scored.sort(key=lambda x: x[1], reverse=True)
-            
-            # Filter out near-zero scores (indicates broken matching)
-            min_threshold = 0.05
-            meaningful = [(c, s) for c, s in scored if s >= min_threshold]
-            
-            if scored and not meaningful:
-                logger.warning(
-                    "semantic_match_all_below_threshold",
-                    threshold=min_threshold,
-                    max_score=scored[0][1] if scored else 0,
-                    num_communities=len(scored),
-                    hint="All community scores near zero — likely embedding mismatch",
-                )
-                return []  # Fall through to dynamic generation
-            
-            logger.info("semantic_community_match",
-                       query=query[:50],
-                       top_scores=[round(s, 4) for _, s in meaningful[:5]],
-                       top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in meaningful[:top_k]])
-            
-            return meaningful[:top_k]
-            
-        except Exception as e:
-            logger.error("semantic_match_failed", error=str(e))
-            return []
+        query_embedding = await self._get_embedding(query)
+        if not query_embedding:
+            raise RuntimeError(
+                f"Failed to embed query for community matching: {query[:80]!r}"
+            )
+
+        # Calculate similarities
+        scored: List[Tuple[Dict[str, Any], float]] = []
+        dimension_mismatches = 0
+        community_emb = None
+        for community in self._communities:
+            community_id = community.get("id", community.get("title", ""))
+            community_emb = self._community_embeddings.get(community_id)
+
+            if community_emb:
+                if len(query_embedding) != len(community_emb):
+                    dimension_mismatches += 1
+                    continue
+                similarity = self._cosine_similarity(query_embedding, community_emb)
+                scored.append((community, similarity))
+
+        if dimension_mismatches > 0:
+            raise RuntimeError(
+                f"Community embedding dimension mismatch: query={len(query_embedding)}, "
+                f"community={len(community_emb) if community_emb else '?'}, "
+                f"affected={dimension_mismatches}/{len(self._communities)}. "
+                "Re-index communities or ensure the same Voyage model is used everywhere."
+            )
+
+        # Sort by similarity
+        scored.sort(key=lambda x: x[1], reverse=True)
+
+        # Filter out near-zero scores (indicates broken matching)
+        min_threshold = 0.05
+        meaningful = [(c, s) for c, s in scored if s >= min_threshold]
+
+        if scored and not meaningful:
+            raise RuntimeError(
+                f"All {len(scored)} community similarity scores are below threshold "
+                f"{min_threshold} (max={scored[0][1]:.4f}). "
+                "Community embeddings are likely from a different model than the query embedder."
+            )
+
+        logger.info("semantic_community_match",
+                   query=query[:50],
+                   top_scores=[round(s, 4) for _, s in meaningful[:5]],
+                   top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in meaningful[:top_k]])
+
+        return meaningful[:top_k]
     
     async def _get_embedding(self, text: str) -> Optional[List[float]]:
         """Get embedding for text using the configured embedding client."""
         if not self.embedding_client:
-            return None
+            raise RuntimeError(
+                "No embedding client configured — cannot embed text. "
+                "Pass a Voyage embedding client at construction time."
+            )
 
-        try:
-            # Handle different embedding client interfaces
-            if hasattr(self.embedding_client, 'aget_text_embedding'):
-                # LlamaIndex style (async)
-                return await self.embedding_client.aget_text_embedding(text)
-            elif hasattr(self.embedding_client, 'embed_query'):
-                # VoyageEmbedService / LangChain style (sync)
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(
-                    None, self.embedding_client.embed_query, text
-                )
-            elif hasattr(self.embedding_client, 'create'):
-                # OpenAI style
-                response = await self.embedding_client.create(input=text)
-                return response.data[0].embedding
-            else:
-                logger.warning("unknown_embedding_client_interface")
-                return None
-        except Exception as e:
-            logger.error("embedding_failed", error=str(e))
-            return None
+        # Handle different embedding client interfaces
+        if hasattr(self.embedding_client, 'aget_text_embedding'):
+            # LlamaIndex style (async)
+            return await self.embedding_client.aget_text_embedding(text)
+        elif hasattr(self.embedding_client, 'embed_query'):
+            # VoyageEmbedService / LangChain style (sync)
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None, self.embedding_client.embed_query, text
+            )
+        else:
+            raise RuntimeError(
+                f"Unknown embedding client interface: {type(self.embedding_client).__name__}. "
+                "Expected aget_text_embedding (LlamaIndex) or embed_query (VoyageEmbedService)."
+            )
 
     async def _get_embeddings_batch(self, texts: List[str]) -> List[Optional[List[float]]]:
-        """Batch-embed a list of texts.
-
-        Prefers the client's batch API when available (``embed_query_batch``)
-        to save round-trips and reduce Voyage API calls.
-        """
+        """Batch-embed a list of texts using VoyageEmbedService batch API."""
         if not self.embedding_client:
-            return [None] * len(texts)
+            raise RuntimeError(
+                "No embedding client configured — cannot batch-embed texts. "
+                "Pass a Voyage embedding client at construction time."
+            )
 
         # VoyageEmbedService has embed_query_batch
         if hasattr(self.embedding_client, 'embed_query_batch'):
-            try:
-                loop = asyncio.get_event_loop()
-                results = await loop.run_in_executor(
-                    None, self.embedding_client.embed_query_batch, texts
-                )
-                return results  # type: ignore[return-value]
-            except Exception as e:
-                logger.warning("batch_embedding_failed_falling_back", error=str(e))
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None, self.embedding_client.embed_query_batch, texts
+            )
+            return results  # type: ignore[return-value]
 
-        # Fallback: embed one by one
+        # embed one by one for clients without batch support
         embeddings: List[Optional[List[float]]] = []
         for text in texts:
             emb = await self._get_embedding(text)
@@ -348,7 +328,10 @@ class CommunityMatcher:
     def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
         """Calculate cosine similarity between two vectors."""
         if len(vec1) != len(vec2):
-            return 0.0
+            raise RuntimeError(
+                f"Cannot compute cosine similarity: dimension mismatch "
+                f"({len(vec1)} vs {len(vec2)})"
+            )
         
         dot_product = sum(a * b for a, b in zip(vec1, vec2))
         norm1 = sum(a * a for a in vec1) ** 0.5
@@ -398,8 +381,10 @@ class CommunityMatcher:
         by the ``COMMUNITY_WRITEBACK_EMBEDDINGS`` env var (default: ``1``).
         """
         if not self.embedding_client:
-            logger.warning("ensure_embeddings_no_client")
-            return
+            raise RuntimeError(
+                "No embedding client configured — cannot ensure community embeddings. "
+                "Pass a Voyage embedding client at construction time."
+            )
 
         # Determine the expected dimension from the embedding client
         expected_dim: Optional[int] = None
@@ -469,8 +454,10 @@ class CommunityMatcher:
             valid_indices.append(idx)
 
         if not texts:
-            logger.warning("ensure_embeddings_no_text_to_embed")
-            return
+            raise RuntimeError(
+                f"No embeddable text found in {len(needs_embedding)} communities — "
+                "all have empty summary and title. Check community generation."
+            )
 
         embeddings = await self._get_embeddings_batch(texts)
 
@@ -504,43 +491,40 @@ class CommunityMatcher:
         The text hash enables stale-embedding detection when summaries are
         updated after the embedding was generated.
         """
-        try:
-            cypher = """
-            UNWIND $rows AS row
-            MATCH (c:Community {group_id: $group_id})
-            WHERE c.id = row.id
-            SET c.embedding = row.embedding,
-                c.embedding_text_hash = row.text_hash
-            """
-            rows = []
-            for cid in community_ids:
-                if cid not in self._community_embeddings:
-                    continue
-                # Find the community dict to compute the hash
-                community = next(
-                    (c for c in self._communities
-                     if c.get("id", c.get("title", "")) == cid),
-                    None,
-                )
-                text_hash = self._compute_text_hash(community) if community else ""
-                rows.append({
-                    "id": cid,
-                    "embedding": self._community_embeddings[cid],
-                    "text_hash": text_hash,
-                })
-            if not rows:
-                return
+        cypher = """
+        UNWIND $rows AS row
+        MATCH (c:Community {group_id: $group_id})
+        WHERE c.id = row.id
+        SET c.embedding = row.embedding,
+            c.embedding_text_hash = row.text_hash
+        """
+        rows = []
+        for cid in community_ids:
+            if cid not in self._community_embeddings:
+                continue
+            # Find the community dict to compute the hash
+            community = next(
+                (c for c in self._communities
+                 if c.get("id", c.get("title", "")) == cid),
+                None,
+            )
+            text_hash = self._compute_text_hash(community) if community else ""
+            rows.append({
+                "id": cid,
+                "embedding": self._community_embeddings[cid],
+                "text_hash": text_hash,
+            })
+        if not rows:
+            return
 
-            async with self.neo4j_service._get_session() as session:
-                await session.run(cypher, rows=rows, group_id=self.group_id)
+        async with self.neo4j_service._get_session() as session:
+            await session.run(cypher, rows=rows, group_id=self.group_id)
 
-            # Update in-memory hashes
-            for row in rows:
-                self._summary_hashes[row["id"]] = row["text_hash"]
+        # Update in-memory hashes
+        for row in rows:
+            self._summary_hashes[row["id"]] = row["text_hash"]
 
-            logger.info("community_embeddings_written_back", count=len(rows))
-        except Exception as e:
-            logger.warning("community_embeddings_writeback_failed", error=str(e))
+        logger.info("community_embeddings_written_back", count=len(rows))
 
     # ==================================================================
     # Accessors

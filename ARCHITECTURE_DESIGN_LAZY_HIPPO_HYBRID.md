@@ -1,6 +1,9 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 13, 2026
+**Last Updated:** February 20, 2026
+
+**Recent Updates (February 20, 2026):**
+- ✅ **Route 3 Three-Layer Fix — Q-G4 50% → 100% theme coverage:** Three stacked fixes eliminated a minority-document suppression chain in the Route 3 pipeline. Root cause confirmed via `include_context=True` diagnostic: PMA "monthly statement" sentence was present in REDUCE input at position 10 (score 0.623) but suppressed by prompt. Fixed with: (1) `asyncio.Lock` double-checked locking in `CommunityMatcher` (commit `3d52d16`), (2) reranker over-fetch 15→30 + post-rerank diversity pass (commit `b8f364b`), (3) REDUCE prompt completeness — require all obligations from all documents (commit `a1ae6ef`). Q-G4: 50%→100%, Q-G3/G7 variance resolved to 100%, Q-G10: 17%→83%. Side effect: avg response length +102% (1,941→3,931 chars), avg latency +36% (10.5s→14.3s). See [Section 31](#31-route-3-three-layer-fix-minority-document-suppression-february-20-2026).
 
 **Recent Updates (February 13, 2026):**
 - ✅ **Route 3 v3.1 — Sentence-Enriched Map-Reduce (5 fixes):** Complete rewrite of Route 3 pipeline from legacy 12-stage architecture to streamlined 4-step Map-Reduce with dual evidence sources. Theme coverage: 59.5% → 100% (10/10 questions). Deployed as `route3-v3.1-e19b3e0d`. See [Section 24](#24-route-3-v31-sentence-enriched-map-reduce-february-13-2026).
@@ -8394,5 +8397,144 @@ NER union alone shows **no measurable improvement** (−0.02, within noise). The
 ### 30.4. Key Insight
 
 The earlier 0.81→0.88 improvement (Section 29.1) was **primarily from sentence search** (Tier 1A), not NER union (Tier 1B). NER union alone is insufficient to close the quality gap through seed improvement alone. The remaining improvement path is Phase 3: making PPR traversal itself smarter (query-biased teleportation, EPIC-style passage enrichment, adaptive path weights).
+
+---
+
+## 31. Route 3 Three-Layer Fix — Minority-Document Suppression (February 20, 2026)
+
+### 31.1. Problem
+
+After redeploying with correct Voyage embeddings (2048-dim), Q-G4 ("What obligations are explicitly described as reporting / record-keeping?") was stuck at **50% theme coverage (3/6)** despite a known-good retrieval pipeline. Expected 100%.
+
+Missing themes: `monthly statement`, `income`, `expenses` — all from the **Property Management Agreement (PMA)**, a minority document across 5-PDF corpus.
+
+### 31.2. Root Cause Investigation
+
+**Diagnostic method:** Called the deployed API with `include_context: true` in the payload. This causes `route_3_global.py` to populate `metadata.sentence_evidence` (first 10 sentences) and `metadata.map_claims` in the API response — exact REDUCE inputs without any server-side logging changes.
+
+**Finding:**
+
+```
+SENTENCE EVIDENCE (15 sentences total, first 10 shown):
+ 1-9: HOLDING TANK SERVICING CONTRACT  scores 0.69 → 0.66
+  10: PROPERTY MANAGEMENT AGREEMENT    score 0.623
+      "Provide Owner with a monthly statement of income and expenses..."
+
+MAP CLAIMS (9 total):
+  ALL 9 from [Community: Holding Tank Servicing and Disposal Records]
+  0 claims from PMA communities (both extracted 0 relevant claims)
+```
+
+The PMA "monthly statement of income and expenses" sentence **was present** in the REDUCE input. The problem was pure synthesis suppression:
+
+| Layer | Cause |
+|-------|-------|
+| MAP claims | 9:0 Holding Tank dominance — PMA communities matched but extracted 0 relevant claims (community summaries don't use "reporting" vocabulary for monthly statements) |
+| Sentence evidence | 9:1 dominance; PMA at position 10 with score 0.623 |
+| REDUCE prompt Rule 4 | `"3-5 focused paragraphs maximum — prioritize the most important findings"` → LLM writes about the 9-sentence dominant HT block and drops the single PMA sentence |
+
+### 31.3. Three-Layer Fix
+
+#### Layer 1 — asyncio Race Condition: `CommunityMatcher.load_communities()` (commit `3d52d16`)
+
+`CommunityMatcher` is lazy-loaded: `_loaded=False` at init, loads on first `match_communities()` call. Two concurrent first-queries both see `_loaded=False` and both execute the full `_load_from_neo4j()` + `_ensure_embeddings()` path, wasting a Voyage batch embedding call.
+
+**Fix:** Double-checked locking with `asyncio.Lock`:
+
+```python
+self._load_lock = asyncio.Lock()   # added to __init__
+
+async def load_communities(self) -> bool:
+    if self._loaded:               # fast path — no lock overhead on hot path
+        return True
+    async with self._load_lock:
+        if self._loaded:           # re-check: another coroutine may have loaded while we waited
+            return True
+        # ... load from Neo4j or JSON ...
+```
+
+**File:** `src/worker/hybrid_v2/pipeline/community_matcher.py`
+
+#### Layer 2 — Post-Rerank Cross-Document Diversity (commit `b8f364b`)
+
+**Root cause:** The reranker (`voyage-rerank-2.5`) cuts 30→15 sentences with no document-diversity awareness. PMA's "monthly statement" sentence has a lower cross-encoder relevance score than the 9 Holding Tank sentences. It is eliminated before the REDUCE step.
+
+**Pre-fix flow:**
+```
+Vector search: 90 sentences
+  → pre-rerank diversity: keeps min 2 per qualifying doc → 30 (PMA present)
+  → reranker cuts 30 → 15 (PMA eliminated — lower cross-encoder score than HT)
+  → REDUCE sees 15 HT-only sentences
+```
+
+**Fix:** Over-fetch from reranker (2× target = 30), then re-apply `_diversify_by_document` with `score_gate=0.0`:
+
+```python
+rerank_fetch_k = min(rerank_top_k * 2, len(sentence_evidence))   # 30 instead of 15
+sentence_evidence = await self._rerank_sentences(query, sentence_evidence, top_k=rerank_fetch_k)
+if len(sentence_evidence) > rerank_top_k:
+    sentence_evidence = self._diversify_by_document(
+        sentence_evidence,
+        top_k=rerank_top_k,      # back to 15
+        min_per_doc=min_per_doc,
+        score_gate=0.0,          # reranker already filtered for relevance; no floor needed
+    )
+```
+
+`score_gate=0.0` is intentional: since the reranker has already selected the most relevant sentences, the pre-rerank score floor (`0.85 × top1`) would be redundant and might re-suppress minority docs.
+
+**File:** `src/worker/hybrid_v2/routes/route_3_global.py` (lines 214–233)
+
+**Why both layers are necessary:** Layer 2 ensures PMA sentences survive into the REDUCE input. Layer 3 ensures the REDUCE LLM uses them. Without Layer 2, no PMA sentence reaches REDUCE regardless of prompt. Without Layer 3, PMA arrives at REDUCE but is silently dropped.
+
+#### Layer 3 — REDUCE Prompt Completeness (commit `a1ae6ef`)
+
+**Root cause:** `REDUCE_WITH_EVIDENCE_PROMPT_CONCISE` Rule 4 — `"3-5 focused paragraphs maximum — prioritize the most important findings"` — instructs the LLM to drop items when space is limited. With 9:1 HT dominance and 0 MAP claims from PMA, the LLM always deprioritises the single PMA sentence.
+
+**Fix** (`src/worker/hybrid_v2/routes/route_3_prompts.py`):
+
+| Rule | Before | After |
+|------|--------|-------|
+| Rule 1 | `Use both sources. Include facts from sentences even if not in claims.` | `Use ALL evidence. Every obligation, requirement, duty, or provision found in ANY document sentence must appear in your answer — even if it appears in only one sentence from one document.` |
+| Rule 2 | `Organize by theme with clear headings.` | `Organize using the structure the query implies (e.g. per-obligation type, per-document, per-party). Use clear headings.` |
+| Rule 4 | `3-5 focused paragraphs maximum — prioritize the most important findings.` | `Completeness takes priority over brevity. Do not drop any item to save space. Be concise within each item, but include all items.` |
+
+Rule 2 also fixes Q-G10 ("Summarize each document's main purpose") which was producing community-structured output (themes) instead of per-document summaries.
+
+### 31.4. Results
+
+| Question | Theme (before) | Theme (after) | Notes |
+|----------|---------------|---------------|-------|
+| Q-G1 | 100% (7/7) | 100% (7/7) | — |
+| Q-G2 | 100% (5/5) | 100% (5/5) | — |
+| Q-G3 | 75% (6/8) | **100% (8/8)** | LLM variance resolved |
+| **Q-G4** | **50% (3/6)** | **100% (6/6)** | Primary fix target |
+| Q-G5 | 100% (6/6) | 100% (6/6) | — |
+| Q-G6 | 100% (8/8) | 100% (8/8) | — |
+| Q-G7 | 80% (4/5) | **100% (5/5)** | LLM variance resolved |
+| Q-G8 | 100% (6/6) | 100% (6/6) | — |
+| Q-G9 | 100% (6/6) | 100% (6/6) | — |
+| Q-G10 | 17% (1/6) | **83% (5/6)** | +66pp; "scope of work" phrase absent |
+| Q-N1..N10 | all PASS | all PASS | — |
+
+Q-G10 remaining miss: ground truth term `"scope of work"` not used by LLM for the purchase contract (answer says "furnish and install a specified vertical platform lift system"). Concept is present; exact phrase is absent. Likely a ground truth term issue rather than a retrieval/synthesis issue.
+
+### 31.5. Side Effects — Verbosity and Latency Increase
+
+Removing the "3-5 paragraphs maximum" guardrail caused the LLM to produce significantly more verbose responses:
+
+| Metric | Before (b8f364b) | After (a1ae6ef) | Delta |
+|--------|-----------------|-----------------|-------|
+| Avg response chars | 1,941 | 3,931 | **+102%** |
+| Avg latency ms | 10,466 | 14,252 | **+36%** |
+| Worst case (Q-G3) | 2,808 chars / 9.8s | 11,123 chars / 41.4s | +4× chars |
+
+The latency increase is proportional to output token count (LLM generation time). Completeness-first prompting is the correct tradeoff for obligation-enumeration queries, but for short-answer queries the verbosity increase is unnecessary. A future refinement could add a conditional conciseness rule: "Be concise unless the query enumerates items (obligations, parties, documents)."
+
+### 31.6. Deployment
+
+Tag: `a1ae6ef-89` (api + worker)
+Group: `test-5pdfs-v2-fix2`
+Benchmark file: `benchmarks/route3_global_search_20260220T092601Z.json`
 
 ---

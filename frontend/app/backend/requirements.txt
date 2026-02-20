@@ -88,7 +88,7 @@ click==8.3.1
     #   prompty
     #   quart
     #   uvicorn
-cryptography==44.0.1
+cryptography==46.0.5
     # via
     #   -r requirements.in
     #   azure-identity
@@ -323,7 +323,7 @@ packaging==24.1
     # via
     #   opentelemetry-instrumentation
     #   opentelemetry-instrumentation-flask
-pillow==12.0.0
+pillow==12.1.1
     # via -r requirements.in
 priority==2.0.0
     # via hypercorn

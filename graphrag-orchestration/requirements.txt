@@ -4,7 +4,7 @@ python-multipart>=0.0.9
 uvicorn[standard]>=0.30.0
 pydantic>=2.10.3
 pydantic-settings>=2.1.0
-python-jose[cryptography]>=3.3.0  # JWT token validation for Azure Easy Auth
+python-jose[cryptography]>=3.4.0  # JWT token validation for Azure Easy Auth — CVE-2024-33663/33664 patched in 3.4.0
 
 # Minimal local stub for graspologic to avoid pulling heavy community deps in base builds.
 # The real graspologic package is optional and can be installed with `requirements.community.txt`.

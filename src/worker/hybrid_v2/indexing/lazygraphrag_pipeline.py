@@ -786,24 +786,40 @@ class LazyGraphRAGIndexingPipeline:
         
         def _build_label_prefix(sentence: Dict[str, Any]) -> str:
             """Build Voyage/Anthropic-style structural label for a sentence.
-            
-            Format: [Document: <title> | Section: <section_path>] <text>
-            
+
+            The type tag is chosen based on the sentence source so that
+            voyage-context-3 encodes structural identity directly into the
+            vector — especially important for self-contained elements (table
+            rows, signature parties) that have no surrounding prose siblings:
+
+              • "paragraph"       → [Document: X | Section: Y]
+              • "table_row"       → [Document: X | Table: Y]   (Y = section_path if present)
+              • "figure_caption"  → [Document: X | Figure: Y]  (Y = section_path if present)
+              • "signature_party" → [Document: X | Signature Block]
+
             Falls back gracefully when metadata is missing:
               • Both present:  [Document: Contract A | Section: Warranties > Limited]
               • Title only:    [Document: Contract A]
-              • Section only:  [Section: Warranties > Limited]
+              • Type only:     [Table: Fee Schedule]
               • Neither:       (no prefix — raw text)
             """
             doc_title = doc_title_map.get(sentence.get("document_id", ""), "")
             section_path = sentence.get("section_path", "")
-            
+            source = sentence.get("source", "paragraph")
+
             parts: List[str] = []
             if doc_title:
                 parts.append(f"Document: {doc_title}")
-            if section_path:
+
+            if source == "signature_party":
+                parts.append("Signature Block")
+            elif source == "table_row":
+                parts.append(f"Table: {section_path}" if section_path else "Table")
+            elif source == "figure_caption":
+                parts.append(f"Figure: {section_path}" if section_path else "Figure")
+            elif section_path:
                 parts.append(f"Section: {section_path}")
-            
+
             if parts:
                 return f"[{' | '.join(parts)}] "
             return ""

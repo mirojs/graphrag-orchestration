@@ -872,15 +872,33 @@ class DocumentIntelligenceService:
         
         return "BARCODE"
 
-    # Typed-signature anchor patterns (fallback when no handwritten spans).
-    _SIG_ANCHOR_RE = re.compile(
-        r'^[_\-=\s]{5,}$'                                    # underscore/dash signature line
-        r'|Signed\s+this'                                     # "Signed this DD/MM/YYYY:"
-        r'|(?:Authorized\s+Representative|Contractor|Owner'
+    # Role-label sub-pattern used by _is_typed_sig_anchor().
+    _SIG_ROLE_RE = re.compile(
+        r'(?:Authorized\s+Representative|Contractor|Owner'
         r'|Tenant|Landlord|Buyer|Seller|Lessee|Lessor'
         r'|Client|Vendor|Service\s+Provider)\s*:',
         re.IGNORECASE,
     )
+
+    @classmethod
+    def _is_typed_sig_anchor(cls, text: str) -> bool:
+        """Return True iff *text* looks like a typed-signature anchor line.
+
+        Underscore/dash lines and "Signed this …" are unconditional anchors.
+        Role-label patterns (Owner:, Contractor:, …) only qualify when the
+        content after the colon is blank or short (≤ 40 chars).  This prevents
+        body-text sentences such as "Owner: This property is rented for …"
+        from being mistaken for blank fill-in signature fields.
+        """
+        if re.match(r'^[_\-=\s]{5,}$', text):
+            return True
+        if re.search(r'Signed\s+this', text, re.IGNORECASE):
+            return True
+        m = cls._SIG_ROLE_RE.search(text)
+        if m:
+            after = text[m.end():].strip()
+            return len(after) <= 40
+        return False
 
     def _detect_signature_block_paragraphs(self, result: AnalyzeResult) -> Set[int]:
         """Detect paragraph indices within signature block windows.
@@ -920,7 +938,7 @@ class DocumentIntelligenceService:
                 if not spans:
                     continue
                 text = (getattr(para, "content", "") or "").strip()
-                if self._SIG_ANCHOR_RE.search(text):
+                if self._is_typed_sig_anchor(text):
                     offset = getattr(spans[0], "offset", 0) or 0
                     anchor_offsets.append(offset)
 
@@ -1025,6 +1043,11 @@ class DocumentIntelligenceService:
             r'authorized\s+(representative|signatory)|by\s*:|title\s*:|print\s+name\s*:',
             re.IGNORECASE,
         )
+        # Single-word field labels that look like party names but aren't.
+        _FIELD_LABEL_ONLY = re.compile(
+            r'^(?:Date[d]?|Signature[s]?|Sign|Initials?|Print[ed]?|Title[s]?|Name[s]?|N/?A)\s*$',
+            re.IGNORECASE,
+        )
 
         parties: List[Dict[str, str]] = []
         signed_date = ""
@@ -1048,20 +1071,28 @@ class DocumentIntelligenceService:
             if _ROLE_LABEL.search(text):
                 m_role = _ROLE_LABEL.search(text)
                 remainder = text[m_role.end():].strip().lstrip(':').strip()
-                if remainder and 2 < len(remainder) < 80:
+                if remainder and 2 < len(remainder) < 80 and not _FIELD_LABEL_ONLY.match(remainder):
                     # Inline "Authorized Representative Contoso Ltd." form.
-                    role_str = text[:m_role.end()].strip()
+                    role_str = text[:m_role.end()].strip().rstrip(':').strip()
                     parties.append({"role": role_str, "name": remainder})
                     pending_role = ""
                 else:
                     # Role-only line; name follows on the next paragraph.
-                    pending_role = text[:m_role.end()].strip() or text
+                    pending_role = text[:m_role.end()].strip().rstrip(':').strip() or text
                 continue
 
-            # Short remaining text → entity name (company/person).
-            if len(text) < 80:
-                parties.append({"role": pending_role or "Signatory", "name": text})
-                pending_role = ""
+            # Short text following an explicit role label → entity name.
+            # Require pending_role to be set; plain short lines without a
+            # preceding role label are not added (avoids sweeping in body
+            # text, legal descriptions, clause headers, etc.).
+            # Also reject single-word field labels (Date, Signature, Title…)
+            # that DI sometimes places on the same line as the role label.
+            if pending_role and len(text) < 80:
+                if _FIELD_LABEL_ONLY.match(text):
+                    pending_role = ""  # discard stale role, don't carry forward
+                else:
+                    parties.append({"role": pending_role, "name": text})
+                    pending_role = ""
 
         if not parties and not signed_date:
             return {}

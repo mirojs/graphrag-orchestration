@@ -60,6 +60,7 @@ class CommunityMatcher:
         self._community_embeddings: Dict[str, List[float]] = {}
         self._summary_hashes: Dict[str, str] = {}  # community_id -> hash of text that was embedded
         self._loaded = False
+        self._load_lock = asyncio.Lock()
         
         logger.info("community_matcher_created",
                    group_id=group_id,
@@ -78,37 +79,41 @@ class CommunityMatcher:
         whose stored embedding is missing or has a dimension mismatch with
         the current Voyage model.
         """
-        if self._loaded:
+        if self._loaded:  # fast path — avoids lock acquisition on hot path
             return True
 
-        # Try Neo4j first — materialized Louvain communities with embeddings
-        if self.neo4j_service:
-            neo4j_loaded = await self._load_from_neo4j()
-            if neo4j_loaded:
+        async with self._load_lock:
+            if self._loaded:  # re-check under lock: another coroutine may have loaded while we waited
+                return True
+
+            # Try Neo4j first — materialized Louvain communities with embeddings
+            if self.neo4j_service:
+                neo4j_loaded = await self._load_from_neo4j()
+                if neo4j_loaded:
+                    await self._ensure_embeddings()
+                    return True
+
+            # Fall back to JSON file
+            if self.communities_path and self.communities_path.exists():
+                with open(self.communities_path) as f:
+                    data = json.load(f)
+
+                self._communities = data.get("communities", [])
+                self._community_embeddings = data.get("embeddings", {})
+                self._loaded = True
+
+                logger.info("communities_loaded_from_json",
+                           num_communities=len(self._communities))
                 await self._ensure_embeddings()
                 return True
 
-        # Fall back to JSON file
-        if self.communities_path and self.communities_path.exists():
-            with open(self.communities_path) as f:
-                data = json.load(f)
-
-            self._communities = data.get("communities", [])
-            self._community_embeddings = data.get("embeddings", {})
-            self._loaded = True
-
-            logger.info("communities_loaded_from_json",
-                       num_communities=len(self._communities))
-            await self._ensure_embeddings()
-            return True
-
-        logger.error("no_community_data_found",
-                      path=str(self.communities_path))
-        raise RuntimeError(
-            f"No community data found — Neo4j returned no communities for group '{self.group_id}' "
-            f"and no JSON fallback exists at {self.communities_path}. "
-            "Run the V2 indexing pipeline with run_community_detection=True."
-        )
+            logger.error("no_community_data_found",
+                          path=str(self.communities_path))
+            raise RuntimeError(
+                f"No community data found — Neo4j returned no communities for group '{self.group_id}' "
+                f"and no JSON fallback exists at {self.communities_path}. "
+                "Run the V2 indexing pipeline with run_community_detection=True."
+            )
 
     async def _load_from_neo4j(self) -> bool:
         """Load materialized Louvain communities from Neo4j.

@@ -4,6 +4,7 @@
 
 **Recent Updates (February 20, 2026):**
 - ✅ **Route 3 Three-Layer Fix — Q-G4 50% → 100% theme coverage:** Three stacked fixes eliminated a minority-document suppression chain in the Route 3 pipeline. Root cause confirmed via `include_context=True` diagnostic: PMA "monthly statement" sentence was present in REDUCE input at position 10 (score 0.623) but suppressed by prompt. Fixed with: (1) `asyncio.Lock` double-checked locking in `CommunityMatcher` (commit `3d52d16`), (2) reranker over-fetch 15→30 + post-rerank diversity pass (commit `b8f364b`), (3) REDUCE prompt completeness — require all obligations from all documents (commit `a1ae6ef`). Q-G4: 50%→100%, Q-G3/G7 variance resolved to 100%, Q-G10: 17%→83%. Side effect: avg response length +102% (1,941→3,931 chars), avg latency +36% (10.5s→14.3s). See [Section 31](#31-route-3-three-layer-fix-minority-document-suppression-february-20-2026).
+- ✅ **Route 3 vs Route 6 Cross-Route Benchmark:** Route 6 achieves identical theme coverage (100% Q-G1..G9) at 52% shorter responses and 46% lower latency vs Route 3. Root cause is architectural: Route 6's concept-graph MAP (10 communities, fine-grained) pre-digests content and covers minority-document obligations that Route 3's Louvain MAP (3 communities, coarse) misses, making Route 3's reranker over-fetch unnecessary in Route 6. See [Section 32](#32-route-3-vs-route-6--cross-route-benchmark--architectural-divergence-february-20-2026).
 
 **Recent Updates (February 13, 2026):**
 - ✅ **Route 3 v3.1 — Sentence-Enriched Map-Reduce (5 fixes):** Complete rewrite of Route 3 pipeline from legacy 12-stage architecture to streamlined 4-step Map-Reduce with dual evidence sources. Theme coverage: 59.5% → 100% (10/10 questions). Deployed as `route3-v3.1-e19b3e0d`. See [Section 24](#24-route-3-v31-sentence-enriched-map-reduce-february-13-2026).
@@ -8538,3 +8539,116 @@ Group: `test-5pdfs-v2-fix2`
 Benchmark file: `benchmarks/route3_global_search_20260220T092601Z.json`
 
 ---
+
+## 32. Route 3 vs Route 6 — Cross-Route Benchmark & Architectural Divergence (February 20, 2026)
+
+### 32.1. Why Route 6 Was Benchmarked
+
+After the three-layer fix landed on Route 3 (Section 31), Route 6 was run on the same 19-question benchmark (`QUESTION_BANK_5PDFS_2025-12-24.md`, `force_route=concept_search`) to verify that the REDUCE prompt change (`a1ae6ef`) did not regress Route 6 and to understand whether the reranker over-fetch fix (`b8f364b`) was also necessary for Route 6.
+
+### 32.2. Performance Comparison
+
+Both routes deployed as `a1ae6ef-89`.
+
+| QID | R3 ms | R6 ms | R3 chars | R6 chars | R3 theme | R6 theme |
+|-----|------:|------:|---------:|---------:|:--------:|:--------:|
+| Q-G1 | 9,252 | 10,880 | 3,493 | 2,670 | 100% (7/7) | 100% (7/7) |
+| Q-G2 | 4,919 | 6,305 | 1,365 | 1,215 | 100% (5/5) | 100% (5/5) |
+| Q-G3 | 41,361 | 7,238 | 11,123 | 2,314 | 100% (8/8) | 100% (8/8) |
+| Q-G4 | 8,101 | 6,203 | 2,883 | 1,682 | 100% (6/6) | 100% (6/6) |
+| Q-G5 | 22,896 | 10,189 | 6,510 | 2,855 | 100% (6/6) | 100% (6/6) |
+| Q-G6 | 24,685 | 8,962 | 4,963 | 2,279 | 100% (8/8) | 100% (8/8) |
+| Q-G7 | 11,694 | 9,660 | 4,504 | 2,093 | 100% (5/5) | 100% (5/5) |
+| Q-G8 | 8,477 | 6,691 | 2,124 | 1,635 | 100% (6/6) | 100% (6/6) |
+| Q-G9 | 4,651 | 5,264 | 740 | 919 | 100% (6/6) | 100% (6/6) |
+| Q-G10 | 6,483 | 5,522 | 1,607 | 1,357 | 83% (5/6) | 83% (5/6) |
+| **AVG** | **14,252** | **7,691** | **3,931** | **1,902** | — | — |
+| Q-N1..N10 | — | — | — | — | all PASS | all PASS |
+
+Route 6 is **52% shorter** and **46% faster** at **identical theme coverage**. Same REDUCE prompt, same answer quality, half the tokens and latency.
+
+### 32.3. Architectural Differences That Explain the Gap
+
+#### A. MAP Phase: Louvain Communities (R3) vs Concept-Graph Communities (R6)
+
+This is the primary driver of all observed differences.
+
+**Route 3** runs a Louvain community MAP:
+- Matches 3 communities per query (default `ROUTE3_COMMUNITY_TOP_K=5`, typically 2–4 fire)
+- Community summaries are graph-partition-level: coarse, document-section-scoped
+- For Q-G4: all 9 MAP claims came from `Holding Tank Servicing and Disposal Records`; both PMA-matched communities (`Special Trust Accounts in Hawaiian Financial Institutions`, `Change Clauses and County Filing Requirements`) extracted **0 claims** — their summaries do not use "reporting" vocabulary for monthly statements
+- MAP claims are shallow, so sentence evidence must compensate — and with 9:1 HT dominance in sentences, the REDUCE LLM has no MAP anchor to pull it toward PMA content
+
+**Route 6** runs a concept-graph MAP:
+- Matches up to 10 concept-cluster communities per query
+- Concept communities are finer-grained, semantically coherent sub-topics
+- For Q-G10: Route 6 matched 10 concept paths vs Route 3's 3
+- For Q-G4: the concept graph includes communities that surface PMA monthly statement obligations through concept-level framing (e.g. `Management Services in Long-Term Lease Agreements`), which do use vocabulary linking financial reporting to agent duties
+- Because MAP claims carry PMA content, REDUCE receives balanced evidence rather than 9:1-dominated evidence
+
+#### B. Reranker Over-Fetch: Required for R3, Not for R6
+
+**Route 3** (post `b8f364b`):
+```
+rerank_top_k = 15  (ROUTE3_RERANK_TOP_K default)
+rerank_fetch_k = min(15 * 2, len(evidence)) = 30   ← over-fetch
+sentence_evidence = await _rerank_sentences(..., top_k=30)
+sentence_evidence = _diversify_by_document(..., top_k=15)  ← restore diversity
+```
+
+The over-fetch is necessary because Route 3's MAP blind spot on PMA means the PMA "monthly statement" sentence **must** survive the reranker cut. Without over-fetch + post-rerank diversity, the reranker eliminates it (lower cross-encoder relevance vs 9 HT sentences).
+
+**Route 6** (`route_6_concept.py` line 182):
+```
+rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))  ← straight 15, no over-fetch
+sentence_evidence = await _rerank_sentences(..., top_k=15)
+# no post-rerank diversity pass
+```
+
+Route 6 does not need the over-fetch because its concept-MAP already carries the PMA monthly statement obligation in MAP claims. The sentence evidence is a supplement, not the primary carrier of minority-document content. Even if the reranker cuts PMA sentences, the MAP claims deliver the coverage.
+
+#### C. Response Verbosity: Dual-Evidence Expansion (R3) vs Dense MAP Claims (R6)
+
+Both routes share `REDUCE_WITH_EVIDENCE_PROMPT_CONCISE` with the same completeness rules. Both receive the same query. Yet Route 3 produces 2× more text.
+
+The difference is in what the REDUCE LLM receives as input:
+
+**Route 3 REDUCE input structure:**
+- Community claims: typically 3–9 claims, often from 1 dominant community
+- Sentence evidence: 15 sentences (after rerank + diversity), 200-char preview each
+- Combined, for a query like Q-G3 ("who pays what"), sentence evidence includes detailed payment schedules, dollar amounts, and conditions from all 5 docs — the LLM receives dense granular content and expands it fully
+
+**Route 6 REDUCE input structure:**
+- Concept-MAP claims: up to 30–40 claims from 10 concept communities — already abstracted summaries
+- Sentence evidence: 15 sentences
+- Concept claims provide a pre-summarised layer; the LLM synthesises claims rather than raw sentence text — producing tighter, denser output
+- Q-G3 example: R3 → 11,123 chars / 41s; R6 → 2,314 chars / 7.2s
+
+This explains the paradox: Route 6 achieves the same theme coverage with half the output because its MAP layer pre-digests content that Route 3's sentence evidence delivers raw.
+
+### 32.4. Q-G10 83% — Shared Ground Truth Issue
+
+Both routes score 83% (5/6) on Q-G10 ("Summarize each document's main purpose in one sentence"). Both cite all 5 documents. Both produce correctly structured per-document summaries. The missing theme `"scope of work"` is not used by either route — both describe the purchase contract as:
+
+> "furnish and install a specified vertical platform lift system"
+
+The concept **is present**; the exact phrase `"scope of work"` is not. This is a ground truth term issue. Updating the benchmark term from `"scope of work"` to `"furnish and install"` or `"lift system"` would bring both routes to 100%.
+
+### 32.5. Summary
+
+| Dimension | Route 3 | Route 6 |
+|-----------|---------|---------|
+| MAP type | Louvain community (coarse, graph-partition) | Concept-graph community (fine, semantic-topic) |
+| MAP breadth | 2–4 communities matched | Up to 10 concept paths matched |
+| PMA coverage via MAP | ❌ 0 claims (vocabulary mismatch in summaries) | ✅ Claims cover cross-domain obligations |
+| Reranker over-fetch | ✅ Required (b8f364b) — compensates MAP blind spot | ❌ Not needed — MAP carries minority content |
+| Avg response length | 3,931 chars | 1,902 chars (52% shorter) |
+| Avg latency | 14,252 ms | 7,691 ms (46% faster) |
+| Theme coverage Q-G1..G9 | 100% | 100% |
+| Theme coverage Q-G10 | 83% | 83% (same ground truth issue) |
+
+**Architectural insight:** Route 6's concept-graph MAP acts as a pre-summarisation layer that prevents verbosity explosion and fills minority-document gaps that Route 3's Louvain MAP misses. The reranker over-fetch in Route 3 is a compensating mechanism for a structural weakness in the Louvain MAP phase — not a fundamental retrieval improvement.
+
+Benchmark files:
+- Route 3: `benchmarks/route3_global_search_20260220T092601Z.json`
+- Route 6: `benchmarks/route6_global_search_20260220T100958Z.json`

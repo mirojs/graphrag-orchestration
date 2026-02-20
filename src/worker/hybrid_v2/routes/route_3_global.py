@@ -212,9 +212,25 @@ class GlobalSearchHandler(BaseRouteHandler):
             ).strip().lower() in {"1", "true", "yes"}
             rerank_top_k = int(os.getenv("ROUTE3_RERANK_TOP_K", "15"))
             if rerank_enabled and sentence_evidence:
+                # Over-fetch from reranker (2× target) so minority documents
+                # that lost out to the dominant document in vector scoring still
+                # have candidates available for the post-rerank diversity pass.
+                rerank_fetch_k = min(rerank_top_k * 2, len(sentence_evidence))
                 sentence_evidence = await self._rerank_sentences(
-                    query, sentence_evidence, top_k=rerank_top_k,
+                    query, sentence_evidence, top_k=rerank_fetch_k,
                 )
+                # Re-apply document diversity on the over-fetched reranked pool.
+                # score_gate=0.0: all docs that survived reranking qualify —
+                # the reranker has already filtered for relevance, so we don't
+                # need an additional score floor here.
+                min_per_doc = int(os.getenv("ROUTE3_SENTENCE_MIN_PER_DOC", "2"))
+                if len(sentence_evidence) > rerank_top_k:
+                    sentence_evidence = self._diversify_by_document(
+                        sentence_evidence,
+                        top_k=rerank_top_k,
+                        min_per_doc=min_per_doc,
+                        score_gate=0.0,
+                    )
 
             timings_ms["step_2b_denoise_rerank_ms"] = int(
                 (time.perf_counter() - t0) * 1000

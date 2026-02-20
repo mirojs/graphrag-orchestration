@@ -163,10 +163,14 @@ You are a document analysis assistant. Answer the query using the evidence below
 {sentence_evidence}
 
 **Rules**:
-1. Use both sources. Include facts from sentences even if not in claims.
-2. Organize by theme with clear headings.
+1. Use ALL evidence. Every obligation, requirement, duty, or provision found in ANY
+   document sentence must appear in your answer — even if it appears in only one
+   sentence from one document.
+2. Organize using the structure the query implies (e.g. per-obligation type,
+   per-document, per-party). Use clear headings.
 3. Keep specific details: names, amounts, dates, conditions.
-4. 3-5 focused paragraphs maximum — prioritize the most important findings.
+4. Completeness takes priority over brevity. Do not drop any item to save space.
+   Be concise within each item, but include all items.
 5. Do not mention methodology or sources.
 6. If no evidence, say: "The requested information was not found in the available documents."
 

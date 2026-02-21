@@ -838,7 +838,7 @@ async def resolve_all_tiers(
         # Run section-entity resolution and (optionally) SignatureBlock resolution
         # in parallel.  resolve_section_entities() handles empty section_paths
         # gracefully.
-        sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "1").strip() == "1"
+        sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "0").strip() == "1"
 
         section_task = asyncio.create_task(
             resolve_section_entities(
@@ -1046,7 +1046,7 @@ async def resolve_flat_seed_pool(
             structural_sections = await match_sections_by_embedding(
                 async_neo4j=async_neo4j, query=query, group_id=group_id,
             )
-            sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "1").strip() == "1"
+            sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "0").strip() == "1"
 
             section_task = asyncio.create_task(
                 resolve_section_entities(

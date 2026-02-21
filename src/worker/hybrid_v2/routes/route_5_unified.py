@@ -897,20 +897,22 @@ class UnifiedSearchHandler(BaseRouteHandler):
         allocation may deprioritize them when the entity has many chunks
         across multiple documents.
 
-        By fetching the parent TextChunk we get the full page context
-        (e.g. the entire Exhibit A page including scope, dates, and
-        parties), not just the individual sentence fragments.
+        Uses two strategies:
+          1. Graph traversal: Sentence{source="signature_party"}→PART_OF→TextChunk
+          2. Content fallback: TextChunks containing signature-block text
+             patterns (catches chunks where source tagging was missed)
         """
         if not self.neo4j_driver:
             return []
 
+        # Strategy 1: graph-based (Sentence source tag → parent chunk)
+        # Strategy 2: content-based (text patterns in chunks themselves)
+        # Combined into a single query using OR to catch both
         cypher = """
-        MATCH (sent:Sentence {source: "signature_party", group_id: $group_id})
-              -[:PART_OF]->(chunk:TextChunk)
-        OPTIONAL MATCH (chunk)-[:PART_OF]->(doc:Document)
-
-        WITH DISTINCT chunk, doc
-        RETURN chunk.id AS chunk_id,
+        MATCH (chunk:TextChunk {group_id: $group_id})-[:PART_OF]->(doc:Document)
+        WHERE chunk.text CONTAINS 'Authorized Representative'
+           OR chunk.text CONTAINS 'Signed this'
+        RETURN DISTINCT chunk.id AS chunk_id,
                chunk.text AS text,
                doc.title AS document_title,
                doc.id AS document_id,

@@ -2493,18 +2493,6 @@ Response:"""
             any(re.search(pattern, q_lower) for pattern in regex_patterns)
         )
         
-        # Sub-detect entity-tracking queries (entity vs document cross-reference)
-        _entity_tracking_patterns = [
-            r"which\s+entity\s+appears?\s+in",
-            r"appears?\s+in\s+(?:the\s+)?most\s+(?:different\s+)?documents",
-            r"(?:how\s+many|which)\s+documents?\s+(?:does|do)\s+.+\s+appear",
-            r"across\s+.*(?:which|who|what)\s+.*(?:appears?|mentioned|found)",
-        ]
-        is_entity_tracking_query = (
-            is_per_document_query
-            and any(re.search(p, q_lower) for p in _entity_tracking_patterns)
-        )
-
         document_guidance = ""
         if is_per_document_query:
             document_guidance = """
@@ -2517,24 +2505,12 @@ IMPORTANT for Per-Document Queries:
 - If you see "Builder's Warranty" and "Builder's Warranty - Section 3", combine into ONE summary.
 - If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
 """
-        if is_entity_tracking_query:
-            document_guidance += """
-IMPORTANT for Entity-Document Tracking:
-- Before answering, mentally scan EACH "=== DOCUMENT: ... ===" section and note whether each queried entity name appears in its text.
-- Distinguish entities by their EXACT legal name as written in the text:
-  * "Contoso Ltd." and "Contoso Lifts LLC" are DIFFERENT entities.
-  * "Fabrikam Inc." and "Fabrikam Construction" are DIFFERENT entities.
-  * Do NOT conflate entities that share a common word but have different legal suffixes.
-- After scanning all document sections, tally document counts per entity, then compare.
-- Show your per-document tally explicitly before stating the conclusion.
-"""
         
         logger.info(
             "summary_prompt_variant",
             variant=variant,
             query=query[:60],
             is_per_document_query=is_per_document_query,
-            is_entity_tracking_query=is_entity_tracking_query,
             context_length=len(context),
         )
         

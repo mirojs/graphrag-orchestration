@@ -732,6 +732,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                     "text": passage,
                     "sentence_text": r.get("text", ""),
                     "score": r.get("score", 0),
+                    "source": r.get("source", ""),
                     "document_title": r.get("document_title", "Unknown"),
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_path", ""),

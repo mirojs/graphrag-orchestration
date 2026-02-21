@@ -573,15 +573,14 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _fetch_chunks_by_ids(
         self,
         chunk_ids: List[str],
-    ) -> Dict[str, List[Dict[str, Any]]]:
+    ) -> List[Dict[str, Any]]:
         """Fetch chunk text + metadata from Neo4j by chunk IDs.
 
-        Returns dict in pre_fetched_chunks format expected by the synthesizer:
-        {entity_name: [chunk_dicts]}.  For passage-node PPR we group by
-        document so the synthesizer can build proper citations.
+        Returns flat list of chunk dicts in the format expected by the
+        synthesizer's ``pre_fetched_chunks`` parameter.
         """
         if not chunk_ids or not self.neo4j_driver:
-            return {}
+            return []
 
         group_id = self.group_id
 
@@ -611,18 +610,20 @@ class HippoRAG2Handler(BaseRouteHandler):
             results = await asyncio.to_thread(_run)
         except Exception as e:
             logger.warning("route7_fetch_chunks_failed", error=str(e))
-            return {}
+            return []
 
-        # Group chunks by a pseudo-entity key for the synthesizer.
-        # Use "__ppr_passage__" as a single entity so synthesizer treats
-        # all PPR-retrieved chunks as evidence for one "entity".
-        chunks_list = []
+        # Build flat list of chunk dicts for the synthesizer.
+        # Each chunk needs "text", "source", "entity", and "metadata" fields
+        # matching what _retrieve_text_chunks() normally returns.
+        chunks_list: List[Dict[str, Any]] = []
         for r in results:
             chunks_list.append({
                 "id": r.get("chunk_id", ""),
                 "source": r.get("document_title", "Unknown"),
                 "text": r.get("text", ""),
                 "entity": "__ppr_passage__",
+                "_entity_score": 1.0,
+                "_source_entity": "__ppr_passage__",
                 "metadata": {
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_title", ""),
@@ -630,7 +631,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 },
             })
 
-        return {"__ppr_passage__": chunks_list} if chunks_list else {}
+        return chunks_list
 
     # ======================================================================
     # Phase 2: Structural Seeds (Tier 2)

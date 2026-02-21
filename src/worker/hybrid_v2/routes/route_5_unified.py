@@ -415,27 +415,13 @@ class UnifiedSearchHandler(BaseRouteHandler):
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
 
-        # 5a: Inject signature block coverage sentences that vector search
-        #     may have missed (short structured text ranks poorly for many
-        #     query types).  Deduplicate against existing sentence evidence.
+        # 5a: Inject signature block coverage chunks that vector search
+        #     and PPR chunk allocation may have missed.  These are the
+        #     parent TextChunks of signature_party sentences — full page
+        #     context rather than individual sentence fragments.
+        sigblock_chunks: List[Dict[str, Any]] = []
         try:
-            sigblock_sentences = await self._retrieve_signature_sentences()
-            if sigblock_sentences:
-                existing_sids = {
-                    ev.get("sentence_id") for ev in sentence_evidence
-                }
-                new_sigblock = [
-                    s
-                    for s in sigblock_sentences
-                    if s.get("sentence_id") not in existing_sids
-                ]
-                if new_sigblock:
-                    sentence_evidence.extend(new_sigblock)
-                    logger.info(
-                        "step_5a_sigblock_coverage",
-                        added=len(new_sigblock),
-                        total_sentence_evidence=len(sentence_evidence),
-                    )
+            sigblock_chunks = await self._retrieve_signature_chunks()
         except Exception as e:
             logger.warning("step_5a_sigblock_coverage_failed", error=str(e))
 
@@ -470,12 +456,15 @@ class UnifiedSearchHandler(BaseRouteHandler):
             if community_summaries:
                 community_context = "\n\n".join(community_summaries)
 
+        # Merge sentence + sigblock chunks for coverage
+        all_coverage = sentence_chunks + sigblock_chunks
+
         # Synthesize with both PPR evidence and sentence chunks
         synthesis_result = await self.pipeline.synthesizer.synthesize(
             query=query,
             evidence_nodes=ppr_evidence,
             response_type=response_type,
-            coverage_chunks=sentence_chunks if sentence_chunks else None,
+            coverage_chunks=all_coverage if all_coverage else None,
             prompt_variant=prompt_variant,
             synthesis_model=synthesis_model,
             include_context=include_context,
@@ -897,34 +886,36 @@ class UnifiedSearchHandler(BaseRouteHandler):
     # Signature block coverage — guaranteed retrieval
     # ==================================================================
 
-    async def _retrieve_signature_sentences(
+    async def _retrieve_signature_chunks(
         self,
     ) -> List[Dict[str, Any]]:
-        """Fetch all signature_party sentences for the group.
+        """Fetch parent TextChunks that contain signature_party sentences.
 
-        Signature block sentences carry entity names and dates that
-        vector search may rank poorly for non-name/non-date queries.
-        By fetching them directly we guarantee that document signature
-        content reaches the LLM context regardless of query type.
+        Signature blocks carry entity names and dates critical for
+        cross-document entity tracking and date extraction.  Vector
+        search ranks these poorly for many query types, and PPR chunk
+        allocation may deprioritize them when the entity has many chunks
+        across multiple documents.
+
+        By fetching the parent TextChunk we get the full page context
+        (e.g. the entire Exhibit A page including scope, dates, and
+        parties), not just the individual sentence fragments.
         """
         if not self.neo4j_driver:
             return []
 
         cypher = """
         MATCH (sent:Sentence {source: "signature_party", group_id: $group_id})
-        OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
-        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
+              -[:PART_OF]->(chunk:TextChunk)
+        OPTIONAL MATCH (chunk)-[:PART_OF]->(doc:Document)
 
-        RETURN sent.id AS sentence_id,
-               sent.text AS text,
-               sent.source AS source,
-               sent.section_path AS section_path,
-               sent.page AS page,
+        WITH DISTINCT chunk, doc
+        RETURN chunk.id AS chunk_id,
+               chunk.text AS text,
                doc.title AS document_title,
                doc.id AS document_id,
-               prev_sent.text AS prev_text,
-               next_sent.text AS next_text
+               chunk.section_path AS section_path,
+               chunk.page AS page
         """
 
         try:
@@ -945,32 +936,27 @@ class UnifiedSearchHandler(BaseRouteHandler):
         if not results:
             return []
 
-        evidence: List[Dict[str, Any]] = []
+        chunks: List[Dict[str, Any]] = []
         for r in results:
-            parts = []
-            if r.get("prev_text"):
-                parts.append(r["prev_text"].strip())
-            parts.append(r.get("text", "").strip())
-            if r.get("next_text"):
-                parts.append(r["next_text"].strip())
-            passage = " ".join(parts)
-
-            evidence.append(
+            text = (r.get("text") or "").strip()
+            if not text:
+                continue
+            chunks.append(
                 {
-                    "text": passage,
-                    "sentence_text": r.get("text", ""),
-                    "score": 0.35,
-                    "source": "signature_party",
+                    "text": text,
                     "document_title": r.get("document_title", "Unknown"),
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_path", ""),
-                    "page": r.get("page"),
-                    "sentence_id": r.get("sentence_id", ""),
+                    "page_number": r.get("page"),
+                    "_entity_score": 0.35,
+                    "_source_entity": "__sigblock_coverage__",
+                    "chunk_id": r.get("chunk_id", ""),
                 }
             )
 
         logger.info(
-            "route5_sigblock_sentences_fetched",
-            count=len(evidence),
+            "route5_sigblock_chunks_fetched",
+            count=len(chunks),
+            documents=[c.get("document_title", "?") for c in chunks],
         )
-        return evidence
+        return chunks

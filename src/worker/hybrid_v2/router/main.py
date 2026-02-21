@@ -95,6 +95,7 @@ class QueryRoute(Enum):
     DRIFT_MULTI_HOP = "drift_multi_hop"     # Route 4: Iterative multi-hop reasoning
     UNIFIED_SEARCH = "unified_search"       # Route 5: Unified hierarchical seed PPR
     CONCEPT_SEARCH = "concept_search"       # Route 6: Concept search (direct community synthesis)
+    HIPPORAG2_SEARCH = "hipporag2_search"  # Route 7: True HippoRAG 2 architecture
     # Legacy alias for backward compatibility
     VECTOR_RAG = "local_search"             # Deprecated: maps to LOCAL_SEARCH
 

@@ -9,6 +9,7 @@ and implements a specific retrieval strategy:
 - Route 4 (DRIFTHandler): Multi-hop iterative reasoning
 - Route 5 (UnifiedSearchHandler): Unified hierarchical seed PPR (merges Routes 3+4)
 - Route 6 (ConceptSearchHandler): Concept search with direct community synthesis
+- Route 7 (HippoRAG2Handler): True HippoRAG 2 with passage-node PPR
 
 Usage:
     from src.worker.hybrid_v2.routes import VectorRAGHandler, RouteResult
@@ -24,6 +25,7 @@ from .route_3_global import GlobalSearchHandler
 from .route_4_drift import DRIFTHandler
 from .route_5_unified import UnifiedSearchHandler
 from .route_6_concept import ConceptSearchHandler
+from .route_7_hipporag2 import HippoRAG2Handler
 
 __all__ = [
     # Base classes
@@ -37,4 +39,5 @@ __all__ = [
     "DRIFTHandler",
     "UnifiedSearchHandler",
     "ConceptSearchHandler",
+    "HippoRAG2Handler",
 ]

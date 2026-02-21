@@ -175,6 +175,7 @@ class RouteEnum(str, Enum):
     DRIFT_MULTI_HOP = "drift_multi_hop" # Route 4: Multi-hop iterative
     UNIFIED_SEARCH = "unified_search"   # Route 5: Unified hierarchical seed PPR
     CONCEPT_SEARCH = "concept_search"   # Route 6: Concept search (direct community synthesis)
+    HIPPORAG2_SEARCH = "hipporag2_search"  # Route 7: True HippoRAG 2 architecture
 
 
 class HybridQueryRequest(BaseModel):
@@ -486,7 +487,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
         
         pipeline = await _get_or_create_pipeline(group_id)
         
-        # Handle forced routing (Routes 2, 3, 4, 5)
+        # Handle forced routing (Routes 2, 3, 4, 5, 6, 7)
         if body.force_route:
             route_map: Dict[RouteEnum, QueryRoute] = {
                 RouteEnum.LOCAL_SEARCH: QueryRoute.LOCAL_SEARCH,
@@ -494,6 +495,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
                 RouteEnum.DRIFT_MULTI_HOP: QueryRoute.DRIFT_MULTI_HOP,
                 RouteEnum.UNIFIED_SEARCH: QueryRoute.UNIFIED_SEARCH,
                 RouteEnum.CONCEPT_SEARCH: QueryRoute.CONCEPT_SEARCH,
+                RouteEnum.HIPPORAG2_SEARCH: QueryRoute.HIPPORAG2_SEARCH,
             }
             forced_route = route_map[body.force_route]
             result = await pipeline.force_route(

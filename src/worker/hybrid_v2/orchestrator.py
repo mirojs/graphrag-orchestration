@@ -53,7 +53,7 @@ from .pipeline.enhanced_graph_retriever import EnhancedGraphRetriever
 from .router.main import HybridRouter, QueryRoute, DeploymentProfile
 
 # Modular route handlers (Jan 2026 refactor)
-from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler
+from .routes import LocalSearchHandler, GlobalSearchHandler, DRIFTHandler, UnifiedSearchHandler, ConceptSearchHandler, HippoRAG2Handler
 
 # Import async Neo4j service for native async operations
 try:
@@ -289,6 +289,7 @@ class HybridPipeline:
             QueryRoute.DRIFT_MULTI_HOP: DRIFTHandler(self),
             QueryRoute.UNIFIED_SEARCH: UnifiedSearchHandler(self),
             QueryRoute.CONCEPT_SEARCH: ConceptSearchHandler(self),
+            QueryRoute.HIPPORAG2_SEARCH: HippoRAG2Handler(self),
         }
         
         logger.info("hybrid_pipeline_initialized",

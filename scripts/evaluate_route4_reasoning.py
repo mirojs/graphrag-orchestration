@@ -177,17 +177,28 @@ def load_ground_truth(path: Path) -> Dict[str, str]:
     i = 0
     while i < len(lines):
         line = lines[i]
-        m_id = re.search(r"\*\*(Q-[DNS]\d+):\*\*", line)
+        m_id = re.search(r"\*\*(Q-[DGNLS]\d+):\*\*", line)
         if m_id:
             current_qid = m_id.group(1)
-        
+
         if current_qid and "- **Expected:**" in line:
             expected_text = line.split("- **Expected:**")[1].strip()
-            # Collect multi-line expected answers if they exist
-            # (Look ahead for indented lines or wrapped text)
-            # For now, just taking the single line or until next bullet/blank
-            gt[current_qid] = expected_text
-            current_qid = None # Reset
+            # Collect multi-line expected answers (indented continuation lines)
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j]
+                # Stop at blank line, next section header, next QID, or next top-level bullet
+                if not next_line.strip():
+                    break
+                if re.match(r"\d+\.\s+\*\*Q-", next_line):
+                    break
+                if re.match(r"\s*- \*\*(Expected Route|Source|Note):", next_line):
+                    break
+                # Continuation line (indented bullet or text)
+                expected_text += " " + next_line.strip().lstrip("- ")
+                j += 1
+            gt[current_qid] = expected_text.strip()
+            current_qid = None  # Reset
             
         i += 1
             

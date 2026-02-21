@@ -500,8 +500,8 @@ def main() -> int:
     ap.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis model (e.g. gpt-4.1, gpt-4.1-mini)")
     ap.add_argument("--include-context", action="store_true", default=False, help="Include full LLM context (retrieved evidence) in benchmark output for debugging")
     ap.add_argument("--force-route", default="global_search",
-                    choices=["global_search", "unified_search", "concept_search"],
-                    help="Route to force (global_search=Route3, unified_search=Route5, concept_search=Route6)")
+                    choices=["global_search", "unified_search", "concept_search", "hipporag2_search"],
+                    help="Route to force (global_search=Route3, unified_search=Route5, concept_search=Route6, hipporag2_search=Route7)")
     args = ap.parse_args()
 
     base_url = str(args.url).rstrip("/")
@@ -543,6 +543,9 @@ def main() -> int:
     if "concept" in force_route:
         route_label = "Route 6 (Concept)"
         scenario_name = "hybrid_concept_summary"
+    elif "hipporag2" in force_route:
+        route_label = "Route 7 (HippoRAG 2)"
+        scenario_name = "route7_hipporag2_global_summary"
     elif "unified" in force_route:
         route_label = "Route 5 (Unified)"
         scenario_name = "hybrid_unified_summary"
@@ -556,6 +559,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     if "concept" in force_route:
         route_prefix = "route6"
+    elif "hipporag2" in force_route:
+        route_prefix = "route7"
     elif "unified" in force_route:
         route_prefix = "route5"
     else:

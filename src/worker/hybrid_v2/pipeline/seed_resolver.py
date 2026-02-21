@@ -835,11 +835,11 @@ async def resolve_all_tiers(
                 union_sections=len(structural_sections),
             )
 
-        # Run section-entity resolution and SignatureBlock resolution in parallel.
-        # SignatureBlock entities are always fetched regardless of whether any
-        # section match was found — they represent contracting parties that are
-        # structurally present but not captured by Section-node traversal.
-        # resolve_section_entities() handles empty section_paths gracefully.
+        # Run section-entity resolution and (optionally) SignatureBlock resolution
+        # in parallel.  resolve_section_entities() handles empty section_paths
+        # gracefully.
+        sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "1").strip() == "1"
+
         section_task = asyncio.create_task(
             resolve_section_entities(
                 async_neo4j=async_neo4j,
@@ -848,14 +848,18 @@ async def resolve_all_tiers(
                 folder_id=folder_id,
             )
         )
-        sigblock_task = asyncio.create_task(
-            resolve_signatureblock_entities(
-                async_neo4j=async_neo4j,
-                group_id=group_id,
-                folder_id=folder_id,
+        if sigblock_enabled:
+            sigblock_task = asyncio.create_task(
+                resolve_signatureblock_entities(
+                    async_neo4j=async_neo4j,
+                    group_id=group_id,
+                    folder_id=folder_id,
+                )
             )
-        )
-        section_records, sigblock_ids = await asyncio.gather(section_task, sigblock_task)
+            section_records, sigblock_ids = await asyncio.gather(section_task, sigblock_task)
+        else:
+            section_records = await section_task
+            sigblock_ids = []
 
         entity_ids = list({r["id"] for r in section_records} | set(sigblock_ids))
         return entity_ids, structural_sections
@@ -1042,8 +1046,8 @@ async def resolve_flat_seed_pool(
             structural_sections = await match_sections_by_embedding(
                 async_neo4j=async_neo4j, query=query, group_id=group_id,
             )
-            # Run section-entity resolution and SignatureBlock resolution in
-            # parallel; resolve_section_entities handles empty list gracefully.
+            sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "1").strip() == "1"
+
             section_task = asyncio.create_task(
                 resolve_section_entities(
                     async_neo4j=async_neo4j,
@@ -1052,16 +1056,21 @@ async def resolve_flat_seed_pool(
                     folder_id=folder_id,
                 )
             )
-            sigblock_task = asyncio.create_task(
-                resolve_signatureblock_entities(
-                    async_neo4j=async_neo4j,
-                    group_id=group_id,
-                    folder_id=folder_id,
+            if sigblock_enabled:
+                sigblock_task = asyncio.create_task(
+                    resolve_signatureblock_entities(
+                        async_neo4j=async_neo4j,
+                        group_id=group_id,
+                        folder_id=folder_id,
+                    )
                 )
-            )
-            section_records, sigblock_ids = await asyncio.gather(
-                section_task, sigblock_task
-            )
+                section_records, sigblock_ids = await asyncio.gather(
+                    section_task, sigblock_task
+                )
+            else:
+                section_records = await section_task
+                sigblock_ids = []
+
             entity_ids = list({r["id"] for r in section_records} | set(sigblock_ids))
             return entity_ids, structural_sections
         except Exception as e:

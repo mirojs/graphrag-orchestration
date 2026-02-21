@@ -1,6 +1,9 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 20, 2026
+**Last Updated:** February 21, 2026
+
+**Recent Updates (February 21, 2026):**
+- ✅ **Route 7: True HippoRAG 2 — 57/57 (100%) LLM Judge Score:** Implemented the real HippoRAG 2 architecture (ICML '25) as a new route alongside Route 5. Two key innovations: (1) passage nodes in PPR graph (passage scores from random walk, not post-PPR lookup), (2) query-to-triple linking with LLM recognition memory filter (not NER-to-node). All three tested configurations (vanilla d=0.5, Phase 2 all-ON, d=0.85) scored **57/57** on gpt-5.1 LLM judge. Route 5 regression baseline: 51/57 (89.5%). Route 7 vanilla is 2.6× faster than Route 5 (3,438ms vs 9,105ms P50). See [Section 33](#33-route-7-true-hipporag-2-implementation--benchmark-february-21-2026).
 
 **Recent Updates (February 20, 2026):**
 - ✅ **Route 3 Three-Layer Fix — Q-G4 50% → 100% theme coverage:** Three stacked fixes eliminated a minority-document suppression chain in the Route 3 pipeline. Root cause confirmed via `include_context=True` diagnostic: PMA "monthly statement" sentence was present in REDUCE input at position 10 (score 0.623) but suppressed by prompt. Fixed with: (1) `asyncio.Lock` double-checked locking in `CommunityMatcher` (commit `3d52d16`), (2) reranker over-fetch 15→30 + post-rerank diversity pass (commit `b8f364b`), (3) REDUCE prompt completeness — require all obligations from all documents (commit `a1ae6ef`). Q-G4: 50%→100%, Q-G3/G7 variance resolved to 100%, Q-G10: 17%→83%. Side effect: avg response length +102% (1,941→3,931 chars), avg latency +36% (10.5s→14.3s). See [Section 31](#31-route-3-three-layer-fix-minority-document-suppression-february-20-2026).
@@ -8652,3 +8655,245 @@ The concept **is present**; the exact phrase `"scope of work"` is not. This is a
 Benchmark files:
 - Route 3: `benchmarks/route3_global_search_20260220T092601Z.json`
 - Route 6: `benchmarks/route6_global_search_20260220T100958Z.json`
+
+## 33. Route 7: True HippoRAG 2 — Implementation & Benchmark (February 21, 2026)
+
+### 33.1. Motivation
+
+Route 5 (HippoRAG-style PPR) scored 51/57 (89.5%) on the gpt-5.1 LLM judge using the standard 19-question benchmark (10 positive + 9 negative). Three questions (Q-D3, Q-D7, Q-D8) consistently lost points due to incomplete retrieval of cross-document timeframes, incorrect date comparison, and entity count errors.
+
+The HippoRAG 2 paper (ICML '25, arXiv:2502.14802) introduces two architectural innovations that address retrieval completeness:
+
+1. **Passage nodes in the PPR graph** — PPR walks Entity↔Passage (TextChunk) edges, so passage scores come directly from the random walk rather than a post-PPR entity→passage lookup. This gives the graph walk direct access to chunk-level granularity.
+
+2. **Query-to-triple linking** — At query time, the full query is embedded and matched against pre-computed triple embeddings (not NER-to-node). An LLM then filters the top-K triples ("recognition memory") before seeding PPR. This avoids NER extraction errors and captures relational patterns that entity matching misses.
+
+### 33.2. Architecture
+
+```
+                    ┌──────────────────────────┐
+                    │     Query Embedding       │
+                    │      (Voyage v3)          │
+                    └──────────┬───────────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+              ▼                ▼                ▼
+   ┌──────────────────┐ ┌────────────┐ ┌────────────────┐
+   │ Query-to-Triple  │ │    DPR     │ │   Sentence     │
+   │ Linking (top-5)  │ │  Passage   │ │   Search       │
+   │      +           │ │  Search    │ │  (Phase 2)     │
+   │ LLM Recognition  │ │ (top-20)  │ │  (optional)    │
+   │ Memory Filter    │ │            │ │                │
+   └────────┬─────────┘ └─────┬──────┘ └───────┬────────┘
+            │                 │                 │
+            ▼                 ▼                 │
+   ┌──────────────────────────────────┐         │
+   │    Entity Seeds + Passage Seeds  │         │
+   │   + Structural Seeds (Phase 2)   │         │
+   │   + Community Seeds  (Phase 2)   │         │
+   └──────────────┬───────────────────┘         │
+                  │                             │
+                  ▼                             │
+   ┌──────────────────────────────────┐         │
+   │   True PPR (in-memory)           │         │
+   │   Damping=0.5, undirected,       │         │
+   │   weighted edges,                │         │
+   │   Entity↔Passage walk            │         │
+   └──────────────┬───────────────────┘         │
+                  │                             │
+                  ▼                             ▼
+   ┌──────────────────────────────────────────────┐
+   │   Top-K Passage Scores → Fetch Chunk Texts   │
+   │   + Sentence Evidence (if enabled)            │
+   └──────────────┬───────────────────────────────┘
+                  │
+                  ▼
+   ┌──────────────────────────────────┐
+   │   Synthesis (pre_fetched_chunks) │
+   │   → RouteResult with Citations   │
+   └──────────────────────────────────┘
+```
+
+**Key differences from Route 5:**
+
+| Aspect | Route 5 | Route 7 |
+|--------|---------|---------|
+| Query understanding | NER extraction → entity matching | Query embedding → triple cosine similarity |
+| Triple filtering | None | LLM recognition memory (top-5 → survivors) |
+| PPR graph nodes | Entity only | Entity + Passage (TextChunk) |
+| Passage scoring | Post-PPR lookup (entity→chunk) | Direct from PPR walk |
+| Edge weighting | Unweighted | Weighted (RELATED_TO, MENTIONS, SIMILAR) |
+| DPR integration | Not used | Parallel passage vector search → passage seeds |
+| Default damping | 0.85 | 0.5 |
+
+### 33.3. Implementation — New Files
+
+| File | Purpose |
+|------|---------|
+| `src/worker/hybrid_v2/retrievers/triple_store.py` | `TripleEmbeddingStore` — loads all RELATED_TO edges, batch-embeds via Voyage, cosine search. `recognition_memory_filter()` — LLM filters top-K triples for query relevance. |
+| `src/worker/hybrid_v2/retrievers/hipporag2_ppr.py` | `HippoRAG2PPR` — builds undirected weighted adjacency (Entity↔Entity via RELATED_TO, Entity↔Passage via MENTIONS, Entity↔Entity via SEMANTICALLY_SIMILAR). Power iteration PPR returns `(passage_scores, entity_scores)`. |
+| `src/worker/hybrid_v2/routes/route_7_hipporag2.py` | `HippoRAG2Handler` — route handler. Pipeline: embed → parallel (triple linking, DPR, sentence search) → seed build → PPR → fetch chunks → synthesize. |
+| `scripts/benchmark_route7_hipporag2.py` | Benchmark script. `FORCE_ROUTE = "hipporag2_search"`. Same 19-question bank as Route 5. |
+
+### 33.4. Implementation — Modified Files
+
+| File | Change |
+|------|--------|
+| `src/worker/hybrid_v2/router/main.py` | Added `HIPPORAG2_SEARCH = "hipporag2_search"` to `QueryRoute` enum |
+| `src/worker/hybrid_v2/routes/__init__.py` | Import + export `HippoRAG2Handler` |
+| `src/worker/hybrid_v2/orchestrator.py` | Register handler in `_route_handlers` dict |
+| `src/api_gateway/routers/hybrid.py` | Added to `RouteEnum` + `route_map` |
+
+### 33.5. Phase 2 Feature Flags
+
+Each addition is gated by an env var for independent A/B testing:
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `ROUTE7_STRUCTURAL_SEEDS` | `0` | Tier 2 structural seeds via section embedding matching |
+| `ROUTE7_COMMUNITY_SEEDS` | `0` | Tier 3 community seeds via `CommunityMatcher` |
+| `ROUTE7_SENTENCE_SEARCH` | `0` | Parallel sentence vector search (sentence_embeddings_v2 index) |
+| `ROUTE7_SECTION_GRAPH` | `0` | Include Section nodes in PPR graph |
+| `ROUTE7_TRIPLE_TOP_K` | `5` | Number of triple candidates before recognition memory filter |
+| `ROUTE7_DPR_TOP_K` | `20` | DPR passage search top-K |
+| `ROUTE7_DAMPING` | `0.5` | PPR damping factor |
+| `ROUTE7_PASSAGE_NODE_WEIGHT` | `0.05` | Weight for passage→entity MENTIONS edges |
+| `ROUTE7_SYNONYM_THRESHOLD` | `0.8` | Minimum similarity for SEMANTICALLY_SIMILAR edges |
+| `ROUTE7_PPR_PASSAGE_TOP_K` | `20` | Number of top passages from PPR to send to synthesis |
+| `ROUTE7_W_STRUCTURAL` | `0.2` | Weight for structural entity seeds |
+| `ROUTE7_W_COMMUNITY` | `0.1` | Weight for community entity seeds |
+| `ROUTE7_SENTENCE_TOP_K` | `30` | Sentence search top-K |
+| `ROUTE7_SENTENCE_THRESHOLD` | `0.2` | Sentence search similarity threshold |
+| `ROUTE7_RETURN_TIMINGS` | `0` | Include per-step timing breakdown in response metadata |
+
+### 33.6. Damping Factor Explained
+
+The PPR damping factor controls how far the random walk spreads from seed nodes:
+
+- **Low damping (0.5)** — At each step, 50% chance of teleporting back to seeds. Walk stays close to seed neighbourhood. Produces focused, high-precision retrieval. Favours passages directly connected to query-relevant triples.
+- **High damping (0.85)** — Only 15% teleport chance. Walk explores further from seeds. Produces broader retrieval. Can discover transitively-related passages but may also introduce noise.
+
+Route 7 defaults to **0.5** (matching the HippoRAG 2 paper), while Route 5 uses **0.85**. Both scored 57/57 on Route 7 — the direct passage-node integration makes Route 7 less sensitive to damping choice than Route 5's entity-only PPR.
+
+### 33.7. Bug Fix: Synthesizer Integration
+
+**Commit:** `9e21c6f` — `fix(route7): pass flat chunk list to synthesizer instead of wrapped dict`
+
+Initial deployment returned HTTP 500: `'str' object has no attribute 'get'`.
+
+**Root cause:** `_fetch_chunks_by_ids()` returned `{"__ppr_passage__": [chunks]}` (a `Dict[str, List]`) but the synthesizer's `pre_fetched_chunks` parameter expects `List[Dict]`. When iterating a dict, Python yields string keys; calling `.get()` on a string crashes.
+
+**Fix:** Changed return type to flat `List[Dict[str, Any]]`, returning `chunks_list` directly. Each chunk dict includes `id`, `source`, `text`, `entity`, `_entity_score`, `_source_entity`, and `metadata` fields matching the synthesizer's expected format.
+
+### 33.8. Benchmark Results — LLM Judge (gpt-5.1)
+
+All benchmarks use the same 19-question bank (10 positive Q-D, 9 negative Q-N) and the same group (`test-5pdfs-v2-fix2`, 5 PDFs). LLM judge: `scripts/evaluate_route4_reasoning.py` with gpt-5.1, scoring 0–3 per question (max = 19 × 3 = 57).
+
+#### Configuration Summary
+
+| Config | LLM Judge | Pass Rate (≥2) | Containment | F1 | P50 Latency | Neg Pass | Pos Resp Len | Neg Resp Len |
+|--------|-----------|----------------|-------------|-----|-------------|----------|--------------|--------------|
+| **R7 vanilla (d=0.5)** | **57/57 (100%)** | 100% | 0.91 | 0.40 | **3,438 ms** | 9/9 | 1,154 chars | 88 chars |
+| **R7 Phase 2 all-ON** | **57/57 (100%)** | 100% | 0.90 | 0.41 | 5,949 ms | 9/9 | 1,211 chars | 71 chars |
+| **R7 d=0.85** | **57/57 (100%)** | 100% | **0.92** | **0.41** | 5,153 ms | 9/9 | 1,364 chars | 88 chars |
+| **R5 baseline** | 51/57 (89.5%) | 84.2% | 0.81 | 0.38 | 9,105 ms | 9/9 | 1,150 chars | 77 chars |
+
+#### Route 7 vs Route 5 Delta
+
+| Metric | Route 7 (best) | Route 5 | Delta |
+|--------|---------------|---------|-------|
+| LLM Judge | 57/57 (100%) | 51/57 (89.5%) | **+10.5 pp** |
+| Pass Rate (≥2) | 100% | 84.2% | **+15.8 pp** |
+| Avg Containment | 0.92 | 0.81 | **+0.11** |
+| Avg F1 | 0.41 | 0.38 | +0.03 |
+| P50 Latency | 3,438 ms | 9,105 ms | **2.6× faster** |
+| Pos Resp Length | 1,154–1,364 chars | 1,150 chars | comparable |
+
+#### Route 5 Failure Analysis (3 questions lost 6 points)
+
+| Question | R5 Score | R7 Score | R5 Failure Reason |
+|----------|----------|----------|-------------------|
+| Q-D3 (time windows) | 1/3 | 3/3 | Missed 1-year warranty, 180-day arbitration, 12-month PMA term, 90-day labor warranty, 3-day cancel window. NER-based seeding failed to link cross-document temporal concepts. |
+| Q-D7 (latest date) | 1/3 | 3/3 | Incorrectly identified 2024-06-15 (Holding Tank) instead of 2025-04-30 (Purchase Contract). Entity-only PPR didn't surface the Exhibit A date passage. |
+| Q-D8 (entity count) | 1/3 | 3/3 | Incorrectly claimed Fabrikam appears in more documents than Contoso. Entity-only retrieval conflated Contoso Ltd. with Contoso Lifts LLC. |
+
+**Root cause pattern:** Route 5's NER-to-node seeding retrieves entity-adjacent passages but misses passages that are relevant to the query's *relational* or *comparative* intent. Route 7's query-to-triple linking captures these relational patterns because triples encode subject-predicate-object structure, and the full query embedding matches against this structure directly.
+
+### 33.9. Phase 2 Ablation
+
+Phase 2 features (structural seeds, community seeds, sentence search, section graph) were tested with all flags enabled simultaneously vs vanilla:
+
+| Metric | Vanilla (Phase 1 only) | Phase 2 all-ON | Delta |
+|--------|----------------------|----------------|-------|
+| LLM Judge | 57/57 | 57/57 | no change |
+| Containment | 0.91 | 0.90 | −0.01 |
+| F1 | 0.40 | 0.41 | +0.01 |
+| P50 Latency | 3,438 ms | 5,949 ms | +73% slower |
+| Pos Resp Length | 1,154 chars | 1,211 chars | +5% |
+
+**Conclusion:** Phase 2 additions provide no measurable accuracy gain on this benchmark while adding 73% latency. The vanilla Phase 1 pipeline (query-to-triple + DPR + passage-node PPR) is sufficient for the 5-PDF test corpus. Phase 2 features may become valuable on larger corpora with more entity ambiguity and community structure.
+
+**Recommendation:** Keep Phase 2 flags disabled by default. Enable selectively for larger corpora where structural/community seeds provide additional retrieval pathways.
+
+### 33.10. Damping Sensitivity
+
+| Metric | d=0.5 (default) | d=0.85 |
+|--------|----------------|--------|
+| LLM Judge | 57/57 | 57/57 |
+| Containment | 0.91 | 0.92 |
+| F1 | 0.40 | 0.41 |
+| P50 Latency | 3,438 ms | 5,153 ms |
+| Pos Resp Length | 1,154 chars | 1,364 chars |
+
+**Conclusion:** Route 7 is insensitive to damping on this benchmark — both 0.5 and 0.85 achieve 57/57. The d=0.85 variant produces slightly longer responses (+18%) and slightly higher containment (+0.01) at the cost of 50% more latency. The paper's default of 0.5 is retained as it provides the best speed/quality tradeoff.
+
+**Why Route 7 is damping-insensitive:** Unlike Route 5 (entity-only PPR, where passage scores are derived indirectly), Route 7's passage nodes participate directly in the PPR walk. Even with high teleport probability (low damping), passages connected to seed entities receive direct score contributions. The dual seeding (entity seeds from triples + passage seeds from DPR) further ensures relevant passages are scored regardless of walk depth.
+
+### 33.11. Per-Question Automated Metrics (Vanilla d=0.5, 3 repeats)
+
+| QID | Question | Containment | F1 | P50 (ms) | Resp Len |
+|-----|----------|-------------|-----|----------|----------|
+| Q-D1 | Emergency defect notification | 0.94 | 0.36 | 3,229 | 782 |
+| Q-D2 | Confirmed reservations on termination | 1.00 | 0.18 | 5,058 | 1,083 |
+| Q-D3 | Time windows across documents | 0.76 | 0.43 | 7,090 | 2,250 |
+| Q-D4 | Insurance mentions and limits | 1.00 | 0.40 | 4,115 | 733 |
+| Q-D5 | Warranty coverage start | 0.93 | 0.40 | 4,501 | 1,173 |
+| Q-D6 | Contract vs invoice total match | 0.50 | 0.22 | 3,337 | 578 |
+| Q-D7 | Latest explicit date | 0.91 | 0.48 | 4,797 | 882 |
+| Q-D8 | Entity document count comparison | 0.84 | 0.63 | 4,799 | 1,182 |
+| Q-D9 | Fee structures comparison | 0.84 | 0.42 | 3,854 | 1,199 |
+| Q-D10 | Risk allocation statements | 0.94 | 0.43 | 4,040 | 1,680 |
+| Q-N1 | Bank routing (neg) | — | — | 1,703 | 43 |
+| Q-N2 | IBAN/SWIFT (neg) | — | — | 2,102 | 43 |
+| Q-N3 | VAT/Tax ID (neg) | — | — | 3,795 | 67 |
+| Q-N5 | Bank account (neg) | — | — | 1,374 | 43 |
+| Q-N6 | California law (neg) | — | — | 1,490 | 43 |
+| Q-N7 | Agent license (neg) | — | — | 2,632 | 67 |
+| Q-N8 | Wire transfer (neg) | — | — | 3,774 | 67 |
+| Q-N9 | Mold coverage (neg) | — | — | 1,741 | 43 |
+| Q-N10 | Shipping method (neg) | — | — | 3,858 | 375 |
+
+**Positive avg:** containment 0.87, F1 0.40, P50 4,482ms, response 1,154 chars
+**Negative avg:** all 9/9 PASS, P50 2,496ms, response 88 chars
+
+### 33.12. Repeatability
+
+The 3-repeat vanilla benchmark (20260221T102100Z) shows:
+
+- **Exact Match Rate:** 1.00 across all 19 questions (identical responses every run)
+- **Min Similarity:** 1.00 across all 19 questions
+- **Unique Citations:** 1 per question (same citations each run)
+- **Unique Evidence Paths:** 1 per question (same entity evidence each run)
+
+Route 7 is fully deterministic when using the same Voyage embeddings and PPR parameters. The only source of non-determinism would be the LLM recognition memory filter, but in practice it produces identical filtering results across runs for these queries.
+
+### 33.13. Benchmark Files
+
+| Config | Benchmark JSON | Eval Report |
+|--------|---------------|-------------|
+| R7 vanilla d=0.5 (3 repeats) | `benchmarks/route7_hipporag2_r4questions_20260221T102100Z.json` | `...102100Z.eval.md` |
+| R7 Phase 2 all-ON | `benchmarks/route7_hipporag2_r4questions_20260221T103332Z.json` | `...103332Z.eval.md` |
+| R7 d=0.85 | `benchmarks/route7_hipporag2_r4questions_20260221T103757Z.json` | `...103757Z.eval.md` |
+| R5 regression baseline | `benchmarks/route5_unified_r4questions_20260221T102102Z.json` | `...102102Z.eval.md` |
+| R7 vanilla (1 repeat, smoke) | `benchmarks/route7_hipporag2_r4questions_20260221T101924Z.json` | `...101924Z.md` |

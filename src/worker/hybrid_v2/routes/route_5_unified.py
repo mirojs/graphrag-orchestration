@@ -909,7 +909,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
         # Strategy 2: content-based (text patterns in chunks themselves)
         # Combined into a single query using OR to catch both
         cypher = """
-        MATCH (chunk:TextChunk {group_id: $group_id})-[:PART_OF]->(doc:Document)
+        MATCH (chunk:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(doc:Document)
         WHERE chunk.text CONTAINS 'Authorized Representative'
            OR chunk.text CONTAINS 'Signed this'
         RETURN DISTINCT chunk.id AS chunk_id,

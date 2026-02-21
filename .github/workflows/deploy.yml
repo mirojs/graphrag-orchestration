@@ -181,67 +181,9 @@ jobs:
             --revision-suffix "r${{ github.run_id }}" \
             --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO"
       
-      - name: Ensure worker Single revision mode & cleanup
-        run: |
-          # Ensure Single revision mode (prevents stale revision accumulation that breaks log stream)
-          az containerapp revision set-mode \
-            --name ${{ env.WORKER_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --mode Single
-
-          # Deactivate all non-latest revisions
-          LATEST=$(az containerapp show \
-            --name ${{ env.WORKER_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "properties.latestReadyRevisionName" -o tsv)
-          echo "Latest ready revision: $LATEST"
-
-          STALE=$(az containerapp revision list \
-            --name ${{ env.WORKER_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "[?properties.active && name != '$LATEST'].name" -o tsv)
-
-          for REV in $STALE; do
-            echo "Deactivating stale revision: $REV"
-            az containerapp revision deactivate \
-              --name ${{ env.WORKER_APP_NAME }} \
-              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --revision "$REV" 2>/dev/null || true
-          done
-          echo "Worker revision cleanup complete"
-      
-      - name: Ensure API Single revision mode & cleanup
-        run: |
-          # Ensure Single revision mode (prevents stale revision accumulation)
-          az containerapp revision set-mode \
-            --name ${{ env.API_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --mode Single
-
-          # Deactivate all non-latest revisions
-          LATEST=$(az containerapp show \
-            --name ${{ env.API_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "properties.latestReadyRevisionName" -o tsv)
-          echo "Latest ready revision: $LATEST"
-
-          STALE=$(az containerapp revision list \
-            --name ${{ env.API_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --query "[?properties.active && name != '$LATEST'].name" -o tsv)
-
-          for REV in $STALE; do
-            echo "Deactivating stale revision: $REV"
-            az containerapp revision deactivate \
-              --name ${{ env.API_APP_NAME }} \
-              --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --revision "$REV" 2>/dev/null || true
-          done
-          echo "API revision cleanup complete"
-      
       - name: Wait for startup
-        run: sleep 30
-      
+        run: sleep 60
+
       - name: Health check
         id: health
         run: |
@@ -249,22 +191,22 @@ jobs:
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --query "properties.configuration.ingress.fqdn" -o tsv)
-          
+
           echo "Testing: https://$URL"
           TOKEN=$(az account get-access-token --scope api://b68b6881-80ba-4cec-b9dd-bd2232ec8817/.default --query accessToken -o tsv)
-          
-          for i in {1..5}; do
+
+          for i in {1..8}; do
             HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://$URL/health" --max-time 10 -H "Authorization: Bearer $TOKEN")
             if [ "$HTTP" == "200" ]; then
-              echo "✅ Health check passed"
+              echo "Health check passed"
               curl -s -I "https://$URL/health" -H "Authorization: Bearer $TOKEN" | grep -i "x-" || true
               exit 0
             fi
-            echo "Attempt $i: HTTP $HTTP, retrying..."
-            sleep 10
+            echo "Attempt $i/8: HTTP $HTTP, retrying in 15s..."
+            sleep 15
           done
-          
-          echo "❌ Health check failed"
+
+          echo "Health check failed after 8 attempts"
           exit 1
       
       - name: Rollback on failure

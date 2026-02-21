@@ -24,6 +24,7 @@ on:
       - 'Dockerfile*'
       - 'requirements*.txt'
       - 'pyproject.toml'
+      - '.github/workflows/**'
   workflow_dispatch:
     inputs:
       algorithm_version:
@@ -157,21 +158,15 @@ jobs:
         run: |
           IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ needs.build.outputs.image_tag }}"
           echo "Deploying API: $IMAGE"
-          
+
           REVISION_SUFFIX="r${{ github.run_id }}"
           az containerapp update \
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
             --revision-suffix "$REVISION_SUFFIX"
-          
-          # Route 100% traffic to the new revision
-          REVISION_NAME="${{ env.API_APP_NAME }}--${REVISION_SUFFIX}"
-          echo "Routing traffic to: $REVISION_NAME"
-          az containerapp ingress traffic set \
-            --name ${{ env.API_APP_NAME }} \
-            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --revision-weight "${REVISION_NAME}=100"
+
+          echo "API deployed (single-revision mode auto-routes traffic)"
       
       - name: Deploy Worker
         run: |
@@ -277,11 +272,16 @@ jobs:
         run: |
           PREV="${{ steps.current.outputs.revision }}"
           if [ -n "$PREV" ]; then
-            echo "🔄 Rolling back to $PREV"
-            az containerapp ingress traffic set \
+            echo "Rolling back API to $PREV"
+            az containerapp update \
               --name ${{ env.API_APP_NAME }} \
               --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-              --revision-weight "$PREV=100"
+              --revision-suffix "rollback-${{ github.run_id }}" \
+              --image "$(az containerapp revision show \
+                --name ${{ env.API_APP_NAME }} \
+                --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+                --revision "$PREV" \
+                --query 'properties.template.containers[0].image' -o tsv)"
           fi
       
       - name: Summary

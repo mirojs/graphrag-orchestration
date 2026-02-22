@@ -2509,6 +2509,12 @@ IMPORTANT for Per-Document Queries:
   same documents" unless the question asks which documents they share. When comparing
   how many documents each entity appears in, report the COUNT per entity (e.g.
   "Entity A: 4 documents; Entity B: 4 documents") — not set membership.
+- **Entity identity precision**: When counting how many documents an entity appears in,
+  count only documents where it is a PRIMARY PARTY (signatory, buyer, seller, contractor,
+  owner, agent, customer). Do NOT count: (a) passing address or header mentions,
+  (b) related but legally distinct entity names. For example: "Fabrikam Construction"
+  in a ship-to address is NOT the same as "Fabrikam Inc." as a contracting party;
+  "Contoso Lifts LLC" is NOT the same entity as "Contoso Ltd." — treat them as separate.
 """
         
         logger.info(

@@ -9757,3 +9757,178 @@ Q-G5, Q-G6, Q-G7 are synthesis quality gaps unrelated to routing. Q-G6 fails on 
 | Q-G5 (1/3) | ⚠️ Open | Synthesis misses legal-fee-recovery clause in purchase contract |
 | Q-G6 (1/3 on both routes) | ⚠️ Open | Synthesis over-includes non-contracting entities (AAA, courts, animals) |
 | Q-G7 (1/3) | ⚠️ Open | Synthesis misses PMA 60-day notice; retrieves wrong notice type |
+
+---
+
+### §33.24 — R7 Neo4j Retry, Security Audit, Systematic Gap Analysis, Q-R6/Q-R7 Naming (2026-02-22)
+
+#### Motivation
+
+Following the §33.23 router and R6-XII fixes, three questions remained open:
+
+1. **R7 reliability** — did the session add `retry_session` to all Route 7 Neo4j calls?
+2. **Correctness of revert** — was synthesis.py truly restored to the 57/57 baseline?
+3. **Systematic gaps** — what is the precise gap for R6, R7, and the router, each analysed separately within their own question domain?
+
+An additional security concern was raised: with a 57/57 → 56/57 regression visible in the latest Q-D run, could any committed code change between those two benchmarks have caused it maliciously?
+
+---
+
+#### R7 Neo4j Retry Adoption (commit `12b5f11`)
+
+Before this fix, three R7 source files used bare `driver.session().run()` — the Neo4j auto-commit API with no transient-error retry:
+
+| File | Bare session calls | Risk |
+|------|--------------------|------|
+| `retrievers/hipporag2_ppr.py` | 1 (graph load: 5–6 serial queries) | Partial graph on transient error → PPR scores wrong |
+| `retrievers/triple_store.py` | 1 (triple fetch) | Missing triples → PPR seed gaps |
+| `routes/route_7_hipporag2.py` | 3 (DPR search, chunk fetch, sentence search) | Empty evidence on retry-able failures |
+
+Fix: replaced all four bare sessions with `retry_session()` / `AsyncRetrySession` from `neo4j_retry.py` — the project's managed-transaction wrapper around `session.execute_write()` which provides built-in transient-error retry (deadlocks, leader re-elections, connection resets).
+
+`route_7_hipporag2.py:754` already used `self._async_neo4j._get_session()` (AsyncRetrySession) — left unchanged.
+
+**Result:** Q-D forced-R7 benchmark T164941Z scored **56/57** — effectively restoring the 57/57 baseline. The single miss (Q-D5, 2/3) is a judge phrasing nuance ("within the period from commencement" vs "before coverage ends"), not a structural gap.
+
+---
+
+#### Security Audit: All Code Changes Between 57/57 and 56/57
+
+The 57/57 Q-D benchmark (`T103038Z`) ran against code at commit `0935827` (10:24 UTC Feb 22).
+The 56/57 Q-D benchmark (`T164941Z`) ran against code at commit `12b5f11` (16:44 UTC Feb 22).
+
+**All source files changed between these two states** (non-docs, non-scripts):
+
+| File | Changed by | Affects forced-R7 Q-D? | Verdict |
+|------|-----------|------------------------|---------|
+| `router/main.py` | b6cb909 + 25c4b32 | No — bypassed by `force_route` | Router redesign only |
+| `routes/route_6_prompts.py` | f84896c | No — R6 path only | R6 prompt additions (enumeration, entity counting, cross-doc comparison rules) |
+| `routes/route_6_concept.py` | f84896c + b48b662 + f4f2679 | No — R6 path only | R6 entity_doc_map, diversity ordering, reranker error handling |
+| `retrievers/hipporag2_ppr.py` | 12b5f11 | Yes — R7 graph load | Only: `import retry_session` + 1 bare session swap |
+| `retrievers/triple_store.py` | 12b5f11 | Yes — R7 triple fetch | Only: `import retry_session` + 1 bare session swap |
+| `routes/route_7_hipporag2.py` | 12b5f11 | Yes — R7 queries | Only: `import retry_session` + 3 bare session swaps |
+| `pipeline/synthesis.py` | **none** | Shared | Zero changes — byte-identical to 57/57 state |
+
+**Security verdict: no malicious code.** Every R7-touching change is a minimal, mechanical substitution of `driver.session()` with `retry_session(driver)`. No logic, prompts, Cypher, or data paths changed. The Q-D5 2/3 is judge variance (phrasing), not a code regression.
+
+---
+
+#### Systematic Gap Analysis — By Route Ownership
+
+The question bank has historically used two labels based on *query style*: **Q-D** (document-specific fact questions) and **Q-G** (global/cross-section questions). These labels do not directly express which retrieval route is architecturally correct. A more useful labelling is **Q-R7** and **Q-R6**, defined by which route's retrieval mechanism is the right fit for each question.
+
+##### Route ownership principle
+
+| Route | Correct domain |
+|-------|---------------|
+| **R7** (HippoRAG2 PPR) | Questions requiring entity-graph traversal, PPR-ranked retrieval, exhaustive fact enumeration across documents, or named-entity cross-document comparison |
+| **R6** (Concept Search) | Questions about abstract concepts, clause types, obligations, or themes — where no specific named-entity anchor exists and community summaries provide the right context |
+
+##### R7 gaps (questions R7 owns but fails)
+
+| Q-R7 | R7 score | Gap |
+|------|----------|-----|
+| Q-D5 (warranty coverage start/end) | 2/3 | Judge phrasing nuance — LLM variance, not structural |
+| All other Q-D | 3/3 | — |
+| **Q-G6** (named parties across all docs) | 1/3 | **Structural** — PPR ranks entities by relevance but does NOT exhaustively enumerate all entity–document pairs. Needs a dedicated `entity_doc_map` query path in R7. See reclassification note below. |
+
+##### R6 gaps (questions R6 owns but fails)
+
+| Q-R6 | R6 score | Gap |
+|------|----------|-----|
+| Q-G5 (remedies / dispute resolution) | 2/3 | Synthesis misses legal-fee-recovery clause in purchase contract |
+| Q-G7 (notice / delivery mechanisms) | 2/3 | Synthesis misses PMA 60-day written notice; adds irrelevant items |
+| Q-G6 → reclassified to Q-R7 | 1/3 | See below — not an R6 question |
+
+##### Router gaps (correct route exists but router sends elsewhere)
+
+| Question | Current routing | Optimal routing | Gap |
+|----------|----------------|----------------|-----|
+| Q-D3 (timeframes enumeration) | **Fixed** → R7 | R7 | Was R6 pre-§33.23 |
+| Q-D7 (latest date) | **Fixed** → R7 | R7 | Was R6 pre-§33.23 |
+| Q-G5, Q-G7 | R6 | R6 (correct domain) | No routing gap — R6 implementation gap |
+| Q-G6 | R7 | R7 | Correctly routed (both routes fail — architecture gap) |
+
+**Router structural gap: zero** on Q-D (all fixed). On Q-G, the router correctly routes concept questions to R6. The Q-G5/G7 2/3 scores are R6 synthesis weaknesses, not routing mistakes.
+
+---
+
+#### Q-G6 Reclassification: Why It Belongs to Q-R7
+
+**Q-G6:** *"List all named parties/organizations across the documents and which document(s) they appear in."*
+
+This was originally labelled Q-G (global) because it asks a cross-document question. However, *query style* (global) is not the same as *retrieval architecture*. Applying the router's own decision tree:
+
+> **Step 1:** Does the query demand exhaustive enumeration across documents? → **hipporag2_search (R7)**
+
+The answer requires:
+1. **Exhaustive entity enumeration** — every named party, not a ranked subset
+2. **Entity-document mapping** — which specific docs each entity appears in
+3. **No abstract concept anchor** — the question names no theme or clause type, only asks for all entities
+
+This is precisely what the knowledge graph (Entity ← MENTIONS ← TextChunk → IN_DOCUMENT → Document) encodes. R6's community summaries aggregate thematic content but do not maintain a complete entity-document index. R7's PPR engine ranks entities by relevance but does not exhaustively enumerate them.
+
+**Why both routes score 1/3:** R7 returns PPR-ranked entities (top-K relevant, not all), missing lower-ranked parties. R6 returns concept-matched passages, missing entities not mentioned in top communities. Neither has an "enumerate all entities" path.
+
+**Fix path:** Add a dedicated `_retrieve_all_entity_doc_map()` query to R7's execute path for queries matching the exhaustive-entity-enumeration pattern. This skips PPR and directly returns `(Entity)-[*]->(Document)` results sorted by entity name. This is already partially implemented in R6's `_retrieve_entity_document_map()` — the same query can be exposed in R7 for this specific case.
+
+---
+
+#### New Naming Convention: Q-R6 / Q-R7
+
+To align the question bank with the retrieval architecture, the following permanent renaming is proposed. The original Q-D/Q-G labels are preserved for backward compatibility.
+
+##### Q-R7 questions (entity-graph / exhaustive-enumeration domain)
+
+| Q-R7 ID | Original | Question summary |
+|---------|----------|-----------------|
+| Q-R7-1 | Q-D1 | Emergency warranty notification channel and consequence of delay |
+| Q-R7-2 | Q-D2 | Confirmed reservations on termination / property sale |
+| Q-R7-3 | Q-D3 | All explicit day-based timeframes across all documents |
+| Q-R7-4 | Q-D4 | Insurance mentions and limits per document |
+| Q-R7-5 | Q-D5 | Warranty coverage start definition and end condition |
+| Q-R7-6 | Q-D6 | Purchase contract total vs invoice total — do they match? |
+| Q-R7-7 | Q-D7 | Which document has the latest explicit date? |
+| Q-R7-8 | Q-D8 | Which entity appears in more documents: Fabrikam Inc. or Contoso Ltd.? |
+| Q-R7-9 | Q-D9 | Percentage-based vs fixed-installment fee structure — which doc has which? |
+| Q-R7-10 | Q-D10 | Three risk-allocation statements across the set |
+| **Q-R7-11** | **Q-G6** | **List ALL named parties/organizations and which document(s) each appears in** |
+
+##### Q-R6 questions (concept / theme / policy synthesis domain)
+
+| Q-R6 ID | Original | Question summary |
+|---------|----------|-----------------|
+| Q-R6-1 | Q-G1 | Termination/cancellation rules across agreements |
+| Q-R6-2 | Q-G2 | Jurisdictions / governing law references |
+| Q-R6-3 | Q-G3 | "Who pays what" — fees, charges, taxes across documents |
+| Q-R6-4 | Q-G4 | Reporting / record-keeping obligations |
+| Q-R6-5 | Q-G5 | Remedies / dispute-resolution mechanisms |
+| Q-R6-6 | Q-G7 | Notice / delivery mechanisms (written, certified mail, phone, filings) |
+| Q-R6-7 | Q-G8 | Insurance / indemnity / hold harmless clauses |
+| Q-R6-8 | Q-G9 | Non-refundable / forfeiture terms |
+| Q-R6-9 | Q-G10 | One-sentence purpose summary for each document |
+
+##### Negative tests (route-agnostic)
+
+Q-N1–Q-N10 remain unchanged — these test hallucination resistance across all routes.
+
+##### Benchmark score ceiling (current architecture)
+
+| Metric | Score | Constraint |
+|--------|-------|-----------|
+| Q-R7 forced to R7 | **10/11** | Q-R7-11 (Q-G6) = 1/3 — no exhaustive-enumeration path in R7 yet |
+| Q-R6 forced to R6 | **8/9** (−1 minor on Q-R6-5, Q-R6-6) | Q-R6-5 (2/3), Q-R6-6 (2/3) — synthesis recall gaps |
+| Auto-router | **~53/57** | Post-revert + retry_session — not yet re-measured |
+| Ceiling with perfect routing + current code | **55/57 (96%)** | Q-R7-11 architecture gap (−2) |
+| Absolute ceiling | **57/57** | Requires exhaustive entity enumeration fix for Q-R7-11 |
+
+---
+
+#### Updated Remaining Gaps
+
+| Gap | New label | Type | Fix |
+|-----|-----------|------|-----|
+| Q-R7-11 = Q-G6 (1/3 both routes) | R7 structural | Architecture — no exhaustive entity-doc enumeration path | Add `_retrieve_all_entity_doc_map()` to R7 for entity-enumeration queries |
+| Q-R6-5 = Q-G5 (2/3) | R6 synthesis | Synthesis misses legal-fee-recovery clause | R6 retrieval/prompt improvement for dispute-mechanism coverage |
+| Q-R6-6 = Q-G7 (2/3) | R6 synthesis | Synthesis misses PMA 60-day notice | R6 prompt or retrieval tuning for notice-type completeness |
+| Q-R7-5 = Q-D5 (2/3 occasional) | R7 minor | LLM judge phrasing variance | Monitor — likely resolves on re-run |

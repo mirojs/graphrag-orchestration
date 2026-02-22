@@ -359,6 +359,23 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Use entity_scores as evidence_nodes for the synthesizer
         evidence_nodes = entity_scores[:20]
 
+        # Build graph structural evidence header from surviving triples (§33.25 fix).
+        # surviving_triples are LLM-confirmed by recognition memory as query-relevant.
+        # Surfacing them to synthesis bridges the "triple discard" gap: the LLM gets
+        # explicit contracting-party anchors so it can distinguish principals from
+        # incidentally mentioned entities in raw document text.
+        graph_structural_header: Optional[str] = None
+        if surviving_triples:
+            triple_lines = [
+                f"- {t.subject_name} → {t.predicate} → {t.object_name}"
+                for t in surviving_triples[:15]
+            ]
+            graph_structural_header = (
+                "Graph Structural Evidence"
+                " (named relationships confirmed relevant to this query):\n"
+                + "\n".join(triple_lines)
+            )
+
         synthesis_result = await self.pipeline.synthesizer.synthesize(
             query=query,
             evidence_nodes=evidence_nodes,
@@ -368,6 +385,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             synthesis_model=synthesis_model,
             include_context=include_context,
             pre_fetched_chunks=pre_fetched_chunks,
+            graph_structural_header=graph_structural_header,
         )
 
         timings_ms["step_5_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)

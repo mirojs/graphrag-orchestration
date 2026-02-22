@@ -211,6 +211,7 @@ class EvidenceSynthesizer:
         language_spans_by_doc: Optional[Dict[str, List[Dict[str, Any]]]] = None,
         pre_fetched_chunks: Optional[List[Dict[str, Any]]] = None,
         ner_seed_count: Optional[int] = None,
+        graph_structural_header: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a comprehensive response with evidence citations.
@@ -389,7 +390,14 @@ class EvidenceSynthesizer:
                     logger.info("injected_global_document_overview", num_docs=len(doc_overviews))
             except Exception as e:
                 logger.warning("global_document_overview_injection_failed", error=str(e))
-        
+
+        # Step 2.6: Prepend graph structural evidence header if provided (Route 7).
+        # surviving_triples from recognition-memory filter are LLM-confirmed as relevant.
+        # Prepending them gives the synthesis LLM explicit structural anchors to distinguish
+        # contracting principals from incidentally mentioned entities — the "triple discard" fix.
+        if graph_structural_header:
+            context = graph_structural_header + "\n\n---\n\n" + context
+
         # Step 3: Sub-question metadata for DRIFT.
         # Previously injected entity names + evidence counts into the context
         # via _enrich_context_for_drift().  Removed Feb 15 2026 — the DRIFT

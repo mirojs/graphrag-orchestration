@@ -9651,3 +9651,109 @@ Note: Route 7 is the stronger Q-D performer (57/57 vs 25/30). The 3-way router c
 - `benchmarks/route6_concept_r4questions_20260222T134245Z.json` + `.eval.md` — After R6-VIII/IX/X/XI: 24/30
 - `benchmarks/route6_concept_r4questions_20260222T140917Z.json` + `.eval.md` — chunk_text regression: 10/30
 - `benchmarks/route6_concept_r4questions_20260222T143701Z.json` + `.eval.md` — Final clean: **25/30**
+
+---
+
+### §33.23 — Routing Audit, Router Fix, Auto-Router Benchmarks (2026-02-22)
+
+#### Motivation
+
+Following the §33.22 Q-D bug fixes (R6-VIII/IX/X/XI, 25/30), a comprehensive routing audit identified two structural misrouting cases:
+
+| Question | Correct route | Was routed to | Score (wrong route) | Score (correct route) |
+|----------|--------------|--------------|--------------------|-----------------------|
+| Q-D3 ("list ALL explicit day-based timeframes") | R7 | R6 | 1/3 | 3/3 |
+| Q-D7 ("which document has the latest date") | R7 | R6 | 1/3 | 3/3 |
+
+Root cause: both queries have no named entity anchor and use "across all documents" phrasing, which triggered Route 6 via the `concept_keywords` heuristic. But they demand exhaustive fact enumeration — a structural strength of Route 7's PPR graph traversal, not Route 6's sentence-window retrieval.
+
+#### Router Fix (commit `25c4b32`)
+
+Two changes to `src/worker/hybrid_v2/router/main.py`:
+
+1. **`ROUTE_CLASSIFICATION_PROMPT` decision tree** — new Step 1 added before concept_search:
+   > "Does the query demand exhaustive enumeration of ALL specific concrete values (dates, amounts, timeframes, counts) across documents, OR compare documents by a specific attribute (latest/earliest/largest/most/fewest)? → **hipporag2_search**"
+
+   concept_search description updated with explicit NOT clause: "NOT for exhaustive enumeration of specific values."
+
+2. **`_heuristic_classify()` guard** — new `hipporag2_enumeration_keywords` list checked BEFORE `concept_keywords`:
+   ```python
+   hipporag2_enumeration_keywords = [
+       "all explicit", "every explicit", "latest date", "earliest date",
+       "all timeframes", "all dates", "all amounts",
+       "which document has the latest", "which document has the earliest",
+   ]
+   ```
+
+#### R6-XII: entity_doc_map 3-hop traversal (commit `f4f2679`)
+
+`_retrieve_entity_document_map()` in `route_6_concept.py` previously used the pre-materialised `(Entity)-[:APPEARS_IN_DOCUMENT]->(Document)` edge, which returned 3 documents per entity (missing 1 for the test group). Replaced with the 3-hop path that Route 7 PPR uses:
+
+```cypher
+MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_DOCUMENT]->(d:Document)
+```
+
+This closes the edge coverage gap when ingestion did not fully populate the APPEARS_IN_DOCUMENT shortcut.
+
+#### Benchmark: `--force-route auto` mode (commit `5f68ed7`)
+
+`benchmark_route7_hipporag2.py` extended with `--force-route auto` (omits force_route from API payload, exercising the live HybridRouter). Used for end-to-end routing verification.
+
+#### Auto-Router Q-D Benchmark Result (T154344Z)
+
+| Question | Route used | Score | Notes |
+|----------|-----------|-------|-------|
+| Q-D1 | R7 | 3/3 ✅ | |
+| Q-D2 | R7 | 3/3 ✅ | |
+| Q-D3 | R7 | **3/3 ✅** | Was 1/3 with R6 — router fix confirmed |
+| Q-D4 | R7 | 3/3 ✅ | |
+| Q-D5 | R7 | 3/3 ✅ | |
+| Q-D6 | R7 | 3/3 ✅ | |
+| Q-D7 | R7 | **3/3 ✅** | Was 1/3 with R6 — router fix confirmed |
+| Q-D8 | R7 | 0/3 ❌ | Invoice chunk fetched — see Q-D8 variance note |
+| Q-D9 | R7 | 3/3 ✅ | |
+| Q-D10 | R7 | 3/3 ✅ | |
+| Q-N (negative) | — | 27/27 | |
+| **Total** | | **54/57** | |
+
+**Q-D8 variance note:** Q-D8 is an inherently non-deterministic case. Route 7's PPR engine sometimes retrieves a TextChunk from the `contoso_lifts_invoice` document that contains "Fabrikam Construction" in its billing address. When this happens, the synthesis LLM counts the invoice as a 6th document for Fabrikam (correct count is 4; both entities tied). When this chunk is NOT retrieved, the LLM correctly answers "tied at 4 each." The original 57/57 baseline benchmark happened to not retrieve the invoice chunk in runs[0]. The evaluate script grades only runs[0].
+
+Two synthesis prompt additions were attempted to fix Q-D8 but both made behaviour WORSE in the common case and were reverted (commit `f067e71`). The root fix requires either: (a) entity resolution — not creating a MENTIONS edge from invoice address chunks to `Fabrikam Inc.`, or (b) retrieval filtering — down-weighting chunks where the entity appears only in an address field. Both require ingestion-layer changes.
+
+#### Auto-Router Q-G Benchmark Result (T154351Z)
+
+| Question | Route used | Score | Notes |
+|----------|-----------|-------|-------|
+| Q-G1 | R6 | 3/3 ✅ | (was 1/3 with forced R6 in some runs — routing context improved) |
+| Q-G2 | R6 | 3/3 ✅ | |
+| Q-G3 | R6 | 2/3 ⚠️ | Minor omissions |
+| Q-G4 | R6 | 2/3 ⚠️ | Extra items outside scope |
+| Q-G5 | R6 | 1/3 ❌ | Missing legal-fee-recovery clause (purchase contract) |
+| Q-G6 | R6 | 1/3 ❌ | Entity over-inclusion (AAA, courts, Bayfront Animal Clinic) — fails on both routes |
+| Q-G7 | R6 | 1/3 ❌ | Missing PMA 60-day notice; adds irrelevant 5-business-days notice |
+| Q-G8 | R6 | 3/3 ✅ | |
+| Q-G9 | R6 | 3/3 ✅ | |
+| Q-G10 | R6 | 2/3 ⚠️ | Incomplete PMA and purchase contract summaries |
+| Q-N (negative) | — | 27/27 | |
+| **Total** | | **48/57** | Single run; compare to forced R6 best 52/57 |
+
+Q-G5, Q-G6, Q-G7 are synthesis quality gaps unrelated to routing. Q-G6 fails on both R6 and R7 (entity over-inclusion). Q-G5/G7 are synthesis recall misses.
+
+#### Commits this sub-session
+
+| Commit | Description |
+|--------|-------------|
+| `25c4b32` | fix: router — exhaustive enumeration and cross-doc comparison → R7 |
+| `f4f2679` | fix: R6-XII entity_doc_map 3-hop; R7 Q-D8 count vs set rule (synthesis) |
+| `5f68ed7` | feat: --force-route auto for benchmark end-to-end routing test |
+| `50de541` | fix: synthesis — entity identity precision for Q-D8 (attempted) |
+| `f067e71` | **revert**: synthesis document_guidance rules — both synthesis additions reverted; R7 Q-D8 variance is a retrieval issue, not a prompt issue |
+
+#### Remaining Gaps
+
+| Item | Status | Root cause |
+|------|--------|-----------|
+| Q-D8 variance (1/5 wrong) | ⚠️ Accepted | PPR retrieves invoice address chunk → entity over-count; ingestion fix needed |
+| Q-G5 (1/3) | ⚠️ Open | Synthesis misses legal-fee-recovery clause in purchase contract |
+| Q-G6 (1/3 on both routes) | ⚠️ Open | Synthesis over-includes non-contracting entities (AAA, courts, animals) |
+| Q-G7 (1/3) | ⚠️ Open | Synthesis misses PMA 60-day notice; retrieves wrong notice type |

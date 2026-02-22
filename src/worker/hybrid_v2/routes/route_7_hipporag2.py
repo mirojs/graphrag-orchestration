@@ -327,8 +327,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         t0 = time.perf_counter()
 
         # Get top-K passage chunk IDs and fetch their text
-        top_chunk_ids = [cid for cid, _ in passage_scores[:ppr_passage_top_k]]
-        pre_fetched_chunks = await self._fetch_chunks_by_ids(top_chunk_ids)
+        top_passage_scores = passage_scores[:ppr_passage_top_k]
+        top_chunk_ids = [cid for cid, _ in top_passage_scores]
+        ppr_scores_map = {cid: score for cid, score in top_passage_scores}
+        pre_fetched_chunks = await self._fetch_chunks_by_ids(
+            top_chunk_ids, ppr_scores_map=ppr_scores_map
+        )
 
         # Convert sentence evidence to coverage_chunks format
         sentence_chunks: List[Dict[str, Any]] = []
@@ -573,11 +577,13 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _fetch_chunks_by_ids(
         self,
         chunk_ids: List[str],
+        ppr_scores_map: Optional[Dict[str, float]] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch chunk text + metadata from Neo4j by chunk IDs.
 
         Returns flat list of chunk dicts in the format expected by the
-        synthesizer's ``pre_fetched_chunks`` parameter.
+        synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
+        score descending when ``ppr_scores_map`` is provided.
         """
         if not chunk_ids or not self.neo4j_driver:
             return []
@@ -615,14 +621,16 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Build flat list of chunk dicts for the synthesizer.
         # Each chunk needs "text", "source", "entity", and "metadata" fields
         # matching what _retrieve_text_chunks() normally returns.
+        scores = ppr_scores_map or {}
         chunks_list: List[Dict[str, Any]] = []
         for r in results:
+            cid = r.get("chunk_id", "")
             chunks_list.append({
-                "id": r.get("chunk_id", ""),
+                "id": cid,
                 "source": r.get("document_title", "Unknown"),
                 "text": r.get("text", ""),
                 "entity": "__ppr_passage__",
-                "_entity_score": 1.0,
+                "_entity_score": scores.get(cid, 1.0),
                 "_source_entity": "__ppr_passage__",
                 "metadata": {
                     "document_id": r.get("document_id", ""),
@@ -630,6 +638,11 @@ class HippoRAG2Handler(BaseRouteHandler):
                     "chunk_index": r.get("chunk_index", 0),
                 },
             })
+
+        # Preserve PPR ranking: sort by score descending (Neo4j UNWIND+MATCH
+        # does not guarantee return order matches input order).
+        if scores:
+            chunks_list.sort(key=lambda c: c["_entity_score"], reverse=True)
 
         return chunks_list
 

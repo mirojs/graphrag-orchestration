@@ -9236,3 +9236,52 @@ Synthesis fix       ★★☆ (CoT,      ★★☆ (date       ★★☆ (expert
 A dedicated question bank targeting these four categories has been added as **Section G** of the question bank file (`QUESTION_BANK_5PDFS_2025-12-24.md`). These questions are designed to benchmark synthesis quality independently of retrieval quality — any route that retrieves complete evidence will still face these challenges.
 
 See: `docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md` Section G (Q-A, Q-T, Q-I, Q-C prefixes).
+
+---
+
+### 33.18. Route 7 Critical Bug Fixes — PPR Score Propagation
+
+#### Bug 4: PPR Scores Lost Before Synthesis (FIXED)
+
+**Location:** `route_7_hipporag2.py:620-633` (before fix)
+
+**Problem:** `_fetch_chunks_by_ids()` hardcoded `_entity_score: 1.0` for every chunk. The PPR walk computes a probability distribution over passages (the core innovation of HippoRAG 2), but these scores were discarded. The synthesizer uses `_entity_score` for token budget pruning — since all chunks appeared equally scored, high-PPR and low-PPR chunks were treated identically. When context exceeded the token limit, chunks were dropped arbitrarily instead of by relevance.
+
+**Impact:** Route 7 scored 57/57 on Q-D and 52/57 on Q-G despite the synthesizer being unable to distinguish relevant from irrelevant chunks. The PPR ranking signal — the entire point of the HippoRAG 2 architecture — was invisible to synthesis.
+
+**Fix:** Pass `ppr_scores_map: Dict[str, float]` (chunk_id → PPR score) into `_fetch_chunks_by_ids()` and stamp each chunk's `_entity_score` with its actual PPR probability. The scores are built from the already-computed `passage_scores` list.
+
+```python
+# Before (bug): all chunks equal
+"_entity_score": 1.0
+
+# After (fix): actual PPR probability
+"_entity_score": scores.get(cid, 1.0)
+```
+
+#### Bug 5: Chunk Order Not Preserved (FIXED)
+
+**Location:** `route_7_hipporag2.py:588-596` (Cypher query)
+
+**Problem:** The Neo4j `UNWIND $chunk_ids AS cid MATCH (c:TextChunk {id: cid})` pattern does not guarantee that results come back in the same order as the input `chunk_ids` list. Combined with Bug 4 (all scores equal), the synthesizer received chunks in arbitrary order with no ranking signal.
+
+**Fix:** After fetching from Neo4j, sort chunks by `_entity_score` descending. This ensures PPR-ranked order is preserved regardless of Neo4j's return order.
+
+```python
+if scores:
+    chunks_list.sort(key=lambda c: c["_entity_score"], reverse=True)
+```
+
+#### Combined Effect
+
+These two bugs meant that Route 7's entire PPR ranking pipeline (query → triple embedding → recognition memory → seed build → PPR walk → passage probability) produced results that were then **thrown away** before reaching synthesis. The synthesizer operated on an unranked, equally-weighted bag of chunks.
+
+Fixing both bugs restores the full HippoRAG 2 signal path: PPR probabilities now flow through to synthesis, and the highest-ranked passages are prioritized when the token budget forces pruning. This is expected to improve Q-G scores where token budget limits were causing arbitrary chunk drops.
+
+#### Status
+
+- Bugs fixed in `route_7_hipporag2.py`
+- 27/27 PPR unit tests pass
+- Needs deployment + re-benchmark on both Q-D (regression check) and Q-G (improvement target)
+- Previous 57/57 Q-D score should be maintained or improved (correct chunks were already being retrieved; now they're also correctly ranked)
+- Q-G score (52/57) may improve if the token budget was previously dropping high-relevance chunks

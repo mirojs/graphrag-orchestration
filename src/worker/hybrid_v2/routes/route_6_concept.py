@@ -125,6 +125,12 @@ class ConceptSearchHandler(BaseRouteHandler):
         section_search_task = asyncio.create_task(
             self._retrieve_section_headings(query, top_k=section_top_k)
         )
+        # R6-XI: entity-document coverage map — launched in parallel.
+        # Resolves queries like "which entity appears in the most documents?"
+        # using the pre-materialized APPEARS_IN_DOCUMENT edges (cheap, fast).
+        entity_doc_task = asyncio.create_task(
+            self._retrieve_entity_document_map(top_k=20)
+        )
 
         matched_communities = await self.pipeline.community_matcher.match_communities(
             query, top_k=community_top_k,
@@ -156,6 +162,13 @@ class ConceptSearchHandler(BaseRouteHandler):
             logger.warning("route6_section_search_failed", error=str(e))
             section_headings = []
 
+        # R6-XI: Await entity-document coverage map
+        try:
+            entity_doc_map = await entity_doc_task
+        except Exception as e:
+            logger.warning("route6_entity_doc_map_failed", error=str(e))
+            entity_doc_map = {}
+
         timings_ms["step_1_parallel_ms"] = int(
             (time.perf_counter() - t0) * 1000
         )
@@ -165,6 +178,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             communities=len(community_data),
             sentences_raw=len(sentence_evidence),
             sections=len(section_headings),
+            entity_doc_map_entries=len(entity_doc_map),
         )
 
         # ================================================================
@@ -251,6 +265,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         t0 = time.perf_counter()
         response_text = await self._synthesize(
             query, community_data, section_headings, sentence_evidence,
+            entity_doc_map=entity_doc_map,
         )
         timings_ms["step_3_synthesis_ms"] = int(
             (time.perf_counter() - t0) * 1000
@@ -287,6 +302,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 for s in section_headings
             },
             "sentence_evidence_count": len(sentence_evidence),
+            "entity_doc_map_count": len(entity_doc_map),
             "route_description": "Concept search — direct community synthesis (v2 + section headings)",
             "version": "v2",
         }
@@ -319,6 +335,11 @@ class ConceptSearchHandler(BaseRouteHandler):
                 }
                 for s in sentence_evidence[:10]
             ]
+            # R6-XI: include entity-document map for debugging
+            if entity_doc_map:
+                metadata["entity_doc_map"] = {
+                    name: docs for name, docs in list(entity_doc_map.items())[:10]
+                }
 
         if enable_timings:
             metadata["timings_ms"] = timings_ms
@@ -341,6 +362,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         communities: List[Dict[str, Any]],
         section_headings: List[Dict[str, Any]],
         sentence_evidence: List[Dict[str, Any]],
+        entity_doc_map: Optional[Dict[str, List[str]]] = None,
     ) -> str:
         """Synthesize community summaries + section headings + sentence evidence in one LLM call.
 
@@ -352,6 +374,9 @@ class ConceptSearchHandler(BaseRouteHandler):
             communities: Matched community dicts with title/summary.
             section_headings: Matched section dicts with title/summary/path_key.
             sentence_evidence: Denoised + reranked sentence dicts.
+            entity_doc_map: R6-XI — {entity_name: [doc_title, ...]} for top entities
+                by document count. Provides structured entity-document coverage for
+                comparison queries ("which entity appears in the most documents?").
 
         Returns:
             Synthesized response text.
@@ -411,11 +436,26 @@ class ConceptSearchHandler(BaseRouteHandler):
         else:
             evidence_text = "(No document evidence retrieved)"
 
+        # R6-XI: Format entity-document coverage for comparison queries.
+        # Emits a compact table: "Entity X → [Doc A, Doc B, ...] (N docs)"
+        # Only included when entity_doc_map is non-empty.
+        if entity_doc_map:
+            cov_lines = []
+            for entity_name, doc_titles in entity_doc_map.items():
+                docs_str = ", ".join(sorted(doc_titles))
+                cov_lines.append(
+                    f"- {entity_name}: {docs_str} ({len(doc_titles)} document{'s' if len(doc_titles) != 1 else ''})"
+                )
+            entity_coverage_text = "\n".join(cov_lines)
+        else:
+            entity_coverage_text = ""
+
         prompt = CONCEPT_SYNTHESIS_PROMPT.format(
             query=query,
             community_summaries=summaries_text,
             section_headings=headings_text,
             sentence_evidence=evidence_text,
+            entity_coverage=entity_coverage_text,
         )
 
         try:
@@ -564,9 +604,17 @@ class ConceptSearchHandler(BaseRouteHandler):
                 parts.append(r["next_text"].strip())
             passage = " ".join(parts)
 
+            # R6-X: include chunk_text (full parent chunk) alongside the
+            # sentence-window passage.  chunk_text is fetched by the Cypher
+            # query but was previously discarded.  Synthesis can use it as
+            # extended context when the passage alone is insufficient (e.g.
+            # date-comparison or entity-count queries where the key fact lives
+            # in an adjacent clause rather than the retrieved sentence itself).
+            chunk_text = (r.get("chunk_text") or "").strip()
             evidence.append({
                 "text": passage,
                 "sentence_text": r.get("text", ""),
+                "chunk_text": chunk_text,
                 "score": r.get("score", 0),
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
@@ -693,6 +741,82 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         return results
+
+    # ==================================================================
+    # Entity-Document Coverage (R6-XI)
+    # ==================================================================
+
+    async def _retrieve_entity_document_map(
+        self,
+        top_k: int = 20,
+    ) -> Dict[str, List[str]]:
+        """Return {entity_name: [doc_title, ...]} for the top entities by document count.
+
+        Uses the pre-materialised APPEARS_IN_DOCUMENT edge (1-hop, indexed).
+        Only includes entities that appear in 2+ documents to filter noise.
+        Result is sorted by document count descending so the most cross-document
+        entities appear first.
+
+        Used by _synthesize() to answer queries like "which entity appears in
+        the most documents?" without relying on heuristic LLM counting from
+        sentence snippets.
+
+        Args:
+            top_k: Maximum number of entities to return (default 20).
+
+        Returns:
+            Dict mapping entity name → list of document titles, or {} on failure.
+        """
+        if not self.neo4j_driver:
+            return {}
+
+        group_id = self.group_id
+        folder_id = self.folder_id
+
+        cypher = """
+        MATCH (e:Entity {group_id: $group_id})-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
+
+        // R6-1 pattern: folder scope filter (no-op when $folder_id IS NULL)
+        WITH e, d
+        WHERE $folder_id IS NULL
+           OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+
+        WITH e, collect(DISTINCT d.title) AS doc_titles, count(DISTINCT d) AS doc_count
+        WHERE doc_count >= 2
+        RETURN e.name AS entity_name, doc_titles, doc_count
+        ORDER BY doc_count DESC, e.name ASC
+        LIMIT $top_k
+        """
+
+        try:
+            loop = asyncio.get_event_loop()
+            driver = self.neo4j_driver
+
+            def _run():
+                with driver.session() as session:
+                    records = session.run(
+                        cypher,
+                        group_id=group_id,
+                        folder_id=folder_id,
+                        top_k=top_k,
+                    )
+                    return [dict(r) for r in records]
+
+            results = await loop.run_in_executor(self._executor, _run)
+            entity_map = {r["entity_name"]: r["doc_titles"] for r in results}
+
+            logger.info(
+                "route6_entity_doc_map_complete",
+                entities=len(entity_map),
+                top_entries=[
+                    (r["entity_name"], r["doc_count"]) for r in results[:5]
+                ],
+            )
+            return entity_map
+
+        except Exception as e:
+            logger.warning("route6_entity_doc_map_failed", error=str(e))
+            return {}
 
     # ==================================================================
     # Document diversification (reused from Route 3)

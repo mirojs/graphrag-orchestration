@@ -2537,6 +2537,8 @@ IMPORTANT for Contracting-Party Enumeration:
   * Professional associations or trade bodies that authored or own a standard form
   * Regulatory or enforcement bodies referenced in a compliance clause
   * Courts or venues listed in a jurisdiction clause
+  * Organizations that appear ONLY in vendor invoices, receipts, or purchase orders (as billed/ship-to)
+    but are not independently named as signatories in any formal contract
   * Any entity appearing only in an address, venue reference, or passing clause citation
 """
         

@@ -9345,3 +9345,54 @@ Both regressions reversed. Q-D and Q-G match the pre-discovery baseline.
 **Benchmark files:**
 - `benchmarks/route7_hipporag2_r4questions_20260222T103038Z.json` + `.eval.md` — Q-D all-fixes (57/57)
 - `benchmarks/route7_global_search_20260222T103010Z.json` + `_eval_input.eval.md` — Q-G all-fixes (52/57)
+
+---
+
+### 33.19. Route 7 Cross-Route Benchmark — Q-L (Route 2) Coverage (2026-02-22)
+
+#### Motivation
+
+After confirming Route 7 at Q-D 57/57 and Q-G 52/57, the question arose: could Route 7 also replace Route 2 (local/entity search) and serve as a universal single route?
+
+Route 2 (`local_search`) handles entity-focused lookup questions: single-document facts, named party identities, addresses, dates, percentages. These are the easiest queries for any graph-based system since the answer is directly attached to a known entity node.
+
+#### Result
+
+| Benchmark | Score | Notes |
+|-----------|-------|-------|
+| Q-L (Route 2 questions) | **57/57** | Perfect — all 10 positive + 9 negative |
+| Q-D (Route 4 questions) | **57/57** | Perfect — all multi-hop |
+| Q-G (Route 6 questions) | **52/57** | 2 failures (Q-G4, Q-G6) — known synthesis gaps |
+
+#### Per-Question Q-L Detail
+
+All 10 Q-L questions scored 3/3. Selected examples:
+
+- **Q-L1** (Who is the Agent?): `Walt Flood Realty` — exact match
+- **Q-L3** (Managed property address): `456 Palm Tree Avenue, Honolulu, HI 96815` — exact match
+- **Q-L8** (Advertising + admin charges): `$75.00/month; $50.00/month` — exact match despite 0.88 containment (response was verbose but correct)
+- **Q-L10** (Contact name + email): `Elizabeth Nolasco; enolasco@fabrikam.com` — exact match
+
+#### Why Route 7 handles Q-L well
+
+Q-L questions are entity-lookup queries. HippoRAG 2's architecture is *explicitly designed* for this pattern:
+
+1. Query → NER extracts entity names (Agent, Owner, address)
+2. Recognition memory matches against the KG
+3. Entity nodes in the KG store document context via MENTIONS edges
+4. PPR propagates from entity seeds to the passages that contain them
+5. The answer is in the top-1 retrieved chunk
+
+This is the HippoRAG 2 "home territory" — the same capability demonstrated on MuSiQue and HotpotQA in the paper.
+
+#### Architectural implication: Route 7 as universal Route 2+4 replacement
+
+| Query type | Route 7 score | Current route | Recommended |
+|-----------|---------------|---------------|-------------|
+| Entity lookup (Q-L) | 57/57 | Route 2 | ✅ Route 7 replaces Route 2 |
+| Multi-hop reasoning (Q-D) | 57/57 | Route 4/5 | ✅ Route 7 replaces Route 4/5 |
+| Global/thematic (Q-G) | 52/57 | Route 6 | ⚠️ Route 6 still preferred (Q-G4, Q-G6 failures) |
+
+Route 7 can consolidate Routes 2 and 4/5 into a single route with no score regression. Route 6 should be retained for global/thematic queries until the Q-G4 (scope creep) and Q-G6 (party role attribution) synthesis gaps are resolved.
+
+**Benchmark file:** `benchmarks/route7_hipporag2_r2questions_20260222T105331Z.json` + `.eval.md`

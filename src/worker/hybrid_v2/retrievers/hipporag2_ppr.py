@@ -175,6 +175,13 @@ class HippoRAG2PPR:
         entity_edge_count = 0
         mentions_edge_count = 0
         synonym_edge_count = 0
+        # Bug 11 fix: deduplicate undirected edges.
+        # _add_edge adds both A→B and B→A. If Neo4j stores both directions of a
+        # RELATED_TO/SEMANTICALLY_SIMILAR edge (common with MERGE-based ingestion),
+        # calling _add_edge twice creates 4 adjacency entries instead of 2 and
+        # doubles edge weight in PPR. Track canonical (min_idx, max_idx) pairs.
+        seen_entity_edges: set = set()
+        seen_synonym_edges: set = set()
 
         with neo4j_driver.session() as session:
             # ----------------------------------------------------------
@@ -216,8 +223,11 @@ class HippoRAG2PPR:
                 src_idx = self._node_to_idx.get(record["src"])
                 tgt_idx = self._node_to_idx.get(record["tgt"])
                 if src_idx is not None and tgt_idx is not None:
-                    self._add_edge(src_idx, tgt_idx, float(record["weight"]))
-                    entity_edge_count += 1
+                    edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                    if edge_key not in seen_entity_edges:
+                        seen_entity_edges.add(edge_key)
+                        self._add_edge(src_idx, tgt_idx, float(record["weight"]))
+                        entity_edge_count += 1
 
             # ----------------------------------------------------------
             # 4. Passage-Entity edges via MENTIONS
@@ -253,8 +263,11 @@ class HippoRAG2PPR:
                 src_idx = self._node_to_idx.get(record["src"])
                 tgt_idx = self._node_to_idx.get(record["tgt"])
                 if src_idx is not None and tgt_idx is not None:
-                    self._add_edge(src_idx, tgt_idx, float(record["weight"]))
-                    synonym_edge_count += 1
+                    edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                    if edge_key not in seen_synonym_edges:
+                        seen_synonym_edges.add(edge_key)
+                        self._add_edge(src_idx, tgt_idx, float(record["weight"]))
+                        synonym_edge_count += 1
 
             # ----------------------------------------------------------
             # 6. Phase 2: Section graph (optional)

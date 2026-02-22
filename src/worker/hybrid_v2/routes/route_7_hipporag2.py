@@ -278,10 +278,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         if total_e > 0:
             entity_seeds = {k: v / total_e for k, v in entity_seeds.items()}
 
-        # Build passage seeds from DPR scores
+        # Build passage seeds from DPR scores (Bug 2 fix: normalize before scaling)
         passage_seeds: Dict[str, float] = {}
         for chunk_id, score in dpr_results:
-            passage_seeds[chunk_id] = score * passage_node_weight
+            passage_seeds[chunk_id] = score
+        total_p = sum(passage_seeds.values())
+        if total_p > 0:
+            passage_seeds = {k: (v / total_p) * passage_node_weight for k, v in passage_seeds.items()}
 
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -301,17 +304,21 @@ class HippoRAG2Handler(BaseRouteHandler):
             return self._empty_result("no_seeds_resolved")
 
         if not entity_seeds:
-            # No entity seeds (all triples filtered) — fallback to DPR-only
-            logger.info("route7_dpr_fallback", reason="no_entity_seeds")
-            passage_scores = [(cid, s) for cid, s in dpr_results]
-            entity_scores: List[Tuple[str, float]] = []
-        else:
-            # True PPR with passage nodes
-            passage_scores, entity_scores = self._ppr_engine.run_ppr(
-                entity_seeds=entity_seeds,
-                passage_seeds=passage_seeds,
-                damping=ppr_damping,
-            )
+            # Bug 13 fix: passage seeds alone can drive PPR via MENTIONS edges
+            logger.info("route7_passage_only_ppr", passage_seeds=len(passage_seeds))
+
+        # Always run PPR (entity-only, passage-only, or combined)
+        passage_scores, entity_scores = self._ppr_engine.run_ppr(
+            entity_seeds=entity_seeds,
+            passage_seeds=passage_seeds,
+            damping=ppr_damping,
+        )
+
+        # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order
+        if not passage_scores:
+            logger.info("route7_dpr_fallback", reason="ppr_no_passage_scores")
+            passage_scores = list(dpr_results)
+            entity_scores = []
 
         timings_ms["step_4_ppr_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -630,7 +637,10 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "source": r.get("document_title", "Unknown"),
                 "text": r.get("text", ""),
                 "entity": "__ppr_passage__",
-                "_entity_score": scores.get(cid, 1.0),
+                # Synthesis weight fix: equal weight within fetched set (paper intent).
+                # PPR scores determine *which* chunks to fetch (top-K); once fetched,
+                # all chunks pass to the reader equally — consistent with upstream HippoRAG 2.
+                "_entity_score": 1.0,
                 "_source_entity": "__ppr_passage__",
                 "metadata": {
                     "document_id": r.get("document_id", ""),
@@ -639,10 +649,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                 },
             })
 
-        # Preserve PPR ranking: sort by score descending (Neo4j UNWIND+MATCH
-        # does not guarantee return order matches input order).
+        # Preserve PPR ranking: sort by PPR score descending.
+        # Neo4j UNWIND+MATCH does not guarantee return order matches input order.
+        # Sort uses the scores dict (not _entity_score) so equal synthesis weights
+        # don't collapse the ordering.
         if scores:
-            chunks_list.sort(key=lambda c: c["_entity_score"], reverse=True)
+            chunks_list.sort(key=lambda c: scores.get(c["id"], 0.0), reverse=True)
 
         return chunks_list
 

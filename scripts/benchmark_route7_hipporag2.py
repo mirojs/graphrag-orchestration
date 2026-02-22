@@ -489,6 +489,7 @@ def main():
     parser.add_argument("--timeout", type=float, default=180.0, help="HTTP timeout in seconds")
     parser.add_argument("--qbank", type=Path, default=DEFAULT_QUESTION_BANK, help="Question bank path")
     parser.add_argument("--filter-qid", type=str, default=None, help="Run only a specific question ID")
+    parser.add_argument("--positive-prefix", type=str, default="Q-D", help="Question prefix for positive tests (default: Q-D; use Q-L for Route 2 local questions)")
     parser.add_argument(
         "--response-type", type=str, default="summary",
         choices=["summary", "detailed_report", "nlp_audit", "nlp_connected"],
@@ -507,7 +508,7 @@ def main():
     if not qbank_path.exists():
         raise FileNotFoundError(f"Question bank not found: {qbank_path}")
 
-    questions = read_question_bank(qbank_path, positive_prefix="Q-D", negative_prefix="Q-N")
+    questions = read_question_bank(qbank_path, positive_prefix=args.positive_prefix, negative_prefix="Q-N")
 
     if args.filter_qid:
         questions = [q for q in questions if q.qid == args.filter_qid]
@@ -518,15 +519,18 @@ def main():
     else:
         print(f"Loaded {len(questions)} questions from {qbank_path.name}")
 
-    positive_count = sum(1 for q in questions if q.qid.startswith("Q-D"))
+    positive_count = sum(1 for q in questions if q.qid.startswith(args.positive_prefix))
     negative_count = sum(1 for q in questions if q.qid.startswith("Q-N"))
-    print(f"  Positive tests (Q-D): {positive_count}")
+    print(f"  Positive tests ({args.positive_prefix}): {positive_count}")
     print(f"  Negative tests (Q-N): {negative_count}")
 
     ground_truth = extract_ground_truth(qbank_path)
     print(f"Loaded {len(ground_truth)} ground truth answers")
 
-    scenario_name = f"{ROUTE_LABEL}_r4questions_{args.response_type}"
+    # Derive label from prefix: Q-D → r4questions, Q-L → r2questions, Q-G → r3questions, else use prefix
+    _prefix_to_label = {"Q-D": "r4questions", "Q-L": "r2questions", "Q-G": "r3questions"}
+    qset_label = _prefix_to_label.get(args.positive_prefix, args.positive_prefix.lower().replace("-", ""))
+    scenario_name = f"{ROUTE_LABEL}_{qset_label}_{args.response_type}"
     timestamp = _now_utc_stamp()
 
     if args.synthesis_model:
@@ -544,8 +548,8 @@ def main():
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_json = out_dir / f"{ROUTE_LABEL}_r4questions_{timestamp}.json"
-    out_md = out_dir / f"{ROUTE_LABEL}_r4questions_{timestamp}.md"
+    out_json = out_dir / f"{ROUTE_LABEL}_{qset_label}_{timestamp}.json"
+    out_md = out_dir / f"{ROUTE_LABEL}_{qset_label}_{timestamp}.md"
 
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(

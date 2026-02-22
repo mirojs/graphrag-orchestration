@@ -33,6 +33,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
+from ..services.neo4j_retry import retry_session
+
 logger = structlog.get_logger(__name__)
 
 
@@ -183,7 +185,7 @@ class HippoRAG2PPR:
         seen_entity_edges: set = set()
         seen_synonym_edges: set = set()
 
-        with neo4j_driver.session() as session:
+        with retry_session(neo4j_driver) as session:
             # ----------------------------------------------------------
             # 1. Load Entity nodes
             # ----------------------------------------------------------

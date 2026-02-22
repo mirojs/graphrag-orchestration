@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from .base import BaseRouteHandler, Citation, RouteResult
+from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
 
@@ -561,7 +562,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             driver = self.neo4j_driver
 
             def _run():
-                with driver.session() as session:
+                with retry_session(driver) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
@@ -612,7 +613,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             driver = self.neo4j_driver
 
             def _run():
-                with driver.session() as session:
+                with retry_session(driver) as session:
                     records = session.run(
                         cypher,
                         chunk_ids=chunk_ids,
@@ -827,7 +828,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             driver = self.neo4j_driver
 
             def _run_search():
-                with driver.session() as session:
+                with retry_session(driver) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,

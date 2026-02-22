@@ -26,6 +26,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import structlog
 
+from ..services.neo4j_retry import retry_session
+
 logger = structlog.get_logger(__name__)
 
 
@@ -127,7 +129,7 @@ class TripleEmbeddingStore:
                e2.id AS obj_id, e2.name AS obj_name
         """
         triples: List[Triple] = []
-        with neo4j_driver.session() as session:
+        with retry_session(neo4j_driver) as session:
             result = session.run(cypher, group_id=group_id)
             for record in result:
                 subj_name = record["subj_name"] or ""

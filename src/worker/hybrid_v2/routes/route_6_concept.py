@@ -181,8 +181,30 @@ class ConceptSearchHandler(BaseRouteHandler):
             ).strip().lower() in {"1", "true", "yes"}
             rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
             if rerank_enabled and sentence_evidence:
-                sentence_evidence = await self._rerank_sentences(
-                    query, sentence_evidence, top_k=rerank_top_k,
+                # R6-3: Wrap in try/except — reranker failures must not crash the request.
+                try:
+                    sentence_evidence = await self._rerank_sentences(
+                        query, sentence_evidence, top_k=rerank_top_k,
+                    )
+                except Exception as e:
+                    logger.warning("route6_rerank_failed_fallback", error=str(e))
+                    sentence_evidence = sentence_evidence[:rerank_top_k]
+
+            # R6-6: Apply document diversity AFTER reranking (not inside
+            # _retrieve_sentence_evidence).  Applying diversity before reranking is
+            # nullified when the reranker cuts to top_k — it has no knowledge of
+            # the upstream diversity constraints.
+            diversity_enabled = os.getenv(
+                "ROUTE6_SENTENCE_DIVERSITY", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+            if diversity_enabled and sentence_evidence:
+                min_per_doc = int(os.getenv("ROUTE6_SENTENCE_MIN_PER_DOC", "2"))
+                score_gate = float(os.getenv("ROUTE6_SENTENCE_SCORE_GATE", "0.85"))
+                sentence_evidence = self._diversify_by_document(
+                    sentence_evidence,
+                    top_k=len(sentence_evidence),
+                    min_per_doc=min_per_doc,
+                    score_gate=score_gate,
                 )
 
             timings_ms["step_2_denoise_rerank_ms"] = int(
@@ -364,7 +386,6 @@ class ConceptSearchHandler(BaseRouteHandler):
             evidence_lines = []
             for i, ev in enumerate(sentence_evidence, 1):
                 doc = ev.get("document_title", "Unknown")
-                score = ev.get("score", 0)
                 text = ev.get("text", "")
                 section = ev.get("section_path", "")
                 if section:
@@ -438,23 +459,29 @@ class ConceptSearchHandler(BaseRouteHandler):
             return []
 
         threshold = float(os.getenv("ROUTE6_SENTENCE_THRESHOLD", "0.2"))
-        min_per_doc = int(os.getenv("ROUTE6_SENTENCE_MIN_PER_DOC", "2"))
-        score_gate = float(os.getenv("ROUTE6_SENTENCE_SCORE_GATE", "0.85"))
-        diversity_enabled = os.getenv(
-            "ROUTE6_SENTENCE_DIVERSITY", "1"
-        ).strip().lower() in {"1", "true", "yes"}
-        fetch_k = top_k * 3 if diversity_enabled else top_k
+        # R6-6: Fetch 3x for denoising headroom; diversity is applied AFTER reranking
+        # in execute() so there is no need for diversity logic inside this method.
+        fetch_k = top_k * 3
         group_id = self.group_id
 
+        # R6-1: Build folder filter clause — applied AFTER OPTIONAL MATCH for doc.
+        # Uses Cypher's IS NULL test so the WHERE is a no-op when no folder scope is set.
+        folder_filter_clause = (
+            "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
+            "        WITH sent, score, chunk, doc, sec, prev_sent, next_sent\n"
+            "        WHERE $folder_id IS NULL OR doc IS NULL"
+            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})\n"
+        )
+
         # 2. Vector search on Sentence nodes + collect parent context
-        cypher = """CYPHER 25
-        CALL () {
+        cypher = f"""CYPHER 25
+        CALL () {{
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
-        }
+        }}
 
         // Get parent chunk + document + section context
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
@@ -465,6 +492,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
 
+        {folder_filter_clause}
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
@@ -483,6 +511,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         try:
             loop = asyncio.get_event_loop()
             driver = self.neo4j_driver
+            folder_id = self.folder_id
 
             def _run_search():
                 with driver.session() as session:
@@ -492,6 +521,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                         group_id=group_id,
                         top_k=fetch_k,
                         threshold=threshold,
+                        folder_id=folder_id,
                     )
                     return [dict(r) for r in records]
 
@@ -543,13 +573,6 @@ class ConceptSearchHandler(BaseRouteHandler):
             top_docs=list(set(e["document_title"] for e in evidence[:10])),
         )
 
-        # 4. Document diversification
-        if diversity_enabled and len(evidence) > top_k:
-            evidence = self._diversify_by_document(
-                evidence, top_k=top_k, min_per_doc=min_per_doc,
-                score_gate=score_gate,
-            )
-
         return evidence
 
     # ==================================================================
@@ -593,8 +616,12 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         min_similarity = float(os.getenv("ROUTE6_SECTION_MIN_SIMILARITY", "0.25"))
         group_id = self.group_id
+        folder_id = self.folder_id
 
         # 2. Cosine similarity against Section.structural_embedding
+        # Note: no vector index exists for Section.structural_embedding (architectural
+        # decision — see ARCHITECTURE_ROUTE5_UNIFIED_HIPPORAG_2026-02-16.md §section).
+        # Brute-force scan is acceptable: typically <20 sections per group.
         cypher = """
         MATCH (s:Section {group_id: $group_id})
         WHERE s.structural_embedding IS NOT NULL
@@ -603,6 +630,11 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         // Get parent document title
         OPTIONAL MATCH (s)<-[:HAS_SECTION]-(doc:Document)
+
+        // R6-2: Folder scope filter (no-op when $folder_id IS NULL)
+        WITH s, score, doc
+        WHERE $folder_id IS NULL OR doc IS NULL
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
         RETURN s.title AS title,
                s.summary AS summary,
@@ -626,6 +658,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                         group_id=group_id,
                         min_similarity=min_similarity,
                         top_k=top_k,
+                        folder_id=folder_id,
                     )
                     return [dict(r) for r in records]
 
@@ -804,7 +837,14 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             reranked: List[Dict[str, Any]] = []
             for rr in rr_result.results:
-                ev = {**evidence[rr.index], "rerank_score": rr.relevance_score}
+                # R6-4: Propagate reranker relevance score to the canonical `score`
+                # field so that downstream consumers (citations, diversity) see the
+                # reranked score instead of the original embedding similarity score.
+                ev = {
+                    **evidence[rr.index],
+                    "rerank_score": rr.relevance_score,
+                    "score": rr.relevance_score,
+                }
                 reranked.append(ev)
 
             logger.info(
@@ -817,9 +857,12 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
             return reranked
 
-        except Exception:
-            logger.exception("route6_rerank_failed")
-            raise
+        except Exception as e:
+            # R6-3: Reranker failures must not crash the request.  The caller in
+            # execute() also wraps this call, but the explicit return here ensures
+            # graceful degradation even when called from other contexts.
+            logger.warning("route6_rerank_failed", error=str(e))
+            return evidence[:top_k]
 
     # ==================================================================
     # Citations

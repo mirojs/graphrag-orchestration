@@ -28,64 +28,63 @@ logger = structlog.get_logger(__name__)
 # Default mapping from router classification → weight profile name.
 # Profiles are defined in seed_resolver.py (WEIGHT_PROFILES dict).
 _ROUTE_TO_WEIGHT_PROFILE: Dict[str, str] = {
-    "local_search": "fact_extraction",      # Entity-heavy, precise lookup
-    "global_search": "thematic_survey",     # Community-heavy, broad coverage
-    "drift_multi_hop": "multi_hop",         # Entity-heavy, graph traversal
-    "unified_search": "balanced",           # Explicit Route 5 → balanced default
-    "concept_search": "thematic_survey",    # Route 6: community-driven concept search
+    "local_search": "fact_extraction",        # Entity-heavy, precise lookup
+    "global_search": "thematic_survey",       # Community-heavy, broad coverage
+    "drift_multi_hop": "multi_hop",           # Entity-heavy, graph traversal
+    "unified_search": "balanced",             # Explicit Route 5 → balanced default
+    "concept_search": "thematic_survey",      # Route 6: community-driven concept search
+    "hipporag2_search": "fact_extraction",    # Route 7: entity-graph PPR (entity-heavy)
 }
 
 
-# Route classification prompt - generic for any document corpus (3 routes)
-ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval system. Classify the user's query into one of three search strategies.
+# Route classification prompt — 3-way routing based on retrieval architecture.
+#
+# Core axis: ENTITY-ANCHORED vs CONCEPT-ANCHORED
+#   Entity-anchored: query names specific entities. Retrieval anchors on those
+#                    names and traverses the knowledge graph.
+#   Concept-anchored: query asks about abstract themes/roles/clauses with no entity
+#                     anchor. Community summaries (LazyGraphRAG) are the right tool.
+#
+# Within entity-anchored: SHALLOW (R2) vs DEEP (R7)
+#   local_search (R2):      answer in one section — fast vector lookup, no graph walk
+#   hipporag2_search (R7):  answer requires entity-graph traversal across chunks
+#
+# Route 4 (drift_multi_hop) is retired from auto-routing: benchmark shows
+# Route 7 achieves 57/57 on all DRIFT-style questions via graph traversal,
+# making iterative LLM decomposition redundant. Use force_route if needed.
+#
+# Validated by benchmark (2026-02):
+#   Route 7 Q-L 57/57, Q-D 57/57 — subsumes Route 2 AND Route 4
+#   Route 6 Q-G 53/57             — best on concept/theme queries
+ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval system. Classify the user's query into ONE of three search strategies.
 
 ## Routes
 
-**local_search** - Factual lookup and entity-focused search (DEFAULT)
-- Direct questions asking for specific values, names, dates, or identifiers
-- Questions about specific named entities, roles, or relationships
-- Information that can be found in one or a few document sections
-- Lists of specific items or conditions within a document (e.g., installments, schedules)
-- Simple document identification by explicit mentions or attributes (e.g., "Which contracts are in NY?", "Which document mentions 'indemnity'?")
-- Examples: "What is the total amount?", "List the 3 installment amounts", "Which documents are governed by California?"
+**local_search** — Simple entity lookup (DEFAULT)
+- Answer lives in one or a few document sections; vector search is sufficient
+- Named entity + simple attribute: name, date, amount, party, jurisdiction, list of items
+- Examples: "What is the total amount in Contract X?", "List the 3 installment dates", "Who are the parties to the NDA?", "Which contracts are governed by California law?"
 
-**global_search** - Cross-document thematic analysis
-- Asks for summaries, patterns, or themes across ALL documents
-- Requires aggregating similar information from multiple sources
-- Looking at the "big picture" without specific entity focus
-- Keywords: "summarize all", "list all X across", "what are the main themes"
-- Examples: "Summarize all termination clauses", "List all parties across documents"
+**hipporag2_search** — Entity graph traversal
+- Named entities present, but the answer requires tracing relationships ACROSS chunks or documents
+- Multi-hop: entity A → relationship → entity B → fact
+- Questions about obligations, roles, or relationships linking multiple named entities
+- Examples: "What are all obligations of Company Y across documents?", "Which subsidiary handles indemnification under the master agreement?", "Find documents where Counterparty X appears alongside obligation Z"
 
-**drift_multi_hop** - Complex multi-hop reasoning and comparison
-- Requires connecting multiple pieces of information
-- **COMPARATIVE analysis** between documents or entities (which is more/less/latest/earliest)
-- Needs to trace chains of relationships or dependencies
-- Conditional or hypothetical questions ("if X happens, what about Y?")
-- Questions asking "which document" based on calculated conditions, ranking, or cross-referencing
-- Keywords: "compare", "which document has", "if...then", "difference between", "latest/earliest date"
-- Examples: "Compare X across documents", "Which document has the latest date?", "If condition A, what happens to B?", "Which document contradicts the invoice?"
+**concept_search** — Abstract concept / theme retrieval
+- NO specific named entity anchor — query is about a ROLE, CLAUSE TYPE, OBLIGATION, or THEME
+- The answer could come from any document mentioning the concept
+- Test: if you replaced all party names with "Party A/B", the question still makes sense
+- Examples: "What are the reporting obligations?", "Summarise all termination clauses", "What compliance risks exist?", "What are the main payment obligations?", "List all insurance requirements"
 
-## Critical Distinctions
-
-**global_search vs drift_multi_hop:**
-- global_search: "List all insurance mentions" (aggregation, no comparison)
-- drift_multi_hop: "Which documents mention insurance and what limits are specified?" (requires cross-referencing)
-
-**local_search vs drift_multi_hop:**
-- local_search: "List the 3 installment amounts" (lookup in one context)
-- drift_multi_hop: "Compare installment amounts across contracts" (requires comparing/chaining)
-- local_search: "Which contracts are in NY?" (explicit attribute lookup)
-- drift_multi_hop: "Which contract has the best payment terms?" (requires evaluation/comparison)
-
-## Instructions
-Analyze the query and select the BEST matching route:
-1. Use **drift_multi_hop** for ANY comparison, conditional logic, or "which document" questions involving ranking or calculated criteria
-2. Use **global_search** for aggregation/summary across documents (no comparison needed)
-3. Use **local_search** as default for all other factual questions, including lists and simple lookups
+## Decision (apply in order)
+1. Is the query about an abstract concept/theme with no named entity anchor? → **concept_search**
+2. Does the answer require connecting entities across multiple chunks/documents? → **hipporag2_search**
+3. Everything else (direct lookup with a named entity) → **local_search**
 
 Query: {query}
 
-Respond with JSON: {{"route": "<route_name>", "reasoning": "<brief explanation>"}}"""
+Respond with JSON: {{"route": "<route_name>", "reasoning": "<one sentence>"}}"""
 
 
 class QueryRoute(Enum):
@@ -108,16 +107,20 @@ class DeploymentProfile(Enum):
 
 class HybridRouter:
     """
-    Routes queries between 3 distinct search strategies.
-    
-    Classification Logic (after Vector RAG removal):
-    - Factual lookups / entity questions -> Local Search (LazyGraphRAG)
-    - Cross-document themes / summaries -> Global Search (LazyGraphRAG + HippoRAG)
-    - Comparative / multi-hop / conditional -> DRIFT
-    
+    Routes queries between 3 retrieval strategies based on the entity-vs-concept axis.
+
+    Classification Logic:
+    - No entity anchor / abstract theme/clause → concept_search  (Route 6, LazyGraphRAG communities)
+    - Named entity + graph-traversal needed   → hipporag2_search (Route 7, PPR entity graph)
+    - Named entity + direct section lookup    → local_search     (Route 2, fast vector)
+
+    Routes 3 (global_search) and 4 (drift_multi_hop) are retired from auto-routing:
+    - Route 7 achieves 57/57 on all DRIFT-style questions (makes Route 4 redundant).
+    - Route 6 concept_search supersedes Route 3 global_search for concept queries.
+    Both remain accessible via force_route for manual override.
+
     Model Selection:
         Uses HYBRID_ROUTER_MODEL (default: gpt-4o-mini) for classification.
-        Fast and cost-effective for routing decisions.
     """
     
     def __init__(
@@ -241,12 +244,14 @@ class HybridRouter:
             route_str = result.get("route", "local_search")
             reasoning = result.get("reasoning", "")
             
-            # Map string to enum (with backward compatibility for vector_rag)
+            # Map string to enum — includes legacy aliases for backward compatibility
             route_map = {
                 "local_search": QueryRoute.LOCAL_SEARCH,
+                "hipporag2_search": QueryRoute.HIPPORAG2_SEARCH,
+                "concept_search": QueryRoute.CONCEPT_SEARCH,
+                # Legacy / force_route aliases kept for backward compatibility
                 "global_search": QueryRoute.GLOBAL_SEARCH,
                 "drift_multi_hop": QueryRoute.DRIFT_MULTI_HOP,
-                # Legacy support: vector_rag maps to local_search
                 "vector_rag": QueryRoute.LOCAL_SEARCH,
             }
             
@@ -261,21 +266,26 @@ class HybridRouter:
     def _heuristic_classify(self, query: str) -> QueryRoute:
         """
         Fast heuristic-based classification as fallback when LLM is unavailable.
-        
-        This is intentionally simple - the LLM classifier handles nuanced cases.
+
+        Mirrors the 3-way routing in ROUTE_CLASSIFICATION_PROMPT.
         Only catches high-confidence patterns to avoid false positives.
         """
         query_lower = query.lower()
-        
-        # Explicit comparison keywords -> DRIFT
-        if any(kw in query_lower for kw in ["compare", "versus", " vs ", "difference between"]):
-            return QueryRoute.DRIFT_MULTI_HOP
-        
-        # Explicit aggregation keywords -> Global
-        if any(kw in query_lower for kw in ["summarize", "summary", "all documents", "across all"]):
-            return QueryRoute.GLOBAL_SEARCH
-        
-        # Default to Local Search (most common case, good fallback)
+
+        # Concept-anchored signals: abstract roles/obligations/themes with no entity anchor.
+        # Checked first because these phrases override entity-lookup patterns.
+        concept_keywords = [
+            "reporting obligation", "compliance risk", "termination clause",
+            "payment obligation", "insurance requirement", "indemnification provision",
+            "what are the", "what obligations", "what requirements", "what provisions",
+            "summarize all", "summarise all", "all clauses", "across all documents",
+            "across documents", "main themes", "key themes",
+        ]
+        if any(kw in query_lower for kw in concept_keywords):
+            return QueryRoute.CONCEPT_SEARCH
+
+        # Default to Local Search — most queries are direct entity lookups.
+        # LLM handles nuanced hipporag2_search vs local_search distinction.
         return QueryRoute.LOCAL_SEARCH
 
     def _has_explicit_entity(self, query: str) -> bool:

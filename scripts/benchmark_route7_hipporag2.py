@@ -498,11 +498,29 @@ def main():
     parser.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis LLM")
     parser.add_argument("--include-context", action="store_true", default=False, help="Include LLM context in output")
     parser.add_argument("--token", type=str, default=None, help="Azure AD Bearer token")
+    parser.add_argument(
+        "--force-route", type=str, default=None,
+        choices=["hipporag2_search", "concept_search", "local_search", "global_search", "drift_multi_hop"],
+        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'concept_search' to benchmark Route 6.",
+    )
 
     args = parser.parse_args()
 
     if args.token:
         os.environ["GRAPHRAG_API_TOKEN"] = args.token
+
+    # Allow --force-route to override the module-level constant
+    global FORCE_ROUTE, ROUTE_LABEL
+    if args.force_route:
+        FORCE_ROUTE = args.force_route
+        _label_map = {
+            "hipporag2_search": "route7_hipporag2",
+            "concept_search": "route6_concept",
+            "local_search": "route2_local",
+            "global_search": "route3_global",
+            "drift_multi_hop": "route4_drift",
+        }
+        ROUTE_LABEL = _label_map.get(FORCE_ROUTE, FORCE_ROUTE)
 
     qbank_path: Path = args.qbank
     if not qbank_path.exists():

@@ -9306,3 +9306,42 @@ This confirms that Route 7 is correctly positioned for Q-D queries and should NO
 **Benchmark files:**
 - `benchmarks/route7_hipporag2_r4questions_20260222T095120Z.json` + `.eval.md` — Q-D post-fix (56/57)
 - `benchmarks/route7_global_search_20260222T095136Z.json` + `_eval_input.eval.md` — Q-G post-fix (51/57)
+
+#### Synthesis Weight Fix + 4 Additional Bugs (2026-02-22)
+
+The post-Bug-4/5-fix regression revealed the design mismatch: PPR scores were being used for BOTH chunk selection (top-K fetch) AND synthesis weighting, whereas the upstream HippoRAG 2 paper uses PPR scores only for selection. Once fetched, all chunks pass to the reader equally.
+
+**Additional bugs fixed (commit `0935827`):**
+
+**Synthesis weight fix** (paper intent restored):
+- `_entity_score` reverted to `1.0` for all fetched chunks
+- Sort now uses `scores.get(c["id"])` directly (PPR order preserved without triggering synthesizer pruning)
+- Result: token budget orders by PPR rank but does not penalise lower-PPR chunks
+
+**Bug 2 — Asymmetric seed normalization:**
+- Entity seeds normalized to sum=1.0; passage seeds were raw DPR score × 0.05 (un-normalized)
+- With 20 DPR results at avg 0.8, passage mass totalled ≈0.8 — nearly equal to entity mass despite 5% design intent
+- Fix: normalize DPR scores to sum=1 before multiplying by `passage_node_weight`
+
+**Bug 3 + 13 — Passage-only PPR bypass:**
+- When entity seeds were empty (all triples filtered by recognition memory), PPR was skipped entirely and raw DPR order used
+- Fix: always run PPR; passage seeds alone propagate via `TextChunk → MENTIONS → Entity → MENTIONS → TextChunk`; DPR fallback only if PPR produces zero passage scores
+
+**Bug 11 — RELATED_TO / SEMANTICALLY_SIMILAR edge deduplication:**
+- `_add_edge` adds A→B and B→A. If Neo4j stores both directions (common with MERGE-based ingestion), 4 adjacency entries created per logical edge, doubling weight in PPR walks
+- Fix: `seen_entity_edges` and `seen_synonym_edges` sets using canonical `(min_idx, max_idx)` keys
+
+**Post-fix benchmark results (2026-02-22, commit `0935827`):**
+
+| Metric | Bug 4+5 fix only | All fixes | Change |
+|--------|-----------------|-----------|--------|
+| Q-D score (LLM judge) | 56/57 | **57/57** | +1 (fully restored) |
+| Q-G score (LLM judge) | 51/57 | **52/57** | +1 (fully restored) |
+
+Both regressions reversed. Q-D and Q-G match the pre-discovery baseline.
+
+**Why scores match the original (buggy) state:** The original `_entity_score: 1.0` behaviour and the new synthesis-weight-revert are functionally equivalent for synthesis weighting. The improvement over the old code is that chunks are now **sorted by PPR score** (Bug 5 fix preserved), so the token budget drops the *least relevant* chunks instead of arbitrary ones. The visible score improvement from Bug 5 is within LLM judge noise (correct ranking rarely changes which answer the judge grades).
+
+**Benchmark files:**
+- `benchmarks/route7_hipporag2_r4questions_20260222T103038Z.json` + `.eval.md` — Q-D all-fixes (57/57)
+- `benchmarks/route7_global_search_20260222T103010Z.json` + `_eval_input.eval.md` — Q-G all-fixes (52/57)

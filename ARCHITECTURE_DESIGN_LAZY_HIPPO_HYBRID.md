@@ -9000,3 +9000,103 @@ The router already classifies queries by type — Route 7 is selected for Q-D qu
 #### Action Item
 
 Test Route 7 with `ROUTE7_COMMUNITY_SEEDS=1` and `ROUTE7_W_COMMUNITY=0.8` on Q-G benchmark, keeping Q-D benchmark as regression check. If Q-G4 improves with no Q-D regression, surface this as a `weight_profile=global` option that the router can select when dispatching Q-G queries to Route 7.
+
+---
+
+### 33.16. Q-G6 Shared Failure — Synthesis Gap Analysis
+
+#### What Failed
+
+Q-G6 asks: *"List all **named parties/organizations** across the documents and which document(s) they appear in."*
+
+Both **Route 6** (53/57 overall) and **Route 7** (52/57 overall) scored **1/3** on this question. This is notable because the routes use completely different retrieval architectures:
+- Route 6: community graph + global search (map-reduce synthesis over all documents)
+- Route 7: HippoRAG 2 PPR with entity seeds derived from triple embeddings
+
+The shared failure on the same question from architecturally different routes indicates the gap is **not in retrieval** — it is in **synthesis/LLM reasoning**.
+
+#### What Both Routes Actually Returned
+
+Both routes correctly identified all 4 ground-truth contracting parties and their document associations:
+
+| Party | Role(s) | Ground truth |
+|-------|---------|--------------|
+| Fabrikam Inc. | Builder (warranty), Pumper (holding tank), Customer (purchase contract) | ✅ Route 6, ✅ Route 7 |
+| Contoso Ltd. | Owner (PMA), Holding Tank Owner (HTC) | ✅ Route 6, ✅ Route 7 |
+| Contoso Lifts LLC | Contractor (purchase contract) | ✅ Route 6, ✅ Route 7 |
+| Walt Flood Realty | Agent (PMA) | ✅ Route 6, ✅ Route 7 |
+
+**Both routes also returned additional entities not in the ground truth:**
+
+| Extra entity | Where it appears | Route 6 | Route 7 |
+|-------------|-----------------|---------|---------|
+| Fabrikam Construction | Invoice (recipient/ship-to) | ✅ | ✅ |
+| Bayfront Animal Clinic | Exhibit A (job name field) | ✅ | ✅ |
+| Elizabeth Nolasco | Exhibit A (contact field) | ✅ | — |
+| John Doe | Invoice (to/ship-to person) | ✅ | — |
+| Jim Contoso | Invoice (salesperson) | ✅ | — |
+| County of Washburn | Holding tank contract (gov. body) | ✅ | — |
+| WI Code SPS 383.21(2)5 | Holding tank contract (statute ref) | ✅ | — |
+| American Arbitration Association | Warranty arbitration clause | — | ✅ |
+| Building Contractors Association of South East Idaho | Warranty form footer | — | ✅ |
+
+**Critical observation: none of these are hallucinations.** Every extra entity genuinely appears in the source documents exactly where the routes say it does.
+
+#### Root Cause: Query Intent vs. Synthesis Scope
+
+The question asks for "named parties/organizations" — but the LLM judge's ground truth only includes the 4 **contracting parties** (entities with formal legal roles: signatories named in the agreement preamble). Both routes interpreted "named parties/organizations" as all named entities mentioned anywhere in the documents, which is an equally valid reading of the question.
+
+There is also a **role misattribution** in Route 7's response: Fabrikam Inc. was labeled as "Principal Broker" in the PMA. This occurs because the PMA signature block reads `"By: Fabrikam Inc. Its Principal Broker"` — the LLM parsed "Its Principal Broker" as Fabrikam's role in the agreement, when it is actually a professional title of the signatory. Fabrikam's actual role in the PMA is "Owner."
+
+**Neither retrieval architecture can fix this at the retrieval layer.** Both routes:
+1. Successfully retrieved all 5 documents
+2. Correctly surfaced all entity mentions within those documents
+3. Passed accurate, complete evidence to the synthesis step
+
+The LLM synthesizer has no signal to distinguish:
+- **Contracting parties**: entities named in the agreement preamble/header with formal legal roles
+- **Incidental mentions**: contacts, government bodies, form template owners, invoice line-item recipients
+
+#### Why the Failure Is Shared Across Routes
+
+A retrieval-level fix for one route would not help the other because the problem is not retrieval depth, precision, or graph structure — it is that the synthesis prompt and LLM do not apply a "contracting party" filter when enumerating entities. Any route that retrieves complete document context will encounter the same pattern.
+
+This is the same category of synthesis gap as Q-D8 (entity counting across documents): the LLM has the right evidence but misinterprets or over-includes from it.
+
+#### Fix Options
+
+**Option A — Synthesis prompt variant (near-term, low-risk)**
+
+Add a `prompt_variant="party_enumeration"` that injects a clarifying instruction:
+
+```
+When listing parties/organizations, only include entities that appear as FORMAL
+NAMED PARTIES to the agreements — i.e., entities listed in the preamble
+("This agreement is between X and Y"), assigned a legal role (Owner, Agent,
+Contractor, Customer, Builder, Pumper), or named as signatories.
+
+Exclude: entities merely referenced in document text (government bodies,
+arbitration organizations, form template owners, contact persons, invoice
+line-item recipients, job site names).
+```
+
+This requires the router to detect "party/organization listing" queries and apply the variant. The `prompt_variant` parameter already exists in `execute()` signatures for all routes but is currently unused for this purpose.
+
+**Option B — Indexing-time contracting party tagging (longer-term)**
+
+At document indexing time, run an LLM extraction pass to identify entities in preamble/header roles and tag them with `is_contracting_party=True` on the Entity node. At synthesis time, inject a structured table of tagged parties as additional context.
+
+This overlaps with the entity-document role matrix direction from Q-D8. The tagging approach would fix both:
+- Q-G6: restrict "named parties" responses to tagged entities
+- Q-D8: provide an accurate per-document entity count pre-computed at indexing time
+
+**Option C — Revise ground truth scope**
+
+The responses from both routes are arguably correct: the question asks for "all named parties/organizations" and Bayfront Animal Clinic, AAA, and Fabrikam Construction genuinely are named entities in the documents. The ground truth may be too narrow for the question as phrased. If the ground truth is updated to accept these additional entities as correct (graded as additional accurate information, not as errors), both routes would score higher.
+
+#### Current Status
+
+- No fix implemented yet
+- Both routes share this failure; any fix must be applied at the synthesis layer
+- Option A (prompt variant) is the lowest-risk path: it leaves the retrieval layer unchanged and only affects synthesis for queries where the user explicitly targets party enumeration
+- Q-G6 may be the only question in the Q-G bank where the "contracting parties only" vs "all entity mentions" distinction matters

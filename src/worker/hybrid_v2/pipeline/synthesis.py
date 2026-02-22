@@ -2504,6 +2504,11 @@ IMPORTANT for Per-Document Queries:
   * Repeated excerpts from the same document
 - If you see "Builder's Warranty" and "Builder's Warranty - Section 3", combine into ONE summary.
 - If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
+- **Count vs. Set precision**: "appears in N documents" (a COUNT) is distinct from
+  "appears in the same documents" (a SET). Do NOT say two entities "appear in the
+  same documents" unless the question asks which documents they share. When comparing
+  how many documents each entity appears in, report the COUNT per entity (e.g.
+  "Entity A: 4 documents; Entity B: 4 documents") — not set membership.
 """
         
         logger.info(

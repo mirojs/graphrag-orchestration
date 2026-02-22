@@ -8897,3 +8897,106 @@ Route 7 is fully deterministic when using the same Voyage embeddings and PPR par
 | R7 d=0.85 | `benchmarks/route7_hipporag2_r4questions_20260221T103757Z.json` | `...103757Z.eval.md` |
 | R5 regression baseline | `benchmarks/route5_unified_r4questions_20260221T102102Z.json` | `...102102Z.eval.md` |
 | R7 vanilla (1 repeat, smoke) | `benchmarks/route7_hipporag2_r4questions_20260221T101924Z.json` | `...101924Z.md` |
+
+---
+
+### 33.14. Cross-Route Evaluation — Route 7 vs Route 6 on Q-G Global Questions (February 21, 2026)
+
+This is the first LLM judge evaluation applied to Q-G (global/thematic) questions. Prior Route 3/6 evaluations used only automated theme coverage (keyword matching). The eval script was updated to support Q-G ground truth (regex `Q-[DNS]` → `Q-[DGNLS]`, multi-line expected answer parsing).
+
+#### Results
+
+| QID | Question theme | R7 Score | R6 Score |
+|-----|---------------|----------|----------|
+| Q-G1 | Termination/cancellation rules | 3/3 | 3/3 |
+| Q-G2 | Governing law / jurisdictions | 3/3 | 3/3 |
+| Q-G3 | Who pays what | **2/3** | 3/3 |
+| Q-G4 | Reporting/record-keeping | **1/3** | 3/3 |
+| Q-G5 | Remedies/dispute resolution | 3/3 | **2/3** |
+| Q-G6 | Named parties/organizations | **1/3** | **1/3** |
+| Q-G7 | Notice/delivery mechanisms | 3/3 | **2/3** |
+| Q-G8 | Insurance/indemnity | 3/3 | 3/3 |
+| Q-G9 | Non-refundable/forfeiture terms | 3/3 | 3/3 |
+| Q-G10 | Document purpose summaries | 3/3 | 3/3 |
+| Q-N1..N10 | Negative tests | 27/27 | 27/27 |
+| **Total** | | **52/57 (91.2%)** | **53/57 (93.0%)** |
+
+Route 6 benchmark: `benchmarks/route6_global_search_20260221T112104Z.json` (3 repeats), eval: `...eval_input.eval.md`
+Route 7 benchmark: `benchmarks/route7_global_search_20260221T105836Z.json` (1 repeat), eval: `...eval_input.eval.md`
+
+#### Metric Comparison
+
+| Metric | Route 7 (Q-G) | Route 6 (Q-G) |
+|--------|---------------|---------------|
+| LLM Judge | 52/57 (91.2%) | 53/57 (93.0%) |
+| Avg containment | 0.88 | 0.84 |
+| Avg P50 latency | 15,102 ms | 5,612 ms |
+| Avg response length | 3,171 chars | ~1,900 chars |
+
+#### Failure Analysis
+
+**Q-G4 (R7: 1/3, R6: 3/3)** — Route 7 missed the PMA monthly statement reporting obligation. The triple store holds RELATED_TO edges between named entities; "reporting" / "monthly statement" are verb-phrase-level concepts with weak entity mapping. Route 6's concept-graph MAP surfaces this through community summaries that use financial-reporting vocabulary. This is the core structural weakness of triple-based seeding for thematic questions.
+
+**Q-G6 (both: 1/3)** — Both routes misattribute entity-to-document roles (e.g. stating Contoso Ltd. is the buyer in the Warranty when it is Fabrikam Inc.'s counterpart). This is a shared synthesis problem: the LLM conflates the entity graph's co-occurrence patterns with the strict per-document role assignments the question requires.
+
+**Q-G5 (R7: 3/3, R6: 2/3)** — Route 7 wins here. Triple store explicitly encodes dispute-resolution relationship structure (arbitration, legal fees), which the concept-graph MAP summarises at a higher level and misses the "legal fees recoverable by contractor" clause.
+
+**Q-G7 (R7: 3/3, R6: 2/3)** — Route 7 wins. PPR walk from "notice" / "certified mail" entity seeds reaches the PMA 60-day termination clause directly. Route 6's Louvain community MAP missed this specific clause in its synthesized community summary.
+
+#### Architectural Interpretation
+
+Route 7 is optimised for **entity-relational queries** (Q-D): triple linking directly encodes subject-predicate-object relationships, and passage-node PPR propagates scores through the graph to reach entity-adjacent passages. For Q-D this is perfect — 57/57.
+
+For **thematic/enumerative queries** (Q-G), the question often spans all documents and asks for a thematic inventory (all termination rules, all fee structures). Triple-based seeding biases toward entities that appear in triples — it misses thematic obligations that are expressed as verb phrases without strong named-entity anchors (e.g. "monthly statement of income and expenses"). Route 6's concept-graph MAP pre-digests thematic content through community summaries, which is better suited to this query type.
+
+---
+
+### 33.15. Seed Weighting Analysis — Improvement Opportunity for Q-G Queries
+
+#### Current Weighting Scheme
+
+```
+Phase 1 entity seeds (triple linking):    +1.0 per triple appearance
+Phase 2 structural seeds (section match): +0.2  (ROUTE7_W_STRUCTURAL)
+Phase 2 community seeds (community match):+0.1  (ROUTE7_W_COMMUNITY)
+DPR passage seeds:                        score × 0.05 (ROUTE7_PASSAGE_NODE_WEIGHT)
+
+All entity seeds are normalized to sum=1.0 before PPR.
+```
+
+#### Comparison to HippoRAG 2 Paper
+
+The paper uses a **uniform seed distribution** over entities from surviving triples — every entity gets weight `1/N`. Our implementation accumulates by count (entities in multiple surviving triples get proportionally higher weight), which is a minor intentional departure: more triple hits = stronger relevance signal.
+
+The paper has only one entity seed source (triple linking). The tiered Phase 2 weights (0.2, 0.1) are entirely our custom design to keep Phase 2 as a supplementary signal.
+
+#### The Q-G Weakness and the Weighting Connection
+
+For Q-G queries, Phase 2 community seeds are the mechanism most likely to overcome the triple-store's blind spot for thematic/verb-phrase content. However, with default Phase 2 weights:
+
+- If 3 triples survive → 4 unique entities → each gets ~0.25 after normalization
+- A community seed entity gets 0.1 added before normalization → ends up at ~0.09 effective weight relative to top triple seeds
+- Community seeds contribute only ~9% of the PPR seed mass — too small to redirect the walk meaningfully toward PMA reporting content
+
+This is why the Phase 2 ablation showed no improvement on Q-D: community seeds are correctly down-weighted for precise entity-relational queries. But for Q-G (where community seeds are more relevant than triples), the same down-weighting prevents community seeds from having any effect.
+
+#### Potential Improvement Direction
+
+A **query-type-aware seed weighting** scheme could bridge this gap:
+
+| Query type | Triple seeds | Community seeds | DPR seeds |
+|------------|-------------|-----------------|-----------|
+| Q-D (entity-relational) | High (current 1.0) | Low (current 0.1) | Current |
+| Q-G (thematic/enumerative) | Medium (e.g. 0.5) | **High (e.g. 0.8)** | Current |
+
+The router already classifies queries by type — Route 7 is selected for Q-D queries. A simple extension would be an optional `weight_profile` parameter (already in the `execute()` signature but unused by Route 7) that shifts the seed balance toward community seeds when the query is thematic.
+
+**Why this wasn't done yet:** The ablation tested Phase 2 all-ON with current (low) community seed weights. It did not test Phase 2 with elevated community weights for Q-G queries. This is the most promising unexplored configuration.
+
+**Estimated impact:** Q-G4 (1/3 → 3/3) is the primary target. Community seeds from the concept-graph communities that encode PMA financial reporting obligations would contribute if given sufficient weight to influence the PPR walk. Q-G3 (2/3 → 3/3) is a secondary target.
+
+**Risk:** Elevated community seed weight on Q-D queries could dilute the precise triple-based signal and regress Q-D scores. This must be kept query-type-conditional, not a global default change.
+
+#### Action Item
+
+Test Route 7 with `ROUTE7_COMMUNITY_SEEDS=1` and `ROUTE7_W_COMMUNITY=0.8` on Q-G benchmark, keeping Q-D benchmark as regression check. If Q-G4 improves with no Q-D regression, surface this as a `weight_profile=global` option that the router can select when dispatching Q-G queries to Route 7.

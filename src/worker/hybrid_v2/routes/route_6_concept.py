@@ -424,19 +424,11 @@ class ConceptSearchHandler(BaseRouteHandler):
                 doc = ev.get("document_title", "Unknown")
                 section = ev.get("section_path", "")
 
-                # R6-X (synthesis use): prefer chunk_text for enumeration queries.
-                # chunk_text is the full parent TextChunk (typically 300-600 chars),
-                # which may contain several adjacent facts (e.g. multiple timeframes
-                # in one clause) that sentence or passage view would miss.
-                # Fall back to the passage (prev+sent+next) otherwise.
-                chunk_text = ev.get("chunk_text", "")
-                passage = ev.get("text", "")
-                _CHUNK_ADVANTAGE_RATIO = 1.3  # use chunk only when it's 30%+ longer
-                if chunk_text and len(chunk_text) > len(passage) * _CHUNK_ADVANTAGE_RATIO:
-                    # Cap at 700 chars to keep the prompt manageable
-                    text = chunk_text[:700] + ("…" if len(chunk_text) > 700 else "")
-                else:
-                    text = passage
+                # Use the sentence-window passage (prev+sent+next ~200 chars).
+                # chunk_text is stored in the evidence dict for metadata/debug,
+                # but replacing passage with chunk[:700] risks cutting the retrieved
+                # sentence off mid-chunk and hiding the relevant fact.
+                text = ev.get("text", "")
 
                 if section:
                     evidence_lines.append(

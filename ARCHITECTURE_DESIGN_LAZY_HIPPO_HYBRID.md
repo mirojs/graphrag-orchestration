@@ -9100,3 +9100,139 @@ The responses from both routes are arguably correct: the question asks for "all 
 - Both routes share this failure; any fix must be applied at the synthesis layer
 - Option A (prompt variant) is the lowest-risk path: it leaves the retrieval layer unchanged and only affects synthesis for queries where the user explicitly targets party enumeration
 - Q-G6 may be the only question in the Q-G bank where the "contracting parties only" vs "all entity mentions" distinction matters
+
+---
+
+### 33.17. Four Frontier Gap Categories — Beyond Retrieval Quality
+
+#### Context
+
+The Q-G6 shared failure analysis (Section 33.16) revealed that some question types expose **synthesis/reasoning** limitations rather than retrieval gaps. Both Route 6 and Route 7 retrieved all relevant evidence correctly — the failure was in how the LLM processed it.
+
+This section catalogues four general categories of queries where retrieval quality is no longer the bottleneck. These represent the frontier of RAG system performance: even with perfect retrieval, current LLM synthesis can fail on these patterns.
+
+---
+
+#### Category 1: Numerical Aggregation Across Documents
+
+**Problem:** Queries requiring counting, summing, or comparing numerical values extracted from multiple documents. The LLM receives all the numbers but miscounts, omits duplicates, or double-counts shared values.
+
+**Example failures:**
+- Q-D8 (1/3): "Which entity appears in more documents?" — LLM miscounts document appearances despite having all evidence
+- Q-G6 (1/3): over-counting entities by including incidental mentions alongside contracting parties
+
+**Why retrieval doesn't help:** The numbers are correctly retrieved. The failure is arithmetic reasoning over scattered evidence.
+
+**Solutions:**
+
+| Layer | Approach | Implementation | Effort |
+|-------|----------|---------------|--------|
+| Index-time | Pre-compute structured fact tables (entity-document matrix, monetary value registry) | LLM extraction pass at indexing → store as graph properties or side tables | Medium |
+| Index-time | `IS_PARTY_TO` edge tagging (Section 33.16 Option B) for entity-document membership | One LLM call per document at indexing time | Low |
+| Retrieval | Not the bottleneck — all values are already retrieved | N/A | N/A |
+| Synthesis | Tool-augmented LLM (calculator, Python code execution for aggregation) | Integrate code interpreter tool into synthesis chain | Medium |
+| Synthesis | Map-reduce: extract values per document → aggregate in final step | Requires a two-pass synthesis pipeline | Medium |
+| Synthesis | Chain-of-thought prompting ("list each value, then compute the total step by step") | Prompt engineering only | Low |
+
+**What we've already done:** Sentence-level chunking ensures precise number retrieval. The gap is purely in synthesis arithmetic.
+
+---
+
+#### Category 2: Temporal / Sequential Reasoning
+
+**Problem:** Queries requiring understanding of chronological order, date arithmetic, version comparison, or reasoning about what changed between document versions. The LLM has the dates but cannot reliably compute intervals, order events, or diff versions.
+
+**Example:** "How many years elapsed between the oldest and newest document?" requires extracting dates from 5 documents, comparing them, and computing the difference — a multi-step temporal reasoning task.
+
+**Why retrieval doesn't help:** Dates are simple text fields that any retrieval approach surfaces correctly. The failure is in temporal reasoning over extracted dates.
+
+**Solutions:**
+
+| Layer | Approach | Implementation | Effort |
+|-------|----------|---------------|--------|
+| Index-time | Extract temporal metadata per document (effective date, expiry, signing date) → store as structured properties | LLM extraction at indexing → `(:Document {effective_date: "2010-06-15"})` | Low |
+| Index-time | Build timeline graph: `(:Event)-[:PRECEDES]->(:Event)` with date properties | Requires event extraction pipeline | High |
+| Index-time | Document version diffing: if multiple versions exist, compute and store clause-level diffs at index time | Clause segmentation + diff algorithm | High |
+| Retrieval | Time-aware retrieval: filter/boost by temporal proximity to query context | Add date filter to vector search | Low |
+| Synthesis | Inject pre-computed date table as structured context alongside retrieved text | Build date summary table at query time from index metadata | Low |
+| Synthesis | Tool-augmented LLM (date calculator for interval computation) | Integrate date arithmetic tool | Medium |
+| Synthesis | Side-by-side comparison prompt (for version diff queries): present both versions explicitly | Prompt template change | Low |
+
+**What we've already done:** Document dates are extractable from text. But no structured temporal metadata exists in the graph — dates are embedded in unstructured chunk text only.
+
+---
+
+#### Category 3: Implicit Role / Risk Inference
+
+**Problem:** Queries requiring the LLM to reason about unstated implications — who bears risk, which party is most exposed, which clause provides weakest protection. The answer isn't explicitly stated in any document; it requires inference across obligations, exclusions, and liabilities.
+
+**Example:** "Which party bears the most financial risk across all documents?" requires synthesizing: owner pays pumper charges + forfeits deposit on late cancellation + bears maintenance costs under PMA + warranty has extensive exclusions; then comparing overall exposure against other parties.
+
+**Why retrieval doesn't help:** The relevant clauses are retrieved, but the inference (risk comparison, obligation density assessment) requires multi-step legal reasoning that current LLMs perform inconsistently.
+
+**Solutions:**
+
+| Layer | Approach | Implementation | Effort |
+|-------|----------|---------------|--------|
+| Index-time | Party-obligation matrix: for each party, extract obligations/entitlements per document | LLM extraction: "List obligations for each named party in this document" | Medium |
+| Index-time | Clause classification: tag each clause with semantic type (indemnification, limitation of liability, risk allocation, payment obligation) | Fine-tuned classifier or LLM tagging pass | Medium |
+| Index-time | Risk scoring: assign risk weight to each clause type per party at index time | Requires domain-specific risk model | High |
+| Retrieval | Concept-level retrieval: retrieve by legal concept rather than entity or text match | Community-based retrieval (Route 6) partially addresses this | Low (existing) |
+| Synthesis | Expert persona prompting: "You are a contract analyst. Assess each party's obligations and exposure..." | Prompt engineering | Low |
+| Synthesis | Multi-step reasoning chain: (1) list all obligations per party, (2) categorize by risk type, (3) compare overall exposure | Structured multi-step synthesis prompt | Medium |
+| Synthesis | Inject party-obligation matrix as structured context | Combine with index-time extraction | Low (if index-time data exists) |
+
+**What we've already done:** Community-based retrieval (Route 6) surfaces thematic clusters that help group "risk allocation" content. But the inference step — concluding who is MORE at risk — remains synthesis-dependent.
+
+---
+
+#### Category 4: Clause-Level Legal Interpretation
+
+**Problem:** Queries requiring the LLM to interpret legal language beyond its literal meaning — understanding exceptions to exceptions, the practical effect of a clause, distinguishing between "coverage terminates" vs "standing to enforce is lost," or inferring regulatory implications from statutory references.
+
+**Example:** The warranty states it is "not transferable." Does this mean a second buyer gets no warranty protection, or merely that they lack standing to enforce it? The text says the warranty "terminates if first purchaser sells or moves out" — this is a substantive termination, not a procedural bar. The LLM must distinguish these two legal concepts from the clause language.
+
+**Why retrieval doesn't help:** Sentence-level chunking already retrieves the exact clause. The gap is in legal reasoning — interpreting what the clause means in practice, not finding it.
+
+**Solutions:**
+
+| Layer | Approach | Implementation | Effort |
+|-------|----------|---------------|--------|
+| Index-time | Clause segmentation: split each document into individual clauses with semantic labels (termination, indemnity, warranty scope, arbitration) | LLM-based clause boundary detection + labeling | Medium |
+| Index-time | Plain-language paraphrase: at index time, generate a plain-English summary of each clause's practical effect | LLM call per clause at indexing | Medium |
+| Index-time | Cross-reference annotation: link related clauses across documents (e.g., warranty.termination ↔ pma.non_transferability) | Requires semantic similarity between clauses | High |
+| Retrieval | Sentence-level chunking (already implemented) ensures the right clause text is retrieved | Already done (`sentence_embeddings_v2`) | Done |
+| Synthesis | Domain-specific system prompt with legal definitions ("'not transferable' in contract law means...") | Prompt engineering with legal domain knowledge | Low |
+| Synthesis | Multi-step interpretation: (1) extract the exact clause text, (2) identify the legal mechanism, (3) state the practical consequence | Structured reasoning prompt | Medium |
+| Synthesis | Model upgrade: stronger LLMs (GPT-5, Claude Opus-class) handle legal interpretation better | No code change, model swap only | Low |
+
+**What we've already done:** Sentence-level chunking ensures precise clause retrieval. The gap is purely in the LLM's ability to interpret legal language, which improves with model capability but cannot be fully solved architecturally.
+
+---
+
+#### Summary: What Each Layer Can Fix
+
+```
+                    Category 1      Category 2      Category 3      Category 4
+                    Numerical       Temporal        Implicit        Clause
+                    Aggregation     Reasoning       Inference       Interpretation
+                    ─────────────   ─────────────   ─────────────   ─────────────
+Index-time fix      ★★★ (fact       ★★★ (date       ★★☆ (obligation ★★☆ (clause
+                    tables)         metadata)       matrix)         paraphrases)
+
+Retrieval fix       — (not the      ★☆☆ (date       ★☆☆ (concept    — (already
+                    bottleneck)     filtering)      retrieval)      solved)
+
+Synthesis fix       ★★☆ (CoT,      ★★☆ (date       ★★☆ (expert     ★★★ (model
+                    tools)          tools)          prompting)      capability)
+```
+
+**Key insight:** Index-time pre-computation is the most impactful fix for Categories 1-3 because it moves hard reasoning out of synthesis (where LLMs are unreliable) into structured data (where it can be verified). Category 4 is fundamentally bounded by LLM reasoning capability and improves primarily through model upgrades.
+
+**Cross-cutting fix:** The `IS_PARTY_TO` edge tagging proposed in Section 33.16 (Option B) is an instance of index-time pre-computation that directly addresses Category 1 and partially addresses Category 3. A generalized version — extracting structured entity-role-document facts at indexing time — would cover the broadest range of gap queries.
+
+#### New Question Bank
+
+A dedicated question bank targeting these four categories has been added as **Section G** of the question bank file (`QUESTION_BANK_5PDFS_2025-12-24.md`). These questions are designed to benchmark synthesis quality independently of retrieval quality — any route that retrieves complete evidence will still face these challenges.
+
+See: `docs/archive/status_logs/QUESTION_BANK_5PDFS_2025-12-24.md` Section G (Q-A, Q-T, Q-I, Q-C prefixes).

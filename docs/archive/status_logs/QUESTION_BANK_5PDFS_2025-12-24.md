@@ -355,3 +355,149 @@ These should return **“not found / not specified in the provided documents”*
 9. **Q-N10:** What is the invoice **shipping method** (value in "SHIPPED VIA")?
    - **Expected Route:** Route 2 (Local Search)
    - **Expected:** Not specified / blank.
+
+---
+
+## G) Synthesis Gap Questions — Frontier Categories (20)
+
+These questions target four categories of **synthesis/reasoning limitations** that persist even when retrieval is perfect. They benchmark LLM reasoning quality independently of retrieval architecture. Any route that retrieves complete evidence will face these challenges.
+
+See: `ARCHITECTURE_DESIGN_LAZY_HIPPO_HYBRID.md` Section 33.17 for full gap analysis.
+
+**Expected Route:** Route 7 (HippoRAG 2) or Route 6 (Global Search) — retrieval is not the bottleneck for these questions; the synthesis step is.
+
+---
+
+### G.1) Numerical Aggregation (Q-A)
+
+1. **Q-A1:** How many distinct dollar amounts (not percentages) are explicitly stated across all 5 documents? List each one with its source document.
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Invoice:** $29,900.00 (total/amount due). **Purchase contract:** $20,000 (1st installment), $7,000 (2nd installment), $2,900 (3rd installment), $29,900 (total). **PMA:** $250.00 (non-refundable start-up fee), $75/month (advertising), $50/month (admin fee), $35/hour (scheduling fee). **PMA insurance minimums:** $300,000 (bodily injury), $25,000 (property damage). Total distinct dollar amounts: **11** (note: invoice $29,900 and purchase contract total $29,900 are the same value but from different documents).
+   - **Source:** contoso_lifts_invoice.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+   - **Note:** Tests numerical enumeration + cross-document counting. Common failure: omitting insurance minimums or double-counting the $29,900.
+
+2. **Q-A2:** What is the total fixed monthly cost (not percentage-based) that the property owner pays the agent under the PMA?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** $75 (advertising) + $50 (admin) = **$125/month** in fixed costs. The commissions (25%/10%) and repair markup (10%) are variable, not fixed monthly amounts. The $35/hour scheduling fee is per-use, not monthly. The $250 start-up fee is one-time, not monthly.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+   - **Note:** Tests filtering by criteria (fixed vs variable vs one-time) + arithmetic. Common failure: including percentage-based fees or the one-time start-up fee.
+
+3. **Q-A3:** Sum all percentage-based rates mentioned in the PMA. What is the total, and is it meaningful to sum them?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** 25% (short-term commission) + 10% (long-term commission) + 10% (repair markup) + 4.712% (Hawaii excise tax) = **49.712%**. However, this sum is **not meaningful** — these percentages apply to different bases (gross rental revenue for commissions, repair costs for markup, fees for tax). They cannot be meaningfully aggregated into a single rate.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+   - **Note:** Tests arithmetic + meta-reasoning about whether aggregation is valid. Common failure: computing the sum without noting it's meaningless.
+
+4. **Q-A4:** How many distinct time periods (in days, months, weeks, or years) are explicitly stated across all documents? List each one.
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Warranty:** 1 year (major systems), 60 days (minor items), 60 days (repair window), 60 days (arbitration demand deadline), 180 days (arbitration completion target). **Holding tank:** 10 business days (file changes). **PMA:** 12 months (initial term), 60 days (termination notice), 5 business days (notify agent of sale listing), 180 days (short-term vs long-term threshold). **Purchase contract:** 90 days (labor warranty), 3 business days (cancellation window), 8-10 weeks (delivery estimate). Total: **13-14** distinct timeframes.
+   - **Source:** All docs
+   - **Note:** Tests enumeration + deduplication (60 days appears in multiple contexts with different meanings). Common failure: conflating the multiple 60-day periods or missing the 8-10 week delivery estimate.
+
+5. **Q-A5:** Across all documents, how many unique named individuals (not organizations) are mentioned? List each with their role.
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Invoice:** John Doe (recipient/ship-to contact), Jim Contoso (salesperson). **Purchase contract / Exhibit A:** Elizabeth Nolasco (contact for Bayfront Animal Clinic job). Total: **3** named individuals. Note: Signature blocks may contain names but these are typically role-holders signing on behalf of organizations, not independently named parties.
+   - **Source:** contoso_lifts_invoice.pdf (chunk 0); purchase_contract.pdf (Exhibit A)
+   - **Note:** Tests entity type filtering (individuals vs organizations) + exhaustive enumeration. Common failure: including organization names or missing individuals in secondary document sections.
+
+---
+
+### G.2) Temporal / Sequential Reasoning (Q-T)
+
+1. **Q-T1:** Arrange all 5 documents by their stated or effective date from oldest to newest. Which two documents share the same date?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** (1) PMA: 2010-06-15, (2) Warranty: 2010-06-15, (3) Invoice: 2015-12-17, (4) Holding Tank: 2024-06-15, (5) Purchase Contract: 2025-04-30. The **PMA and Warranty** share the same date (June 15, 2010).
+   - **Source:** All docs (date fields in each document)
+   - **Note:** Tests date extraction from 5 different document formats + comparison. Common failure: missing one document's date or getting the ordering wrong.
+
+2. **Q-T2:** If the purchase contract was signed on its stated date, by what calendar date would the 3-business-day cancellation window expire?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** Contract signed 2025-04-30 (Wednesday). 3 business days: Thu May 1, Fri May 2, Mon May 5 = cancellation window expires **May 5, 2025** (Monday). Weekends (Sat May 3, Sun May 4) are excluded from business days.
+   - **Source:** purchase_contract.pdf (chunk 0/1)
+   - **Note:** Tests date arithmetic with business day calculation. Common failure: counting calendar days instead of business days, or miscounting the start day.
+
+3. **Q-T3:** Based on the warranty's stated date and coverage period, is the 1-year warranty still active as of today? When did/will it expire?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** Warranty date is 2010-06-15. Coverage begins on "date of final settlement or first occupancy, whichever comes first." Assuming that date aligns with the document date, the 1-year warranty expired **2011-06-15** and the 60-day warranty expired **2010-08-14**. Both are long expired (over 15 years ago).
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0)
+   - **Note:** Tests temporal reasoning + conditional date computation. Common failure: not recognizing the coverage start date condition.
+
+4. **Q-T4:** How many years and months elapsed between the oldest and newest document dates in the set?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** Oldest: PMA/Warranty at 2010-06-15. Newest: Purchase Contract at 2025-04-30. Elapsed: **14 years, 10 months, and 15 days** (approximately 14 years 10 months).
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf; purchase_contract.pdf
+   - **Note:** Tests date interval computation. Common failure: miscalculating months or confusing which documents are oldest/newest.
+
+5. **Q-T5:** If the PMA started on its effective date and auto-renews every 12 months, how many times has it renewed as of February 2026?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** PMA effective 2010-06-15. Initial 12-month term expires 2011-06-15. Then auto-renews annually. From June 2011 to February 2026 = ~14 years 8 months = **14 completed renewals** (currently in the 15th renewal year, which started June 2025).
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+   - **Note:** Tests combining contract terms with date arithmetic. Common failure: off-by-one in renewal count or not accounting for the initial term.
+
+---
+
+### G.3) Implicit Role / Risk Inference (Q-I)
+
+1. **Q-I1:** Across all documents, which named party bears the most financial risk? Justify by listing their specific obligations and exposures.
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Contoso Ltd. / the Owner** bears the most financial risk: (a) under PMA: pays commissions (25%/10%), monthly fees ($75+$50), repair markup (10%), $250 start-up, insurance premiums, excise tax, and must indemnify agent; (b) under Holding Tank: pays pumper charges; (c) under Warranty (as Buyer/Owner): warranty has extensive exclusions and is non-transferable — once expired, all repair costs fall to owner; (d) under Purchase Contract: Fabrikam (as Customer) risks $20,000 deposit forfeiture after 3 days + risk of loss shifts on delivery.
+   - **Source:** All docs
+   - **Note:** Tests multi-document synthesis + comparative risk assessment. Common failure: listing obligations without concluding who bears MORE risk, or confusing which entity is the "owner" in each document.
+
+2. **Q-I2:** If Fabrikam Inc. ceased operations, which agreements would be directly affected and what would each counterparty lose?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** (a) **Warranty** — Contoso Ltd. (Buyer/Owner) loses warranty coverage; Fabrikam is the Builder obligated to repair defects. (b) **Holding Tank** — Contoso Ltd. (Owner) loses their pumper; must find a replacement and file contract changes within 10 business days. (c) **Purchase Contract** — Contoso Lifts LLC (Contractor) loses their customer; Fabrikam is the Customer who ordered the lift. The **PMA is unaffected** — its parties are Contoso Ltd. and Walt Flood Realty; Fabrikam is not a party to it.
+   - **Source:** All docs
+   - **Note:** Tests entity-document role mapping + counterfactual reasoning. Common failure: incorrectly including the PMA as affected, or confusing Fabrikam Inc. with Fabrikam Construction (invoice entity).
+
+3. **Q-I3:** Which document provides the weakest consumer/buyer protection? Explain what makes it weaker than the others.
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** The **Builders Limited Warranty** provides the weakest buyer protection: (a) extensive exclusions (settling, cracking, exterior stains, septic systems, landscaping, etc.); (b) non-transferable — terminates on resale; (c) strict notice requirements (certified mail, return receipt requested); (d) mandatory binding arbitration with confidentiality clause — removes court access; (e) short 60-day window for minor items. By comparison, the PMA at least allows 60-day termination by either party, and the Purchase Contract offers a 3-day full-refund cancellation window.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunks 0-6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+   - **Note:** Tests comparative legal analysis + reasoning about protection strength. Common failure: stating facts without comparative judgment, or selecting the wrong document.
+
+4. **Q-I4:** If a dispute arose about the quality of the vertical platform lift installation, which documents would be relevant and what remedies are available?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Purchase Contract:** 90-day labor warranty; contractor recovers legal fees on customer default; risk of loss shifts to customer on delivery. **Invoice:** documents the $29,900 payment but contains no warranty or dispute terms. The **Builders Limited Warranty is NOT relevant** — it covers a residential property (480 Willow Glen Drive, Chubbuck, ID) and its builder is Fabrikam Inc., while the lift installation involves Contoso Lifts LLC at a different location (Bayfront Animal Clinic). The warranty and purchase contract are separate agreements between different parties about different properties.
+   - **Source:** purchase_contract.pdf (chunk 0); contoso_lifts_invoice.pdf (chunk 0); BUILDERS LIMITED WARRANTY.pdf (chunk 0)
+   - **Note:** Tests cross-document reasoning about applicability. Common failure: incorrectly applying the Builders Limited Warranty to the lift installation because both involve "warranty" concepts.
+
+5. **Q-I5:** Which party has the most contractual obligations (not rights) across all documents? List the obligations per document.
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Fabrikam Inc.** has obligations in 3 documents: (a) Warranty — repair/replace defects within 60 days, respond to emergency calls; (b) Holding Tank — pump tank, submit County reports with dates/volumes/condition, provide licensed equipment; (c) Purchase Contract (as Customer) — make installment payments ($20,000/$7,000/$2,900). **Contoso Ltd.** also has obligations in 3 documents: (a) PMA — furnish property, provide insurance, pay fees/commissions; (b) Holding Tank — provide access to tank, pay pumper charges, file contract with County; (c) Warranty — provide written notice of defects by certified mail. Both have obligations in 3 documents, but Fabrikam's obligations are more operationally demanding (physical servicing, construction repair) while Contoso's are primarily financial.
+   - **Source:** All docs
+   - **Note:** Tests obligation enumeration + comparative analysis. Common failure: confusing rights with obligations, or missing obligations in secondary clauses.
+
+---
+
+### G.4) Clause-Level Legal Interpretation (Q-C)
+
+1. **Q-C1:** The warranty states it is "not transferable" and "terminates if first purchaser sells or moves out." Are these the same thing, or do they mean something different legally?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** These are **related but distinct concepts.** "Not transferable" means the warranty cannot be assigned to another person — the new buyer cannot claim under it. "Terminates if first purchaser sells or moves out" goes further — the warranty **ceases to exist entirely**, not just for the new buyer but for everyone. Together they mean: (a) even if transfer were somehow attempted, it would be void; AND (b) the warranty itself ends as a matter of contract, regardless of any assignment attempt. The termination clause is the stronger provision — it makes the warranty disappear, not merely unenforceable by a third party.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3)
+   - **Note:** Tests distinguishing between two related legal concepts. Common failure: treating them as synonymous ("both mean the new buyer gets nothing").
+
+2. **Q-C2:** The PMA says the owner must "hold harmless and indemnify Agent...except for losses caused by Agent's gross negligence or willful misconduct." Does the agent have ANY liability under this agreement?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** **Yes, but only for gross negligence or willful misconduct.** The indemnification clause protects the agent from all ordinary liability (simple negligence, third-party claims, property damage, etc.) — the owner absorbs those costs. The exception carves out a narrow category: if the agent's actions rise to "gross negligence or willful misconduct," the owner is NOT required to indemnify. This means the agent IS liable for their own grossly negligent or willfully wrongful acts, but NOT for ordinary mistakes.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2)
+   - **Note:** Tests understanding exception-to-indemnification clauses. Common failure: stating the agent has "no liability" (ignoring the exception) or overstating the exception as general liability.
+
+3. **Q-C3:** The warranty's arbitration clause includes a "small claims carveout." What is the practical significance for a homeowner with a $500 repair claim?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** The small claims carveout means disputes below the jurisdictional small claims court limit **do not have to go through arbitration** — the homeowner can file directly in small claims court. This is practically significant because: (a) arbitration filing fees often exceed the claim value for small amounts; (b) small claims court is designed for self-representation (no attorney needed); (c) it provides a faster, cheaper path for minor warranty claims. Without this carveout, even a $500 claim would require binding arbitration with its associated costs.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/5)
+   - **Note:** Tests understanding the practical effect of a procedural carveout. Common failure: explaining what arbitration is without addressing why the carveout matters for small claims specifically.
+
+4. **Q-C4:** The purchase contract states the deposit is "forfeited" if the customer doesn't cancel within 3 business days. Is this a penalty or liquidated damages? Does the distinction matter?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** The contract uses "forfeited" without specifying whether it constitutes liquidated damages or a penalty. The distinction matters under Florida law (the governing jurisdiction): **liquidated damages** are enforceable if they represent a reasonable pre-estimate of actual loss; **penalties** designed to punish breach may be unenforceable. A $20,000 forfeiture on a $29,900 contract (67% of total) could be challenged as a penalty if the contractor's actual damages from cancellation would be substantially less. The contract does not include a liquidated damages clause or reasonableness justification.
+   - **Source:** purchase_contract.pdf (chunk 0/1)
+   - **Note:** Tests legal concept application to contract terms. Common failure: defining the terms without applying them to the specific facts (forfeiture amount vs contract value, governing law).
+
+5. **Q-C5:** The holding tank contract references "WI Code SPS 383.21(2)5" as the basis for filing requirements. What does this reference tell us about the regulatory context, and what might happen if the owner fails to file?
+   - **Expected Route:** Route 7 (HippoRAG 2)
+   - **Expected:** The statutory reference indicates this contract operates under **Wisconsin administrative code** (SPS = Safety and Professional Services). This means: (a) the filing requirement is not merely contractual but **regulatory** — it exists because state law mandates it; (b) failure to file may expose the owner to **governmental enforcement** (fines, compliance orders), not just contractual breach by the pumper; (c) the pumper's reporting obligations to the County are also likely regulatory in origin. The regulatory context elevates this from a private contract term to a public health/environmental compliance obligation.
+   - **Source:** HOLDING TANK SERVICING CONTRACT.pdf (chunk 0/1)
+   - **Note:** Tests inference from statutory references about regulatory implications. Common failure: noting the code reference exists without analyzing what it implies about enforcement and consequences.

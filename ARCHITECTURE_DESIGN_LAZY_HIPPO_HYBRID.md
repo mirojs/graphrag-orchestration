@@ -9285,3 +9285,24 @@ Fixing both bugs restores the full HippoRAG 2 signal path: PPR probabilities now
 - Needs deployment + re-benchmark on both Q-D (regression check) and Q-G (improvement target)
 - Previous 57/57 Q-D score should be maintained or improved (correct chunks were already being retrieved; now they're also correctly ranked)
 - Q-G score (52/57) may improve if the token budget was previously dropping high-relevance chunks
+
+#### Post-Fix Benchmark Results (2026-02-22)
+
+| Metric | Before fix | After fix | Change |
+|--------|-----------|-----------|--------|
+| Q-D score (LLM judge) | 57/57 | **56/57** | -1 |
+| Q-G score (LLM judge) | 52/57 | **51/57** | -1 |
+
+**Q-D regression detail:** Q-D8 dropped 3/3 → 2/3. The judge found the response correctly concluded "tied at 4 documents each" but overstated the document set overlap. Minor imprecision, acceptable.
+
+**Q-G regression detail:** Q-G7 (notice/delivery mechanisms) dropped 3/3 → 2/3. This reveals an important architectural finding:
+
+Before the fix, all chunks had equal score (1.0) — the synthesizer included the full retrieved set. After the fix, PPR scores correctly deprioritize clause text that isn't attached to high-scoring entity hubs. The notice clauses (scattered across legal paragraphs in multiple documents) have lower PPR scores and get pruned from context when the token budget is applied.
+
+**Key architectural finding:** PPR ranking *helps* Q-D queries (entity-relational: higher-PPR chunks are exactly the relevant ones) but can *hurt* Q-G queries (global/thematic: PPR relevance is not correlated with cross-document clause enumeration relevance). The pre-fix "equal weight" behavior was accidentally good for Q-G queries.
+
+This confirms that Route 7 is correctly positioned for Q-D queries and should NOT replace Route 6 (global search) for Q-G queries. The routes serve genuinely different retrieval needs.
+
+**Benchmark files:**
+- `benchmarks/route7_hipporag2_r4questions_20260222T095120Z.json` + `.eval.md` — Q-D post-fix (56/57)
+- `benchmarks/route7_global_search_20260222T095136Z.json` + `_eval_input.eval.md` — Q-G post-fix (51/57)

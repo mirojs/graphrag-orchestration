@@ -65,22 +65,26 @@ ROUTE_CLASSIFICATION_PROMPT = """You are a query router for a document retrieval
 - Named entity + simple attribute: name, date, amount, party, jurisdiction, list of items
 - Examples: "What is the total amount in Contract X?", "List the 3 installment dates", "Who are the parties to the NDA?", "Which contracts are governed by California law?"
 
-**hipporag2_search** — Entity graph traversal
-- Named entities present, but the answer requires tracing relationships ACROSS chunks or documents
+**hipporag2_search** — Entity graph traversal OR exhaustive cross-document enumeration
+- Named entities present, and the answer requires tracing relationships ACROSS chunks or documents
 - Multi-hop: entity A → relationship → entity B → fact
 - Questions about obligations, roles, or relationships linking multiple named entities
-- Examples: "What are all obligations of Company Y across documents?", "Which subsidiary handles indemnification under the master agreement?", "Find documents where Counterparty X appears alongside obligation Z"
+- ALSO: exhaustive fact enumeration with NO entity anchor — queries that demand EVERY instance of a specific concrete value (dates, amounts, timeframes, counts) found across ALL documents
+- ALSO: cross-document comparison of a specific attribute — "which document has the latest date?", "which entity appears in more documents?", "what is the largest amount across documents?"
+- Examples: "What are all obligations of Company Y across documents?", "Which subsidiary handles indemnification under the master agreement?", "List ALL explicit day-based timeframes across all documents", "What is the latest date mentioned across all documents?"
 
 **concept_search** — Abstract concept / theme retrieval
 - NO specific named entity anchor — query is about a ROLE, CLAUSE TYPE, OBLIGATION, or THEME
 - The answer could come from any document mentioning the concept
 - Test: if you replaced all party names with "Party A/B", the question still makes sense
+- NOT for exhaustive enumeration of specific values — use hipporag2_search for "list ALL dates/amounts/timeframes"
 - Examples: "What are the reporting obligations?", "Summarise all termination clauses", "What compliance risks exist?", "What are the main payment obligations?", "List all insurance requirements"
 
 ## Decision (apply in order)
-1. Is the query about an abstract concept/theme with no named entity anchor? → **concept_search**
-2. Does the answer require connecting entities across multiple chunks/documents? → **hipporag2_search**
-3. Everything else (direct lookup with a named entity) → **local_search**
+1. Does the query demand exhaustive enumeration of ALL specific concrete values (dates, amounts, timeframes, counts) across documents, OR compare documents by a specific attribute (latest/earliest/largest/most/fewest)? → **hipporag2_search**
+2. Is the query about an abstract concept/theme/clause type with no named entity anchor? → **concept_search**
+3. Does the answer require connecting named entities across multiple chunks/documents? → **hipporag2_search**
+4. Everything else (direct lookup with a named entity) → **local_search**
 
 Query: {query}
 
@@ -271,6 +275,21 @@ class HybridRouter:
         Only catches high-confidence patterns to avoid false positives.
         """
         query_lower = query.lower()
+
+        # Exhaustive fact-enumeration / cross-document comparison → hipporag2_search.
+        # Checked FIRST to intercept before the broader concept_search "across all documents" pattern.
+        # These are queries demanding every specific value (dates, amounts, timeframes) or a
+        # superlative comparison across documents — not abstract concept/theme queries.
+        hipporag2_enumeration_keywords = [
+            "all explicit", "every explicit",
+            "latest explicit", "earliest explicit",
+            "latest date", "earliest date",
+            "all timeframes", "all dates", "all amounts",
+            "which document has the latest", "which document has the earliest",
+            "which document.*most", "which.*appears in more", "which.*appears in fewer",
+        ]
+        if any(kw in query_lower for kw in hipporag2_enumeration_keywords):
+            return QueryRoute.HIPPORAG2_SEARCH
 
         # Concept-anchored signals: abstract roles/obligations/themes with no entity anchor.
         # Checked first because these phrases override entity-lookup patterns.

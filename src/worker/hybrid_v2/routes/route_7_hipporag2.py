@@ -364,17 +364,29 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Surfacing them to synthesis bridges the "triple discard" gap: the LLM gets
         # explicit contracting-party anchors so it can distinguish principals from
         # incidentally mentioned entities in raw document text.
+        # Filter: exclude triples whose predicate purely indicates location, alias, or
+        # generic membership — those add noise for structural enumeration queries.
+        _EXCLUDE_PRED_FRAGMENTS = frozenset({
+            "located_in", "located at", "located_at", "has_alias", "alias",
+            "same_as", "is_a",
+        })
         graph_structural_header: Optional[str] = None
         if surviving_triples:
-            triple_lines = [
-                f"- {t.subject_name} → {t.predicate} → {t.object_name}"
-                for t in surviving_triples[:15]
+            filtered_triples = [
+                t for t in surviving_triples
+                if t.predicate.lower() not in _EXCLUDE_PRED_FRAGMENTS
+                and not any(excl in t.predicate.lower() for excl in ("located", "alias", "same_as"))
             ]
-            graph_structural_header = (
-                "Graph Structural Evidence"
-                " (named relationships confirmed relevant to this query):\n"
-                + "\n".join(triple_lines)
-            )
+            if filtered_triples:
+                triple_lines = [
+                    f"- {t.subject_name} → {t.predicate} → {t.object_name}"
+                    for t in filtered_triples[:15]
+                ]
+                graph_structural_header = (
+                    "Graph Structural Evidence"
+                    " (named relationships confirmed relevant to this query):\n"
+                    + "\n".join(triple_lines)
+                )
 
         synthesis_result = await self.pipeline.synthesizer.synthesize(
             query=query,

@@ -278,9 +278,11 @@ def benchmark_scenario(
             payload: Dict[str, Any] = {
                 "group_id": group_id,
                 "query": query,
-                "force_route": FORCE_ROUTE,
                 "response_type": response_type,
             }
+            # "auto" means: let the server-side router choose — omit force_route entirely.
+            if FORCE_ROUTE and FORCE_ROUTE != "auto":
+                payload["force_route"] = FORCE_ROUTE
             if synthesis_model:
                 payload["synthesis_model"] = synthesis_model
             if include_context:
@@ -500,8 +502,8 @@ def main():
     parser.add_argument("--token", type=str, default=None, help="Azure AD Bearer token")
     parser.add_argument(
         "--force-route", type=str, default=None,
-        choices=["hipporag2_search", "concept_search", "local_search", "global_search", "drift_multi_hop"],
-        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'concept_search' to benchmark Route 6.",
+        choices=["hipporag2_search", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
+        help="Override FORCE_ROUTE (default: hipporag2_search). Use 'concept_search' for Route 6, 'auto' to use the auto-router without any force_route.",
     )
 
     args = parser.parse_args()
@@ -519,6 +521,7 @@ def main():
             "local_search": "route2_local",
             "global_search": "route3_global",
             "drift_multi_hop": "route4_drift",
+            "auto": "auto_router",
         }
         ROUTE_LABEL = _label_map.get(FORCE_ROUTE, FORCE_ROUTE)
 

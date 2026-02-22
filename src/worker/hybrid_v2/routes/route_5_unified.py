@@ -673,9 +673,9 @@ class UnifiedSearchHandler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold
+            WHERE sent.group_id = $group_id AND score >= $threshold
             RETURN sent, score
         }
 

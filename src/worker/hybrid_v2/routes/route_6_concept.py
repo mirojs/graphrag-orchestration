@@ -180,6 +180,34 @@ class ConceptSearchHandler(BaseRouteHandler):
                 "ROUTE6_SENTENCE_RERANK", "1"
             ).strip().lower() in {"1", "true", "yes"}
             rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
+            diversity_enabled = os.getenv(
+                "ROUTE6_SENTENCE_DIVERSITY", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+            min_per_doc = int(os.getenv("ROUTE6_SENTENCE_MIN_PER_DOC", "2"))
+            score_gate = float(os.getenv("ROUTE6_SENTENCE_SCORE_GATE", "0.85"))
+
+            # R6-6: Diversity BEFORE reranking but AFTER denoising (correct order).
+            #
+            #   Previously diversity ran inside _retrieve_sentence_evidence on the raw
+            #   fetch, then reranking nullified it by cutting the diverse set to top_k.
+            #
+            #   Correct pipeline:
+            #     1. Denoise  (removes junk sentences)
+            #     2. Diversity → pool of 2×rerank_top_k (guarantees document coverage)
+            #     3. Rerank   → final rerank_top_k from the diverse pool
+            #
+            #   The reranker picks the BEST sentences from a pool that already covers
+            #   all qualifying documents, so both relevance and coverage are preserved.
+            if diversity_enabled and sentence_evidence:
+                diversity_pool_k = rerank_top_k * 2
+                if len(sentence_evidence) > diversity_pool_k:
+                    sentence_evidence = self._diversify_by_document(
+                        sentence_evidence,
+                        top_k=diversity_pool_k,
+                        min_per_doc=min_per_doc,
+                        score_gate=score_gate,
+                    )
+
             if rerank_enabled and sentence_evidence:
                 # R6-3: Wrap in try/except — reranker failures must not crash the request.
                 try:
@@ -189,23 +217,6 @@ class ConceptSearchHandler(BaseRouteHandler):
                 except Exception as e:
                     logger.warning("route6_rerank_failed_fallback", error=str(e))
                     sentence_evidence = sentence_evidence[:rerank_top_k]
-
-            # R6-6: Apply document diversity AFTER reranking (not inside
-            # _retrieve_sentence_evidence).  Applying diversity before reranking is
-            # nullified when the reranker cuts to top_k — it has no knowledge of
-            # the upstream diversity constraints.
-            diversity_enabled = os.getenv(
-                "ROUTE6_SENTENCE_DIVERSITY", "1"
-            ).strip().lower() in {"1", "true", "yes"}
-            if diversity_enabled and sentence_evidence:
-                min_per_doc = int(os.getenv("ROUTE6_SENTENCE_MIN_PER_DOC", "2"))
-                score_gate = float(os.getenv("ROUTE6_SENTENCE_SCORE_GATE", "0.85"))
-                sentence_evidence = self._diversify_by_document(
-                    sentence_evidence,
-                    top_k=len(sentence_evidence),
-                    min_per_doc=min_per_doc,
-                    score_gate=score_gate,
-                )
 
             timings_ms["step_2_denoise_rerank_ms"] = int(
                 (time.perf_counter() - t0) * 1000

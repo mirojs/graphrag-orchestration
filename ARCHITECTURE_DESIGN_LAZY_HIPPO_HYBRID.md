@@ -9932,3 +9932,184 @@ Q-N1–Q-N10 remain unchanged — these test hallucination resistance across all
 | Q-R6-5 = Q-G5 (2/3) | R6 synthesis | Synthesis misses legal-fee-recovery clause | R6 retrieval/prompt improvement for dispute-mechanism coverage |
 | Q-R6-6 = Q-G7 (2/3) | R6 synthesis | Synthesis misses PMA 60-day notice | R6 prompt or retrieval tuning for notice-type completeness |
 | Q-R7-5 = Q-D5 (2/3 occasional) | R7 minor | LLM judge phrasing variance | Monitor — likely resolves on re-run |
+
+---
+
+### §33.25 — Q-G6 Deep Study: The "Triple Discard Before Synthesis" Gap
+
+**Date:** 2026-02-22
+**Trigger:** Q-R7-11 (Q-G6) scores 1/3 on both R6 and R7 despite PPR correctly retrieving all four contracting parties. User directive: *"We should not blame the PPR ranking by relevance because it's the single algorithm for everything that made the 57/57 success happened. Instead, we need to find out what gap do we have on the R7 when dealing with this kind of exhaustive questions or if there's anything deeper that had not been figured out."*
+
+---
+
+#### 33.25.1 — The Question and Ground Truth
+
+```
+Q-G6 / Q-R7-11:
+"List all named parties/organizations across the documents
+ and which document(s) they appear in."
+
+Ground truth (4 entities):
+- Fabrikam Inc.     → Builder (warranty), Pumper (holding tank), Customer (purchase contract)
+- Contoso Ltd.      → Owner (property management), Holding tank owner
+- Contoso Lifts LLC → Contractor (purchase contract)
+- Walt Flood Realty → Agent (property management)
+```
+
+**Judge verdict (1/3):** *"correctly identifies the four core parties... However, it adds many extra named entities (AAA, states, counties, Bayfront Animal Clinic, etc.) that are not requested in the expected ground truth."*
+
+This is over-inclusion, **not** under-inclusion. R7 found all 4 correct entities PLUS 11 additional ones.
+
+---
+
+#### 33.25.2 — Failure Mode Analysis
+
+**R7 returned 15 entities total:**
+
+| Category | Entities | Should include? |
+|----------|----------|----------------|
+| Contracting parties (principals) | Fabrikam Inc., Contoso Ltd., Contoso Lifts LLC, Walt Flood Realty | ✅ YES |
+| Arbitration bodies | American Arbitration Association | ❌ NO — external reference |
+| Governing jurisdictions | State of Hawaii, State of Idaho, State of Florida | ❌ NO — cited in clauses |
+| Regulatory entities | County of Washburn | ❌ NO — regulatory reference |
+| Job site / third parties | Bayfront Animal Clinic, Fabrikam Construction | ❌ NO — mentioned incidentally |
+| Professional associations | Building Contractors Association of South East Idaho | ❌ NO — form attribution |
+| Courts | Small Claims Department of the Magistrate Division... | ❌ NO — venue reference |
+| Locations | Hillview (Township), Meadow Estates (Subdivision) | ❌ NO — property description |
+
+The word "parties" in a legal context means **contracting parties** — entities with signed rights/obligations. The LLM interpreted it as "any named organization in the text," which is technically correct English but wrong legal semantics.
+
+---
+
+#### 33.25.3 — Root Cause: "Triple Discard Before Synthesis"
+
+A deep read of the R7 pipeline (route_7_hipporag2.py lines 362–371 + synthesis.py lines 200–243) revealed:
+
+**What R7 synthesis receives:**
+
+```python
+synthesis_result = await self.pipeline.synthesizer.synthesize(
+    query=query,
+    evidence_nodes=entity_scores[:20],   # List[Tuple[entity_name, ppr_score]] -- bare names only
+    pre_fetched_chunks=pre_fetched_chunks, # Raw text chunks from documents
+    ...
+)
+```
+
+- `evidence_nodes` = plain `(entity_name, ppr_score)` tuples — no descriptions, no roles, no relationships
+- `pre_fetched_chunks` = raw document text + section title — no entity-level metadata
+- **No** `hub_entities`, **no** `triple_text`, **no** entity roles passed to synthesis
+
+**What is thrown away before synthesis (route_7_hipporag2.py lines 256–259, 443–445):**
+
+```python
+# Surviving triples → used ONLY as PPR seed IDs:
+for triple in surviving_triples:
+    entity_seeds[triple.subject_id] += 1.0
+    entity_seeds[triple.object_id]  += 1.0
+# triple.predicate, triple.triple_text, triple.subject_name, triple.object_name → DISCARDED
+
+# Stored in metadata (debug only), NOT passed to synthesis:
+metadata["triple_seeds"] = [t.triple_text for t in surviving_triples[:10]]
+```
+
+**The gap:** R7's entire semantic machinery — query-to-triple linking, recognition memory filtering, PPR seeding — is consumed purely for **retrieval** (which text chunks to fetch). All structural knowledge about **who contracts with whom** is discarded before the LLM synthesizes. The LLM then reads raw document text and lists ALL named organizations equally.
+
+For most queries this is fine: clause lookups, obligation enumeration, fee extraction — the raw text contains the answer explicitly. But for **structural enumeration** queries like Q-G6 ("who are the contracting parties"), the distinction between principal and incidental mention is **semantic/legal**, not **syntactic**. It requires graph-structural knowledge, not just text.
+
+---
+
+#### 33.25.4 — Architecture Diagram of the Gap
+
+```
+Q-G6 query
+    │
+    ▼
+Triple Store (1,240 triples embedded)
+    │  Query-to-triple matching
+    ├─ top-5 candidates: "Fabrikam Inc. is customer of Contoso Lifts LLC"
+    │                    "Contoso Ltd. is owner managed by Walt Flood Realty"
+    │                    ... (all 4 contracting parties represented)
+    │
+    ▼
+Recognition Memory Filter (LLM confirms: yes, relevant)
+    │  surviving_triples: 4–5 structural triples
+    │
+    ▼
+PPR Engine ──► entity_seeds = {Fabrikam_id: 1.0, Contoso_id: 1.0, ...}
+    │                          ┌─────────────────────────────────────┐
+    │                          │  TRIPLE TEXT IS DISCARDED HERE      │
+    │                          │  subject_name, predicate, obj_name  │
+    │                          │  → never reaches synthesis          │
+    │                          └─────────────────────────────────────┘
+    │  run_ppr() → passage_scores (top 20 chunks) + entity_scores (top 20 names)
+    │
+    ▼
+Chunk Fetch (top-20 PPR passages — raw document text)
+    │
+    ▼
+Synthesis LLM
+    │ evidence_nodes = [(entity_name, score), ...]  ← bare names only
+    │ context = [raw document text chunks]          ← no structural markup
+    │
+    ▼
+"List all named organizations in documents:"
+    → Fabrikam Inc. ✅, Contoso Ltd. ✅, Contoso Lifts LLC ✅, Walt Flood Realty ✅
+    → American Arbitration Association ❌, State of Idaho ❌, Bayfront Animal Clinic ❌...
+    OVER-INCLUSION: LLM cannot distinguish principals from mentions using text alone
+```
+
+---
+
+#### 33.25.5 — Fix: Surface Triple Evidence to Synthesis
+
+**The structural knowledge exists** — `surviving_triples` already contains:
+```
+Triple(
+  subject_name="Fabrikam Inc.", predicate="is customer of",
+  object_name="Contoso Lifts LLC",
+  triple_text="Fabrikam Inc. is customer of Contoso Lifts LLC"
+)
+```
+
+These triples were LLM-confirmed (recognition memory filter) as relevant to the query. Passing them to synthesis gives the LLM explicit structural anchors: *these are the entities confirmed as parties in named relationships*.
+
+**Proposed implementation:**
+
+In `route_7_hipporag2.py`, before calling `synthesize()`, construct a structural header from surviving triples and pass it as a new `graph_structural_header` parameter to `synthesize()`. Synthesis prepends this section before the text chunks in the LLM context:
+
+```
+Graph Structural Evidence (confirmed relevant relationships):
+- Fabrikam Inc. → is customer of → Contoso Lifts LLC
+- Contoso Ltd. → is owner managed by → Walt Flood Realty
+- Fabrikam Inc. → enters warranty with → Contoso Ltd. as Builder
+...
+
+[Document text chunks follow]
+```
+
+This gives the LLM:
+1. Explicit set of confirmed principals (entities appearing in structural triples)
+2. Their roles/relationships (not just names)
+3. Ground to distinguish "named in a contracting relationship" from "referenced in a clause"
+
+**Expected effect on Q-G6:** The LLM sees the 4–5 structural triples confirming the contracting parties. When asked to "list all named parties," it can now anchor to the structural evidence and recognize that AAA, Idaho, Bayfront Animal Clinic appear ONLY in text — not in any confirmed structural triple.
+
+**Risk:** If `surviving_triples` is empty (recognition memory filtered all), the header is omitted and synthesis falls back to current text-only behavior. No regression expected on other queries where triples supplement rather than anchor the response.
+
+---
+
+#### 33.25.6 — Scope and Priority
+
+This fix is **specific to Q-R7-11 (Q-G6)** type queries — structural enumeration where the distinction between principal and incidental mention requires graph-structural knowledge. It does not affect:
+- Q-D1–Q-D10: clause/provision lookups where raw text suffices ✅
+- Q-G1–Q-G5, Q-G7–Q-G10: concept/theme synthesis handled by R6 ✅
+- Negative tests (Q-N1–Q-N10): hallucination resistance ✅
+
+The fix moves the ceiling from **55/57** (current) to **57/57** (absolute) if Q-G6 scores 3/3 post-fix.
+
+**Revised "Updated Remaining Gaps" entry:**
+
+| Gap | Root cause (precise) | Fix |
+|-----|---------------------|-----|
+| Q-R7-11 (Q-G6) 1/3 | Triple evidence discarded before synthesis; LLM over-includes incidental mentions | Surface `surviving_triples` as structural evidence header in R7 synthesis context |

@@ -2514,40 +2514,11 @@ IMPORTANT for Per-Document Queries:
 - If you see "Purchase Contract" and "Exhibit A - Scope of Work", combine into ONE summary.
 """
 
-        # Detect "named parties / contracting parties" enumeration queries.
-        # Prevents over-inclusion of incidentally mention entities (governing jurisdictions,
-        # arbitration administrators, job-site names, form associations, etc.).
-        is_contracting_party_query = bool(
-            re.search(
-                r"named\s+part(?:ies|y)|contracting\s+part(?:ies|y)"
-                r"|part(?:ies|y)\s*/\s*organiz|named\s+organiz",
-                q_lower,
-            )
-        )
-        parties_guidance = ""
-        if is_contracting_party_query:
-            parties_guidance = """
-IMPORTANT for Contracting-Party Enumeration:
-- "Named parties" or "named parties/organizations" means entities that SIGN, are explicitly
-  designated as a PARTY TO, or have defined RIGHTS/OBLIGATIONS UNDER a specific contract.
-- Do NOT list any entity that merely APPEARS IN a document but is not a contracting principal:
-  * Governing jurisdictions, states, counties, municipalities (even if cited in a governing-law clause)
-  * Arbitration administrators or dispute-forum bodies named within a clause
-  * Job-site, project, or property names that appear only in a scope-of-work or address field
-  * Professional associations or trade bodies that authored or own a standard form
-  * Regulatory or enforcement bodies referenced in a compliance clause
-  * Courts or venues listed in a jurisdiction clause
-  * Organizations that appear ONLY in vendor invoices, receipts, or purchase orders (as billed/ship-to)
-    but are not independently named as signatories in any formal contract
-  * Any entity appearing only in an address, venue reference, or passing clause citation
-"""
-        
         logger.info(
             "summary_prompt_variant",
             variant=variant,
             query=query[:60],
             is_per_document_query=is_per_document_query,
-            is_contracting_party_query=is_contracting_party_query,
             context_length=len(context),
         )
         
@@ -2600,7 +2571,7 @@ Instructions:
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
-{document_guidance}{parties_guidance}
+{document_guidance}
 
 Respond using this format:
 

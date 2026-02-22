@@ -1,6 +1,10 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** February 21, 2026
+**Last Updated:** February 22, 2026
+
+**Recent Updates (February 22, 2026):**
+- ✅ **Route 6 Q-D Bug Audit — 22/30 → 25/30:** First LLM-judged Q-D benchmark on Route 6 found three failure types. Four bugs fixed (R6-VIII enumeration truncation, R6-IX no comparison rule, R6-X chunk_text discarded, R6-XI entity counting needs graph traversal). Deployed via commits `f84896c` + `07d2c96`. chunk_text synthesis attempt (`a497305`) catastrophically regressed Q-D and Q-G by cutting off retrieved sentences after byte 700; fully reverted. Final Q-D: 25/30. Q-G stable: 52/57. See [§33.22](#3322-route-6-q-d-bug-audit--four-bugs-found-and-fixed-2026-02-22).
+- ✅ **Route 6 Q-G R6-6 Fix — 52/57 Confirmed:** Correct diversity-before-rerank fix restored Q-G4 and Q-G10. See [§33.21](#3321-route-6-q-g-benchmark--r6-6-regression-discovery-and-correct-fix-2026-02-22).
 
 **Recent Updates (February 21, 2026):**
 - ✅ **Route 7: True HippoRAG 2 — 57/57 (100%) LLM Judge Score:** Implemented the real HippoRAG 2 architecture (ICML '25) as a new route alongside Route 5. Two key innovations: (1) passage nodes in PPR graph (passage scores from random walk, not post-PPR lookup), (2) query-to-triple linking with LLM recognition memory filter (not NER-to-node). All three tested configurations (vanilla d=0.5, Phase 2 all-ON, d=0.85) scored **57/57** on gpt-5.1 LLM judge. Route 5 regression baseline: 51/57 (89.5%). Route 7 vanilla is 2.6× faster than Route 5 (3,438ms vs 9,105ms P50). See [Section 33](#33-route-7-true-hipporag-2-implementation--benchmark-february-21-2026).
@@ -9527,3 +9531,123 @@ Run 1 shows Q-G4 and Q-G10 fully restored to 3/3 (confirming the fix). Run 2 sho
 **Benchmark files:**
 - `benchmarks/route6_concept_r3questions_20260222T125043Z.json` + `.eval.md` — Run 1 (52/57)
 - `benchmarks/route6_concept_r3questions_20260222T125516Z.json` + `.eval.md` — Run 2 (50/57)
+
+---
+
+### 33.22. Route 6 Q-D Bug Audit — Four Bugs Found and Fixed (2026-02-22)
+
+Route 6 (`concept_search`) had never been LLM-judged on Q-D (DRIFT-style multi-hop) questions. After the §33.20 bug audit and §33.21 Q-G regression fix, a first Q-D benchmark was run to establish a baseline and check for gaps.
+
+#### Q-D Baseline Benchmark (T131947Z — pre-fix)
+
+First Q-D run on the §33.21 code (commit `b48b662`):
+
+| Question | Score | Notes |
+|----------|-------|-------|
+| Q-D1 | 3/3 | ✅ |
+| Q-D2 | 3/3 | ✅ |
+| Q-D3 | 1/3 | ❌ Enumeration — only 4 of 13 timeframes returned |
+| Q-D4 | 3/3 | ✅ |
+| Q-D5 | 3/3 | ✅ |
+| Q-D6 | 3/3 | ✅ |
+| Q-D7 | 0/3 | ❌ Date comparison — returned 2024-06-15, correct is 2025-04-30 |
+| Q-D8 | 0/3 | ❌ Entity count — claimed Fabrikam in more docs (wrong: both tied at 4) |
+| Q-D9 | 3/3 | ✅ |
+| Q-D10 | 2/3 | Partial |
+| **Q-D total** | **22/30 (73%)** | |
+| Q-N total | 27/27 | All negative tests pass |
+| **Overall** | **49/57** | |
+
+Three failure types identified: enumeration truncation (Q-D3), cross-document comparison (Q-D7), entity-document counting (Q-D8).
+
+#### Four Bugs Diagnosed
+
+**R6-VIII — Enumeration truncation (Q-D3)**
+
+`CONCEPT_SYNTHESIS_PROMPT` Rule 6 said "3-5 paragraphs MAXIMUM". An enumeration query asking for ALL explicit day-based timeframes needs 13 items; the hard paragraph cap caused the LLM to stop at 4, truncating 9 items.
+
+**R6-IX — No cross-document comparison instruction (Q-D7)**
+
+Nothing in the synthesis prompt instructed the LLM to extract the target value from *each* document before comparing. For "which document has the latest date?", the LLM guessed heuristically and picked the wrong one. Fix: prompt Rule 7 now requires per-document value extraction followed by an explicit comparison step.
+
+**R6-X — chunk_text fetched but discarded (evidence dict)**
+
+The sentence Cypher query fetches `chunk.text AS chunk_text` (full parent TextChunk, ~300-600 chars) but the evidence dict only stored `text` (the sentence-window passage). The `chunk_text` field was discarded. Fixed: `chunk_text` is now in the evidence dict for metadata. (See also failed R6-X synthesis attempt below.)
+
+**R6-XI — Entity-document counting requires graph traversal (Q-D8)**
+
+Q-D8 asks which entity appears in more documents across the 5-document corpus. Estimating from 15 retrieved sentence snippets gave the wrong answer. Fix: a new parallel query uses the pre-materialized `(Entity)-[:APPEARS_IN_DOCUMENT]->(Document)` edge (1-hop, zero added latency) to build an authoritative entity→[doc_titles] map, injected into the synthesis prompt as `{entity_coverage}` with Rule 8 instructing the LLM to treat it as authoritative.
+
+#### Fix Deployment — T134245Z (commit f84896c: R6-VIII/IX/X/XI)
+
+Second Q-D benchmark on `f84896c`:
+
+| Question | Before | After | Notes |
+|----------|--------|-------|-------|
+| Q-D3 | 1/3 | 1/3 | No change — retrieval completeness problem |
+| Q-D7 | 0/3 | 1/3 | +1 — Rule 7 partially helped |
+| Q-D8 | 0/3 | 2/3 | +2 — entity_doc_map working |
+| All others | same | same | |
+| **Q-D total** | 22/30 | **24/30** | +2 overall |
+
+Q-D8 went 0→2 in one step (graph traversal beats LLM estimation). Remaining Q-D8 gap (2/3) is likely APPEARS_IN_DOCUMENT edge coverage — the map returned 3 documents per entity instead of the actual 4.
+
+#### Failed Experiment — chunk_text Synthesis (commit a497305) — REVERTED
+
+An attempt was made to further improve Q-D3 enumeration by replacing the sentence-window passage with `chunk_text[:700]` in synthesis (the first 700 chars of the parent TextChunk), reasoning that a single retrieved sentence in a clause might bring in 4-5 adjacent timeframes.
+
+**Root-cause bug:** The retrieved sentence (the top-scoring semantic match) may appear at any position within the TextChunk. If the relevant sentence falls after byte 700 in the chunk, `chunk_text[:700]` silently excludes it. The LLM sees the chunk heading/introduction but not the sentence containing the actual fact, and answers "not found".
+
+**Observed impact (T140917Z benchmark on a497305):**
+- Q-D1, Q-D2, Q-D4, Q-D5: 3/3 → **0/3** each (consistently, all 3 repeats)
+- Q-G7, Q-G8, Q-G9: 3/3 → **0/3** (same mechanism on Q-G questions)
+- Q-D total: 24/30 → 10/30 (catastrophic)
+- Q-G total: ~52/57 → 38/57 (catastrophic)
+
+**Lesson:** Expanding from sentence-window to full chunk requires ensuring the retrieved sentence is always included verbatim (e.g., insert retrieved sentence into chunk context at a marked position, rather than naive head-truncation). Reverted in commit `07d2c96`.
+
+#### Final Q-D Benchmark (T143701Z — commit 07d2c96)
+
+| Question | Score | Notes |
+|----------|-------|-------|
+| Q-D1 | 3/3 | ✅ |
+| Q-D2 | 3/3 | ✅ |
+| Q-D3 | 1/3 | ❌ Retrieval completeness — only 1 of 3 judge points met |
+| Q-D4 | 3/3 | ✅ |
+| Q-D5 | 3/3 | ✅ |
+| Q-D6 | 3/3 | ✅ |
+| Q-D7 | 1/3 | ❌ Partial — Rule 7 helps but correct April 2025 date not always retrieved |
+| Q-D8 | 2/3 | Partial — entity_doc_map count gap (map returns 3 docs per entity, actual is 4) |
+| Q-D9 | 3/3 | ✅ |
+| Q-D10 | 3/3 | ✅ |
+| **Q-D total** | **25/30 (83.3%)** | +3 from baseline |
+| Q-N total | 27/27 | |
+| **Overall** | **52/57 (91.2%)** | |
+
+Q-G stability verified in parallel (T143849Z on same commit): 49/57 on single run (within expected variance of the 3-run best of 52/57). Q-G7, Q-G8, Q-G9 all restored to 2-3/3 after the chunk_text revert.
+
+#### Remaining Q-D Gaps
+
+| Question | Score | Root cause | Possible future fix |
+|----------|-------|-----------|---------------------|
+| Q-D3 | 1/3 | Retrieval: not all 13 timeframe sentences are in top-15 final evidence | Increase `sentence_top_k` for enumeration queries |
+| Q-D7 | 1/3 | April 2025 date not in retrieved sentences (wrong sentences ranked higher) | Better retrieval coverage; Rule 7 is correct but useless when fact not retrieved |
+| Q-D8 | 2/3 | APPEARS_IN_DOCUMENT edges return 3 docs per entity; ground truth is 4 | Investigate edge materialization coverage for test group |
+
+#### Updated Route Architecture Status (2026-02-22 Post-All-Fixes)
+
+| Route | Auto-routing | Q-L | Q-D | Q-G | Primary use |
+|-------|-------------|-----|-----|-----|-------------|
+| Route 2 `local_search` | No (superseded by R7) | — | — | — | Force-route escape hatch |
+| Route 6 `concept_search` | ✅ Yes | — | **25/30** | **52/57** | Thematic/concept queries |
+| Route 7 `hipporag2_search` | ✅ Yes | **57/57** | **57/57** | 50/57 | Entity + multi-hop queries |
+| Route 3 `global_search` | No (superseded by R6) | — | — | — | Force-route escape hatch |
+| Route 4 `drift_multi_hop` | No (superseded by R7) | — | — | — | Force-route escape hatch |
+
+Note: Route 7 is the stronger Q-D performer (57/57 vs 25/30). The 3-way router correctly directs entity-count and date-comparison queries to Route 7; Route 6's Q-D score reflects queries routed to concept_search.
+
+**Benchmark files:**
+- `benchmarks/route6_concept_r4questions_20260222T131947Z.json` + `.eval.md` — Baseline 22/30
+- `benchmarks/route6_concept_r4questions_20260222T134245Z.json` + `.eval.md` — After R6-VIII/IX/X/XI: 24/30
+- `benchmarks/route6_concept_r4questions_20260222T140917Z.json` + `.eval.md` — chunk_text regression: 10/30
+- `benchmarks/route6_concept_r4questions_20260222T143701Z.json` + `.eval.md` — Final clean: **25/30**

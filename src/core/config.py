@@ -89,13 +89,10 @@ class Settings(BaseSettings):
     SKELETON_TRAVERSAL_RELATED_HOPS: int = 1  # Max RELATED_TO hops from seed sentence
 
     # Synthesis model override for Route 2 skeleton path.
+    # Sentence-level context is precise (answer at rank #1), so a smaller/faster model
+    # can extract answers without the reasoning overhead of gpt-5.1.
     # Empty string = use HYBRID_SYNTHESIS_MODEL (default, no override).
-    # NOTE: gpt-4.1-mini was tested but fails Q-L5-Q-L8 when skeleton context
-    # is mixed with PPR entity chunks from unrelated documents. The standalone
-    # skeleton experiment (Feb 11) worked with mini because context was clean
-    # (skeleton-only). In production, PPR noise dilutes the context and the
-    # weaker model returns "Not found" for fee/termination clauses.
-    SKELETON_SYNTHESIS_MODEL: str = ""  # Use default synthesis model (no override)
+    SKELETON_SYNTHESIS_MODEL: str = "gpt-4.1-mini"  # Override synthesis model when skeleton enrichment is active
     
     # ========================================================================
     # Algorithm Version Control

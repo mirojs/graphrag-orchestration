@@ -398,10 +398,13 @@ class EvidenceSynthesizer:
         # knowledge graph, constraining enumeration to graph-indexed entities.
         if graph_structural_header:
             constraint = (
-                "IMPORTANT: The Entity-Document Map above is the authoritative "
-                "list of named parties/organizations. Your answer MUST only "
-                "include entities listed in this map. Do NOT add entities found "
-                "in the raw text below that are not in the map."
+                "IMPORTANT: The Entity-Document Map above lists entities from "
+                "the knowledge graph. When the user asks about parties or "
+                "organizations, include ONLY entities that are direct parties "
+                "to, or signatories of, an agreement/contract. Exclude entities "
+                "that are merely referenced (e.g. project names, mailing "
+                "addresses, job sites, third-party mentions). Do NOT add "
+                "entities found in the raw text below that are not in the map."
             )
             context = (
                 graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context

@@ -482,10 +482,6 @@ class LocalSearchHandler(BaseRouteHandler):
             
             coverage_chunks.append({
                 "text": tagged_text,
-                # Carry the skeleton similarity score as _entity_score so that
-                # synthesis token-budget sorting ranks these by actual query
-                # relevance instead of assigning min_entity_score * 0.5.
-                "_entity_score": result.get("score", 0.0),
                 "metadata": {
                     "document_id": result.get("document_id", ""),
                     "document_title": result.get("document_title", "Unknown"),
@@ -687,10 +683,6 @@ class LocalSearchHandler(BaseRouteHandler):
             
             coverage_chunks.append({
                 "text": tagged_text,
-                # Carry the skeleton similarity score as _entity_score so that
-                # synthesis token-budget sorting ranks these by actual query
-                # relevance instead of assigning min_entity_score * 0.5.
-                "_entity_score": score,
                 "metadata": {
                     "document_id": result.get("document_id", ""),
                     "document_title": result.get("document_title", "Unknown"),

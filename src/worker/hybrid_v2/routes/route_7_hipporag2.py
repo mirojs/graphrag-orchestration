@@ -36,6 +36,44 @@ from ..services.neo4j_retry import retry_session
 logger = structlog.get_logger(__name__)
 
 # ---------------------------------------------------------------------------
+# Entity-doc map v2: exhaustive entity enumeration support
+# ---------------------------------------------------------------------------
+# Maps query-object keywords to the 5 fixed Entity.type values.
+# The type schema is set at indexing time and is NOT corpus-specific.
+_ENTITY_TYPE_KEYWORDS: Dict[str, List[str]] = {
+    "ORGANIZATION": [
+        "party", "parties", "organization", "organizations",
+        "company", "companies", "firm", "firms",
+        "entity", "entities", "contractor", "contractors",
+        "vendor", "vendors", "principal", "principals",
+    ],
+    "PERSON": [
+        "party", "parties", "people", "individual", "individuals",
+        "person", "persons", "signatory", "signatories",
+        "representative", "representatives", "personnel",
+    ],
+    "LOCATION": [
+        "location", "locations", "place", "places",
+        "address", "addresses", "jurisdiction", "jurisdictions",
+        "city", "cities", "state", "states", "country", "countries",
+    ],
+}
+
+# Structural signals for exhaustive intent (no domain nouns)
+_EXHAUSTIVE_INTENT_RE = re.compile(
+    r"\b(?:list|enumerate|identify|name|find|what\s+are)\b"
+    r".{0,40}"
+    r"\b(?:all|every|each|across)\b",
+    re.IGNORECASE,
+)
+
+# Corpus-scope confirmation (query must reference documents/corpus)
+_CORPUS_SCOPE_RE = re.compile(
+    r"\b(?:documents?|files?|contracts?|agreements?|corpus|set|collection)\b",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
 # Voyage embedding service — shared singleton (same pattern as Route 5)
 # ---------------------------------------------------------------------------
 _voyage_service = None
@@ -330,6 +368,55 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         # ------------------------------------------------------------------
+        # Step 4.5: Entity-doc map for exhaustive enumeration queries
+        #
+        # When the query asks to "list all X across documents", PPR+synthesis
+        # over-includes incidental mentions from raw text.  Instead, query the
+        # complete entity-document MENTIONS index (type-filtered) and pass the
+        # result as a constraining structural header to synthesis.
+        # ------------------------------------------------------------------
+        graph_structural_header: Optional[str] = None
+        entity_doc_rows: List[Dict[str, Any]] = []
+        detected_types: Optional[List[str]] = None
+
+        entity_doc_map_enabled = os.getenv(
+            "ROUTE7_ENTITY_DOC_MAP", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if entity_doc_map_enabled:
+            detected_types = self._detect_exhaustive_entity_types(query)
+            if detected_types:
+                t_edm = time.perf_counter()
+                entity_doc_rows = await self._query_entity_doc_map(detected_types)
+                if entity_doc_rows:
+                    header_lines = [
+                        "## Entity-Document Map (from knowledge graph index)",
+                        "The following entities were extracted during document indexing "
+                        "and linked to documents via text mentions. For this listing "
+                        "question, base your answer on this complete map. Do not add "
+                        "entities from the raw text that are not listed here.",
+                        "",
+                        "| Entity | Type | Document(s) |",
+                        "|--------|------|-------------|",
+                    ]
+                    for row in entity_doc_rows:
+                        docs_str = ", ".join(row["documents"])
+                        header_lines.append(
+                            f"| {row['entity_name']} | {row['entity_type']} | {docs_str} |"
+                        )
+                    graph_structural_header = "\n".join(header_lines)
+
+                    timings_ms["step_45_entity_doc_map_ms"] = int(
+                        (time.perf_counter() - t_edm) * 1000
+                    )
+                    logger.info(
+                        "step_45_entity_doc_map_v2",
+                        entity_types=detected_types,
+                        entities_found=len(entity_doc_rows),
+                        query=query[:80],
+                    )
+
+        # ------------------------------------------------------------------
         # Step 5: Fetch chunk texts + synthesis
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
@@ -368,6 +455,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             synthesis_model=synthesis_model,
             include_context=include_context,
             pre_fetched_chunks=pre_fetched_chunks,
+            graph_structural_header=graph_structural_header,
         )
 
         timings_ms["step_5_synthesis_ms"] = int((time.perf_counter() - t0) * 1000)
@@ -439,6 +527,13 @@ class HippoRAG2Handler(BaseRouteHandler):
                 c.get("title", "?") for c in community_data[:5]
             ]
 
+        # Entity-doc map metadata
+        if graph_structural_header:
+            metadata["entity_doc_map"] = {
+                "entity_types": detected_types,
+                "entities_found": len(entity_doc_rows),
+            }
+
         # Triple details
         metadata["triple_seeds"] = [
             t.triple_text for t in surviving_triples[:10]
@@ -496,6 +591,91 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "detection_reason": reason,
             },
         )
+
+    # ======================================================================
+    # Entity-doc map v2: exhaustive entity enumeration
+    # ======================================================================
+
+    @staticmethod
+    def _detect_exhaustive_entity_types(query: str) -> Optional[List[str]]:
+        """Detect if query requires exhaustive entity enumeration.
+
+        Returns a list of entity type strings (e.g. ["ORGANIZATION", "PERSON"])
+        when the query has exhaustive intent + corpus scope + a detectable type
+        target.  Returns None otherwise (normal pipeline runs unchanged).
+
+        Three gates keep false-positive rate low:
+          1. Exhaustive intent — list/enumerate/find + all/every/each/across
+          2. Corpus scope — mentions documents/contracts/files/set
+          3. Type target — maps query-object words to entity type schema
+        """
+        q = query.lower()
+
+        if not _EXHAUSTIVE_INTENT_RE.search(q):
+            return None
+
+        if not _CORPUS_SCOPE_RE.search(q):
+            return None
+
+        matched_types: set = set()
+        for entity_type, keywords in _ENTITY_TYPE_KEYWORDS.items():
+            for kw in keywords:
+                if kw in q:
+                    matched_types.add(entity_type)
+
+        return sorted(matched_types) if matched_types else None
+
+    async def _query_entity_doc_map(
+        self,
+        entity_types: List[str],
+    ) -> List[Dict[str, Any]]:
+        """Query ALL entities of given types and their document appearances.
+
+        Uses the MENTIONS + IN_DOCUMENT edge path — the same structural index
+        that PPR traverses, but without PPR's top-K scope limitation.
+        """
+        if not entity_types or not self.neo4j_driver:
+            return []
+
+        group_id = self.group_id
+        cypher = """
+        MATCH (e:Entity {group_id: $group_id})
+              <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
+              -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        WHERE e.type IN $entity_types
+        RETURN e.name AS entity_name, e.type AS entity_type,
+               collect(DISTINCT d.title) AS documents
+        ORDER BY entity_name
+        """
+        driver = self.neo4j_driver
+
+        def _run():
+            with retry_session(driver) as session:
+                records = session.run(
+                    cypher,
+                    group_id=group_id,
+                    entity_types=entity_types,
+                )
+                return [
+                    {
+                        "entity_name": r["entity_name"],
+                        "entity_type": r["entity_type"],
+                        "documents": [t for t in r["documents"] if t],
+                    }
+                    for r in records
+                ]
+
+        try:
+            results = await asyncio.to_thread(_run)
+            logger.info(
+                "route7_entity_doc_map_v2",
+                entity_types=entity_types,
+                entities_found=len(results),
+            )
+            return results
+        except Exception as e:
+            logger.warning("route7_entity_doc_map_v2_failed", error=str(e))
+            return []
 
     # ======================================================================
     # Query-to-Triple Linking + Recognition Memory

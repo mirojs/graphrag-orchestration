@@ -395,7 +395,8 @@ class HippoRAG2Handler(BaseRouteHandler):
                         "and linked to documents via text mentions. Sorted by mention "
                         "count (most-referenced first). Each row includes a sample "
                         "mention context showing how the entity appears in the source "
-                        "text.",
+                        "text. Prioritize entities with higher mention counts and "
+                        "those appearing across multiple documents.",
                         "",
                         "| Entity | Type | Mentions | Document(s) | Mention context |",
                         "|--------|------|----------|-------------|-----------------|",

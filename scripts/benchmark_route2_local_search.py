@@ -3,7 +3,8 @@
 """Repeatability benchmark for Route-2 (Local Search) via the Hybrid API.
 
 This benchmark targets the *Local Search* "Route 2" implementation exposed through:
-  POST /hybrid/query  (force_route=local_search)
+  POST /hybrid/query  (force_route=local_search)    [--api backend]
+  POST /chat          (overrides.force_route)        [--api frontend]
 
 Route 2 uses HippoRAG entity retrieval with LazyGraphRAG local search.
 
@@ -16,10 +17,18 @@ Outputs
 - Writes JSON + MD into ./benchmarks/
 
 Usage
-  python3 scripts/benchmark_hybrid_route2_repeatability.py \
+  # Backend API (default)
+  python3 scripts/benchmark_route2_local_search.py \
     --url https://...azurecontainerapps.io \
     --group-id <group> \
-    --repeats 10
+    --repeats 3
+
+  # Frontend API
+  python3 scripts/benchmark_route2_local_search.py \
+    --api frontend \
+    --url https://...azurecontainerapps.io \
+    --group-id <group> \
+    --repeats 3
 
 Dependency-free (stdlib only).
 """
@@ -448,15 +457,20 @@ def benchmark_scenario(
     ground_truth: Dict[str, GroundTruth],
     synthesis_model: Optional[str] = None,
     prompt_variant: Optional[str] = None,
+    api_mode: str = "backend",
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
+    print(f"API mode: {api_mode}")
     print(f"Questions: {len(questions)}, Repeats: {repeats}")
     print(f"{'=' * 70}\n")
 
-    url = f"{api_base_url.rstrip('/')}/hybrid/query"
+    if api_mode == "frontend":
+        url = f"{api_base_url.rstrip('/')}/chat"
+    else:
+        url = f"{api_base_url.rstrip('/')}/hybrid/query"
     headers = {"Content-Type": "application/json", "X-Group-ID": group_id}
-    
+
     # Add Azure AD authentication if available
     token = _get_aad_token()
     if token:
@@ -473,15 +487,25 @@ def benchmark_scenario(
 
         runs: List[Dict[str, Any]] = []
         for rep in range(1, repeats + 1):
-            payload = {
-                "query": query,
-                "force_route": "local_search",  # Route 2
-                "response_type": response_type,
-            }
-            if synthesis_model:
-                payload["synthesis_model"] = synthesis_model
-            if prompt_variant:
-                payload["prompt_variant"] = prompt_variant
+            if api_mode == "frontend":
+                payload: Dict[str, Any] = {
+                    "messages": [{"role": "user", "content": query}],
+                    "context": {
+                        "overrides": {
+                            "force_route": "local_search",
+                        }
+                    },
+                }
+            else:
+                payload = {
+                    "query": query,
+                    "force_route": "local_search",  # Route 2
+                    "response_type": response_type,
+                }
+                if synthesis_model:
+                    payload["synthesis_model"] = synthesis_model
+                if prompt_variant:
+                    payload["prompt_variant"] = prompt_variant
 
             status, resp, elapsed, err = _http_post_json(
                 url=url,
@@ -494,7 +518,12 @@ def benchmark_scenario(
                 print(f"  [{rep}/{repeats}] HTTP {status} - {err or resp.get('error', 'unknown')}")
                 continue
 
-            answer = resp.get("response", "")
+            # Extract answer from appropriate response format
+            if api_mode == "frontend":
+                msg = resp.get("message", {})
+                answer = msg.get("content", "") if isinstance(msg, dict) else ""
+            else:
+                answer = resp.get("response", "")
             text_norm = _normalize_text(answer)
             citations_sig = _extract_citation_ids(resp)
             evidence_path_sig = _extract_evidence_path(resp)
@@ -911,6 +940,13 @@ def main():
         default=None,
         help="Prompt variant for A/B testing (e.g. v0, v1_concise). Default: None (uses v0).",
     )
+    parser.add_argument(
+        "--api",
+        choices=["backend", "frontend"],
+        default="backend",
+        help="API mode: 'backend' calls /hybrid/query (default), "
+             "'frontend' calls /chat with OpenAI-compatible format.",
+    )
 
     args = parser.parse_args()
     print(f"[DEBUG] Parsed arguments. URL: {args.url}")
@@ -967,6 +1003,7 @@ def main():
                 timeout_s=args.timeout,
                 ground_truth=ground_truth,
                 synthesis_model=model,
+                api_mode=args.api,
             )
             all_model_results[model] = result
 
@@ -1031,6 +1068,7 @@ def main():
         ground_truth=ground_truth,
         synthesis_model=synthesis_model,
         prompt_variant=prompt_variant,
+        api_mode=args.api,
     )
 
     # Write outputs
@@ -1044,6 +1082,7 @@ def main():
         out_data = {
             "timestamp": timestamp,
             "api_base_url": args.url,
+            "api_mode": args.api,
             "group_id": args.group_id,
             "force_route": "local_search",
             "response_type": response_type,

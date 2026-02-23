@@ -424,10 +424,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                         "## Entity-Document Map (from knowledge graph index)",
                         "The following entities were extracted during document indexing "
                         "and linked to documents via text mentions. Sorted by mention "
-                        "count (most-referenced first). Each row includes a sample "
-                        "mention context showing how the entity appears in the source "
-                        "text. Prioritize entities with higher mention counts and "
-                        "those appearing across multiple documents.",
+                        "count (most-referenced first). NOTE: Not every entity listed "
+                        "here is a contractual party. When the query asks about "
+                        "parties/organizations, include ONLY entities that serve as "
+                        "direct parties or signatories to agreements — exclude entities "
+                        "that are merely referenced (e.g. project names, mailing "
+                        "addresses, job sites, invoice recipients).",
                         "",
                         "| Entity | Type | Mentions | Document(s) | Mention context |",
                         "|--------|------|----------|-------------|-----------------|",

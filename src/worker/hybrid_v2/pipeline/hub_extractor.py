@@ -295,22 +295,15 @@ class HubExtractor:
             # Query Neo4j to get document source for each entity
             # Support both Entity and __Entity__ labels for compatibility
             # Includes alias support for flexible entity matching
-            # Phase B: Support both Sentence-based and TextChunk-based MENTIONS
             def _sync_query():
                 with self.neo4j_driver.session() as session:
                     result = session.run(f"""
                         UNWIND $entity_names AS entity_name
-                        MATCH (src)-[:MENTIONS]->(e)
+                        MATCH (c:TextChunk)-[:MENTIONS]->(e)
                         WHERE (e:Entity OR e:`__Entity__`)
-                          AND src.group_id = $group_id AND e.group_id = $group_id
+                          AND c.group_id = $group_id AND e.group_id = $group_id
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-                        // Resolve to TextChunk: if src is Sentence, follow PART_OF
-                        WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE NULL END AS direct_chunk, src
-                        OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk)
-                        WHERE direct_chunk IS NULL AND parent_chunk.group_id = $group_id
-                        WITH entity_name, coalesce(direct_chunk, parent_chunk) AS c
-                        WHERE c IS NOT NULL
                         OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
                         WHERE d IS NULL OR (d.group_id = $group_id {folder_filter})
                         WITH entity_name, c, apoc.convert.fromJsonMap(c.metadata) AS meta

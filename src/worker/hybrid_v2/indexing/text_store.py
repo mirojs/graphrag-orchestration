@@ -359,9 +359,7 @@ class Neo4jTextUnitStore:
         
         # --- Document-scoped vs document-blind query (Feb 10, 2026) ---
         # Phase B: Support both Sentence-based and TextChunk-based MENTIONS.
-        # - TextChunk MENTIONS: direct path (fast, created by propagation)
-        # - Sentence MENTIONS: fallback via PART_OF → parent TextChunk
-        #   (needed for data indexed before MENTIONS propagation was added)
+        # When MENTIONS comes from a Sentence, traverse PART_OF to get parent TextChunk.
         if target_document_ids:
             # Scoped: hard-filter chunks to target documents only
             query = """
@@ -370,14 +368,8 @@ class Neo4jTextUnitStore:
             WHERE (e:Entity OR e:`__Entity__`)
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-            MATCH (src)-[:MENTIONS]->(e)
-            WHERE src.group_id = $group_id
-            // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
-            WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE NULL END AS direct_chunk, src
-            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {group_id: $group_id})
-            WHERE direct_chunk IS NULL
-            WITH entity_name, coalesce(direct_chunk, parent_chunk) AS c
-            WHERE c IS NOT NULL
+            MATCH (c:TextChunk)-[:MENTIONS]->(e)
+            WHERE c.group_id = $group_id
             MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             WHERE d.id IN $target_document_ids
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
@@ -399,14 +391,8 @@ class Neo4jTextUnitStore:
             WHERE (e:Entity OR e:`__Entity__`)
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
-            MATCH (src)-[:MENTIONS]->(e)
-            WHERE src.group_id = $group_id
-            // Resolve to TextChunk: if src is Sentence, follow PART_OF; if src is TextChunk, use directly
-            WITH entity_name, CASE WHEN src:TextChunk THEN src ELSE NULL END AS direct_chunk, src
-            OPTIONAL MATCH (src)-[:PART_OF]->(parent_chunk:TextChunk {group_id: $group_id})
-            WHERE direct_chunk IS NULL
-            WITH entity_name, coalesce(direct_chunk, parent_chunk) AS c
-            WHERE c IS NOT NULL
+            MATCH (c:TextChunk)-[:MENTIONS]->(e)
+            WHERE c.group_id = $group_id
             OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
             OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
             WITH entity_name, c, d, s

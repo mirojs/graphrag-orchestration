@@ -392,22 +392,23 @@ class HippoRAG2Handler(BaseRouteHandler):
                     header_lines = [
                         "## Entity-Document Map (from knowledge graph index)",
                         "The following entities were extracted during document indexing "
-                        "and linked to documents via text mentions. Each row includes "
-                        "a sample mention context showing how the entity appears in "
-                        "the source text.",
+                        "and linked to documents via text mentions. Sorted by mention "
+                        "count (most-referenced first). Each row includes a sample "
+                        "mention context showing how the entity appears in the source "
+                        "text.",
                         "",
-                        "| Entity | Type | Document(s) | Mention context |",
-                        "|--------|------|-------------|-----------------|",
+                        "| Entity | Type | Mentions | Document(s) | Mention context |",
+                        "|--------|------|----------|-------------|-----------------|",
                     ]
                     for row in entity_doc_rows:
                         docs_str = ", ".join(row["documents"])
                         snippet = self._extract_mention_snippet(
                             row["entity_name"], row.get("sample_chunk", "")
                         )
-                        # Escape pipe characters in snippet for markdown table
                         snippet = snippet.replace("|", "\\|")
                         header_lines.append(
                             f"| {row['entity_name']} | {row['entity_type']} "
+                            f"| {row.get('mention_count', 0)} "
                             f"| {docs_str} | {snippet} |"
                         )
                     graph_structural_header = "\n".join(header_lines)
@@ -652,12 +653,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         entity_types: List[str],
     ) -> List[Dict[str, Any]]:
-        """Query ALL entities of given types, their documents, and a sample mention.
+        """Query ALL entities of given types, their documents, mention count,
+        and a sample mention context snippet.
 
         Uses the MENTIONS + IN_DOCUMENT edge path — the same structural index
         that PPR traverses, but without PPR's top-K scope limitation.
-        Also returns one sample TextChunk per entity so the LLM can see the
-        surrounding context in which each entity is mentioned.
+        Results are sorted by mention count (descending) so the most
+        frequently referenced entities appear first.
         """
         if not entity_types or not self.neo4j_driver:
             return []
@@ -669,10 +671,11 @@ class HippoRAG2Handler(BaseRouteHandler):
               -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         WHERE e.type IN $entity_types
         WITH e, collect(DISTINCT d.title) AS documents,
+             count(tc) AS mention_count,
              collect(tc.text)[0] AS sample_chunk
         RETURN e.name AS entity_name, e.type AS entity_type,
-               documents, sample_chunk
-        ORDER BY entity_name
+               documents, mention_count, sample_chunk
+        ORDER BY mention_count DESC, entity_name
         """
         driver = self.neo4j_driver
 
@@ -688,6 +691,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         "entity_name": r["entity_name"],
                         "entity_type": r["entity_type"],
                         "documents": [t for t in r["documents"] if t],
+                        "mention_count": r["mention_count"],
                         "sample_chunk": r["sample_chunk"] or "",
                     }
                     for r in records

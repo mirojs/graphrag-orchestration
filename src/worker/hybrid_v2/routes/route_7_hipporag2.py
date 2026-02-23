@@ -26,6 +26,7 @@ import asyncio
 import os
 import re
 import time
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
@@ -428,45 +429,56 @@ class HippoRAG2Handler(BaseRouteHandler):
                     if not _is_role_label(r["entity_name"])
                 ]
                 if entity_doc_rows:
+                    # Group rows by entity for bullet-list format
+                    entity_groups: Dict[
+                        Tuple[str, str], List[Dict[str, Any]]
+                    ] = defaultdict(list)
+                    for row in entity_doc_rows:
+                        key = (row["entity_name"], row["entity_type"])
+                        entity_groups[key].append(row)
+
                     header_lines = [
                         "## Entity-Document Map (from knowledge graph index)",
-                        "The following entities were extracted during document "
-                        "indexing and linked to documents via text mentions. "
-                        "The Role column shows graph-extracted relationship "
-                        "types: PARTY_TO means the entity is a direct party "
-                        "to an agreement. When answering questions about "
-                        "parties/organizations, include ONLY entities whose "
-                        "Role is PARTY_TO or whose Mention context clearly "
-                        "shows they are signatories. Exclude entities with "
-                        "Role '---' that are merely referenced (project "
-                        "names, addresses, job sites, invoice recipients).",
                         "",
-                        "| Entity | Type | Mentions | Document(s) | Role | Mention context |",
-                        "|--------|------|----------|-------------|------|-----------------|",
+                        "Each entity below lists the documents where it appears.",
+                        "[PARTY_TO] = direct party/signatory to the agreement "
+                        "in that document.",
+                        "[---] = merely referenced (address, job site, invoice "
+                        "recipient).",
+                        "When answering about parties/organizations, include "
+                        "ONLY [PARTY_TO] entries or entries whose context "
+                        "clearly shows a signatory role.",
+                        "",
                     ]
-                    for row in entity_doc_rows:
-                        docs_str = ", ".join(row["documents"])
-                        snippet = self._extract_sentence_context(
-                            row["entity_name"], row.get("sample_chunk", "")
-                        )
-                        snippet = snippet.replace("|", "\\|")
-                        role_labels = row.get("role_labels", [])
-                        role_str = ", ".join(role_labels) if role_labels else "---"
-                        header_lines.append(
-                            f"| {row['entity_name']} | {row['entity_type']} "
-                            f"| {row.get('mention_count', 0)} "
-                            f"| {docs_str} | {role_str} | {snippet} |"
-                        )
+                    for (ent_name, ent_type), rows in entity_groups.items():
+                        header_lines.append(f"### {ent_name} [{ent_type}]")
+                        for row in rows:
+                            role_labels = row.get("doc_role_labels", [])
+                            role_str = (
+                                ", ".join(role_labels) if role_labels else "---"
+                            )
+                            snippet = self._extract_sentence_context(
+                                ent_name,
+                                row.get("doc_sample_chunk", ""),
+                            )
+                            doc_title = row["document_title"]
+                            header_lines.append(
+                                f'- {doc_title} [{role_str}]: "{snippet}"'
+                            )
+                        header_lines.append("")  # blank line between entities
+
                     graph_structural_header = "\n".join(header_lines)
 
                     timings_ms["step_45_entity_doc_map_ms"] = int(
                         (time.perf_counter() - t_edm) * 1000
                     )
+                    unique_entities = len(entity_groups)
                     logger.info(
-                        "step_45_entity_doc_map_v2",
+                        "step_45_entity_doc_map_v3",
                         entity_types=detected_types,
-                        entities_total=len(entity_doc_rows_raw),
-                        entities_after_filter=len(entity_doc_rows),
+                        rows_total=len(entity_doc_rows_raw),
+                        rows_after_filter=len(entity_doc_rows),
+                        unique_entities=unique_entities,
                         role_labels_removed=len(entity_doc_rows_raw) - len(entity_doc_rows),
                         query=query[:80],
                     )
@@ -741,15 +753,17 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         entity_types: List[str],
     ) -> List[Dict[str, Any]]:
-        """Query ALL entities of given types, their documents, mention count,
-        a sample mention context snippet, and structured role labels.
+        """Query ALL entities of given types with per-document granularity.
 
-        Uses the MENTIONS + IN_DOCUMENT edge path — the same structural index
-        that PPR traverses, but without PPR's top-K scope limitation.
-        An OPTIONAL MATCH on RELATED_TO edges collects structured role
-        labels (e.g. PARTY_TO) when available.
-        Results are sorted by mention count (descending) so the most
-        frequently referenced entities appear first.
+        Returns one row per (entity, document) pair, each with:
+        - doc_mentions: how many TextChunks mention this entity in this doc
+        - doc_sample_chunk: a sample chunk from THIS document (not global)
+        - doc_role_labels: RELATED_TO role types scoped to this document
+          (only includes roles where the related entity also appears
+          in the same document)
+
+        Uses the MENTIONS + IN_DOCUMENT edge path — the same structural
+        index that PPR traverses, but without PPR's top-K scope limitation.
         """
         if not entity_types or not self.neo4j_driver:
             return []
@@ -760,16 +774,20 @@ class HippoRAG2Handler(BaseRouteHandler):
               <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
               -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         WHERE e.type IN $entity_types
-        WITH e, collect(DISTINCT d.title) AS documents,
-             count(tc) AS mention_count,
-             collect(tc.text)[0] AS sample_chunk
+        WITH e, d, count(tc) AS doc_mentions,
+             collect(tc.text)[0] AS doc_sample_chunk
         OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
         WHERE r.rel_type IN $role_rel_types
-        WITH e, documents, mention_count, sample_chunk,
-             collect(DISTINCT r.rel_type)[0..3] AS role_labels
+          AND EXISTS {
+            MATCH (e2)<-[:MENTIONS]-(:TextChunk {group_id: $group_id})
+                  -[:IN_DOCUMENT]->(d)
+          }
+        WITH e, d, doc_mentions, doc_sample_chunk,
+             collect(DISTINCT r.rel_type)[0..3] AS doc_role_labels
         RETURN e.name AS entity_name, e.type AS entity_type,
-               documents, mention_count, sample_chunk, role_labels
-        ORDER BY mention_count DESC, entity_name
+               d.title AS document_title, doc_mentions,
+               doc_sample_chunk, doc_role_labels
+        ORDER BY entity_name, doc_mentions DESC
         """
         driver = self.neo4j_driver
 
@@ -785,10 +803,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                     {
                         "entity_name": r["entity_name"],
                         "entity_type": r["entity_type"],
-                        "documents": [t for t in r["documents"] if t],
-                        "mention_count": r["mention_count"],
-                        "sample_chunk": r["sample_chunk"] or "",
-                        "role_labels": [rl for rl in (r["role_labels"] or []) if rl],
+                        "document_title": r["document_title"] or "",
+                        "doc_mentions": r["doc_mentions"],
+                        "doc_sample_chunk": r["doc_sample_chunk"] or "",
+                        "doc_role_labels": [
+                            rl for rl in (r["doc_role_labels"] or []) if rl
+                        ],
                     }
                     for r in records
                 ]
@@ -796,13 +816,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         try:
             results = await asyncio.to_thread(_run)
             logger.info(
-                "route7_entity_doc_map_v2",
+                "route7_entity_doc_map_v3",
                 entity_types=entity_types,
-                entities_found=len(results),
+                rows_found=len(results),
             )
             return results
         except Exception as e:
-            logger.warning("route7_entity_doc_map_v2_failed", error=str(e))
+            logger.warning("route7_entity_doc_map_v3_failed", error=str(e))
             return []
 
     # ======================================================================

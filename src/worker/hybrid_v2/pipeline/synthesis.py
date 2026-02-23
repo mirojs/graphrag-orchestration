@@ -397,17 +397,17 @@ class EvidenceSynthesizer:
                 logger.warning("global_document_overview_injection_failed", error=str(e))
 
         # Step 2.6: Prepend graph structural header (Route 7 entity-doc map).
-        # Provides synthesis with a complete entity-document table from the
+        # Provides synthesis with a per-document entity map from the
         # knowledge graph, constraining enumeration to graph-indexed entities.
         if graph_structural_header:
             constraint = (
-                "IMPORTANT: The Entity-Document Map above lists entities from "
-                "the knowledge graph. When the user asks about parties or "
-                "organizations, include ONLY entities whose Role column shows "
-                "PARTY_TO, or whose Mention context clearly indicates they are "
-                "direct parties/signatories. Exclude entities with Role '---' "
-                "that are merely referenced. Do NOT add entities from the raw "
-                "text below that are not in the map."
+                "IMPORTANT: The Entity-Document Map above lists entities "
+                "grouped by name, with per-document entries. When the user "
+                "asks about parties or organizations, include ONLY entries "
+                "marked [PARTY_TO] or whose context clearly shows a "
+                "signatory role. Exclude [---] entries (addresses, job "
+                "sites, invoice recipients). Do NOT add entities from the "
+                "raw text below that are not in the map."
             )
             context = (
                 graph_structural_header + "\n\n" + constraint + "\n\n---\n\n" + context

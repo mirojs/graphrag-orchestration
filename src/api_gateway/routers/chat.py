@@ -268,18 +268,14 @@ class ChatJobStatusResponse(BaseModel):
 # ============================================================================
 
 async def _get_hybrid_pipeline(group_id: str, folder_id: Optional[str] = None):
-    """Get or create HybridPipeline instance for the given group and folder."""
-    # Import here to avoid circular imports
-    from src.worker.hybrid_v2.orchestrator import HybridPipeline
-    from src.worker.hybrid_v2.router.main import DeploymentProfile
-    
-    # Simple singleton pattern - pipelines are stateless
-    pipeline = HybridPipeline(
-        group_id=group_id,
-        folder_id=folder_id,  # Optional folder scope
-        profile=DeploymentProfile.GENERAL_ENTERPRISE,
-    )
-    return pipeline
+    """Get or create HybridPipeline instance for the given group.
+
+    Delegates to the hybrid router's cached pipeline factory which wires up
+    all required services (LLM, Neo4j, HippoRAG, embeddings, text stores,
+    communities) and calls ``pipeline.initialize()``.
+    """
+    from src.api_gateway.routers.hybrid import _get_or_create_pipeline  # noqa: E402
+    return await _get_or_create_pipeline(group_id)
 
 
 async def _execute_query(
@@ -288,25 +284,45 @@ async def _execute_query(
     group_id: str,
     folder_id: Optional[str] = None,
     response_type: str = "detailed_report",
+    force_route: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Execute a GraphRAG query via HybridPipeline.
-    
+
+    Args:
+        query: User question
+        approach: Query approach (hybrid, local, global, drift)
+        group_id: Tenant group ID
+        folder_id: Optional folder scope
+        response_type: Response format
+        force_route: Direct route string (e.g. "local_search", "unified_search").
+                     When provided, bypasses approach→route mapping and uses
+                     pipeline.force_route with the corresponding QueryRoute enum.
+
     Returns dict with: answer, route_used, usage, thoughts
     """
     from src.worker.hybrid_v2.router.main import QueryRoute
-    
+
     pipeline = await _get_hybrid_pipeline(group_id, folder_id)
-    
-    # Map approach to route
-    route_map = {
-        "hybrid": None,  # Let orchestrator decide
-        "local": QueryRoute.LOCAL_SEARCH,
-        "global": QueryRoute.GLOBAL_SEARCH,
-        "drift": QueryRoute.DRIFT_MULTI_HOP,
-    }
-    
-    route = route_map.get(approach)
+
+    # Resolve route: direct force_route string takes priority over approach mapping
+    route = None
+    if force_route:
+        # Map force_route string to QueryRoute enum
+        route_str_map = {r.value: r for r in QueryRoute}
+        route = route_str_map.get(force_route)
+        if route is None:
+            logger.warning("unknown_force_route", force_route=force_route, available=list(route_str_map.keys()))
+
+    if route is None and not force_route:
+        # Fall back to approach-based mapping
+        approach_map = {
+            "hybrid": None,  # Let orchestrator decide
+            "local": QueryRoute.LOCAL_SEARCH,
+            "global": QueryRoute.GLOBAL_SEARCH,
+            "drift": QueryRoute.DRIFT_MULTI_HOP,
+        }
+        route = approach_map.get(approach)
     
     try:
         if route:
@@ -321,13 +337,14 @@ async def _execute_query(
         # Extract thoughts from result
         thoughts = _extract_thoughts(result)
         
+        usage_raw = result.get("usage") or {}
         return {
-            "answer": result.get("answer", ""),
-            "route_used": result.get("route_selected", approach),
+            "answer": result.get("response", ""),
+            "route_used": result.get("route_used", approach),
             "usage": {
-                "prompt_tokens": result.get("token_usage", {}).get("prompt_tokens", 0),
-                "completion_tokens": result.get("token_usage", {}).get("completion_tokens", 0),
-                "total_tokens": result.get("token_usage", {}).get("total_tokens", 0),
+                "prompt_tokens": usage_raw.get("prompt_tokens", 0),
+                "completion_tokens": usage_raw.get("completion_tokens", 0),
+                "total_tokens": usage_raw.get("total_tokens", 0),
             },
             "thoughts": thoughts,
             "context": result.get("context", {}),
@@ -346,7 +363,7 @@ def _extract_thoughts(result: Dict[str, Any]) -> List[Dict[str, str]]:
     thoughts = []
     
     # Route selection
-    route = result.get("route_selected", "unknown")
+    route = result.get("route_used", "unknown")
     thoughts.append({
         "title": "Route Selection",
         "description": f"Using {route} for this query",
@@ -814,6 +831,11 @@ async def list_models():
 class FrontendChatOverrides(BaseModel):
     """Override options from frontend context."""
     retrieval_mode: Optional[str] = None
+    force_route: Optional[str] = Field(
+        default=None,
+        description="Force a specific route: local_search, global_search, "
+                    "drift_multi_hop, unified_search, concept_search, hipporag2_search",
+    )
     semantic_ranker: Optional[bool] = None
     semantic_captions: Optional[bool] = None
     query_rewriting: Optional[bool] = None
@@ -907,20 +929,27 @@ async def frontend_chat(
     # Map frontend overrides to approach
     overrides = body.context.overrides if body.context else None
     approach = "hybrid"  # Default
-    if overrides and overrides.retrieval_mode:
-        mode_map = {"vectors": "local", "text": "global", "hybrid": "hybrid"}
-        approach = mode_map.get(overrides.retrieval_mode, "hybrid")
-    
+    force_route_str: Optional[str] = None
+    if overrides:
+        if overrides.force_route:
+            # Direct route override — pass through to _execute_query
+            force_route_str = overrides.force_route
+            approach = overrides.force_route
+        elif overrides.retrieval_mode:
+            mode_map = {"vectors": "local", "text": "global", "hybrid": "hybrid"}
+            approach = mode_map.get(overrides.retrieval_mode, "hybrid")
+
     logger.info(
         "frontend_chat_request",
         group_id=group_id,
         user_id=user_id,
         approach=approach,
+        force_route=force_route_str,
         query_preview=query[:50],
     )
-    
+
     try:
-        result = await _execute_query(query, approach, group_id)
+        result = await _execute_query(query, approach, group_id, force_route=force_route_str)
         
         # Build frontend-compatible response
         thoughts = [
@@ -1001,20 +1030,26 @@ async def frontend_chat_stream(
     # Map frontend overrides to approach
     overrides = body.context.overrides if body.context else None
     approach = "hybrid"
-    if overrides and overrides.retrieval_mode:
-        mode_map = {"vectors": "local", "text": "global", "hybrid": "hybrid"}
-        approach = mode_map.get(overrides.retrieval_mode, "hybrid")
-    
+    force_route_str: Optional[str] = None
+    if overrides:
+        if overrides.force_route:
+            force_route_str = overrides.force_route
+            approach = overrides.force_route
+        elif overrides.retrieval_mode:
+            mode_map = {"vectors": "local", "text": "global", "hybrid": "hybrid"}
+            approach = mode_map.get(overrides.retrieval_mode, "hybrid")
+
     logger.info(
         "frontend_chat_stream_request",
         group_id=group_id,
         user_id=user_id,
         approach=approach,
+        force_route=force_route_str,
         query_preview=query[:50],
     )
-    
+
     return StreamingResponse(
-        _frontend_stream_response(query, approach, group_id, body.session_state, overrides),
+        _frontend_stream_response(query, approach, group_id, body.session_state, overrides, force_route_str),
         media_type="application/x-ndjson",
     )
 
@@ -1025,6 +1060,7 @@ async def _frontend_stream_response(
     group_id: str,
     session_state: Optional[Any],
     overrides: Optional[FrontendChatOverrides],
+    force_route: Optional[str] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Generate streaming response in azure-search-openai-demo format.
@@ -1048,7 +1084,7 @@ async def _frontend_stream_response(
         }) + "\n"
         
         # Execute query
-        result = await _execute_query(query, approach, group_id)
+        result = await _execute_query(query, approach, group_id, force_route=force_route)
         
         # Extract context data
         thoughts = result.get("thoughts", [])

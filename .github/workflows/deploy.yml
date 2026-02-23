@@ -164,7 +164,8 @@ jobs:
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
-            --revision-suffix "$REVISION_SUFFIX"
+            --revision-suffix "$REVISION_SUFFIX" \
+            --set-env-vars "VOYAGE_API_KEY=secretref:voyage-api-key"
 
           echo "API deployed (single-revision mode auto-routes traffic)"
       
@@ -173,13 +174,13 @@ jobs:
           IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-worker:${{ needs.build.outputs.image_tag }}"
           ALGO="${{ github.event.inputs.algorithm_version || 'v2' }}"
           echo "Deploying Worker: $IMAGE (DEFAULT_ALGORITHM_VERSION=$ALGO)"
-          
+
           az containerapp update \
             --name ${{ env.WORKER_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
             --image "$IMAGE" \
             --revision-suffix "r${{ github.run_id }}" \
-            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO"
+            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO" "VOYAGE_API_KEY=secretref:voyage-api-key"
       
       - name: Wait for startup
         run: sleep 60

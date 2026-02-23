@@ -298,7 +298,6 @@ class Neo4jStoreV3:
             "CREATE INDEX entity_group IF NOT EXISTS FOR (e:Entity) ON (e.group_id)",
             "CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name)",
             "CREATE INDEX entity_type IF NOT EXISTS FOR (e:Entity) ON (e.type)",
-            "CREATE INDEX rel_rel_type IF NOT EXISTS FOR ()-[r:RELATED_TO]-() ON (r.rel_type)",
             "CREATE INDEX community_group IF NOT EXISTS FOR (c:Community) ON (c.group_id)",
             
             # Document lifecycle indexes (deprecation queries)
@@ -939,13 +938,12 @@ class Neo4jStoreV3:
         MERGE (source)-[r:RELATED_TO]->(target)
         SET r.id = $id,
             r.description = $description,
-            r.rel_type = $rel_type,
             r.weight = $weight,
             r.group_id = $group_id,
             r.updated_at = datetime()
         RETURN r.id AS id
         """
-
+        
         with self.get_retry_session() as session:
             result = session.run(
                 query,
@@ -953,7 +951,6 @@ class Neo4jStoreV3:
                 target_id=relationship.target_id,
                 id=relationship.id,
                 description=relationship.description,
-                rel_type=relationship.description or "RELATED_TO",
                 weight=relationship.weight,
                 group_id=group_id,
             )
@@ -969,20 +966,18 @@ class Neo4jStoreV3:
         MERGE (source)-[r:RELATED_TO]->(target)
         SET r.id = rel.id,
             r.description = rel.description,
-            r.rel_type = rel.rel_type,
             r.weight = rel.weight,
             r.group_id = $group_id,
             r.updated_at = datetime()
         RETURN count(r) AS count
         """
-
+        
         rel_data = [
             {
                 "source_id": r.source_id,
                 "target_id": r.target_id,
                 "id": r.id,
                 "description": r.description,
-                "rel_type": r.description or "RELATED_TO",
                 "weight": r.weight,
             }
             for r in relationships
@@ -992,26 +987,7 @@ class Neo4jStoreV3:
             result = session.run(query, relationships=rel_data, group_id=group_id)
             record = result.single()
             return cast(int, record["count"]) if record else 0
-
-    def backfill_rel_type(self, group_id: str) -> int:
-        """Stamp rel_type on pre-existing RELATED_TO edges that predate this property.
-
-        Safe to call multiple times — only updates edges where rel_type IS NULL.
-        Sources the value from r.description, which has always stored the semantic
-        relationship type string (e.g. "PARTY_TO", "LOCATED_IN") for all extraction
-        paths.  Run once after deploying the rel_type persistence fix.
-        """
-        cypher = """
-        MATCH (e1:Entity {group_id: $group_id})-[r:RELATED_TO]->(e2:Entity {group_id: $group_id})
-        WHERE r.rel_type IS NULL
-        SET r.rel_type = coalesce(r.description, 'RELATED_TO')
-        RETURN count(r) AS updated
-        """
-        with self.get_retry_session() as session:
-            result = session.run(cypher, group_id=group_id)
-            record = result.single()
-            return cast(int, record["updated"]) if record else 0
-
+    
     # ==================== Community Operations ====================
     
     def upsert_community(self, group_id: str, community: Community) -> str:

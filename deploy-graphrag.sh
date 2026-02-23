@@ -274,10 +274,10 @@ VOYAGE_API_KEY=$(get_env_value_or_default "VOYAGE_API_KEY" "" false)
 # ROUTE3_DENOISE_TOKEN_BUDGET=1
 
 # Skeleton enrichment (sentence-level retrieval + graph traversal).
-# Strategy B + gpt-4.1-mini synthesis.
+# Strategy B — use default synthesis model (gpt-4.1-mini fails on mixed PPR+skeleton context).
 SKELETON_ENRICHMENT_ENABLED=${SKELETON_ENRICHMENT_ENABLED:-true}
 SKELETON_GRAPH_TRAVERSAL_ENABLED=${SKELETON_GRAPH_TRAVERSAL_ENABLED:-true}
-SKELETON_SYNTHESIS_MODEL=${SKELETON_SYNTHESIS_MODEL:-gpt-4.1-mini}
+SKELETON_SYNTHESIS_MODEL=${SKELETON_SYNTHESIS_MODEL:-}
 
 # Route 5 flat-pool seed mode (flat = equal-weight seed union, weighted = legacy 3-tier)
 ROUTE5_SEED_MODE=${ROUTE5_SEED_MODE:-weighted}

@@ -167,6 +167,9 @@ class LazyGraphRAGIndexingPipeline:
             chunk_overlap=self.config.chunk_overlap,
         )
 
+        # Chunking strategy: "section_aware" (default) or "sliding_3sentence"
+        self._chunk_strategy = os.getenv("CHUNK_STRATEGY", "section_aware")
+
     async def index_documents(
         self,
         *,
@@ -558,9 +561,11 @@ class LazyGraphRAGIndexingPipeline:
         return out
 
     async def _chunk_document(self, document: Dict[str, Any], doc_id: str) -> List[TextChunk]:
-        """Chunk a document into TextChunks using section-aware chunking."""
+        """Chunk a document into TextChunks using the configured strategy."""
         di_units: Sequence[LlamaDocument] = document.get("di_extracted_docs") or []
         if di_units:
+            if self._chunk_strategy == "sliding_3sentence":
+                return await self._chunk_di_units_sliding_window(di_units=di_units, doc_id=doc_id)
             return await self._chunk_di_units_section_aware(di_units=di_units, doc_id=doc_id)
 
         # Fallback for non-DI documents
@@ -602,6 +607,24 @@ class LazyGraphRAGIndexingPipeline:
             doc_title = first_meta.get("title", "") or ""
 
         return await chunk_di_units_section_aware(
+            di_units=di_units,
+            doc_id=doc_id,
+            doc_source=doc_source,
+            doc_title=doc_title,
+        )
+
+    async def _chunk_di_units_sliding_window(self, *, di_units: Sequence[LlamaDocument], doc_id: str) -> List[TextChunk]:
+        """Chunk DI units using 3-sentence sliding windows."""
+        from src.worker.hybrid_v2.indexing.section_chunking.integration import chunk_di_units_sliding_window
+
+        doc_source = ""
+        doc_title = ""
+        if di_units:
+            first_meta = getattr(di_units[0], "metadata", None) or {}
+            doc_source = first_meta.get("url", "") or first_meta.get("source", "") or ""
+            doc_title = first_meta.get("title", "") or ""
+
+        return await chunk_di_units_sliding_window(
             di_units=di_units,
             doc_id=doc_id,
             doc_source=doc_source,

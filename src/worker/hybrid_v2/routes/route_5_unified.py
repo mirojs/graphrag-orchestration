@@ -683,6 +683,9 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        WITH sent, score, chunk, doc
+        WHERE $folder_id IS NULL OR doc IS NULL
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
 
@@ -712,6 +715,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                         group_id=group_id,
                         top_k=top_k,
                         threshold=threshold,
+                        folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
 
@@ -912,8 +916,9 @@ class UnifiedSearchHandler(BaseRouteHandler):
         # Combined into a single query using OR to catch both
         cypher = """
         MATCH (chunk:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(doc:Document)
-        WHERE chunk.text CONTAINS 'Authorized Representative'
-           OR chunk.text CONTAINS 'Signed this'
+        WHERE (chunk.text CONTAINS 'Authorized Representative'
+           OR chunk.text CONTAINS 'Signed this')
+          AND ($folder_id IS NULL OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id}))
         RETURN DISTINCT chunk.id AS chunk_id,
                chunk.text AS text,
                doc.title AS document_title,
@@ -929,7 +934,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
             def _run_query():
                 with driver.session() as session:
-                    records = session.run(cypher, group_id=group_id)
+                    records = session.run(cypher, group_id=group_id, folder_id=self.folder_id)
                     return [dict(r) for r in records]
 
             results = await loop.run_in_executor(self._executor, _run_query)

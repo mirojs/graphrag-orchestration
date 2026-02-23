@@ -398,6 +398,9 @@ class GlobalSearchHandler(BaseRouteHandler):
         // Get parent chunk + document context
         OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        WITH sent, score, chunk, doc
+        WHERE $folder_id IS NULL OR doc IS NULL
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
         // Expand via NEXT for local context (1 hop each direction)
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
@@ -429,6 +432,7 @@ class GlobalSearchHandler(BaseRouteHandler):
                         group_id=group_id,
                         top_k=fetch_k,
                         threshold=threshold,
+                        folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
 

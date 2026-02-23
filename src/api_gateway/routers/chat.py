@@ -341,13 +341,14 @@ async def _execute_query(
         # Extract thoughts from result
         thoughts = _extract_thoughts(result)
         
+        usage_raw = result.get("usage") or {}
         return {
-            "answer": result.get("answer", ""),
-            "route_used": result.get("route_selected", approach),
+            "answer": result.get("response", ""),
+            "route_used": result.get("route_used", approach),
             "usage": {
-                "prompt_tokens": result.get("token_usage", {}).get("prompt_tokens", 0),
-                "completion_tokens": result.get("token_usage", {}).get("completion_tokens", 0),
-                "total_tokens": result.get("token_usage", {}).get("total_tokens", 0),
+                "prompt_tokens": usage_raw.get("prompt_tokens", 0),
+                "completion_tokens": usage_raw.get("completion_tokens", 0),
+                "total_tokens": usage_raw.get("total_tokens", 0),
             },
             "thoughts": thoughts,
             "context": result.get("context", {}),
@@ -366,7 +367,7 @@ def _extract_thoughts(result: Dict[str, Any]) -> List[Dict[str, str]]:
     thoughts = []
     
     # Route selection
-    route = result.get("route_selected", "unknown")
+    route = result.get("route_used", "unknown")
     thoughts.append({
         "title": "Route Selection",
         "description": f"Using {route} for this query",

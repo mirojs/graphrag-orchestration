@@ -1056,6 +1056,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 continue
             seen_docs.add(dedup_key)
             offset += 1
+            sent_text = ev.get("sentence_text", "")
             citations.append(
                 Citation(
                     index=offset,
@@ -1063,7 +1064,10 @@ class ConceptSearchHandler(BaseRouteHandler):
                     document_id=ev.get("document_id", ""),
                     document_title=doc_title,
                     score=round(ev.get("score", 0), 4),
-                    text_preview=ev.get("sentence_text", "")[:200],
+                    text_preview=sent_text[:200],
+                    page_number=ev.get("page"),
+                    sentence_text=sent_text,
+                    sentence_length=len(sent_text),
                 )
             )
             if len(seen_docs) >= 5:

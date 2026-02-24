@@ -408,8 +408,91 @@ Leverages existing edges created at index time (no schema changes):
 - `(Sentence)-[:IN_DOCUMENT]->(Document)` — folder isolation
 - `(Document)-[:IN_FOLDER]->(Folder)` — folder scope filter
 
-### Expected Impact
+### Benchmark Results (2026-02-24)
 
-- **Multi-hop queries** should improve (facts spanning multiple documents connected by entity mentions)
-- **Cross-document concept queries** should find related clauses/provisions that vector search misses
-- **Zero risk to existing quality** — disabled by default; when enabled, expanded sentences are filtered by the same reranker that already works well
+Tested on the 5-document corpus (`test-5pdfs-v2-fix2`) using the Route 3 Q-G question bank
+(10 positive + 9 negative questions), with LLM Judge evaluation (gpt-5.1, 0-3 rubric).
+
+#### Route 6 Baseline (Entity Expansion OFF)
+
+| QID | Containment | Theme Coverage | LLM Judge | Latency (ms) |
+|-----|------------|----------------|-----------|-------------|
+| Q-G1 | 1.00 | 100% (7/7) | 3/3 | 23,318 |
+| Q-G2 | 1.00 | 100% (5/5) | 3/3 | 5,474 |
+| Q-G3 | 0.87 | 100% (8/8) | 3/3 | 15,468 |
+| Q-G4 | 0.88 | 100% (6/6) | 2/3 | 5,956 |
+| Q-G5 | 0.60 | 100% (6/6) | 1/3 | 11,287 |
+| Q-G6 | 0.77 | 75% (6/8) | 1/3 | 9,247 |
+| Q-G7 | 0.94 | 100% (5/5) | 2/3 | 10,210 |
+| Q-G8 | 0.82 | 100% (6/6) | 3/3 | 11,916 |
+| Q-G9 | 0.94 | 100% (6/6) | 3/3 | 6,734 |
+| Q-G10 | 0.69 | 100% (6/6) | 2/3 | 6,859 |
+| **Average** | **0.85** | **98%** | **50/57 (87.7%)** | **10,647** |
+
+- Negative tests: **9/9 PASS** (all 3/3)
+- Pass rate (score >= 2): **89.5%** (17/19)
+
+#### Route 6 with Entity Expansion ON (`ROUTE6_ENTITY_EXPANSION=1`)
+
+| QID | Containment | Theme Coverage | LLM Judge | Latency (ms) |
+|-----|------------|----------------|-----------|-------------|
+| Q-G1 | 1.00 | 100% (7/7) | 3/3 | 25,508 |
+| Q-G2 | 1.00 | 100% (5/5) | 3/3 | 4,746 |
+| Q-G3 | 0.89 | 100% (8/8) | **2/3** (-1) | 12,784 |
+| Q-G4 | 0.88 | 100% (6/6) | 2/3 | 6,864 |
+| Q-G5 | 0.60 | 100% (6/6) | 1/3 | 10,389 |
+| Q-G6 | 0.73 | 62% (5/8) | 1/3 | 6,972 |
+| Q-G7 | 0.94 | 100% (5/5) | **1/3** (-1) | 12,526 |
+| Q-G8 | 0.77 | 100% (6/6) | 3/3 | 8,102 |
+| Q-G9 | 0.94 | 100% (6/6) | 3/3 | 9,562 |
+| Q-G10 | 0.69 | 100% (6/6) | 2/3 | 6,059 |
+| **Average** | **0.84** | **96%** | **48/57 (84.2%)** | **10,351** |
+
+- Negative tests: **9/9 PASS** (all 3/3)
+- Pass rate (score >= 2): **84.2%** (16/19)
+
+#### Comparison: Expansion OFF vs ON
+
+| Metric | OFF | ON | Delta |
+|--------|-----|-----|-------|
+| Avg Containment | 0.85 | 0.84 | -0.01 |
+| Avg Theme Coverage | 98% | 96% | -2% |
+| LLM Judge Total | 50/57 (87.7%) | 48/57 (84.2%) | **-2 pts** |
+| Pass Rate (>= 2) | 89.5% | 84.2% | **-5.3%** |
+| Avg Latency | 10,647ms | 10,351ms | -296ms |
+| Negative Tests | 9/9 | 9/9 | same |
+
+#### Regression Analysis
+
+Two questions regressed with entity expansion enabled:
+
+- **Q-G3** (3/3 -> 2/3): Expanded entity-connected sentences added evidence but caused the
+  LLM to omit the exact invoice label "TOTAL/AMOUNT DUE 29900.00". The extra context diluted
+  focus on this specific detail.
+
+- **Q-G7** (2/3 -> 1/3): Expansion brought in a listing-agreement 5-business-day notice
+  mechanism via shared entities. This distracted the LLM from the key PMA "60 days written
+  notice" termination requirement, which was the main expected answer.
+
+**Root cause:** On a small 5-document corpus, entity expansion adds topically related but
+not always query-relevant sentences. The reranker pool gets diluted with entity-connected
+but tangential facts. The existing vector search + community matching already covers the
+entity landscape well at this corpus scale.
+
+#### Decision: Keep Disabled by Default
+
+`ROUTE6_ENTITY_EXPANSION=0` remains the default. The feature may show value on larger corpora
+(50+ documents) where multi-hop entity connections surface facts that vector search genuinely
+cannot find. On small corpora, the noise-to-signal ratio is unfavorable.
+
+#### Comparison vs Route 3 Baseline (from Section 6)
+
+| Metric | Route 3 (no communities) | Route 6 (expansion OFF) | Delta |
+|--------|-------------------------|-------------------------|-------|
+| Avg Containment | 0.83 | **0.85** | **+0.02** |
+| Avg Theme Coverage | 95% | **98%** | **+3%** |
+| LLM Calls per Query | N+1 (MAP+REDUCE) | **1** | **significant** |
+| Negative Tests | 9/9 | 9/9 | same |
+
+Route 6 outperforms Route 3 on containment and theme coverage with a single LLM call
+instead of N+1, confirming the design rationale of skipping the MAP phase.

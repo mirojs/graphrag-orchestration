@@ -10179,3 +10179,122 @@ Missing "owner files contract changes within 10 business days" from holding tank
 | Q-G4 (1/3) | Synthesis | Over-includes non-reporting clauses as reporting obligations | Tighter synthesis scoping for reporting/record-keeping category |
 | Q-G3 (2/3) | Synthesis | Omits one niche holding tank filing detail | Minor — 10-business-day requirement is a small detail in a comprehensive answer |
 | Q-G7 (3/3) | **Resolved** | Previously over-generated; now fixed by per-document entity-doc map | — |
+
+## 34. R6-XII: Entity-Centric Sentence Expansion — Implementation & Benchmark (February 24, 2026)
+
+### Motivation
+
+Route 6's sentence retrieval relies on Voyage-Context-3 vector similarity. This works well for sentences lexically/semantically close to the query, but misses sentences **topically connected via shared entities** that don't match the query's phrasing. A Gemini discussion on "Sentence Chunking for GraphRAG Quality" identified this "entity-centric jump" as the one missing piece in our sentence-level chunking architecture.
+
+### Implementation
+
+Added Step 1b to Route 6's pipeline: after the initial vector search retrieves seed sentences, traverse the graph via shared entities to discover additional related sentences.
+
+```
+Seed Sentence -[:MENTIONS]-> Entity <-[:MENTIONS]- Expanded Sentence
+```
+
+**Updated pipeline:**
+
+```
+Step 1:  Community Match + Sentence Search + Section Heading Search + Entity-Doc Map (parallel)
+Step 1b: Entity-centric sentence expansion via shared MENTIONS edges (R6-XII)
+Step 2:  Denoise + Diversity + Rerank sentence evidence (includes expanded sentences)
+Step 3:  Single LLM synthesis call
+```
+
+**Key design decisions:**
+- Expanded sentences merge into the pool **before** Step 2, so they go through the same denoise/diversity/rerank pipeline
+- Synthetic score (`min(seed_scores) * 0.8`) positions expanded sentences below vector matches; the reranker controls final ordering
+- Pure graph traversal (Cypher only) — no additional Voyage API calls, ~30-50ms added latency
+- Gated behind `ROUTE6_ENTITY_EXPANSION=0` (disabled by default)
+
+**Configuration:**
+
+| Env Var | Default | Purpose |
+|---------|---------|---------|
+| `ROUTE6_ENTITY_EXPANSION` | `"0"` | Master switch |
+| `ROUTE6_ENTITY_EXPANSION_SEEDS` | `"10"` | Number of top-scoring seed sentences |
+| `ROUTE6_ENTITY_EXPANSION_TOP_K` | `"20"` | Max expanded sentences to add |
+| `ROUTE6_ENTITY_EXPANSION_MIN_OVERLAP` | `"1"` | Min shared entities to qualify |
+
+**Files changed:**
+- `src/worker/hybrid_v2/routes/route_6_concept.py` — new `_expand_sentences_via_entities()` method + Step 1b integration in `execute()`
+
+### Benchmark Results (5-document corpus, `test-5pdfs-v2-fix2`)
+
+Ran Route 3 Q-G question bank (10 positive + 9 negative) with LLM Judge (gpt-5.1).
+
+#### Route 6 Baseline (Entity Expansion OFF)
+
+| QID | Containment | Theme Coverage | LLM Judge | Latency (ms) |
+|-----|------------|----------------|-----------|-------------|
+| Q-G1 | 1.00 | 100% (7/7) | 3/3 | 23,318 |
+| Q-G2 | 1.00 | 100% (5/5) | 3/3 | 5,474 |
+| Q-G3 | 0.87 | 100% (8/8) | 3/3 | 15,468 |
+| Q-G4 | 0.88 | 100% (6/6) | 2/3 | 5,956 |
+| Q-G5 | 0.60 | 100% (6/6) | 1/3 | 11,287 |
+| Q-G6 | 0.77 | 75% (6/8) | 1/3 | 9,247 |
+| Q-G7 | 0.94 | 100% (5/5) | 2/3 | 10,210 |
+| Q-G8 | 0.82 | 100% (6/6) | 3/3 | 11,916 |
+| Q-G9 | 0.94 | 100% (6/6) | 3/3 | 6,734 |
+| Q-G10 | 0.69 | 100% (6/6) | 2/3 | 6,859 |
+| **Average** | **0.85** | **98%** | **50/57 (87.7%)** | **10,647** |
+
+- Negative tests: **9/9 PASS** (all 3/3)
+- Pass rate (score >= 2): **89.5%** (17/19)
+
+#### Route 6 with Entity Expansion ON
+
+| QID | Containment | Theme Coverage | LLM Judge | Latency (ms) |
+|-----|------------|----------------|-----------|-------------|
+| Q-G1 | 1.00 | 100% (7/7) | 3/3 | 25,508 |
+| Q-G2 | 1.00 | 100% (5/5) | 3/3 | 4,746 |
+| Q-G3 | 0.89 | 100% (8/8) | **2/3** (-1) | 12,784 |
+| Q-G4 | 0.88 | 100% (6/6) | 2/3 | 6,864 |
+| Q-G5 | 0.60 | 100% (6/6) | 1/3 | 10,389 |
+| Q-G6 | 0.73 | 62% (5/8) | 1/3 | 6,972 |
+| Q-G7 | 0.94 | 100% (5/5) | **1/3** (-1) | 12,526 |
+| Q-G8 | 0.77 | 100% (6/6) | 3/3 | 8,102 |
+| Q-G9 | 0.94 | 100% (6/6) | 3/3 | 9,562 |
+| Q-G10 | 0.69 | 100% (6/6) | 2/3 | 6,059 |
+| **Average** | **0.84** | **96%** | **48/57 (84.2%)** | **10,351** |
+
+- Negative tests: **9/9 PASS** (all 3/3)
+- Pass rate (score >= 2): **84.2%** (16/19)
+
+#### Comparison: Expansion OFF vs ON
+
+| Metric | OFF | ON | Delta |
+|--------|-----|-----|-------|
+| Avg Containment | 0.85 | 0.84 | -0.01 |
+| Avg Theme Coverage | 98% | 96% | -2% |
+| LLM Judge Total | 50/57 (87.7%) | 48/57 (84.2%) | **-2 pts** |
+| Pass Rate (>= 2) | 89.5% | 84.2% | **-5.3%** |
+| Avg Latency | 10,647ms | 10,351ms | -296ms |
+| Negative Tests | 9/9 | 9/9 | same |
+
+### Regression Analysis
+
+Two questions regressed with entity expansion enabled:
+
+- **Q-G3** (3/3 -> 2/3): Expanded entity-connected sentences added evidence but caused the LLM to omit the exact invoice label "TOTAL/AMOUNT DUE 29900.00". Extra context diluted focus on this specific detail.
+
+- **Q-G7** (2/3 -> 1/3): Expansion brought in a listing-agreement 5-business-day notice mechanism via shared entities. This distracted the LLM from the key PMA "60 days written notice" termination requirement.
+
+**Root cause:** On a small 5-document corpus, entity expansion adds topically related but not always query-relevant sentences. The reranker pool gets diluted with entity-connected but tangential facts. The existing vector search + community matching already covers the entity landscape well at this corpus scale.
+
+### Decision: Keep Disabled by Default
+
+`ROUTE6_ENTITY_EXPANSION=0` remains the default. The feature may show value on larger corpora (50+ documents) where multi-hop entity connections surface facts that vector search genuinely cannot find. On small corpora, the noise-to-signal ratio is unfavorable.
+
+### Route 6 vs Route 3 Baseline (from Section 32)
+
+| Metric | Route 3 (no communities) | Route 6 (expansion OFF) | Delta |
+|--------|-------------------------|-------------------------|-------|
+| Avg Containment | 0.83 | **0.85** | **+0.02** |
+| Avg Theme Coverage | 95% | **98%** | **+3%** |
+| LLM Calls per Query | N+1 (MAP+REDUCE) | **1** | **significant** |
+| Negative Tests | 9/9 | 9/9 | same |
+
+Route 6 outperforms Route 3 on containment and theme coverage with a single LLM call instead of N+1, confirming the design rationale of skipping the MAP phase.

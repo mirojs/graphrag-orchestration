@@ -7,9 +7,10 @@ errors (deadlocks, leader re-elections, connection resets).  This is the
 same mechanism the GDS library uses via ``run_retryable_cypher``.
 
 For operations that need the simpler ``session.run()`` API — but with retry —
-we provide ``RetrySession`` / ``AsyncRetrySession`` wrappers that delegate
-``.run()`` to ``execute_write()`` internally, eagerly materializing results
-so callers can use ``.single()``, ``.data()`` etc. unchanged.
+we provide a ``RetrySession`` wrapper that delegates ``.run()`` to
+``execute_write()`` (or ``execute_read()`` when ``read_only=True``) internally,
+eagerly materializing results so callers can use ``.single()``, ``.data()``
+etc. unchanged.
 
 Fallback: if the neo4j driver's ``is_retryable()`` flag is unavailable the
 wrapper also catches the classic transient exception types manually.
@@ -20,18 +21,21 @@ Usage::
     with retry_session(driver, database="neo4j") as session:
         result = session.run("MATCH (n) RETURN count(n)")
 
-    # Async — same pattern
-    async with async_retry_session(async_driver, database="neo4j") as session:
-        result = await session.run("MATCH (n) RETURN count(n)")
+    # Inside an async function — offload to thread pool
+    loop = asyncio.get_running_loop()
+    def _sync():
+        with retry_session(driver, read_only=True) as session:
+            return list(session.run("MATCH (n) RETURN count(n)"))
+    records = await loop.run_in_executor(None, _sync)
 
-Context managers and ``__getattr__`` delegation ensure these are drop-in
-replacements for raw ``Session`` / ``AsyncSession``.
+Context manager and ``__getattr__`` delegation ensure ``RetrySession`` is a
+drop-in replacement for a raw ``Session``.
 """
 
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import contextmanager
 from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -97,50 +101,6 @@ class _EagerResult:
         return bool(self._records)
 
 
-class _AsyncEagerResult(_EagerResult):
-    """Async-compatible variant of ``_EagerResult``.
-
-    The async Neo4j driver's ``Result`` has awaitable ``.data()``,
-    ``.single()``, ``.values()`` and ``.consume()``.  This subclass
-    provides coroutine wrappers so callers can ``await result.data()``
-    without change.
-    """
-
-    async def single(self, strict: bool = False):  # type: ignore[override]
-        return super().single(strict)
-
-    async def data(self, *keys: str) -> List[dict]:  # type: ignore[override]
-        return super().data(*keys)
-
-    async def values(self, *keys: str) -> list:  # type: ignore[override]
-        return super().values(*keys)
-
-    async def consume(self):  # type: ignore[override]
-        return None
-
-    # Async iteration support — callers may use ``async for record in result``
-    def __aiter__(self):
-        return _AsyncRecordIter(self._records)
-
-
-class _AsyncRecordIter:
-    """Minimal async iterator over pre-fetched records."""
-
-    def __init__(self, records: list):
-        self._records = records
-        self._index = 0
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        if self._index >= len(self._records):
-            raise StopAsyncIteration
-        rec = self._records[self._index]
-        self._index += 1
-        return rec
-
-
 # ── Sync Retry Session ──────────────────────────────────────────────────────
 
 class RetrySession:
@@ -195,55 +155,7 @@ class RetrySession:
         return self._session.__exit__(*args)
 
 
-# ── Async Retry Session ─────────────────────────────────────────────────────
-
-class AsyncRetrySession:
-    """Wraps a Neo4j ``AsyncSession``, routing ``.run()`` through managed transactions.
-
-    When ``read_only=True``, uses ``execute_read()`` instead of
-    ``execute_write()`` — enables routing to read replicas in a cluster.
-    """
-
-    def __init__(self, session, read_only: bool = False):
-        self._session = session
-        self._read_only = read_only
-
-    async def run(self, query, parameters=None, **kwargs):
-        """Execute a Cypher query with automatic retry via managed transaction."""
-        merged = dict(parameters or {})
-        merged.update(kwargs)
-
-        async def _tx_func(tx):
-            result = await tx.run(query, merged)
-            records = [record async for record in result]
-            keys = list(result.keys())
-            try:
-                await result.consume()
-            except Exception:
-                pass
-            return records, keys
-
-        executor = self._session.execute_read if self._read_only else self._session.execute_write
-        label = "execute_read" if self._read_only else "execute_write"
-        try:
-            records, keys = await executor(_tx_func)
-            return _AsyncEagerResult(records, keys)
-        except Exception as e:
-            q_preview = str(query)[:80].replace("\n", " ")
-            logger.debug("Neo4j async %s failed: %s | query: %s", label, e, q_preview)
-            raise
-
-    def __getattr__(self, name: str) -> Any:
-        return getattr(self._session, name)
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *args):
-        return await self._session.__aexit__(*args)
-
-
-# ── Context Manager Helpers ──────────────────────────────────────────────────
+# ── Context Manager Helper ───────────────────────────────────────────────────
 
 @contextmanager
 def retry_session(driver, database: Optional[str] = None, read_only: bool = False):
@@ -253,7 +165,7 @@ def retry_session(driver, database: Optional[str] = None, read_only: bool = Fals
     Uses managed transactions internally for automatic transient-error retry.
 
     Args:
-        driver: Neo4j driver instance.
+        driver: Neo4j sync driver instance.
         database: Optional database name.
         read_only: If True, use ``execute_read()`` instead of ``execute_write()``.
                    Preferred for retrieval queries — enables read-replica routing.
@@ -263,21 +175,3 @@ def retry_session(driver, database: Optional[str] = None, read_only: bool = Fals
         kwargs["database"] = database
     with driver.session(**kwargs) as session:
         yield RetrySession(session, read_only=read_only)
-
-
-@asynccontextmanager
-async def async_retry_session(driver, database: Optional[str] = None, read_only: bool = False):
-    """Context manager yielding a retry-enabled async Neo4j session.
-
-    Drop-in replacement for ``async with driver.session(database=db) as s:``.
-
-    Args:
-        driver: Neo4j driver instance.
-        database: Optional database name.
-        read_only: If True, use ``execute_read()`` instead of ``execute_write()``.
-    """
-    kwargs = {}
-    if database is not None:
-        kwargs["database"] = database
-    async with driver.session(**kwargs) as session:
-        yield AsyncRetrySession(session, read_only=read_only)

@@ -20,12 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple, cast
 from dataclasses import dataclass, field
 
 import neo4j
-from neo4j import GraphDatabase, AsyncGraphDatabase
+from neo4j import GraphDatabase
 
-from src.worker.hybrid_v2.services.neo4j_retry import (
-    retry_session,
-    async_retry_session,
-)
+from src.worker.hybrid_v2.services.neo4j_retry import retry_session
 
 logger = logging.getLogger(__name__)
 
@@ -172,7 +169,6 @@ class Neo4jStoreV3:
         self.password = password
         self.database = database
         self._driver = None
-        self._async_driver = None
 
         # Determinism: chunk-level extraction cache schema init (best-effort).
         self._extraction_cache_schema_ready: bool = False
@@ -191,17 +187,6 @@ class Neo4jStoreV3:
             logger.info(f"Connected to Neo4j at {self.uri}")
         return self._driver
     
-    @property
-    def async_driver(self) -> neo4j.AsyncDriver:
-        """Lazy initialization of async Neo4j driver."""
-        if self._async_driver is None:
-            self._async_driver = AsyncGraphDatabase.driver(
-                self.uri,
-                auth=(self.username, self.password),
-            )
-            logger.info(f"Connected to Neo4j (async) at {self.uri}")
-        return self._async_driver
-
     def get_retry_session(self):
         """Return a context manager that yields a retry-enabled sync session.
 
@@ -211,13 +196,6 @@ class Neo4jStoreV3:
         """
         return retry_session(self.driver, database=self.database)
 
-    def get_async_retry_session(self):
-        """Return an async context manager yielding a retry-enabled session.
-
-        Drop-in replacement for ``async with self.async_driver.session(...) as s:``.
-        """
-        return async_retry_session(self.async_driver, database=self.database)
-
     def close(self):
         """Close the Neo4j driver."""
         if self._driver:
@@ -225,11 +203,7 @@ class Neo4jStoreV3:
             self._driver = None
     
     async def aclose(self):
-        """Close the async Neo4j driver."""
-        if self._async_driver:
-            await self._async_driver.close()
-            self._async_driver = None
-
+        """Reset async state (extraction cache schema flag)."""
         self._extraction_cache_schema_ready = False
 
     async def _aensure_extraction_cache_schema(self) -> None:
@@ -248,10 +222,12 @@ class Neo4jStoreV3:
                 return
 
             try:
-                async with self.get_async_retry_session() as session:
-                    await session.run(
-                        "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE"
-                    )
+                def _sync_create():
+                    with self.get_retry_session() as session:
+                        session.run(
+                            "CREATE CONSTRAINT extraction_cache_key IF NOT EXISTS FOR (c:ExtractionCache) REQUIRE c.key IS UNIQUE"
+                        )
+                await asyncio.to_thread(_sync_create)
                 self._extraction_cache_schema_ready = True
             except Exception as e:
                 # Caching is optional; never fail the indexing request because of it.
@@ -444,15 +420,18 @@ class Neo4jStoreV3:
         RETURN k AS key, c['payload'] AS payload
         """
 
-        async with self.get_async_retry_session() as session:
-            result = await session.run(query, keys=keys)
-            out: Dict[str, str] = {}
-            async for record in result:
-                key = cast(str, record.get("key"))
-                payload = record.get("payload")
-                if key and payload:
-                    out[key] = cast(str, payload)
-            return out
+        def _sync_get(keys_arg):
+            with self.get_retry_session() as session:
+                result = session.run(query, keys=keys_arg)
+                out: Dict[str, str] = {}
+                for record in result:
+                    key = cast(str, record.get("key"))
+                    payload = record.get("payload")
+                    if key and payload:
+                        out[key] = cast(str, payload)
+                return out
+
+        return await asyncio.to_thread(_sync_get, keys)
 
     async def aput_extraction_cache_batch(
         self,
@@ -485,10 +464,13 @@ class Neo4jStoreV3:
         RETURN count(c) AS count
         """
 
-        async with self.get_async_retry_session() as session:
-            result = await session.run(query, items=items)
-            record = await result.single()
-            return cast(int, record["count"]) if record and record.get("count") is not None else 0
+        def _sync_put(items_arg):
+            with self.get_retry_session() as session:
+                result = session.run(query, items=items_arg)
+                record = result.single()
+                return cast(int, record["count"]) if record and record.get("count") is not None else 0
+
+        return await asyncio.to_thread(_sync_put, items)
     
     # ==================== Entity Operations ====================
     
@@ -705,21 +687,24 @@ class Neo4jStoreV3:
             if sample['embedding_v2']:
                 logger.warning(f"   embedding_v2 dim: {len(sample['embedding_v2'])}")
         
-        async with self.get_async_retry_session() as session:
-            result = await session.run(query, entities=entity_data, group_id=group_id)
-            record = await result.single()
-            count = cast(int, record["count"]) if record else 0
-            
-            # Propagate Sentence MENTIONS to parent TextChunks
-            prop_result = await session.run(propagate_query, group_id=group_id)
-            prop_record = await prop_result.single()
-            propagated = cast(int, prop_record["propagated"]) if prop_record else 0
-            
-            # Log MENTIONS creation
-            mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
-            logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS + {propagated} TextChunk MENTIONS (propagated, async)")
-            
-            return count
+        def _sync_upsert():
+            with self.get_retry_session() as session:
+                result = session.run(query, entities=entity_data, group_id=group_id)
+                record = result.single()
+                count = cast(int, record["count"]) if record else 0
+
+                # Propagate Sentence MENTIONS to parent TextChunks
+                prop_result = session.run(propagate_query, group_id=group_id)
+                prop_record = prop_result.single()
+                propagated = cast(int, prop_record["propagated"]) if prop_record else 0
+
+                # Log MENTIONS creation
+                mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
+                logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS + {propagated} TextChunk MENTIONS (propagated, async)")
+
+                return count
+
+        return await asyncio.to_thread(_sync_upsert)
     
     def get_entity(self, group_id: str, entity_id: str) -> Optional[Entity]:
         """Get an entity by ID."""

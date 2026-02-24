@@ -23,7 +23,7 @@ import asyncio
 import structlog
 
 from .enhanced_graph_retriever import EnhancedGraphRetriever
-from ..services.neo4j_retry import retry_session, async_retry_session
+from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
 
@@ -191,16 +191,19 @@ class HubExtractor:
             RETURN e.name as name, e.id as id, degree
             """
             
-            async with async_retry_session(self.neo4j_driver, read_only=True) as session:
-                result = await session.run(
-                    query,
-                    community_id=community_id,
-                    top_k=top_k,
-                    group_id=self.group_id,
-                )
-                records = await result.data()
+            loop = asyncio.get_running_loop()
 
-            hubs = [r.get("name") or r.get("id") for r in records if r]
+            def _sync_query():
+                with retry_session(self.neo4j_driver, read_only=True) as session:
+                    result = session.run(
+                        query,
+                        community_id=community_id,
+                        top_k=top_k,
+                        group_id=self.group_id,
+                    )
+                    return [r.get("name") or r.get("id") for r in result if r]
+
+            hubs = await loop.run_in_executor(None, _sync_query)
             
             logger.info("neo4j_hub_query_success",
                        community_id=community_id,
@@ -386,14 +389,17 @@ class HubExtractor:
             LIMIT $top_k
             """
             
-            async with async_retry_session(self.neo4j_driver, read_only=True) as session:
-                result = await session.run(query, top_k=top_k, group_id=self.group_id)
-                records = await result.data()
-            
-            hubs = [
-                (r.get("name") or r.get("id"), r.get("degree", 0))
-                for r in records if r
-            ]
+            loop = asyncio.get_running_loop()
+
+            def _sync_query():
+                with retry_session(self.neo4j_driver, read_only=True) as session:
+                    result = session.run(query, top_k=top_k, group_id=self.group_id)
+                    return [
+                        (r.get("name") or r.get("id"), r.get("degree", 0))
+                        for r in result if r
+                    ]
+
+            hubs = await loop.run_in_executor(None, _sync_query)
             
             logger.info("global_hub_query_success", num_hubs=len(hubs))
             return hubs

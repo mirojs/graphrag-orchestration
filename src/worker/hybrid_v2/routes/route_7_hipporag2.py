@@ -494,8 +494,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         top_passage_scores = passage_scores[:ppr_passage_top_k]
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
+
+        # Pass PPR entity names so _fetch_chunks_by_ids can build focused
+        # 3-sentence windows around entity-relevant sentences.
+        ppr_entity_names = [name for name, _ in entity_scores[:30]]
         pre_fetched_chunks = await self._fetch_chunks_by_ids(
-            top_chunk_ids, ppr_scores_map=ppr_scores_map
+            top_chunk_ids,
+            ppr_scores_map=ppr_scores_map,
+            entity_names=ppr_entity_names,
         )
 
         # Convert sentence evidence to coverage_chunks format
@@ -988,8 +994,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         chunk_ids: List[str],
         ppr_scores_map: Optional[Dict[str, float]] = None,
+        entity_names: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Fetch chunk text + metadata from Neo4j by chunk IDs.
+
+        When *entity_names* is provided, returns **focused 3-sentence
+        windows** around sentences that mention those entities instead of
+        the full chunk text.  This reduces noise for synthesis while
+        keeping the entity-relevant context tight.
 
         Returns flat list of chunk dicts in the format expected by the
         synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
@@ -1000,6 +1012,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         group_id = self.group_id
 
+        # Fetch chunk metadata + ordered sentences in one query
         cypher = """
         UNWIND $chunk_ids AS cid
         MATCH (c:TextChunk {id: cid, group_id: $group_id})
@@ -1008,10 +1021,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         WHERE $folder_id IS NULL OR d IS NULL
            OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
+        OPTIONAL MATCH (sent:Sentence {group_id: $group_id})-[:PART_OF]->(c)
+        WITH c, d, s,
+             sent ORDER BY sent.index_in_chunk
         RETURN c.id AS chunk_id, c.text AS text,
                c.chunk_index AS chunk_index,
                d.id AS document_id, d.title AS document_title,
-               s.title AS section_title, s.id AS section_id
+               s.title AS section_title, s.id AS section_id,
+               collect(sent.text) AS sentence_texts
         """
 
         try:
@@ -1032,21 +1049,64 @@ class HippoRAG2Handler(BaseRouteHandler):
             logger.warning("route7_fetch_chunks_failed", error=str(e))
             return []
 
-        # Build flat list of chunk dicts for the synthesizer.
-        # Each chunk needs "text", "source", "entity", and "metadata" fields
-        # matching what _retrieve_text_chunks() normally returns.
+        # ── Build focused 3-sentence windows ──
+        # If entity_names given, for each chunk find sentences containing
+        # any entity, expand ±1, and concatenate the non-overlapping
+        # windows.  Falls back to full chunk text when no sentences match
+        # or no sentence nodes exist.
+        ent_lower = (
+            {n.lower() for n in entity_names} if entity_names else set()
+        )
+
+        def _focused_text(
+            sentence_texts: List[str], full_text: str
+        ) -> str:
+            if not sentence_texts or not ent_lower:
+                return full_text
+
+            # Find indices of sentences mentioning any PPR entity
+            hit_indices: set[int] = set()
+            for i, sent in enumerate(sentence_texts):
+                sent_l = sent.lower()
+                for en in ent_lower:
+                    if en in sent_l:
+                        hit_indices.add(i)
+                        break
+
+            if not hit_indices:
+                return full_text  # no entity matches → keep full
+
+            # Expand each hit ±1 and merge overlapping ranges
+            ranges: list[tuple[int, int]] = []
+            for idx in sorted(hit_indices):
+                lo = max(0, idx - 1)
+                hi = min(len(sentence_texts), idx + 2)
+                if ranges and lo <= ranges[-1][1]:
+                    ranges[-1] = (ranges[-1][0], hi)  # merge
+                else:
+                    ranges.append((lo, hi))
+
+            # Build final text from windows
+            windows: list[str] = []
+            for lo, hi in ranges:
+                windows.append(
+                    " ".join(sentence_texts[lo:hi])
+                )
+            return " [...] ".join(windows)
+
         scores = ppr_scores_map or {}
         chunks_list: List[Dict[str, Any]] = []
         for r in results:
             cid = r.get("chunk_id", "")
+            sentence_texts = r.get("sentence_texts") or []
+            full_text = r.get("text", "")
+            focused = _focused_text(sentence_texts, full_text)
+
             chunks_list.append({
                 "id": cid,
                 "source": r.get("document_title", "Unknown"),
-                "text": r.get("text", ""),
+                "text": focused,
                 "entity": "__ppr_passage__",
-                # Synthesis weight fix: equal weight within fetched set (paper intent).
-                # PPR scores determine *which* chunks to fetch (top-K); once fetched,
-                # all chunks pass to the reader equally — consistent with upstream HippoRAG 2.
                 "_entity_score": 1.0,
                 "_source_entity": "__ppr_passage__",
                 "metadata": {

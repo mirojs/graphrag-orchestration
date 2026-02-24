@@ -2262,7 +2262,14 @@ Response:"""
                         }
                     context_parts.append("\n".join(entry_lines))
                 else:
-                    context_parts.append(f"{citation_id} {text}")
+                    # Add section label when available so the LLM knows
+                    # which section each chunk belongs to.
+                    if section_str and section_str != "General":
+                        context_parts.append(
+                            f"{citation_id} [Section: {section_str}] {text}"
+                        )
+                    else:
+                        context_parts.append(f"{citation_id} {text}")
             
             context_parts.append("")  # Blank line between documents
         

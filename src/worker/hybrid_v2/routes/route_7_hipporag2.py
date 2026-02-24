@@ -1095,12 +1095,53 @@ class HippoRAG2Handler(BaseRouteHandler):
             return " [...] ".join(windows)
 
         scores = ppr_scores_map or {}
-        chunks_list: List[Dict[str, Any]] = []
+
+        # ── Merge adjacent same-section chunks ──
+        # Group by (document_id, section_title), sort by chunk_index,
+        # and merge consecutive chunks so the LLM receives one coherent
+        # block per section instead of fragmented overlapping snippets.
+        from collections import defaultdict
+
+        section_groups: dict[tuple, list] = defaultdict(list)
         for r in results:
+            key = (r.get("document_id", ""), r.get("section_title", ""))
+            section_groups[key].append(r)
+
+        merged_results: list[dict] = []
+        for _key, group in section_groups.items():
+            group.sort(key=lambda x: x.get("chunk_index", 0))
+            merged = [group[0]]
+            for r in group[1:]:
+                prev = merged[-1]
+                prev_idx = prev.get("chunk_index", 0)
+                curr_idx = r.get("chunk_index", 0)
+                if curr_idx == prev_idx + 1:
+                    # Adjacent — merge sentences and text
+                    prev_sents = prev.get("sentence_texts") or []
+                    curr_sents = r.get("sentence_texts") or []
+                    prev["sentence_texts"] = prev_sents + curr_sents
+                    prev["text"] = (
+                        (prev.get("text", "") + " " + r.get("text", ""))
+                        .strip()
+                    )
+                    prev["chunk_index"] = curr_idx  # advance for next merge
+                    # Track merged IDs for PPR score lookup
+                    prev.setdefault("_merged_ids", [prev.get("chunk_id", "")])
+                    prev["_merged_ids"].append(r.get("chunk_id", ""))
+                else:
+                    merged.append(r)
+            merged_results.extend(merged)
+
+        chunks_list: List[Dict[str, Any]] = []
+        for r in merged_results:
             cid = r.get("chunk_id", "")
             sentence_texts = r.get("sentence_texts") or []
             full_text = r.get("text", "")
             focused = _focused_text(sentence_texts, full_text)
+
+            # Best PPR score among merged chunk IDs
+            merged_ids = r.get("_merged_ids", [cid])
+            best_score = max(scores.get(mid, 0.0) for mid in merged_ids) if scores else 0.0
 
             chunks_list.append({
                 "id": cid,
@@ -1109,6 +1150,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "entity": "__ppr_passage__",
                 "_entity_score": 1.0,
                 "_source_entity": "__ppr_passage__",
+                "_ppr_score": best_score,
                 "metadata": {
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_title", ""),
@@ -1117,11 +1159,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             })
 
         # Preserve PPR ranking: sort by PPR score descending.
-        # Neo4j UNWIND+MATCH does not guarantee return order matches input order.
-        # Sort uses the scores dict (not _entity_score) so equal synthesis weights
-        # don't collapse the ordering.
         if scores:
-            chunks_list.sort(key=lambda c: scores.get(c["id"], 0.0), reverse=True)
+            chunks_list.sort(key=lambda c: c.get("_ppr_score", 0.0), reverse=True)
 
         return chunks_list
 

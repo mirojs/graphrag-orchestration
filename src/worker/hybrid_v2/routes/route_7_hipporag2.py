@@ -1003,6 +1003,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         the full chunk text.  This reduces noise for synthesis while
         keeping the entity-relevant context tight.
 
+        Uses a two-pass approach for speed:
+        - Pass 1 (always): fast chunk metadata fetch without sentence join
+        - Pass 2 (only when entity_names given): fetch sentences for the
+          focused-window logic
+
         Returns flat list of chunk dicts in the format expected by the
         synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
         score descending when ``ppr_scores_map`` is provided.
@@ -1011,9 +1016,10 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         group_id = self.group_id
+        driver = self.neo4j_driver
 
-        # Fetch chunk metadata + ordered sentences in one query
-        cypher = """
+        # ── Pass 1: Fast chunk metadata (no sentence join) ──
+        cypher_chunks = """
         UNWIND $chunk_ids AS cid
         MATCH (c:TextChunk {id: cid, group_id: $group_id})
         OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
@@ -1021,33 +1027,65 @@ class HippoRAG2Handler(BaseRouteHandler):
         WHERE $folder_id IS NULL OR d IS NULL
            OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
-        OPTIONAL MATCH (sent:Sentence {group_id: $group_id})-[:PART_OF]->(c)
-        WITH c, d, s,
-             sent ORDER BY sent.index_in_chunk
         RETURN c.id AS chunk_id, c.text AS text,
                c.chunk_index AS chunk_index,
                d.id AS document_id, d.title AS document_title,
-               s.title AS section_title, s.id AS section_id,
-               collect(sent.text) AS sentence_texts
+               s.title AS section_title, s.id AS section_id
         """
 
-        try:
-            driver = self.neo4j_driver
+        # ── Pass 2: Sentence texts (only when entity_names given) ──
+        ent_lower = (
+            {n.lower() for n in entity_names} if entity_names else set()
+        )
 
+        async def _fetch_chunk_meta():
             def _run():
                 with retry_session(driver, read_only=True) as session:
                     records = session.run(
-                        cypher,
+                        cypher_chunks,
                         chunk_ids=chunk_ids,
                         group_id=group_id,
                         folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
+            return await asyncio.to_thread(_run)
 
-            results = await asyncio.to_thread(_run)
+        async def _fetch_sentences():
+            if not ent_lower:
+                return {}
+            cypher_sents = """
+            UNWIND $chunk_ids AS cid
+            MATCH (sent:Sentence {group_id: $group_id})-[:PART_OF]->(c:TextChunk {id: cid, group_id: $group_id})
+            RETURN c.id AS chunk_id, sent.text AS sent_text, sent.index_in_chunk AS idx
+            ORDER BY c.id, sent.index_in_chunk
+            """
+            def _run():
+                with retry_session(driver, read_only=True) as session:
+                    records = session.run(
+                        cypher_sents,
+                        chunk_ids=chunk_ids,
+                        group_id=group_id,
+                    )
+                    return [(r["chunk_id"], r["sent_text"]) for r in records]
+            rows = await asyncio.to_thread(_run)
+            result: Dict[str, List[str]] = {}
+            for cid, text in rows:
+                result.setdefault(cid, []).append(text)
+            return result
+
+        try:
+            # Run both queries in parallel
+            results, chunk_sentences = await asyncio.gather(
+                _fetch_chunk_meta(),
+                _fetch_sentences(),
+            )
         except Exception as e:
             logger.warning("route7_fetch_chunks_failed", error=str(e))
             return []
+
+        # Attach sentence_texts to results
+        for r in results:
+            r["sentence_texts"] = chunk_sentences.get(r.get("chunk_id", ""), [])
 
         # ── Build focused 3-sentence windows ──
         # If entity_names given, for each chunk find sentences containing

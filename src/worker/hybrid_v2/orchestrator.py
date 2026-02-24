@@ -1402,8 +1402,6 @@ class HybridPipeline:
                 "precision_level": "high",
                 "route_description": "Thematic with community matching + Graph relationships + HippoRAG PPR",
                 "bm25_phrase": bm25_phrase_metadata,
-                "section_boost": section_boost_metadata,
-                "shares_entity_boost": shares_entity_metadata,
                 "ppr_detail_recovery": ppr_metadata,
                 **({"coverage_retrieval": coverage_metadata} if coverage_metadata else {}),
                 **({"timings_ms": {**timings_ms, "route_3_total_ms": int((time.perf_counter() - t_route0) * 1000)}} if enable_timings else {}),

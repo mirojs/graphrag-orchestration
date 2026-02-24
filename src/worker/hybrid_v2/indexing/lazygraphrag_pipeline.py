@@ -2647,9 +2647,8 @@ Output:
                             # If drop fails, try via low-level query (handles FAILED jobs)
                             logger.warning(f"Standard drop failed, trying direct cleanup: {drop_err}")
                             try:
-                                with driver.session() as session:
-                                    session.run(f"CALL gds.graph.drop('{projection_name}', false)")
-                                    logger.info(f"🧹 Force-dropped projection via query: {projection_name}")
+                                gds.run_cypher(f"CALL gds.graph.drop('{projection_name}', false)")
+                                logger.info(f"🧹 Force-dropped projection via query: {projection_name}")
                             except Exception as force_err:
                                 logger.warning(f"Could not force-drop projection: {force_err}")
             except Exception as e:

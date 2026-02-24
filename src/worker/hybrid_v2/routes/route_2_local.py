@@ -21,13 +21,16 @@ Note: No HippoRAG in this route - entities are explicit in the query.
 import asyncio
 import os
 import time
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 
 import structlog
 
 from src.core.config import settings
 from ..services.neo4j_retry import retry_session
 from .base import BaseRouteHandler, RouteResult, Citation
+
+if TYPE_CHECKING:
+    from src.worker.hybrid_v2.embeddings import VoyageEmbedService
 
 logger = structlog.get_logger(__name__)
 

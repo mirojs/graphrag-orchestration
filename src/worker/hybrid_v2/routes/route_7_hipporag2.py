@@ -806,7 +806,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         driver = self.neo4j_driver
 
         def _run():
-            with retry_session(driver) as session:
+            with retry_session(driver, read_only=True) as session:
                 records = session.run(
                     cypher,
                     group_id=group_id,
@@ -920,7 +920,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             driver = self.neo4j_driver
 
             def _run_sentence():
-                with retry_session(driver) as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         sentence_cypher,
                         embedding=query_embedding,
@@ -961,7 +961,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         try:
             def _run_chunk():
-                with retry_session(driver) as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         chunk_cypher,
                         embedding=query_embedding,
@@ -1018,7 +1018,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             driver = self.neo4j_driver
 
             def _run():
-                with retry_session(driver) as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         chunk_ids=chunk_ids,
@@ -1153,6 +1153,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             cypher = """
             UNWIND $community_ids AS cid
             MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(c:Community {id: cid})
+            WHERE $folder_id IS NULL
+               OR EXISTS {
+                 MATCH (e)<-[:MENTIONS]-(:TextChunk {group_id: $group_id})
+                       -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+                       -[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+               }
             RETURN e.id AS entity_id, e.name AS entity_name, c.id AS community_id
             ORDER BY e.degree DESC
             LIMIT 15
@@ -1163,6 +1169,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     cypher,
                     community_ids=community_ids,
                     group_id=self.group_id,
+                    folder_id=self.folder_id,
                 )
                 records = await result.data()
 
@@ -1237,7 +1244,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             driver = self.neo4j_driver
 
             def _run_search():
-                with retry_session(driver) as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,

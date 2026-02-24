@@ -26,6 +26,7 @@ from typing import Dict, Any, List, Optional
 import structlog
 
 from src.core.config import settings
+from ..services.neo4j_retry import retry_session
 from .base import BaseRouteHandler, RouteResult, Citation
 
 logger = structlog.get_logger(__name__)
@@ -57,10 +58,6 @@ class LocalSearchHandler(BaseRouteHandler):
     """
 
     ROUTE_NAME = "route_2_local_search"
-
-    def _is_v2_enabled(self) -> bool:
-        """Check if Voyage embeddings are available (API key present)."""
-        return bool(settings.VOYAGE_API_KEY)
 
     async def _get_query_embedding(self, query: str):
         """Get query embedding using Voyage voyage-context-3."""
@@ -448,10 +445,10 @@ class LocalSearchHandler(BaseRouteHandler):
         sentence_results = []
         try:
             # Run sync Neo4j query in executor to avoid blocking
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def _run_query():
-                with self.neo4j_driver.session() as session:
+                with retry_session(self.neo4j_driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
@@ -635,10 +632,10 @@ class LocalSearchHandler(BaseRouteHandler):
         
         traversal_results = []
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             
             def _run_traversal():
-                with self.neo4j_driver.session() as session:
+                with retry_session(self.neo4j_driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,

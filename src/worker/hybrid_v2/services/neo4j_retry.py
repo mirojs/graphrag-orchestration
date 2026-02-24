@@ -149,10 +149,15 @@ class RetrySession:
     ``session.execute_write()`` automatically retries on transient errors
     (the Neo4j driver calls ``exception.is_retryable()``).  By default we
     route through ``execute_write`` which is safe for both reads and writes.
+
+    When ``read_only=True``, uses ``execute_read()`` instead — enables
+    routing to read replicas in a cluster and is semantically correct
+    for retrieval queries.
     """
 
-    def __init__(self, session):
+    def __init__(self, session, read_only: bool = False):
         self._session = session
+        self._read_only = read_only
 
     def run(self, query, parameters=None, **kwargs):
         """Execute a Cypher query with automatic retry via managed transaction."""
@@ -170,12 +175,14 @@ class RetrySession:
                 pass
             return records, keys
 
+        executor = self._session.execute_read if self._read_only else self._session.execute_write
+        label = "execute_read" if self._read_only else "execute_write"
         try:
-            records, keys = self._session.execute_write(_tx_func)
+            records, keys = executor(_tx_func)
             return _EagerResult(records, keys)
         except Exception as e:
             q_preview = str(query)[:80].replace("\n", " ")
-            logger.debug("Neo4j execute_write failed: %s | query: %s", e, q_preview)
+            logger.debug("Neo4j %s failed: %s | query: %s", label, e, q_preview)
             raise
 
     def __getattr__(self, name: str) -> Any:
@@ -191,10 +198,15 @@ class RetrySession:
 # ── Async Retry Session ─────────────────────────────────────────────────────
 
 class AsyncRetrySession:
-    """Wraps a Neo4j ``AsyncSession``, routing ``.run()`` through managed transactions."""
+    """Wraps a Neo4j ``AsyncSession``, routing ``.run()`` through managed transactions.
 
-    def __init__(self, session):
+    When ``read_only=True``, uses ``execute_read()`` instead of
+    ``execute_write()`` — enables routing to read replicas in a cluster.
+    """
+
+    def __init__(self, session, read_only: bool = False):
         self._session = session
+        self._read_only = read_only
 
     async def run(self, query, parameters=None, **kwargs):
         """Execute a Cypher query with automatic retry via managed transaction."""
@@ -211,12 +223,14 @@ class AsyncRetrySession:
                 pass
             return records, keys
 
+        executor = self._session.execute_read if self._read_only else self._session.execute_write
+        label = "execute_read" if self._read_only else "execute_write"
         try:
-            records, keys = await self._session.execute_write(_tx_func)
+            records, keys = await executor(_tx_func)
             return _AsyncEagerResult(records, keys)
         except Exception as e:
             q_preview = str(query)[:80].replace("\n", " ")
-            logger.debug("Neo4j async execute_write failed: %s | query: %s", e, q_preview)
+            logger.debug("Neo4j async %s failed: %s | query: %s", label, e, q_preview)
             raise
 
     def __getattr__(self, name: str) -> Any:
@@ -232,28 +246,38 @@ class AsyncRetrySession:
 # ── Context Manager Helpers ──────────────────────────────────────────────────
 
 @contextmanager
-def retry_session(driver, database: Optional[str] = None):
+def retry_session(driver, database: Optional[str] = None, read_only: bool = False):
     """Context manager yielding a retry-enabled sync Neo4j session.
 
     Drop-in replacement for ``with driver.session(database=db) as s:``.
-    Uses ``session.execute_write()`` internally for automatic transient-error
-    retry (Neo4j driver native mechanism).
+    Uses managed transactions internally for automatic transient-error retry.
+
+    Args:
+        driver: Neo4j driver instance.
+        database: Optional database name.
+        read_only: If True, use ``execute_read()`` instead of ``execute_write()``.
+                   Preferred for retrieval queries — enables read-replica routing.
     """
     kwargs = {}
     if database is not None:
         kwargs["database"] = database
     with driver.session(**kwargs) as session:
-        yield RetrySession(session)
+        yield RetrySession(session, read_only=read_only)
 
 
 @asynccontextmanager
-async def async_retry_session(driver, database: Optional[str] = None):
+async def async_retry_session(driver, database: Optional[str] = None, read_only: bool = False):
     """Context manager yielding a retry-enabled async Neo4j session.
 
     Drop-in replacement for ``async with driver.session(database=db) as s:``.
+
+    Args:
+        driver: Neo4j driver instance.
+        database: Optional database name.
+        read_only: If True, use ``execute_read()`` instead of ``execute_write()``.
     """
     kwargs = {}
     if database is not None:
         kwargs["database"] = database
     async with driver.session(**kwargs) as session:
-        yield AsyncRetrySession(session)
+        yield AsyncRetrySession(session, read_only=read_only)

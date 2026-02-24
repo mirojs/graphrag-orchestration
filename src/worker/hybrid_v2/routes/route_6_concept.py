@@ -33,6 +33,7 @@ import structlog
 
 from .base import BaseRouteHandler, Citation, RouteResult
 from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT
+from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
 
@@ -613,12 +614,12 @@ class ConceptSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
             folder_id = self.folder_id
 
             def _run_search():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
@@ -787,11 +788,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
 
             def _run_expansion():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         seed_ids=seed_ids,
@@ -921,11 +922,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
 
             def _run_search():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         query_embedding=query_embedding,
@@ -1008,11 +1009,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
 
             def _run():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         group_id=group_id,
@@ -1178,7 +1179,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
             documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             rr_result = await loop.run_in_executor(
                 self._executor,
                 lambda: vc.rerank(

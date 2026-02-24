@@ -44,6 +44,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from .base import BaseRouteHandler, Citation, RouteResult
+from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
 
@@ -185,7 +186,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
         # Await NER + sentence search (community match is inside resolve_all_tiers)
         entity_seed_names, sentence_evidence = await asyncio.gather(
-            ner_task, sentence_task
+            ner_task, sentence_task, return_exceptions=True
         )
 
         # Handle exceptions from tasks
@@ -704,11 +705,11 @@ class UnifiedSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
 
             def _run_search():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
@@ -857,7 +858,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                 for ev in evidence
             ]
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             rr_result = await loop.run_in_executor(
                 self._executor,
                 lambda: vc.rerank(
@@ -928,12 +929,12 @@ class UnifiedSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
             group_id = self.group_id
 
             def _run_query():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(cypher, group_id=group_id, folder_id=self.folder_id)
                     return [dict(r) for r in records]
 

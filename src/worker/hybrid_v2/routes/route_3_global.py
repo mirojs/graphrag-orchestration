@@ -29,6 +29,7 @@ import structlog
 
 from .base import BaseRouteHandler, Citation, RouteResult
 from .route_3_prompts import MAP_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT_CONCISE
+from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
 
@@ -421,11 +422,11 @@ class GlobalSearchHandler(BaseRouteHandler):
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
 
             def _run_search():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
@@ -873,7 +874,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
             documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             rr_result = await loop.run_in_executor(
                 self._executor,
                 lambda: vc.rerank(

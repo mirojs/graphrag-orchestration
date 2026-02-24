@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import structlog
 
+from ..services.neo4j_retry import retry_session
+
 if TYPE_CHECKING:
     from ..orchestrator import HybridPipeline
 
@@ -226,12 +228,12 @@ class BaseRouteHandler:
         """
 
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
             group_id = self.group_id
 
             def _run():
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     result = session.run(query, group_id=group_id, doc_ids=doc_ids)
                     return list(result)
 
@@ -433,7 +435,7 @@ class BaseRouteHandler:
         driver = self.neo4j_driver  # Local ref for closure
 
         def _run_sync():
-            with driver.session() as session:
+            with retry_session(driver) as session:
                 session.run(
                     "CREATE FULLTEXT INDEX textchunk_fulltext IF NOT EXISTS "
                     "FOR (c:TextChunk) ON EACH [c.text]"
@@ -526,7 +528,7 @@ class BaseRouteHandler:
             if folder_id:
                 params["folder_id"] = folder_id
                 
-            with driver.session() as session:
+            with retry_session(driver, read_only=True) as session:
                 for r in session.run(q, **params):
                     chunk = {
                         "id": r["id"],
@@ -654,7 +656,7 @@ class BaseRouteHandler:
 
             rows = []
             try:
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     params = dict(
                         bm25_query=bm25_query,
                         embedding=embedding,
@@ -756,7 +758,7 @@ class BaseRouteHandler:
 
             rows = []
             try:
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     params = dict(
                         search_query=search_query,
                         group_id=group_id,
@@ -877,7 +879,7 @@ class BaseRouteHandler:
             
             rows = []
             try:
-                with driver.session() as session:
+                with retry_session(driver, read_only=True) as session:
                     regex_pattern = f'(?i).*({term_pattern}).*'
                     
                     params = {
@@ -1013,7 +1015,7 @@ class BaseRouteHandler:
         )
         metadata_map: Dict[str, Dict[str, Any]] = {}
         try:
-            with self.neo4j_driver.session() as session:
+            with retry_session(self.neo4j_driver, read_only=True) as session:
                 result = session.run(query, ids=list(text_chunk_ids), group_id=self.group_id)
                 for record in result:
                     raw = record["metadata"]

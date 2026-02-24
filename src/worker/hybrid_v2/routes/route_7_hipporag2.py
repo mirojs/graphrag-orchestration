@@ -446,9 +446,10 @@ class HippoRAG2Handler(BaseRouteHandler):
                         "in that document.",
                         "[---] = merely referenced (address, job site, invoice "
                         "recipient).",
-                        "When answering about parties/organizations, include "
-                        "ONLY [PARTY_TO] entries or entries whose context "
-                        "clearly shows a signatory role.",
+                        "The context sentence after each entry shows the "
+                        "entity's actual contractual role (e.g. owner, "
+                        "builder, agent). Use ONLY that context to determine "
+                        "roles — do NOT rely on signature-block titles.",
                         "",
                     ]
                     for (ent_name, ent_type), rows in entity_groups.items():
@@ -703,14 +704,14 @@ class HippoRAG2Handler(BaseRouteHandler):
 
     @staticmethod
     def _extract_sentence_context(
-        entity_name: str, chunk_text: str, max_chars: int = 300
+        entity_name: str, chunk_text: str, max_chars: int = 500
     ) -> str:
-        """Extract the full sentence containing the entity mention.
+        """Extract a 3-sentence window around the entity mention.
 
-        Scans backward/forward from the entity position for sentence
-        boundaries (``.  ?  !  \\n``).  Returns the containing sentence
-        capped at *max_chars*.  Falls back to the first *max_chars* of
-        the chunk when the entity is not found.
+        Finds the sentence containing the entity, then includes ±1
+        adjacent sentences for anaphora and role context.  Returns the
+        window capped at *max_chars*.  Falls back to the first
+        *max_chars* of the chunk when the entity is not found.
         """
         if not chunk_text:
             return ""
@@ -719,36 +720,46 @@ class HippoRAG2Handler(BaseRouteHandler):
         if idx < 0:
             return chunk_text[:max_chars].strip()
 
-        # Scan backward for sentence start
-        sent_start = 0
-        for i in range(idx - 1, -1, -1):
-            if chunk_text[i] in ".?!\n" and i < idx - 1:
-                sent_start = i + 1
+        # ── Split chunk into sentences ──
+        import re
+        # Split on sentence-ending punctuation followed by whitespace
+        sent_spans: list[tuple[int, int]] = []
+        for m in re.finditer(r'[^.!?\n]+(?:[.!?]+|\n|$)', chunk_text):
+            s, e = m.start(), m.end()
+            if m.group().strip():
+                sent_spans.append((s, e))
+
+        if not sent_spans:
+            return chunk_text[:max_chars].strip()
+
+        # Find which sentence contains the entity
+        target_idx = 0
+        for i, (s, e) in enumerate(sent_spans):
+            if s <= idx < e:
+                target_idx = i
                 break
 
-        # Scan forward for sentence end
-        entity_end = idx + len(entity_name)
-        sent_end = len(chunk_text)
-        for i in range(entity_end, len(chunk_text)):
-            if chunk_text[i] in ".?!\n":
-                sent_end = i + 1  # include punctuation
-                break
+        # ±1 sentence window
+        win_start = max(0, target_idx - 1)
+        win_end = min(len(sent_spans), target_idx + 2)
 
-        sentence = chunk_text[sent_start:sent_end].strip()
+        window_text = chunk_text[
+            sent_spans[win_start][0]:sent_spans[win_end - 1][1]
+        ].strip()
 
         # Truncate if too long, keeping entity visible
-        if len(sentence) > max_chars:
-            entity_pos = idx - sent_start
+        if len(window_text) > max_chars:
+            entity_pos = idx - sent_spans[win_start][0]
             half = max_chars // 2
             t_start = max(0, entity_pos - half)
-            t_end = min(len(sentence), t_start + max_chars)
-            sentence = sentence[t_start:t_end].strip()
+            t_end = min(len(window_text), t_start + max_chars)
+            window_text = window_text[t_start:t_end].strip()
             if t_start > 0:
-                sentence = "..." + sentence
-            if t_end < len(chunk_text[sent_start:sent_end].strip()):
-                sentence = sentence + "..."
+                window_text = "..." + window_text
+            if t_end < len(window_text):
+                window_text = window_text + "..."
 
-        return sentence
+        return window_text
 
     async def _query_entity_doc_map(
         self,

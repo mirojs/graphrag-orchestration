@@ -19,9 +19,11 @@ Used in: Route 3 (Global Search Equivalent) - V1 only
 """
 
 from typing import List, Dict, Any, Optional, Tuple
+import asyncio
 import structlog
 
 from .enhanced_graph_retriever import EnhancedGraphRetriever
+from ..services.neo4j_retry import retry_session, async_retry_session
 
 logger = structlog.get_logger(__name__)
 
@@ -189,7 +191,7 @@ class HubExtractor:
             RETURN e.name as name, e.id as id, degree
             """
             
-            async with self.neo4j_driver.session() as session:
+            async with async_retry_session(self.neo4j_driver, read_only=True) as session:
                 result = await session.run(
                     query,
                     community_id=community_id,
@@ -197,7 +199,7 @@ class HubExtractor:
                     group_id=self.group_id,
                 )
                 records = await result.data()
-            
+
             hubs = [r.get("name") or r.get("id") for r in records if r]
             
             logger.info("neo4j_hub_query_success",
@@ -244,11 +246,10 @@ class HubExtractor:
             """
             
             # Use sync driver with run_in_executor for async compatibility
-            import asyncio
-            loop = asyncio.get_event_loop()
-            
+            loop = asyncio.get_running_loop()
+
             def _sync_query():
-                with self.neo4j_driver.session() as session:
+                with retry_session(self.neo4j_driver, read_only=True) as session:
                     result = session.run(
                         query,
                         top_k=top_k,
@@ -284,8 +285,7 @@ class HubExtractor:
             return []
         
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             
             # Build folder filter if folder_id is set
             folder_filter = ""
@@ -296,7 +296,7 @@ class HubExtractor:
             # Support both Entity and __Entity__ labels for compatibility
             # Includes alias support for flexible entity matching
             def _sync_query():
-                with self.neo4j_driver.session() as session:
+                with retry_session(self.neo4j_driver, read_only=True) as session:
                     result = session.run(f"""
                         UNWIND $entity_names AS entity_name
                         MATCH (c:TextChunk)-[:MENTIONS]->(e)
@@ -386,7 +386,7 @@ class HubExtractor:
             LIMIT $top_k
             """
             
-            async with self.neo4j_driver.session() as session:
+            async with async_retry_session(self.neo4j_driver, read_only=True) as session:
                 result = await session.run(query, top_k=top_k, group_id=self.group_id)
                 records = await result.data()
             

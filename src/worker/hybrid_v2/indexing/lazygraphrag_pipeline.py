@@ -1039,34 +1039,33 @@ class LazyGraphRAGIndexingPipeline:
         # This ensures re-indexing doesn't leave orphan edges from changed/deleted sentences.
         # Match on both source and method properties for backward compatibility
         # (edges created before Feb 12 2026 only had source, not method).
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
+        result = await self.neo4j_store.arun_query(
+            """
                 MATCH (:Sentence {group_id: $group_id})-[r:RELATED_TO]->(:Sentence)
                 WHERE r.source = 'knn_sentence' OR r.method = 'knn_sentence'
                 DELETE r
                 RETURN count(r) AS deleted
                 """,
-                group_id=group_id,
-            )
-            deleted = result.single()["deleted"]
-            if deleted > 0:
-                logger.info(f"step_4.2_cleanup: deleted {deleted} stale RELATED_TO edges")
+            group_id=group_id,
+        )
+        deleted = result.single()["deleted"]
+        if deleted > 0:
+            logger.info(f"step_4.2_cleanup: deleted {deleted} stale RELATED_TO edges")
         
         # Fetch all sentences with embeddings for this group
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
+        result = await self.neo4j_store.arun_query(
+            """
                 MATCH (s:Sentence {group_id: $group_id})
                 WHERE s.embedding_v2 IS NOT NULL
                 RETURN s.id AS id, s.chunk_id AS chunk_id, s.embedding_v2 AS embedding
                 """,
-                group_id=group_id,
-            )
-            sentences = [
-                {"id": record["id"], "chunk_id": record["chunk_id"], "embedding": record["embedding"]}
-                for record in result
-            ]
+            read_only=True,
+            group_id=group_id,
+        )
+        sentences = [
+            {"id": record["id"], "chunk_id": record["chunk_id"], "embedding": record["embedding"]}
+            for record in result
+        ]
         
         if len(sentences) < 2:
             return {"edges_created": 0, "reason": "insufficient_sentences"}
@@ -2210,7 +2209,7 @@ Output:
                 }
             )
             
-            with self.neo4j_store.get_retry_session() as session:
+            def _write_di_metadata(session):
                 # 1. Create Barcode nodes and FOUND_IN edges
                 if barcodes:
                     barcode_data = []
@@ -2226,7 +2225,7 @@ Output:
                             "entity_type": bc.get("entity_type", "BARCODE"),
                             "doc_id": doc_id,
                         })
-                    
+
                     result = session.run(
                         """
                         UNWIND $barcodes AS bc
@@ -2392,7 +2391,9 @@ Output:
                         count = result.single()["count"]
                         stats["kvps_created"] += count
                         logger.info(f"🔑 Created {count} KeyValuePair nodes for {doc_id}")
-        
+
+            await self.neo4j_store.arun_in_session(_write_di_metadata)
+
         # 6. Generate embeddings for Figure captions and KVP searchable text
         # Then use GDS KNN to create SIMILAR_TO edges with Entity nodes
         embedding_stats = await self._generate_di_node_embeddings_and_knn(group_id=group_id)
@@ -2452,7 +2453,7 @@ Output:
             "kvps_processed": 0,
         }
         
-        with self.neo4j_store.get_retry_session() as session:
+        def _read_di_nodes(session):
             # 1. Get Figure nodes needing embeddings (have caption, no embedding_v2)
             figure_result = session.run(
                 """
@@ -2463,8 +2464,8 @@ Output:
                 """,
                 group_id=group_id,
             )
-            figures_to_embed = [{"id": r["id"], "text": r["text"]} for r in figure_result]
-            
+            figures_to_embed_inner = [{"id": r["id"], "text": r["text"]} for r in figure_result]
+
             # 2. Get KVP nodes needing embeddings
             kvp_result = session.run(
                 """
@@ -2475,7 +2476,10 @@ Output:
                 """,
                 group_id=group_id,
             )
-            kvps_to_embed = [{"id": r["id"], "text": r["text"]} for r in kvp_result]
+            kvps_to_embed_inner = [{"id": r["id"], "text": r["text"]} for r in kvp_result]
+            return figures_to_embed_inner, kvps_to_embed_inner
+
+        figures_to_embed, kvps_to_embed = await self.neo4j_store.arun_in_session(_read_di_nodes, read_only=True)
         
         # 3. Generate embeddings for all nodes
         all_nodes = figures_to_embed + kvps_to_embed
@@ -2505,7 +2509,7 @@ Output:
             if (kvp_start_idx + i) < len(embeddings) and embeddings[kvp_start_idx + i]
         ]
         
-        with self.neo4j_store.get_retry_session() as session:
+        def _write_di_embeddings(session):
             if fig_updates:
                 session.run("""
                     UNWIND $updates AS u
@@ -2514,7 +2518,7 @@ Output:
                 """, updates=fig_updates, group_id=group_id)
             stats["figures_processed"] = len(fig_updates)
             stats["embeddings_created"] += len(fig_updates)
-            
+
             if kvp_updates:
                 session.run("""
                     UNWIND $updates AS u
@@ -2523,6 +2527,8 @@ Output:
                 """, updates=kvp_updates, group_id=group_id)
             stats["kvps_processed"] = len(kvp_updates)
             stats["embeddings_created"] += len(kvp_updates)
+
+        await self.neo4j_store.arun_in_session(_write_di_embeddings)
         
         logger.info(f"✅ Generated {stats['embeddings_created']} embeddings for DI nodes")
         
@@ -2749,7 +2755,7 @@ Output:
                 if n1 < n2:  # Pre-filter dedup (symmetric similarity)
                     edge_batch.append({"node1": n1, "node2": n2, "similarity": float(row["similarity"])})
             
-            with self.neo4j_store.get_retry_session() as session:
+            def _write_knn_edges(session):
                 if edge_batch:
                     if knn_config:
                         result = session.run("""
@@ -2778,10 +2784,12 @@ Output:
                     edges_created = result.single()["cnt"]
                 else:
                     edges_created = 0
-                
+
                 stats["knn_edges"] = edges_created
                 config_msg = f" (config={knn_config})" if knn_config else ""
                 logger.info(f"🔗 GDS KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges created{config_msg}")
+
+            await self.neo4j_store.arun_in_session(_write_knn_edges)
             
             # 4. Run Louvain community detection
             logger.info(f"🏘️ Running GDS Louvain community detection...")
@@ -2795,16 +2803,18 @@ Output:
                 updates.append({"nodeId": node_id, "communityId": community_id})
                 community_ids.add(community_id)
             
-            with self.neo4j_store.get_retry_session() as session:
+            def _write_louvain(session):
                 if updates:
                     session.run("""
                         UNWIND $updates AS u
                         MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
                         SET n.community_id = u.communityId
                     """, updates=updates, group_id=group_id)
-                
+
                 stats["communities"] = len(community_ids)
                 logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
+
+            await self.neo4j_store.arun_in_session(_write_louvain)
             
             # 5. Run PageRank
             logger.info(f"📈 Running GDS PageRank...")
@@ -2815,16 +2825,18 @@ Output:
                 for _, row in pagerank_df.iterrows()
             ]
             
-            with self.neo4j_store.get_retry_session() as session:
+            def _write_pagerank(session):
                 if pr_updates:
                     session.run("""
                         UNWIND $updates AS u
                         MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
                         SET n.pagerank = u.score
                     """, updates=pr_updates, group_id=group_id)
-                
+
                 stats["pagerank_nodes"] = len(pr_updates)
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
+
+            await self.neo4j_store.arun_in_session(_write_pagerank)
             
             # 6. Cleanup
             gds.graph.drop(projection_name)
@@ -2907,9 +2919,8 @@ Output:
         RETURN cid, members
         ORDER BY size(members) DESC
         """
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(community_query, group_id=group_id, min_size=min_community_size)
-            community_groups = [(record["cid"], record["members"]) for record in result]
+        result = await self.neo4j_store.arun_query(community_query, read_only=True, group_id=group_id, min_size=min_community_size)
+        community_groups = [(record["cid"], record["members"]) for record in result]
 
         if not community_groups:
             logger.info("⏭️  No Louvain communities with >= %d members found", min_community_size)
@@ -2997,9 +3008,8 @@ Output:
         LIMIT 50
         """
         relationships = []
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(rel_query, group_id=group_id, community_id=community_id)
-            relationships = [dict(record) for record in result]
+        result = await self.neo4j_store.arun_query(rel_query, read_only=True, group_id=group_id, community_id=community_id)
+        relationships = [dict(record) for record in result]
 
         # Build entity list (sorted by pagerank descending)
         entity_lines = []
@@ -3415,7 +3425,7 @@ SUMMARY: <summary>"""
         # Create Section nodes via Neo4j
         section_data = list(all_sections.values())
         
-        with self.neo4j_store.get_retry_session() as session:
+        def _write_section_graph(session):
             # Create sections
             result = session.run(
                 """
@@ -3432,7 +3442,7 @@ SUMMARY: <summary>"""
                 sections=section_data,
             )
             sections_created = result.single()["count"]
-            
+
             # Create HAS_SECTION edges (Document -> top-level Section)
             top_level = [
                 {"doc_id": s["doc_id"], "section_id": s["id"]}
@@ -3450,7 +3460,7 @@ SUMMARY: <summary>"""
                     edges=top_level,
                     group_id=group_id,
                 )
-            
+
             # Create SUBSECTION_OF edges (child -> parent)
             subsection_edges = []
             for s in section_data:
@@ -3462,7 +3472,7 @@ SUMMARY: <summary>"""
                             "child_id": s["id"],
                             "parent_id": parent["id"],
                         })
-            
+
             if subsection_edges:
                 session.run(
                     """
@@ -3473,13 +3483,13 @@ SUMMARY: <summary>"""
                     """,
                     edges=subsection_edges,
                 )
-            
+
             # Create IN_SECTION edges (TextChunk -> leaf Section)
             in_section_edges = [
                 {"chunk_id": chunk_id, "section_id": section_id}
                 for chunk_id, section_id in chunk_to_leaf_section.items()
             ]
-            
+
             in_section_count = 0
             batch_size = 1000
             for i in range(0, len(in_section_edges), batch_size):
@@ -3495,6 +3505,9 @@ SUMMARY: <summary>"""
                     edges=batch,
                 )
                 in_section_count += result.single()["count"]
+            return sections_created, in_section_count
+
+        sections_created, in_section_count = await self.neo4j_store.arun_in_session(_write_section_graph)
         
         logger.info(
             "section_graph_built",
@@ -3536,26 +3549,26 @@ SUMMARY: <summary>"""
             return {"sections_embedded": 0, "skipped": "no_embedder"}
         
         # Fetch sections with their linked chunk texts
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
+        result = await self.neo4j_store.arun_query(
+            """
                 MATCH (s:Section {group_id: $group_id})
                 WHERE s.embedding IS NULL
                 OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
                 WITH s, collect(t.text)[0..3] AS chunk_texts
                 RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key, chunk_texts
                 """,
-                group_id=group_id,
-            )
-            sections_to_embed = [
-                {
-                    "id": record["section_id"],
-                    "title": record["title"] or "",
-                    "path_key": record["path_key"] or "",
-                    "chunk_texts": record["chunk_texts"] or [],
-                }
-                for record in result
-            ]
+            read_only=True,
+            group_id=group_id,
+        )
+        sections_to_embed = [
+            {
+                "id": record["section_id"],
+                "title": record["title"] or "",
+                "path_key": record["path_key"] or "",
+                "chunk_texts": record["chunk_texts"] or [],
+            }
+            for record in result
+        ]
         
         if not sections_to_embed:
             return {"sections_embedded": 0}
@@ -3585,16 +3598,15 @@ SUMMARY: <summary>"""
             if emb is not None
         ]
         
-        with self.neo4j_store.get_retry_session() as session:
-            session.run(
-                """
-                UNWIND $updates AS u
-                MATCH (s:Section {id: u.id, group_id: $group_id})
-                SET s.embedding = u.embedding
-                """,
-                updates=updates,
-                group_id=group_id,
-            )
+        await self.neo4j_store.arun_query(
+            """
+            UNWIND $updates AS u
+            MATCH (s:Section {id: u.id, group_id: $group_id})
+            SET s.embedding = u.embedding
+            """,
+            updates=updates,
+            group_id=group_id,
+        )
         
         logger.info(
             "section_nodes_embedded",
@@ -3626,30 +3638,30 @@ SUMMARY: <summary>"""
             return {"sections_summarised": 0, "skipped": "no_llm"}
 
         # Fetch sections without summaries, with their chunk text
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
-                MATCH (s:Section {group_id: $group_id})
-                WHERE s.summary IS NULL
-                OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
-                WITH s, collect(t.text)[0..6] AS chunk_texts
-                WHERE size(chunk_texts) > 0
-                RETURN s.id AS section_id,
-                       s.title AS title,
-                       s.path_key AS path_key,
-                       chunk_texts
-                """,
-                group_id=group_id,
-            )
-            sections = [
-                {
-                    "id": record["section_id"],
-                    "title": record["title"] or "",
-                    "path_key": record["path_key"] or "",
-                    "chunk_texts": record["chunk_texts"] or [],
-                }
-                for record in result
-            ]
+        result = await self.neo4j_store.arun_query(
+            """
+            MATCH (s:Section {group_id: $group_id})
+            WHERE s.summary IS NULL
+            OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
+            WITH s, collect(t.text)[0..6] AS chunk_texts
+            WHERE size(chunk_texts) > 0
+            RETURN s.id AS section_id,
+                   s.title AS title,
+                   s.path_key AS path_key,
+                   chunk_texts
+            """,
+            read_only=True,
+            group_id=group_id,
+        )
+        sections = [
+            {
+                "id": record["section_id"],
+                "title": record["title"] or "",
+                "path_key": record["path_key"] or "",
+                "chunk_texts": record["chunk_texts"] or [],
+            }
+            for record in result
+        ]
 
         if not sections:
             return {"sections_summarised": 0}
@@ -3700,8 +3712,7 @@ SUMMARY: <summary>"""
         BATCH = 200
         for i in range(0, len(updates), BATCH):
             batch = updates[i : i + BATCH]
-            with self.neo4j_store.get_retry_session() as session:
-                session.run(
+            await self.neo4j_store.arun_query(
                     """
                     UNWIND $updates AS u
                     MATCH (s:Section {id: u.id, group_id: $group_id})
@@ -3752,25 +3763,25 @@ SUMMARY: <summary>"""
             return {"sections_embedded": 0, "skipped": "no_embedder"}
         
         # Fetch sections without structural embeddings (include summary if present)
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
-                MATCH (s:Section {group_id: $group_id})
-                WHERE s.structural_embedding IS NULL
-                RETURN s.id AS section_id, s.title AS title,
-                       s.path_key AS path_key, s.summary AS summary
-                """,
-                group_id=group_id,
-            )
-            sections_to_embed = [
-                {
-                    "id": record["section_id"],
-                    "title": record["title"] or "",
-                    "path_key": record["path_key"] or "",
-                    "summary": record["summary"] or "",
-                }
-                for record in result
-            ]
+        result = await self.neo4j_store.arun_query(
+            """
+            MATCH (s:Section {group_id: $group_id})
+            WHERE s.structural_embedding IS NULL
+            RETURN s.id AS section_id, s.title AS title,
+                   s.path_key AS path_key, s.summary AS summary
+            """,
+            read_only=True,
+            group_id=group_id,
+        )
+        sections_to_embed = [
+            {
+                "id": record["section_id"],
+                "title": record["title"] or "",
+                "path_key": record["path_key"] or "",
+                "summary": record["summary"] or "",
+            }
+            for record in result
+        ]
         
         if not sections_to_embed:
             return {"sections_embedded": 0}
@@ -3805,16 +3816,15 @@ SUMMARY: <summary>"""
             if emb is not None
         ]
         
-        with self.neo4j_store.get_retry_session() as session:
-            session.run(
-                """
-                UNWIND $updates AS u
-                MATCH (s:Section {id: u.id, group_id: $group_id})
-                SET s.structural_embedding = u.embedding
-                """,
-                updates=updates,
-                group_id=group_id,
-            )
+        await self.neo4j_store.arun_query(
+            """
+            UNWIND $updates AS u
+            MATCH (s:Section {id: u.id, group_id: $group_id})
+            SET s.structural_embedding = u.embedding
+            """,
+            updates=updates,
+            group_id=group_id,
+        )
         
         logger.info(
             "section_structural_nodes_embedded",
@@ -3850,19 +3860,19 @@ SUMMARY: <summary>"""
             Stats dict with edges_created count
         """
         # Fetch all sections with embeddings
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
-                MATCH (s:Section {group_id: $group_id})
-                WHERE s.embedding IS NOT NULL
-                RETURN s.id AS id, s.doc_id AS doc_id, s.embedding AS embedding
-                """,
-                group_id=group_id,
-            )
-            sections = [
-                {"id": record["id"], "doc_id": record["doc_id"], "embedding": record["embedding"]}
-                for record in result
-            ]
+        result = await self.neo4j_store.arun_query(
+            """
+            MATCH (s:Section {group_id: $group_id})
+            WHERE s.embedding IS NOT NULL
+            RETURN s.id AS id, s.doc_id AS doc_id, s.embedding AS embedding
+            """,
+            read_only=True,
+            group_id=group_id,
+        )
+        sections = [
+            {"id": record["id"], "doc_id": record["doc_id"], "embedding": record["embedding"]}
+            for record in result
+        ]
         
         if len(sections) < 2:
             return {"edges_created": 0, "reason": "insufficient_sections"}
@@ -3916,20 +3926,19 @@ SUMMARY: <summary>"""
             return {"edges_created": 0}
         
         # Create SEMANTICALLY_SIMILAR edges in Neo4j
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
-                UNWIND $edges AS e
-                MATCH (s1:Section {id: e.source_id, group_id: $group_id})
-                MATCH (s2:Section {id: e.target_id, group_id: $group_id})
-                MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
-                SET r.similarity = e.similarity, r.group_id = $group_id, r.created_at = datetime()
-                RETURN count(r) AS count
-                """,
-                edges=edges_to_create,
-                group_id=group_id,
-            )
-            edges_created = result.single()["count"]
+        result = await self.neo4j_store.arun_query(
+            """
+            UNWIND $edges AS e
+            MATCH (s1:Section {id: e.source_id, group_id: $group_id})
+            MATCH (s2:Section {id: e.target_id, group_id: $group_id})
+            MERGE (s1)-[r:SEMANTICALLY_SIMILAR]->(s2)
+            SET r.similarity = e.similarity, r.group_id = $group_id, r.created_at = datetime()
+            RETURN count(r) AS count
+            """,
+            edges=edges_to_create,
+            group_id=group_id,
+        )
+        edges_created = result.single()["count"]
         
         logger.info(
             "section_similarity_edges_created",
@@ -3962,25 +3971,25 @@ SUMMARY: <summary>"""
             return {"kvps_total": 0, "unique_keys": 0, "keys_embedded": 0, "skipped": "no_embedder"}
         
         # Fetch all KeyValue nodes without embeddings
-        with self.neo4j_store.get_retry_session() as session:
-            result = session.run(
-                """
-                MATCH (kv:KeyValue {group_id: $group_id})
-                WHERE kv.key_embedding IS NULL
-                RETURN kv.id AS id, kv.key AS key
-                """,
-                group_id=group_id,
-            )
-            kvps_to_embed = [{"id": record["id"], "key": record["key"]} for record in result]
-        
+        result = await self.neo4j_store.arun_query(
+            """
+            MATCH (kv:KeyValue {group_id: $group_id})
+            WHERE kv.key_embedding IS NULL
+            RETURN kv.id AS id, kv.key AS key
+            """,
+            read_only=True,
+            group_id=group_id,
+        )
+        kvps_to_embed = [{"id": record["id"], "key": record["key"]} for record in result]
+
         if not kvps_to_embed:
             # Count total KVPs for stats
-            with self.neo4j_store.get_retry_session() as session:
-                result = session.run(
-                    "MATCH (kv:KeyValue {group_id: $group_id}) RETURN count(kv) AS count",
-                    group_id=group_id,
-                )
-                total = result.single()["count"]
+            result = await self.neo4j_store.arun_query(
+                "MATCH (kv:KeyValue {group_id: $group_id}) RETURN count(kv) AS count",
+                read_only=True,
+                group_id=group_id,
+            )
+            total = result.single()["count"]
             return {"kvps_total": total, "unique_keys": 0, "keys_embedded": 0}
         
         # Deduplicate keys (case-insensitive) for efficient batch embedding
@@ -4013,16 +4022,15 @@ SUMMARY: <summary>"""
             return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0}
         
         # Update KeyValue nodes with embeddings
-        with self.neo4j_store.get_retry_session() as session:
-            session.run(
-                """
-                UNWIND $updates AS u
-                MATCH (kv:KeyValue {id: u.id, group_id: $group_id})
-                SET kv.key_embedding = u.key_embedding
-                """,
-                updates=updates,
-                group_id=group_id,
-            )
+        await self.neo4j_store.arun_query(
+            """
+            UNWIND $updates AS u
+            MATCH (kv:KeyValue {id: u.id, group_id: $group_id})
+            SET kv.key_embedding = u.key_embedding
+            """,
+            updates=updates,
+            group_id=group_id,
+        )
         
         logger.info(
             "keyvalue_keys_embedded",
@@ -4065,7 +4073,7 @@ SUMMARY: <summary>"""
             "has_hub_entity": 0,
         }
         
-        with self.neo4j_store.get_retry_session() as session:
+        def _write_foundation(session):
             # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
             # Phase B: Sentences reach Section via PART_OF→TextChunk→IN_SECTION
             result = session.run(
@@ -4084,8 +4092,8 @@ SUMMARY: <summary>"""
                 """,
                 group_id=group_id,
             )
-            stats["appears_in_section"] = result.single()["count"]
-            
+            s = {"appears_in_section": result.single()["count"]}
+
             # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
             result = session.run(
                 """
@@ -4106,8 +4114,8 @@ SUMMARY: <summary>"""
                 """,
                 group_id=group_id,
             )
-            stats["appears_in_document"] = result.single()["count"]
-            
+            s["appears_in_document"] = result.single()["count"]
+
             # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
             result = session.run(
                 """
@@ -4130,7 +4138,10 @@ SUMMARY: <summary>"""
                 """,
                 group_id=group_id,
             )
-            stats["has_hub_entity"] = result.single()["count"]
+            s["has_hub_entity"] = result.single()["count"]
+            return s
+
+        stats = await self.neo4j_store.arun_in_session(_write_foundation)
         
         logger.info(
             "foundation_edges_created",
@@ -4162,38 +4173,37 @@ SUMMARY: <summary>"""
             "shares_entity": 0,
         }
         
-        with self.neo4j_store.get_retry_session() as session:
-            # Create SHARES_ENTITY edges (Section ↔ Section)
-            # Connects sections that discuss the same entities across documents
-            # Threshold: at least 2 shared entities to reduce noise
-            result = session.run(
-                """
-                // Resolve src→Section via PART_OF→TextChunk→IN_SECTION for Sentences
-                MATCH (src1)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2)
-                WHERE e.group_id = $group_id
-                  AND (src1:Sentence OR src1:TextChunk)
-                  AND (src2:Sentence OR src2:TextChunk)
-                OPTIONAL MATCH (src1)-[:IN_SECTION]->(s1d:Section {group_id: $group_id})
-                OPTIONAL MATCH (src1)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s1p:Section {group_id: $group_id})
-                OPTIONAL MATCH (src2)-[:IN_SECTION]->(s2d:Section {group_id: $group_id})
-                OPTIONAL MATCH (src2)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s2p:Section {group_id: $group_id})
-                WITH coalesce(s1d, s1p) AS s1, coalesce(s2d, s2p) AS s2, e
-                WHERE s1 IS NOT NULL AND s2 IS NOT NULL
-                  AND s1 <> s2
-                  AND s1.doc_id <> s2.doc_id  // Cross-document only
-                WITH s1, s2, collect(DISTINCT e.name) AS shared_entities, count(DISTINCT e) AS shared_count
-                WHERE shared_count >= 2  // Threshold: at least 2 shared entities
-                MERGE (s1)-[r:SHARES_ENTITY]->(s2)
-                SET r.shared_entities = shared_entities[0..10],
-                    r.shared_count = shared_count,
-                    r.similarity_boost = shared_count * 0.1,
-                    r.group_id = $group_id,
-                    r.created_at = datetime()
-                RETURN count(r) AS count
-                """,
-                group_id=group_id,
-            )
-            stats["shares_entity"] = result.single()["count"]
+        # Create SHARES_ENTITY edges (Section ↔ Section)
+        # Connects sections that discuss the same entities across documents
+        # Threshold: at least 2 shared entities to reduce noise
+        result = await self.neo4j_store.arun_query(
+            """
+            // Resolve src→Section via PART_OF→TextChunk→IN_SECTION for Sentences
+            MATCH (src1)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2)
+            WHERE e.group_id = $group_id
+              AND (src1:Sentence OR src1:TextChunk)
+              AND (src2:Sentence OR src2:TextChunk)
+            OPTIONAL MATCH (src1)-[:IN_SECTION]->(s1d:Section {group_id: $group_id})
+            OPTIONAL MATCH (src1)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s1p:Section {group_id: $group_id})
+            OPTIONAL MATCH (src2)-[:IN_SECTION]->(s2d:Section {group_id: $group_id})
+            OPTIONAL MATCH (src2)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s2p:Section {group_id: $group_id})
+            WITH coalesce(s1d, s1p) AS s1, coalesce(s2d, s2p) AS s2, e
+            WHERE s1 IS NOT NULL AND s2 IS NOT NULL
+              AND s1 <> s2
+              AND s1.doc_id <> s2.doc_id  // Cross-document only
+            WITH s1, s2, collect(DISTINCT e.name) AS shared_entities, count(DISTINCT e) AS shared_count
+            WHERE shared_count >= 2  // Threshold: at least 2 shared entities
+            MERGE (s1)-[r:SHARES_ENTITY]->(s2)
+            SET r.shared_entities = shared_entities[0..10],
+                r.shared_count = shared_count,
+                r.similarity_boost = shared_count * 0.1,
+                r.group_id = $group_id,
+                r.created_at = datetime()
+            RETURN count(r) AS count
+            """,
+            group_id=group_id,
+        )
+        stats["shares_entity"] = result.single()["count"]
         
         logger.info(
             "connectivity_edges_created",

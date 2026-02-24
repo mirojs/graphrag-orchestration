@@ -187,14 +187,36 @@ class Neo4jStoreV3:
             logger.info(f"Connected to Neo4j at {self.uri}")
         return self._driver
     
-    def get_retry_session(self):
+    def get_retry_session(self, read_only: bool = False):
         """Return a context manager that yields a retry-enabled sync session.
 
         Drop-in replacement for ``with self.driver.session(database=...) as s:``.
         Retries on TransientError, ServiceUnavailable, SessionExpired with
         exponential backoff (3 attempts, 1-30 s).
         """
-        return retry_session(self.driver, database=self.database)
+        return retry_session(self.driver, database=self.database, read_only=read_only)
+
+    async def arun_query(self, query, *, read_only: bool = False, **params):
+        """Run a single Cypher query off the event loop via thread pool.
+
+        Returns an ``_EagerResult`` supporting ``.single()``, iteration, etc.
+        Use ``read_only=True`` for pure-read queries to enable read-replica routing.
+        """
+        def _sync():
+            with self.get_retry_session(read_only=read_only) as session:
+                return session.run(query, **params)
+        return await asyncio.to_thread(_sync)
+
+    async def arun_in_session(self, func, *, read_only: bool = False):
+        """Run ``func(session)`` off the event loop via thread pool.
+
+        Use for multi-query operations that need to share a single session.
+        ``func`` receives a ``RetrySession`` and should return any result.
+        """
+        def _sync():
+            with self.get_retry_session(read_only=read_only) as session:
+                return func(session)
+        return await asyncio.to_thread(_sync)
 
     def close(self):
         """Close the Neo4j driver."""

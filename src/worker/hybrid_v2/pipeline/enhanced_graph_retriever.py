@@ -1037,7 +1037,7 @@ class EnhancedGraphRetriever:
         fallback_query = f"""
                 UNWIND $entity_names AS entity_name
                 WITH entity_name, $group_id AS group_id, $max_per_entity AS max_per_entity, $probe_limit AS probe_limit
-                CALL db.index.fulltext.queryNodes('textchunk_fulltext', entity_name, {{limit: probe_limit}})
+                CALL db.index.fulltext.queryNodes('sentence_fulltext', entity_name, {{limit: probe_limit}})
                     YIELD node AS t, score
                 WHERE t.group_id = group_id
                 OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)

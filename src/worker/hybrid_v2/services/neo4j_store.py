@@ -281,7 +281,6 @@ class Neo4jStoreV3:
             "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
             "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (c:Community) REQUIRE c.id IS UNIQUE",
             "CREATE CONSTRAINT raptor_id IF NOT EXISTS FOR (r:RaptorNode) REQUIRE r.id IS UNIQUE",
-            "CREATE CONSTRAINT chunk_id IF NOT EXISTS FOR (t:TextChunk) REQUIRE t.id IS UNIQUE",
             "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
 
             # Determinism: chunk-level extraction cache
@@ -313,7 +312,6 @@ class Neo4jStoreV3:
             # Document lifecycle indexes (deprecation queries)
             "CREATE INDEX document_deprecated_at IF NOT EXISTS FOR (d:Document) ON (d.deprecated_at)",
             "CREATE INDEX entity_deprecated_at IF NOT EXISTS FOR (e:Entity) ON (e.deprecated_at)",
-            "CREATE INDEX chunk_deprecated_at IF NOT EXISTS FOR (t:TextChunk) ON (t.deprecated_at)",
             "CREATE INDEX groupmeta_gds_stale IF NOT EXISTS FOR (g:GroupMeta) ON (g.gds_stale)",
             
             # Full-text index for hybrid search (keyword matching)
@@ -321,7 +319,6 @@ class Neo4jStoreV3:
             "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)",
             "CREATE INDEX raptor_group IF NOT EXISTS FOR (r:RaptorNode) ON (r.group_id)",
             "CREATE INDEX raptor_level IF NOT EXISTS FOR (r:RaptorNode) ON (r.level)",
-            "CREATE INDEX chunk_group IF NOT EXISTS FOR (t:TextChunk) ON (t.group_id)",
             "CREATE INDEX document_group IF NOT EXISTS FOR (d:Document) ON (d.group_id)",
         ]
         
@@ -362,14 +359,6 @@ class Neo4jStoreV3:
                 `vector.similarity_function`: 'cosine'
             }}
             """,
-            """
-            CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
-            FOR (t:TextChunk) ON (t.embedding)
-            OPTIONS {indexConfig: {
-                `vector.dimensions`: 3072,
-                `vector.similarity_function`: 'cosine'
-            }}
-            """,
             # V2: Entity embeddings with Voyage (2048-dim)
             # WITH [e.group_id] enables SEARCH clause pre-filtering for group isolation
             """
@@ -391,18 +380,7 @@ class Neo4jStoreV3:
                 `vector.similarity_function`: 'cosine'
             }}
             """,
-            # V2: TextChunk embeddings with Voyage (2048-dim)
-            """
-            CREATE VECTOR INDEX chunk_embeddings_v2 IF NOT EXISTS
-            FOR (t:TextChunk) ON (t.embedding_v2)
-            WITH [t.group_id]
-            OPTIONS {indexConfig: {
-                `vector.dimensions`: 2048,
-                `vector.similarity_function`: 'cosine'
-            }}
-            """,
-            # Skeleton: Sentence-level embeddings with Voyage (2048-dim)
-            # Used by Route 2 skeleton enrichment (Strategy A) for sentence-level retrieval
+            # Sentence-level embeddings with Voyage (2048-dim)
             """
             CREATE VECTOR INDEX sentence_embeddings_v2 IF NOT EXISTS
             FOR (s:Sentence) ON (s.embedding_v2)
@@ -627,7 +605,7 @@ class Neo4jStoreV3:
 
         This creates/updates the following properties on entity nodes:
         - `degree`: number of relationships
-        - `chunk_count`: number of TextChunks that mention the entity
+        - `chunk_count`: number of Sentences that mention the entity
         - `importance_score`: weighted score used for ranking
 
         Note: This is best-effort and should not fail indexing.
@@ -1214,7 +1192,7 @@ class Neo4jStoreV3:
         query = """
         MATCH (r:RaptorNode {id: $raptor_id, group_id: $group_id})
         // Traverse down to chunks
-        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk {group_id: $group_id})
+        MATCH (r)<-[:SUMMARIZES*1..]-(c:Sentence {group_id: $group_id})
         // Find entities in these chunks
         MATCH (c)-[:MENTIONS]->(e:Entity {group_id: $group_id})
         RETURN DISTINCT e
@@ -1243,7 +1221,7 @@ class Neo4jStoreV3:
         MATCH (r:RaptorNode {group_id: $group_id})
         WHERE r.id IN $raptor_ids
         // Traverse down to chunks
-        MATCH (r)<-[:SUMMARIZES*1..]-(c:TextChunk {group_id: $group_id})
+        MATCH (r)<-[:SUMMARIZES*1..]-(c:Sentence {group_id: $group_id})
         // Find entities in these chunks
         MATCH (c)-[:MENTIONS]->(e:Entity {group_id: $group_id})
         // Find communities these entities belong to
@@ -1271,10 +1249,10 @@ class Neo4jStoreV3:
     def get_entity_raptor_context(self, group_id: str, entity_id: str) -> Optional[RaptorNode]:
         """
         Get the parent RAPTOR node for an entity to provide thematic context.
-        Traverses: Entity <- MENTIONS - TextChunk - SUMMARIZES -> RaptorNode
+        Traverses: Entity <- MENTIONS - Sentence - SUMMARIZES -> RaptorNode
         """
         query = """
-        MATCH (e:Entity {id: $entity_id, group_id: $group_id})<-[:MENTIONS]-(c:TextChunk)-[:SUMMARIZES]->(r:RaptorNode)
+        MATCH (e:Entity {id: $entity_id, group_id: $group_id})<-[:MENTIONS]-(c:Sentence)-[:SUMMARIZES]->(r:RaptorNode)
         WHERE c.group_id = $group_id AND r.group_id = $group_id
         RETURN r
         ORDER BY r.level ASC
@@ -1312,7 +1290,7 @@ class Neo4jStoreV3:
         
         WITH r
         UNWIND $child_ids AS child_id
-        OPTIONAL MATCH (tc:TextChunk {id: child_id, group_id: $group_id})
+        OPTIONAL MATCH (tc:Sentence {id: child_id, group_id: $group_id})
         FOREACH (_ IN CASE WHEN tc IS NOT NULL THEN [1] ELSE [] END | MERGE (tc)-[:SUMMARIZES]->(r))
         OPTIONAL MATCH (rn:RaptorNode {id: child_id, group_id: $group_id})
         FOREACH (_ IN CASE WHEN rn IS NOT NULL THEN [1] ELSE [] END | MERGE (rn)-[:SUMMARIZES]->(r))

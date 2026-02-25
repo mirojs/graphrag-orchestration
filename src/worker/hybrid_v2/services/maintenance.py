@@ -198,7 +198,7 @@ class MaintenanceService:
                 WITH total_docs, active_docs, count(d) AS deprecated_docs
                 
                 // Chunk count
-                OPTIONAL MATCH (c:TextChunk {group_id: $group_id})
+                OPTIONAL MATCH (c:Sentence {group_id: $group_id})
                 WITH total_docs, active_docs, deprecated_docs, count(c) AS total_chunks
                 
                 // Entity counts
@@ -209,7 +209,7 @@ class MaintenanceService:
                 OPTIONAL MATCH (e:Entity {group_id: $group_id})
                 WHERE NOT e:Deprecated
                   AND NOT EXISTS {
-                      MATCH (e)<-[:MENTIONS]-(c:TextChunk)
+                      MATCH (e)<-[:MENTIONS]-(c:Sentence)
                       WHERE NOT c:Deprecated
                   }
                 WITH total_docs, active_docs, deprecated_docs, total_chunks, total_entities,
@@ -230,7 +230,7 @@ class MaintenanceService:
                 // Isolation violations (nodes without group_id)
                 OPTIONAL MATCH (n)
                 WHERE n.group_id IS NULL
-                  AND (n:Entity OR n:TextChunk OR n:Document OR n:Section)
+                  AND (n:Entity OR n:Sentence OR n:Document OR n:Section)
                 WITH total_docs, active_docs, deprecated_docs, total_chunks, total_entities,
                      orphan_entities, stale_edges, g, count(n) AS isolation_violations
                 
@@ -311,7 +311,7 @@ class MaintenanceService:
                     MATCH (e:Entity {group_id: $group_id})
                     WHERE NOT e:Deprecated
                       AND NOT EXISTS {
-                          MATCH (e)<-[:MENTIONS]-(c:TextChunk)
+                          MATCH (e)<-[:MENTIONS]-(c:Sentence)
                           WHERE NOT c:Deprecated
                       }
                     RETURN count(e) AS orphan_count
@@ -327,7 +327,7 @@ class MaintenanceService:
                     MATCH (e:Entity {group_id: $group_id})
                     WHERE NOT e:Deprecated
                       AND NOT EXISTS {
-                          MATCH (e)<-[:MENTIONS]-(c:TextChunk)
+                          MATCH (e)<-[:MENTIONS]-(c:Sentence)
                           WHERE NOT c:Deprecated
                       }
                     SET e:Deprecated,
@@ -391,7 +391,7 @@ class MaintenanceService:
                     """
                     MATCH (n {group_id: $group_id})
                     WHERE n:Deprecated
-                      AND (n:TextChunk OR n:Entity)
+                      AND (n:Sentence OR n:Entity)
                       AND (n.embedding IS NOT NULL OR n.embedding_v2 IS NOT NULL)
                     RETURN count(n) AS vector_count
                     """,
@@ -404,7 +404,7 @@ class MaintenanceService:
                     """
                     MATCH (n {group_id: $group_id})
                     WHERE n:Deprecated
-                      AND (n:TextChunk OR n:Entity)
+                      AND (n:Sentence OR n:Entity)
                       AND (n.embedding IS NOT NULL OR n.embedding_v2 IS NOT NULL)
                     SET n.embedding = null,
                         n.embedding_v2 = null,
@@ -474,7 +474,7 @@ class MaintenanceService:
                 """
                 MATCH (n)
                 WHERE n.group_id IS NULL
-                  AND (n:Entity OR n:TextChunk OR n:Document OR n:Section OR n:Table OR n:Figure OR n:KeyValue)
+                  AND (n:Entity OR n:Sentence OR n:Document OR n:Section OR n:Table OR n:Figure OR n:KeyValue)
                 WITH labels(n)[0] AS label, n
                 LIMIT 10000
                 RETURN label, count(n) AS count

@@ -1351,7 +1351,7 @@ class LazyGraphRAGIndexingPipeline:
                     name=name,
                     type=node_labels[0] if node_labels else "CONCEPT",
                     description=str(props.get("description", "") or ""),
-                    embedding=None,
+                    embedding_v2=None,
                     metadata=props,
                     text_unit_ids=[],
                     aliases=aliases_list,
@@ -1488,7 +1488,7 @@ class LazyGraphRAGIndexingPipeline:
                         name=name,
                         type=getattr(kn, "label", None) or (kn.get("label") if isinstance(kn, dict) else None) or "CONCEPT",
                         description="",
-                        embedding=None,
+                        embedding_v2=None,
                         metadata={},
                         text_unit_ids=[],
                     )
@@ -2690,8 +2690,7 @@ SUMMARY: <summary>"""
             merged_desc = ""
             merged_type = "CONCEPT"
             merged_meta: Dict[str, Any] = {}
-            merged_emb = None
-            merged_emb_v2 = None  # V2: Also track embedding_v2
+            merged_emb_v2 = None
 
             for m in members:
                 id_remap[m.id] = canon_id
@@ -2703,8 +2702,6 @@ SUMMARY: <summary>"""
                     merged_desc = m.description
                 merged_type = m.type or merged_type
                 merged_meta.update(m.metadata or {})
-                # V1: Copy embedding property
-                pass  # V1 embedding removed
                 # V2: Copy embedding_v2 property (Voyage embeddings)
                 if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:
                     merged_emb_v2 = m.embedding_v2
@@ -2714,8 +2711,7 @@ SUMMARY: <summary>"""
                 name=canon_name,
                 type=merged_type,
                 description=merged_desc,
-                embedding=merged_emb,
-                embedding_v2=merged_emb_v2,  # V2: Include Voyage embeddings
+                embedding_v2=merged_emb_v2,
                 metadata=merged_meta,
                 text_unit_ids=sorted(merged_text_units),
                 aliases=sorted(merged_aliases),  # Include merged aliases

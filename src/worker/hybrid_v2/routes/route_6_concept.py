@@ -600,8 +600,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             RETURN sent, score
         }}
 
-        // Get parent chunk + document + section context
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        // Get document + section context
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
 
@@ -616,7 +615,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                sent.section_path AS section_path,
                sec.path_key AS section_key,
                sent.page AS page,
-               chunk.text AS chunk_text,
+               sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
                score,
@@ -776,7 +775,6 @@ class ConceptSearchHandler(BaseRouteHandler):
         WITH expanded, count(DISTINCT e) AS shared_entity_count
         WHERE shared_entity_count >= $min_overlap
 
-        OPTIONAL MATCH (expanded)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (expanded)-[:IN_DOCUMENT]->(doc:Document)
         OPTIONAL MATCH (expanded)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (expanded)-[:NEXT]->(next_sent:Sentence)
@@ -789,7 +787,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                expanded.section_path AS section_path,
                sec.path_key AS section_key,
                expanded.page AS page,
-               chunk.text AS chunk_text,
+               expanded.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
                shared_entity_count,
@@ -1006,7 +1004,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         folder_id = self.folder_id
 
         cypher = """
-        MATCH (e:Entity {group_id: $group_id})<-[:MENTIONS]-(c:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        MATCH (e:Entity {group_id: $group_id})<-[:MENTIONS]-(s:Sentence {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
 
         // R6-1 pattern: folder scope filter (no-op when $folder_id IS NULL)
         WITH e, d

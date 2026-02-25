@@ -689,9 +689,8 @@ class UnifiedSearchHandler(BaseRouteHandler):
             RETURN sent, score
         }
 
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        WITH sent, score, chunk, doc
+        WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
@@ -702,7 +701,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                sent.source AS source,
                sent.section_path AS section_path,
                sent.page AS page,
-               chunk.text AS chunk_text,
+               sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
                score,
@@ -903,7 +902,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
     async def _retrieve_signature_chunks(
         self,
     ) -> List[Dict[str, Any]]:
-        """Fetch parent TextChunks that contain signature_party sentences.
+        """Fetch sentences from signature blocks.
 
         Signature blocks carry entity names and dates critical for
         cross-document entity tracking and date extraction.  Vector
@@ -911,28 +910,26 @@ class UnifiedSearchHandler(BaseRouteHandler):
         allocation may deprioritize them when the entity has many chunks
         across multiple documents.
 
-        Uses two strategies:
-          1. Graph traversal: Sentence{source="signature_party"}→PART_OF→TextChunk
-          2. Content fallback: TextChunks containing signature-block text
-             patterns (catches chunks where source tagging was missed)
+        Queries Sentence nodes directly — uses source='signature_party'
+        tag (new pipeline) with content-pattern fallback (legacy data).
         """
         if not self.neo4j_driver:
             return []
 
-        # Strategy 1: graph-based (Sentence source tag → parent chunk)
-        # Strategy 2: content-based (text patterns in chunks themselves)
-        # Combined into a single query using OR to catch both
+        # Query Sentence nodes: tagged source OR content-pattern fallback
         cypher = """
-        MATCH (chunk:TextChunk {group_id: $group_id})-[:IN_DOCUMENT]->(doc:Document)
-        WHERE (chunk.text CONTAINS 'Authorized Representative'
-           OR chunk.text CONTAINS 'Signed this')
-          AND ($folder_id IS NULL OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id}))
-        RETURN DISTINCT chunk.id AS chunk_id,
-               chunk.text AS text,
+        MATCH (sent:Sentence {group_id: $group_id})-[:IN_DOCUMENT]->(doc:Document)
+        WHERE sent.source = 'signature_party'
+           OR sent.text CONTAINS 'Authorized Representative'
+           OR sent.text CONTAINS 'Signed this'
+        WITH sent, doc
+        WHERE $folder_id IS NULL OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+        RETURN DISTINCT sent.id AS chunk_id,
+               sent.text AS text,
                doc.title AS document_title,
                doc.id AS document_id,
-               chunk.section_path AS section_path,
-               chunk.page AS page
+               coalesce(sent.section_path, '') AS section_path,
+               sent.page AS page
         """
 
         try:

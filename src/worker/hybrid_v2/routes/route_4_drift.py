@@ -1205,10 +1205,9 @@ Sub-questions:"""
             RETURN sent, score
         }
 
-        // Get parent chunk + document context
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        // Get document context
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        WITH sent, score, chunk, doc
+        WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
@@ -1221,7 +1220,7 @@ Sub-questions:"""
                sent.source AS source,
                sent.section_path AS section_path,
                sent.page AS page,
-               chunk.text AS chunk_text,
+               sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
                score,

@@ -431,10 +431,9 @@ class LocalSearchHandler(BaseRouteHandler):
             WHERE score >= $threshold
             RETURN sent, score
         }
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        WITH sent, score, chunk, sec, doc
+        WITH sent, score, sec, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         RETURN sent.id AS sentence_id,
@@ -445,7 +444,7 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.page AS page,
                sent.chunk_id AS chunk_id,
                sent.document_id AS document_id,
-               chunk.text AS chunk_text,
+               sent.parent_text AS chunk_text,
                doc.title AS document_title,
                sec.path_key AS section_key,
                score
@@ -616,11 +615,10 @@ class LocalSearchHandler(BaseRouteHandler):
         WITH DISTINCT entry.node AS sent, max(entry.score) AS final_score, 
              collect(DISTINCT entry.via) AS sources
         
-        // COLLECT: Parent chunk + document context
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
+        // COLLECT: Document context
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        WITH sent, final_score, sources, chunk, sec, doc
+        WITH sent, final_score, sources, sec, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
@@ -632,7 +630,7 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.page AS page,
                sent.chunk_id AS chunk_id,
                sent.document_id AS document_id,
-               chunk.text AS chunk_text,
+               sent.parent_text AS chunk_text,
                doc.title AS document_title,
                sec.path_key AS section_key,
                final_score AS score,

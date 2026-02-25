@@ -393,10 +393,7 @@ class BaseRouteHandler:
     # =========================================================================
 
     async def _ensure_textchunk_fulltext_index(self) -> None:
-        """Ensure the TextChunk fulltext index exists.
-
-        Uses an index name that won't collide with other schemas.
-        """
+        """Ensure the Sentence fulltext index exists."""
         if self.pipeline._textchunk_fulltext_index_checked:
             return
         self.pipeline._textchunk_fulltext_index_checked = True
@@ -409,8 +406,8 @@ class BaseRouteHandler:
         def _run_sync():
             with retry_session(driver) as session:
                 session.run(
-                    "CREATE FULLTEXT INDEX textchunk_fulltext IF NOT EXISTS "
-                    "FOR (c:TextChunk) ON EACH [c.text]"
+                    "CREATE FULLTEXT INDEX sentence_fulltext IF NOT EXISTS "
+                    "FOR (s:Sentence) ON EACH [s.text]"
                 )
 
         try:
@@ -471,7 +468,7 @@ class BaseRouteHandler:
                 folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
             
             q = f"""
-            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $query_text, {{limit: $candidate_k}})
+            CALL db.index.fulltext.queryNodes('sentence_fulltext', $query_text, {{limit: $candidate_k}})
             YIELD node, score
             WHERE node.group_id = $group_id
             OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
@@ -575,7 +572,7 @@ class BaseRouteHandler:
                  $vector_k AS vector_k, $rrf_k AS rrf_k, $top_k AS top_k
 
             CALL (bm25_query, group_id) {{
-                CALL db.index.fulltext.queryNodes('textchunk_fulltext', bm25_query)
+                CALL db.index.fulltext.queryNodes('sentence_fulltext', bm25_query)
                 YIELD node, score
                 WHERE node.group_id = group_id
                 WITH node, score ORDER BY score DESC LIMIT $bm25_k
@@ -587,7 +584,7 @@ class BaseRouteHandler:
                  embedding, group_id, vector_k, rrf_k, top_k
 
             CALL (embedding, group_id) {{
-                MATCH (node:TextChunk)
+                MATCH (node:Sentence)
                 SEARCH node IN (VECTOR INDEX {vector_index} FOR embedding WHERE node.group_id = group_id LIMIT $vector_k)
                 SCORE AS score
                 WITH collect(node) AS nodes
@@ -709,7 +706,7 @@ class BaseRouteHandler:
                 folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
 
             cypher = f"""
-            CALL db.index.fulltext.queryNodes('textchunk_fulltext', $search_query)
+            CALL db.index.fulltext.queryNodes('sentence_fulltext', $search_query)
             YIELD node AS chunk, score AS bm25_score
             WHERE chunk.group_id = $group_id
 
@@ -826,8 +823,8 @@ class BaseRouteHandler:
             WHERE e.name =~ $pattern
                OR any(a IN coalesce(e.aliases, []) WHERE a =~ $pattern)
             
-            // Route 2: Use direct TextChunk MENTIONS (propagated from Sentences at index time)
-            MATCH (t:TextChunk)-[:MENTIONS]->(e)
+            // Use Sentence MENTIONS for entity graph traversal
+            MATCH (t:Sentence)-[:MENTIONS]->(e)
             WHERE t.group_id = $group_id
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
             WITH t, d, e
@@ -838,7 +835,7 @@ class BaseRouteHandler:
             
             RETURN t.id AS id,
                    t.text AS text,
-                   t.chunk_index AS chunk_index,
+                   coalesce(t.chunk_index, t.index_in_doc, 0) AS chunk_index,
                    d.id AS document_id,
                    d.title AS document_title,
                    d.source AS document_source,
@@ -964,31 +961,16 @@ class BaseRouteHandler:
         if not chunk_ids_to_enrich:
             return
 
-        # Separate sentence IDs from TextChunk IDs
-        text_chunk_ids: set = set()
-        sentence_parent_map: Dict[str, str] = {}  # sent_chunk_id -> parent_chunk_id
-        for cid in chunk_ids_to_enrich:
-            m = re.match(r"^(.+)_sent_(\d+)$", cid)
-            if m:
-                parent_id = m.group(1)
-                sentence_parent_map[cid] = parent_id
-                text_chunk_ids.add(parent_id)
-            else:
-                text_chunk_ids.add(cid)
-
-        if not text_chunk_ids:
-            return
-
-        # Batch fetch metadata from Neo4j
+        # Batch fetch metadata from Sentence nodes
         query = (
-            "MATCH (t:TextChunk) "
-            "WHERE t.id IN $ids AND t.group_id = $group_id "
-            "RETURN t.id AS id, t.metadata AS metadata"
+            "UNWIND $ids AS tid "
+            "MATCH (s:Sentence {id: tid, group_id: $group_id}) "
+            "RETURN s.id AS id, s.metadata AS metadata"
         )
         metadata_map: Dict[str, Dict[str, Any]] = {}
         try:
             with retry_session(self.neo4j_driver, read_only=True) as session:
-                result = session.run(query, ids=list(text_chunk_ids), group_id=self.group_id)
+                result = session.run(query, ids=chunk_ids_to_enrich, group_id=self.group_id)
                 for record in result:
                     raw = record["metadata"]
                     meta: Dict[str, Any] = {}
@@ -1013,11 +995,7 @@ class BaseRouteHandler:
             cid = citation.chunk_id
             if not cid or cid.startswith("community_"):
                 continue
-            # For sentence citations, use parent chunk's metadata
-            if cid in sentence_parent_map:
-                meta = metadata_map.get(sentence_parent_map[cid], {})
-            else:
-                meta = metadata_map.get(cid, {})
+            meta = metadata_map.get(cid, {})
             if not meta:
                 continue
 

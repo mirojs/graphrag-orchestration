@@ -804,7 +804,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_id = self.group_id
         cypher = """
         MATCH (e:Entity {group_id: $group_id})
-              <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
+              <-[:MENTIONS]-(tc:Sentence {group_id: $group_id})
               -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
         WHERE e.type IN $entity_types
           AND ($folder_id IS NULL
@@ -814,7 +814,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
         WHERE r.rel_type IN $role_rel_types
           AND EXISTS {
-            MATCH (e2)<-[:MENTIONS]-(:TextChunk {group_id: $group_id})
+            MATCH (e2)<-[:MENTIONS]-(:Sentence {group_id: $group_id})
                   -[:IN_DOCUMENT]->(d)
           }
         WITH e, d, doc_mentions, doc_sample_chunk,
@@ -906,12 +906,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         top_k: int = 20,
         sentence_top_k: int = 60,
     ) -> List[Tuple[str, float]]:
-        """Dense Passage Retrieval via sentence-level vector search (Small-to-Big).
+        """Dense Passage Retrieval via sentence-level vector search.
 
-        Searches sentence_embeddings_v2 for sharp single-sentence matches,
-        then maps each sentence to its parent TextChunk via PART_OF.
-        Multiple sentences in the same chunk → take max score.
-        Falls back to chunk_embeddings_v2 if no sentence results.
+        Searches sentence_embeddings_v2 for sharp single-sentence matches.
+        Returns sentence IDs as passage nodes for PPR.
         """
         if not self.neo4j_driver:
             return []
@@ -919,18 +917,16 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_id = self.group_id
         folder_id = self.folder_id
 
-        # Step 1: Try sentence-level DPR (sharp, single-sentence embeddings)
         sentence_cypher = """CYPHER 25
         CALL () {
             MATCH (s:Sentence)
             SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
-            MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
-            OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-            WITH c, score, d
+            OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+            WITH s, score, d
             WHERE $folder_id IS NULL OR d IS NULL
                OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-            RETURN c.id AS chunk_id, score
+            RETURN s.id AS chunk_id, score
         }
         RETURN chunk_id, max(score) AS score
         ORDER BY score DESC
@@ -953,49 +949,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     return [(r["chunk_id"], r["score"]) for r in records]
 
             results = await asyncio.to_thread(_run_sentence)
-            if results:
-                logger.debug(
-                    "route7_dpr_sentence_complete", hits=len(results)
-                )
-                return results
-            logger.info("route7_dpr_sentence_empty_fallback_to_chunk")
-        except Exception as e:
-            logger.warning(
-                "route7_dpr_sentence_failed_fallback", error=str(e)
-            )
-
-        # Step 2: Fallback to chunk-level DPR (backward compat)
-        chunk_cypher = """CYPHER 25
-        CALL () {
-            MATCH (c:TextChunk)
-            SEARCH c IN (VECTOR INDEX chunk_embeddings_v2 FOR $embedding WHERE c.group_id = $group_id LIMIT $top_k)
-            SCORE AS score
-            OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-            WITH c, score, d
-            WHERE $folder_id IS NULL OR d IS NULL
-               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-            RETURN c.id AS chunk_id, score
-        }
-        RETURN chunk_id, score
-        ORDER BY score DESC
-        """
-
-        try:
-            def _run_chunk():
-                with retry_session(driver, read_only=True) as session:
-                    records = session.run(
-                        chunk_cypher,
-                        embedding=query_embedding,
-                        group_id=group_id,
-                        top_k=top_k,
-                        folder_id=folder_id,
-                    )
-                    return [(r["chunk_id"], r["score"]) for r in records]
-
-            results = await asyncio.to_thread(_run_chunk)
-            logger.debug(
-                "route7_dpr_chunk_fallback_complete", hits=len(results)
-            )
+            logger.debug("route7_dpr_sentence_complete", hits=len(results))
             return results
         except Exception as e:
             logger.warning("route7_dpr_failed", error=str(e))
@@ -1033,17 +987,18 @@ class HippoRAG2Handler(BaseRouteHandler):
         group_id = self.group_id
         driver = self.neo4j_driver
 
-        # ── Pass 1: Fast chunk metadata (no sentence join) ──
+        # ── Pass 1: Sentence metadata ──
         cypher_chunks = """
         UNWIND $chunk_ids AS cid
-        MATCH (c:TextChunk {id: cid, group_id: $group_id})
-        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
-        WITH c, d
+        MATCH (node:Sentence {id: cid, group_id: $group_id})
+        OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)
+        WITH cid, node, d
         WHERE $folder_id IS NULL OR d IS NULL
            OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-        OPTIONAL MATCH (c)-[:IN_SECTION]->(s:Section)
-        RETURN c.id AS chunk_id, c.text AS text,
-               c.chunk_index AS chunk_index,
+        OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
+        RETURN cid AS chunk_id,
+               coalesce(node.text, '') AS text,
+               coalesce(node.index_in_doc, 0) AS chunk_index,
                d.id AS document_id, d.title AS document_title,
                s.title AS section_title, s.id AS section_id
         """
@@ -1070,9 +1025,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                 return {}
             cypher_sents = """
             UNWIND $chunk_ids AS cid
-            MATCH (sent:Sentence {group_id: $group_id})-[:PART_OF]->(c:TextChunk {id: cid, group_id: $group_id})
-            RETURN c.id AS chunk_id, sent.text AS sent_text, sent.index_in_chunk AS idx
-            ORDER BY c.id, sent.index_in_chunk
+            MATCH (sent:Sentence {id: cid, group_id: $group_id})
+            RETURN sent.id AS chunk_id, sent.text AS sent_text, coalesce(sent.index_in_doc, 0) AS idx
+            ORDER BY chunk_id, idx
             """
             def _run():
                 with retry_session(driver, read_only=True) as session:
@@ -1094,11 +1049,10 @@ class HippoRAG2Handler(BaseRouteHandler):
                 return {}
             cypher_hits = """
             UNWIND $chunk_ids AS cid
-            MATCH (s:Sentence {group_id: $group_id})
-                  -[:PART_OF]->(c:TextChunk {id: cid, group_id: $group_id})
+            MATCH (s:Sentence {id: cid, group_id: $group_id})
             MATCH (s)-[:MENTIONS]->(e:Entity {group_id: $group_id})
             WHERE e.name IN $entity_names
-            RETURN c.id AS chunk_id, s.index_in_chunk AS idx
+            RETURN cid AS chunk_id, coalesce(s.index_in_doc, 0) AS idx
             """
             def _run():
                 with retry_session(driver, read_only=True) as session:
@@ -1338,7 +1292,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(c:Community {id: cid})
             WHERE $folder_id IS NULL
                OR EXISTS {
-                 MATCH (e)<-[:MENTIONS]-(:TextChunk {group_id: $group_id})
+                 MATCH (e)<-[:MENTIONS]-(:Sentence {group_id: $group_id})
                        -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
                        -[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
                }
@@ -1405,9 +1359,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             RETURN sent, score
         }
 
-        OPTIONAL MATCH (sent)-[:PART_OF]->(chunk:TextChunk)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
-        WITH sent, score, chunk, doc
+        WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
@@ -1416,7 +1369,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                sent.source AS source,
                sent.section_path AS section_path,
                sent.page AS page,
-               chunk.text AS chunk_text,
+               sent.parent_text AS chunk_text,
                doc.title AS document_title,
                doc.id AS document_id,
                score

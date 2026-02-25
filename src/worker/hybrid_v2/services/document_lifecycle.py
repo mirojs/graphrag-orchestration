@@ -55,6 +55,7 @@ class DeletionResult:
     group_id: str
     success: bool
     chunks_deleted: int
+    sentences_deleted: int
     sections_deleted: int
     entities_orphaned: int
     edges_deleted: int
@@ -304,6 +305,7 @@ class DocumentLifecycleService:
         errors = []
         stats = {
             "chunks_deleted": 0,
+            "sentences_deleted": 0,
             "sections_deleted": 0,
             "entities_orphaned": 0,
             "edges_deleted": 0,
@@ -340,39 +342,46 @@ class DocumentLifecycleService:
                         // Step 3: Delete document and chunks
                         OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
                         WITH d, had_folder, chunk_ids, chunk_count, orphaned_entities, collect(c) AS chunks_to_delete
-                        
+
+                        // Collect Sentence nodes linked to these chunks
+                        OPTIONAL MATCH (sent:Sentence)-[:PART_OF]->(c2:TextChunk)
+                        WHERE c2 IN chunks_to_delete
+                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, collect(DISTINCT sent) AS sentences_to_delete
+
                         // Delete sections
                         OPTIONAL MATCH (s:Section {doc_id: d.id, group_id: $group_id})
-                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, collect(s) AS sections_to_delete
-                        
+                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, sentences_to_delete, collect(s) AS sections_to_delete
+
                         // Delete tables, figures, KVPs linked to document
                         OPTIONAL MATCH (t:Table)-[:IN_DOCUMENT]->(d)
                         OPTIONAL MATCH (f:Figure)-[:IN_DOCUMENT]->(d)
                         OPTIONAL MATCH (k:KeyValue)-[:IN_DOCUMENT]->(d)
-                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, sections_to_delete,
+                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, sentences_to_delete, sections_to_delete,
                              collect(DISTINCT t) AS tables_to_delete,
                              collect(DISTINCT f) AS figures_to_delete,
                              collect(DISTINCT k) AS kvps_to_delete
-                        
+
                         // Count edges to delete
                         OPTIONAL MATCH (oe:Entity)-[r]-() WHERE oe IN orphaned_entities
-                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, sections_to_delete,
+                        WITH d, had_folder, chunk_count, orphaned_entities, chunks_to_delete, sentences_to_delete, sections_to_delete,
                              tables_to_delete, figures_to_delete, kvps_to_delete, count(DISTINCT r) AS edge_count
-                        
+
                         // Perform deletions (DETACH DELETE removes all relationships including IN_FOLDER)
                         DETACH DELETE d
                         FOREACH (c IN chunks_to_delete | DETACH DELETE c)
+                        FOREACH (sent IN sentences_to_delete | DETACH DELETE sent)
                         FOREACH (s IN sections_to_delete | DETACH DELETE s)
                         FOREACH (t IN tables_to_delete | DETACH DELETE t)
                         FOREACH (f IN figures_to_delete | DETACH DELETE f)
                         FOREACH (k IN kvps_to_delete | DETACH DELETE k)
                         FOREACH (oe IN orphaned_entities | DETACH DELETE oe)
-                        
+
                         // Mark group stale
                         MERGE (g:GroupMeta {group_id: $group_id})
                         SET g.gds_stale = true, g.gds_stale_since = datetime()
-                        
+
                         RETURN chunk_count,
+                               size(sentences_to_delete) AS sentence_count,
                                size(sections_to_delete) AS section_count,
                                size(orphaned_entities) AS orphan_count,
                                edge_count,
@@ -388,18 +397,23 @@ class DocumentLifecycleService:
                         MATCH (d:Document {id: $doc_id, group_id: $group_id})
                         OPTIONAL MATCH (d)-[folder_rel:IN_FOLDER]->(:Folder)
                         OPTIONAL MATCH (c:TextChunk)-[:PART_OF|IN_DOCUMENT]->(d)
+                        WITH d, folder_rel IS NOT NULL AS had_folder,
+                             count(c) AS chunk_count, collect(c) AS chunks
+                        OPTIONAL MATCH (sent:Sentence)-[:PART_OF]->(c2:TextChunk)
+                        WHERE c2 IN chunks
+                        WITH d, had_folder, chunk_count, chunks, collect(DISTINCT sent) AS sentences
                         OPTIONAL MATCH (s:Section {doc_id: d.id, group_id: $group_id})
-                        WITH d, folder_rel IS NOT NULL AS had_folder, 
-                             count(c) AS chunk_count, count(s) AS section_count, 
-                             collect(c) AS chunks, collect(s) AS sections
+                        WITH d, had_folder, chunk_count, chunks, sentences, count(s) AS section_count, collect(s) AS sections
                         DETACH DELETE d
                         FOREACH (c IN chunks | DETACH DELETE c)
+                        FOREACH (sent IN sentences | DETACH DELETE sent)
                         FOREACH (s IN sections | DETACH DELETE s)
-                        
+
                         MERGE (g:GroupMeta {group_id: $group_id})
                         SET g.gds_stale = true, g.gds_stale_since = datetime()
-                        
-                        RETURN chunk_count, section_count, 0 AS orphan_count, 0 AS edge_count, had_folder AS folder_unlinked
+
+                        RETURN chunk_count, size(sentences) AS sentence_count, section_count,
+                               0 AS orphan_count, 0 AS edge_count, had_folder AS folder_unlinked
                         """,
                         doc_id=document_id,
                         group_id=group_id,
@@ -408,6 +422,7 @@ class DocumentLifecycleService:
                 record = result.single()
                 if record:
                     stats["chunks_deleted"] = record["chunk_count"] or 0
+                    stats["sentences_deleted"] = record.get("sentence_count", 0) or 0
                     stats["sections_deleted"] = record["section_count"] or 0
                     stats["entities_orphaned"] = record["orphan_count"] or 0
                     stats["edges_deleted"] = record["edge_count"] or 0

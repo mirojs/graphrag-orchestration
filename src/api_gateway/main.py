@@ -17,6 +17,7 @@ from src.api_gateway.routers import (
     health, graphrag, orchestration, hybrid, document_analysis, knowledge_map,
     config, folders, chat,
     spa, files, chat_history, file_metadata, speech,
+    documents,
 )
 from src.api_gateway.routers.admin import router as admin_router
 from src.api_gateway.routers.dashboard import router as dashboard_router
@@ -335,6 +336,7 @@ app.include_router(health.router, tags=["health"])
 app.include_router(config.router, tags=["config"])
 app.include_router(folders.router, tags=["folders"])
 app.include_router(chat.router, tags=["chat"])  # OpenAI-compatible chat API
+app.include_router(documents.router)  # BFF-facing document lifecycle notifications
 
 # ============================================================================
 # Frontend-Serving Routers (replaces Quart backend)

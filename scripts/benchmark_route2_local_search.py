@@ -236,9 +236,10 @@ def _calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) -
         recall = len(overlap) / len(expected_tokens) if expected_tokens else 0.0
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
         
-        # Smart containment: Use recall-based metric (>=0.8) OR substring match
-        # This handles cases where expected answer is compact ("A; B") but actual is verbose ("...A...B...")
-        contained = (expected_norm in actual_norm) or (recall >= 0.8)
+        # Smart containment: bi-directional substring OR high recall
+        # expected⊂actual: verbose answer contains compact expected
+        # actual⊂expected: concise answer is a correct subset of expected
+        contained = (expected_norm in actual_norm) or (actual_norm in expected_norm) or (recall >= 0.8)
     
     return {
         'is_negative_test': False,

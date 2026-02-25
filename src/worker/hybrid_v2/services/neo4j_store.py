@@ -70,16 +70,6 @@ class Community:
 
 
 @dataclass
-class RaptorNode:
-    """RAPTOR tree node data."""
-    id: str
-    text: str
-    level: int
-    embedding: Optional[List[float]] = None
-    parent_id: Optional[str] = None
-    child_ids: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass 
 class TextChunk:
@@ -280,7 +270,6 @@ class Neo4jStoreV3:
             # Constraints (unique IDs)
             "CREATE CONSTRAINT entity_id IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
             "CREATE CONSTRAINT community_id IF NOT EXISTS FOR (c:Community) REQUIRE c.id IS UNIQUE",
-            "CREATE CONSTRAINT raptor_id IF NOT EXISTS FOR (r:RaptorNode) REQUIRE r.id IS UNIQUE",
             "CREATE CONSTRAINT document_id IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
 
             # Determinism: chunk-level extraction cache
@@ -317,31 +306,16 @@ class Neo4jStoreV3:
             # Full-text index for hybrid search (keyword matching)
             "CREATE FULLTEXT INDEX entity_fulltext IF NOT EXISTS FOR (e:Entity) ON EACH [e.name, e.description]",
             "CREATE INDEX community_level IF NOT EXISTS FOR (c:Community) ON (c.level)",
-            "CREATE INDEX raptor_group IF NOT EXISTS FOR (r:RaptorNode) ON (r.group_id)",
-            "CREATE INDEX raptor_level IF NOT EXISTS FOR (r:RaptorNode) ON (r.level)",
             "CREATE INDEX document_group IF NOT EXISTS FOR (d:Document) ON (d.group_id)",
         ]
         
-        # Vector indexes (separate because they need special syntax)
-        # NOTE: Commented out drop logic to avoid timeouts during schema initialization
-        # If dimensions need changing, manually drop indexes via Neo4j Browser
-        # vector_indexes_to_drop = [
-        #     "DROP INDEX entity_embedding IF EXISTS",
-        #     "DROP INDEX raptor_embedding IF EXISTS",
-        #     "DROP INDEX chunk_embedding IF EXISTS",
-        # ]
-        
-        # Native Vector Type indexes (Neo4j 5.13+)
-        # Note: If upgrading from list-based embeddings, you must:
+        # Vector indexes
+        # NOTE: If upgrading from list-based embeddings, you must:
         #   1. DROP old indexes
         #   2. Convert properties: SET e.embedding = null then use db.create.setVectorProperty
         #   3. CREATE new indexes with updated config
         #
-        # ISOLATION NOTE: V1 indexes below lack WITH [group_id] pre-filter property.
-        # Queries still apply group_id filtering via post-search WHERE clause, so tenant
-        # isolation is preserved. However, LIMIT $top_k in SEARCH may return fewer
-        # results than expected after post-filtering. V2 indexes (below) include
-        # WITH [group_id] for in-index pre-filtering which avoids this issue.
+        # V2 indexes include WITH [group_id] for in-index pre-filtering.
         vector_indexes = [
             """
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
@@ -351,16 +325,7 @@ class Neo4jStoreV3:
                 `vector.similarity_function`: 'cosine'
             }}
             """,
-            """
-            CREATE VECTOR INDEX raptor_embedding IF NOT EXISTS
-            FOR (r:RaptorNode) ON (r.embedding)
-            OPTIONS {indexConfig: {
-                `vector.dimensions`: 3072,
-                `vector.similarity_function`: 'cosine'
-            }}
-            """,
             # V2: Entity embeddings with Voyage (2048-dim)
-            # WITH [e.group_id] enables SEARCH clause pre-filtering for group isolation
             """
             CREATE VECTOR INDEX entity_embedding_v2 IF NOT EXISTS
             FOR (e:Entity) ON (e.embedding_v2)
@@ -403,13 +368,7 @@ class Neo4jStoreV3:
                 except Exception as e:
                     logger.warning(f"Schema query failed (may already exist): {e}")
             
-            # NOTE: Vector index drops commented out to avoid timeouts
-            # If dimensions need changing, manually drop via Neo4j Browser:
-            # DROP INDEX entity_embedding IF EXISTS
-            # DROP INDEX raptor_embedding IF EXISTS  
-            # DROP INDEX chunk_embedding IF EXISTS
-            
-            # Create vector indexes with correct dimensions
+            # Create vector indexes
             for query in vector_indexes:
                 try:
                     session.run(query)
@@ -1184,241 +1143,13 @@ class Neo4jStoreV3:
                 )
             return out
     
-    def get_entities_by_raptor_context(self, group_id: str, raptor_node_id: str, limit: int = 10) -> List[Entity]:
-        """
-        Get entities mentioned in the chunks summarized by a RAPTOR node.
-        Used for DRIFT traversal (Summary -> Entity).
-        """
-        query = """
-        MATCH (r:RaptorNode {id: $raptor_id, group_id: $group_id})
-        // Traverse down to chunks
-        MATCH (r)<-[:SUMMARIZES*1..]-(c:Sentence {group_id: $group_id})
-        // Find entities in these chunks
-        MATCH (c)-[:MENTIONS]->(e:Entity {group_id: $group_id})
-        RETURN DISTINCT e
-        LIMIT $limit
-        """
-        with self.get_retry_session() as session:
-            result = session.run(query, raptor_id=raptor_node_id, group_id=group_id, limit=limit)
-            entities = []
-            for record in result:
-                e = record["e"]
-                entities.append(Entity(
-                    id=e["id"],
-                    name=e["name"],
-                    type=e["type"],
-                    description=e.get("description", ""),
-                    metadata=dict(e.get("metadata", {})),
-                ))
-            return entities
 
-    def get_communities_by_raptor_context(self, group_id: str, raptor_node_ids: List[str]) -> List[Community]:
-        """
-        Get communities relevant to specific RAPTOR nodes.
-        Used for 'Global + RAPTOR' pruning.
-        """
-        query = """
-        MATCH (r:RaptorNode {group_id: $group_id})
-        WHERE r.id IN $raptor_ids
-        // Traverse down to chunks
-        MATCH (r)<-[:SUMMARIZES*1..]-(c:Sentence {group_id: $group_id})
-        // Find entities in these chunks
-        MATCH (c)-[:MENTIONS]->(e:Entity {group_id: $group_id})
-        // Find communities these entities belong to
-        MATCH (e)-[:BELONGS_TO]->(comm:Community)
-        WHERE comm.group_id = $group_id AND comm.level = 0
-        OPTIONAL MATCH (e2:Entity {group_id: $group_id})-[:BELONGS_TO]->(comm)
-        RETURN comm, collect(DISTINCT e2.id) AS entity_ids
-        LIMIT 20
-        """
-        with self.get_retry_session() as session:
-            result = session.run(query, group_id=group_id, raptor_ids=raptor_node_ids)
-            communities = []
-            for record in result:
-                c = record["comm"]
-                communities.append(Community(
-                    id=c["id"],
-                    level=c["level"],
-                    title=c.get("title", ""),
-                    summary=c.get("summary", ""),
-                    rank=c.get("rank", 0.0),
-                    entity_ids=record.get("entity_ids") or [],
-                ))
-            return communities
 
-    def get_entity_raptor_context(self, group_id: str, entity_id: str) -> Optional[RaptorNode]:
-        """
-        Get the parent RAPTOR node for an entity to provide thematic context.
-        Traverses: Entity <- MENTIONS - Sentence - SUMMARIZES -> RaptorNode
-        """
-        query = """
-        MATCH (e:Entity {id: $entity_id, group_id: $group_id})<-[:MENTIONS]-(c:Sentence)-[:SUMMARIZES]->(r:RaptorNode)
-        WHERE c.group_id = $group_id AND r.group_id = $group_id
-        RETURN r
-        ORDER BY r.level ASC
-        LIMIT 1
-        """
-        with self.get_retry_session() as session:
-            result = session.run(query, group_id=group_id, entity_id=entity_id)
-            record = result.single()
-            if record:
-                node_data = record["r"]
-                return RaptorNode(
-                    id=node_data["id"],
-                    text=node_data["text"],
-                    level=node_data["level"],
-                    metadata=dict(node_data.get("metadata", {})),
-                )
-        return None
 
     # ==================== RAPTOR Node Operations ====================
     
-    def upsert_raptor_node(self, group_id: str, node: RaptorNode) -> str:
-        """Insert or update a RAPTOR node using native vector storage."""
-        query = """
-        MERGE (r:RaptorNode {id: $id, group_id: $group_id})
-        SET r.text = $text,
-            r.level = $level,
-            r.group_id = $group_id,
-            r.metadata = $metadata,
-            r.child_ids = $child_ids,
-            r.updated_at = datetime()
-        WITH r
-        FOREACH (_ IN CASE WHEN $embedding IS NOT NULL THEN [1] ELSE [] END |
-            SET r.embedding = $embedding
-        )
-        
-        WITH r
-        UNWIND $child_ids AS child_id
-        OPTIONAL MATCH (tc:Sentence {id: child_id, group_id: $group_id})
-        FOREACH (_ IN CASE WHEN tc IS NOT NULL THEN [1] ELSE [] END | MERGE (tc)-[:SUMMARIZES]->(r))
-        OPTIONAL MATCH (rn:RaptorNode {id: child_id, group_id: $group_id})
-        FOREACH (_ IN CASE WHEN rn IS NOT NULL THEN [1] ELSE [] END | MERGE (rn)-[:SUMMARIZES]->(r))
-        
-        RETURN r.id AS id
-        """
-        
-        with self.get_retry_session() as session:
-            result = session.run(
-                query,
-                id=node.id,
-                text=node.text,
-                level=node.level,
-                embedding=node.embedding,
-                group_id=group_id,
-                metadata=node.metadata,
-                child_ids=node.child_ids,
-            )
-            record = result.single()
-            
-            # Link to parent if exists (legacy support)
-            if node.parent_id:
-                link_query = """
-                MATCH (child:RaptorNode {id: $child_id, group_id: $group_id})
-                MATCH (parent:RaptorNode {id: $parent_id, group_id: $group_id})
-                MERGE (child)-[:SUMMARIZES]->(parent)
-                """
-                session.run(
-                    link_query,
-                    child_id=node.id,
-                    parent_id=node.parent_id,
-                    group_id=group_id,
-                )
-            
-            return cast(str, record["id"]) if record else node.id
     
-    def upsert_raptor_nodes_batch(self, group_id: str, nodes: List[RaptorNode]) -> int:
-        """Batch insert/update RAPTOR nodes with native vector support."""
-        query = """
-        UNWIND $nodes AS n
-        MERGE (r:RaptorNode {id: n.id, group_id: $group_id})
-        SET r.text = n.text,
-            r.level = n.level,
-            r.group_id = $group_id,
-            r.cluster_coherence = n.cluster_coherence,
-            r.confidence_level = n.confidence_level,
-            r.confidence_score = n.confidence_score,
-            r.silhouette_score = n.silhouette_score,
-            r.cluster_silhouette_avg = n.cluster_silhouette_avg,
-            r.child_count = n.child_count,
-            r.creation_model = n.creation_model,
-            r.updated_at = datetime()
-        
-        WITH r, n
-        FOREACH (_ IN CASE WHEN n.embedding IS NOT NULL AND size(n.embedding) > 0 THEN [1] ELSE [] END |
-            SET r.embedding = n.embedding
-        )
-        
-        RETURN count(r) AS count
-        """
-        
-        node_data = [
-            {
-                "id": n.id,
-                "text": n.text,
-                "level": n.level,
-                "embedding": n.embedding,
-                "cluster_coherence": n.metadata.get("cluster_coherence", 0.0),
-                "confidence_level": n.metadata.get("confidence_level", "unknown"),
-                "confidence_score": n.metadata.get("confidence_score", 0.0),
-                "silhouette_score": n.metadata.get("silhouette_score", 0.0),
-                "cluster_silhouette_avg": n.metadata.get("cluster_silhouette_avg", 0.0),
-                "child_count": n.metadata.get("child_count", 0),
-                "creation_model": n.metadata.get("creation_model", ""),
-            }
-            for n in nodes
-        ]
-        
-        with self.get_retry_session() as session:
-            result = session.run(query, nodes=node_data, group_id=group_id)
-            record = result.single()
-            return cast(int, record["count"]) if record else 0
     
-    def search_raptor_by_embedding(
-        self,
-        group_id: str,
-        embedding: List[float],
-        level: Optional[int] = None,
-        top_k: int = 10,
-    ) -> List[Tuple[RaptorNode, float]]:
-        """Vector similarity search for RAPTOR nodes using native vector functions."""
-        
-        # Use native vector similarity for efficient calculation.
-        if level is not None:
-            query = """
-            MATCH (r:RaptorNode {group_id: $group_id, level: $level})
-            WHERE r.embedding IS NOT NULL
-            WITH r, vector.similarity.cosine(r.embedding, $embedding) AS score
-            ORDER BY score DESC
-            LIMIT $top_k
-            RETURN r, score
-            """
-            params = {"group_id": group_id, "level": level, "embedding": embedding, "top_k": top_k}
-        else:
-            query = """
-            MATCH (r:RaptorNode {group_id: $group_id})
-            WHERE r.embedding IS NOT NULL
-            WITH r, vector.similarity.cosine(r.embedding, $embedding) AS score
-            ORDER BY score DESC
-            LIMIT $top_k
-            RETURN r, score
-            """
-            params = {"group_id": group_id, "embedding": embedding, "top_k": top_k}
-        
-        results = []
-        with self.get_retry_session() as session:
-            result = session.run(query, **params)
-            for record in result:
-                r = record["r"]
-                node = RaptorNode(
-                    id=r["id"],
-                    text=r["text"],
-                    level=r["level"],
-                    embedding=r.get("embedding"),
-                )
-                results.append((node, record["score"]))
-        
-        return results
     
     # ==================== Text Chunk Operations ====================
     
@@ -2374,7 +2105,6 @@ class Neo4jStoreV3:
         queries = [
             ("entities", "MATCH (e:Entity {group_id: $group_id}) DETACH DELETE e RETURN count(*) AS count"),
             ("communities", "MATCH (c:Community {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
-            ("raptor_nodes", "MATCH (r:RaptorNode {group_id: $group_id}) DETACH DELETE r RETURN count(*) AS count"),
             ("key_values", "MATCH (kv:KeyValue {group_id: $group_id}) DETACH DELETE kv RETURN count(*) AS count"),
             ("key_value_pairs", "MATCH (kvp:KeyValuePair {group_id: $group_id}) DETACH DELETE kvp RETURN count(*) AS count"),
             ("tables", "MATCH (t:Table {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
@@ -2382,7 +2112,6 @@ class Neo4jStoreV3:
             ("sections", "MATCH (s:Section {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("sentences", "MATCH (s:Sentence {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("figures", "MATCH (f:Figure {group_id: $group_id}) DETACH DELETE f RETURN count(*) AS count"),
-            ("text_chunks", "MATCH (t:TextChunk {group_id: $group_id}) DETACH DELETE t RETURN count(*) AS count"),
             ("documents", "MATCH (d:Document {group_id: $group_id}) DETACH DELETE d RETURN count(*) AS count"),
         ]
         
@@ -2434,14 +2163,12 @@ class Neo4jStoreV3:
         WITH count(e) AS entities
         OPTIONAL MATCH (c:Community {group_id: $group_id})
         WITH entities, count(c) AS communities
-        OPTIONAL MATCH (r:RaptorNode {group_id: $group_id})
-        WITH entities, communities, count(r) AS raptor_nodes
-        OPTIONAL MATCH (t:TextChunk {group_id: $group_id})
-        WITH entities, communities, raptor_nodes, count(t) AS text_chunks
+        OPTIONAL MATCH (s:Sentence {group_id: $group_id})
+        WITH entities, communities, count(s) AS sentences
         OPTIONAL MATCH (d:Document {group_id: $group_id})
-        WITH entities, communities, raptor_nodes, text_chunks, count(d) AS documents
+        WITH entities, communities, sentences, count(d) AS documents
         OPTIONAL MATCH (:Entity {group_id: $group_id})-[rel]->(:Entity {group_id: $group_id})
-        RETURN entities, communities, raptor_nodes, text_chunks, documents, count(rel) AS relationships
+        RETURN entities, communities, sentences, documents, count(rel) AS relationships
         """
         
         with self.get_retry_session() as session:
@@ -2452,8 +2179,7 @@ class Neo4jStoreV3:
                     "entities": record["entities"],
                     "relationships": record["relationships"],
                     "communities": record["communities"],
-                    "raptor_nodes": record["raptor_nodes"],
-                    "text_chunks": record["text_chunks"],
+                    "sentences": record["sentences"],
                     "documents": record["documents"],
                 }
-            return {"entities": 0, "relationships": 0, "communities": 0, "raptor_nodes": 0, "text_chunks": 0, "documents": 0}
+            return {"entities": 0, "relationships": 0, "communities": 0, "sentences": 0, "documents": 0}

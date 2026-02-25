@@ -119,12 +119,12 @@ def get_query_embedding(query: str) -> List[float]:
 
 def get_vector_index_name() -> str:
     """
-    Get the vector index name.  Always returns the V2 Voyage index.
+    Get the vector index name for Sentence embedding search.
     
     Returns:
-        'chunk_embeddings_v2'
+        'sentence_embeddings_v2'
     """
-    return "chunk_embeddings_v2"
+    return "sentence_embeddings_v2"
 
 logger = structlog.get_logger(__name__)
 

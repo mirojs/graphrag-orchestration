@@ -74,11 +74,21 @@ def run_migration(driver, database: str, dry_run: bool = False):
             results["deleted"] = total_deleted
             print(f"Total TextChunk nodes deleted: {total_deleted}")
 
+        # 4b. Delete RaptorNode nodes
+        record = session.run("MATCH (r:RaptorNode) RETURN count(r) AS cnt").single()
+        raptor_count = record["cnt"] if record else 0
+        results["raptor_count"] = raptor_count
+        print(f"RaptorNode nodes found: {raptor_count}")
+        if not dry_run and raptor_count > 0:
+            session.run("MATCH (r:RaptorNode) DETACH DELETE r")
+            print(f"Deleted {raptor_count} RaptorNode nodes")
+
         # 5. Drop legacy indexes
         legacy_indexes = [
             "chunk_embedding",        # v1 OpenAI 3072-dim vector index
             "chunk_embeddings_v2",    # v2 Voyage 2048-dim vector index
             "textchunk_fulltext",     # fulltext index on TextChunk.text
+            "raptor_embedding",       # RAPTOR tree embedding index
         ]
         for idx_name in legacy_indexes:
             try:

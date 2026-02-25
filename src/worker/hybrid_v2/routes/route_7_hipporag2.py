@@ -148,7 +148,7 @@ class HippoRAG2Handler(BaseRouteHandler):
       1. Embed query (Voyage)
       2. asyncio.gather(
            - Query-to-triple linking (top 5) -> LLM recognition memory -> entity seeds
-           - DPR passage search (chunk_embeddings_v2 vector index) -> passage seeds
+           - DPR passage search (sentence_embeddings_v2 vector index) -> passage seeds
            - [Phase 2] Sentence vector search (optional)
          )
       3. [Phase 2] Structural seeds & community seeds (optional)

@@ -35,8 +35,8 @@ class Entity:
     name: str
     type: str
     description: str = ""
-    embedding: Optional[List[float]] = None  # V1: OpenAI 3072-dim
-    embedding_v2: Optional[List[float]] = None  # V2: Voyage 2048-dim
+    embedding: Optional[List[float]] = None  # Deprecated (was OpenAI 3072-dim)
+    embedding_v2: Optional[List[float]] = None  # Voyage 2048-dim
     metadata: Dict[str, Any] = field(default_factory=dict)
     text_unit_ids: List[str] = field(default_factory=list)  # For DRIFT MENTIONS relationships
     aliases: List[str] = field(default_factory=list)  # Alternative names/variations for entity lookup
@@ -317,28 +317,10 @@ class Neo4jStoreV3:
         #
         # V2 indexes include WITH [group_id] for in-index pre-filtering.
         vector_indexes = [
-            """
-            CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
-            FOR (e:Entity) ON (e.embedding)
-            OPTIONS {indexConfig: {
-                `vector.dimensions`: 1536,
-                `vector.similarity_function`: 'cosine'
-            }}
-            """,
-            # V2: Entity embeddings with Voyage (2048-dim)
+            # Entity embeddings with Voyage (2048-dim)
             """
             CREATE VECTOR INDEX entity_embedding_v2 IF NOT EXISTS
             FOR (e:Entity) ON (e.embedding_v2)
-            WITH [e.group_id]
-            OPTIONS {indexConfig: {
-                `vector.dimensions`: 2048,
-                `vector.similarity_function`: 'cosine'
-            }}
-            """,
-            # V2: Also index __Entity__ label for embedding_v2
-            """
-            CREATE VECTOR INDEX entity_embedding_v2_internal IF NOT EXISTS
-            FOR (e:`__Entity__`) ON (e.embedding_v2)
             WITH [e.group_id]
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
@@ -470,15 +452,15 @@ class Neo4jStoreV3:
     def upsert_entity(self, group_id: str, entity: Entity) -> str:
         """Insert or update an entity using native vector storage."""
         query = """
-        MERGE (e:`__Entity__` {id: $id, group_id: $group_id})
+        MERGE (e:Entity {id: $id, group_id: $group_id})
         SET e.name = $name,
             e.type = $type,
             e.description = $description,
             e.group_id = $group_id,
             e.updated_at = datetime()
-        WITH e
-        FOREACH (_ IN CASE WHEN $embedding IS NOT NULL THEN [1] ELSE [] END |
-            SET e.embedding = $embedding
+        With e
+        FOREACH (_ IN CASE WHEN $embedding_v2 IS NOT NULL THEN [1] ELSE [] END |
+            SET e.embedding_v2 = $embedding_v2
         )
         RETURN e.id AS id
         """
@@ -490,7 +472,7 @@ class Neo4jStoreV3:
                 name=entity.name,
                 type=entity.type,
                 description=entity.description,
-                embedding=entity.embedding,
+                embedding_v2=entity.embedding_v2 if hasattr(entity, 'embedding_v2') else None,
                 group_id=group_id,
             )
             record = result.single()
@@ -500,14 +482,12 @@ class Neo4jStoreV3:
         """Batch insert/update entities with native vector support."""
         
         # Diagnostic: Check embeddings before storing
-        with_embeddings = sum(1 for e in entities if e.embedding and len(e.embedding) > 0)
-        logger.warning(f"🔍 UPSERT CHECK: Storing {len(entities)} entities, {with_embeddings} have embeddings")
-        if entities and entities[0].embedding:
-            logger.warning(f"   First entity embedding dim: {len(entities[0].embedding)}")
+        with_v2 = sum(1 for e in entities if getattr(e, "embedding_v2", None))
+        logger.info(f"upsert_entities_batch: {len(entities)} entities, {with_v2} with embedding_v2")
         
         query = """
         UNWIND $entities AS e
-        MERGE (entity:`__Entity__` {id: e.id, group_id: $group_id})
+        MERGE (entity:Entity {id: e.id, group_id: $group_id})
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
@@ -516,14 +496,11 @@ class Neo4jStoreV3:
             entity.updated_at = datetime()
         
         WITH entity, e
-        // V2: Store embeddings in embedding_v2 property (Voyage 2048-dim)
+        // Store embeddings in embedding_v2 property (Voyage 2048-dim)
         FOREACH (_ IN CASE WHEN e.embedding_v2 IS NOT NULL AND size(e.embedding_v2) > 0 THEN [1] ELSE [] END |
             SET entity.embedding_v2 = e.embedding_v2
         )
-        // V1 fallback: Store in embedding property (OpenAI 3072-dim)
-        FOREACH (_ IN CASE WHEN e.embedding IS NOT NULL AND size(e.embedding) > 0 THEN [1] ELSE [] END |
-            SET entity.embedding = e.embedding
-        )
+
         
         // Create MENTIONS relationships from Sentence nodes
         WITH entity, e
@@ -541,8 +518,7 @@ class Neo4jStoreV3:
                 "name": e.name,
                 "type": e.type,
                 "description": e.description,
-                "embedding": e.embedding if hasattr(e, 'embedding') else None,  # V1: OpenAI embeddings
-                "embedding_v2": e.embedding_v2 if hasattr(e, 'embedding_v2') else e.embedding,  # V2: Voyage embeddings (fallback to embedding if no embedding_v2)
+                "embedding_v2": e.embedding_v2 if hasattr(e, 'embedding_v2') else None,
                 "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
                 "aliases": e.aliases if hasattr(e, 'aliases') else [],
             }
@@ -572,7 +548,7 @@ class Neo4jStoreV3:
 
         query = """
         MATCH (e)
-        WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+        WHERE e.group_id = $group_id AND (e:Entity)
         WITH e, COUNT { (e)-[]-() } AS degree
         SET e.degree = degree
         WITH e
@@ -593,10 +569,8 @@ class Neo4jStoreV3:
         """Async batch insert/update entities with native vector support."""
         
         # Diagnostic: Check embeddings before storing
-        with_embeddings = sum(1 for e in entities if e.embedding and len(e.embedding) > 0)
-        logger.warning(f"🔍 ASYNC UPSERT CHECK: Storing {len(entities)} entities, {with_embeddings} have embeddings")
-        if entities and entities[0].embedding:
-            logger.warning(f"   First entity embedding dim: {len(entities[0].embedding)}")
+        with_v2 = sum(1 for e in entities if getattr(e, "embedding_v2", None))
+        logger.info(f"aupsert_entities_batch: {len(entities)} entities, {with_v2} with embedding_v2")
         
         query = """
         UNWIND $entities AS e
@@ -608,14 +582,11 @@ class Neo4jStoreV3:
             entity.updated_at = datetime()
         
         WITH entity, e
-        // V2: Store embeddings in embedding_v2 property (Voyage 2048-dim)
+        // Store embeddings in embedding_v2 property (Voyage 2048-dim)
         FOREACH (_ IN CASE WHEN e.embedding_v2 IS NOT NULL AND size(e.embedding_v2) > 0 THEN [1] ELSE [] END |
             SET entity.embedding_v2 = e.embedding_v2
         )
-        // V1 fallback: Store in embedding property (OpenAI 3072-dim)
-        FOREACH (_ IN CASE WHEN e.embedding IS NOT NULL AND size(e.embedding) > 0 THEN [1] ELSE [] END |
-            SET entity.embedding = e.embedding
-        )
+
         
         // Create MENTIONS relationships from Sentence nodes
         WITH entity, e
@@ -632,8 +603,7 @@ class Neo4jStoreV3:
                 "name": e.name,
                 "type": e.type,
                 "description": e.description,
-                "embedding": e.embedding if hasattr(e, 'embedding') else None,  # V1: OpenAI embeddings
-                "embedding_v2": e.embedding_v2 if hasattr(e, 'embedding_v2') else e.embedding,  # V2: Voyage embeddings (fallback to embedding if no embedding_v2)
+                "embedding_v2": e.embedding_v2 if hasattr(e, 'embedding_v2') else None,
                 "text_unit_ids": e.text_unit_ids if hasattr(e, 'text_unit_ids') else [],
                 "aliases": e.aliases if hasattr(e, 'aliases') else [],
             }
@@ -712,8 +682,8 @@ class Neo4jStoreV3:
         query = """
         // Step 1: Vector Search (Native - using vector.similarity.cosine)
         MATCH (e:Entity {group_id: $group_id})
-        WHERE e.embedding IS NOT NULL
-        WITH e, vector.similarity.cosine(e.embedding, $embedding) AS vectorScore
+        WHERE e.embedding_v2 IS NOT NULL
+        WITH e, vector.similarity.cosine(e.embedding_v2, $embedding) AS vectorScore
         ORDER BY vectorScore DESC
         LIMIT $retrieval_k
         WITH collect({node: e, score: vectorScore}) AS vectorResults
@@ -787,7 +757,7 @@ class Neo4jStoreV3:
         """
         query = """CYPHER 25
         MATCH (node:Entity)
-        SEARCH node IN (VECTOR INDEX entity_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+        SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
         SCORE AS score
         RETURN node, score
         ORDER BY score DESC
@@ -808,7 +778,7 @@ class Neo4jStoreV3:
                     name=e["name"],
                     type=e["type"],
                     description=e.get("description", ""),
-                    embedding=e.get("embedding"),
+                    embedding_v2=e.get("embedding_v2"),
                 )
                 results.append((entity, record["score"]))
         

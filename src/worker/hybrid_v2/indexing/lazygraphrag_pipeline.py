@@ -1422,10 +1422,7 @@ class LazyGraphRAGIndexingPipeline:
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
-                    if self.use_v2_embedding_property:
-                        ent.embedding_v2 = emb
-                    else:
-                        ent.embedding = emb
+                    ent.embedding_v2 = emb
             except Exception as e:
                 logger.warning("sentence_entity_embedding_failed", extra={"error": str(e)})
 
@@ -1538,10 +1535,7 @@ class LazyGraphRAGIndexingPipeline:
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
-                    if self.use_v2_embedding_property:
-                        ent.embedding_v2 = emb
-                    else:
-                        ent.embedding = emb
+                    ent.embedding_v2 = emb
             except Exception as e:
                 logger.warning("llamaindex_sentence_embedding_failed", extra={"error": str(e)})
 
@@ -2661,7 +2655,7 @@ SUMMARY: <summary>"""
         # Use embedding_v2 (V2/Voyage) if available, otherwise embedding (V1/OpenAI)
         entity_dicts = []
         for e in entities:
-            emb = e.embedding_v2 if hasattr(e, 'embedding_v2') and e.embedding_v2 else e.embedding
+            emb = e.embedding_v2 if hasattr(e, 'embedding_v2') else None
             if emb is None:
                 continue  # Skip entities without embeddings
             entity_dicts.append({
@@ -2712,8 +2706,7 @@ SUMMARY: <summary>"""
                 merged_type = m.type or merged_type
                 merged_meta.update(m.metadata or {})
                 # V1: Copy embedding property
-                if merged_emb is None and m.embedding is not None:
-                    merged_emb = m.embedding
+                pass  # V1 embedding removed
                 # V2: Copy embedding_v2 property (Voyage embeddings)
                 if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:
                     merged_emb_v2 = m.embedding_v2

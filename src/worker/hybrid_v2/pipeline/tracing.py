@@ -226,7 +226,7 @@ class DeterministicTracer:
                         # Select index based on embedding dimension
                         # V2 Voyage: 2048 dims → entity_embedding_v2
                         # V1 OpenAI: 3072 dims → entity_embedding
-                        index_name = "entity_embedding_v2" if len(embedding) <= 2048 else "entity_embedding"
+                        index_name = "entity_embedding_v2"
                         
                         # Search for similar entities
                         vector_records = await self.async_neo4j.get_entities_by_vector_similarity(
@@ -420,14 +420,14 @@ class DeterministicTracer:
             cypher_query = """
             UNWIND $seedNames AS seedName
             MATCH (seed)
-            WHERE (seed:Entity OR seed:`__Entity__`)
+            WHERE (seed:Entity)
               AND (toLower(seed.name) = toLower(seedName)
                    OR ANY(alias IN coalesce(seed.aliases, []) WHERE toLower(alias) = toLower(seedName)))
               AND seed.group_id = $group_id
             
             // Expand to neighbors with decay
             OPTIONAL MATCH path = (seed)-[*1..3]-(neighbor)
-            WHERE (neighbor:Entity OR neighbor:`__Entity__`)
+            WHERE (neighbor:Entity)
               AND neighbor.group_id = $group_id
               AND ALL(r IN relationships(path) WHERE type(r) <> 'MENTIONS')
             
@@ -480,7 +480,7 @@ class DeterministicTracer:
 
         cypher_query = """
         MATCH (a)
-        WHERE (a:Entity OR a:`__Entity__`)
+        WHERE (a:Entity)
           AND a.group_id = $group_id
           AND toLower(a.name) IN $nodeNames
         WITH collect(a) AS nodes

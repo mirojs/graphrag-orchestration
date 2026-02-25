@@ -993,7 +993,7 @@ class EnhancedGraphRetriever:
         query = f"""
                 UNWIND $entity_names AS entity_name
                 MATCH (t:Sentence)-[:MENTIONS]->(e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                     AND t.group_id = $group_id
@@ -1989,7 +1989,7 @@ class EnhancedGraphRetriever:
         query = f"""
         UNWIND $entity_inputs AS seed
         MATCH (e1)
-        WHERE (e1:Entity OR e1:`__Entity__`)
+        WHERE (e1:Entity)
           AND e1.group_id = $group_id
             AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                  OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
@@ -2000,7 +2000,7 @@ class EnhancedGraphRetriever:
         WITH e1, c, d
         WHERE $folder_id IS NULL OR d IS NULL {folder_filter}
         MATCH (c)-[:MENTIONS]->(e2)
-        WHERE (e2:Entity OR e2:`__Entity__`)
+        WHERE (e2:Entity)
           AND e2.group_id = $group_id AND e2 <> e1
         
         WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
@@ -2020,12 +2020,12 @@ class EnhancedGraphRetriever:
         fallback_query = """
         UNWIND $entity_inputs AS seed
         MATCH (e1)
-        WHERE (e1:Entity OR e1:`__Entity__`)
+        WHERE (e1:Entity)
           AND e1.group_id = $group_id
           AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         MATCH (e1)-[r:RELATED_TO]-(e2)
-        WHERE (e2:Entity OR e2:`__Entity__`)
+        WHERE (e2:Entity)
           AND e2.group_id = $group_id AND e2 <> e1
         WITH e1, e2, r
         WHERE elementId(e1) < elementId(e2)
@@ -2096,7 +2096,7 @@ class EnhancedGraphRetriever:
         query = """
         UNWIND $entity_names AS name
         MATCH (e)
-        WHERE (e:Entity OR e:`__Entity__`)
+        WHERE (e:Entity)
           AND e.group_id = $group_id
                     AND (toLower(e.name) = toLower(name) OR e.id = name OR elementId(e) = name)
         RETURN e.name as name, e.description as description
@@ -2171,9 +2171,9 @@ class EnhancedGraphRetriever:
         query = """
         MATCH (e:Entity)
         WHERE e.group_id = $group_id
-          AND (e.embedding_v2 IS NOT NULL OR e.embedding IS NOT NULL)
+          AND e.embedding_v2 IS NOT NULL
         WITH e, vector.similarity.cosine(
-            COALESCE(e.embedding_v2, e.embedding), $query_embedding
+            e.embedding_v2, $query_embedding
         ) as score
         ORDER BY score DESC
         LIMIT $top_k

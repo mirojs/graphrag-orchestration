@@ -339,7 +339,7 @@ async def resolve_section_entities(
 
     MATCH (chunk)-[:MENTIONS]->(e)
     WHERE e.group_id = $group_id
-      AND (e:Entity OR e:`__Entity__`)
+      AND (e:Entity)
 
     WITH path, e, count(chunk) AS mention_count
     ORDER BY mention_count DESC
@@ -411,7 +411,7 @@ async def resolve_signatureblock_entities(
       {folder_filter}
     MATCH (s)-[:MENTIONS]->(e)
     WHERE e.group_id = $group_id
-      AND (e:Entity OR e:`__Entity__`)
+      AND (e:Entity)
     RETURN DISTINCT e.id AS id, e.name AS name
     """
 
@@ -505,7 +505,7 @@ async def resolve_thematic_seeds(
 
             MATCH (e)-[:BELONGS_TO]->(c)
             WHERE e.group_id = $group_id
-              AND (e:Entity OR e:`__Entity__`)
+              AND (e:Entity)
               {folder_filter}
 
             WITH c, e
@@ -758,11 +758,7 @@ async def resolve_all_tiers(
                         if not embedding:
                             continue
 
-                        index_name = (
-                            "entity_embedding_v2"
-                            if len(embedding) <= 2048
-                            else "entity_embedding"
-                        )
+                        index_name = "entity_embedding_v2"
                         vector_records = await async_neo4j.get_entities_by_vector_similarity(
                             group_id=group_id,
                             seed_text=seed,
@@ -997,11 +993,7 @@ async def resolve_flat_seed_pool(
                             continue
                         if not embedding:
                             continue
-                        index_name = (
-                            "entity_embedding_v2"
-                            if len(embedding) <= 2048
-                            else "entity_embedding"
-                        )
+                        index_name = "entity_embedding_v2"
                         vector_records = await async_neo4j.get_entities_by_vector_similarity(
                             group_id=group_id,
                             seed_text=seed,

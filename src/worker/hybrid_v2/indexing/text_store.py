@@ -97,7 +97,7 @@ class Neo4jTextUnitStore:
         query = """
         UNWIND $entity_names AS ename
         MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
-        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+        WHERE (e:Entity) AND e.group_id = $group_id
           AND (toLower(e.name) = toLower(ename)
                OR ANY(alias IN coalesce(e.aliases, [])
                       WHERE toLower(alias) = toLower(ename)))
@@ -116,7 +116,7 @@ class Neo4jTextUnitStore:
         doc_count_query = """
         UNWIND $entity_names AS ename
         MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
-        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+        WHERE (e:Entity) AND e.group_id = $group_id
           AND (toLower(e.name) = toLower(ename)
                OR ANY(alias IN coalesce(e.aliases, [])
                       WHERE toLower(alias) = toLower(ename)))
@@ -280,7 +280,7 @@ class Neo4jTextUnitStore:
             UNWIND $names AS ename
             MATCH (e)
             WHERE e.group_id = $group_id
-              AND (e:Entity OR e:`__Entity__`)
+              AND (e:Entity)
               AND e.name = ename
             RETURN e.name AS name, e.community_id AS community_id
         """
@@ -366,7 +366,7 @@ class Neo4jTextUnitStore:
             query = """
             UNWIND $entity_names AS entity_name
             MATCH (e {group_id: $group_id})
-            WHERE (e:Entity OR e:`__Entity__`)
+            WHERE (e:Entity)
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
             MATCH (c:TextChunk)-[:MENTIONS]->(e)
@@ -390,7 +390,7 @@ class Neo4jTextUnitStore:
             query = """
             UNWIND $entity_names AS entity_name
             MATCH (e {group_id: $group_id})
-            WHERE (e:Entity OR e:`__Entity__`)
+            WHERE (e:Entity)
               AND (toLower(e.name) = toLower(entity_name)
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
             MATCH (c:TextChunk)-[:MENTIONS]->(e)

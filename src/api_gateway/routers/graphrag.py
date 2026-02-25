@@ -1224,7 +1224,7 @@ async def debug_neo4j(request: Request):
         
         # Get sample node properties for key labels
         sample_properties = {}
-        key_labels = ["__Entity__", "__Node__", "Chunk", "Document", "Entity"]
+        key_labels = ["Entity", "__Node__", "Chunk", "Document"]
         
         for label in key_labels:
             try:
@@ -1836,7 +1836,7 @@ async def debug_neo4j_v2(request: Request):
             
             # Get sample node properties for key labels
             sample_properties = {}
-            key_labels = ["__Entity__", "__Node__", "Chunk", "Document", "Entity", "__Chunk__"]
+            key_labels = ["Entity", "__Node__", "Chunk", "Document"]
             
             for label in key_labels:
                 try:

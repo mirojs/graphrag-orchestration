@@ -74,6 +74,7 @@ USER appuser
 
 # Set PATH and environment
 ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUSERBASE=/home/appuser/.local \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     SERVICE_ROLE=api \

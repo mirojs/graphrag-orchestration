@@ -250,6 +250,7 @@ def benchmark_scenario(
     scenario_name: str, response_type: str, repeats: int, timeout_s: float,
     ground_truth: Dict[str, GroundTruth],
     synthesis_model: Optional[str] = None, include_context: bool = False,
+    no_auth: bool = False,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -260,12 +261,15 @@ def benchmark_scenario(
     url = f"{api_base_url.rstrip('/')}/hybrid/query"
     headers: Dict[str, str] = {"Content-Type": "application/json", "X-Group-ID": group_id}
 
-    token = _get_aad_token()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-        print("Using Azure AD authentication\n")
+    if no_auth:
+        print("Authentication skipped (--no-auth)\n")
     else:
-        print("No authentication token available\n")
+        token = _get_aad_token()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            print("Using Azure AD authentication\n")
+        else:
+            print("No authentication token available\n")
 
     results: List[Dict[str, Any]] = []
 
@@ -500,6 +504,7 @@ def main():
     parser.add_argument("--synthesis-model", type=str, default=None, help="Override synthesis LLM")
     parser.add_argument("--include-context", action="store_true", default=False, help="Include LLM context in output")
     parser.add_argument("--token", type=str, default=None, help="Azure AD Bearer token")
+    parser.add_argument("--no-auth", action="store_true", default=False, help="Skip authentication (for local testing)")
     parser.add_argument(
         "--force-route", type=str, default=None,
         choices=["hipporag2_search", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
@@ -564,6 +569,7 @@ def main():
         scenario_name=scenario_name, response_type=args.response_type,
         repeats=args.repeats, timeout_s=args.timeout, ground_truth=ground_truth,
         synthesis_model=args.synthesis_model, include_context=args.include_context,
+        no_auth=args.no_auth,
     )
 
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"

@@ -3,8 +3,9 @@
 This exists to avoid coupling `/hybrid/index/documents` to the V3 router or the V3
 indexing pipeline implementation. The hybrid system needs a stable, dedicated
 indexing entrypoint that populates the Neo4j schema used by:
-- Route 1 (Neo4j vector search over :TextChunk.embedding)
-- Route 2/3 (LazyGraphRAG + HippoRAG over :Entity / :TextChunk / :MENTIONS)
+- Route 2/3/4/5/6/7 (LazyGraphRAG + HippoRAG over :Entity / :Sentence / :MENTIONS)
+
+Sentence-direct indexing: DI units → spaCy → Sentence nodes (no TextChunk layer).
 
 Phase 2 Migration: Added optional neo4j-graphrag LLMEntityRelationExtractor support.
 Set use_native_extractor=True in config to use the native extractor.
@@ -288,30 +289,24 @@ class LazyGraphRAGIndexingPipeline:
         # 1) Normalize + (optional) extract with Document Intelligence.
         expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
 
-        # 2) Upsert Documents + chunk text units.
-        all_chunks: List[TextChunk] = []
-        chunk_to_doc_id: Dict[str, str] = {}
+        # 2) Upsert Document nodes + clean stale children.
+        chunk_to_doc_id: Dict[str, str] = {}  # kept for _process_di_metadata_to_graph compat
         for doc in expanded_docs:
             doc_id = doc["id"]
             doc_title = doc.get("title", "Untitled")
             logger.info(f"Upserting document: id={doc_id}, title='{doc_title}', has_di={bool(doc.get('di_extracted_docs'))}")
-            
-            # Extract document date from content (for corpus-level date queries)
-            # Collect all text content for date extraction
+
             doc_content_for_date = ""
             di_docs = doc.get("di_extracted_docs") or []
             if di_docs:
-                # DI-extracted content: concatenate all DI unit texts
                 doc_content_for_date = " ".join(str(d.text) for d in di_docs if hasattr(d, 'text'))
             else:
-                # Direct content
                 doc_content_for_date = doc.get("content") or doc.get("text") or ""
-            
-            # Extract the latest date from document content
+
             document_date = extract_document_date(doc_content_for_date) if doc_content_for_date else None
             if document_date:
                 logger.info(f"Extracted document date: doc_id={doc_id}, date={document_date}")
-            
+
             self.neo4j_store.upsert_document(
                 group_id,
                 Document(
@@ -323,59 +318,26 @@ class LazyGraphRAGIndexingPipeline:
                 ),
             )
 
-            # Clean stale children (chunks, sentences, sections, etc.) before
-            # creating new ones.  Prevents orphan chunks from prior indexing
-            # runs with different chunking strategies/counts.
-            # Skipped when reindex=True since delete_group_data already wiped.
+            # Clean stale children before creating new ones.
             if not reindex:
                 self.neo4j_store.delete_document_chunks(group_id, doc_id)
 
-            chunks = await self._chunk_document(doc, doc_id)
-            for c in chunks:
-                chunk_to_doc_id[c.id] = doc_id
-            all_chunks.extend(chunks)
+        # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
+        #    Bypasses the old TextChunk pipeline entirely.
+        sentence_stats = await self._index_sentences_direct(
+            group_id=group_id,
+            expanded_docs=expanded_docs,
+        )
+        stats["sentences"] = sentence_stats.get("sentences_created", 0)
+        stats["sentences_embedded"] = sentence_stats.get("sentences_embedded", 0)
 
-        if not all_chunks:
-            stats["skipped"].append("no_chunks")
+        if stats["sentences"] == 0:
+            stats["skipped"].append("no_sentences")
             stats["elapsed_s"] = round(time.time() - start_time, 2)
             return stats
 
-        # 3) Embeddings for chunks (best-effort).
-        await self._embed_chunks_best_effort(all_chunks)
-
-        # 4) Persist chunks.
-        self.neo4j_store.upsert_text_chunks_batch(group_id, all_chunks)
-        stats["chunks"] = len(all_chunks)
-
-        # 4.1) Skeleton: Extract sentence nodes, embed, persist (Strategy A).
-        # Guard: only run when feature flag is on AND Voyage V2 is enabled.
-        skeleton_enabled = settings.SKELETON_ENRICHMENT_ENABLED and bool(settings.VOYAGE_API_KEY)
-        if skeleton_enabled:
-            try:
-                skeleton_stats = await self._build_sentence_skeleton(
-                    group_id=group_id,
-                    chunks=all_chunks,
-                )
-                stats["skeleton_sentences"] = skeleton_stats.get("sentences_created", 0)
-                stats["skeleton_sentences_embedded"] = skeleton_stats.get("sentences_embedded", 0)
-                logger.info(
-                    "step_4.1_skeleton_complete",
-                    extra={
-                        "sentences": stats["skeleton_sentences"],
-                        "embedded": stats["skeleton_sentences_embedded"],
-                    },
-                )
-            except Exception as e:
-                logger.warning(f"step_4.1_skeleton_failed: {e}")
-                stats["skeleton_sentences"] = 0
-                stats["skeleton_error"] = str(e)
-        else:
-            logger.debug("step_4.1_skeleton_skipped (SKELETON_ENRICHMENT_ENABLED=%s, VOYAGE_API_KEY=%s)",
-                         settings.SKELETON_ENRICHMENT_ENABLED, bool(settings.VOYAGE_API_KEY))
-
-        # 4.2) Phase 2: Sparse sentence-to-sentence RELATED_TO edges.
-        # Separate from GDS KNN — bounded: threshold 0.90, max k=2, cross-chunk only.
-        if skeleton_enabled and stats.get("skeleton_sentences", 0) > 0:
+        # 4.2) Sparse sentence-to-sentence RELATED_TO edges.
+        if stats["sentences"] > 1:
             try:
                 knn_stats = await self._build_sentence_knn_edges(group_id)
                 stats["skeleton_related_to_edges"] = knn_stats.get("edges_created", 0)
@@ -386,10 +348,9 @@ class LazyGraphRAGIndexingPipeline:
             except Exception as e:
                 logger.warning(f"step_4.2_sentence_knn_failed: {e}")
                 stats["skeleton_related_to_edges"] = 0
-                stats["skeleton_knn_error"] = str(e)
 
-        # 4.5) Build Section graph from chunk metadata.
-        section_stats = await self._build_section_graph(group_id, all_chunks, chunk_to_doc_id)
+        # 4.5) Build Section graph from DI unit metadata.
+        section_stats = await self._build_section_graph_from_docs(group_id, expanded_docs)
         stats["sections"] = section_stats.get("sections_created", 0)
         stats["section_edges"] = section_stats.get("in_section_edges", 0)
         
@@ -441,7 +402,7 @@ class LazyGraphRAGIndexingPipeline:
         else:
             entities, relationships = await self._extract_entities_and_relationships(
                 group_id=group_id,
-                chunks=all_chunks,
+                chunks=[],  # Sentence-first: no chunk fallback needed
             )
             logger.info(f"entity_extraction_complete: {len(entities)} entities, {len(relationships)} relationships")
             # Diagnostic: log relationship count to help debug validation failures
@@ -1046,6 +1007,294 @@ class LazyGraphRAGIndexingPipeline:
         
         return stats
 
+    # ------------------------------------------------------------------
+    # Phase 1: Direct sentence indexing (bypass TextChunk creation)
+    # ------------------------------------------------------------------
+
+    async def _index_sentences_direct(
+        self,
+        *,
+        group_id: str,
+        expanded_docs: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Extract, embed, and persist Sentence nodes directly from documents.
+
+        Replaces the old chunk pipeline (_chunk_document → _embed_chunks →
+        upsert_text_chunks_batch → _build_sentence_skeleton) with a single
+        step that goes DI units → spaCy → Sentence nodes.
+
+        Returns stats dict with sentences_created, sentences_embedded, etc.
+        """
+        from src.worker.services.sentence_extraction_service import (
+            extract_sentences_from_di_units,
+            extract_sentences_from_raw_text,
+        )
+        from src.worker.hybrid_v2.services.neo4j_store import Sentence
+
+        stats: Dict[str, Any] = {
+            "sentences_created": 0,
+            "sentences_embedded": 0,
+            "documents_processed": 0,
+        }
+
+        all_raw_sentences: List[Dict[str, Any]] = []
+        doc_title_map: Dict[str, str] = {}
+
+        for doc in expanded_docs:
+            doc_id = doc["id"]
+            doc_title = doc.get("title", "Untitled")
+            doc_source = doc.get("source", "")
+            doc_title_map[doc_id] = doc_title
+
+            di_units = doc.get("di_extracted_docs") or []
+            if di_units:
+                raw = extract_sentences_from_di_units(
+                    di_units, doc_id=doc_id,
+                    doc_title=doc_title, doc_source=doc_source,
+                )
+            else:
+                content = (doc.get("content") or doc.get("text") or "").strip()
+                if not content:
+                    continue
+                raw = extract_sentences_from_raw_text(
+                    content, doc_id=doc_id,
+                    doc_title=doc_title, doc_source=doc_source,
+                )
+
+            all_raw_sentences.extend(raw)
+            stats["documents_processed"] += 1
+
+        if not all_raw_sentences:
+            logger.info("index_sentences_direct: no sentences extracted")
+            return stats
+
+        logger.info(
+            "index_sentences_direct: extracted %d sentences from %d documents",
+            len(all_raw_sentences), stats["documents_processed"],
+        )
+
+        # ── Embed with Voyage contextualized (per-document grouping) ──
+        sentence_embeddings: List[Optional[List[float]]] = [None] * len(all_raw_sentences)
+
+        def _build_label_prefix(s: Dict[str, Any]) -> str:
+            title = doc_title_map.get(s.get("document_id", ""), "")
+            sp = s.get("section_path", "")
+            source = s.get("source", "paragraph")
+            parts: List[str] = []
+            if title:
+                parts.append(f"Document: {title}")
+            if source == "signature_party":
+                parts.append("Signature Block")
+            elif source == "table_row":
+                parts.append(f"Table: {sp}" if sp else "Table")
+            elif source == "figure_caption":
+                parts.append(f"Figure: {sp}" if sp else "Figure")
+            elif sp:
+                parts.append(f"Section: {sp}")
+            return f"[{' | '.join(parts)}] " if parts else ""
+
+        try:
+            from collections import OrderedDict
+            doc_groups: OrderedDict[str, List[int]] = OrderedDict()
+            for idx, s in enumerate(all_raw_sentences):
+                doc_groups.setdefault(s.get("document_id", "unknown"), []).append(idx)
+
+            document_chunks: List[List[str]] = []
+            index_maps: List[List[int]] = []
+            for did, indices in doc_groups.items():
+                doc_texts = [
+                    _build_label_prefix(all_raw_sentences[i]) + all_raw_sentences[i]["text"]
+                    for i in indices
+                ]
+                document_chunks.append(doc_texts)
+                index_maps.append(indices)
+
+            logger.info(
+                "index_sentences_direct: embedding %d documents, sentences=%s",
+                len(document_chunks),
+                [len(dc) for dc in document_chunks],
+            )
+
+            import asyncio
+            from src.worker.hybrid_v2.embeddings.voyage_embed import get_voyage_embed_service
+            voyage_svc = get_voyage_embed_service()
+            loop = asyncio.get_event_loop()
+            all_doc_embeddings = await loop.run_in_executor(
+                None,
+                lambda: voyage_svc.embed_documents_contextualized(document_chunks),
+            )
+
+            for doc_embs, orig_indices in zip(all_doc_embeddings, index_maps):
+                for chunk_idx, orig_idx in enumerate(orig_indices):
+                    emb = doc_embs[chunk_idx]
+                    if emb and isinstance(emb, list) and len(emb) > 0:
+                        sentence_embeddings[orig_idx] = emb
+
+            stats["sentences_embedded"] = sum(1 for e in sentence_embeddings if e is not None)
+            logger.info(
+                "index_sentences_direct: embedded %d/%d sentences",
+                stats["sentences_embedded"], len(all_raw_sentences),
+            )
+        except Exception as e:
+            logger.exception("index_sentences_direct: embedding failed: %s", e)
+            raise
+
+        # ── Build Sentence dataclass instances ──
+        sentence_objects: List[Sentence] = []
+        for raw, emb in zip(all_raw_sentences, sentence_embeddings):
+            sentence_objects.append(Sentence(
+                id=raw["id"],
+                text=raw["text"],
+                chunk_id=raw.get("chunk_id") or None,
+                document_id=raw["document_id"],
+                source=raw["source"],
+                index_in_chunk=raw.get("index_in_chunk", 0),
+                index_in_doc=raw.get("index_in_doc", 0),
+                section_path=raw.get("section_path", ""),
+                page=raw.get("page"),
+                confidence=raw.get("confidence", 1.0),
+                embedding_v2=emb,
+                tokens=raw.get("tokens", 0),
+                parent_text=raw.get("parent_text"),
+            ))
+
+        # ── Persist in Neo4j ──
+        count = self.neo4j_store.upsert_sentences_batch(group_id, sentence_objects)
+        stats["sentences_created"] = count
+
+        logger.info(
+            "index_sentences_direct: persisted %d sentences",
+            count,
+        )
+        return stats
+
+    async def _build_section_graph_from_docs(
+        self,
+        group_id: str,
+        expanded_docs: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """Build Section graph directly from DI unit metadata.
+
+        Replaces the chunk-based ``_build_section_graph`` for the new
+        sentence-direct pipeline.  Creates the same Section node hierarchy
+        and links Sentences (not TextChunks) to their leaf sections.
+        """
+        DEFAULT_ROOT_SECTION = "[Document Root]"
+        all_sections: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+        for doc in expanded_docs:
+            doc_id = doc["id"]
+            di_units = doc.get("di_extracted_docs") or []
+            if not di_units:
+                # non-DI document — single root section
+                key = (doc_id, DEFAULT_ROOT_SECTION)
+                if key not in all_sections:
+                    all_sections[key] = {
+                        "id": self._stable_section_id(group_id, doc_id, DEFAULT_ROOT_SECTION),
+                        "group_id": group_id,
+                        "doc_id": doc_id,
+                        "path_key": DEFAULT_ROOT_SECTION,
+                        "title": DEFAULT_ROOT_SECTION,
+                        "depth": 0,
+                        "parent_path_key": None,
+                    }
+                continue
+
+            for unit in di_units:
+                meta = getattr(unit, "metadata", None) or {}
+                section_path = self._parse_section_path(meta)
+                if not section_path:
+                    section_path = [DEFAULT_ROOT_SECTION]
+
+                for depth, title in enumerate(section_path):
+                    path_key = " > ".join(section_path[: depth + 1])
+                    parent_path_key = " > ".join(section_path[:depth]) if depth > 0 else None
+                    key = (doc_id, path_key)
+                    if key not in all_sections:
+                        all_sections[key] = {
+                            "id": self._stable_section_id(group_id, doc_id, path_key),
+                            "group_id": group_id,
+                            "doc_id": doc_id,
+                            "path_key": path_key,
+                            "title": title,
+                            "depth": depth,
+                            "parent_path_key": parent_path_key,
+                        }
+
+        if not all_sections:
+            return {"sections_created": 0, "in_section_edges": 0}
+
+        section_data = list(all_sections.values())
+
+        def _write(session):
+            # Create Section nodes
+            result = session.run(
+                """
+                UNWIND $sections AS s
+                MERGE (sec:Section {id: s.id, group_id: s.group_id})
+                SET sec.group_id = s.group_id,
+                    sec.doc_id = s.doc_id,
+                    sec.path_key = s.path_key,
+                    sec.section_path = s.path_key,
+                    sec.title = s.title,
+                    sec.depth = s.depth,
+                    sec.updated_at = datetime()
+                RETURN count(sec) AS count
+                """,
+                sections=section_data,
+            )
+            sections_created = result.single()["count"]
+
+            # HAS_SECTION edges (Document → top-level Section)
+            top_level = [
+                {"doc_id": s["doc_id"], "section_id": s["id"]}
+                for s in section_data if s["depth"] == 0
+            ]
+            if top_level:
+                session.run(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (d:Document {id: e.doc_id, group_id: $group_id})
+                    MATCH (s:Section {id: e.section_id, group_id: $group_id})
+                    MERGE (d)-[:HAS_SECTION]->(s)
+                    """,
+                    edges=top_level, group_id=group_id,
+                )
+
+            # SUBSECTION_OF edges
+            subsection_edges = []
+            for s in section_data:
+                if s["parent_path_key"]:
+                    parent_key = (s["doc_id"], s["parent_path_key"])
+                    parent = all_sections.get(parent_key)
+                    if parent:
+                        subsection_edges.append({
+                            "child_id": s["id"],
+                            "parent_id": parent["id"],
+                        })
+            if subsection_edges:
+                session.run(
+                    """
+                    UNWIND $edges AS e
+                    MATCH (child:Section {id: e.child_id})
+                    MATCH (parent:Section {id: e.parent_id})
+                    MERGE (child)-[:SUBSECTION_OF]->(parent)
+                    """,
+                    edges=subsection_edges,
+                )
+
+            return sections_created
+
+        sections_created = await self.neo4j_store.arun_in_session(_write)
+
+        # IN_SECTION edges for Sentences are already created by
+        # upsert_sentences_batch (direct section_path matching).
+        logger.info(
+            "section_graph_from_docs_built",
+            extra={"group_id": group_id, "sections_created": sections_created},
+        )
+        return {"sections_created": sections_created, "in_section_edges": 0}
+
     async def _build_sentence_knn_edges(
         self,
         group_id: str,
@@ -1094,13 +1343,22 @@ class LazyGraphRAGIndexingPipeline:
             """
                 MATCH (s:Sentence {group_id: $group_id})
                 WHERE s.embedding_v2 IS NOT NULL
-                RETURN s.id AS id, s.chunk_id AS chunk_id, s.embedding_v2 AS embedding
+                RETURN s.id AS id, s.chunk_id AS chunk_id,
+                       s.document_id AS document_id,
+                       s.index_in_doc AS index_in_doc,
+                       s.embedding_v2 AS embedding
                 """,
             read_only=True,
             group_id=group_id,
         )
         sentences = [
-            {"id": record["id"], "chunk_id": record["chunk_id"], "embedding": record["embedding"]}
+            {
+                "id": record["id"],
+                "chunk_id": record["chunk_id"] or "",
+                "document_id": record["document_id"] or "",
+                "index_in_doc": record["index_in_doc"] or 0,
+                "embedding": record["embedding"],
+            }
             for record in result
         ]
         
@@ -1133,10 +1391,23 @@ class LazyGraphRAGIndexingPipeline:
         normalized = embeddings / norms
         sim_matrix = normalized @ normalized.T
         
-        # Build edge candidates: cross-chunk, above threshold, max-k per node
+        # Build edge candidates: cross-context, above threshold, max-k per node.
+        # For legacy sentences with chunk_id: skip same-chunk pairs.
+        # For new sentences without chunk_id: skip adjacent sentences in same doc
+        # (already linked via NEXT edges).
         edge_count: Dict[str, int] = defaultdict(int)
         
-        # For each sentence, find its top-k cross-chunk neighbours
+        def _is_same_context(a: dict, b: dict) -> bool:
+            """True when two sentences are too close to need a RELATED_TO edge."""
+            cid_a, cid_b = a["chunk_id"], b["chunk_id"]
+            if cid_a and cid_b:
+                return cid_a == cid_b  # legacy: same chunk
+            # New doc-based sentences: skip immediate neighbours in same doc
+            if a["document_id"] == b["document_id"]:
+                return abs(a["index_in_doc"] - b["index_in_doc"]) <= 1
+            return False
+
+        # For each sentence, find its top-k non-adjacent neighbours
         # Process by descending similarity to ensure we keep the best edges
         candidates = []
         for i in range(len(sentences)):
@@ -1144,8 +1415,8 @@ class LazyGraphRAGIndexingPipeline:
             for j in range(len(sentences)):
                 if i == j:
                     continue
-                if sentences[i]["chunk_id"] == sentences[j]["chunk_id"]:
-                    continue  # Same chunk — already linked via NEXT
+                if _is_same_context(sentences[i], sentences[j]):
+                    continue  # Too close — already linked via NEXT
                 sim = float(sim_matrix[i, j])
                 if sim >= threshold:
                     row_candidates.append((j, sim))
@@ -3612,7 +3883,7 @@ SUMMARY: <summary>"""
         
         Creates content-rich embeddings for Section nodes by concatenating:
         - Section title
-        - Aggregated text from linked TextChunks (first 500 chars each, max 3 chunks)
+        - Aggregated text from linked Sentences (first 500 chars each, max 5)
         
         These embeddings capture what the section *contains* and are used for
         SEMANTICALLY_SIMILAR edge creation ("soft" thematic hops in PPR).
@@ -3637,9 +3908,9 @@ SUMMARY: <summary>"""
             """
                 MATCH (s:Section {group_id: $group_id})
                 WHERE s.embedding IS NULL
-                OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
-                WITH s, collect(t.text)[0..3] AS chunk_texts
-                RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key, chunk_texts
+                OPTIONAL MATCH (t:Sentence)-[:IN_SECTION]->(s)
+                WITH s, collect(t.text)[0..5] AS sent_texts
+                RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key, sent_texts AS chunk_texts
                 """,
             read_only=True,
             group_id=group_id,
@@ -3726,13 +3997,13 @@ SUMMARY: <summary>"""
             """
             MATCH (s:Section {group_id: $group_id})
             WHERE s.summary IS NULL
-            OPTIONAL MATCH (t:TextChunk)-[:IN_SECTION]->(s)
-            WITH s, collect(t.text)[0..6] AS chunk_texts
-            WHERE size(chunk_texts) > 0
+            OPTIONAL MATCH (t:Sentence)-[:IN_SECTION]->(s)
+            WITH s, collect(t.text)[0..8] AS sent_texts
+            WHERE size(sent_texts) > 0
             RETURN s.id AS section_id,
                    s.title AS title,
                    s.path_key AS path_key,
-                   chunk_texts
+                   sent_texts AS chunk_texts
             """,
             read_only=True,
             group_id=group_id,

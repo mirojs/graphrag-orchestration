@@ -372,6 +372,251 @@ def extract_sentences_from_chunks(
     return all_sentences, extra_chunk_map
 
 
+def extract_sentences_from_di_units(
+    di_units: List[Any],
+    doc_id: str,
+    doc_title: str = "",
+    doc_source: str = "",
+) -> List[Dict[str, Any]]:
+    """Extract sentences directly from DI units, bypassing TextChunk creation.
+
+    Each DI unit is a LlamaIndex Document with ``.text`` and ``.metadata``.
+    Body text is split with spaCy; tables, figures, and signature blocks are
+    extracted from DI metadata the same way ``extract_sentences_from_chunk``
+    handles them.
+
+    Returns a deduplicated list of sentence dicts with:
+        id, text, chunk_id (empty), document_id, source, index_in_chunk (0),
+        index_in_doc, section_path, page, confidence, tokens, parent_text.
+    """
+    all_sentences: List[Dict[str, Any]] = []
+    seen_texts: Dict[str, str] = {}  # lowered text → sentence id (dedup)
+    global_idx = 0
+
+    for unit in di_units:
+        meta = getattr(unit, "metadata", None) or {}
+        unit_text = getattr(unit, "text", "") or ""
+
+        # Section path from DI metadata
+        section_path_raw = meta.get("section_path") or meta.get("di_section_path") or ""
+        if isinstance(section_path_raw, list):
+            section_path = " > ".join(str(s) for s in section_path_raw if str(s).strip())
+        elif isinstance(section_path_raw, str) and section_path_raw.strip():
+            section_path = section_path_raw.strip()
+        else:
+            section_path = ""
+
+        page = meta.get("page_number")
+
+        # Skip non-content DI roles
+        role = meta.get("role", "")
+        if role in SKIP_ROLES:
+            continue
+
+        # ─── Source A: Body text → spaCy sentences ───────────────
+        clean_text = _clean_chunk_text_for_spacy(unit_text)
+        if clean_text:
+            nlp = _get_nlp()
+            doc = nlp(clean_text)
+            for sent in doc.sents:
+                sent_text = sent.text.strip()
+                if not sent_text or _is_noise_sentence(sent_text) or _is_kvp_label(sent_text):
+                    continue
+                text_key = sent_text.strip().lower()
+                if text_key in seen_texts:
+                    continue
+                sent_id = f"{doc_id}_sent_{global_idx}"
+                seen_texts[text_key] = sent_id
+                all_sentences.append({
+                    "id": sent_id,
+                    "text": sent_text,
+                    "chunk_id": "",
+                    "document_id": doc_id,
+                    "source": "paragraph",
+                    "index_in_chunk": 0,
+                    "index_in_doc": global_idx,
+                    "section_path": section_path,
+                    "page": page,
+                    "confidence": 1.0,
+                    "tokens": len(sent_text.split()),
+                    "parent_text": clean_text[:500] if clean_text else "",
+                })
+                global_idx += 1
+
+        # ─── Source B: Table rows ────────────────────────────────
+        tables = meta.get("tables", [])
+        if isinstance(tables, list):
+            for table in tables:
+                if not isinstance(table, dict):
+                    continue
+                headers = table.get("headers", [])
+                for row in table.get("rows", []):
+                    if not isinstance(row, dict):
+                        continue
+                    parts = [f"{h}: {row[h].strip()}" for h in headers if row.get(h, "").strip()]
+                    if not parts:
+                        continue
+                    row_text = " | ".join(parts)
+                    if _is_noise_sentence(row_text, min_chars=15, min_words=3):
+                        continue
+                    text_key = row_text.strip().lower()
+                    if text_key in seen_texts:
+                        continue
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": row_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "table_row",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": section_path,
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(row_text.split()),
+                        "parent_text": "",
+                    })
+                    global_idx += 1
+
+        # ─── Source C: Figure captions ───────────────────────────
+        figures = meta.get("figures", [])
+        if isinstance(figures, list):
+            for fig in figures:
+                if not isinstance(fig, dict):
+                    continue
+                caption = (fig.get("caption") or "").strip()
+                if not caption or len(caption) < 15:
+                    continue
+                text_key = caption.strip().lower()
+                if text_key in seen_texts:
+                    continue
+                sent_id = f"{doc_id}_sent_{global_idx}"
+                seen_texts[text_key] = sent_id
+                all_sentences.append({
+                    "id": sent_id,
+                    "text": caption,
+                    "chunk_id": "",
+                    "document_id": doc_id,
+                    "source": "figure_caption",
+                    "index_in_chunk": 0,
+                    "index_in_doc": global_idx,
+                    "section_path": section_path,
+                    "page": fig.get("page_number") or page,
+                    "confidence": 1.0,
+                    "tokens": len(caption.split()),
+                    "parent_text": "",
+                })
+                global_idx += 1
+
+        # ─── Source D: Signature parties ─────────────────────────
+        sig_block = meta.get("signature_block", {})
+        if isinstance(sig_block, dict):
+            parties = sig_block.get("parties", [])
+            signed_date = sig_block.get("signed_date", "")
+            for party in parties:
+                if not isinstance(party, dict):
+                    continue
+                role = (party.get("role") or "").strip()
+                name = (party.get("name") or "").strip()
+                if not name:
+                    continue
+                text = f"{role}: {name}" if role else name
+                if _is_noise_sentence(text, min_chars=5, min_words=1):
+                    continue
+                text_key = text.strip().lower()
+                if text_key in seen_texts:
+                    continue
+                sent_id = f"{doc_id}_sent_{global_idx}"
+                seen_texts[text_key] = sent_id
+                all_sentences.append({
+                    "id": sent_id,
+                    "text": text,
+                    "chunk_id": "",
+                    "document_id": doc_id,
+                    "source": "signature_party",
+                    "index_in_chunk": 0,
+                    "index_in_doc": global_idx,
+                    "section_path": section_path,
+                    "page": page,
+                    "confidence": 1.0,
+                    "tokens": len(text.split()),
+                    "parent_text": "",
+                })
+                global_idx += 1
+            if signed_date:
+                date_text = f"Signed date: {signed_date}"
+                text_key = date_text.strip().lower()
+                if text_key not in seen_texts:
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": date_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "signature_party",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": section_path,
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(date_text.split()),
+                        "parent_text": "",
+                    })
+                    global_idx += 1
+
+    logger.info(
+        "di_sentence_extraction_complete",
+        doc_id=doc_id,
+        di_units=len(di_units),
+        sentences=len(all_sentences),
+    )
+    return all_sentences
+
+
+def extract_sentences_from_raw_text(
+    text: str,
+    doc_id: str,
+    doc_title: str = "",
+    doc_source: str = "",
+) -> List[Dict[str, Any]]:
+    """Extract sentences from raw text (non-DI fallback) using spaCy."""
+    sentences: List[Dict[str, Any]] = []
+    clean_text = _clean_chunk_text_for_spacy(text)
+    if not clean_text:
+        return sentences
+
+    nlp = _get_nlp()
+    doc = nlp(clean_text)
+    for idx, sent in enumerate(doc.sents):
+        sent_text = sent.text.strip()
+        if not sent_text or _is_noise_sentence(sent_text) or _is_kvp_label(sent_text):
+            continue
+        sentences.append({
+            "id": f"{doc_id}_sent_{idx}",
+            "text": sent_text,
+            "chunk_id": "",
+            "document_id": doc_id,
+            "source": "paragraph",
+            "index_in_chunk": 0,
+            "index_in_doc": idx,
+            "section_path": "",
+            "page": None,
+            "confidence": 1.0,
+            "tokens": len(sent_text.split()),
+            "parent_text": clean_text[:500],
+        })
+
+    logger.info(
+        "raw_text_sentence_extraction_complete",
+        doc_id=doc_id,
+        sentences=len(sentences),
+    )
+    return sentences
+
+
 def format_skeleton_context_for_prompt(
     sentence_results: List[Dict[str, Any]],
     max_sentences: int = 8,

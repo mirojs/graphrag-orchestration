@@ -96,27 +96,33 @@ class TextChunk:
 
 @dataclass
 class Sentence:
-    """Sentence-level node for skeleton enrichment (Strategy A).
+    """Sentence-level node — the primary retrieval and extraction unit.
     
-    Extracted from TextChunks via spaCy (body text) or DI metadata (table rows,
-    figure captions). Embedded with Voyage voyage-context-3 for sentence-level
-    semantic search. Used by Route 2 to inject supplementary evidence into the
-    synthesis prompt.
+    Extracted from document text via spaCy (body text) or DI metadata (table
+    rows, figure captions).  Embedded with Voyage voyage-context-3 for
+    sentence-level semantic search.  Used by all active routes (2-7).
     
-    See ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md for design rationale.
+    Graph edges created during indexing:
+      - IN_DOCUMENT → Document
+      - IN_SECTION  → Section
+      - MENTIONS    → Entity  (created during entity extraction)
+      - NEXT        → Sentence (sequential ordering)
+      - RELATED_TO  → Sentence (KNN similarity)
     """
     id: str
     text: str
-    chunk_id: str  # Parent TextChunk ID
-    document_id: str
-    source: str  # "paragraph" | "table_row" | "figure_caption"
-    index_in_chunk: int  # Position within parent chunk
+    chunk_id: Optional[str] = None  # Legacy: parent TextChunk ID (deprecated)
+    document_id: str = ""
+    source: str = "paragraph"  # "paragraph" | "table_row" | "figure_caption" | "signature_party"
+    index_in_chunk: int = 0  # Position within parent chunk (legacy)
+    index_in_doc: int = 0  # Global ordinal position within document
     section_path: str = ""  # Section hierarchy path
     page: Optional[int] = None
     confidence: float = 1.0
     embedding_v2: Optional[List[float]] = None  # Voyage 2048-dim
     tokens: int = 0
     parent_text: Optional[str] = None  # Parent paragraph for "sentence search, paragraph display"
+    metadata: Dict[str, Any] = field(default_factory=dict)  # KVPs, tables, source URL, title
 
 
 @dataclass
@@ -2008,8 +2014,9 @@ class Neo4jStoreV3:
     def upsert_sentences_batch(self, group_id: str, sentences: List["Sentence"]) -> int:
         """Batch insert/update Sentence nodes with embeddings and structural edges.
         
-        Creates :Sentence nodes linked to parent :TextChunk via PART_OF edges,
-        and NEXT edges between sequential sentences within the same chunk.
+        Creates :Sentence nodes with direct IN_DOCUMENT and IN_SECTION edges.
+        Optionally creates PART_OF→TextChunk if chunk_id is present (legacy).
+        Creates NEXT edges between sequential sentences within the same document.
         """
         if not sentences:
             return 0
@@ -2022,11 +2029,13 @@ class Neo4jStoreV3:
             sent.document_id = s.document_id,
             sent.source = s.source,
             sent.index_in_chunk = s.index_in_chunk,
+            sent.index_in_doc = s.index_in_doc,
             sent.section_path = s.section_path,
             sent.page = s.page,
             sent.confidence = s.confidence,
             sent.tokens = s.tokens,
             sent.parent_text = s.parent_text,
+            sent.metadata = s.metadata,
             sent.group_id = $group_id,
             sent.updated_at = datetime()
         
@@ -2036,10 +2045,13 @@ class Neo4jStoreV3:
             SET sent.embedding_v2 = s.embedding_v2
         )
         
-        // PART_OF edge to parent TextChunk
+        // PART_OF edge to parent TextChunk (legacy — only when chunk_id is set)
         WITH sent, s
-        MATCH (chunk:TextChunk {id: s.chunk_id, group_id: $group_id})
-        MERGE (sent)-[:PART_OF]->(chunk)
+        OPTIONAL MATCH (chunk:TextChunk {id: s.chunk_id, group_id: $group_id})
+        WHERE s.chunk_id IS NOT NULL AND s.chunk_id <> ''
+        FOREACH (_ IN CASE WHEN chunk IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sent)-[:PART_OF]->(chunk)
+        )
         
         // IN_DOCUMENT edge
         WITH sent, s
@@ -2048,11 +2060,17 @@ class Neo4jStoreV3:
             MERGE (sent)-[:IN_DOCUMENT]->(d)
         )
         
-        // IN_SECTION edge (inherit from parent chunk)
+        // IN_SECTION edge — try direct match on section_path first
         WITH sent, s
-        OPTIONAL MATCH (chunk:TextChunk {id: s.chunk_id, group_id: $group_id})-[:IN_SECTION]->(sec:Section)
-        FOREACH (_ IN CASE WHEN sec IS NOT NULL THEN [1] ELSE [] END |
-            MERGE (sent)-[:IN_SECTION]->(sec)
+        OPTIONAL MATCH (sec:Section {group_id: $group_id})
+        WHERE sec.doc_id = s.document_id AND s.section_path <> '' AND sec.section_path = s.section_path
+        WITH sent, s, sec AS direct_sec
+        // Fallback: inherit IN_SECTION from parent TextChunk (legacy path)
+        OPTIONAL MATCH (chunk2:TextChunk {id: s.chunk_id, group_id: $group_id})-[:IN_SECTION]->(inherited_sec:Section)
+        WHERE direct_sec IS NULL AND s.chunk_id IS NOT NULL AND s.chunk_id <> ''
+        WITH sent, coalesce(direct_sec, inherited_sec) AS final_sec
+        FOREACH (_ IN CASE WHEN final_sec IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sent)-[:IN_SECTION]->(final_sec)
         )
         
         RETURN count(sent) AS count
@@ -2060,19 +2078,29 @@ class Neo4jStoreV3:
         
         sentence_data = []
         for s in sentences:
+            # Serialize metadata dict to JSON string for Neo4j storage
+            meta_str = ""
+            if s.metadata:
+                import json as _json
+                try:
+                    meta_str = _json.dumps(s.metadata, default=str)
+                except (TypeError, ValueError):
+                    meta_str = ""
             sentence_data.append({
                 "id": s.id,
                 "text": s.text,
-                "chunk_id": s.chunk_id,
+                "chunk_id": s.chunk_id or "",
                 "document_id": s.document_id,
                 "source": s.source,
                 "index_in_chunk": s.index_in_chunk,
+                "index_in_doc": s.index_in_doc,
                 "section_path": s.section_path,
                 "page": s.page,
                 "confidence": s.confidence,
                 "tokens": s.tokens,
                 "parent_text": s.parent_text or "",
                 "embedding_v2": s.embedding_v2,
+                "metadata": meta_str,
             })
         
         with self.get_retry_session() as session:
@@ -2087,17 +2115,34 @@ class Neo4jStoreV3:
             return count
     
     def _create_sentence_next_edges(self, group_id: str, sentences: List["Sentence"]) -> None:
-        """Create NEXT edges between sequential sentences within each chunk."""
+        """Create NEXT edges between sequential sentences.
+
+        For legacy sentences with chunk_id: groups by chunk_id, sorts by index_in_chunk.
+        For new sentences without chunk_id: groups by document_id, sorts by index_in_doc.
+        """
         from collections import defaultdict
-        
-        # Group sentences by chunk_id
+
+        # Separate legacy (chunk-based) and new (doc-based) sentences
         chunk_sentences: Dict[str, List["Sentence"]] = defaultdict(list)
+        doc_sentences: Dict[str, List["Sentence"]] = defaultdict(list)
         for s in sentences:
-            chunk_sentences[s.chunk_id].append(s)
-        
+            if s.chunk_id:
+                chunk_sentences[s.chunk_id].append(s)
+            else:
+                doc_sentences[s.document_id].append(s)
+
         next_pairs = []
+        # Legacy: NEXT within each chunk
         for chunk_id, chunk_sents in chunk_sentences.items():
             sorted_sents = sorted(chunk_sents, key=lambda s: s.index_in_chunk)
+            for i in range(len(sorted_sents) - 1):
+                next_pairs.append({
+                    "from_id": sorted_sents[i].id,
+                    "to_id": sorted_sents[i + 1].id,
+                })
+        # New: NEXT within each document by index_in_doc
+        for doc_id, doc_sents in doc_sentences.items():
+            sorted_sents = sorted(doc_sents, key=lambda s: s.index_in_doc)
             for i in range(len(sorted_sents) - 1):
                 next_pairs.append({
                     "from_id": sorted_sents[i].id,

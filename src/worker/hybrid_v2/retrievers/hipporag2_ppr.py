@@ -198,10 +198,10 @@ class HippoRAG2PPR:
                 self._add_node(record["id"], "entity", record["name"] or "")
 
             # ----------------------------------------------------------
-            # 2. Load TextChunk (passage) nodes
+            # 2. Load Sentence (passage) nodes
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (c:TextChunk {group_id: $group_id}) "
+                "MATCH (c:Sentence {group_id: $group_id}) "
                 "RETURN c.id AS id, c.text AS text",
                 group_id=group_id,
             )
@@ -235,7 +235,7 @@ class HippoRAG2PPR:
             # 4. Passage-Entity edges via MENTIONS
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (c:TextChunk {group_id: $group_id})"
+                "MATCH (c:Sentence {group_id: $group_id})"
                 "-[:MENTIONS]->"
                 "(e:Entity {group_id: $group_id}) "
                 "RETURN c.id AS chunk_id, e.id AS entity_id",
@@ -305,7 +305,7 @@ class HippoRAG2PPR:
 
         # Passage <-> Section via IN_SECTION
         result = session.run(
-            "MATCH (c:TextChunk {group_id: $group_id})"
+            "MATCH (c:Sentence {group_id: $group_id})"
             "-[:IN_SECTION]->"
             "(s:Section {group_id: $group_id}) "
             "RETURN c.id AS chunk_id, s.id AS section_id",

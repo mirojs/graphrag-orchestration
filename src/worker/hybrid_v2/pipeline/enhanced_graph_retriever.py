@@ -349,7 +349,7 @@ class EnhancedGraphRetriever:
             # Fallback to 2-hop traversal
             query = """
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_SECTION]->(s:Section)
+            MATCH (e:Entity)<-[:MENTIONS]-(c:Sentence)-[:IN_SECTION]->(s:Section)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND c.group_id = $group_id
@@ -437,7 +437,7 @@ class EnhancedGraphRetriever:
             # Fallback to 3-hop traversal
             query = f"""
             UNWIND $entity_names AS entity_name
-            MATCH (e:Entity)<-[:MENTIONS]-(c:TextChunk)-[:IN_DOCUMENT]->(d:Document)
+            MATCH (e:Entity)<-[:MENTIONS]-(c:Sentence)-[:IN_DOCUMENT]->(d:Document)
             WHERE (toLower(e.name) = toLower(entity_name) OR e.id = entity_name
                    OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
               AND c.group_id = $group_id
@@ -862,7 +862,7 @@ class EnhancedGraphRetriever:
                 MATCH (e)-[:APPEARS_IN_SECTION]->(s:Section)
                 WHERE s.group_id = $group_id
                 // Get chunks from this section
-                MATCH (c:TextChunk)-[:IN_SECTION]->(s)
+                MATCH (c:Sentence)-[:IN_SECTION]->(s)
                 WHERE c.group_id = $group_id
                 // Get document info
                 OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document)
@@ -992,7 +992,7 @@ class EnhancedGraphRetriever:
         # Includes alias support for flexible entity matching
         query = f"""
                 UNWIND $entity_names AS entity_name
-                MATCH (t:TextChunk)-[:MENTIONS]->(e)
+                MATCH (t:Sentence)-[:MENTIONS]->(e)
                 WHERE (e:Entity OR e:`__Entity__`)
                   AND (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
@@ -1363,7 +1363,7 @@ class EnhancedGraphRetriever:
         candidate_limit = max(50, max_total * 10)
 
         query = """
-        MATCH (t:TextChunk)
+        MATCH (t:Sentence)
         WHERE t.group_id = $group_id
         WITH t,
              replace(
@@ -1520,7 +1520,7 @@ class EnhancedGraphRetriever:
         folder_filter = self._get_folder_filter_clause("d")
 
         query = f"""
-        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.chunk_index IN $chunk_indexes
@@ -1650,7 +1650,7 @@ class EnhancedGraphRetriever:
         candidate_limit = max(60, max_total * 10)
 
         query = """
-        MATCH (s:Section)<-[:IN_SECTION]-(t:TextChunk)
+        MATCH (s:Section)<-[:IN_SECTION]-(t:Sentence)
         WHERE t.group_id = $group_id
           AND s.group_id = $group_id
         WITH t, s,
@@ -1780,7 +1780,7 @@ class EnhancedGraphRetriever:
         candidate_limit = max(60, max_total * 10)
 
         query = """
-        MATCH (s:Section)<-[:IN_SECTION]-(t:TextChunk)
+        MATCH (s:Section)<-[:IN_SECTION]-(t:Sentence)
         WHERE t.group_id = $group_id
           AND s.group_id = $group_id
           AND s.id IN $section_ids
@@ -1994,7 +1994,7 @@ class EnhancedGraphRetriever:
             AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                  OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         
-        MATCH (c:TextChunk)-[:MENTIONS]->(e1)
+        MATCH (c:Sentence)-[:MENTIONS]->(e1)
         WHERE c.group_id = $group_id
         OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
         WITH e1, c, d
@@ -2369,7 +2369,7 @@ class EnhancedGraphRetriever:
                 # documents and break the intended “every document” coverage behavior.
         folder_filter = self._get_folder_filter_clause("d")
         query = f"""
-        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           {folder_filter}
@@ -2528,7 +2528,7 @@ class EnhancedGraphRetriever:
         
         # Use native vector similarity to find the best chunk per document
         query = f"""
-        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.embedding IS NOT NULL
@@ -2683,7 +2683,7 @@ class EnhancedGraphRetriever:
             # COMPREHENSIVE: Return ALL chunks from all sections
             # No slicing - just collect and unwind all chunks per section
             query = f"""
-            MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
+            MATCH (t:Sentence)-[:IN_SECTION]->(s:Section)
             WHERE t.group_id = $group_id
               AND s.group_id = $group_id
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
@@ -2705,7 +2705,7 @@ class EnhancedGraphRetriever:
         else:
             # SAMPLING: Return max_per_section chunks from each section
             query = f"""
-            MATCH (t:TextChunk)-[:IN_SECTION]->(s:Section)
+            MATCH (t:Sentence)-[:IN_SECTION]->(s:Section)
             WHERE t.group_id = $group_id
               AND s.group_id = $group_id
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
@@ -2838,7 +2838,7 @@ class EnhancedGraphRetriever:
         query = f"""
         MATCH (s:Section {{group_id: $group_id}})
         WHERE s.structural_embedding IS NOT NULL
-        OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:TextChunk)-[:IN_DOCUMENT]->(d:Document)
+        OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:Sentence)-[:IN_DOCUMENT]->(d:Document)
         WITH s, d, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
         WHERE score >= $score_threshold {folder_filter_clause}
         WITH s, d, score
@@ -2920,7 +2920,7 @@ class EnhancedGraphRetriever:
         folder_filter = self._get_folder_filter_clause("d")
 
         query = f"""
-        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
+        MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
           AND t.metadata IS NOT NULL
@@ -3056,7 +3056,7 @@ class EnhancedGraphRetriever:
         
         folder_filter = self._get_folder_filter_clause("d")
         query = f"""
-        MATCH (t:TextChunk)
+        MATCH (t:Sentence)
         WHERE t.group_id = $group_id
           AND t.metadata IS NOT NULL
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})

@@ -311,7 +311,7 @@ class CommunityMatcher:
         UNWIND $community_ids AS cid
         MATCH (c:Community {id: cid, group_id: $group_id})
               <-[:BELONGS_TO]-(e:Entity)
-              <-[:MENTIONS]-(tc:TextChunk {group_id: $group_id})
+              <-[:MENTIONS]-(tc:Sentence {group_id: $group_id})
               -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
               -[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         RETURN DISTINCT cid

@@ -588,27 +588,14 @@ class Neo4jStoreV3:
             SET entity.embedding = e.embedding
         )
         
-        // Create MENTIONS relationships (Phase B: Sentence-first, TextChunk fallback)
+        // Create MENTIONS relationships from Sentence nodes
         WITH entity, e
         UNWIND e.text_unit_ids AS unit_id
-        OPTIONAL MATCH (sent:Sentence {id: unit_id, group_id: $group_id})
-        OPTIONAL MATCH (chunk:TextChunk {id: unit_id, group_id: $group_id})
-        WITH entity, coalesce(sent, chunk) AS source_node
-        WHERE source_node IS NOT NULL
-        MERGE (source_node)-[m:MENTIONS]->(entity)
+        MATCH (sent:Sentence {id: unit_id, group_id: $group_id})
+        MERGE (sent)-[m:MENTIONS]->(entity)
         SET m.group_id = $group_id
         
         RETURN count(DISTINCT entity) AS count
-        """
-        
-        # Phase B: Also create TextChunk MENTIONS by propagating from Sentences
-        # This gives Route 2 a direct TextChunk->Entity path (fast, no PART_OF traversal)
-        propagate_query = """
-        MATCH (s:Sentence {group_id: $group_id})-[:MENTIONS]->(e:Entity {group_id: $group_id})
-        MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
-        MERGE (c)-[m:MENTIONS]->(e)
-        SET m.group_id = $group_id
-        RETURN count(m) AS propagated
         """
         
         entity_data = [
@@ -630,14 +617,8 @@ class Neo4jStoreV3:
             record = result.single()
             count = cast(int, record["count"]) if record else 0
             
-            # Propagate Sentence MENTIONS to parent TextChunks
-            prop_result = session.run(propagate_query, group_id=group_id)
-            prop_record = prop_result.single()
-            propagated = cast(int, prop_record["propagated"]) if prop_record else 0
-            
-            # Log MENTIONS creation
             mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
-            logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS + {propagated} TextChunk MENTIONS (propagated)")
+            logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS")
             
             return count
 
@@ -658,7 +639,7 @@ class Neo4jStoreV3:
         WITH e, COUNT { (e)-[]-() } AS degree
         SET e.degree = degree
         WITH e
-        // Phase B: count mentions from both Sentence and TextChunk
+        // Count MENTIONS from Sentence nodes
         WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id } AS chunk_count
         SET e.chunk_count = chunk_count
         SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
@@ -699,27 +680,13 @@ class Neo4jStoreV3:
             SET entity.embedding = e.embedding
         )
         
-        // Create MENTIONS relationships (Phase B: Sentence-first, TextChunk fallback)
+        // Create MENTIONS relationships from Sentence nodes
         WITH entity, e
         UNWIND e.text_unit_ids AS unit_id
-        OPTIONAL MATCH (sent:Sentence {id: unit_id, group_id: $group_id})
-        OPTIONAL MATCH (chunk:TextChunk {id: unit_id, group_id: $group_id})
-        WITH entity, coalesce(sent, chunk) AS source_node
-        WHERE source_node IS NOT NULL
-        MERGE (source_node)-[m:MENTIONS]->(entity)
+        MATCH (sent:Sentence {id: unit_id, group_id: $group_id})
+        MERGE (sent)-[m:MENTIONS]->(entity)
         SET m.group_id = $group_id
-        
         RETURN count(DISTINCT entity) AS count
-        """
-        
-        # Phase B: Also create TextChunk MENTIONS by propagating from Sentences
-        # This gives Route 2 a direct TextChunk->Entity path (fast, no PART_OF traversal)
-        propagate_query = """
-        MATCH (s:Sentence {group_id: $group_id})-[:MENTIONS]->(e:Entity {group_id: $group_id})
-        MATCH (s)-[:PART_OF]->(c:TextChunk {group_id: $group_id})
-        MERGE (c)-[m:MENTIONS]->(e)
-        SET m.group_id = $group_id
-        RETURN count(m) AS propagated
         """
         
         entity_data = [
@@ -749,14 +716,8 @@ class Neo4jStoreV3:
                 record = result.single()
                 count = cast(int, record["count"]) if record else 0
 
-                # Propagate Sentence MENTIONS to parent TextChunks
-                prop_result = session.run(propagate_query, group_id=group_id)
-                prop_record = prop_result.single()
-                propagated = cast(int, prop_record["propagated"]) if prop_record else 0
-
-                # Log MENTIONS creation
                 mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
-                logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS + {propagated} TextChunk MENTIONS (propagated, async)")
+                logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS (async)")
 
                 return count
 
@@ -2045,14 +2006,6 @@ class Neo4jStoreV3:
             SET sent.embedding_v2 = s.embedding_v2
         )
         
-        // PART_OF edge to parent TextChunk (legacy — only when chunk_id is set)
-        WITH sent, s
-        OPTIONAL MATCH (chunk:TextChunk {id: s.chunk_id, group_id: $group_id})
-        WHERE s.chunk_id IS NOT NULL AND s.chunk_id <> ''
-        FOREACH (_ IN CASE WHEN chunk IS NOT NULL THEN [1] ELSE [] END |
-            MERGE (sent)-[:PART_OF]->(chunk)
-        )
-        
         // IN_DOCUMENT edge
         WITH sent, s
         OPTIONAL MATCH (d:Document {id: s.document_id, group_id: $group_id})
@@ -2060,17 +2013,12 @@ class Neo4jStoreV3:
             MERGE (sent)-[:IN_DOCUMENT]->(d)
         )
         
-        // IN_SECTION edge — try direct match on section_path first
+        // IN_SECTION edge
         WITH sent, s
         OPTIONAL MATCH (sec:Section {group_id: $group_id})
         WHERE sec.doc_id = s.document_id AND s.section_path <> '' AND sec.section_path = s.section_path
-        WITH sent, s, sec AS direct_sec
-        // Fallback: inherit IN_SECTION from parent TextChunk (legacy path)
-        OPTIONAL MATCH (chunk2:TextChunk {id: s.chunk_id, group_id: $group_id})-[:IN_SECTION]->(inherited_sec:Section)
-        WHERE direct_sec IS NULL AND s.chunk_id IS NOT NULL AND s.chunk_id <> ''
-        WITH sent, coalesce(direct_sec, inherited_sec) AS final_sec
-        FOREACH (_ IN CASE WHEN final_sec IS NOT NULL THEN [1] ELSE [] END |
-            MERGE (sent)-[:IN_SECTION]->(final_sec)
+        FOREACH (_ IN CASE WHEN sec IS NOT NULL THEN [1] ELSE [] END |
+            MERGE (sent)-[:IN_SECTION]->(sec)
         )
         
         RETURN count(sent) AS count
@@ -2115,32 +2063,14 @@ class Neo4jStoreV3:
             return count
     
     def _create_sentence_next_edges(self, group_id: str, sentences: List["Sentence"]) -> None:
-        """Create NEXT edges between sequential sentences.
-
-        For legacy sentences with chunk_id: groups by chunk_id, sorts by index_in_chunk.
-        For new sentences without chunk_id: groups by document_id, sorts by index_in_doc.
-        """
+        """Create NEXT edges between sequential sentences within each document."""
         from collections import defaultdict
 
-        # Separate legacy (chunk-based) and new (doc-based) sentences
-        chunk_sentences: Dict[str, List["Sentence"]] = defaultdict(list)
         doc_sentences: Dict[str, List["Sentence"]] = defaultdict(list)
         for s in sentences:
-            if s.chunk_id:
-                chunk_sentences[s.chunk_id].append(s)
-            else:
-                doc_sentences[s.document_id].append(s)
+            doc_sentences[s.document_id].append(s)
 
         next_pairs = []
-        # Legacy: NEXT within each chunk
-        for chunk_id, chunk_sents in chunk_sentences.items():
-            sorted_sents = sorted(chunk_sents, key=lambda s: s.index_in_chunk)
-            for i in range(len(sorted_sents) - 1):
-                next_pairs.append({
-                    "from_id": sorted_sents[i].id,
-                    "to_id": sorted_sents[i + 1].id,
-                })
-        # New: NEXT within each document by index_in_doc
         for doc_id, doc_sents in doc_sentences.items():
             sorted_sents = sorted(doc_sents, key=lambda s: s.index_in_doc)
             for i in range(len(sorted_sents) - 1):

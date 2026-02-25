@@ -950,7 +950,7 @@ class EvidenceSynthesizer:
             raise RuntimeError(
                 f"No source chunks found via MENTIONS edges for hub entities: {graph_context.hub_entities}. "
                 "This indicates the group may not have been properly indexed with entity extraction, "
-                "or the entities don't have MENTIONS relationships to TextChunks."
+                "or the entities don't have MENTIONS relationships to Sentences."
             )
         
         # Step 5: Generate response

@@ -334,7 +334,7 @@ async def resolve_section_entities(
     WITH s, path
     MATCH (chunk)-[:IN_SECTION]->(s)
     WHERE chunk.group_id = $group_id
-      AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
+      AND (chunk:Sentence OR chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
       {folder_filter}
 
     MATCH (chunk)-[:MENTIONS]->(e)
@@ -491,8 +491,8 @@ async def resolve_thematic_seeds(
                 folder_filter = (
                     "AND EXISTS { "
                     "  MATCH (chunk2)-[:MENTIONS]->(e) "
-                    "  WHERE (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`) "
-                    "  MATCH (chunk2)-[:PART_OF|IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
+                    "  WHERE (chunk2:Sentence OR chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`) "
+                    "  MATCH (chunk2)-[:IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
                     "  WHERE f.id = $folder_id AND f.group_id = $group_id "
                     "} "
                 )

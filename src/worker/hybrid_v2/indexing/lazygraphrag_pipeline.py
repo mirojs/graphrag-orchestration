@@ -1723,7 +1723,7 @@ class LazyGraphRAGIndexingPipeline:
 
         for node in graph.nodes:
             node_labels = _normalize_labels(node)
-            if not node_labels or any(l in ("Chunk", "TextChunk") for l in node_labels):
+            if not node_labels or any(l in ("Chunk", "TextChunk", "Sentence") for l in node_labels):
                 continue
 
             props = getattr(node, "properties", None) or {}
@@ -2130,7 +2130,7 @@ Output:
         for node in graph.nodes:
             node_labels = _normalize_labels(node)
             # Skip chunk/text-chunk nodes; we already persist our own TextChunk nodes.
-            if not node_labels or any(l in ("Chunk", "TextChunk") for l in node_labels):
+            if not node_labels or any(l in ("Chunk", "TextChunk", "Sentence") for l in node_labels):
                 continue
 
             props = getattr(node, "properties", None) or {}
@@ -4442,13 +4442,10 @@ SUMMARY: <summary>"""
             # Phase B: Sentences reach Section via PART_OF→TextChunk→IN_SECTION
             result = session.run(
                 """
-                MATCH (src)-[:MENTIONS]->(e:Entity)
+                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
                 WHERE e.group_id = $group_id AND src.group_id = $group_id
-                  AND (src:Sentence OR src:TextChunk)
-                // Resolve to section: TextChunk has direct IN_SECTION, Sentence goes via PART_OF
-                OPTIONAL MATCH (src)-[:IN_SECTION]->(s_direct:Section {group_id: $group_id})
-                OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_SECTION]->(s_via_chunk:Section {group_id: $group_id})
-                WITH e, coalesce(s_direct, s_via_chunk) AS s
+                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                WITH e, s
                 WHERE s IS NOT NULL
                 MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
                 SET r.group_id = $group_id
@@ -4461,12 +4458,10 @@ SUMMARY: <summary>"""
             # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
             result = session.run(
                 """
-                MATCH (src)-[:MENTIONS]->(e:Entity)
+                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
                 WHERE e.group_id = $group_id AND src.group_id = $group_id
-                  AND (src:Sentence OR src:TextChunk)
-                OPTIONAL MATCH (src)-[:IN_SECTION]->(s_direct:Section {group_id: $group_id})
-                OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_SECTION]->(s_via_chunk:Section {group_id: $group_id})
-                WITH e, coalesce(s_direct, s_via_chunk) AS s
+                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                With e, s
                 WHERE s IS NOT NULL
                 WITH e, s.doc_id AS doc_id
                 MATCH (d:Document {id: doc_id})
@@ -4484,12 +4479,10 @@ SUMMARY: <summary>"""
             result = session.run(
                 """
                 // Collect entity mentions per section, resolving Sentence→PART_OF→TextChunk→IN_SECTION
-                MATCH (src)-[:MENTIONS]->(e:Entity)
+                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
                 WHERE e.group_id = $group_id AND src.group_id = $group_id
-                  AND (src:Sentence OR src:TextChunk)
-                OPTIONAL MATCH (src)-[:IN_SECTION]->(s_direct:Section {group_id: $group_id})
-                OPTIONAL MATCH (src)-[:PART_OF]->(chunk:TextChunk)-[:IN_SECTION]->(s_via_chunk:Section {group_id: $group_id})
-                WITH e, coalesce(s_direct, s_via_chunk) AS s, src
+                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                WITH e, s, src
                 WHERE s IS NOT NULL
                 WITH s, e, count(DISTINCT src) AS mention_count
                 ORDER BY s.id, mention_count DESC
@@ -4542,16 +4535,11 @@ SUMMARY: <summary>"""
         # Threshold: at least 2 shared entities to reduce noise
         result = await self.neo4j_store.arun_query(
             """
-            // Resolve src→Section via PART_OF→TextChunk→IN_SECTION for Sentences
-            MATCH (src1)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2)
+            MATCH (src1:Sentence)-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(src2:Sentence)
             WHERE e.group_id = $group_id
-              AND (src1:Sentence OR src1:TextChunk)
-              AND (src2:Sentence OR src2:TextChunk)
-            OPTIONAL MATCH (src1)-[:IN_SECTION]->(s1d:Section {group_id: $group_id})
-            OPTIONAL MATCH (src1)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s1p:Section {group_id: $group_id})
-            OPTIONAL MATCH (src2)-[:IN_SECTION]->(s2d:Section {group_id: $group_id})
-            OPTIONAL MATCH (src2)-[:PART_OF]->(:TextChunk)-[:IN_SECTION]->(s2p:Section {group_id: $group_id})
-            WITH coalesce(s1d, s1p) AS s1, coalesce(s2d, s2p) AS s2, e
+            MATCH (src1)-[:IN_SECTION]->(s1:Section {group_id: $group_id})
+            MATCH (src2)-[:IN_SECTION]->(s2:Section {group_id: $group_id})
+            WITH s1, s2, e
             WHERE s1 IS NOT NULL AND s2 IS NOT NULL
               AND s1 <> s2
               AND s1.doc_id <> s2.doc_id  // Cross-document only

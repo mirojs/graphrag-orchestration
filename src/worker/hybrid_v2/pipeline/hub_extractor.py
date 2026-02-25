@@ -302,7 +302,7 @@ class HubExtractor:
                 with retry_session(self.neo4j_driver, read_only=True) as session:
                     result = session.run(f"""
                         UNWIND $entity_names AS entity_name
-                        MATCH (c:TextChunk)-[:MENTIONS]->(e)
+                        MATCH (c:Sentence)-[:MENTIONS]->(e)
                         WHERE (e:Entity OR e:`__Entity__`)
                           AND c.group_id = $group_id AND e.group_id = $group_id
                             AND (toLower(e.name) = toLower(entity_name)

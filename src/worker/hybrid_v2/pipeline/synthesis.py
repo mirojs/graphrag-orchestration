@@ -1537,9 +1537,15 @@ Response:"""
                     for chunk in entity_chunks_map.get(entity_name, [])[:budget]:
                         raw_chunks.append((entity_name, chunk))
             else:
-                # Fallback to sequential queries (for HippoRAGTextUnitStore or old implementations)
-                for entity_name in selected_entities:
-                    entity_chunks = await self.text_store.get_chunks_for_entity(entity_name)
+                # Fallback: parallel entity chunk queries
+                async def _fetch_entity_chunks(entity_name: str):
+                    chunks = await self.text_store.get_chunks_for_entity(entity_name)
+                    return entity_name, chunks
+
+                fetch_results = await asyncio.gather(*[
+                    _fetch_entity_chunks(en) for en in selected_entities
+                ])
+                for entity_name, entity_chunks in fetch_results:
                     budget = entity_budgets.get(entity_name, DEFAULT_LIMIT)
                     for chunk in entity_chunks[:budget]:
                         raw_chunks.append((entity_name, chunk))

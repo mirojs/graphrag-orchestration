@@ -606,9 +606,14 @@ Response:"""
                 for entity_name in selected_entities:
                     chunks.extend(entity_chunks_map.get(entity_name, []))
             else:
-                # Fallback to sequential queries (for HippoRAGTextUnitStore or old implementations)
-                for entity_name in selected_entities:
-                    entity_chunks = await self.text_store.get_chunks_for_entity(entity_name)
+                # Fallback: parallel entity chunk queries
+                async def _fetch_entity_chunks(entity_name: str):
+                    return await self.text_store.get_chunks_for_entity(entity_name)
+
+                fetch_results = await asyncio.gather(*[
+                    _fetch_entity_chunks(en) for en in selected_entities
+                ])
+                for entity_chunks in fetch_results:
                     chunks.extend(entity_chunks)
             
             logger.info("text_chunks_retrieved", 

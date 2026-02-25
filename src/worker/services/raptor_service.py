@@ -13,6 +13,7 @@ the discussion about best-quality GraphRAG pipelines.
 
 from __future__ import annotations
 from typing import List, Optional, Dict, Any, Tuple, TYPE_CHECKING
+import asyncio
 import logging
 import numpy as np
 from collections import defaultdict
@@ -223,20 +224,25 @@ class RaptorService:
                 logger.info(f"Stopping at level {level-1}: clustering produced only 1 cluster")
                 break
             
-            # Summarize each cluster
-            summary_nodes = []
-            for cluster_id, cluster_nodes in clusters.items():
-                if len(cluster_nodes) < self.min_cluster_size:
-                    continue
-                    
-                summary_node = await self._summarize_cluster(
-                    cluster_nodes, 
-                    level, 
-                    cluster_id,
-                    group_id
-                )
-                if summary_node:
-                    summary_nodes.append(summary_node)
+            # Summarize eligible clusters in parallel (bounded)
+            _raptor_sem = asyncio.Semaphore(5)
+            eligible = [
+                (cid, cnodes) for cid, cnodes in clusters.items()
+                if len(cnodes) >= self.min_cluster_size
+            ]
+
+            async def _summarize_one(cid, cnodes):
+                async with _raptor_sem:
+                    return await self._summarize_cluster(cnodes, level, cid, group_id)
+
+            results = await asyncio.gather(
+                *[_summarize_one(cid, cnodes) for cid, cnodes in eligible],
+                return_exceptions=True,
+            )
+            summary_nodes = [
+                r for r in results
+                if r is not None and not isinstance(r, Exception)
+            ]
             
             if not summary_nodes:
                 logger.info(f"Stopping at level {level}: no summaries generated")

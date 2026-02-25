@@ -73,20 +73,17 @@ class DualIndexService:
             return {"status": "skipped", "reason": "no_neo4j_driver"}
         
         try:
-            # Step 1: Extract entities
-            entities = await self._extract_entities()
+            # Steps 1-4: Extract entities, triples, text units, and entity-text
+            # mappings in parallel (all independent read-only Neo4j queries).
+            entities, triples, text_units, entity_text_map = await asyncio.gather(
+                self._extract_entities(),
+                self._extract_triples(),
+                self._extract_text_units(),
+                self._build_entity_text_mapping(),
+            )
             logger.info("entities_extracted", count=len(entities))
-            
-            # Step 2: Extract relationships (triples)
-            triples = await self._extract_triples()
             logger.info("triples_extracted", count=len(triples))
-            
-            # Step 3: Extract text units
-            text_units = await self._extract_text_units()
             logger.info("text_units_extracted", count=len(text_units))
-            
-            # Step 4: Build entity-to-text mappings
-            entity_text_map = await self._build_entity_text_mapping()
             logger.info("entity_text_mapping_built", 
                        entities_with_text=len(entity_text_map))
             

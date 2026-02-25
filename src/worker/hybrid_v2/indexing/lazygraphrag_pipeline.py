@@ -386,26 +386,30 @@ class LazyGraphRAGIndexingPipeline:
         stats["sections"] = section_stats.get("sections_created", 0)
         stats["section_edges"] = section_stats.get("in_section_edges", 0)
         
-        # 4.6) Embed Section nodes (required for semantic similarity edges).
-        section_embed_stats = await self._embed_section_nodes(group_id)
+        # 4.6–4.8) Section enrichment + KVP embedding.
+        # Wave 1: Independent stages run in parallel.
+        #   - 4.6  embed section content (for similarity edges)
+        #   - 4.6.1 LLM section summaries (for structural embed)
+        #   - 4.8  embed KVP keys (fully independent)
+        section_embed_stats, section_summary_stats, kvp_embed_stats = await asyncio.gather(
+            self._embed_section_nodes(group_id),
+            self._generate_section_summaries(group_id),
+            self._embed_keyvalue_keys(group_id),
+        )
         stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
-        
-        # 4.6.1) Generate LLM summaries for Section nodes (enriches structural matching).
-        section_summary_stats = await self._generate_section_summaries(group_id)
         stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
-
-        # 4.6.2) Embed Section nodes structurally (title + path + summary, for Source 2 header matching).
-        structural_embed_stats = await self._embed_section_structural(group_id)
-        stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
-        
-        # 4.7) Build SEMANTICALLY_SIMILAR edges between Sections (HippoRAG 2 improvement).
-        similarity_stats = await self._build_section_similarity_edges(group_id)
-        stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
-
-        # 4.8) Embed KeyValue keys for semantic matching.
-        kvp_embed_stats = await self._embed_keyvalue_keys(group_id)
         stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
         stats["key_values_embedded"] = kvp_embed_stats.get("keys_embedded", 0)
+
+        # Wave 2: Stages that depend on wave 1 results.
+        #   - 4.6.2 structural embed (needs summaries from 4.6.1)
+        #   - 4.7   similarity edges (needs embeddings from 4.6)
+        structural_embed_stats, similarity_stats = await asyncio.gather(
+            self._embed_section_structural(group_id),
+            self._build_section_similarity_edges(group_id),
+        )
+        stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
+        stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
 
         # 4.9) Process DI metadata: extract barcodes, figures, languages → graph entities/edges.
         # This leverages Azure DI FREE add-ons that are already extracted but not yet in the graph.
@@ -595,22 +599,33 @@ class LazyGraphRAGIndexingPipeline:
 
         di_service = DocumentIntelligenceService()
 
-        # Process one URL at a time to guarantee per-document isolation.
-        # Passing all URLs in one batch risks cross-document contamination: if Azure DI
-        # does not reliably tag returned LlamaDocuments with their source URL, the
-        # metadata-based by_source grouping below collapses all files under the empty-
-        # string key "", and none of them get matched back to their correct document.
-        # One call per URL eliminates that dependency entirely.
+        # Process URLs in parallel with per-URL isolation (each URL is a single-item
+        # call, so cross-document contamination is impossible). Semaphore bounds
+        # concurrent Azure DI requests to avoid throttling.
         by_source: Dict[str, List[LlamaDocument]] = {}
-        for url in url_inputs:
-            url_extracted = await di_service.extract_documents(
-                group_id=group_id,
-                input_items=cast(List[str | Dict[str, Any]], [url]),
-                fail_fast=True,
-                model_strategy="auto",
-            )
-            by_source[url] = url_extracted
-            logger.info(f"DI extracted {len(url_extracted)} units for {url.split('/')[-1]}")
+        _di_sem = asyncio.Semaphore(5)
+
+        async def _extract_one_url(url: str) -> Tuple[str, List[LlamaDocument]]:
+            async with _di_sem:
+                extracted = await di_service.extract_documents(
+                    group_id=group_id,
+                    input_items=cast(List[str | Dict[str, Any]], [url]),
+                    fail_fast=True,
+                    model_strategy="auto",
+                )
+                logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
+                return url, extracted
+
+        di_results = await asyncio.gather(
+            *[_extract_one_url(u) for u in url_inputs],
+            return_exceptions=True,
+        )
+        for result in di_results:
+            if isinstance(result, Exception):
+                logger.warning(f"DI extraction failed for a URL: {result}")
+                continue
+            url, extracted = result
+            by_source[url] = extracted
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:
@@ -2940,20 +2955,42 @@ Output:
 
         logger.info("📋 Found %d Louvain communities (>= %d members)", len(community_groups), min_community_size)
 
-        # 9b) Create Community nodes + BELONGS_TO edges
+        # 9b) Create Community nodes + BELONGS_TO edges (batched via UNWIND)
         logger.info("🏗️ Step 9b: Creating Community nodes...")
+        community_params = []
+        link_params = []
         for cid, members in community_groups:
             avg_pagerank = sum(m["pagerank"] for m in members) / len(members)
-            community = Community(
-                id=f"louvain_{group_id}_{cid}",
-                level=0,
-                title="",
-                summary="",
-                rank=avg_pagerank,
-                entity_ids=[m["id"] for m in members],
+            c_id = f"louvain_{group_id}_{cid}"
+            community_params.append({
+                "id": c_id, "level": 0, "title": "", "summary": "",
+                "full_content": "", "rank": avg_pagerank,
+            })
+            for m in members:
+                link_params.append({"community_id": c_id, "entity_id": m["id"]})
+
+        await self.neo4j_store.arun_query(
+            """
+            UNWIND $communities AS c
+            MERGE (comm:Community {id: c.id, group_id: $group_id})
+            SET comm.level = c.level, comm.title = c.title, comm.summary = c.summary,
+                comm.full_content = c.full_content, comm.rank = c.rank,
+                comm.group_id = $group_id, comm.updated_at = datetime()
+            """,
+            communities=community_params, group_id=group_id,
+        )
+        if link_params:
+            await self.neo4j_store.arun_query(
+                """
+                UNWIND $links AS l
+                MATCH (c:Community {id: l.community_id, group_id: $group_id})
+                MATCH (e:Entity {id: l.entity_id, group_id: $group_id})
+                MERGE (e)-[r:BELONGS_TO]->(c)
+                SET r.group_id = $group_id
+                """,
+                links=link_params, group_id=group_id,
             )
-            self.neo4j_store.upsert_community(group_id, community)
-            stats["communities_created"] += 1
+        stats["communities_created"] = len(community_params)
 
         # 9c) Generate LLM summaries (bounded parallelism)
         logger.info("📝 Step 9c: Generating LLM summaries for %d communities...", len(community_groups))
@@ -2979,7 +3016,7 @@ Output:
             summaries_cache[community_id] = (title, summary)
             stats["summaries_generated"] += 1
 
-        # 9d-9e) Embed summaries and store on Community nodes
+        # 9d-9e) Embed summaries and store on Community nodes (batched)
         if summaries_cache and self.embedder:
             logger.info("🔢 Step 9d: Embedding %d community summaries...", len(summaries_cache))
             community_ids_ordered = list(summaries_cache.keys())
@@ -2989,9 +3026,21 @@ Output:
             ]
             try:
                 embeddings = await self.embedder.aget_text_embedding_batch(summary_texts)
-                for community_id, embedding in zip(community_ids_ordered, embeddings):
-                    self.neo4j_store.update_community_embedding(group_id, community_id, embedding)
-                    stats["embeddings_stored"] += 1
+                embed_updates = [
+                    {"id": cid, "embedding": emb}
+                    for cid, emb in zip(community_ids_ordered, embeddings)
+                    if emb is not None
+                ]
+                if embed_updates:
+                    await self.neo4j_store.arun_query(
+                        """
+                        UNWIND $updates AS u
+                        MATCH (c:Community {id: u.id, group_id: $group_id})
+                        SET c.embedding = u.embedding
+                        """,
+                        updates=embed_updates, group_id=group_id,
+                    )
+                stats["embeddings_stored"] = len(embed_updates)
                 logger.info("✅ Step 9e: Stored %d community embeddings", stats["embeddings_stored"])
             except Exception as e:
                 logger.warning("⚠️  Community embedding failed: %s", e)
@@ -3686,13 +3735,12 @@ SUMMARY: <summary>"""
 
         from llama_index.core.llms import ChatMessage
 
-        updates: list[dict] = []
-        for sec in sections:
-            # Build content sample from linked chunks
+        _summary_sem = asyncio.Semaphore(5)
+
+        async def _summarize_section(sec: dict) -> Optional[dict]:
             content_sample = "\n---\n".join(
                 ct[:600] for ct in sec["chunk_texts"] if ct
             )[:3000]
-
             prompt = (
                 f"You are summarising a document section for a retrieval index.\n\n"
                 f"Section title: {sec['title']}\n"
@@ -3704,19 +3752,29 @@ SUMMARY: <summary>"""
                 f"that would help a search system decide whether this section "
                 f"is relevant to a user query.  Return ONLY the summary text."
             )
-
             try:
-                response = await self.llm.achat(
-                    [ChatMessage(role="user", content=prompt)]
-                )
+                async with _summary_sem:
+                    response = await self.llm.achat(
+                        [ChatMessage(role="user", content=prompt)]
+                    )
                 summary = response.message.content.strip()
                 if summary:
-                    updates.append({"id": sec["id"], "summary": summary})
+                    return {"id": sec["id"], "summary": summary}
             except Exception as e:
                 logger.warning(
                     "section_summary_llm_failed",
                     extra={"section_id": sec["id"], "error": str(e)},
                 )
+            return None
+
+        results = await asyncio.gather(
+            *[_summarize_section(sec) for sec in sections],
+            return_exceptions=True,
+        )
+        updates: list[dict] = [
+            r for r in results
+            if r is not None and not isinstance(r, Exception)
+        ]
 
         if not updates:
             return {"sections_summarised": 0}

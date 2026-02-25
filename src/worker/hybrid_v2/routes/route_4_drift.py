@@ -665,16 +665,19 @@ Sub-questions:"""
         evidence_count for the confidence metric is back-filled after
         Stage 4.3 by _backfill_evidence_counts().
         """
-        all_seeds: List[str] = []
-        intermediate_results: List[Dict[str, Any]] = []
-        
+        # NER disambiguation for all sub-questions in parallel
         for i, sub_q in enumerate(sub_questions):
             logger.info(f"processing_sub_question_{i+1}", question=sub_q[:50])
-            
-            # NER disambiguation only — no per-sub-question trace
-            sub_entities = await self.pipeline.disambiguator.disambiguate(sub_q)
+
+        ner_results = await asyncio.gather(*[
+            self.pipeline.disambiguator.disambiguate(sub_q)
+            for sub_q in sub_questions
+        ])
+
+        all_seeds: List[str] = []
+        intermediate_results: List[Dict[str, Any]] = []
+        for sub_q, sub_entities in zip(sub_questions, ner_results):
             all_seeds.extend(sub_entities)
-            
             intermediate_results.append({
                 "question": sub_q,
                 "entities": sub_entities,

@@ -211,15 +211,24 @@ class SimpleDocumentAnalysisService:
                         logger.error(f"Failed to analyze URLs in batch: {e}")
                         failed_urls.extend(urls)
                 else:
-                    # CU processes one at a time
-                    for url in urls:
-                        try:
-                            doc_list = await service.ingest_from_url(url)
+                    # CU processes URLs in parallel with bounded concurrency
+                    _cu_sem = asyncio.Semaphore(5)
+
+                    async def _ingest_url(url):
+                        async with _cu_sem:
+                            return url, await service.ingest_from_url(url)
+
+                    results = await asyncio.gather(
+                        *[_ingest_url(u) for u in urls],
+                        return_exceptions=True,
+                    )
+                    for result in results:
+                        if isinstance(result, Exception):
+                            logger.error(f"Failed to analyze URL: {result}")
+                            failed_urls.append("<unknown>")
+                        else:
+                            url, doc_list = result
                             documents.extend(doc_list)
-                        except Exception as e:
-                            logger.error(f"Failed to analyze URL {url}: {e}")
-                            failed_urls.append(url)
-                            # Continue with other URLs instead of failing completely
             
             # Process texts
             if texts:

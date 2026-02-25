@@ -339,21 +339,29 @@ class HippoRAG2Handler(BaseRouteHandler):
             entity_seeds[triple.subject_id] = entity_seeds.get(triple.subject_id, 0) + 1.0
             entity_seeds[triple.object_id] = entity_seeds.get(triple.object_id, 0) + 1.0
 
-        # Phase 2: Add structural seeds (Tier 2)
+        # Phase 2+3: Add structural seeds (Tier 2) and community seeds (Tier 3) in parallel
         structural_sections: List[str] = []
-        if structural_seeds_enabled and self._async_neo4j:
-            structural_entity_ids, structural_sections = await self._resolve_structural_seeds(query)
-            w_structural = float(os.getenv("ROUTE7_W_STRUCTURAL", "0.2"))
-            for eid in structural_entity_ids:
-                entity_seeds[eid] = entity_seeds.get(eid, 0) + w_structural
-
-        # Phase 2: Add community seeds (Tier 3)
         community_data: List[Dict[str, Any]] = []
+
+        _seed_tasks: List[Tuple[str, Any]] = []
+        if structural_seeds_enabled and self._async_neo4j:
+            _seed_tasks.append(("structural", self._resolve_structural_seeds(query)))
         if community_seeds_enabled and self.pipeline.community_matcher:
-            community_entity_ids, community_data = await self._resolve_community_seeds(query)
-            w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
-            for eid in community_entity_ids:
-                entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
+            _seed_tasks.append(("community", self._resolve_community_seeds(query)))
+
+        if _seed_tasks:
+            _seed_results = await asyncio.gather(*[t[1] for t in _seed_tasks])
+            for (label, _), result in zip(_seed_tasks, _seed_results):
+                if label == "structural":
+                    structural_entity_ids, structural_sections = result
+                    w_structural = float(os.getenv("ROUTE7_W_STRUCTURAL", "0.2"))
+                    for eid in structural_entity_ids:
+                        entity_seeds[eid] = entity_seeds.get(eid, 0) + w_structural
+                else:
+                    community_entity_ids, community_data = result
+                    w_community = float(os.getenv("ROUTE7_W_COMMUNITY", "0.1"))
+                    for eid in community_entity_ids:
+                        entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
 
         # Normalize entity seeds
         total_e = sum(entity_seeds.values())

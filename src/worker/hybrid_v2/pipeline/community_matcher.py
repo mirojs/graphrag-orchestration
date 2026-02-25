@@ -387,12 +387,9 @@ class CommunityMatcher:
             )
             return results  # type: ignore[return-value]
 
-        # embed one by one for clients without batch support
-        embeddings: List[Optional[List[float]]] = []
-        for text in texts:
-            emb = await self._get_embedding(text)
-            embeddings.append(emb)
-        return embeddings
+        # embed in parallel for clients without batch support
+        embeddings = await asyncio.gather(*[self._get_embedding(text) for text in texts])
+        return list(embeddings)
     
 
 

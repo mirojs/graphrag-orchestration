@@ -83,11 +83,11 @@ class HubExtractor:
         Returns:
             List of hub entity names/IDs.
         """
-        all_hubs: List[str] = []
-        
-        for community in communities:
-            hubs = await self._get_community_hubs(community, top_k_per_community)
-            all_hubs.extend(hubs)
+        hub_lists = await asyncio.gather(*[
+            self._get_community_hubs(community, top_k_per_community)
+            for community in communities
+        ])
+        all_hubs: List[str] = [hub for hubs in hub_lists for hub in hubs]
         
         # Deduplicate while preserving order
         seen = set()

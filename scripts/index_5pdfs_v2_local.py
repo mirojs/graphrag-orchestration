@@ -269,16 +269,18 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
     log("=" * 70)
     log(f"  Group ID:      {group_id}")
     log(f"  Documents:     {stats.get('documents', 0)}")
-    log(f"  Chunks:        {stats.get('chunks', 0)}")
+    log(f"  Sentences:     {stats.get('sentences', 0)} "
+        f"(embedded: {stats.get('sentences_embedded', 0)})")
+    if stats.get('sentences', 0) == 0:
+        log("  WARNING: No sentence nodes created")
     log(f"  Entities:      {stats.get('entities', 0)}")
     log(f"  Relationships: {stats.get('relationships', 0)}")
     log(f"  Sections:      {stats.get('sections', 0)}")
     log(f"  Section Edges: {stats.get('section_edges', 0)}")
     log(f"  Semantic Sim:  {stats.get('semantic_similarity_edges', 0)}")
-    log(f"  Sentences:     {stats.get('skeleton_sentences', 0)} "
-        f"(embedded: {stats.get('skeleton_sentences_embedded', 0)})")
-    if stats.get('skeleton_sentences', 0) == 0:
-        log("  ⚠️  WARNING: No sentence nodes created — check SKELETON_ENRICHMENT_ENABLED and VOYAGE_API_KEY")
+    log(f"  Communities:   {stats.get('communities_created', 0)} "
+        f"(summaries: {stats.get('summaries_generated', 0)})")
+    log(f"  KNN Edges:     {stats.get('gds_knn_edges', 0)}")
     log(f"  Elapsed:       {elapsed:.1f}s")
     log("=" * 70)
     
@@ -292,12 +294,12 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
 
 
 async def verify_v2_index(group_id: str):
-    """Verify V2 index has embedding_v2 properties."""
+    """Verify index has correct Sentence-based structure."""
     from neo4j import GraphDatabase
     
     log("")
     log("=" * 70)
-    log("🔍 V2 Index Verification")
+    log("V2 Index Verification")
     log("=" * 70)
     
     driver = GraphDatabase.driver(
@@ -306,30 +308,6 @@ async def verify_v2_index(group_id: str):
     )
     
     with driver.session(database=settings.NEO4J_DATABASE or "neo4j") as session:
-        # Check embedding_v2 coverage
-        result = session.run(
-            """
-            MATCH (c:TextChunk {group_id: $group_id})
-            RETURN 
-                count(c) AS total_chunks,
-                count(c.embedding_v2) AS with_v2_embedding,
-                count(c.embedding) AS with_v1_embedding
-            """,
-            group_id=group_id,
-        )
-        record = result.single()
-        
-        total = record["total_chunks"]
-        v2_count = record["with_v2_embedding"]
-        v1_count = record["with_v1_embedding"]
-        
-        log(f"  Total chunks: {total}")
-        if total > 0:
-            log(f"  With embedding_v2: {v2_count} ({100*v2_count/total:.1f}%)")
-            log(f"  With embedding (v1): {v1_count} ({100*v1_count/total:.1f}%)")
-        else:
-            log("  ⚠️ No chunks found!")
-        
         # Check Document nodes
         result = session.run(
             """
@@ -353,17 +331,7 @@ async def verify_v2_index(group_id: str):
         )
         log(f"  Section nodes: {result.single()['section_count']}")
         
-        # Check APPEARS_IN_DOCUMENT edges
-        result = session.run(
-            """
-            MATCH (:Entity {group_id: $group_id})-[r:APPEARS_IN_DOCUMENT]->(:Document {group_id: $group_id})
-            RETURN count(r) AS edge_count
-            """,
-            group_id=group_id,
-        )
-        log(f"  APPEARS_IN_DOCUMENT edges: {result.single()['edge_count']}")
-
-        # Check Sentence nodes and embeddings (sentence skeleton)
+        # Check Sentence nodes and embeddings
         result = session.run(
             """
             MATCH (s:Sentence {group_id: $group_id})
@@ -376,47 +344,16 @@ async def verify_v2_index(group_id: str):
         sent_total = record["total_sentences"]
         sent_embedded = record["with_embedding"]
         if sent_total > 0:
-            log(f"  Sentence nodes: {sent_total} ({sent_embedded} embedded)")
+            log(f"  Sentence nodes: {sent_total} (embedded: {sent_embedded})")
         else:
-            log("  ❌ Sentence nodes: 0 — skeleton enrichment did not run. "
-                "Routes 3/4 sentence search and Route 5 semantic addon will return empty.")
+            log("  WARNING: Sentence nodes: 0")
 
-        # Check Sentence→Entity MENTIONS (Route 5 semantic addon)
+        # Check Sentence embedding dimension
         result = session.run(
             """
-            MATCH (s:Sentence {group_id: $group_id})-[r:MENTIONS]->(e)
-            WHERE e.group_id = $group_id
-            RETURN count(r) AS mentions_count
-            """,
-            group_id=group_id,
-        )
-        sent_mentions = result.single()["mentions_count"]
-        if sent_mentions > 0:
-            log(f"  Sentence→Entity MENTIONS: {sent_mentions} ✅")
-        else:
-            log("  ❌ Sentence→Entity MENTIONS: 0 — Route 5 semantic addon will return 0 seeds.")
-
-        # Check TextChunk→Entity MENTIONS (Routes 2/3/4/5 primary path)
-        result = session.run(
-            """
-            MATCH (c:TextChunk {group_id: $group_id})-[r:MENTIONS]->(e)
-            WHERE e.group_id = $group_id
-            RETURN count(r) AS mentions_count
-            """,
-            group_id=group_id,
-        )
-        chunk_mentions = result.single()["mentions_count"]
-        if chunk_mentions > 0:
-            log(f"  TextChunk→Entity MENTIONS: {chunk_mentions} ✅")
-        else:
-            log("  ❌ TextChunk→Entity MENTIONS: 0 — entity-based retrieval broken for all routes.")
-        
-        # Check if V2 embeddings are correct dimension
-        result = session.run(
-            """
-            MATCH (c:TextChunk {group_id: $group_id})
-            WHERE c.embedding_v2 IS NOT NULL
-            RETURN size(c.embedding_v2) AS dim
+            MATCH (s:Sentence {group_id: $group_id})
+            WHERE s.embedding_v2 IS NOT NULL
+            RETURN size(s.embedding_v2) AS dim
             LIMIT 1
             """,
             group_id=group_id,
@@ -424,12 +361,63 @@ async def verify_v2_index(group_id: str):
         record = result.single()
         if record:
             dim = record["dim"]
-            if dim == 2048:
-                log(f"  ✅ V2 embedding dimension: {dim} (correct)")
-            else:
-                log(f"  ⚠️ V2 embedding dimension: {dim} (expected 2048)")
-        else:
-            log("  ⚠️ No V2 embeddings found!")
+            log(f"  Sentence embedding dim: {dim} {'(correct)' if dim == 2048 else '(expected 2048)'}")
+
+        # Check Entity nodes
+        result = session.run(
+            """
+            MATCH (e:Entity {group_id: $group_id})
+            RETURN count(e) AS entity_count,
+                   count(e.embedding_v2) AS with_embedding
+            """,
+            group_id=group_id,
+        )
+        record = result.single()
+        log(f"  Entity nodes: {record['entity_count']} (embedded: {record['with_embedding']})")
+        
+        # Check APPEARS_IN_DOCUMENT edges
+        result = session.run(
+            """
+            MATCH (:Entity {group_id: $group_id})-[r:APPEARS_IN_DOCUMENT]->(:Document {group_id: $group_id})
+            RETURN count(r) AS edge_count
+            """,
+            group_id=group_id,
+        )
+        log(f"  APPEARS_IN_DOCUMENT edges: {result.single()['edge_count']}")
+
+        # Check Sentence->Entity MENTIONS
+        result = session.run(
+            """
+            MATCH (s:Sentence {group_id: $group_id})-[r:MENTIONS]->(e:Entity {group_id: $group_id})
+            RETURN count(r) AS mentions_count
+            """,
+            group_id=group_id,
+        )
+        log(f"  Sentence->Entity MENTIONS: {result.single()['mentions_count']}")
+
+        # Check Community nodes
+        result = session.run(
+            """
+            MATCH (c:Community {group_id: $group_id})
+            RETURN count(c) AS community_count,
+                   count(c.summary) AS with_summary,
+                   count(c.embedding) AS with_embedding
+            """,
+            group_id=group_id,
+        )
+        record = result.single()
+        log(f"  Community nodes: {record['community_count']} "
+            f"(summaries: {record['with_summary']}, embedded: {record['with_embedding']})")
+
+        # Check KNN edges
+        result = session.run(
+            """
+            MATCH (:Entity {group_id: $group_id})-[r:SEMANTICALLY_SIMILAR]->(:Entity {group_id: $group_id})
+            RETURN count(r) AS knn_count
+            """,
+            group_id=group_id,
+        )
+        log(f"  SEMANTICALLY_SIMILAR (KNN) edges: {result.single()['knn_count']}")
     
     driver.close()
     log("=" * 70)

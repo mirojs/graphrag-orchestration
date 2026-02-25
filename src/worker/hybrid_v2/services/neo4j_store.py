@@ -597,7 +597,8 @@ class Neo4jStoreV3:
         # Debug: Check if embedding_v2 is actually populated
         if entity_data:
             sample = entity_data[0]
-            logger.warning(f"   Sample entity_data: has embedding={sample['embedding'] is not None and len(sample['embedding']) > 0 if sample['embedding'] else False}, has embedding_v2={sample['embedding_v2'] is not None and len(sample['embedding_v2']) > 0 if sample['embedding_v2'] else False}")
+            has_v2 = sample['embedding_v2'] is not None and len(sample['embedding_v2']) > 0 if sample['embedding_v2'] else False
+            logger.warning(f"   Sample entity_data: has embedding_v2={has_v2}")
             if sample['embedding_v2']:
                 logger.warning(f"   embedding_v2 dim: {len(sample['embedding_v2'])}")
         
@@ -631,7 +632,7 @@ class Neo4jStoreV3:
                     name=e["name"],
                     type=e["type"],
                     description=e.get("description", ""),
-                    embedding=e.get("embedding"),
+                    embedding_v2=e.get("embedding_v2"),
                 )
             return None
     
@@ -718,7 +719,7 @@ class Neo4jStoreV3:
                         name=e["name"],
                         type=e["type"],
                         description=e.get("description", ""),
-                        embedding=e.get("embedding"),
+                        embedding_v2=e.get("embedding_v2"),
                     )
                     results.append((entity, record["finalScore"]))
             except Exception as ex:
@@ -814,7 +815,7 @@ class Neo4jStoreV3:
                     name=e["name"],
                     type=e["type"],
                     description=e.get("description", ""),
-                    embedding=e.get("embedding"),
+                    embedding_v2=e.get("embedding_v2"),
                 )
                 # Normalize relevance score to 0-1 range for consistency
                 score = float(record["relevance_score"]) / 5.0

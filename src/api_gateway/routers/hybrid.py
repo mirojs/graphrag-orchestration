@@ -21,7 +21,7 @@ Multi-instance Notes:
 - Indexing jobs tracked in Redis for cross-instance visibility
 """
 
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any, Literal
@@ -33,6 +33,7 @@ import time
 from src.worker.hybrid_v2.orchestrator import HybridPipeline, HighQualityError
 from src.worker.hybrid_v2.router.main import DeploymentProfile, QueryRoute
 from src.worker.hybrid_v2.indexing import DualIndexService, get_hipporag_service
+from src.api_gateway.middleware.auth import get_group_id
 from src.core.config import settings
 from src.core.services.redis_service import (
     get_redis_service,
@@ -442,7 +443,7 @@ async def _get_or_create_pipeline(
 # ============================================================================
 
 @router.post("/query", response_model=HybridQueryResponse)
-async def hybrid_query(request: Request, body: HybridQueryRequest):
+async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str = Depends(get_group_id)):
     """
     Execute a query through the hybrid pipeline with auto-routing.
     
@@ -457,8 +458,6 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
     """
     import time
     start_time = time.time()
-    
-    group_id = request.state.group_id or "default"
     
     logger.info("hybrid_query_received",
                group_id=group_id,
@@ -574,7 +573,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest):
 
 
 @router.post("/query/audit", response_model=HybridQueryResponse)
-async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
+async def hybrid_query_audit(request: Request, body: HybridQueryRequest, group_id: str = Depends(get_group_id)):
     """
     Execute a query with full audit trail (Routes 2 or 3 only).
     
@@ -585,8 +584,6 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
     
     Recommended for: forensic accounting, legal discovery, compliance audits.
     """
-    group_id = request.state.group_id or "default"
-    
     logger.info("audit_query_received",
                group_id=group_id,
                query_preview=body.query[:50])
@@ -628,7 +625,7 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest):
 
 
 @router.post("/query/fast", response_model=HybridQueryResponse, deprecated=True)
-async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
+async def hybrid_query_fast(request: Request, body: HybridQueryRequest, group_id: str = Depends(get_group_id)):
     """
     DEPRECATED: Route 1 (Vector RAG) has been removed.
     
@@ -641,7 +638,7 @@ async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
     """
     logger.warning(
         "deprecated_route1_fast_endpoint_called",
-        group_id=request.state.group_id or "default",
+        group_id=group_id,
         query_preview=body.query[:50],
     )
     
@@ -662,7 +659,7 @@ async def hybrid_query_fast(request: Request, body: HybridQueryRequest):
 
 
 @router.post("/query/drift", response_model=HybridQueryResponse)
-async def hybrid_query_drift(request: Request, body: HybridQueryRequest):
+async def hybrid_query_drift(request: Request, body: HybridQueryRequest, group_id: str = Depends(get_group_id)):
     """
     Execute a query via Route 3 (DRIFT multi-hop reasoning).
     
@@ -681,8 +678,6 @@ async def hybrid_query_drift(request: Request, body: HybridQueryRequest):
     - "What regulatory implications exist?" (no specific entity)
     - "How do ESG factors affect valuations?" (needs decomposition)
     """
-    group_id = request.state.group_id or "default"
-    
     logger.info("drift_query_received",
                group_id=group_id,
                query_preview=body.query[:50])

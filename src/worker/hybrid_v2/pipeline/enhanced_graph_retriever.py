@@ -1985,7 +1985,8 @@ class EnhancedGraphRetriever:
             return []
 
         # Support both Entity and __Entity__ labels for compatibility
-        query = """
+        folder_filter = self._get_folder_filter_clause("d")
+        query = f"""
         UNWIND $entity_inputs AS seed
         MATCH (e1)
         WHERE (e1:Entity OR e1:`__Entity__`)
@@ -1995,6 +1996,9 @@ class EnhancedGraphRetriever:
         
         MATCH (c:TextChunk)-[:MENTIONS]->(e1)
         WHERE c.group_id = $group_id
+        OPTIONAL MATCH (c)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+        WITH e1, c, d
+        WHERE $folder_id IS NULL OR d IS NULL {folder_filter}
         MATCH (c)-[:MENTIONS]->(e2)
         WHERE (e2:Entity OR e2:`__Entity__`)
           AND e2.group_id = $group_id AND e2 <> e1
@@ -2038,12 +2042,14 @@ class EnhancedGraphRetriever:
             
             def _run_query():
                 with retry_session(self.driver) as session:
-                    result = session.run(
-                        query,
-                        entity_inputs=entity_names,
-                        group_id=self.group_id,
-                        max_rels=max_relationships,
-                    )
+                    params = {
+                        "entity_inputs": entity_names,
+                        "group_id": self.group_id,
+                        "max_rels": max_relationships,
+                        "folder_id": self.folder_id,
+                    }
+                    params.update(self._get_folder_params())
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)
@@ -2361,10 +2367,12 @@ class EnhancedGraphRetriever:
                 # Query gets the first N chunks per document (ordered by chunk_index).
                 # IMPORTANT: Do not apply a global LIMIT here; it can truncate later
                 # documents and break the intended “every document” coverage behavior.
-        query = """
+        folder_filter = self._get_folder_filter_clause("d")
+        query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:TextChunk)
         WHERE d.group_id = $group_id
           AND t.group_id = $group_id
+          {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         WITH d, t, s
                 ORDER BY d.id,
@@ -3046,14 +3054,17 @@ class EnhancedGraphRetriever:
         ])
         kw_params = {f"kw_{i}": kw for i, kw in enumerate(sanitized_kws)}
         
+        folder_filter = self._get_folder_filter_clause("d")
         query = f"""
         MATCH (t:TextChunk)
         WHERE t.group_id = $group_id
           AND t.metadata IS NOT NULL
-        WITH t, 
+        OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+        WITH t, d,
              apoc.convert.fromJsonMap(t.metadata).section_path as sections
         WHERE sections IS NOT NULL
           AND ({conditions})
+          AND ($folder_id IS NULL OR d IS NULL {folder_filter})
         RETURN 
             t.id as chunk_id,
             t.text as text,
@@ -3067,12 +3078,14 @@ class EnhancedGraphRetriever:
             
             def _run_query():
                 with retry_session(self.driver) as session:
-                    result = session.run(
-                        query,
-                        group_id=self.group_id,
-                        top_k=top_k,
+                    params = {
+                        "group_id": self.group_id,
+                        "top_k": top_k,
+                        "folder_id": self.folder_id,
                         **kw_params,
-                    )
+                    }
+                    params.update(self._get_folder_params())
+                    result = session.run(query, **params)
                     return list(result)
             
             records = await loop.run_in_executor(None, _run_query)

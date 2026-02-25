@@ -311,10 +311,13 @@ def get_group_id(
     if hasattr(request.state, "group_id") and request.state.group_id:
         return request.state.group_id
     
-    # Fallback to X-Group-ID header (legacy)
+    # Fallback to X-Group-ID header (dev/testing only)
     if x_group_id:
-        logger.warning(f"Using legacy X-Group-ID header: {x_group_id}")
-        return x_group_id
+        if settings.REQUIRE_AUTH:
+            logger.warning("X-Group-ID header rejected in production auth mode", x_group_id=x_group_id)
+        else:
+            logger.warning(f"Using legacy X-Group-ID header: {x_group_id}")
+            return x_group_id
     
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

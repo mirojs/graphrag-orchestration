@@ -2231,7 +2231,7 @@ Output:
                     result = session.run(
                         """
                         UNWIND $barcodes AS bc
-                        MERGE (b:Barcode {id: bc.id})
+                        MERGE (b:Barcode {id: bc.id, group_id: bc.group_id})
                         SET b.group_id = bc.group_id,
                             b.kind = bc.kind,
                             b.value = bc.value,
@@ -2267,7 +2267,7 @@ Output:
                     result = session.run(
                         """
                         UNWIND $figures AS fig
-                        MERGE (f:Figure {id: fig.id})
+                        MERGE (f:Figure {id: fig.id, group_id: fig.group_id})
                         SET f.group_id = fig.group_id,
                             f.di_id = fig.di_id,
                             f.caption = fig.caption,
@@ -2302,10 +2302,11 @@ Output:
                         session.run(
                             """
                             UNWIND $refs AS r
-                            MATCH (f:Figure {id: r.figure_id})
+                            MATCH (f:Figure {id: r.figure_id, group_id: $group_id})
                             SET f.element_refs = coalesce(f.element_refs, []) + [r.ref_path]
                             """,
                             refs=ref_edges,
+                            group_id=group_id,
                         )
                         stats["figure_ref_edges"] += len(ref_edges)
                     
@@ -2373,7 +2374,7 @@ Output:
                         result = session.run(
                             """
                             UNWIND $kvps AS kvp
-                            MERGE (k:KeyValuePair {id: kvp.id})
+                            MERGE (k:KeyValuePair {id: kvp.id, group_id: kvp.group_id})
                             SET k.group_id = kvp.group_id,
                                 k.key = kvp.key,
                                 k.value = kvp.value,
@@ -3431,7 +3432,7 @@ SUMMARY: <summary>"""
             result = session.run(
                 """
                 UNWIND $sections AS s
-                MERGE (sec:Section {id: s.id})
+                MERGE (sec:Section {id: s.id, group_id: s.group_id})
                 SET sec.group_id = s.group_id,
                     sec.doc_id = s.doc_id,
                     sec.path_key = s.path_key,
@@ -3455,7 +3456,7 @@ SUMMARY: <summary>"""
                     """
                     UNWIND $edges AS e
                     MATCH (d:Document {id: e.doc_id, group_id: $group_id})
-                    MATCH (s:Section {id: e.section_id})
+                    MATCH (s:Section {id: e.section_id, group_id: $group_id})
                     MERGE (d)-[:HAS_SECTION]->(s)
                     """,
                     edges=top_level,
@@ -3498,12 +3499,13 @@ SUMMARY: <summary>"""
                 result = session.run(
                     """
                     UNWIND $edges AS e
-                    MATCH (t:TextChunk {id: e.chunk_id})
-                    MATCH (s:Section {id: e.section_id})
+                    MATCH (t:TextChunk {id: e.chunk_id, group_id: $group_id})
+                    MATCH (s:Section {id: e.section_id, group_id: $group_id})
                     MERGE (t)-[:IN_SECTION]->(s)
                     RETURN count(*) AS count
                     """,
                     edges=batch,
+                    group_id=group_id,
                 )
                 in_section_count += result.single()["count"]
             return sections_created, in_section_count

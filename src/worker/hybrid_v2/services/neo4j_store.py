@@ -1680,7 +1680,7 @@ class Neo4jStoreV3:
         """Batch insert/update text chunks with native vector support."""
         query = """
         UNWIND $chunks AS c
-        MERGE (t:TextChunk {id: c.id})
+        MERGE (t:TextChunk {id: c.id, group_id: $group_id})
         SET t.text = c.text,
             t.chunk_index = c.chunk_index,
             t.document_id = c.document_id,
@@ -2011,7 +2011,7 @@ class Neo4jStoreV3:
         
         query = """
         UNWIND $sentences AS s
-        MERGE (sent:Sentence {id: s.id})
+        MERGE (sent:Sentence {id: s.id, group_id: $group_id})
         SET sent.text = s.text,
             sent.chunk_id = s.chunk_id,
             sent.document_id = s.document_id,

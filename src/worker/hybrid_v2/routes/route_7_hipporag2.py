@@ -993,6 +993,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
         RETURN cid AS chunk_id,
                coalesce(node.parent_text, node.text, '') AS text,
+               node.text AS sentence_text,
                coalesce(node.index_in_doc, 0) AS chunk_index,
                d.id AS document_id, d.title AS document_title,
                s.title AS section_title, s.id AS section_id
@@ -1015,10 +1016,11 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         scores = ppr_scores_map or {}
 
-        # ── Merge adjacent same-section chunks ──
-        # Group by (document_id, section_title), sort by chunk_index,
-        # and merge consecutive chunks so the LLM receives one coherent
-        # block per section instead of fragmented overlapping snippets.
+        # ── Deduplicate by parent_text within each section ──
+        # Multiple Sentence nodes often share the same parent_text (~3-sentence
+        # paragraph window). Keep only the highest-PPR-scored representative
+        # for each unique parent_text per (document, section) group, then use
+        # parent_text as synthesis context (broad) with section-boundary respect.
         from collections import defaultdict
 
         section_groups: dict[tuple, list] = defaultdict(list)
@@ -1026,36 +1028,31 @@ class HippoRAG2Handler(BaseRouteHandler):
             key = (r.get("document_id", ""), r.get("section_title", ""))
             section_groups[key].append(r)
 
-        _MAX_MERGE = 2  # merge at most 2 consecutive chunks to prevent mega-blocks
-
-        merged_results: list[dict] = []
+        deduped_results: list[dict] = []
         for _key, group in section_groups.items():
+            # Sort by chunk_index for stable ordering
             group.sort(key=lambda x: x.get("chunk_index", 0))
-            merged = [group[0]]
-            for r in group[1:]:
-                prev = merged[-1]
-                prev_idx = prev.get("chunk_index", 0)
-                curr_idx = r.get("chunk_index", 0)
-                merge_count = len(prev.get("_merged_ids", [prev.get("chunk_id", "")]))
-                if curr_idx == prev_idx + 1 and merge_count < _MAX_MERGE:
-                    prev["text"] = (
-                        (prev.get("text", "") + " " + r.get("text", ""))
-                        .strip()
-                    )
-                    prev["chunk_index"] = curr_idx  # advance for next merge
-                    prev.setdefault("_merged_ids", [prev.get("chunk_id", "")])
-                    prev["_merged_ids"].append(r.get("chunk_id", ""))
+            seen_texts: dict[str, dict] = {}  # parent_text → best record
+            for r in group:
+                pt = r.get("text", "").strip()
+                cid = r.get("chunk_id", "")
+                r_score = scores.get(cid, 0.0)
+                if pt in seen_texts:
+                    # Keep the one with higher PPR score
+                    existing = seen_texts[pt]
+                    existing_score = scores.get(existing.get("chunk_id", ""), 0.0)
+                    if r_score > existing_score:
+                        seen_texts[pt] = r
                 else:
-                    merged.append(r)
-            merged_results.extend(merged)
+                    seen_texts[pt] = r
+            # Maintain chunk_index order among survivors
+            survivors = sorted(seen_texts.values(), key=lambda x: x.get("chunk_index", 0))
+            deduped_results.extend(survivors)
 
         chunks_list: List[Dict[str, Any]] = []
-        for r in merged_results:
+        for r in deduped_results:
             cid = r.get("chunk_id", "")
-
-            # Best PPR score among merged chunk IDs
-            merged_ids = r.get("_merged_ids", [cid])
-            best_score = max(scores.get(mid, 0.0) for mid in merged_ids) if scores else 0.0
+            best_score = scores.get(cid, 0.0)
 
             chunks_list.append({
                 "id": cid,

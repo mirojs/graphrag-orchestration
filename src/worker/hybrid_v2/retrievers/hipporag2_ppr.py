@@ -62,6 +62,7 @@ class HippoRAG2PPR:
         self._idx_to_node: Dict[int, str] = {}  # index -> node_id
         self._node_types: Dict[int, str] = {}  # index -> "entity"|"passage"
         self._node_names: Dict[int, str] = {}  # index -> display name
+        self._passage_full_texts: Dict[str, str] = {}  # node_id -> full text (for reranker)
         # Weighted adjacency: source_idx -> [(target_idx, weight)]
         self._adj: Dict[int, List[Tuple[int, float]]] = {}
         # Precomputed sum of outgoing weights per node (for rank distribution)
@@ -76,6 +77,13 @@ class HippoRAG2PPR:
     @property
     def node_count(self) -> int:
         return self._node_count
+
+    def get_all_passage_texts(self) -> Dict[str, str]:
+        """Return all passage (Sentence) node IDs mapped to their full text.
+
+        Used by the cross-encoder reranker to avoid a separate Neo4j fetch.
+        """
+        return self._passage_full_texts
 
     def _add_node(self, node_id: str, node_type: str, name: str) -> int:
         """Add a node to the graph, return its index."""
@@ -207,8 +215,9 @@ class HippoRAG2PPR:
             )
             for record in result:
                 # Use first 80 chars of text as display name
-                text = (record["text"] or "")[:80]
-                self._add_node(record["id"], "passage", text)
+                full_text = record["text"] or ""
+                self._add_node(record["id"], "passage", full_text[:80])
+                self._passage_full_texts[record["id"]] = full_text
 
             # ----------------------------------------------------------
             # 3. Entity-Entity edges via RELATED_TO

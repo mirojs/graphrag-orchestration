@@ -250,7 +250,7 @@ def benchmark_scenario(
     scenario_name: str, response_type: str, repeats: int, timeout_s: float,
     ground_truth: Dict[str, GroundTruth],
     synthesis_model: Optional[str] = None, include_context: bool = False,
-    no_auth: bool = False,
+    no_auth: bool = False, query_delay: float = 0,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -273,7 +273,9 @@ def benchmark_scenario(
 
     results: List[Dict[str, Any]] = []
 
-    for q_obj in questions:
+    for q_idx, q_obj in enumerate(questions):
+        if query_delay > 0 and q_idx > 0:
+            time.sleep(query_delay)
         qid, query = q_obj.qid, q_obj.query
         print(f"[{qid}] {query}")
 
@@ -493,6 +495,7 @@ def main():
     parser.add_argument("--group-id", default=_default_group_id(), help="group_id to query")
     parser.add_argument("--repeats", type=int, default=3, help="Repeats per question (default: 3)")
     parser.add_argument("--timeout", type=float, default=180.0, help="HTTP timeout in seconds")
+    parser.add_argument("--query-delay", type=float, default=0, help="Seconds to wait between queries (helps with reranker rate limits; 35 recommended for Voyage free tier)")
     parser.add_argument("--qbank", type=Path, default=DEFAULT_QUESTION_BANK, help="Question bank path")
     parser.add_argument("--filter-qid", type=str, default=None, help="Run only a specific question ID")
     parser.add_argument("--positive-prefix", type=str, default="Q-D", help="Question prefix for positive tests (default: Q-D; use Q-L for Route 2 local questions)")
@@ -569,7 +572,7 @@ def main():
         scenario_name=scenario_name, response_type=args.response_type,
         repeats=args.repeats, timeout_s=args.timeout, ground_truth=ground_truth,
         synthesis_model=args.synthesis_model, include_context=args.include_context,
-        no_auth=args.no_auth,
+        no_auth=args.no_auth, query_delay=args.query_delay,
     )
 
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"

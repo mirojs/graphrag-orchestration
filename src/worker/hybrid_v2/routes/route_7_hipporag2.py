@@ -303,6 +303,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             damping=ppr_damping,
             triple_top_k=triple_top_k,
             dpr_top_k=dpr_top_k,
+            rerank_enabled=rerank_enabled,
+            rerank_top_k=rerank_top_k,
             query_mode=query_mode,
             ppr_passage_top_k=ppr_passage_top_k,
             prompt_variant=prompt_variant,
@@ -322,7 +324,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         timings_ms["step_1_embed_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ------------------------------------------------------------------
-        # Step 2: Parallel — Triple linking + DPR + optional sentence search
+        # Step 2: Parallel — Triple linking + Reranker/DPR + sentence search
+        #
+        # When the cross-encoder reranker is enabled, it replaces DPR for
+        # both passage seeding and final ranking.  The reranker sees ALL
+        # sentences (cached in PPR engine) and matches conceptual queries
+        # that cosine similarity misses.  DPR still runs as a fallback in
+        # case the reranker API call fails (rate limit, network error).
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
 
@@ -331,12 +339,19 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._query_to_triple_linking(query, query_embedding, triple_top_k)
         )
 
-        # 2b. DPR passage search (sentence-level Small-to-Big)
+        # 2b. Cross-encoder reranker on ALL sentences (replaces DPR when enabled)
+        rerank_all_task = None
+        if rerank_enabled and self._ppr_engine.loaded:
+            rerank_all_task = asyncio.create_task(
+                self._rerank_all_passages(query, top_k=rerank_top_k)
+            )
+
+        # 2c. DPR passage search — fallback when reranker disabled or fails
         dpr_task = asyncio.create_task(
             self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k)
         )
 
-        # 2c. Optional sentence search (Phase 2)
+        # 2d. Optional sentence search (Phase 2)
         sentence_task = None
         if sentence_search_enabled:
             sentence_top_k = int(os.getenv("ROUTE7_SENTENCE_TOP_K", "30"))
@@ -346,16 +361,30 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Await parallel tasks
         tasks = [triple_task, dpr_task]
+        if rerank_all_task:
+            tasks.append(rerank_all_task)
         if sentence_task:
             tasks.append(sentence_task)
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Unpack results
+        # Unpack results (indices shift when rerank_all_task is present)
         surviving_triples = results[0] if not isinstance(results[0], BaseException) else []
         dpr_results = results[1] if not isinstance(results[1], BaseException) else []
+
+        rerank_all_results: List[Tuple[str, float]] = []
+        _next_idx = 2
+        if rerank_all_task:
+            raw_rerank = results[_next_idx]
+            if isinstance(raw_rerank, BaseException):
+                logger.warning("route7_rerank_all_failed_fallback_dpr", error=str(raw_rerank))
+            else:
+                rerank_all_results = raw_rerank
+            _next_idx += 1
+
         sentence_evidence: List[Dict[str, Any]] = []
-        if sentence_task and len(results) > 2:
-            sentence_evidence = results[2] if not isinstance(results[2], BaseException) else []
+        if sentence_task:
+            raw_sent = results[_next_idx] if _next_idx < len(results) else []
+            sentence_evidence = raw_sent if not isinstance(raw_sent, BaseException) else []
 
         if isinstance(results[0], BaseException):
             logger.warning("route7_triple_linking_failed", error=str(results[0]))
@@ -368,6 +397,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             "step_2_parallel_complete",
             surviving_triples=len(surviving_triples),
             dpr_hits=len(dpr_results),
+            rerank_all_hits=len(rerank_all_results),
             sentence_hits=len(sentence_evidence),
         )
 
@@ -412,10 +442,16 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Do NOT pre-normalize entity seeds — let PPR handle normalization
         # of the combined entity+passage personalization vector.
 
-        # Build passage seeds from DPR scores (raw similarity × passage_node_weight)
+        # Build passage seeds: prefer reranker (conceptual matching) over DPR (cosine)
         passage_seeds: Dict[str, float] = {}
-        for chunk_id, score in dpr_results:
-            passage_seeds[chunk_id] = score * passage_node_weight
+        if rerank_all_results:
+            # Reranker relevance scores are typically 0-1; use as seed weight
+            for chunk_id, score in rerank_all_results:
+                passage_seeds[chunk_id] = score * passage_node_weight
+        else:
+            # Fallback to DPR cosine similarity
+            for chunk_id, score in dpr_results:
+                passage_seeds[chunk_id] = score * passage_node_weight
 
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -460,12 +496,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         # ------------------------------------------------------------------
-        # Step 4.5: Entity-doc map for exhaustive enumeration queries
-        #
-        # When the query asks to "list all X across documents", PPR+synthesis
-        # over-includes incidental mentions from raw text.  Instead, query the
-        # complete entity-document MENTIONS index (type-filtered) and pass the
-        # result as a constraining structural header to synthesis.
+        # Step 4.5+4.7+5: Rerank apply → parallel entity-doc map + chunk fetch
         # ------------------------------------------------------------------
         graph_structural_header: Optional[str] = None
         entity_doc_rows: List[Dict[str, Any]] = []
@@ -475,135 +506,119 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_ENTITY_DOC_MAP", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
-        if entity_doc_map_enabled:
-            detected_types = self._detect_exhaustive_entity_types(query)
-            if detected_types:
-                t_edm = time.perf_counter()
-                entity_doc_rows_raw = await self._query_entity_doc_map(detected_types)
-                entity_doc_rows = [
-                    r for r in entity_doc_rows_raw
-                    if not _is_role_label(r["entity_name"])
-                ]
-                if entity_doc_rows:
-                    # Group rows by entity for bullet-list format
-                    entity_groups: Dict[
-                        Tuple[str, str], List[Dict[str, Any]]
-                    ] = defaultdict(list)
-                    for row in entity_doc_rows:
-                        key = (row["entity_name"], row["entity_type"])
-                        entity_groups[key].append(row)
-
-                    header_lines = [
-                        "## Entity-Document Map (from knowledge graph index)",
-                        "",
-                        "Each entity below lists the documents where it appears.",
-                        "[PARTY_TO] = direct party/signatory to the agreement "
-                        "in that document.",
-                        "[---] = merely referenced (address, job site, invoice "
-                        "recipient).",
-                        "The context sentence after each entry shows the "
-                        "entity's actual contractual role (e.g. owner, "
-                        "builder, agent). Use ONLY that context to determine "
-                        "roles — do NOT rely on signature-block titles.",
-                        "",
-                    ]
-                    for (ent_name, ent_type), rows in entity_groups.items():
-                        header_lines.append(f"### {ent_name} [{ent_type}]")
-                        for row in rows:
-                            role_labels = row.get("doc_role_labels", [])
-                            role_str = (
-                                ", ".join(role_labels) if role_labels else "---"
-                            )
-                            snippet = self._extract_sentence_context(
-                                ent_name,
-                                row.get("doc_sample_chunk", ""),
-                            )
-                            doc_title = row["document_title"]
-                            header_lines.append(
-                                f'- {doc_title} [{role_str}]: "{snippet}"'
-                            )
-                        header_lines.append("")  # blank line between entities
-
-                    graph_structural_header = "\n".join(header_lines)
-
-                    timings_ms["step_45_entity_doc_map_ms"] = int(
-                        (time.perf_counter() - t_edm) * 1000
-                    )
-                    unique_entities = len(entity_groups)
-                    logger.info(
-                        "step_45_entity_doc_map_v3",
-                        entity_types=detected_types,
-                        rows_total=len(entity_doc_rows_raw),
-                        rows_after_filter=len(entity_doc_rows),
-                        unique_entities=unique_entities,
-                        role_labels_removed=len(entity_doc_rows_raw) - len(entity_doc_rows),
-                        query=query[:80],
-                    )
-
-        # ------------------------------------------------------------------
-        # Step 4.7: Rerank PPR output with cross-encoder (optional)
-        #
-        # The cross-encoder (voyage-rerank-2.5) sees query+passage together
-        # and can interpret conceptual matches that cosine similarity misses
-        # (e.g., "time windows" → "3 business days cancellation").
-        # Merge PPR top passages with DPR results to broaden the candidate
-        # pool, then rerank to pick the best passages for synthesis.
-        # ------------------------------------------------------------------
-        if rerank_enabled and passage_scores:
-            t0_rerank = time.perf_counter()
-            # Merge PPR top + DPR results into a candidate pool (deduplicated)
-            candidate_ids = []
-            seen_ids: set = set()
-            # PPR passages first (already ranked by graph walk)
-            for cid, score in passage_scores[:ppr_passage_top_k * 2]:
-                if cid not in seen_ids:
-                    candidate_ids.append(cid)
-                    seen_ids.add(cid)
-            # Add DPR results that PPR missed (broader recall)
-            for cid, score in dpr_results:
-                if cid not in seen_ids:
-                    candidate_ids.append(cid)
-                    seen_ids.add(cid)
-
-            if len(candidate_ids) > rerank_top_k:
-                try:
-                    reranked_ids = await self._rerank_passages(
-                        query, candidate_ids, top_k=rerank_top_k,
-                    )
-                    if reranked_ids:
-                        # Replace passage_scores with reranked order
-                        passage_scores = [
-                            (cid, 1.0 - i * 0.01)  # Monotonic score for ordering
-                            for i, cid in enumerate(reranked_ids)
-                        ]
-                        logger.info(
-                            "step_4.7_rerank_complete",
-                            candidates=len(candidate_ids),
-                            output=len(reranked_ids),
-                            elapsed_ms=int((time.perf_counter() - t0_rerank) * 1000),
-                        )
-                except Exception as e:
-                    logger.warning("step_4.7_rerank_failed_fallback", error=str(e))
-                    # Fall through — use original PPR passage_scores
-
-            timings_ms["step_4.7_rerank_ms"] = int(
-                (time.perf_counter() - t0_rerank) * 1000
+        # Apply reranker ranking (already computed in step 2)
+        if rerank_all_results:
+            passage_scores = rerank_all_results
+            logger.info(
+                "step_4.7_rerank_applied",
+                source="step_2_parallel",
+                passages=len(rerank_all_results),
             )
 
-        # ------------------------------------------------------------------
-        # Step 5: Fetch chunk texts + synthesis
-        # ------------------------------------------------------------------
-        t0 = time.perf_counter()
-
-        # Get top-K passage chunk IDs and fetch their text
+        # Determine top passage IDs for chunk fetch
         top_passage_scores = passage_scores[:ppr_passage_top_k]
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
 
-        pre_fetched_chunks = await self._fetch_chunks_by_ids(
-            top_chunk_ids,
-            ppr_scores_map=ppr_scores_map,
+        # Launch parallel tasks: entity-doc map + chunk text fetch
+        t0 = time.perf_counter()
+
+        _parallel_tasks: List[Tuple[str, Any]] = []
+
+        # Chunk text fetch (always needed for synthesis)
+        _parallel_tasks.append((
+            "chunks",
+            self._fetch_chunks_by_ids(top_chunk_ids, ppr_scores_map=ppr_scores_map),
+        ))
+
+        # Entity-doc map (conditional: only for exhaustive enumeration queries)
+        if entity_doc_map_enabled:
+            detected_types = self._detect_exhaustive_entity_types(query)
+            if detected_types:
+                _parallel_tasks.append((
+                    "entity_doc_map",
+                    self._query_entity_doc_map(detected_types),
+                ))
+
+        _parallel_results = await asyncio.gather(
+            *[t[1] for t in _parallel_tasks], return_exceptions=True
         )
+
+        # Unpack chunk fetch result
+        pre_fetched_chunks = (
+            _parallel_results[0]
+            if not isinstance(_parallel_results[0], BaseException)
+            else []
+        )
+        if isinstance(_parallel_results[0], BaseException):
+            logger.warning("route7_chunk_fetch_failed", error=str(_parallel_results[0]))
+
+        # Unpack entity-doc map result (if launched)
+        for i, (label, _) in enumerate(_parallel_tasks):
+            if label == "entity_doc_map":
+                raw_edm = _parallel_results[i]
+                if isinstance(raw_edm, BaseException):
+                    logger.warning("route7_entity_doc_map_failed", error=str(raw_edm))
+                else:
+                    entity_doc_rows_raw = raw_edm
+                    entity_doc_rows = [
+                        r for r in entity_doc_rows_raw
+                        if not _is_role_label(r["entity_name"])
+                    ]
+                    if entity_doc_rows:
+                        # Group rows by entity for bullet-list format
+                        entity_groups: Dict[
+                            Tuple[str, str], List[Dict[str, Any]]
+                        ] = defaultdict(list)
+                        for row in entity_doc_rows:
+                            key = (row["entity_name"], row["entity_type"])
+                            entity_groups[key].append(row)
+
+                        header_lines = [
+                            "## Entity-Document Map (from knowledge graph index)",
+                            "",
+                            "Each entity below lists the documents where it appears.",
+                            "[PARTY_TO] = direct party/signatory to the agreement "
+                            "in that document.",
+                            "[---] = merely referenced (address, job site, invoice "
+                            "recipient).",
+                            "The context sentence after each entry shows the "
+                            "entity's actual contractual role (e.g. owner, "
+                            "builder, agent). Use ONLY that context to determine "
+                            "roles — do NOT rely on signature-block titles.",
+                            "",
+                        ]
+                        for (ent_name, ent_type), rows in entity_groups.items():
+                            header_lines.append(f"### {ent_name} [{ent_type}]")
+                            for row in rows:
+                                role_labels = row.get("doc_role_labels", [])
+                                role_str = (
+                                    ", ".join(role_labels) if role_labels else "---"
+                                )
+                                snippet = self._extract_sentence_context(
+                                    ent_name,
+                                    row.get("doc_sample_chunk", ""),
+                                )
+                                doc_title = row["document_title"]
+                                header_lines.append(
+                                    f'- {doc_title} [{role_str}]: "{snippet}"'
+                                )
+                            header_lines.append("")  # blank line between entities
+
+                        graph_structural_header = "\n".join(header_lines)
+
+                        unique_entities = len(entity_groups)
+                        logger.info(
+                            "step_45_entity_doc_map_v3",
+                            entity_types=detected_types,
+                            rows_total=len(entity_doc_rows_raw),
+                            rows_after_filter=len(entity_doc_rows),
+                            unique_entities=unique_entities,
+                            role_labels_removed=len(entity_doc_rows_raw) - len(entity_doc_rows),
+                            query=query[:80],
+                        )
+
+        timings_ms["step_45_parallel_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # Convert sentence evidence to coverage_chunks format
         sentence_chunks: List[Dict[str, Any]] = []
@@ -701,8 +716,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
             "sentence_evidence_count": len(sentence_evidence),
             "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
-            "version": "v7.1",
+            "version": "v7.2",
             "rerank_enabled": rerank_enabled,
+            "rerank_all_sentences": bool(rerank_all_results),
             "query_mode": query_mode,
             "query_mode_preset_applied": query_mode in self.QUERY_MODE_PRESETS if query_mode else False,
         }
@@ -1389,7 +1405,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         return evidence
 
     # ==================================================================
-    # Step 4.7 helper: Cross-encoder reranking
+    # Step 4.7 helper: Cross-encoder reranking (legacy — kept as fallback)
     # ==================================================================
 
     async def _rerank_passages(
@@ -1474,3 +1490,86 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         return reranked_ids
+
+    # ==================================================================
+    # Step 2 helper: Rerank ALL sentences using PPR-cached texts
+    # ==================================================================
+
+    async def _rerank_all_passages(
+        self,
+        query: str,
+        top_k: int = 20,
+    ) -> List[Tuple[str, float]]:
+        """Rerank ALL sentences using cached texts from the PPR engine.
+
+        Replaces DPR cosine pre-filtering — the cross-encoder sees every
+        sentence and can match conceptual queries (e.g. "day-based
+        timeframes" → "90 days labor warranty") that embedding similarity
+        misses entirely.
+
+        Returns list of (sentence_id, relevance_score) sorted best-first.
+        """
+        rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
+
+        text_map = self._ppr_engine.get_all_passage_texts()
+        if not text_map:
+            logger.warning("rerank_all_no_texts")
+            return []
+
+        ids = []
+        documents = []
+        for sid, text in text_map.items():
+            if text.strip():
+                ids.append(sid)
+                documents.append(text)
+
+        if not documents:
+            return []
+
+        import voyageai
+        from src.core.config import settings
+
+        vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+
+        loop = asyncio.get_running_loop()
+
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                rr_result = await loop.run_in_executor(
+                    None,
+                    lambda: vc.rerank(
+                        query=query,
+                        documents=documents,
+                        model=rerank_model,
+                        top_k=min(top_k, len(documents)),
+                    ),
+                )
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                if "rate limit" in err_msg and attempt < max_retries:
+                    wait_secs = 30 * (attempt + 1)
+                    logger.warning(
+                        "route7_rerank_rate_limited_retrying",
+                        attempt=attempt + 1,
+                        wait_secs=wait_secs,
+                    )
+                    await asyncio.sleep(wait_secs)
+                    continue
+                raise
+
+        results = [
+            (ids[rr.index], rr.relevance_score)
+            for rr in rr_result.results
+        ]
+
+        logger.info(
+            "route7_rerank_all_complete",
+            model=rerank_model,
+            input=len(documents),
+            output=len(results),
+            top_score=round(results[0][1], 4) if results else 0,
+        )
+
+        return results

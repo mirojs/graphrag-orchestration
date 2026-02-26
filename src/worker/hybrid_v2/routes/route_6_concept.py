@@ -23,18 +23,23 @@ Design rationale:
 """
 
 import asyncio
+import json
 import os
 import re
 import time
 import threading
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 
 import structlog
+import tiktoken
 
 from .base import BaseRouteHandler, Citation, RouteResult
 from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT
 from ..services.neo4j_retry import retry_session
+
+# Shared tiktoken encoder for token budget control (Feature 4)
+_tiktoken_enc = tiktoken.get_encoding("cl100k_base")
 
 logger = structlog.get_logger(__name__)
 
@@ -157,6 +162,50 @@ class ConceptSearchHandler(BaseRouteHandler):
             titles=[c.get("title", "?") for c in community_data],
             top_scores=[round(s, 4) for s in community_scores[:5]],
         )
+
+        # Feature 1: Dynamic Community Selection — LLM-rate matched communities
+        dynamic_community = os.getenv(
+            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        if dynamic_community and community_data:
+            t_dc = time.perf_counter()
+            try:
+                community_data, community_scores = await self._rate_communities_with_llm(
+                    query, community_data, community_scores,
+                )
+            except Exception as e:
+                logger.warning("route6_dynamic_community_failed_fallback", error=str(e))
+            timings_ms["step_1_dynamic_community_ms"] = int(
+                (time.perf_counter() - t_dc) * 1000
+            )
+
+        # Feature 2: Community Children Traversal — expand with child communities
+        community_children_enabled = os.getenv(
+            "ROUTE6_COMMUNITY_CHILDREN", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        if community_children_enabled and community_data:
+            t_cc = time.perf_counter()
+            try:
+                children = await self._fetch_community_children(community_data)
+                if children:
+                    # Dedup: skip children already in community_data
+                    existing_ids = {c.get("id") for c in community_data}
+                    for child, child_score in children:
+                        if child.get("id") not in existing_ids:
+                            community_data.append(child)
+                            community_scores.append(child_score)
+                            existing_ids.add(child.get("id"))
+                    logger.info(
+                        "route6_community_children_merged",
+                        parent_count=len(community_data) - len(children),
+                        children_added=len([c for c, _ in children if c.get("id") not in existing_ids]) if children else 0,
+                        total=len(community_data),
+                    )
+            except Exception as e:
+                logger.warning("route6_community_children_failed", error=str(e))
+            timings_ms["step_1_community_children_ms"] = int(
+                (time.perf_counter() - t_cc) * 1000
+            )
 
         # Await sentence search
         try:
@@ -357,6 +406,9 @@ class ConceptSearchHandler(BaseRouteHandler):
             "entity_doc_map_count": len(entity_doc_map),
             "entity_expansion_enabled": expansion_enabled,
             "entity_expansion_count": expansion_count,
+            "dynamic_community_enabled": dynamic_community,
+            "community_children_enabled": community_children_enabled,
+            "community_children_count": len([c for c in community_data if c.get("_is_child")]),
             "route_description": "Concept search — direct community synthesis (v2 + section headings)",
             "version": "v2",
         }
@@ -512,6 +564,42 @@ class ConceptSearchHandler(BaseRouteHandler):
         else:
             entity_coverage_text = ""
 
+        # Feature 4: Token Budget Control — truncate context sections if over budget.
+        # Community summaries are never truncated (thematic backbone).
+        max_tokens = int(os.getenv("ROUTE6_MAX_CONTEXT_TOKENS", "0"))
+        if max_tokens > 0:
+            summaries_tokens = len(_tiktoken_enc.encode(summaries_text))
+            sections = [
+                ("evidence", evidence_text),
+                ("entity_coverage", entity_coverage_text),
+                ("headings", headings_text),
+            ]
+            other_tokens = sum(len(_tiktoken_enc.encode(t)) for _, t in sections)
+            total = summaries_tokens + other_tokens
+            if total > max_tokens:
+                budget = max_tokens - summaries_tokens
+                # Truncate in priority order: evidence first, then entity_coverage, then headings
+                truncated = {}
+                for name, text in sections:
+                    tokens = _tiktoken_enc.encode(text)
+                    if len(tokens) <= budget:
+                        truncated[name] = text
+                        budget -= len(tokens)
+                    else:
+                        truncated[name] = _tiktoken_enc.decode(tokens[:max(budget, 0)])
+                        budget = 0
+                evidence_text = truncated["evidence"]
+                entity_coverage_text = truncated["entity_coverage"]
+                headings_text = truncated["headings"]
+                logger.info(
+                    "route6_token_budget_applied",
+                    max_tokens=max_tokens,
+                    original_tokens=total,
+                    after_tokens=summaries_tokens + sum(
+                        len(_tiktoken_enc.encode(truncated[n])) for n, _ in sections
+                    ),
+                )
+
         prompt = CONCEPT_SYNTHESIS_PROMPT.format(
             query=query,
             community_summaries=summaries_text,
@@ -539,8 +627,437 @@ class ConceptSearchHandler(BaseRouteHandler):
             )
 
     # ==================================================================
-    # Sentence Vector Search (reused from Route 3 pattern)
+    # Feature 3: Streaming Synthesis
     # ==================================================================
+
+    async def _stream_synthesize(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+        section_headings: List[Dict[str, Any]],
+        sentence_evidence: List[Dict[str, Any]],
+        entity_doc_map: Optional[Dict[str, List[str]]] = None,
+        language: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Streaming variant of _synthesize(). Yields token chunks.
+
+        Uses self.llm.astream_complete() (LlamaIndex AzureOpenAI) to stream
+        the synthesis response token-by-token. Falls back to a single yield
+        of the full response if streaming is not supported.
+        """
+        # Build prompt identically to _synthesize()
+        prompt = await self._build_synthesis_prompt(
+            query, communities, section_headings, sentence_evidence,
+            entity_doc_map, language,
+        )
+
+        try:
+            stream_resp = await self.llm.astream_complete(prompt)
+            async for chunk in stream_resp:
+                if chunk.delta:
+                    yield chunk.delta
+        except Exception as e:
+            logger.error("route6_stream_synthesis_failed", error=str(e))
+            yield (
+                "An error occurred while synthesizing the response. "
+                f"Please try again. (Error: {type(e).__name__})"
+            )
+
+    async def stream_execute(
+        self,
+        query: str,
+        response_type: str = "summary",
+        language: Optional[str] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Streaming variant of execute(). Yields synthesis chunks.
+
+        Runs the same retrieval pipeline (community match, sentence search,
+        section heading search, entity-doc map, denoise, rerank), then
+        streams the LLM synthesis token-by-token.
+
+        Gated by ROUTE6_STREAM_SYNTHESIS env var — caller should check before invoking.
+        """
+        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
+        sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
+        section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
+
+        # Step 1: Parallel retrieval (same as execute)
+        sentence_search_task = asyncio.create_task(
+            self._retrieve_sentence_evidence(query, top_k=sentence_top_k)
+        )
+        section_search_task = asyncio.create_task(
+            self._retrieve_section_headings(query, top_k=section_top_k)
+        )
+        entity_doc_task = asyncio.create_task(
+            self._retrieve_entity_document_map(top_k=20)
+        )
+
+        matched_communities = await self.pipeline.community_matcher.match_communities(
+            query, top_k=community_top_k,
+        )
+        community_data = [c for c, _ in matched_communities]
+        community_scores = [s for _, s in matched_communities]
+
+        # Feature 1: Dynamic Community Selection (if enabled)
+        dynamic_community = os.getenv(
+            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        if dynamic_community and community_data:
+            try:
+                community_data, community_scores = await self._rate_communities_with_llm(
+                    query, community_data, community_scores,
+                )
+            except Exception:
+                pass  # fallback to embedding-only
+
+        # Feature 2: Community Children (if enabled)
+        community_children_enabled = os.getenv(
+            "ROUTE6_COMMUNITY_CHILDREN", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        if community_children_enabled and community_data:
+            try:
+                children = await self._fetch_community_children(community_data)
+                if children:
+                    existing_ids = {c.get("id") for c in community_data}
+                    for child, child_score in children:
+                        if child.get("id") not in existing_ids:
+                            community_data.append(child)
+                            community_scores.append(child_score)
+                            existing_ids.add(child.get("id"))
+            except Exception:
+                pass
+
+        # Await parallel tasks
+        try:
+            sentence_evidence = await sentence_search_task
+        except Exception:
+            sentence_evidence = []
+        try:
+            section_headings = await section_search_task
+        except Exception:
+            section_headings = []
+        try:
+            entity_doc_map = await entity_doc_task
+        except Exception:
+            entity_doc_map = {}
+
+        # Step 2: Denoise + Rerank (same as execute)
+        if sentence_evidence:
+            sentence_evidence = self._denoise_sentences(sentence_evidence)
+            rerank_enabled = os.getenv(
+                "ROUTE6_SENTENCE_RERANK", "1"
+            ).strip().lower() in {"1", "true", "yes"}
+            rerank_top_k = int(os.getenv("ROUTE6_RERANK_TOP_K", "15"))
+            if rerank_enabled:
+                try:
+                    sentence_evidence = await self._rerank_sentences(
+                        query, sentence_evidence, top_k=rerank_top_k,
+                    )
+                except Exception:
+                    sentence_evidence = sentence_evidence[:rerank_top_k]
+
+        # Step 3: Stream synthesis
+        async for chunk in self._stream_synthesize(
+            query, community_data, section_headings, sentence_evidence,
+            entity_doc_map=entity_doc_map, language=language,
+        ):
+            yield chunk
+
+    # ==================================================================
+    # Feature 1: Dynamic Community Selection (LLM-rated)
+    # ==================================================================
+
+    _COMMUNITY_RATING_PROMPT = (
+        "Rate how relevant the following community summary is to the query.\n\n"
+        "Query: {query}\n\n"
+        "Community: {title}\n"
+        "Summary: {summary}\n\n"
+        "Respond with ONLY a JSON object: {{\"rating\": <0-10>}}\n"
+        "0 = completely irrelevant, 10 = perfectly relevant."
+    )
+
+    async def _rate_communities_with_llm(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+        scores: List[float],
+    ) -> Tuple[List[Dict[str, Any]], List[float]]:
+        """Rate matched communities using a cheap LLM, filter low-rated ones.
+
+        Inspired by Microsoft GraphRAG's DynamicCommunitySelection. Uses
+        gpt-4o-mini (or configurable model) to rate each community's relevance
+        on a 0-10 scale, then filters below threshold.
+
+        Args:
+            query: User query.
+            communities: Community dicts from embedding match.
+            scores: Corresponding cosine similarity scores.
+
+        Returns:
+            Filtered (communities, scores) tuple.
+        """
+        threshold = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_THRESHOLD", "1"))
+        max_concurrent = int(os.getenv("ROUTE6_DYNAMIC_COMMUNITY_CONCURRENCY", "8"))
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def _rate_one(community: Dict[str, Any]) -> int:
+            prompt = self._COMMUNITY_RATING_PROMPT.format(
+                query=query,
+                title=community.get("title", ""),
+                summary=(community.get("summary", "") or "")[:500],
+            )
+            async with semaphore:
+                try:
+                    resp = await self.llm.acomplete(prompt)
+                    text = resp.text.strip()
+                    # Parse JSON rating
+                    parsed = json.loads(text)
+                    return int(parsed.get("rating", 0))
+                except (json.JSONDecodeError, ValueError, KeyError):
+                    # Try extracting a bare number
+                    match = re.search(r"\b(\d+)\b", resp.text if 'resp' in dir() else "")
+                    return int(match.group(1)) if match else 0
+                except Exception as e:
+                    logger.warning("route6_community_rating_error", error=str(e))
+                    return -1  # -1 means "keep" (LLM failure → don't filter)
+
+        # Rate all communities concurrently
+        ratings = await asyncio.gather(*[_rate_one(c) for c in communities])
+
+        # Filter below threshold; keep communities where LLM failed (rating == -1)
+        filtered_communities = []
+        filtered_scores = []
+        for community, score, rating in zip(communities, scores, ratings):
+            if rating == -1 or rating >= threshold:
+                filtered_communities.append(community)
+                filtered_scores.append(score)
+
+        logger.info(
+            "route6_dynamic_community_ratings",
+            ratings=list(zip(
+                [c.get("title", "?") for c in communities],
+                ratings,
+            )),
+            threshold=threshold,
+            kept=len(filtered_communities),
+            dropped=len(communities) - len(filtered_communities),
+        )
+
+        # If all were filtered out, return original (safety fallback)
+        if not filtered_communities:
+            logger.warning("route6_dynamic_community_all_filtered_fallback")
+            return communities, scores
+
+        return filtered_communities, filtered_scores
+
+    # ==================================================================
+    # Feature 2: Community Children Traversal
+    # ==================================================================
+
+    async def _fetch_community_children(
+        self,
+        parent_communities: List[Dict[str, Any]],
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """Fetch child communities via PARENT_COMMUNITY edges in Neo4j.
+
+        For each parent community, traverses the hierarchy built by
+        ensure_community_hierarchy() to find finer-grained child communities.
+
+        Args:
+            parent_communities: Matched parent community dicts.
+
+        Returns:
+            List of (child_community_dict, synthetic_score) tuples.
+        """
+        if not self.neo4j_driver:
+            return []
+
+        max_depth = int(os.getenv("ROUTE6_COMMUNITY_CHILDREN_MAX_LEVEL", "1"))
+        parent_ids = [c.get("id") for c in parent_communities if c.get("id")]
+        if not parent_ids:
+            return []
+
+        group_id = self.group_id
+
+        # Fetch children up to max_depth levels below parents
+        cypher = """
+        UNWIND $parent_ids AS pid
+        MATCH (child:Community {group_id: $group_id})-[:PARENT_COMMUNITY*1..]->(parent:Community {id: pid, group_id: $group_id})
+        WHERE child.summary IS NOT NULL AND child.summary <> ''
+        WITH DISTINCT child, parent
+        RETURN child.id AS id,
+               child.title AS title,
+               child.summary AS summary,
+               child.level AS level,
+               child.rank AS rank,
+               parent.id AS parent_id
+        ORDER BY child.rank DESC
+        """
+
+        try:
+            loop = asyncio.get_running_loop()
+            driver = self.neo4j_driver
+
+            def _run():
+                with retry_session(driver, read_only=True) as session:
+                    records = session.run(
+                        cypher,
+                        parent_ids=parent_ids,
+                        group_id=group_id,
+                    )
+                    return [dict(r) for r in records]
+
+            results = await loop.run_in_executor(self._executor, _run)
+        except Exception as e:
+            logger.warning("route6_community_children_query_failed", error=str(e))
+            return []
+
+        if not results:
+            return []
+
+        # Assign synthetic score (below parent minimum)
+        parent_scores = [
+            c.get("score", 0) for c in parent_communities
+            if isinstance(c.get("score"), (int, float))
+        ]
+        synthetic_score = min(parent_scores) * 0.8 if parent_scores else 0.3
+
+        children: List[Tuple[Dict[str, Any], float]] = []
+        for r in results:
+            child_dict = {
+                "id": r["id"],
+                "title": r.get("title", ""),
+                "summary": r.get("summary", ""),
+                "level": r.get("level", 0),
+                "rank": r.get("rank", 0),
+                "parent_id": r.get("parent_id", ""),
+                "_is_child": True,  # marker for metadata traceability
+            }
+            children.append((child_dict, synthetic_score))
+
+        logger.info(
+            "route6_community_children_fetched",
+            parent_count=len(parent_ids),
+            children_count=len(children),
+            child_titles=[c.get("title", "?") for c, _ in children[:5]],
+        )
+
+        return children
+
+    # ==================================================================
+    # Shared prompt builder (used by _synthesize and _stream_synthesize)
+    # ==================================================================
+
+    async def _build_synthesis_prompt(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+        section_headings: List[Dict[str, Any]],
+        sentence_evidence: List[Dict[str, Any]],
+        entity_doc_map: Optional[Dict[str, List[str]]] = None,
+        language: Optional[str] = None,
+    ) -> str:
+        """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize."""
+        # Format community summaries
+        if communities:
+            summary_lines = []
+            for i, c in enumerate(communities, 1):
+                title = c.get("title", f"Theme {i}")
+                summary = c.get("summary", "").strip()
+                if summary:
+                    summary_lines.append(f"{i}. **{title}**: {summary}")
+                else:
+                    entities = ", ".join(c.get("entity_names", [])[:10])
+                    if entities:
+                        summary_lines.append(f"{i}. **{title}**: Entities: {entities}")
+            summaries_text = "\n".join(summary_lines) if summary_lines else "(No thematic context available)"
+        else:
+            summaries_text = "(No thematic context available)"
+
+        # Format section headings
+        if section_headings:
+            heading_lines = []
+            for i, sec in enumerate(section_headings, 1):
+                title = sec.get("title", f"Section {i}")
+                doc_title = sec.get("document_title", "")
+                path_key = sec.get("path_key", "").strip()
+                parts = []
+                if doc_title:
+                    parts.append(f"[{doc_title}]")
+                if path_key and path_key != title:
+                    parts.append(path_key)
+                else:
+                    parts.append(title)
+                heading_lines.append(f"- {' '.join(parts)}")
+            headings_text = "\n".join(heading_lines)
+        else:
+            headings_text = "(No document structure available)"
+
+        # Format sentence evidence
+        if sentence_evidence:
+            evidence_lines = []
+            for i, ev in enumerate(sentence_evidence, 1):
+                doc = ev.get("document_title", "Unknown")
+                section = ev.get("section_path", "")
+                text = ev.get("text", "")
+                if section:
+                    evidence_lines.append(f"{i}. [{doc} > {section}] {text}")
+                else:
+                    evidence_lines.append(f"{i}. [{doc}] {text}")
+            evidence_text = "\n".join(evidence_lines)
+        else:
+            evidence_text = "(No document evidence retrieved)"
+
+        # Format entity-document coverage
+        if entity_doc_map:
+            cov_lines = []
+            for entity_name, doc_titles in entity_doc_map.items():
+                docs_str = ", ".join(sorted(doc_titles))
+                cov_lines.append(
+                    f"- {entity_name}: {docs_str} ({len(doc_titles)} document{'s' if len(doc_titles) != 1 else ''})"
+                )
+            entity_coverage_text = "\n".join(cov_lines)
+        else:
+            entity_coverage_text = ""
+
+        # Feature 4: Token budget
+        max_tokens = int(os.getenv("ROUTE6_MAX_CONTEXT_TOKENS", "0"))
+        if max_tokens > 0:
+            summaries_tokens = len(_tiktoken_enc.encode(summaries_text))
+            sections = [
+                ("evidence", evidence_text),
+                ("entity_coverage", entity_coverage_text),
+                ("headings", headings_text),
+            ]
+            other_tokens = sum(len(_tiktoken_enc.encode(t)) for _, t in sections)
+            total = summaries_tokens + other_tokens
+            if total > max_tokens:
+                budget = max_tokens - summaries_tokens
+                truncated = {}
+                for name, text in sections:
+                    tokens = _tiktoken_enc.encode(text)
+                    if len(tokens) <= budget:
+                        truncated[name] = text
+                        budget -= len(tokens)
+                    else:
+                        truncated[name] = _tiktoken_enc.decode(tokens[:max(budget, 0)])
+                        budget = 0
+                evidence_text = truncated["evidence"]
+                entity_coverage_text = truncated["entity_coverage"]
+                headings_text = truncated["headings"]
+
+        prompt = CONCEPT_SYNTHESIS_PROMPT.format(
+            query=query,
+            community_summaries=summaries_text,
+            section_headings=headings_text,
+            sentence_evidence=evidence_text,
+            entity_coverage=entity_coverage_text,
+        )
+
+        if language:
+            prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
+
+        return prompt
 
     async def _retrieve_sentence_evidence(
         self,

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Check KNN groups with Entity label (not __Entity__).
+Check KNN groups with Entity label.
 """
 from neo4j import GraphDatabase
 import os

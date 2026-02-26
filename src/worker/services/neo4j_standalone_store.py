@@ -32,7 +32,7 @@ from src.core.config import settings
 logger = logging.getLogger(__name__)
 
 # Constants matching previous Neo4j PropertyGraphStore label conventions
-BASE_ENTITY_LABEL = "__Entity__"
+BASE_ENTITY_LABEL = "Entity"
 BASE_NODE_LABEL = "__Node__"
 
 
@@ -237,7 +237,7 @@ class StandaloneNeo4jStore:
                 self.structured_query(
                     """
                     UNWIND $data AS row
-                    MERGE (e:`__Entity__` {id: row.id, group_id: $group_id})
+                    MERGE (e:Entity {id: row.id, group_id: $group_id})
                     SET e.name = row.name
                     SET e += row.properties
                     SET e.embedding = row.embedding
@@ -355,7 +355,7 @@ class StandaloneNeo4jStore:
         _label_map = {
             "entity_embedding": "Entity",
             "entity_embedding_v2": "Entity",
-            "entity_embedding_v2_internal": "`__Entity__`",
+            "entity_embedding_v2_internal": "Entity",
             "chunk_embedding": "TextChunk",
             "chunk_embeddings_v2": "TextChunk",
             "sentence_embeddings_v2": "Sentence",

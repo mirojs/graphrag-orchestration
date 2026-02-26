@@ -245,7 +245,7 @@ async def resolve_entities(
         # Strategy 1: Exact match
         records = await neo4j.run("""
             MATCH (e)
-            WHERE (e:Entity OR e:`__Entity__`)
+            WHERE (e:Entity)
               AND e.group_id = $group_id
               AND toLower(e.name) = toLower($name)
             RETURN e.id AS id, e.name AS name
@@ -258,7 +258,7 @@ async def resolve_entities(
         # Strategy 2: Substring match
         records = await neo4j.run("""
             MATCH (e)
-            WHERE (e:Entity OR e:`__Entity__`)
+            WHERE (e:Entity)
               AND e.group_id = $group_id
               AND (toLower(e.name) CONTAINS toLower($name)
                    OR toLower($name) CONTAINS toLower(e.name))
@@ -279,7 +279,7 @@ async def resolve_entities(
             CALL db.index.vector.queryNodes('entity_embedding_v2', 3, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
-              AND (node:Entity OR node:`__Entity__`)
+              AND (node:Entity)
             RETURN node.id AS id, node.name AS name, score AS similarity
             LIMIT 1
         """, group_id=group_id, embedding=emb)
@@ -311,7 +311,7 @@ async def resolve_entities_semantic(
         # Strategy 1: Exact match (case-insensitive) — precision = 1.0
         records = await neo4j.run("""
             MATCH (e)
-            WHERE (e:Entity OR e:`__Entity__`)
+            WHERE (e:Entity)
               AND e.group_id = $group_id
               AND toLower(e.name) = toLower($name)
             RETURN e.id AS id, e.name AS name, 1.0 AS similarity
@@ -327,7 +327,7 @@ async def resolve_entities_semantic(
             CALL db.index.vector.queryNodes('entity_embedding_v2', 3, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
-              AND (node:Entity OR node:`__Entity__`)
+              AND (node:Entity)
             RETURN node.id AS id, node.name AS name, score AS similarity
             ORDER BY score DESC
             LIMIT 1
@@ -342,7 +342,7 @@ async def resolve_entities_semantic(
         if not records:  # vector returned 0 results
             records = await neo4j.run("""
                 MATCH (e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND e.group_id = $group_id
                   AND (toLower(e.name) CONTAINS toLower($name)
                        OR toLower($name) CONTAINS toLower(e.name))
@@ -381,14 +381,14 @@ async def ppr_uniform(
         UNWIND $seed_ids AS seed_id
         MATCH (seed {id: seed_id})
         WHERE seed.group_id = $group_id
-          AND (seed:Entity OR seed:`__Entity__`)
+          AND (seed:Entity)
 
         WITH seed, $group_id AS group_id
 
         CALL (seed, group_id) {
             MATCH (seed)-[r1]-(n1)
             WHERE n1.group_id = group_id
-                AND (n1:Entity OR n1:`__Entity__`)
+                AND (n1:Entity)
                 AND NOT (type(r1) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
             WITH n1
             ORDER BY coalesce(n1.degree, 0) DESC
@@ -402,7 +402,7 @@ async def ppr_uniform(
         CALL (hop1_node, group_id) {
             MATCH (hop1_node)-[r2]-(n2)
             WHERE n2.group_id = group_id
-                AND (n2:Entity OR n2:`__Entity__`)
+                AND (n2:Entity)
                 AND NOT (type(r2) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
             WITH n2
             ORDER BY coalesce(n2.degree, 0) DESC
@@ -480,7 +480,7 @@ async def get_ground_truth_entities(neo4j: Neo4jClient, group_id: str) -> Dict[s
         if doc_ids:
             records = await neo4j.run("""
                 MATCH (c)-[:MENTIONS]->(e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND e.group_id = $group_id
                   AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
                   AND c.group_id = $group_id
@@ -524,7 +524,7 @@ async def run_experiment(top_k: int = 20, filter_qid: Optional[str] = None, sim_
     try:
         test = await neo4j.run("""
             MATCH (e)
-            WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+            WHERE (e:Entity) AND e.group_id = $group_id
             RETURN count(e) AS cnt
         """, group_id=GROUP_ID)
         print(f"  Entities in graph: {test[0]['cnt']}")

@@ -47,7 +47,7 @@ async def main():
             print("\n=== Sample Entity Properties (first 20) ===")
             result = await session.run("""
                 MATCH (e)
-                WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+                WHERE e.group_id = $group_id AND (e:Entity)
                 RETURN e.id as entity_id, e.name as entity_name, labels(e) as entity_labels
                 LIMIT 20
             """, group_id=GROUP_ID)
@@ -59,7 +59,7 @@ async def main():
             result = await session.run("""
                 MATCH (e)
                 WHERE e.group_id = $group_id 
-                  AND (e:Entity OR e:`__Entity__`)
+                  AND (e:Entity)
                   AND (e.name STARTS WITH 'doc_' OR e.id STARTS WITH 'doc_')
                 RETURN count(*) as synthetic_count, 
                        collect(e.name)[0..5] as sample_names,
@@ -84,7 +84,7 @@ async def main():
                 result = await session.run("""
                     MATCH (e)
                     WHERE e.group_id = $group_id 
-                      AND (e:Entity OR e:`__Entity__`)
+                      AND (e:Entity)
                       AND (toLower(e.name) = toLower($entity_name) OR e.id = $entity_name)
                     RETURN count(*) as match_count, 
                            collect(e.name)[0] as matched_name,
@@ -111,7 +111,7 @@ async def main():
             print("\n=== Total Entity Count ===")
             result = await session.run("""
                 MATCH (e)
-                WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+                WHERE e.group_id = $group_id AND (e:Entity)
                 RETURN count(*) as total_entities
             """, group_id=GROUP_ID)
             record = await result.single()

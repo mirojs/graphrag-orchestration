@@ -37,7 +37,7 @@ def check_groups():
             
             # Check if group exists by counting entities
             result = session.run("""
-                MATCH (e:__Entity__ {group_id: $group_id})
+                MATCH (e:Entity {group_id: $group_id})
                 RETURN count(e) as entity_count
             """, group_id=group_id)
             
@@ -52,7 +52,7 @@ def check_groups():
             
             # Count KNN edges
             knn_result = session.run("""
-                MATCH (e1:__Entity__ {group_id: $group_id})-[r:KNN_SIMILAR]->(e2:__Entity__ {group_id: $group_id})
+                MATCH (e1:Entity {group_id: $group_id})-[r:KNN_SIMILAR]->(e2:Entity {group_id: $group_id})
                 RETURN count(r) as knn_edge_count
             """, group_id=group_id)
             
@@ -62,7 +62,7 @@ def check_groups():
             
             # Count regular relationships
             rel_result = session.run("""
-                MATCH (e1:__Entity__ {group_id: $group_id})-[r]-(e2:__Entity__ {group_id: $group_id})
+                MATCH (e1:Entity {group_id: $group_id})-[r]-(e2:Entity {group_id: $group_id})
                 WHERE type(r) <> 'KNN_SIMILAR'
                 RETURN count(DISTINCT r) as rel_count
             """, group_id=group_id)
@@ -73,7 +73,7 @@ def check_groups():
             
             # Sample entity to check properties
             sample_result = session.run("""
-                MATCH (e:__Entity__ {group_id: $group_id})
+                MATCH (e:Entity {group_id: $group_id})
                 RETURN e LIMIT 1
             """, group_id=group_id)
             

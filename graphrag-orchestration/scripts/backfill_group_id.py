@@ -15,7 +15,7 @@ Today we do that via graph adjacency to chunks that already have the tenant's
 What it does
 ------------
 For a given `--group-id`:
-1) Set group_id on Entity/__Entity__ nodes where group_id IS NULL AND they are
+1) Set group_id on Entity/Entity nodes where group_id IS NULL AND they are
    connected via MENTIONS (either direction) to a Chunk/TextChunk/__Node__ node
    with group_id = $group_id.
 2) Set group_id on relationships where group_id IS NULL AND both endpoint nodes
@@ -86,7 +86,7 @@ def main() -> int:
     MATCH (c)
     WHERE (c:Chunk OR c:TextChunk OR c:__Node__) AND c.group_id = $group_id
     MATCH (c)-[:MENTIONS]-(e)
-    WHERE (e:__Entity__ OR e:Entity) AND e.group_id IS NULL
+    WHERE (e:Entity) AND e.group_id IS NULL
     RETURN count(DISTINCT e) AS entities_to_update
     """
 
@@ -94,7 +94,7 @@ def main() -> int:
     MATCH (c)
     WHERE (c:Chunk OR c:TextChunk OR c:__Node__) AND c.group_id = $group_id
     MATCH (c)-[:MENTIONS]-(e)
-    WHERE (e:__Entity__ OR e:Entity) AND e.group_id IS NULL
+    WHERE (e:Entity) AND e.group_id IS NULL
     SET e.group_id = $group_id
     RETURN count(DISTINCT e) AS entities_updated
     """

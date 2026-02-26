@@ -84,7 +84,7 @@ async def main():
         print("\n=== 2. Sample Entity Properties ===")
         query2 = """
             MATCH (e)
-            WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+            WHERE e.group_id = $group_id AND (e:Entity)
             RETURN e.id as entity_id, e.name as entity_name, labels(e) as entity_labels
             LIMIT 20
         """
@@ -95,7 +95,7 @@ async def main():
         print(f"\n=== 3. Total Entity Count ===")
         query3 = """
             MATCH (e)
-            WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+            WHERE e.group_id = $group_id AND (e:Entity)
             RETURN count(*) as total_entities
         """
         result = await execute_query(driver, query3, {"group_id": group_id})
@@ -114,7 +114,7 @@ async def main():
             query4 = """
                 MATCH (e)
                 WHERE e.group_id = $group_id 
-                  AND (e:Entity OR e:`__Entity__`)
+                  AND (e:Entity)
                   AND (toLower(e.name) = toLower($entity_name) OR e.id = $entity_name)
                 RETURN count(*) as match_count, 
                        collect(e.name)[0] as matched_name,
@@ -142,7 +142,7 @@ async def main():
         query6 = """
             MATCH (e)
             WHERE e.group_id = $group_id 
-              AND (e:Entity OR e:`__Entity__`)
+              AND (e:Entity)
               AND (e.name STARTS WITH 'doc_' OR e.id STARTS WITH 'doc_')
             RETURN count(*) as synthetic_count, 
                    collect(e.name)[0..5] as sample_names,

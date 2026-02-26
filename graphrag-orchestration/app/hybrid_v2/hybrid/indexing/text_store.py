@@ -227,7 +227,7 @@ class Neo4jTextUnitStore:
         # Enhanced query: also fetch section info via IN_SECTION edge
         query = """
         UNWIND $entity_names AS entity_name
-        MATCH (e:`__Entity__` {group_id: $group_id})
+        MATCH (e:Entity {group_id: $group_id})
         WHERE toLower(e.name) = toLower(entity_name)
             OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name))
         MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e)

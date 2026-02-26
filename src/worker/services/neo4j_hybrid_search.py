@@ -34,7 +34,7 @@ class Neo4jHybridSearchService:
     Neo4j Hybrid Search for Seed Node Discovery (Step 7).
     
     Combines:
-    1. Vector search (semantic similarity via embeddings on __Entity__ nodes)
+    1. Vector search (semantic similarity via embeddings on Entity nodes)
     2. Full-text search (keyword/BM25 matching on entity names/descriptions)
     
     Uses Reciprocal Rank Fusion (RRF) to combine rankings from both methods.
@@ -65,8 +65,8 @@ class Neo4jHybridSearchService:
         Ensure required indexes exist in Neo4j.
         
         Creates:
-        1. Full-text index on __Entity__ nodes (name, id fields)
-        2. Vector index on __Entity__ nodes (embedding field)
+        1. Full-text index on Entity nodes (name, id fields)
+        2. Vector index on Entity nodes (embedding field)
         
         Returns:
             Dict with status of each index creation
@@ -95,7 +95,7 @@ class Neo4jHybridSearchService:
                 # Create full-text index on entity name and id
                 create_ft_query = f"""
                 CREATE FULLTEXT INDEX {self.fulltext_index_name} IF NOT EXISTS
-                FOR (e:`__Entity__`)
+                FOR (e:Entity)
                 ON EACH [e.name, e.id]
                 """
                 store.structured_query(create_ft_query)
@@ -127,7 +127,7 @@ class Neo4jHybridSearchService:
                 # Note: dimensions should match your embedding model (3072 for text-embedding-3-large)
                 create_vec_query = f"""
                 CREATE VECTOR INDEX {self.vector_index_name} IF NOT EXISTS
-                FOR (e:`__Entity__`)
+                FOR (e:Entity)
                 ON e.embedding
                 OPTIONS {{
                     indexConfig: {{
@@ -577,9 +577,9 @@ class Neo4jHybridSearchService:
         # Multi-hop traversal query
         cypher = """
         UNWIND $entity_ids AS start_id
-        MATCH (start:`__Entity__` {id: start_id, group_id: $group_id})
+        MATCH (start:Entity {id: start_id, group_id: $group_id})
         CALL (start, group_id, depth) {
-            MATCH path = (start)-[r*1..depth]-(end:`__Entity__`)
+            MATCH path = (start)-[r*1..depth]-(end:Entity)
             WHERE end.group_id = group_id
             UNWIND relationships(path) AS rel
             WITH startNode(rel) AS source, rel, endNode(rel) AS target

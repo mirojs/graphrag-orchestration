@@ -278,7 +278,7 @@ class CommunityMatcher:
                     # Query entities directly by embedding, then join to chunks for doc diversity
                     embedding_query = """
                     MATCH (e)
-                    WHERE (e:Entity OR e:`__Entity__`)
+                    WHERE (e:Entity)
                       AND e.group_id = $group_id AND e.embedding IS NOT NULL
                     WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
                     WHERE similarity > 0.35
@@ -315,10 +315,9 @@ class CommunityMatcher:
         if self.neo4j_service and query_keywords and len(embedding_matched_entities) < 5:
             try:
                 # Search entities by keyword, diversify across documents
-                # Support both Entity and __Entity__ labels for compatibility
                 search_query = """
                 MATCH (c:TextChunk)-[:MENTIONS]->(e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND c.group_id = $group_id AND e.group_id = $group_id
                 WITH c, e
                 WHERE (any(keyword IN $keywords WHERE toLower(e.name) CONTAINS keyword)
@@ -352,10 +351,9 @@ class CommunityMatcher:
         if self.neo4j_service:
             try:
                 # Get top entities from EACH document to ensure coverage
-                # Support both Entity and __Entity__ labels for compatibility
                 multi_doc_query = """
                 MATCH (c:TextChunk)-[:MENTIONS]->(e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND c.group_id = $group_id AND e.group_id = $group_id
                 OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url,
@@ -411,10 +409,9 @@ class CommunityMatcher:
                 if query_embedding:
                     # Use vector similarity search to find relevant entities
                     # This is more semantic than keyword matching
-                    # Support both Entity and __Entity__ labels for compatibility
                     embedding_query = """
                     MATCH (e)
-                    WHERE (e:Entity OR e:`__Entity__`)
+                    WHERE (e:Entity)
                       AND e.group_id = $group_id AND e.embedding IS NOT NULL
                     WITH e, vector.similarity.cosine(e.embedding, $query_embedding) AS similarity
                     WHERE similarity > 0.3
@@ -449,10 +446,9 @@ class CommunityMatcher:
                 
                 # Get top entities from EACH document to ensure cross-document coverage
                 # This prevents the largest document from dominating results
-                # Support both Entity and __Entity__ labels for compatibility
                 multi_doc_query = """
                 MATCH (c:TextChunk)-[:MENTIONS]->(e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND c.group_id = $group_id AND e.group_id = $group_id
                 OPTIONAL MATCH (c)-[:PART_OF]->(d:Document {group_id: $group_id})
                 WITH coalesce(c.url, d.source, d.title, c.document_id, '') AS doc_url, e, coalesce(e.degree, 0) AS deg
@@ -486,10 +482,9 @@ class CommunityMatcher:
                            group_id_used=self.group_id,
                            service_connected=self.neo4j_service._driver is not None)
                 # Get most important entities as fallback
-                # Support both Entity and __Entity__ labels for compatibility
                 fallback_query = """
                 MATCH (e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE (e:Entity)
                   AND e.group_id = $group_id
                 RETURN e.name AS name, e.description AS description
                 ORDER BY coalesce(e.degree, 0) DESC

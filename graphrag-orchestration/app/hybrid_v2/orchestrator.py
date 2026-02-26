@@ -4316,7 +4316,7 @@ Sub-questions:"""
                 keyword_filter = " OR ".join([f"toLower(e.name) CONTAINS '{kw}'" for kw in keywords])
                 query = f"""
                 MATCH (e)
-                WHERE (e:`__Entity__` OR e:Entity)
+                WHERE (e:Entity)
                   AND ({keyword_filter})
                 WITH e
                 MATCH (e)-[r]-()
@@ -4329,7 +4329,7 @@ Sub-questions:"""
                 # No keywords - just get top entities by degree
                 query = """
                 MATCH (e)
-                WHERE e:`__Entity__` OR e:Entity
+                WHERE e:Entity
                 WITH e
                 MATCH (e)-[r]-()
                 WITH e, count(r) as degree

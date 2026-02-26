@@ -892,8 +892,8 @@ class EnhancedGraphRetriever:
 
         Current hybrid pipeline schema (as of Jan 2026):
         - Chunk label: `TextChunk`
-        - Entity label: `__Entity__`
-        - Edge direction: (TextChunk)-[:MENTIONS]->(__Entity__)
+        - Entity label: `Entity`
+        - Edge direction: (TextChunk)-[:MENTIONS]->(Entity)
         - Alias support: matches entity.name OR any alias in entity.aliases[]
         
         Also fetches section_id via IN_SECTION edge for diversification.
@@ -906,7 +906,7 @@ class EnhancedGraphRetriever:
         query = """
                 UNWIND $entity_names AS entity_name
                 MATCH (t:TextChunk)-[:MENTIONS]->(e)
-                WHERE (e:Entity OR e:`__Entity__`)
+                WHERE e:Entity
                   AND (toLower(e.name) = toLower(entity_name)
                        OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
                     AND t.group_id = $group_id
@@ -1870,18 +1870,17 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return []
 
-        # Support both Entity and __Entity__ labels for compatibility
         query = """
         UNWIND $entity_inputs AS seed
         MATCH (e1)
-        WHERE (e1:Entity OR e1:`__Entity__`)
+        WHERE e1:Entity
           AND e1.group_id = $group_id
             AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                  OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         
         MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]->(e1)
         MATCH (c)-[:MENTIONS]->(e2)
-        WHERE (e2:Entity OR e2:`__Entity__`)
+        WHERE e2:Entity
           AND e2.group_id = $group_id AND e2 <> e1
         
         WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
@@ -1897,16 +1896,15 @@ class EnhancedGraphRetriever:
         LIMIT $max_rels
         """
 
-        # Support both Entity and __Entity__ labels for compatibility
         fallback_query = """
         UNWIND $entity_inputs AS seed
         MATCH (e1)
-        WHERE (e1:Entity OR e1:`__Entity__`)
+        WHERE e1:Entity
           AND e1.group_id = $group_id
           AND (toLower(e1.name) = toLower(seed) OR coalesce(e1.id, '') = seed OR elementId(e1) = seed
                OR ANY(alias IN coalesce(e1.aliases, []) WHERE toLower(alias) = toLower(seed)))
         MATCH (e1)-[r:RELATED_TO]-(e2)
-        WHERE (e2:Entity OR e2:`__Entity__`)
+        WHERE e2:Entity
           AND e2.group_id = $group_id AND e2 <> e1
         WITH e1, e2, r
         WHERE elementId(e1) < elementId(e2)
@@ -1975,7 +1973,7 @@ class EnhancedGraphRetriever:
         query = """
         UNWIND $entity_names AS name
         MATCH (e)
-        WHERE (e:Entity OR e:`__Entity__`)
+        WHERE e:Entity
           AND e.group_id = $group_id
                     AND (toLower(e.name) = toLower(name) OR e.id = name OR elementId(e) = name)
         RETURN e.name as name, e.description as description

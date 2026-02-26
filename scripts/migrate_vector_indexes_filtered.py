@@ -55,7 +55,7 @@ V2_INDEXES = [
     },
     {
         "name": "entity_embedding_v2_internal",
-        "label": "`__Entity__`",
+        "label": "Entity",
         "property": "embedding_v2",
         "dimensions": 2048,
         "similarity": "cosine",

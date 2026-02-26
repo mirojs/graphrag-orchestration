@@ -218,7 +218,7 @@ class HubExtractor:
 
             query = """
             MATCH (e)
-            WHERE (e:`__Entity__` OR e:Entity)
+            WHERE e:Entity
               AND e.group_id = $group_id
               AND any(kw IN $keywords WHERE toLower(e.name) CONTAINS kw)
             WITH e
@@ -274,14 +274,13 @@ class HubExtractor:
             loop = asyncio.get_event_loop()
             
             # Query Neo4j to get document source for each entity
-            # Support both Entity and __Entity__ labels for compatibility
             # Includes alias support for flexible entity matching
             def _sync_query():
                 with self.neo4j_driver.session() as session:
                     result = session.run("""
                         UNWIND $entity_names AS entity_name
                         MATCH (c:TextChunk)-[:MENTIONS]->(e)
-                        WHERE (e:Entity OR e:`__Entity__`)
+                        WHERE e:Entity
                           AND c.group_id = $group_id AND e.group_id = $group_id
                             AND (toLower(e.name) = toLower(entity_name)
                                  OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(entity_name)))
@@ -355,10 +354,9 @@ class HubExtractor:
             return []
         
         try:
-            # Support both Entity and __Entity__ labels for compatibility
             query = """
             MATCH (e)-[r]-()
-            WHERE (e:Entity OR e:`__Entity__`)
+            WHERE e:Entity
               AND e.group_id = $group_id
             RETURN e.name as name, e.id as id, count(r) as degree
             ORDER BY degree DESC

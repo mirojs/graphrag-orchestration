@@ -121,7 +121,7 @@ async def validate_indexing(group_id: str):
         record = session.run(
             """
             MATCH (e)
-            WHERE e.group_id = $group_id AND (e:Entity OR e:__Entity__)
+            WHERE e.group_id = $group_id AND (e:Entity)
             RETURN count(e) AS count
             """,
             group_id=group_id,
@@ -133,8 +133,8 @@ async def validate_indexing(group_id: str):
             """
             MATCH (e1)-[r]-(e2)
             WHERE e1.group_id = $group_id AND e2.group_id = $group_id
-              AND (e1:Entity OR e1:__Entity__)
-              AND (e2:Entity OR e2:__Entity__)
+              AND (e1:Entity)
+              AND (e2:Entity)
               AND type(r) <> 'MENTIONS'
             RETURN count(r) AS count
             """,
@@ -146,7 +146,7 @@ async def validate_indexing(group_id: str):
         record = session.run(
             """
             MATCH (c:TextChunk {group_id: $group_id})-[:MENTIONS]-(e)
-            WHERE e.group_id = $group_id AND (e:Entity OR e:__Entity__)
+            WHERE e.group_id = $group_id AND (e:Entity)
             RETURN count(*) AS count
             """,
             group_id=group_id,

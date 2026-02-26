@@ -1275,8 +1275,8 @@ async def setup_hybrid_indexes(request: Request):
     Set up Neo4j indexes required for hybrid search.
     
     Creates:
-    1. Full-text index on __Entity__ nodes (name, id fields)
-    2. Vector index on __Entity__ nodes (embedding field)
+    1. Full-text index on Entity nodes (name, id fields)
+    2. Vector index on Entity nodes (embedding field)
     
     This is a one-time setup required before using hybrid search.
     Run this after initial document indexing.
@@ -1894,8 +1894,8 @@ async def setup_v2_indexes(request: Request):
     Creates:
     - chunk_vector: Vector index on __Node__ nodes (for chunk text embeddings)
     - chunk_fulltext: Fulltext index on __Node__ text property
-    - entity_vector: Vector index on __Entity__ nodes
-    - entity_fulltext: Fulltext index on __Entity__ name/id
+    - entity_vector: Vector index on Entity nodes
+    - entity_fulltext: Fulltext index on Entity name/id
     
     Run this once after indexing documents to enable V2 queries.
     """

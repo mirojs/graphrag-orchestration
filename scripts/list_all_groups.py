@@ -21,7 +21,7 @@ def list_all_groups():
     with driver.session() as session:
         # Get all distinct group_ids
         result = session.run("""
-            MATCH (e:__Entity__)
+            MATCH (e:Entity)
             RETURN DISTINCT e.group_id as group_id, count(e) as entity_count
             ORDER BY group_id
         """)
@@ -35,7 +35,7 @@ def list_all_groups():
             
             # Count KNN edges for this group
             knn_result = session.run("""
-                MATCH (e1:__Entity__ {group_id: $group_id})-[r:KNN_SIMILAR]->(e2:__Entity__ {group_id: $group_id})
+                MATCH (e1:Entity {group_id: $group_id})-[r:KNN_SIMILAR]->(e2:Entity {group_id: $group_id})
                 RETURN count(r) as knn_edges
             """, group_id=group_id)
             

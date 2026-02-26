@@ -101,7 +101,7 @@ async def validate_indexed_data(group_id: str):
             # Check Entity properties
             query2 = """
             MATCH (e)
-            WHERE (e:Entity OR e:__Entity__) AND e.group_id = $group_id
+            WHERE (e:Entity) AND e.group_id = $group_id
             RETURN count(e) AS entity_count
             """
             result = await session.run(query2, group_id=group_id)

@@ -115,7 +115,7 @@ async def step4_get_chunks_for_entities(entity_names):
         UNWIND $names AS name
         MATCH (e {name: name})
         WHERE e.group_id = $group_id
-          AND (e:Entity OR e:`__Entity__`)
+          AND (e:Entity)
         RETURN DISTINCT e.id AS id
         """
         

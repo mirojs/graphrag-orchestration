@@ -97,7 +97,7 @@ try:
                 "name": "entity_embedding",
                 "query": """
                 CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
-                FOR (e:__Entity__) ON (e.embedding)
+                FOR (e:Entity) ON (e.embedding)
                 OPTIONS {indexConfig: {
                     `vector.dimensions`: 3072,
                     `vector.similarity_function`: 'cosine'

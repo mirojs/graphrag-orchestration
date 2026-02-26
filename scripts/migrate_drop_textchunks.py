@@ -90,7 +90,7 @@ def run_migration(driver, database: str, dry_run: bool = False):
             "textchunk_fulltext",     # fulltext index on TextChunk.text
             "raptor_embedding",       # RAPTOR tree embedding index
             "entity_embedding",       # v1 OpenAI 1536-dim entity embedding
-            "entity_embedding_v2_internal",  # __Entity__ label index (unified to Entity)
+            "entity_embedding_v2_internal",  # legacy Entity label index (unified to Entity)
         ]
         for idx_name in legacy_indexes:
             try:
@@ -112,7 +112,7 @@ def run_migration(driver, database: str, dry_run: bool = False):
             print(f"Warning: could not drop chunk_id constraint: {e}")
             results["dropped_chunk_id_constraint"] = False
 
-        # 7. Relabel __Entity__ nodes to Entity
+        # 7. Relabel legacy __Entity__ nodes to unified Entity label
         record = session.run(
             "MATCH (e:`__Entity__`) WHERE NOT e:Entity RETURN count(e) AS cnt"
         ).single()

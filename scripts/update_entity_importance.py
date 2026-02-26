@@ -42,7 +42,7 @@ def update_entity_importance(driver):
     with driver.session() as session:
         # First, check current state
         result = session.run("""
-            MATCH (e:`__Entity__`)
+            MATCH (e:Entity)
             RETURN count(e) AS entity_count,
                    count(e.degree) AS with_degree,
                    count(e.chunk_count) AS with_chunk_count
@@ -55,7 +55,7 @@ def update_entity_importance(driver):
         # Update degree (count of all relationships)
         print("\n   Setting degree property...")
         result = session.run("""
-            MATCH (e:`__Entity__`)
+            MATCH (e:Entity)
             SET e.degree = size((e)-[]-())
             RETURN count(e) AS updated
         """)
@@ -64,7 +64,7 @@ def update_entity_importance(driver):
         # Update chunk_count (count of MENTIONS relationships to TextChunk/Chunk nodes)
         print("\n   Setting chunk_count property...")
         result = session.run("""
-            MATCH (e:`__Entity__`)
+            MATCH (e:Entity)
             OPTIONAL MATCH (e)-[:MENTIONS]->(c)
             WHERE c:Chunk OR c:TextChunk OR c:`__Node__`
             WITH e, count(c) AS cc
@@ -76,7 +76,7 @@ def update_entity_importance(driver):
         # Compute combined importance score
         print("\n   Computing importance_score...")
         result = session.run("""
-            MATCH (e:`__Entity__`)
+            MATCH (e:Entity)
             SET e.importance_score = coalesce(e.degree, 0) * 0.3 + coalesce(e.chunk_count, 0) * 0.7
             RETURN count(e) AS updated,
                    avg(e.importance_score) AS avg_score,
@@ -90,7 +90,7 @@ def update_entity_importance(driver):
         # Show top entities
         print("\n   🏆 Top 10 most important entities:")
         result = session.run("""
-            MATCH (e:`__Entity__`)
+            MATCH (e:Entity)
             RETURN e.name AS name, 
                    e.degree AS degree,
                    e.chunk_count AS chunk_count,

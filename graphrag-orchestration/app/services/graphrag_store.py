@@ -74,12 +74,12 @@ class GraphRAGStore(MultiTenantNeo4jStore):
 
     def upsert_relations(self, relations: List[Relation]) -> None:
         """
-        Override to create relationships directly between __Entity__ nodes.
+        Override to create relationships directly between Entity nodes.
         
         The default LlamaIndex implementation creates __Node__ (Chunk) objects
-        which don't link to the __Entity__ nodes we create via upsert_nodes().
+        which don't link to the Entity nodes we create via upsert_nodes().
         
-        This method uses direct Cypher to MATCH existing __Entity__ nodes by id
+        This method uses direct Cypher to MATCH existing Entity nodes by id
         and creates relationships between them.
         """
         logger.info(f"GraphRAGStore.upsert_relations called with {len(relations)} relations")
@@ -95,11 +95,11 @@ class GraphRAGStore(MultiTenantNeo4jStore):
             prop_items = [f"`{k}`: ${k}" for k in props.keys()]
             prop_string = "{" + ", ".join(prop_items) + "}" if prop_items else ""
             
-            # Cypher to create/merge relationship between existing __Entity__ nodes
+            # Cypher to create/merge relationship between existing Entity nodes
             # Uses MERGE on both nodes to ensure they exist (in case they weren't created yet)
             cypher = f"""
-            MERGE (source:`__Entity__` {{id: $source_id, group_id: $group_id}})
-            MERGE (target:`__Entity__` {{id: $target_id, group_id: $group_id}})
+            MERGE (source:Entity {{id: $source_id, group_id: $group_id}})
+            MERGE (target:Entity {{id: $target_id, group_id: $group_id}})
             MERGE (source)-[r:`{relation.label}` {prop_string}]->(target)
             """
             
@@ -224,7 +224,7 @@ class GraphRAGStore(MultiTenantNeo4jStore):
         # Use direct Cypher query that's more resilient to missing properties
         result = self.structured_query(
             """
-            MATCH (a:`__Entity__`)-[r]->(b:`__Entity__`) 
+            MATCH (a:Entity)-[r]->(b:Entity) 
             WHERE a.group_id = $group_id AND b.group_id = $group_id
             RETURN a.id AS source_id, a.name AS source_name,
                    type(r) AS rel_type,
@@ -386,7 +386,7 @@ class GraphRAGStore(MultiTenantNeo4jStore):
             for community_id in community_ids:
                 self.structured_query(
                     """
-                    MATCH (e:`__Entity__` {id: $entity_name, group_id: $group_id})
+                    MATCH (e:Entity {id: $entity_name, group_id: $group_id})
                     MATCH (c:__Community__ {id: $community_id, group_id: $group_id})
                     MERGE (e)-[:BELONGS_TO]->(c)
                     """,
@@ -421,7 +421,7 @@ class GraphRAGStore(MultiTenantNeo4jStore):
         # Load entity-to-community mappings
         result = self.structured_query(
             """
-            MATCH (e:`__Entity__` {group_id: $group_id})-[:BELONGS_TO]->(c:__Community__)
+            MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(c:__Community__)
             RETURN e.id AS entity_name, collect(c.id) AS community_ids
             """,
             param_map={"group_id": self.group_id}

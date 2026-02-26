@@ -147,7 +147,7 @@ def main():
             print()
             
             constraints = [
-                ("entity_id_unique", "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:`__Entity__`) REQUIRE e.id IS UNIQUE"),
+                ("entity_id_unique", "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE"),
                 ("chunk_id_unique", "CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:TextChunk) REQUIRE c.id IS UNIQUE"),
                 ("document_id_unique", "CREATE CONSTRAINT document_id_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE"),
                 ("node_id_unique", "CREATE CONSTRAINT node_id_unique IF NOT EXISTS FOR (n:`__Node__`) REQUIRE n.id IS UNIQUE"),

@@ -219,7 +219,7 @@ def _query_entity_doc_coverage_neo4j(driver, seed_names: List[str],
 
     cypher = """
     UNWIND $seed_names AS seed
-    MATCH (e:__Entity__)-[:APPEARS_IN_DOCUMENT]->(d:Document)
+    MATCH (e:Entity)-[:APPEARS_IN_DOCUMENT]->(d:Document)
     WHERE (toLower(e.id) CONTAINS toLower(seed)
            OR toLower(e.name) CONTAINS toLower(seed))
       AND e.group_id = $group_id
@@ -232,7 +232,7 @@ def _query_entity_doc_coverage_neo4j(driver, seed_names: List[str],
     """
     count_cypher = """
     UNWIND $seed_names AS seed
-    MATCH (e:__Entity__)-[:APPEARS_IN_DOCUMENT]->(d:Document)
+    MATCH (e:Entity)-[:APPEARS_IN_DOCUMENT]->(d:Document)
     WHERE (toLower(e.id) CONTAINS toLower(seed)
            OR toLower(e.name) CONTAINS toLower(seed))
       AND e.group_id = $group_id

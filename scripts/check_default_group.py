@@ -27,7 +27,7 @@ def check_default_and_common():
     
     with driver.session() as session:
         # First, get count of all entities
-        total_result = session.run("MATCH (e:__Entity__) RETURN count(e) as total")
+        total_result = session.run("MATCH (e:Entity) RETURN count(e) as total")
         total = total_result.single()["total"]
         print(f"Total entities in database: {total}\n")
         
@@ -37,7 +37,7 @@ def check_default_and_common():
         
         for group_id in groups_to_check:
             result = session.run("""
-                MATCH (e:__Entity__ {group_id: $group_id})
+                MATCH (e:Entity {group_id: $group_id})
                 RETURN count(e) as entity_count
             """, group_id=group_id)
             

@@ -953,8 +953,8 @@ Output ONLY the JSON object, no explanations or markdown:"""
         Creates:
         - chunk_vector: Vector index on __Node__/Chunk nodes (configured dimensions)
         - chunk_fulltext: Fulltext index on __Node__/Chunk text property
-        - entity_vector: Vector index on __Entity__ nodes
-        - entity_fulltext: Fulltext index on __Entity__ name property
+        - entity_vector: Vector index on Entity nodes
+        - entity_fulltext: Fulltext index on Entity name property
         """
         results: Dict[str, Any] = {
             "chunk_vector": False,
@@ -998,11 +998,11 @@ Output ONLY the JSON object, no explanations or markdown:"""
                 logger.error(f"Failed to create chunk_fulltext index: {e}")
                 results["chunk_fulltext"] = str(e)
             
-            # Create entity_vector index on __Entity__ nodes
+            # Create entity_vector index on Entity nodes
             try:
                 session.run(f"""
                     CREATE VECTOR INDEX entity_vector IF NOT EXISTS
-                    FOR (e:__Entity__)
+                    FOR (e:Entity)
                     ON e.embedding
                     OPTIONS {{
                         indexConfig: {{
@@ -1012,20 +1012,20 @@ Output ONLY the JSON object, no explanations or markdown:"""
                     }}
                 """)
                 results["entity_vector"] = True
-                logger.info(f"Created entity_vector index on __Entity__ with {dims} dimensions")
+                logger.info(f"Created entity_vector index on Entity with {dims} dimensions")
             except Exception as e:
                 logger.error(f"Failed to create entity_vector index: {e}")
                 results["entity_vector"] = str(e)
             
-            # Create entity_fulltext index on __Entity__ name
+            # Create entity_fulltext index on Entity name
             try:
                 session.run("""
                     CREATE FULLTEXT INDEX entity_fulltext IF NOT EXISTS
-                    FOR (e:__Entity__)
+                    FOR (e:Entity)
                     ON EACH [e.name, e.id]
                 """)
                 results["entity_fulltext"] = True
-                logger.info("Created entity_fulltext index on __Entity__")
+                logger.info("Created entity_fulltext index on Entity")
             except Exception as e:
                 logger.error(f"Failed to create entity_fulltext index: {e}")
                 results["entity_fulltext"] = str(e)

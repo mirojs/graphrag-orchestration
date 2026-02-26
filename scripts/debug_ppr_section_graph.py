@@ -102,7 +102,7 @@ async def test_section_path_traversal():
         UNWIND $seed_ids AS seed_id
         MATCH (seed {id: seed_id})
         WHERE seed.group_id = $group_id
-          AND (seed:Entity OR seed:`__Entity__`)
+          AND (seed:Entity)
         
         // Find chunks the seed entity mentions
         MATCH (seed)-[:MENTIONS]->(chunk)
@@ -123,7 +123,7 @@ async def test_section_path_traversal():
         // Find entities mentioned in those chunks
         MATCH (neighbor)-[:MENTIONS]->(chunk2)
         WHERE neighbor.group_id = $group_id
-          AND (neighbor:Entity OR neighbor:`__Entity__`)
+          AND (neighbor:Entity)
           AND neighbor.id <> seed.id
         
         RETURN DISTINCT neighbor.name AS name, 

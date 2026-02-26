@@ -296,7 +296,7 @@ class HubExtractor:
                 folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})"
             
             # Query Neo4j to get document source for each entity
-            # Support both Entity and __Entity__ labels for compatibility
+            # Support both Entity label variants for compatibility
             # Includes alias support for flexible entity matching
             def _sync_query():
                 with retry_session(self.neo4j_driver, read_only=True) as session:
@@ -379,7 +379,7 @@ class HubExtractor:
             return []
         
         try:
-            # Support both Entity and __Entity__ labels for compatibility
+            # Support both Entity label variants for compatibility
             query = """
             MATCH (e)-[r]-()
             WHERE (e:Entity)

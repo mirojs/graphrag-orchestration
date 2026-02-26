@@ -169,8 +169,8 @@ class MultiTenantNeo4jStore(StandaloneNeo4jStore):
                 self.structured_query(
                     """
                     UNWIND $data AS row
-                    MERGE (e:`__Entity__` {id: row.id, group_id: row.properties.group_id})
-                    SET e.name = row.name, e:`__Entity__`
+                    MERGE (e:Entity {id: row.id, group_id: row.properties.group_id})
+                    SET e.name = row.name, e:Entity
                     SET e += row.properties
                     SET e.embedding = row.embedding
                     WITH e, row
@@ -210,7 +210,7 @@ class MultiTenantNeo4jStore(StandaloneNeo4jStore):
             self.structured_query(
                 """
                 UNWIND $entity_ids AS eid
-                MATCH (e:`__Entity__` {id: eid})
+                MATCH (e:Entity {id: eid})
                 WHERE e.group_id = $group_id
                 WITH e, COUNT { (e)-[]-() } AS degree
                 SET e.degree = degree
@@ -478,7 +478,7 @@ class GraphService:
         # Uniqueness constraints for core node types
         # These enable the MergeUniqueNode optimizer in Cypher 25
         constraint_queries = [
-            "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:`__Entity__`) REQUIRE e.id IS UNIQUE",
+            "CREATE CONSTRAINT entity_id_unique IF NOT EXISTS FOR (e:Entity) REQUIRE e.id IS UNIQUE",
             "CREATE CONSTRAINT chunk_id_unique IF NOT EXISTS FOR (c:TextChunk) REQUIRE c.id IS UNIQUE",
             "CREATE CONSTRAINT document_id_unique IF NOT EXISTS FOR (d:Document) REQUIRE d.id IS UNIQUE",
             "CREATE CONSTRAINT node_id_unique IF NOT EXISTS FOR (n:`__Node__`) REQUIRE n.id IS UNIQUE",

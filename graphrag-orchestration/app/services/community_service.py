@@ -74,7 +74,7 @@ class CommunityService:
         with driver.session(database=settings.NEO4J_DATABASE) as session:
             # Strategy 1: Try direct entity-to-entity relationships
             cypher_direct = """
-            MATCH (source:__Entity__ {group_id: $group_id})-[rel]->(target:__Entity__ {group_id: $group_id})
+            MATCH (source:Entity {group_id: $group_id})-[rel]->(target:Entity {group_id: $group_id})
             WHERE type(rel) <> 'MENTIONS'
             RETURN 
                 source.id AS source_id,
@@ -98,7 +98,7 @@ class CommunityService:
                 logger.info(f"No direct entity relationships found for group {group_id}, using co-occurrence")
                 
                 cypher_cooccurrence = """
-                MATCH (e1:__Entity__ {group_id: $group_id})-[:MENTIONS]->(chunk:Chunk)<-[:MENTIONS]-(e2:__Entity__ {group_id: $group_id})
+                MATCH (e1:Entity {group_id: $group_id})-[:MENTIONS]->(chunk:Chunk)<-[:MENTIONS]-(e2:Entity {group_id: $group_id})
                 WHERE e1.id < e2.id  // Avoid duplicates
                 RETURN 
                     e1.id AS source_id,

@@ -19,14 +19,14 @@ async def check_aliases():
     gid = 'test-5pdfs-1768832399067050900'
     
     # Check total entities
-    query = 'MATCH (e:`__Entity__`) WHERE e.group_id = $gid RETURN count(e) as total'
+    query = 'MATCH (e:Entity) WHERE e.group_id = $gid RETURN count(e) as total'
     result = await store.execute_query(query, {'gid': gid})
     total = result[0]['total']
     print(f'Total entities: {total}')
     
     # Check entities with aliases
     query = '''
-        MATCH (e:`__Entity__`)
+        MATCH (e:Entity)
         WHERE e.group_id = $gid AND e.aliases IS NOT NULL AND size(e.aliases) > 0
         RETURN count(e) as with_aliases
     '''
@@ -36,7 +36,7 @@ async def check_aliases():
     
     # Show sample entities
     query = '''
-        MATCH (e:`__Entity__`)
+        MATCH (e:Entity)
         WHERE e.group_id = $gid
         RETURN e.name as name, e.aliases as aliases
         ORDER BY e.name

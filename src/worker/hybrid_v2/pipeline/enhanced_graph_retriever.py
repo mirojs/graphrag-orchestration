@@ -973,8 +973,8 @@ class EnhancedGraphRetriever:
 
         Current hybrid pipeline schema (as of Jan 2026):
         - Chunk label: `Sentence`
-        - Entity label: `__Entity__`
-        - Edge direction: (TextChunk)-[:MENTIONS]->(__Entity__)
+        - Entity label: `Entity`
+        - Edge direction: (TextChunk)-[:MENTIONS]->(Entity)
         - Alias support: matches entity.name OR any alias in entity.aliases[]
         
         Also fetches section_id via IN_SECTION edge for diversification.
@@ -1984,7 +1984,7 @@ class EnhancedGraphRetriever:
         if not entity_names or not self.driver:
             return []
 
-        # Support both Entity and __Entity__ labels for compatibility
+        # Support both Entity label variants for compatibility
         folder_filter = self._get_folder_filter_clause("d")
         query = f"""
         UNWIND $entity_inputs AS seed
@@ -2016,7 +2016,7 @@ class EnhancedGraphRetriever:
         LIMIT $max_rels
         """
 
-        # Support both Entity and __Entity__ labels for compatibility
+        # Support both Entity label variants for compatibility
         fallback_query = """
         UNWIND $entity_inputs AS seed
         MATCH (e1)

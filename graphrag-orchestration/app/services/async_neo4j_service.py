@@ -159,7 +159,7 @@ class AsyncNeo4jService:
         query = cypher25_query("""
         MATCH (e)
         WHERE e.group_id = $group_id
-          AND (e:Entity OR e:`__Entity__`)
+          AND (e:Entity)
         WITH e, coalesce(e.importance_score, e.degree, 0) AS score
         WHERE score >= $min_importance
         RETURN e.id AS id,
@@ -221,7 +221,7 @@ class AsyncNeo4jService:
         query_exact = cypher25_query("""
         UNWIND $names AS name
         MATCH (e)
-        WHERE (e:Entity OR e:`__Entity__`)
+        WHERE (e:Entity)
             AND e.group_id = $group_id
             AND (
                 toLower(e.name) = toLower(name)
@@ -261,7 +261,7 @@ class AsyncNeo4jService:
         WHERE toLower(k.key) = toLower(name)
         // KVP nodes link to entities via SIMILAR_TO
         OPTIONAL MATCH (k)-[:SIMILAR_TO]->(e)
-        WHERE (e:Entity OR e:`__Entity__`) AND e.group_id = $group_id
+        WHERE (e:Entity) AND e.group_id = $group_id
         WITH name, COALESCE(e, k) AS node
         WHERE node IS NOT NULL
         RETURN DISTINCT
@@ -295,7 +295,7 @@ class AsyncNeo4jService:
         query_substring = cypher25_query("""
         UNWIND $names AS name
         MATCH (e)
-        WHERE (e:Entity OR e:`__Entity__`)
+        WHERE (e:Entity)
             AND e.group_id = $group_id
             AND (
                 toLower(e.name) CONTAINS toLower(name)
@@ -340,7 +340,7 @@ class AsyncNeo4jService:
         WITH name, word
         WHERE size(word) >= 3  // Skip short words like 'the', 'a'
         MATCH (e)
-        WHERE (e:Entity OR e:`__Entity__`)
+        WHERE (e:Entity)
             AND e.group_id = $group_id
             AND toLower(e.name) CONTAINS word
         WITH name, e, count(DISTINCT word) AS word_matches
@@ -417,7 +417,7 @@ class AsyncNeo4jService:
         
         # Query vector index with group filtering
         # Note: Neo4j vector search returns top-k globally, we filter by group after
-        # Use parameterized index name - try both Entity and __Entity__ labels
+        # Use parameterized index name - try Entity label
         query = cypher25_query(f"""
         CALL db.index.vector.queryNodes('{index_name}', $top_k_oversample, $embedding)
         YIELD node, score
@@ -485,11 +485,11 @@ class AsyncNeo4jService:
         query = cypher25_query(f"""
         UNWIND $entity_ids AS eid
         MATCH (seed)
-        WHERE (seed:Entity OR seed:`__Entity__`)
+        WHERE (seed:Entity)
           AND seed.id = eid
           AND seed.group_id = $group_id
         MATCH path = (seed)-[r*1..{depth}]-(neighbor)
-        WHERE (neighbor:Entity OR neighbor:`__Entity__`)
+        WHERE (neighbor:Entity)
           AND neighbor.group_id = $group_id
           AND neighbor.id <> seed.id
           AND ALL(rel IN relationships(path) WHERE type(rel) <> 'MENTIONS')
@@ -531,8 +531,8 @@ class AsyncNeo4jService:
         """
         query = cypher25_query("""
         MATCH (e)-[r]-(other)
-        WHERE (e:Entity OR e:`__Entity__`)
-          AND (other:Entity OR other:`__Entity__`)
+        WHERE (e:Entity)
+          AND (other:Entity)
           AND e.id = $entity_id
           AND e.group_id = $group_id 
           AND other.group_id = $group_id
@@ -642,7 +642,7 @@ class AsyncNeo4jService:
             UNWIND $seed_ids AS seed_id
             MATCH (seed {id: seed_id})
             WHERE seed.group_id = $group_id
-              AND (seed:Entity OR seed:`__Entity__`)
+              AND (seed:Entity)
 
             // Always include the seed itself
             WITH seed,
@@ -654,7 +654,7 @@ class AsyncNeo4jService:
             CALL (seed, group_id, per_seed_limit) {
                 MATCH (seed)-[r1]-(n1)
                 WHERE n1.group_id = group_id
-                    AND (n1:Entity OR n1:`__Entity__`)
+                    AND (n1:Entity)
                     AND type(r1) <> 'MENTIONS'
                 WITH n1
                 ORDER BY coalesce(n1.degree, 0) DESC
@@ -670,7 +670,7 @@ class AsyncNeo4jService:
             CALL (seed, hop1_node, group_id, per_neighbor_limit) {
                 MATCH (hop1_node)-[r2]-(n2)
                 WHERE n2.group_id = group_id
-                    AND (n2:Entity OR n2:`__Entity__`)
+                    AND (n2:Entity)
                     AND type(r2) <> 'MENTIONS'
                 WITH n2
                 ORDER BY coalesce(n2.degree, 0) DESC
@@ -725,7 +725,7 @@ class AsyncNeo4jService:
             UNWIND $seed_ids AS seed_id
             MATCH (seed {id: seed_id})
             WHERE seed.group_id = $group_id
-              AND (seed:Entity OR seed:`__Entity__`)
+              AND (seed:Entity)
 
             WITH seed,
                  seed_id,
@@ -740,7 +740,7 @@ class AsyncNeo4jService:
             CALL (seed, group_id, per_seed_limit) {
                 MATCH (seed)-[r1]-(n1)
                 WHERE n1.group_id = group_id
-                    AND (n1:Entity OR n1:`__Entity__`)
+                    AND (n1:Entity)
                     AND NOT (type(r1) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
                 WITH n1
                 ORDER BY coalesce(n1.degree, 0) DESC
@@ -769,7 +769,7 @@ class AsyncNeo4jService:
                 
                 MATCH (chunk2)-[:MENTIONS]->(neighbor)
                 WHERE neighbor.group_id = group_id
-                    AND (neighbor:Entity OR neighbor:`__Entity__`)
+                    AND (neighbor:Entity)
                     AND neighbor.id <> seed.id
                 
                 WITH neighbor, max(coalesce(sim.similarity, 0.5)) AS sim_weight
@@ -784,7 +784,7 @@ class AsyncNeo4jService:
             CALL (seed, group_id, per_seed_limit) {
                 MATCH (seed)-[sim:SEMANTICALLY_SIMILAR|SIMILAR_TO]-(neighbor)
                 WHERE neighbor.group_id = group_id
-                    AND (neighbor:Entity OR neighbor:`__Entity__`)
+                    AND (neighbor:Entity)
                     AND coalesce(sim.similarity, 0.60) >= 0.60
                 WITH neighbor, max(coalesce(sim.similarity, 0.60)) AS sim_weight
                 ORDER BY sim_weight * coalesce(neighbor.degree, 0) DESC
@@ -814,7 +814,7 @@ class AsyncNeo4jService:
                 WHERE chunk2.group_id = group_id
                 OPTIONAL MATCH (chunk2)-[:MENTIONS]->(chunk_entity)
                 WHERE chunk_entity.group_id = group_id
-                    AND (chunk_entity:Entity OR chunk_entity:`__Entity__`)
+                    AND (chunk_entity:Entity)
                     AND chunk_entity.id <> seed.id
                 
                 WITH coalesce(hub_entity, chunk_entity) AS neighbor, 
@@ -860,7 +860,7 @@ class AsyncNeo4jService:
             CALL (seed, hop1_node, group_id, per_neighbor_limit) {
                 MATCH (hop1_node)-[r2]-(n2)
                 WHERE n2.group_id = group_id
-                    AND (n2:Entity OR n2:`__Entity__`)
+                    AND (n2:Entity)
                     AND NOT (type(r2) IN ['MENTIONS', 'SIMILAR_TO', 'APPEARS_IN_SECTION'])
                 WITH n2
                 ORDER BY coalesce(n2.degree, 0) DESC
@@ -950,11 +950,10 @@ class AsyncNeo4jService:
         """
         Get text chunks that mention the given entities.
         """
-        # Support both Entity and __Entity__ labels
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
         MATCH (e)
-        WHERE (e:Entity OR e:`__Entity__`)
+        WHERE (e:Entity)
           AND e.id = eid
           AND e.group_id = $group_id
         MATCH (c:TextChunk)-[:MENTIONS]->(e)
@@ -1211,8 +1210,8 @@ class AsyncNeo4jService:
         hop_query = cypher25_query("""
         UNWIND $current_ids AS eid
         MATCH (src)-[r]-(neighbor)
-        WHERE (src:Entity OR src:`__Entity__`)
-          AND (neighbor:Entity OR neighbor:`__Entity__`)
+        WHERE (src:Entity)
+          AND (neighbor:Entity)
           AND src.id = eid
           AND neighbor.group_id = $group_id
           AND type(r) <> 'MENTIONS'
@@ -1233,7 +1232,7 @@ class AsyncNeo4jService:
         CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $query_embedding)
         YIELD node, score
         WHERE node.group_id = $group_id
-          AND (node:Entity OR node:`__Entity__`)
+          AND (node:Entity)
         RETURN node.id AS id,
                node.name AS name,
                score AS similarity

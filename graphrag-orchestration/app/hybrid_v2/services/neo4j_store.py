@@ -312,10 +312,10 @@ class Neo4jStoreV3:
                 `vector.similarity_function`: 'cosine'
             }}
             """,
-            # V2: Also index __Entity__ label for embedding_v2
+            # V2: Also index Entity label for embedding_v2
             """
             CREATE VECTOR INDEX entity_embedding_v2_internal IF NOT EXISTS
-            FOR (e:`__Entity__`) ON (e.embedding_v2)
+            FOR (e:Entity) ON (e.embedding_v2)
             OPTIONS {indexConfig: {
                 `vector.dimensions`: 2048,
                 `vector.similarity_function`: 'cosine'
@@ -416,7 +416,7 @@ class Neo4jStoreV3:
     def upsert_entity(self, group_id: str, entity: Entity) -> str:
         """Insert or update an entity using native vector storage."""
         query = """
-        MERGE (e:`__Entity__` {id: $id, group_id: $group_id})
+        MERGE (e:Entity {id: $id, group_id: $group_id})
         SET e.name = $name,
             e.type = $type,
             e.description = $description,
@@ -453,7 +453,7 @@ class Neo4jStoreV3:
         
         query = """
         UNWIND $entities AS e
-        MERGE (entity:`__Entity__` {id: e.id, group_id: $group_id})
+        MERGE (entity:Entity {id: e.id, group_id: $group_id})
         SET entity.name = e.name,
             entity.type = e.type,
             entity.description = e.description,
@@ -519,7 +519,7 @@ class Neo4jStoreV3:
 
         query = """
         MATCH (e)
-        WHERE e.group_id = $group_id AND (e:Entity OR e:`__Entity__`)
+        WHERE e.group_id = $group_id AND (e:Entity)
         WITH e, COUNT { (e)-[]-() } AS degree
         SET e.degree = degree
         WITH e

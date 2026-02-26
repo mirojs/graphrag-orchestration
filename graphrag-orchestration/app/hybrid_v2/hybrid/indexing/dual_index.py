@@ -156,8 +156,8 @@ class DualIndexService:
 
         query = """
         MATCH (s)-[r]->(o)
-        WHERE (s:Entity OR s:__Entity__)
-            AND (o:Entity OR o:__Entity__)
+        WHERE (s:Entity)
+            AND (o:Entity)
             AND s.group_id = $group_id
             AND o.group_id = $group_id
             AND r.group_id = $group_id
@@ -228,7 +228,7 @@ class DualIndexService:
         query = """
         MATCH (c)-[m:MENTIONS]-(e)
         WHERE (c:TextChunk OR c:Chunk OR c:__Node__)
-            AND (e:Entity OR e:__Entity__)
+            AND (e:Entity)
             AND c.group_id = $group_id
             AND e.group_id = $group_id
             AND m.group_id = $group_id

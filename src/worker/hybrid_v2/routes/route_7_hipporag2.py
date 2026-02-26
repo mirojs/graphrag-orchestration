@@ -245,10 +245,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Config from env
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
         dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "20"))
-        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "60"))
+        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "120"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = int(os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20"))
+        rerank_enabled = os.getenv(
+            "ROUTE7_RERANK", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "20"))
 
         # Phase 2 feature flags
         structural_seeds_enabled = os.getenv(
@@ -503,6 +507,56 @@ class HippoRAG2Handler(BaseRouteHandler):
                     )
 
         # ------------------------------------------------------------------
+        # Step 4.7: Rerank PPR output with cross-encoder (optional)
+        #
+        # The cross-encoder (voyage-rerank-2.5) sees query+passage together
+        # and can interpret conceptual matches that cosine similarity misses
+        # (e.g., "time windows" → "3 business days cancellation").
+        # Merge PPR top passages with DPR results to broaden the candidate
+        # pool, then rerank to pick the best passages for synthesis.
+        # ------------------------------------------------------------------
+        if rerank_enabled and passage_scores:
+            t0_rerank = time.perf_counter()
+            # Merge PPR top + DPR results into a candidate pool (deduplicated)
+            candidate_ids = []
+            seen_ids: set = set()
+            # PPR passages first (already ranked by graph walk)
+            for cid, score in passage_scores[:ppr_passage_top_k * 2]:
+                if cid not in seen_ids:
+                    candidate_ids.append(cid)
+                    seen_ids.add(cid)
+            # Add DPR results that PPR missed (broader recall)
+            for cid, score in dpr_results:
+                if cid not in seen_ids:
+                    candidate_ids.append(cid)
+                    seen_ids.add(cid)
+
+            if len(candidate_ids) > rerank_top_k:
+                try:
+                    reranked_ids = await self._rerank_passages(
+                        query, candidate_ids, top_k=rerank_top_k,
+                    )
+                    if reranked_ids:
+                        # Replace passage_scores with reranked order
+                        passage_scores = [
+                            (cid, 1.0 - i * 0.01)  # Monotonic score for ordering
+                            for i, cid in enumerate(reranked_ids)
+                        ]
+                        logger.info(
+                            "step_4.7_rerank_complete",
+                            candidates=len(candidate_ids),
+                            output=len(reranked_ids),
+                            elapsed_ms=int((time.perf_counter() - t0_rerank) * 1000),
+                        )
+                except Exception as e:
+                    logger.warning("step_4.7_rerank_failed_fallback", error=str(e))
+                    # Fall through — use original PPR passage_scores
+
+            timings_ms["step_4.7_rerank_ms"] = int(
+                (time.perf_counter() - t0_rerank) * 1000
+            )
+
+        # ------------------------------------------------------------------
         # Step 5: Fetch chunk texts + synthesis
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
@@ -613,7 +667,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
             "sentence_evidence_count": len(sentence_evidence),
             "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
-            "version": "v7.0",
+            "version": "v7.1",
+            "rerank_enabled": rerank_enabled,
         }
 
         # Phase 2 metadata
@@ -1296,3 +1351,90 @@ class HippoRAG2Handler(BaseRouteHandler):
             deduped=len(evidence),
         )
         return evidence
+
+    # ==================================================================
+    # Step 4.7 helper: Cross-encoder reranking
+    # ==================================================================
+
+    async def _rerank_passages(
+        self,
+        query: str,
+        candidate_ids: List[str],
+        top_k: int = 20,
+    ) -> List[str]:
+        """Rerank candidate sentence IDs using voyage-rerank-2.5.
+
+        Fetches sentence text from Neo4j, calls the Voyage cross-encoder,
+        and returns reranked sentence IDs (best first).
+
+        Args:
+            query: The user query.
+            candidate_ids: Sentence node IDs to rerank.
+            top_k: Max passages to return after reranking.
+
+        Returns:
+            Reranked list of sentence IDs (up to top_k).
+        """
+        rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
+
+        # Fetch sentence texts from Neo4j
+        if not self.neo4j_driver:
+            return candidate_ids[:top_k]
+
+        group_id = self.group_id
+
+        def _fetch_texts():
+            with retry_session(self.neo4j_driver, read_only=True) as session:
+                result = session.run(
+                    "UNWIND $ids AS sid "
+                    "MATCH (s:Sentence {id: sid, group_id: $group_id}) "
+                    "RETURN s.id AS id, s.text AS text",
+                    ids=candidate_ids,
+                    group_id=group_id,
+                )
+                return {r["id"]: r["text"] or "" for r in result}
+
+        text_map = await asyncio.to_thread(_fetch_texts)
+
+        # Build ordered document list (preserve candidate order for fallback)
+        documents = []
+        valid_ids = []
+        for cid in candidate_ids:
+            text = text_map.get(cid, "")
+            if text:
+                documents.append(text)
+                valid_ids.append(cid)
+
+        if not documents:
+            return candidate_ids[:top_k]
+
+        # Call Voyage reranker
+        import voyageai
+        from src.core.config import settings
+
+        vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+
+        loop = asyncio.get_running_loop()
+        rr_result = await loop.run_in_executor(
+            None,
+            lambda: vc.rerank(
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+            ),
+        )
+
+        reranked_ids = [valid_ids[rr.index] for rr in rr_result.results]
+
+        logger.info(
+            "route7_rerank_complete",
+            model=rerank_model,
+            input=len(documents),
+            output=len(reranked_ids),
+            top_score=round(rr_result.results[0].relevance_score, 4)
+            if rr_result.results
+            else 0,
+        )
+
+        return reranked_ids

@@ -459,6 +459,7 @@ def benchmark_scenario(
     synthesis_model: Optional[str] = None,
     prompt_variant: Optional[str] = None,
     api_mode: str = "backend",
+    force_route: str = "local_search",
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -493,14 +494,14 @@ def benchmark_scenario(
                     "messages": [{"role": "user", "content": query}],
                     "context": {
                         "overrides": {
-                            "force_route": "local_search",
+                            "force_route": force_route,
                         }
                     },
                 }
             else:
                 payload = {
                     "query": query,
-                    "force_route": "local_search",  # Route 2
+                    "force_route": force_route,
                     "response_type": response_type,
                 }
                 if synthesis_model:
@@ -810,13 +811,16 @@ def _write_analysis_md(
     api_base_url: str,
     group_id: str,
     scenario_results: List[Dict[str, Any]],
+    force_route: str = "local_search",
 ):
+    route_labels = {"local_search": "Route 2 (Local Search)", "hipporag2_search": "Route 7 (HippoRAG2)", "unified_search": "Route 5 (Unified)", "concept_search": "Route 6 (Concept)", "drift_multi_hop": "Route 4 (Drift)"}
+    route_label = route_labels.get(force_route, f"Route ({force_route})")
     with out_md.open("w", encoding="utf-8") as f:
-        f.write(f"# Route 2 (Local Search) Repeatability Benchmark\n\n")
+        f.write(f"# {route_label} Repeatability Benchmark\n\n")
         f.write(f"**Timestamp:** {timestamp}\n\n")
         f.write(f"**API Base URL:** `{api_base_url}`\n\n")
         f.write(f"**Group ID:** `{group_id}`\n\n")
-        f.write(f"**Force Route:** `local_search`\n\n")
+        f.write(f"**Force Route:** `{force_route}`\n\n")
         f.write("---\n\n")
 
         for sc in scenario_results:
@@ -948,6 +952,12 @@ def main():
         help="API mode: 'backend' calls /hybrid/query (default), "
              "'frontend' calls /chat with OpenAI-compatible format.",
     )
+    parser.add_argument(
+        "--force-route",
+        type=str,
+        default="local_search",
+        help="Route to force (default: local_search). Use hipporag2_search for Route 7.",
+    )
 
     args = parser.parse_args()
     print(f"[DEBUG] Parsed arguments. URL: {args.url}")
@@ -1018,7 +1028,7 @@ def main():
                     "timestamp": timestamp,
                     "api_base_url": args.url,
                     "group_id": args.group_id,
-                    "force_route": "local_search",
+                    "force_route": args.force_route,
                     "response_type": response_type,
                     "models": models_to_test,
                     "repeats": args.repeats,
@@ -1070,14 +1080,17 @@ def main():
         synthesis_model=synthesis_model,
         prompt_variant=prompt_variant,
         api_mode=args.api,
+        force_route=args.force_route,
     )
 
     # Write outputs
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_json = out_dir / f"route2_local_search_{timestamp}.json"
-    out_md = out_dir / f"route2_local_search_{timestamp}.md"
+    route_prefixes = {"local_search": "route2", "hipporag2_search": "route7", "unified_search": "route5", "concept_search": "route6", "drift_multi_hop": "route4"}
+    route_prefix = route_prefixes.get(args.force_route, "route2")
+    out_json = out_dir / f"{route_prefix}_local_search_{timestamp}.json"
+    out_md = out_dir / f"{route_prefix}_local_search_{timestamp}.md"
 
     with out_json.open("w", encoding="utf-8") as f:
         out_data = {
@@ -1085,7 +1098,7 @@ def main():
             "api_base_url": args.url,
             "api_mode": args.api,
             "group_id": args.group_id,
-            "force_route": "local_search",
+            "force_route": args.force_route,
             "response_type": response_type,
         }
         if synthesis_model:
@@ -1106,6 +1119,7 @@ def main():
         api_base_url=args.url,
         group_id=args.group_id,
         scenario_results=[result],
+        force_route=args.force_route,
     )
 
     print(f"\n{'=' * 70}")

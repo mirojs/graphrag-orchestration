@@ -1,0 +1,2725 @@
+{
+  "timestamp": "20260226T112517Z",
+  "api_base_url": "https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io",
+  "api_mode": "backend",
+  "group_id": "test-5pdfs-v2-fix2",
+  "force_route": "hipporag2_search",
+  "response_type": "summary",
+  "scenario": {
+    "scenario": "hybrid_route2_summary",
+    "response_type": "summary",
+    "questions": [
+      {
+        "qid": "Q-L1",
+        "query": "Who is the **Agent** in the property management agreement?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe Agent in the property management agreement is Walt Flood Realty, a Hawaii sole proprietorship. The agreement is made between Contoso Ltd. (the Owner) and Walt Flood Realty (the Agent), with the Agent being exclusively appointed to rent, lease, operate, and manage the property located at 456 Palm Tree Avenue, Honolulu, HI 96815, known as Pacific View Retreat, Unit B202 [1][3][4][5][6][7][8][9].\n\n## Key Points\n\n- The Agent is Walt Flood Realty, a Hawaii sole proprietorship [1][3][4][5][6][7][8][9].\n- The Owner is Contoso Ltd. [1][3][4][5][6][7][8][9].\n- The Agent is exclusively appointed to manage the property at 456 Palm Tree Avenue, Honolulu, HI 96815 (Pacific View Retreat, Unit B202) [1][3][4][5][6][7][8][9].",
+            "text_norm": "summary the agent in the property management agreement is walt flood realty a hawaii sole proprietorship the agreement is made between contoso ltd the owner and walt flood realty the agent with the agent being exclusively appointed to rent lease operate and manage the property located at 456 palm tree avenue honolulu hi 96815 known as pacific view retreat unit b202 1 3 4 5 6 7 8 9 key points the agent is walt flood realty a hawaii sole proprietorship 1 3 4 5 6 7 8 9 the owner is contoso ltd 1 3 4 5 6 7 8 9 the agent is exclusively appointed to manage the property at 456 palm tree avenue honolulu hi 96815 pacific view retreat unit b202 1 3 4 5 6 7 8 9",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Contoso Ltd.",
+              "Agent",
+              "Walt Flood Realty",
+              "Owner",
+              "Agreement",
+              "Fabrikam Inc.",
+              "Pit",
+              "depth: 3\"",
+              "Site prep",
+              "electrical hookup",
+              "concrete pad",
+              "hoistway",
+              "Limited Warranty",
+              "2010-06-15",
+              "Contoso",
+              "Fabrikam",
+              "REG-54321",
+              "Limited Warranty Agreement",
+              "1820 Summit Ridge Dr., Pocatello, ID 83201",
+              "480 Willow Glen Drive, Chubbuck, ID 83202"
+            ],
+            "elapsed_ms": 35897,
+            "full_response": {
+              "response": "## Summary\n\nThe Agent in the property management agreement is Walt Flood Realty, a Hawaii sole proprietorship. The agreement is made between Contoso Ltd. (the Owner) and Walt Flood Realty (the Agent), with the Agent being exclusively appointed to rent, lease, operate, and manage the property located at 456 Palm Tree Avenue, Honolulu, HI 96815, known as Pacific View Retreat, Unit B202 [1][3][4][5][6][7][8][9].\n\n## Key Points\n\n- The Agent is Walt Flood Realty, a Hawaii sole proprietorship [1][3][4][5][6][7][8][9].\n- The Owner is Contoso Ltd. [1][3][4][5][6][7][8][9].\n- The Agent is exclusively appointed to manage the property at 456 Palm Tree Avenue, Honolulu, HI 96815 (Pacific View Retreat, Unit B202) [1][3][4][5][6][7][8][9].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_0",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_34",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_7",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_18",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_24",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_26",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 7,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_16",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 8,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_2",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                }
+              ],
+              "evidence_path": [
+                "Contoso Ltd.",
+                "Agent",
+                "Walt Flood Realty",
+                "Owner",
+                "Agreement",
+                "Fabrikam Inc.",
+                "Pit",
+                "depth: 3\"",
+                "Site prep",
+                "electrical hookup",
+                "concrete pad",
+                "hoistway",
+                "Limited Warranty",
+                "2010-06-15",
+                "Contoso",
+                "Fabrikam",
+                "REG-54321",
+                "Limited Warranty Agreement",
+                "1820 Summit Ridge Dr., Pocatello, ID 83201",
+                "480 Willow Glen Drive, Chubbuck, ID 83202"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 2,
+                "entity_seeds_count": 3,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 10,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Agent THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietorship (hereinafter called \"Agent\"), wherein the\nparties hereby agree as follows: Contoso Ltd.",
+                  "Contoso Ltd. THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietorship (hereinafter called \"Agent\"), wherein the\nparties hereby agree as follows: Walt Flood Realty"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 259,
+                  "step_2_parallel_ms": 4825,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 5,
+                  "step_5_synthesis_ms": 2557,
+                  "total_ms": 26012
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 35897,
+          "latency_ms_p95": 35897,
+          "latency_ms_min": 35897,
+          "latency_ms_max": 35897
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.131,
+          "containment": true,
+          "precision": 0.125,
+          "recall": 1.0,
+          "f1_score": 0.222
+        }
+      },
+      {
+        "qid": "Q-L2",
+        "query": "Who is the **Owner** in the property management agreement?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe **Owner** in the property management agreement is Contoso Ltd., as explicitly stated in the agreement. Contoso Ltd. is repeatedly identified as the party referred to as \"Owner\" throughout the document, and is the entity that appoints Walt Flood Realty as the Agent to manage the property located at 456 Palm Tree Avenue, Honolulu, HI 96815 (Pacific View Retreat, Unit # B202) [1][2][3][4][5][7][8].\n\n## Key Points\n\n- The Owner is Contoso Ltd. [1][2][3][4][5][7][8]\n- Contoso Ltd. is explicitly designated as \"Owner\" in the agreement [1][2][3][4][5][7][8]\n- The Owner appoints Walt Flood Realty as Agent to manage the specified property [1][2][3][4][5][7][8]",
+            "text_norm": "summary the owner in the property management agreement is contoso ltd as explicitly stated in the agreement contoso ltd is repeatedly identified as the party referred to as owner throughout the document and is the entity that appoints walt flood realty as the agent to manage the property located at 456 palm tree avenue honolulu hi 96815 pacific view retreat unit b202 1 2 3 4 5 7 8 key points the owner is contoso ltd 1 2 3 4 5 7 8 contoso ltd is explicitly designated as owner in the agreement 1 2 3 4 5 7 8 the owner appoints walt flood realty as agent to manage the specified property 1 2 3 4 5 7 8",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Owner",
+              "Walt Flood Realty",
+              "Agent",
+              "Agreement",
+              "Contoso Ltd.",
+              "Start-up fee",
+              "$250.00",
+              "Non-refundable start-up fee",
+              "Rental Agent",
+              "successors",
+              "assigns",
+              "Warranty",
+              "Interest bearing account",
+              "Hawaii Gross Excise tax",
+              "Tax",
+              "4.712%",
+              "Pacific View Retreat",
+              "Termination",
+              "Interest",
+              "holding tank"
+            ],
+            "elapsed_ms": 5311,
+            "full_response": {
+              "response": "## Summary\n\nThe **Owner** in the property management agreement is Contoso Ltd., as explicitly stated in the agreement. Contoso Ltd. is repeatedly identified as the party referred to as \"Owner\" throughout the document, and is the entity that appoints Walt Flood Realty as the Agent to manage the property located at 456 Palm Tree Avenue, Honolulu, HI 96815 (Pacific View Retreat, Unit # B202) [1][2][3][4][5][7][8].\n\n## Key Points\n\n- The Owner is Contoso Ltd. [1][2][3][4][5][7][8]\n- Contoso Ltd. is explicitly designated as \"Owner\" in the agreement [1][2][3][4][5][7][8]\n- The Owner appoints Walt Flood Realty as Agent to manage the specified property [1][2][3][4][5][7][8]",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_0",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_34",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_17",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_14",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_2",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_7",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 7,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_19",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                }
+              ],
+              "evidence_path": [
+                "Owner",
+                "Walt Flood Realty",
+                "Agent",
+                "Agreement",
+                "Contoso Ltd.",
+                "Start-up fee",
+                "$250.00",
+                "Non-refundable start-up fee",
+                "Rental Agent",
+                "successors",
+                "assigns",
+                "Warranty",
+                "Interest bearing account",
+                "Hawaii Gross Excise tax",
+                "Tax",
+                "4.712%",
+                "Pacific View Retreat",
+                "Termination",
+                "Interest",
+                "holding tank"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 1,
+                "entity_seeds_count": 2,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 8,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Owner THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a Hawaii sole proprietorship (hereinafter called \"Agent\"), wherein the\nparties hereby agree as follows: Walt Flood Realty"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 223,
+                  "step_2_parallel_ms": 736,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 3347,
+                  "total_ms": 4314
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 5311,
+          "latency_ms_p95": 5311,
+          "latency_ms_min": 5311,
+          "latency_ms_max": 5311
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.0,
+          "containment": true,
+          "precision": 0.037,
+          "recall": 1.0,
+          "f1_score": 0.071
+        }
+      },
+      {
+        "qid": "Q-L3",
+        "query": "What is the managed property address in the property management agreement?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe managed property address specified in the property management agreement is 456 Palm Tree Avenue, Honolulu, HI 96815. The property is named \"Pacific View Retreat\" and the unit number is B202. This information is consistently stated across all provided documents [1][2][3][4][5][6][7].\n\n## Key Points\n\n- The managed property address is 456 Palm Tree Avenue, Honolulu, HI 96815 [1][2][3][4][5][6][7].\n- The property name is Pacific View Retreat [1][2][3][4][5][6][7].\n- The unit number is B202 [1][2][3][4][5][6][7].",
+            "text_norm": "summary the managed property address specified in the property management agreement is 456 palm tree avenue honolulu hi 96815 the property is named pacific view retreat and the unit number is b202 this information is consistently stated across all provided documents 1 2 3 4 5 6 7 key points the managed property address is 456 palm tree avenue honolulu hi 96815 1 2 3 4 5 6 7 the property name is pacific view retreat 1 2 3 4 5 6 7 the unit number is b202 1 2 3 4 5 6 7",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Pacific View Retreat",
+              "Agent",
+              "Owner",
+              "456 Palm Tree Avenue, Honolulu, HI 96815",
+              "Unit B202",
+              "Agreement",
+              "Start-up fee",
+              "Contoso Ltd.",
+              "Rental Agent",
+              "Interest bearing account",
+              "Hawaii Gross Excise tax",
+              "Tax",
+              "4.712%",
+              "$250.00",
+              "Non-refundable start-up fee",
+              "Interest",
+              "successors",
+              "assigns",
+              "make recommendations to Owner",
+              "prepare unit for occupancy"
+            ],
+            "elapsed_ms": 5365,
+            "full_response": {
+              "response": "## Summary\n\nThe managed property address specified in the property management agreement is 456 Palm Tree Avenue, Honolulu, HI 96815. The property is named \"Pacific View Retreat\" and the unit number is B202. This information is consistently stated across all provided documents [1][2][3][4][5][6][7].\n\n## Key Points\n\n- The managed property address is 456 Palm Tree Avenue, Honolulu, HI 96815 [1][2][3][4][5][6][7].\n- The property name is Pacific View Retreat [1][2][3][4][5][6][7].\n- The unit number is B202 [1][2][3][4][5][6][7].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_0",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_11",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_34",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_13",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_7",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_2",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 7,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_42",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                }
+              ],
+              "evidence_path": [
+                "Pacific View Retreat",
+                "Agent",
+                "Owner",
+                "456 Palm Tree Avenue, Honolulu, HI 96815",
+                "Unit B202",
+                "Agreement",
+                "Start-up fee",
+                "Contoso Ltd.",
+                "Rental Agent",
+                "Interest bearing account",
+                "Hawaii Gross Excise tax",
+                "Tax",
+                "4.712%",
+                "$250.00",
+                "Non-refundable start-up fee",
+                "Interest",
+                "successors",
+                "assigns",
+                "make recommendations to Owner",
+                "prepare unit for occupancy"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 5,
+                "entity_seeds_count": 4,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Owner Owner exclusively appoints Agent to rent, lease, operate, and manage on the owner's\nbehalf the property located at: 456 Palm Tree Avenue, Honolulu, HI 96815\n\nProperty Name: Pacific View Retreat\nUnit # 456 Palm Tree Avenue, Honolulu, HI 96815",
+                  "456 Palm Tree Avenue, Honolulu, HI 96815 HAS Pacific View Retreat",
+                  "Agent Owner exclusively appoints Agent to rent, lease, operate, and manage on the owner's\nbehalf the property located at: 456 Palm Tree Avenue, Honolulu, HI 96815\n\nProperty Name: Pacific View Retreat\nUnit # Pacific View Retreat",
+                  "Agent OPERATES 456 Palm Tree Avenue, Honolulu, HI 96815",
+                  "Owner Owner exclusively appoints Agent to rent, lease, operate, and manage on the owner's\nbehalf the property located at: 456 Palm Tree Avenue, Honolulu, HI 96815\n\nProperty Name: Pacific View Retreat\nUnit # Pacific View Retreat"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 228,
+                  "step_2_parallel_ms": 735,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 8,
+                  "step_5_synthesis_ms": 3410,
+                  "total_ms": 4382
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 5365,
+          "latency_ms_p95": 5365,
+          "latency_ms_min": 5365,
+          "latency_ms_max": 5365
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.15,
+          "containment": true,
+          "precision": 0.163,
+          "recall": 1.0,
+          "f1_score": 0.28
+        }
+      },
+      {
+        "qid": "Q-L4",
+        "query": "What is the initial term start date in the property management agreement?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe property management agreement specifies that the initial term is for a period of twelve months; however, the exact start date is not provided in the available evidence. The agreement repeatedly states, \"This agreement shall be for an initial period of twelve months beginning on:\" but does not include a specific date following this phrase in any of the provided excerpts [1][2][4][5][6][7].\n\n## Key Points\n\n- The agreement is for an initial period of twelve months [1][2][4][5][6][7].\n- The specific start date for the initial term is not stated in the available documents [1][2][4][5][6][7].",
+            "text_norm": "summary the property management agreement specifies that the initial term is for a period of twelve months however the exact start date is not provided in the available evidence the agreement repeatedly states this agreement shall be for an initial period of twelve months beginning on but does not include a specific date following this phrase in any of the provided excerpts 1 2 4 5 6 7 key points the agreement is for an initial period of twelve months 1 2 4 5 6 7 the specific start date for the initial term is not stated in the available documents 1 2 4 5 6 7",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "2010-06-15",
+              "Twelve months",
+              "Agreement",
+              "Contoso Ltd.",
+              "Fabrikam Inc.",
+              "Principal Broker",
+              "Agreement Signing",
+              "Agent",
+              "Owner",
+              "Start-up fee",
+              "Walt Flood Realty",
+              "Modification",
+              "Writing",
+              "Binding",
+              "Warranty",
+              "Administrative expenses",
+              "Condition/inspection report",
+              "$250.00",
+              "Non-refundable start-up fee",
+              "successors"
+            ],
+            "elapsed_ms": 4435,
+            "full_response": {
+              "response": "## Summary\n\nThe property management agreement specifies that the initial term is for a period of twelve months; however, the exact start date is not provided in the available evidence. The agreement repeatedly states, \"This agreement shall be for an initial period of twelve months beginning on:\" but does not include a specific date following this phrase in any of the provided excerpts [1][2][4][5][6][7].\n\n## Key Points\n\n- The agreement is for an initial period of twelve months [1][2][4][5][6][7].\n- The specific start date for the initial term is not stated in the available documents [1][2][4][5][6][7].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_2",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_41",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_34",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_0",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_39",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_4",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                }
+              ],
+              "evidence_path": [
+                "2010-06-15",
+                "Twelve months",
+                "Agreement",
+                "Contoso Ltd.",
+                "Fabrikam Inc.",
+                "Principal Broker",
+                "Agreement Signing",
+                "Agent",
+                "Owner",
+                "Start-up fee",
+                "Walt Flood Realty",
+                "Modification",
+                "Writing",
+                "Binding",
+                "Warranty",
+                "Administrative expenses",
+                "Condition/inspection report",
+                "$250.00",
+                "Non-refundable start-up fee",
+                "successors"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 1,
+                "entity_seeds_count": 2,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "2010-06-15 This agreement shall be for an initial period of twelve months beginning on: 2010-06-15\nand shall be automatically renewed for successive one year terms thereafter. Twelve months"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 226,
+                  "step_2_parallel_ms": 734,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 2481,
+                  "total_ms": 3450
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4435,
+          "latency_ms_p95": 4435,
+          "latency_ms_min": 4435,
+          "latency_ms_max": 4435
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.021,
+          "containment": false,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0
+        }
+      },
+      {
+        "qid": "Q-L5",
+        "query": "What written notice period is required for termination of the property management agreement?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe available documents do not specify any written notice period required for termination of the property management agreement. The evidence context provides details about the parties, property, and the initial term of twelve months, but does not include any information regarding the notice period for termination.\n\n## Key Points\n\n- The property management agreement is for an initial period of twelve months [1][2][3][4][5][6][7][8].\n- No written notice period for termination is specified in the available documents [1][2][3][4][5][6][7][8].\n\nResponse: The requested information was not found in the available documents.",
+            "text_norm": "summary the available documents do not specify any written notice period required for termination of the property management agreement the evidence context provides details about the parties property and the initial term of twelve months but does not include any information regarding the notice period for termination key points the property management agreement is for an initial period of twelve months 1 2 3 4 5 6 7 8 no written notice period for termination is specified in the available documents 1 2 3 4 5 6 7 8 response the requested information was not found in the available documents",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Agreement",
+              "Termination with sixty days notice",
+              "Agent",
+              "Owner",
+              "Start-up fee",
+              "2010-06-15",
+              "Contoso Ltd.",
+              "Modification",
+              "Writing",
+              "Binding",
+              "Warranty",
+              "Fabrikam Inc.",
+              "$250.00",
+              "Non-refundable start-up fee",
+              "Administrative expenses",
+              "Condition/inspection report",
+              "This contract",
+              "successors",
+              "assigns",
+              "Termination"
+            ],
+            "elapsed_ms": 4733,
+            "full_response": {
+              "response": "## Summary\n\nThe available documents do not specify any written notice period required for termination of the property management agreement. The evidence context provides details about the parties, property, and the initial term of twelve months, but does not include any information regarding the notice period for termination.\n\n## Key Points\n\n- The property management agreement is for an initial period of twelve months [1][2][3][4][5][6][7][8].\n- No written notice period for termination is specified in the available documents [1][2][3][4][5][6][7][8].\n\nResponse: The requested information was not found in the available documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_2",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_34",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_4",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_0",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_41",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_19",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 7,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_6",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 8,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_16",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                }
+              ],
+              "evidence_path": [
+                "Agreement",
+                "Termination with sixty days notice",
+                "Agent",
+                "Owner",
+                "Start-up fee",
+                "2010-06-15",
+                "Contoso Ltd.",
+                "Modification",
+                "Writing",
+                "Binding",
+                "Warranty",
+                "Fabrikam Inc.",
+                "$250.00",
+                "Non-refundable start-up fee",
+                "Administrative expenses",
+                "Condition/inspection report",
+                "This contract",
+                "successors",
+                "assigns",
+                "Termination"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 1,
+                "entity_seeds_count": 2,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 8,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Agreement HAS Termination with sixty days notice"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 216,
+                  "step_2_parallel_ms": 734,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 5,
+                  "step_5_synthesis_ms": 1792,
+                  "total_ms": 2748
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4733,
+          "latency_ms_p95": 4733,
+          "latency_ms_min": 4733,
+          "latency_ms_max": 4733
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.064,
+          "containment": false,
+          "precision": 0.038,
+          "recall": 0.4,
+          "f1_score": 0.069
+        }
+      },
+      {
+        "qid": "Q-L6",
+        "query": "What is the Agent fee/commission for **short-term** rentals (<180 days)?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nFor short-term rentals (defined as reservations of less than 180 days), the agent fee/commission is twenty five percent (25%) of the gross revenues for management services. This applies specifically to short term and/or vacation/holiday rentals as outlined in the agreement [6].\n\n## Key Points\n\n- The agent is entitled to a fee/commission of twenty five percent (25%) of the gross revenues for management services for short term and/or vacation rentals (reservations of less than 180 days) [6].\n- The owner allows the agent to accept credit cards and deduct credit card and/or bankcard fees from the owner's proceeds [6].",
+            "text_norm": "summary for short term rentals defined as reservations of less than 180 days the agent fee commission is twenty five percent 25% of the gross revenues for management services this applies specifically to short term and or vacation holiday rentals as outlined in the agreement 6 key points the agent is entitled to a fee commission of twenty five percent 25% of the gross revenues for management services for short term and or vacation rentals reservations of less than 180 days 6 the owner allows the agent to accept credit cards and deduct credit card and or bankcard fees from the owner s proceeds 6",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Agent",
+              "Owner",
+              "charge",
+              "property",
+              "Agreement",
+              "Short Term and/or Vacation/Holiday Rentals",
+              "$35/hour",
+              "AAA",
+              "initial property inspection",
+              "State of Hawaii",
+              "advertising for short-term (vacation rentals)",
+              "pro-ration charge",
+              "$75.00/month",
+              "fee",
+              "ten percent (10%)",
+              "total charge for repairs, upgrades, and/or renovations",
+              "rental rates",
+              "Rents",
+              "Special trust account",
+              "minimum charge"
+            ],
+            "elapsed_ms": 4692,
+            "full_response": {
+              "response": "## Summary\n\nFor short-term rentals (defined as reservations of less than 180 days), the agent fee/commission is twenty five percent (25%) of the gross revenues for management services. This applies specifically to short term and/or vacation/holiday rentals as outlined in the agreement [6].\n\n## Key Points\n\n- The agent is entitled to a fee/commission of twenty five percent (25%) of the gross revenues for management services for short term and/or vacation rentals (reservations of less than 180 days) [6].\n- The owner allows the agent to accept credit cards and deduct credit card and/or bankcard fees from the owner's proceeds [6].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_45",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the f..."
+                }
+              ],
+              "evidence_path": [
+                "Agent",
+                "Owner",
+                "charge",
+                "property",
+                "Agreement",
+                "Short Term and/or Vacation/Holiday Rentals",
+                "$35/hour",
+                "AAA",
+                "initial property inspection",
+                "State of Hawaii",
+                "advertising for short-term (vacation rentals)",
+                "pro-ration charge",
+                "$75.00/month",
+                "fee",
+                "ten percent (10%)",
+                "total charge for repairs, upgrades, and/or renovations",
+                "rental rates",
+                "Rents",
+                "Special trust account",
+                "minimum charge"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 213,
+                  "step_2_parallel_ms": 735,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 2723,
+                  "total_ms": 3679
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4692,
+          "latency_ms_p95": 4692,
+          "latency_ms_min": 4692,
+          "latency_ms_max": 4692
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.139,
+          "containment": true,
+          "precision": 0.148,
+          "recall": 1.0,
+          "f1_score": 0.258
+        }
+      },
+      {
+        "qid": "Q-L7",
+        "query": "What is the Agent fee/commission for **long-term** leases (>180 days)?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nFor long-term leases (defined as reservations greater than 180 days), the Agent fee/commission is ten percent (10%) of the gross revenues for management services. This fee is explicitly stated as separate from the short-term/vacation rental commission, which is twenty-five percent (25%) for reservations of less than 180 days [6].\n\n## Key Points\n\n- The Agent's fee/commission for long-term leases (reservations greater than 180 days) is ten percent (10%) of the gross revenues for management services [6].\n- The commission for short-term/vacation rentals (reservations less than 180 days) is twenty-five percent (25%) of the gross revenues, but this does not apply to long-term leases [6].\n- The Agent is allowed to deduct credit card and/or bankcard fees from the Owner's proceeds, but this is a general provision and not specific to long-term leases [6].",
+            "text_norm": "summary for long term leases defined as reservations greater than 180 days the agent fee commission is ten percent 10% of the gross revenues for management services this fee is explicitly stated as separate from the short term vacation rental commission which is twenty five percent 25% for reservations of less than 180 days 6 key points the agent s fee commission for long term leases reservations greater than 180 days is ten percent 10% of the gross revenues for management services 6 the commission for short term vacation rentals reservations less than 180 days is twenty five percent 25% of the gross revenues but this does not apply to long term leases 6 the agent is allowed to deduct credit card and or bankcard fees from the owner s proceeds but this is a general provision and not specific to long term leases 6",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Agent",
+              "fee/commission of 10% of gross revenues for long term leases",
+              "Owner",
+              "Agreement",
+              "Start-up fee",
+              "Rental Agent",
+              "property",
+              "Hawaii Gross Excise tax",
+              "Tax",
+              "4.712%",
+              "Interest bearing account",
+              "Pacific View Retreat",
+              "unit",
+              "$250.00",
+              "Non-refundable start-up fee",
+              "Contoso Ltd.",
+              "Administrative expenses",
+              "Condition/inspection report",
+              "Interest",
+              "make recommendations to Owner"
+            ],
+            "elapsed_ms": 4371,
+            "full_response": {
+              "response": "## Summary\n\nFor long-term leases (defined as reservations greater than 180 days), the Agent fee/commission is ten percent (10%) of the gross revenues for management services. This fee is explicitly stated as separate from the short-term/vacation rental commission, which is twenty-five percent (25%) for reservations of less than 180 days [6].\n\n## Key Points\n\n- The Agent's fee/commission for long-term leases (reservations greater than 180 days) is ten percent (10%) of the gross revenues for management services [6].\n- The commission for short-term/vacation rentals (reservations less than 180 days) is twenty-five percent (25%) of the gross revenues, but this does not apply to long-term leases [6].\n- The Agent is allowed to deduct credit card and/or bankcard fees from the Owner's proceeds, but this is a general provision and not specific to long-term leases [6].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_45",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "(Short Term and/or Vacation/Holiday Rentals)\n\nAGENT'S FEES. Owner is advised and agrees to pay the f..."
+                }
+              ],
+              "evidence_path": [
+                "Agent",
+                "fee/commission of 10% of gross revenues for long term leases",
+                "Owner",
+                "Agreement",
+                "Start-up fee",
+                "Rental Agent",
+                "property",
+                "Hawaii Gross Excise tax",
+                "Tax",
+                "4.712%",
+                "Interest bearing account",
+                "Pacific View Retreat",
+                "unit",
+                "$250.00",
+                "Non-refundable start-up fee",
+                "Contoso Ltd.",
+                "Administrative expenses",
+                "Condition/inspection report",
+                "Interest",
+                "make recommendations to Owner"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 1,
+                "entity_seeds_count": 2,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Agent HAS fee/commission of 10% of gross revenues for long term leases"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 209,
+                  "step_2_parallel_ms": 735,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 7,
+                  "step_5_synthesis_ms": 2435,
+                  "total_ms": 3387
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4371,
+          "latency_ms_p95": 4371,
+          "latency_ms_min": 4371,
+          "latency_ms_max": 4371
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.086,
+          "containment": true,
+          "precision": 0.113,
+          "recall": 1.0,
+          "f1_score": 0.203
+        }
+      },
+      {
+        "qid": "Q-L8",
+        "query": "What is the pro-ration advertising charge and minimum admin/accounting charge in the property management agreement?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "The requested information was not found in the available documents.",
+            "text_norm": "the requested information was not found in the available documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "charge",
+              "$75.00/month",
+              "advertising for short-term (vacation rentals)",
+              "pro-ration charge",
+              "AAA",
+              "fee",
+              "ten percent (10%)",
+              "total charge for repairs, upgrades, and/or renovations",
+              "minimum charge",
+              "$50.00/month",
+              "$35/hour",
+              "schedule repairs, upgrades, renovations, replacement of appliances, carpets, curtains, drapes, and/or to escort contractors, repair persons, technicians and handymen",
+              "Owner",
+              "Agent",
+              "not to include tax preparation/returns/forms",
+              "Arbitration Program",
+              "Building Arbitration Rules",
+              "Agreement",
+              "Contract for services",
+              "Short Term and/or Vacation/Holiday Rentals"
+            ],
+            "elapsed_ms": 4048,
+            "full_response": {
+              "response": "The requested information was not found in the available documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "charge",
+                "$75.00/month",
+                "advertising for short-term (vacation rentals)",
+                "pro-ration charge",
+                "AAA",
+                "fee",
+                "ten percent (10%)",
+                "total charge for repairs, upgrades, and/or renovations",
+                "minimum charge",
+                "$50.00/month",
+                "$35/hour",
+                "schedule repairs, upgrades, renovations, replacement of appliances, carpets, curtains, drapes, and/or to escort contractors, repair persons, technicians and handymen",
+                "Owner",
+                "Agent",
+                "not to include tax preparation/returns/forms",
+                "Arbitration Program",
+                "Building Arbitration Rules",
+                "Agreement",
+                "Contract for services",
+                "Short Term and/or Vacation/Holiday Rentals"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 5,
+                "entity_seeds_count": 4,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 6,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "pro-ration charge HAS $75.00/month",
+                  "advertising for short-term (vacation rentals) (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. $75.00/month",
+                  "$75.00/month (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. charge",
+                  "pro-ration charge (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. charge",
+                  "advertising for short-term (vacation rentals) (d) A pro-ration charge for advertising for short-term (vacation rentals), at $75.00/month. charge"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 210,
+                  "step_2_parallel_ms": 2110,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 5,
+                  "step_5_synthesis_ms": 1254,
+                  "total_ms": 3582
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4048,
+          "latency_ms_p95": 4048,
+          "latency_ms_min": 4048,
+          "latency_ms_max": 4048
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.266,
+          "containment": false,
+          "precision": 0.0,
+          "recall": 0.0,
+          "f1_score": 0.0
+        }
+      },
+      {
+        "qid": "Q-L9",
+        "query": "In the purchase contract Exhibit A, what is the job location?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe job location specified in Exhibit A of the purchase contract is 811 Ocean Drive, Suite 405, Tampa, FL 33602. This address is consistently listed as the job location for the Bayfront Animal Clinic project, which involves the installation of a Vertical Platform Lift (AscendPro VPX200) and related equipment [2][5].\n\n## Key Points\n\n- The job location for the Bayfront Animal Clinic project in the purchase contract Exhibit A is 811 Ocean Drive, Suite 405, Tampa, FL 33602 [2][5].\n- The project involves installation of a Vertical Platform Lift (AscendPro VPX200) and associated components at this address [2][5].",
+            "text_norm": "summary the job location specified in exhibit a of the purchase contract is 811 ocean drive suite 405 tampa fl 33602 this address is consistently listed as the job location for the bayfront animal clinic project which involves the installation of a vertical platform lift ascendpro vpx200 and related equipment 2 5 key points the job location for the bayfront animal clinic project in the purchase contract exhibit a is 811 ocean drive suite 405 tampa fl 33602 2 5 the project involves installation of a vertical platform lift ascendpro vpx200 and associated components at this address 2 5",
+            "citations_sig": [
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66"
+            ],
+            "evidence_path_sig": [
+              "1820 Summit Ridge Dr., Pocatello, ID 83201",
+              "Fabrikam Inc.",
+              "Builder",
+              "480 Willow Glen Drive, Chubbuck, ID 83202",
+              "61 S 34th Street, Dayton, FL 33155",
+              "Contoso Ltd.",
+              "Limited Warranty",
+              "Limited Warranty Agreement",
+              "Buyer/Owner",
+              "defect",
+              "one (1) year or sixty (60) day warranty period",
+              "Representative John Smith",
+              "Pocatello, ID",
+              "Pit",
+              "depth: 3\"",
+              "Site prep",
+              "electrical hookup",
+              "concrete pad",
+              "hoistway",
+              "Agreement"
+            ],
+            "elapsed_ms": 3951,
+            "full_response": {
+              "response": "## Summary\n\nThe job location specified in Exhibit A of the purchase contract is 811 Ocean Drive, Suite 405, Tampa, FL 33602. This address is consistently listed as the job location for the Bayfront Animal Clinic project, which involves the installation of a Vertical Platform Lift (AscendPro VPX200) and related equipment [2][5].\n\n## Key Points\n\n- The job location for the Bayfront Animal Clinic project in the purchase contract Exhibit A is 811 Ocean Drive, Suite 405, Tampa, FL 33602 [2][5].\n- The project involves installation of a Vertical Platform Lift (AscendPro VPX200) and associated components at this address [2][5].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_27",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@f..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_25",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@f..."
+                }
+              ],
+              "evidence_path": [
+                "1820 Summit Ridge Dr., Pocatello, ID 83201",
+                "Fabrikam Inc.",
+                "Builder",
+                "480 Willow Glen Drive, Chubbuck, ID 83202",
+                "61 S 34th Street, Dayton, FL 33155",
+                "Contoso Ltd.",
+                "Limited Warranty",
+                "Limited Warranty Agreement",
+                "Buyer/Owner",
+                "defect",
+                "one (1) year or sixty (60) day warranty period",
+                "Representative John Smith",
+                "Pocatello, ID",
+                "Pit",
+                "depth: 3\"",
+                "Site prep",
+                "electrical hookup",
+                "concrete pad",
+                "hoistway",
+                "Agreement"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 4,
+                "entity_seeds_count": 5,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Fabrikam Inc. LOCATED_IN 1820 Summit Ridge Dr., Pocatello, ID 83201",
+                  "Fabrikam Inc. LOCATED_IN 61 S 34th Street, Dayton, FL 33155",
+                  "Builder HAS 1820 Summit Ridge Dr., Pocatello, ID 83201",
+                  "1820 Summit Ridge Dr., Pocatello, ID 83201 In consideration of the Agreement for the construction or purchase of a home for the undersigned\nBuyer/Owner, this Limited Warranty Agreement is extended by Fabrikam Inc.\n,and is accepted and agreed\n( 480 Willow Glen Drive, Chubbuck, ID 83202"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 222,
+                  "step_2_parallel_ms": 736,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 8,
+                  "step_5_synthesis_ms": 1999,
+                  "total_ms": 2967
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 3951,
+          "latency_ms_p95": 3951,
+          "latency_ms_min": 3951,
+          "latency_ms_max": 3951
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.127,
+          "containment": true,
+          "precision": 0.167,
+          "recall": 1.0,
+          "f1_score": 0.286
+        }
+      },
+      {
+        "qid": "Q-L10",
+        "query": "In the purchase contract Exhibit A, what is the contact’s name and email?   - **Expected Route:** Route 2 (Local Search)   - **Expected:** `Elizabeth Nolasco; enolasco@fabrikam.com`",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe contact's name in the purchase contract Exhibit A is Elizabeth Nolasco, and the email address is enolasco@fabrikam.com. This information is explicitly listed under the job details for Bayfront Animal Clinic in the contract documentation [1][6][7].\n\n## Key Points\n\n- Contact’s name: Elizabeth Nolasco [1][6][7]\n- Contact’s email: enolasco@fabrikam.com [1][6][7]",
+            "text_norm": "summary the contact s name in the purchase contract exhibit a is elizabeth nolasco and the email address is enolasco fabrikam com this information is explicitly listed under the job details for bayfront animal clinic in the contract documentation 1 6 7 key points contact s name elizabeth nolasco 1 6 7 contact s email enolasco fabrikam com 1 6 7",
+            "citations_sig": [
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66"
+            ],
+            "evidence_path_sig": [
+              "Power system",
+              "Email: enolasco@fabrikam.com",
+              "Job Name",
+              "Elizabeth Nolasco",
+              "Contact",
+              "110 VAC 60",
+              "AscendPro VPX200",
+              "Bayfront Animal Clinic",
+              "811 Ocean Drive, Suite 405, Tampa, FL 33602",
+              "Phone: (813) 902-4455",
+              "Contractor",
+              "Vertical Platform Lift",
+              "Contoso Lifts LLC",
+              "Size: 42\" x 62\"",
+              "12/17/2015",
+              "Jim Contoso",
+              "John Doe",
+              "Fabrikam Construction",
+              "Dayton, FL",
+              "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator"
+            ],
+            "elapsed_ms": 3709,
+            "full_response": {
+              "response": "## Summary\n\nThe contact's name in the purchase contract Exhibit A is Elizabeth Nolasco, and the email address is enolasco@fabrikam.com. This information is explicitly listed under the job details for Bayfront Animal Clinic in the contract documentation [1][6][7].\n\n## Key Points\n\n- Contact’s name: Elizabeth Nolasco [1][6][7]\n- Contact’s email: enolasco@fabrikam.com [1][6][7]",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_24",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Contractor assists with permitting. Customer bears any additional compliance costs.\n\nCustomer may ca..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_28",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@f..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_26",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@f..."
+                }
+              ],
+              "evidence_path": [
+                "Power system",
+                "Email: enolasco@fabrikam.com",
+                "Job Name",
+                "Elizabeth Nolasco",
+                "Contact",
+                "110 VAC 60",
+                "AscendPro VPX200",
+                "Bayfront Animal Clinic",
+                "811 Ocean Drive, Suite 405, Tampa, FL 33602",
+                "Phone: (813) 902-4455",
+                "Contractor",
+                "Vertical Platform Lift",
+                "Contoso Lifts LLC",
+                "Size: 42\" x 62\"",
+                "12/17/2015",
+                "Jim Contoso",
+                "John Doe",
+                "Fabrikam Construction",
+                "Dayton, FL",
+                "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 4,
+                "entity_seeds_count": 5,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 8,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Elizabeth Nolasco HAS Email: enolasco@fabrikam.com",
+                  "Power system Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@fabrikam.com\n\nJob Location: 811 Ocean Drive, Suite 405, Tampa, FL 33602\n\n1 Vertical Platform Lift (As Email: enolasco@fabrikam.com",
+                  "Power system Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@fabrikam.com\n\nJob Location: 811 Ocean Drive, Suite 405, Tampa, FL 33602\n\n1 Vertical Platform Lift (As Job Name",
+                  "Power system Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@fabrikam.com\n\nJob Location: 811 Ocean Drive, Suite 405, Tampa, FL 33602\n\n1 Vertical Platform Lift (As Contact"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 224,
+                  "step_2_parallel_ms": 737,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 1756,
+                  "total_ms": 2725
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 3709,
+          "latency_ms_p95": 3709,
+          "latency_ms_min": 3709,
+          "latency_ms_max": 3709
+        },
+        "accuracy": {
+          "is_negative_test": false,
+          "negative_test_pass": null,
+          "exact_match": false,
+          "fuzzy_score": 0.203,
+          "containment": true,
+          "precision": 0.139,
+          "recall": 1.0,
+          "f1_score": 0.244
+        }
+      },
+      {
+        "qid": "Q-N1",
+        "query": "What is the invoice's **bank routing number** for payment?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "Not found in the provided documents.",
+            "text_norm": "not found in the provided documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "29900.00",
+              "holding tank",
+              "110 VAC 60",
+              "Size: 42\" x 62\"",
+              "Vertical Platform Lift (Savaria V1504)",
+              "Hall Call stations for bottom and upper landing",
+              "Outdoor fitting",
+              "12/17/2015",
+              "Jim Contoso",
+              "SUBTOTAL: AMOUNT DUE",
+              "SUBTOTAL: TOTAL",
+              "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+              "SUBTOTAL: TAX",
+              "pumper",
+              "Contoso Lifts LLC",
+              "John Doe",
+              "Fabrikam Construction",
+              "Dayton, FL",
+              "Owner",
+              "disposal sites"
+            ],
+            "elapsed_ms": 2979,
+            "full_response": {
+              "response": "Not found in the provided documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "29900.00",
+                "holding tank",
+                "110 VAC 60",
+                "Size: 42\" x 62\"",
+                "Vertical Platform Lift (Savaria V1504)",
+                "Hall Call stations for bottom and upper landing",
+                "Outdoor fitting",
+                "12/17/2015",
+                "Jim Contoso",
+                "SUBTOTAL: AMOUNT DUE",
+                "SUBTOTAL: TOTAL",
+                "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+                "SUBTOTAL: TAX",
+                "pumper",
+                "Contoso Lifts LLC",
+                "John Doe",
+                "Fabrikam Construction",
+                "Dayton, FL",
+                "Owner",
+                "disposal sites"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 6,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 223,
+                  "step_2_parallel_ms": 1722,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 576,
+                  "total_ms": 2529
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 2979,
+          "latency_ms_p95": 2979,
+          "latency_ms_min": 2979,
+          "latency_ms_max": 2979
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N2",
+        "query": "What is the invoice’s **IBAN / SWIFT (BIC)** for international payments?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "Not found in the provided documents.",
+            "text_norm": "not found in the provided documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "29900.00",
+              "Size: 42\" x 62\"",
+              "110 VAC 60",
+              "Vertical Platform Lift (Savaria V1504)",
+              "Outdoor fitting",
+              "Hall Call stations for bottom and upper landing",
+              "12/17/2015",
+              "Jim Contoso",
+              "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+              "Contoso Lifts LLC",
+              "SUBTOTAL: AMOUNT DUE",
+              "SUBTOTAL: TOTAL",
+              "SUBTOTAL: TAX",
+              "Fabrikam Inc.",
+              "John Doe",
+              "Fabrikam Construction",
+              "Dayton, FL",
+              "Custom cab",
+              "Flush-mount Hall Call stations",
+              "upper & lower"
+            ],
+            "elapsed_ms": 2469,
+            "full_response": {
+              "response": "Not found in the provided documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "29900.00",
+                "Size: 42\" x 62\"",
+                "110 VAC 60",
+                "Vertical Platform Lift (Savaria V1504)",
+                "Outdoor fitting",
+                "Hall Call stations for bottom and upper landing",
+                "12/17/2015",
+                "Jim Contoso",
+                "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+                "Contoso Lifts LLC",
+                "SUBTOTAL: AMOUNT DUE",
+                "SUBTOTAL: TOTAL",
+                "SUBTOTAL: TAX",
+                "Fabrikam Inc.",
+                "John Doe",
+                "Fabrikam Construction",
+                "Dayton, FL",
+                "Custom cab",
+                "Flush-mount Hall Call stations",
+                "upper & lower"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 6,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 221,
+                  "step_2_parallel_ms": 1254,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 9,
+                  "step_5_synthesis_ms": 547,
+                  "total_ms": 2033
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 2469,
+          "latency_ms_p95": 2469,
+          "latency_ms_min": 2469,
+          "latency_ms_max": 2469
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N3",
+        "query": "What is the vendor's **VAT / Tax ID number** on the invoice?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "Not found in the provided documents.",
+            "text_norm": "not found in the provided documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "U.S. Federal Tax Id",
+              "Agent",
+              "Owner",
+              "Agreement",
+              "Start-up fee",
+              "Rental Agent",
+              "Interest bearing account",
+              "Hawaii Gross Excise tax",
+              "Tax",
+              "4.712%",
+              "Contoso Ltd.",
+              "Pacific View Retreat",
+              "Interest",
+              "$250.00",
+              "Non-refundable start-up fee",
+              "make recommendations to Owner",
+              "prepare unit for occupancy",
+              "successors",
+              "assigns",
+              "unit"
+            ],
+            "elapsed_ms": 1993,
+            "full_response": {
+              "response": "Not found in the provided documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "U.S. Federal Tax Id",
+                "Agent",
+                "Owner",
+                "Agreement",
+                "Start-up fee",
+                "Rental Agent",
+                "Interest bearing account",
+                "Hawaii Gross Excise tax",
+                "Tax",
+                "4.712%",
+                "Contoso Ltd.",
+                "Pacific View Retreat",
+                "Interest",
+                "$250.00",
+                "Non-refundable start-up fee",
+                "make recommendations to Owner",
+                "prepare unit for occupancy",
+                "successors",
+                "assigns",
+                "unit"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 2,
+                "entity_seeds_count": 3,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 8,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [
+                  "Owner HAS U.S. Federal Tax Id",
+                  "Agent (e) Provide Agent with Owner's U.S. Federal Tax Id, or Social Security number. U.S. Federal Tax Id"
+                ],
+                "timings_ms": {
+                  "step_1_embed_ms": 224,
+                  "step_2_parallel_ms": 734,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 546,
+                  "total_ms": 1511
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 1993,
+          "latency_ms_p95": 1993,
+          "latency_ms_min": 1993,
+          "latency_ms_max": 1993
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N5",
+        "query": "What is the invoice’s **bank account number** for ACH/wire payments?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "Not found in the provided documents.",
+            "text_norm": "not found in the provided documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "holding tank",
+              "29900.00",
+              "110 VAC 60",
+              "Size: 42\" x 62\"",
+              "Vertical Platform Lift (Savaria V1504)",
+              "Hall Call stations for bottom and upper landing",
+              "Outdoor fitting",
+              "pumper",
+              "12/17/2015",
+              "Jim Contoso",
+              "SUBTOTAL: AMOUNT DUE",
+              "SUBTOTAL: TAX",
+              "SUBTOTAL: TOTAL",
+              "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+              "Owner",
+              "Contoso Lifts LLC",
+              "John Doe",
+              "Fabrikam Construction",
+              "Dayton, FL",
+              "contents pumped"
+            ],
+            "elapsed_ms": 1950,
+            "full_response": {
+              "response": "Not found in the provided documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "holding tank",
+                "29900.00",
+                "110 VAC 60",
+                "Size: 42\" x 62\"",
+                "Vertical Platform Lift (Savaria V1504)",
+                "Hall Call stations for bottom and upper landing",
+                "Outdoor fitting",
+                "pumper",
+                "12/17/2015",
+                "Jim Contoso",
+                "SUBTOTAL: AMOUNT DUE",
+                "SUBTOTAL: TAX",
+                "SUBTOTAL: TOTAL",
+                "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+                "Owner",
+                "Contoso Lifts LLC",
+                "John Doe",
+                "Fabrikam Construction",
+                "Dayton, FL",
+                "contents pumped"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 6,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 223,
+                  "step_2_parallel_ms": 735,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 545,
+                  "total_ms": 1510
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 1950,
+          "latency_ms_p95": 1950,
+          "latency_ms_min": 1950,
+          "latency_ms_max": 1950
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N6",
+        "query": "Which documents are governed by the laws of **California**?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "Not found in the provided documents.",
+            "text_norm": "not found in the provided documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "Agreement",
+              "Arbitration Program",
+              "Proceedings",
+              "Contoso Lifts LLC",
+              "This contract",
+              "one (1) year",
+              "Fabrikam Inc.",
+              "court having jurisdiction",
+              "Arbitrations",
+              "Pocatello, Idaho",
+              "Judgment upon any award",
+              "Limited Warranty",
+              "provisions",
+              "Builder's Limited Warranty and Statement of Non-Warranted Conditions",
+              "all prior communications",
+              "State of Idaho",
+              "disputes",
+              "provisions of the AAA or other rules agreed to by the parties",
+              "Party",
+              "State of Hawaii"
+            ],
+            "elapsed_ms": 1962,
+            "full_response": {
+              "response": "Not found in the provided documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "Agreement",
+                "Arbitration Program",
+                "Proceedings",
+                "Contoso Lifts LLC",
+                "This contract",
+                "one (1) year",
+                "Fabrikam Inc.",
+                "court having jurisdiction",
+                "Arbitrations",
+                "Pocatello, Idaho",
+                "Judgment upon any award",
+                "Limited Warranty",
+                "provisions",
+                "Builder's Limited Warranty and Statement of Non-Warranted Conditions",
+                "all prior communications",
+                "State of Idaho",
+                "disputes",
+                "provisions of the AAA or other rules agreed to by the parties",
+                "Party",
+                "State of Hawaii"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 8,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 223,
+                  "step_2_parallel_ms": 734,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 545,
+                  "total_ms": 1511
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 1962,
+          "latency_ms_p95": 1962,
+          "latency_ms_min": 1962,
+          "latency_ms_max": 1962
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N7",
+        "query": "What is the property management Agent's **license number**?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe property management Agent's license number is not provided in the available documents. The documents identify the Agent as \"Walt Flood Realty, a Hawaii sole proprietorship,\" but do not include any license number or similar identifier [1][2][3][4][5][6][7][8].\n\n## Key Points\n\n- The Agent is named \"Walt Flood Realty, a Hawaii sole proprietorship\" [1][2][3][4][5][6][7][8].\n- No license number for the Agent is mentioned in any of the provided documents [1][2][3][4][5][6][7][8].\n\nResponse: The requested information was not found in the available documents.",
+            "text_norm": "summary the property management agent s license number is not provided in the available documents the documents identify the agent as walt flood realty a hawaii sole proprietorship but do not include any license number or similar identifier 1 2 3 4 5 6 7 8 key points the agent is named walt flood realty a hawaii sole proprietorship 1 2 3 4 5 6 7 8 no license number for the agent is mentioned in any of the provided documents 1 2 3 4 5 6 7 8 response the requested information was not found in the available documents",
+            "citations_sig": [
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43",
+              "doc_18cad577afa94c5890b22f4a776d7f43"
+            ],
+            "evidence_path_sig": [
+              "Agent",
+              "Owner",
+              "Agreement",
+              "property",
+              "Contoso Ltd.",
+              "2010-06-15",
+              "Liability Insurance coverage",
+              "rental rates",
+              "Principal Broker",
+              "Short Term and/or Vacation/Holiday Rentals",
+              "certificate of insurance",
+              "initial property inspection",
+              "Monthly statement",
+              "charge",
+              "Pacific View Retreat",
+              "Twelve months",
+              "U.S. Federal Tax Id",
+              "General Excise Tax License",
+              "456 Palm Tree Avenue, Honolulu, HI 96815",
+              "advertising for short-term (vacation rentals)"
+            ],
+            "elapsed_ms": 4748,
+            "full_response": {
+              "response": "## Summary\n\nThe property management Agent's license number is not provided in the available documents. The documents identify the Agent as \"Walt Flood Realty, a Hawaii sole proprietorship,\" but do not include any license number or similar identifier [1][2][3][4][5][6][7][8].\n\n## Key Points\n\n- The Agent is named \"Walt Flood Realty, a Hawaii sole proprietorship\" [1][2][3][4][5][6][7][8].\n- No license number for the Agent is mentioned in any of the provided documents [1][2][3][4][5][6][7][8].\n\nResponse: The requested information was not found in the available documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_0",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_21",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_23",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_19",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_42",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_7",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 7,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_2",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                },
+                {
+                  "index": 8,
+                  "chunk_id": "doc_18cad577afa94c5890b22f4a776d7f43_sent_27",
+                  "document_id": "doc_18cad577afa94c5890b22f4a776d7f43",
+                  "document_title": "PROPERTY MANAGEMENT AGREEMENT",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "THIS AGREEMENT, by and between: Contoso Ltd.\n(hereinafter called \"Owner\")\nand Walt Flood Realty, a H..."
+                }
+              ],
+              "evidence_path": [
+                "Agent",
+                "Owner",
+                "Agreement",
+                "property",
+                "Contoso Ltd.",
+                "2010-06-15",
+                "Liability Insurance coverage",
+                "rental rates",
+                "Principal Broker",
+                "Short Term and/or Vacation/Holiday Rentals",
+                "certificate of insurance",
+                "initial property inspection",
+                "Monthly statement",
+                "charge",
+                "Pacific View Retreat",
+                "Twelve months",
+                "U.S. Federal Tax Id",
+                "General Excise Tax License",
+                "456 Palm Tree Avenue, Honolulu, HI 96815",
+                "advertising for short-term (vacation rentals)"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 8,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 224,
+                  "step_2_parallel_ms": 1721,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 5,
+                  "step_5_synthesis_ms": 1810,
+                  "total_ms": 3763
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4748,
+          "latency_ms_p95": 4748,
+          "latency_ms_min": 4748,
+          "latency_ms_max": 4748
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N8",
+        "query": "What is the purchase contract’s required **wire transfer / ACH instructions**?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe available evidence does not provide any wire transfer or ACH instructions, such as bank account numbers, routing numbers, or payment processing details, within the purchase contract or related documents. The contract references initial payment requirements and identifies the parties involved, but does not specify the method, account, or instructions for wire transfer or ACH payments [1][2][3][4][5][6].\n\n## Key Points\n\n- The purchase contract does not include wire transfer or ACH instructions, such as bank account numbers or routing numbers [1][2][3][4][5][6].\n- Payment terms are referenced (e.g., initial payment required), but no specific electronic payment instructions are provided [1][2][3][4][5][6].\n\nResponse: The requested information was not found in the available documents.",
+            "text_norm": "summary the available evidence does not provide any wire transfer or ach instructions such as bank account numbers routing numbers or payment processing details within the purchase contract or related documents the contract references initial payment requirements and identifies the parties involved but does not specify the method account or instructions for wire transfer or ach payments 1 2 3 4 5 6 key points the purchase contract does not include wire transfer or ach instructions such as bank account numbers or routing numbers 1 2 3 4 5 6 payment terms are referenced e g initial payment required but no specific electronic payment instructions are provided 1 2 3 4 5 6 response the requested information was not found in the available documents",
+            "citations_sig": [
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+              "doc_1b7819ecc0d340c6af9adc3f8900fb66"
+            ],
+            "evidence_path_sig": [
+              "delivery",
+              "This contract",
+              "Customer",
+              "Fabrikam Inc.",
+              "Size: 42\" x 62\"",
+              "Contractor",
+              "Custom cab",
+              "110 VAC 60",
+              "12/17/2015",
+              "Jim Contoso",
+              "8-10 weeks after drawing approval",
+              "3 business days",
+              "Full Refund",
+              "$20,000.00",
+              "signing",
+              "$7,000.00",
+              "Flush-mount Hall Call stations",
+              "upper & lower",
+              "mutual signature and initial payment",
+              "State of Florida"
+            ],
+            "elapsed_ms": 4030,
+            "full_response": {
+              "response": "## Summary\n\nThe available evidence does not provide any wire transfer or ACH instructions, such as bank account numbers, routing numbers, or payment processing details, within the purchase contract or related documents. The contract references initial payment requirements and identifies the parties involved, but does not specify the method, account, or instructions for wire transfer or ACH payments [1][2][3][4][5][6].\n\n## Key Points\n\n- The purchase contract does not include wire transfer or ACH instructions, such as bank account numbers or routing numbers [1][2][3][4][5][6].\n- Payment terms are referenced (e.g., initial payment required), but no specific electronic payment instructions are provided [1][2][3][4][5][6].\n\nResponse: The requested information was not found in the available documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_5",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "This contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box ..."
+                },
+                {
+                  "index": 2,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_1",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "This contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box ..."
+                },
+                {
+                  "index": 3,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_11",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "This contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box ..."
+                },
+                {
+                  "index": 4,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_3",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "This contract is entered into by and between Contoso Lifts LLC. (Contractor), located at ,\nP.O. Box ..."
+                },
+                {
+                  "index": 5,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_25",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@f..."
+                },
+                {
+                  "index": 6,
+                  "chunk_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66_sent_27",
+                  "document_id": "doc_1b7819ecc0d340c6af9adc3f8900fb66",
+                  "document_title": "purchase contract",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Job Name: Bayfront Animal Clinic\nContact: Elizabeth Nolasco\nPhone: (813) 902-4455\n\nEmail: enolasco@f..."
+                }
+              ],
+              "evidence_path": [
+                "delivery",
+                "This contract",
+                "Customer",
+                "Fabrikam Inc.",
+                "Size: 42\" x 62\"",
+                "Contractor",
+                "Custom cab",
+                "110 VAC 60",
+                "12/17/2015",
+                "Jim Contoso",
+                "8-10 weeks after drawing approval",
+                "3 business days",
+                "Full Refund",
+                "$20,000.00",
+                "signing",
+                "$7,000.00",
+                "Flush-mount Hall Call stations",
+                "upper & lower",
+                "mutual signature and initial payment",
+                "State of Florida"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 214,
+                  "step_2_parallel_ms": 748,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 6,
+                  "step_5_synthesis_ms": 2076,
+                  "total_ms": 3047
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4030,
+          "latency_ms_p95": 4030,
+          "latency_ms_min": 4030,
+          "latency_ms_max": 4030
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N9",
+        "query": "What is the exact clause about **mold damage** coverage in the warranty?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "Not found in the provided documents.",
+            "text_norm": "not found in the provided documents",
+            "citations_sig": [],
+            "evidence_path_sig": [
+              "Builder",
+              "damage",
+              "Warranty",
+              "defect",
+              "Buyer/Owner",
+              "defects",
+              "Limited Warranty",
+              "item",
+              "materials",
+              "original home",
+              "damages",
+              "defective item",
+              "warping and deflection of wood",
+              "consumer product",
+              "Magnuson-Moss Warranty Act",
+              "manufacturers' warranty",
+              "defect or damage",
+              "Statement of Non-Warranted Conditions",
+              "expansion",
+              "contraction"
+            ],
+            "elapsed_ms": 1952,
+            "full_response": {
+              "response": "Not found in the provided documents.",
+              "route_used": "route_7_hipporag2",
+              "citations": [],
+              "evidence_path": [
+                "Builder",
+                "damage",
+                "Warranty",
+                "defect",
+                "Buyer/Owner",
+                "defects",
+                "Limited Warranty",
+                "item",
+                "materials",
+                "original home",
+                "damages",
+                "defective item",
+                "warping and deflection of wood",
+                "consumer product",
+                "Magnuson-Moss Warranty Act",
+                "manufacturers' warranty",
+                "defect or damage",
+                "Statement of Non-Warranted Conditions",
+                "expansion",
+                "contraction"
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 7,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 211,
+                  "step_2_parallel_ms": 735,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 5,
+                  "step_5_synthesis_ms": 546,
+                  "total_ms": 1499
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 1952,
+          "latency_ms_p95": 1952,
+          "latency_ms_min": 1952,
+          "latency_ms_max": 1952
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      },
+      {
+        "qid": "Q-N10",
+        "query": "What is the invoice **shipping method** (value in \"SHIPPED VIA\")?",
+        "runs": [
+          {
+            "run": 1,
+            "text": "## Summary\n\nThe invoice from Contoso Lifts LLC includes a table with a column labeled \"SHIPPED VIA,\" which is intended to indicate the shipping method. However, the corresponding cell for \"SHIPPED VIA\" in the invoice is blank, and no shipping method is specified in the available evidence [1].\n\n## Key Points\n\n- The \"SHIPPED VIA\" field in the invoice is present but contains no value; the shipping method is not specified [1].",
+            "text_norm": "summary the invoice from contoso lifts llc includes a table with a column labeled shipped via which is intended to indicate the shipping method however the corresponding cell for shipped via in the invoice is blank and no shipping method is specified in the available evidence 1 key points the shipped via field in the invoice is present but contains no value the shipping method is not specified 1",
+            "citations_sig": [
+              "doc_04b6b0870e5b46b68427a0390e1ae520"
+            ],
+            "evidence_path_sig": [
+              "29900.00",
+              "110 VAC 60",
+              "Contoso Lifts LLC",
+              "Size: 42\" x 62\"",
+              "Vertical Platform Lift (Savaria V1504)",
+              "delivery",
+              "Outdoor fitting",
+              "Hall Call stations for bottom and upper landing",
+              "12/17/2015",
+              "Jim Contoso",
+              "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+              "SUBTOTAL: TAX",
+              "SUBTOTAL: AMOUNT DUE",
+              "SUBTOTAL: TOTAL",
+              "Contractor",
+              "John Doe",
+              "Fabrikam Construction",
+              "Dayton, FL",
+              "This contract",
+              "Contoso Ltd."
+            ],
+            "elapsed_ms": 4630,
+            "full_response": {
+              "response": "## Summary\n\nThe invoice from Contoso Lifts LLC includes a table with a column labeled \"SHIPPED VIA,\" which is intended to indicate the shipping method. However, the corresponding cell for \"SHIPPED VIA\" in the invoice is blank, and no shipping method is specified in the available evidence [1].\n\n## Key Points\n\n- The \"SHIPPED VIA\" field in the invoice is present but contains no value; the shipping method is not specified [1].",
+              "route_used": "route_7_hipporag2",
+              "citations": [
+                {
+                  "index": 1,
+                  "chunk_id": "doc_04b6b0870e5b46b68427a0390e1ae520_sent_0",
+                  "document_id": "doc_04b6b0870e5b46b68427a0390e1ae520",
+                  "document_title": "contoso lifts invoice",
+                  "document_url": "",
+                  "score": 0.0,
+                  "text_preview": "Contoso Lifts LLC\nYour elevator and lift experts\n\nContoso Lifts LLC\nP.O. Box 123567 Key West, FL. 33..."
+                }
+              ],
+              "evidence_path": [
+                "29900.00",
+                "110 VAC 60",
+                "Contoso Lifts LLC",
+                "Size: 42\" x 62\"",
+                "Vertical Platform Lift (Savaria V1504)",
+                "delivery",
+                "Outdoor fitting",
+                "Hall Call stations for bottom and upper landing",
+                "12/17/2015",
+                "Jim Contoso",
+                "80\" High low profile aluminum door with plexi-glass inserts, WR-500 lock, automatic door operator",
+                "SUBTOTAL: TAX",
+                "SUBTOTAL: AMOUNT DUE",
+                "SUBTOTAL: TOTAL",
+                "Contractor",
+                "John Doe",
+                "Fabrikam Construction",
+                "Dayton, FL",
+                "This contract",
+                "Contoso Ltd."
+              ],
+              "metadata": {
+                "architecture": "hipporag2",
+                "damping": 0.5,
+                "triple_top_k": 5,
+                "surviving_triples": 0,
+                "entity_seeds_count": 0,
+                "passage_seeds_count": 20,
+                "passage_node_weight": 0.05,
+                "num_ppr_passages": 12,
+                "num_ppr_entities": 20,
+                "text_chunks_used": 6,
+                "sentence_evidence_count": 0,
+                "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
+                "version": "v7.0",
+                "triple_seeds": [],
+                "timings_ms": {
+                  "step_1_embed_ms": 221,
+                  "step_2_parallel_ms": 741,
+                  "step_3_seed_build_ms": 0,
+                  "step_4_ppr_ms": 5,
+                  "step_5_synthesis_ms": 2637,
+                  "total_ms": 3607
+                }
+              },
+              "raw_extractions": null
+            }
+          }
+        ],
+        "summary": {
+          "text_norm_exact_rate": 1.0,
+          "text_norm_min_similarity": 1.0,
+          "citations_unique": 1,
+          "evidence_path_unique": 1,
+          "citations_jaccard_min": 1.0,
+          "evidence_path_jaccard_min": 1.0,
+          "latency_ms_p50": 4630,
+          "latency_ms_p95": 4630,
+          "latency_ms_min": 4630,
+          "latency_ms_max": 4630
+        },
+        "accuracy": {
+          "is_negative_test": true,
+          "negative_test_pass": true,
+          "exact_match": null,
+          "fuzzy_score": null,
+          "containment": null,
+          "precision": null,
+          "recall": null,
+          "f1_score": null
+        }
+      }
+    ]
+  }
+}

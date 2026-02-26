@@ -16,16 +16,38 @@ V2 Features:
 - Q-D8 document counting fix
 - Section coverage fallback for large documents
 
+Prerequisites:
+    # Required environment variables (set in .env or export):
+    #   NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD
+    #   AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_DEPLOYMENT_NAME
+    #   AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT
+    #   VOYAGE_API_KEY, VOYAGE_V2_ENABLED=true
+    #
+    # Authenticate to Azure (if not using API keys):
+    #   az login
+
 Usage:
     # Fresh indexing (creates new group ID)
-    python3 scripts/index_5pdfs_v2_local.py
+    PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py
 
-    # Re-index existing group
-    export GROUP_ID=test-5pdfs-v2-1234567890
-    python3 scripts/index_5pdfs_v2_local.py
+    # Re-index existing group (deletes old data first)
+    GROUP_ID=test-5pdfs-v2-fix2 PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py
 
     # Dry run (verify setup without indexing)
-    python3 scripts/index_5pdfs_v2_local.py --dry-run
+    PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py --dry-run
+
+Post-indexing workflow:
+    # 1. Start API server (takes ~60-90s for Neo4j schema init)
+    PYTHONPATH=. uvicorn src.api_gateway.main:app --host 0.0.0.0 --port 8000
+
+    # 2. Run Route 7 benchmark
+    PYTHONPATH=. python3 scripts/benchmark_route7_hipporag2.py \\
+        --url http://localhost:8000 --no-auth \\
+        --group-id test-5pdfs-v2-fix2 --repeats 1
+
+    # 3. Evaluate with LLM judge
+    PYTHONPATH=. python3 scripts/evaluate_route4_reasoning.py \\
+        benchmarks/<benchmark_json_file>
 """
 
 import asyncio

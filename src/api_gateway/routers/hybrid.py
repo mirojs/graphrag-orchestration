@@ -1043,7 +1043,13 @@ async def _run_indexing_job(
             pipeline = get_lazygraphrag_indexing_pipeline_v2()
             
             await _indexing_jobs.update(job_id, status="running", progress="Indexing documents...")
-            stats = await pipeline.index_documents(
+            # Run the pipeline in a separate thread with its own event loop
+            # to avoid blocking uvicorn's main event loop (the pipeline has
+            # many synchronous blocking calls: wtpsplit ONNX inference,
+            # Neo4j sync driver, etc.).
+            import asyncio as _aio
+
+            _pipeline_kwargs = dict(
                 group_id=group_id,
                 documents=docs_for_pipeline,
                 reindex=reindex,
@@ -1056,6 +1062,17 @@ async def _run_indexing_job(
                 knn_similarity_cutoff=knn_similarity_cutoff,
                 knn_config=knn_config,
             )
+
+            def _run_pipeline_in_thread():
+                loop = _aio.new_event_loop()
+                try:
+                    return loop.run_until_complete(
+                        pipeline.index_documents(**_pipeline_kwargs)
+                    )
+                finally:
+                    loop.close()
+
+            stats = await _aio.to_thread(_run_pipeline_in_thread)
         
         await _indexing_jobs.update(
             job_id,

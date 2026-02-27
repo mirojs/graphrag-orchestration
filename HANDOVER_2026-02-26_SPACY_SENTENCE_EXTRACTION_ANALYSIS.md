@@ -623,13 +623,24 @@ All 19 questions pass. LLM eval matches the baseline (55/57).
 
 The reindex process consistently gets SIGKILL'd ~80s after start when the API server is also running (combined memory ~6GB peak). Workaround: stop the API server first, then run reindex with SIGTERM handler. The process catches 10+ SIGTERMs but survives as long as system memory is sufficient to avoid SIGKILL escalation.
 
+### Cloud Deployment
+
+Deployed to Azure Container Apps to verify no package conflicts with wtpsplit.
+
+- **wtpsplit 2.2.0** + **onnxruntime 1.24.2** installed cleanly — no conflicts
+- Both `graphrag-api` and `graphrag-worker` deployed successfully
+- Image tag: `a91e107-91`
+- Health check passes: `{"status": "healthy"}`
+- API URL: `https://graphrag-api.salmonhill-df6033f3.swedencentral.azurecontainerapps.io`
+
 ---
 
 ## Git State
 
 ```
-3c61475 (HEAD, main) fix: Cypher25 implicit grouping in delete_document_chunks + noise filters
-869adb7 (origin/main) docs: update handover with wtpsplit benchmark results
+a91e107 (HEAD, main, origin/main) docs: update handover with noise filter + Cypher25 fix results
+3c61475 fix: Cypher25 implicit grouping in delete_document_chunks + noise filters
+869adb7 docs: update handover with wtpsplit benchmark results
 b20351a fix(neo4j-retry): add __getitem__ to _EagerResult for subscript access
 6f4cbdc feat(sentence-extraction): replace spaCy with wtpsplit for sentence splitting
 ```

@@ -520,10 +520,63 @@ These should be applied regardless:
 
 ---
 
+## Phase 4: Implementation & Benchmark Results (2026-02-27)
+
+### Changes Applied
+
+1. **`sentence_extraction_service.py`** — Replaced spaCy with wtpsplit `sat-3l-sm`:
+   - Lazy singleton `_get_sat()` with threading lock (same pattern as old spaCy loader)
+   - `_split_sentences()` helper with `do_paragraph_segmentation=True` for DI text
+   - All 3 public APIs updated: `extract_sentences_from_chunk`, `extract_sentences_from_di_units`, `extract_sentences_from_raw_text`
+
+2. **`requirements.txt`** — Added `wtpsplit>=2.1.0`, `onnxruntime>=1.16.0`
+
+3. **`neo4j_retry.py`** — Fixed `_EagerResult.__getitem__` (missing, caused `TypeError` during reindex)
+
+### Reindex Results (test-5pdfs-v2-fix2)
+
+| Metric | Value |
+|--------|-------|
+| Documents | 5 |
+| Sections | 55 |
+| **Sentences** | **208** (was ~155 with spaCy) |
+| Entities | 240 |
+| MENTIONS edges | 602 |
+| KNN edges | 0 (GDS Aura timeout) |
+| Communities | 0 (GDS Aura timeout) |
+
+### Route 7 Benchmark: spaCy vs wtpsplit
+
+| QID | spaCy Cont | wtpsplit Cont | Δ | spaCy F1 | wtpsplit F1 | Δ |
+|-----|-----------|--------------|-----|---------|------------|-----|
+| Q-D1 | 0.94 | 0.94 | +0.00 | 0.33 | 0.31 | -0.02 |
+| Q-D2 | 0.83 | 0.83 | +0.00 | 0.19 | 0.16 | -0.03 |
+| Q-D3 | 0.41 | **0.71** | **+0.30** | 0.32 | **0.44** | **+0.12** |
+| Q-D4 | 1.00 | 1.00 | +0.00 | 0.51 | 0.41 | -0.10 |
+| Q-D5 | 0.89 | 0.89 | +0.00 | 0.40 | 0.34 | -0.06 |
+| Q-D6 | 0.90 | 0.90 | +0.00 | 0.22 | 0.31 | +0.08 |
+| Q-D7 | 1.00 | 0.87 | -0.13 | 0.50 | 0.43 | -0.07 |
+| Q-D8 | 0.57 | 0.61 | +0.05 | 0.56 | 0.59 | +0.03 |
+| Q-D9 | 0.92 | **1.00** | **+0.08** | 0.32 | 0.35 | +0.04 |
+| Q-D10 | 0.97 | 0.81 | -0.16 | 0.40 | 0.37 | -0.03 |
+| **AVG** | **0.843** | **0.856** | **+0.013** | **0.374** | **0.370** | **-0.004** |
+
+**Negative tests: 9/9 PASS** (unchanged)
+
+### Verdict
+
+- **Containment improved** +1.3% overall, with Q-D3 (time windows) jumping +30 points
+- **F1 roughly neutral** (-0.4%), within single-run variance
+- **Note:** GDS KNN/Louvain failed (Neo4j Aura connectivity) — 0 communities and 0 KNN edges.
+  Regressions on Q-D7/Q-D10 may partly be from missing KNN edges, not from wtpsplit itself.
+- **208 sentences** vs ~155 with spaCy = +34% more sentence nodes in the graph
+
+---
+
 ## Git State
 
 ```
-e720c65 (HEAD, main, origin/main) feat(route7): increase rerank_top_k from 20 to 30
+b20351a (HEAD, main) fix(neo4j-retry): add __getitem__ to _EagerResult for subscript access
+6f4cbdc feat(sentence-extraction): replace spaCy with wtpsplit for sentence splitting
+e720c65 (origin/main) feat(route7): increase rerank_top_k from 20 to 30
 ```
-
-No uncommitted changes — all analysis only, no production code modified.

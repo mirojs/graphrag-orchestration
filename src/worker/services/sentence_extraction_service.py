@@ -139,15 +139,16 @@ def _is_noise_sentence(
     if ADDRESS_ONLY_RE.match(text):
         return True
     # Multi-line form layout blocks (2+ lines with few words per line)
-    if "\n" in text:
+    # But keep blocks containing dollar amounts — those are financial content.
+    if "\n" in text and "$" not in text:
         lines = [l.strip() for l in text.split("\n") if l.strip()]
         if len(lines) >= 3 and all(len(l.split()) <= 4 for l in lines):
             return True
         # 2-line form blocks (e.g. "Authorized Representative\nFabrikam Inc.")
         if len(lines) == 2 and all(len(l.split()) <= 3 for l in lines):
             return True
-    # Subtotal/total aggregation rows in tables
-    if SUBTOTAL_RE.match(text):
+    # Subtotal/total aggregation rows — only noise when value is N/A or missing
+    if SUBTOTAL_RE.match(text) and re.search(r"N/?A|n/?a", text):
         return True
     return False
 
@@ -297,9 +298,28 @@ def extract_sentences_from_chunk(
             })
             idx += 1
 
-    # ─── Source D: Signature block parties — SKIPPED ──────────────
-    # Signatures are structured metadata, not embeddable sentence content.
-    # Entity names are already extracted from body text sentences.
+    # ─── Source D: Signature block ──────────────────────────────
+    # Party names are structured metadata (skip). But signed_date
+    # is a critical fact for date-based queries.
+    sig_block = metadata.get("signature_block", {})
+    if isinstance(sig_block, dict):
+        signed_date = (sig_block.get("signed_date") or "").strip()
+        if signed_date:
+            date_text = f"Signed date: {signed_date}"
+            sentences.append({
+                "id": f"{chunk_id}_sent_{idx}",
+                "text": date_text,
+                "chunk_id": chunk_id,
+                "document_id": document_id,
+                "source": "signature_date",
+                "index_in_chunk": idx,
+                "section_path": section_path,
+                "page": metadata.get("page_number"),
+                "confidence": 1.0,
+                "tokens": len(date_text.split()),
+                "parent_text": "",
+            })
+            idx += 1
 
     return sentences
 
@@ -521,10 +541,37 @@ def extract_sentences_from_di_units(
                 })
                 global_idx += 1
 
-        # ─── Source D: Signature parties — SKIPPED ─────────────────
-        # Per architecture doc: signatures are structured metadata,
-        # not embeddable sentence content.  Entity names (Contoso Ltd.)
-        # are already extracted from body text sentences that reference them.
+        # ─── Source D: Signature block ────────────────────────────
+        # Party names are structured metadata (skip). But signed_date
+        # is a critical fact for date-based queries.
+        sig_block = meta.get("signature_block", {})
+        if isinstance(sig_block, dict):
+            signed_date = (sig_block.get("signed_date") or "").strip()
+            if signed_date:
+                date_text = f"Signed date: {signed_date}"
+                text_key = date_text.strip().lower()
+                if text_key not in seen_texts:
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    section_key = section_path or "[Document Root]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": date_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "signature_date",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": section_path,
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(date_text.split()),
+                        "parent_text": "",
+                        "index_in_section": idx_in_section,
+                    })
+                    global_idx += 1
 
     # Backfill total_in_section from section_counters
     for sent in all_sentences:

@@ -1,8 +1,9 @@
 """
-Unit Tests: Embedding Dimensions (3072 for text-embedding-3-large)
+Unit Tests: Embedding Dimensions (2048 for Voyage voyage-context-3)
 
-Verifies that all embedding-related code uses 3072 dimensions
-for text-embedding-3-large, not the old 1536 for text-embedding-3-small.
+Verifies that all embedding-related code uses 2048 dimensions
+for Voyage voyage-context-3 (the current embedding model).
+Previously used text-embedding-3-large (3072 dims) — now deprecated.
 
 Run: pytest tests/unit/test_embeddings.py -v
 """
@@ -11,9 +12,10 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock
 from typing import List
 
-# Expected dimensions for text-embedding-3-large
-EXPECTED_DIMENSIONS = 3072
-OLD_DIMENSIONS = 1536  # text-embedding-3-small (deprecated)
+# Expected dimensions for voyage-context-3
+EXPECTED_DIMENSIONS = 2048
+OLD_DIMENSIONS = 3072  # text-embedding-3-large (V1 deprecated)
+LEGACY_DIMENSIONS = 1536  # text-embedding-3-small (very old, deprecated)
 
 
 # ============================================================================
@@ -24,22 +26,22 @@ class TestEmbeddingDimensions:
     """Test that embeddings use correct dimensions."""
     
     def test_embedding_dimensions_constant(self, test_config):
-        """Test that test config uses 3072 dimensions."""
+        """Test that test config uses 2048 dimensions."""
         assert test_config["embedding_dimensions"] == EXPECTED_DIMENSIONS
     
-    def test_mock_embedder_uses_3072(self, mock_embedder):
-        """Test that mock embedder returns 3072-dim vectors."""
+    def test_mock_embedder_uses_2048(self, mock_embedder):
+        """Test that mock embedder returns 2048-dim vectors."""
         embedding = mock_embedder.get_text_embedding("test text")
         assert len(embedding) == EXPECTED_DIMENSIONS
     
     @pytest.mark.asyncio
-    async def test_async_embedder_uses_3072(self, mock_embedder):
-        """Test that async mock embedder returns 3072-dim vectors."""
+    async def test_async_embedder_uses_2048(self, mock_embedder):
+        """Test that async mock embedder returns 2048-dim vectors."""
         embedding = await mock_embedder.aget_text_embedding("test text")
         assert len(embedding) == EXPECTED_DIMENSIONS
     
-    def test_batch_embeddings_use_3072(self, mock_embedder):
-        """Test that batch embeddings return 3072-dim vectors."""
+    def test_batch_embeddings_use_2048(self, mock_embedder):
+        """Test that batch embeddings return 2048-dim vectors."""
         texts = ["text 1", "text 2", "text 3"]
         embeddings = mock_embedder.embed_documents(texts)
         
@@ -55,26 +57,26 @@ class TestEmbeddingDimensions:
 class TestEmbeddingConfiguration:
     """Test embedding configuration settings."""
     
-    def test_config_model_is_large(self, test_config):
-        """Test that config specifies text-embedding-3-large."""
-        assert test_config["embedding_model"] == "text-embedding-3-large"
-        assert "small" not in test_config["embedding_model"]
+    def test_config_model_is_voyage(self, test_config):
+        """Test that config specifies voyage-context-3."""
+        assert test_config["embedding_model"] == "voyage-context-3"
+    
+    def test_dimensions_not_3072(self, test_config):
+        """Test that dimensions are NOT the old V1 3072."""
+        assert test_config["embedding_dimensions"] != OLD_DIMENSIONS
     
     def test_dimensions_not_1536(self, test_config):
-        """Test that dimensions are NOT the old 1536."""
-        assert test_config["embedding_dimensions"] != OLD_DIMENSIONS
+        """Test that dimensions are NOT the legacy 1536."""
+        assert test_config["embedding_dimensions"] != LEGACY_DIMENSIONS
     
     def test_dimensions_match_model(self, test_config):
         """Test that dimensions match the model."""
         model = test_config["embedding_model"]
         dims = test_config["embedding_dimensions"]
         
-        # text-embedding-3-large should use 3072
-        if "large" in model:
-            assert dims == 3072
-        elif "small" in model:
-            # This shouldn't happen in current config
-            assert dims == 1536
+        # voyage-context-3 uses 2048
+        if "voyage" in model:
+            assert dims == 2048
 
 
 # ============================================================================
@@ -84,32 +86,33 @@ class TestEmbeddingConfiguration:
 class TestSourceCodeDimensions:
     """Test that source code uses correct dimensions."""
     
-    def test_config_py_dimensions(self):
-        """Test that config.py specifies 3072."""
+    def test_config_py_voyage_dimensions(self):
+        """Test that config.py specifies 2048 for Voyage."""
         try:
-            from app.core.config import settings
-            assert settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS == EXPECTED_DIMENSIONS
+            from src.core.config import settings
+            assert settings.VOYAGE_EMBEDDING_DIM == EXPECTED_DIMENSIONS
         except ImportError:
             pytest.skip("Config module not available")
     
     def test_indexing_pipeline_dimensions(self):
-        """Test that indexing pipeline uses 3072."""
+        """Test that V2 indexing pipeline defaults to 2048."""
         try:
-            from app.v3.services.indexing_pipeline import IndexingConfig
-            config = IndexingConfig()
+            from src.worker.hybrid_v2.indexing.lazygraphrag_pipeline import LazyGraphRAGIndexingConfig
+            config = LazyGraphRAGIndexingConfig()
             assert config.embedding_dimensions == EXPECTED_DIMENSIONS
         except ImportError:
-            pytest.skip("IndexingConfig not available")
+            pytest.skip("LazyGraphRAGIndexingConfig not available")
     
-    def test_drift_adapter_dimensions(self):
-        """Test that DRIFT adapter uses 3072."""
+    def test_algorithm_registry_v2_dimensions(self):
+        """Test that V2 algorithm registry uses 2048."""
         try:
-            from app.v3.services.drift_adapter import Neo4jDRIFTVectorStore
-            # Default should be 3072
-            # Can't easily test without instantiation
-            assert True
+            from src.core.algorithm_registry import ALGORITHM_VERSIONS
+            v2 = ALGORITHM_VERSIONS.get("v2")
+            if v2:
+                assert v2.embedding_dim == EXPECTED_DIMENSIONS
+                assert v2.embedding_model == "voyage-context-3"
         except ImportError:
-            pytest.skip("DRIFTAdapter not available")
+            pytest.skip("Algorithm registry not available")
 
 
 # ============================================================================
@@ -149,28 +152,19 @@ class TestVectorCompatibility:
 class TestNeo4jIndexDimensions:
     """Test Neo4j vector index dimension requirements."""
     
-    def test_entity_embedding_index_dimensions(self):
-        """Test that entity_embedding index expects 3072 dims."""
+    def test_entity_embedding_v2_index_dimensions(self):
+        """Test that entity_embedding_v2 index expects 2048 dims."""
         expected_index_config = {
-            "name": "entity_embedding",
+            "name": "entity_embedding_v2",
             "dimensions": EXPECTED_DIMENSIONS,
             "similarity": "cosine",
         }
         assert expected_index_config["dimensions"] == EXPECTED_DIMENSIONS
     
-    def test_chunk_vector_index_dimensions(self):
-        """Test that chunk_vector index expects 3072 dims."""
+    def test_sentence_embeddings_v2_index_dimensions(self):
+        """Test that sentence_embeddings_v2 index expects 2048 dims."""
         expected_index_config = {
-            "name": "chunk_vector",
-            "dimensions": EXPECTED_DIMENSIONS,
-            "similarity": "cosine",
-        }
-        assert expected_index_config["dimensions"] == EXPECTED_DIMENSIONS
-    
-    def test_raptor_embedding_index_dimensions(self):
-        """Test that raptor_embedding index expects 3072 dims."""
-        expected_index_config = {
-            "name": "raptor_embedding",
+            "name": "sentence_embeddings_v2",
             "dimensions": EXPECTED_DIMENSIONS,
             "similarity": "cosine",
         }
@@ -186,19 +180,19 @@ class TestDimensionMismatchErrors:
     
     def test_mismatch_error_message_is_clear(self):
         """Test that dimension mismatch produces clear error."""
-        error_message = "Index query vector has 3072 dimensions, but indexed vectors have 1536"
+        error_message = "Index query vector has 2048 dimensions, but indexed vectors have 3072"
         
+        assert "2048" in error_message
         assert "3072" in error_message
-        assert "1536" in error_message
         assert "dimensions" in error_message
     
-    def test_can_detect_old_index(self):
-        """Test detection of old 1536-dim indexes."""
+    def test_can_detect_old_v1_index(self):
+        """Test detection of old V1 3072-dim indexes."""
         old_index_dimensions = OLD_DIMENSIONS
         current_embedding_dimensions = EXPECTED_DIMENSIONS
         
         is_mismatch = old_index_dimensions != current_embedding_dimensions
-        assert is_mismatch, "Should detect mismatch between old index and new embeddings"
+        assert is_mismatch, "Should detect mismatch between V1 index and V2 embeddings"
 
 
 # ============================================================================
@@ -206,24 +200,21 @@ class TestDimensionMismatchErrors:
 # ============================================================================
 
 class TestDimensionMigration:
-    """Test that migration from 1536 to 3072 is complete."""
+    """Test that migration from OpenAI 3072 to Voyage 2048 is reflected in config."""
     
-    def test_no_hardcoded_1536_in_config(self):
-        """Test that config doesn't have hardcoded 1536."""
+    def test_voyage_is_enabled(self):
+        """Test that Voyage V2 is enabled."""
         try:
-            from app.core.config import settings
-            # Check that the setting exists and is 3072
-            dims = settings.AZURE_OPENAI_EMBEDDING_DIMENSIONS
-            assert dims != OLD_DIMENSIONS, f"Config still has old dimensions: {dims}"
+            from src.core.config import settings
+            assert settings.VOYAGE_V2_ENABLED is True
         except ImportError:
             pytest.skip("Config not available")
     
-    def test_embedding_model_name_is_large(self):
-        """Test that embedding model name is text-embedding-3-large."""
+    def test_voyage_model_name(self):
+        """Test that Voyage model name is voyage-context-3."""
         try:
-            from app.core.config import settings
-            model = settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT
-            assert "large" in model.lower(), f"Expected large model, got: {model}"
+            from src.core.config import settings
+            assert settings.VOYAGE_MODEL_NAME == "voyage-context-3"
         except ImportError:
             pytest.skip("Config not available")
 
@@ -235,13 +226,13 @@ class TestDimensionMigration:
 class TestEmbeddingRegression:
     """Regression tests for embedding issues."""
     
-    def test_fallback_zero_vector_is_3072(self):
-        """Test that fallback zero vectors use 3072 dimensions."""
+    def test_fallback_zero_vector_is_2048(self):
+        """Test that fallback zero vectors use 2048 dimensions."""
         fallback_vector = [0.0] * EXPECTED_DIMENSIONS
         assert len(fallback_vector) == EXPECTED_DIMENSIONS
     
-    def test_mock_vectors_in_tests_are_3072(self, mock_retrieval_results):
-        """Test that mock retrieval results use 3072-dim compatible data."""
+    def test_mock_vectors_in_tests_are_2048(self, mock_retrieval_results):
+        """Test that mock retrieval results use 2048-dim compatible data."""
         # The mock doesn't store embeddings directly, but metadata should be consistent
         for result in mock_retrieval_results:
             assert result.score >= 0.0

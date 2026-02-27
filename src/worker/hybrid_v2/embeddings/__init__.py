@@ -2,7 +2,7 @@
 V2 Embeddings module for Voyage AI contextual embeddings.
 
 This module provides the embedding service for V2 section-aware chunking
-using voyage-3-large (2048 dimensions) with native contextual embedding support.
+using voyage-context-3 (2048 dimensions) with native contextual embedding support.
 
 Key feature: Uses tuples (chunk, context) for contextual embeddings.
 Docs: https://docs.voyageai.com/docs/contextualized-chunk-embeddings

@@ -124,7 +124,8 @@ class Neo4jHybridSearchService:
             
             if not existing:
                 # Create vector index on entity embeddings
-                # Note: dimensions should match your embedding model (3072 for text-embedding-3-large)
+                # Note: dimensions match V1 legacy embedding model (3072 for text-embedding-3-large)
+                # V2 uses Voyage voyage-context-3 (2048 dims) with separate indexes
                 create_vec_query = f"""
                 CREATE VECTOR INDEX {self.vector_index_name} IF NOT EXISTS
                 FOR (e:Entity)

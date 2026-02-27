@@ -6,7 +6,7 @@
 ✅ 216 tests passed
 ✅ All 4 routes operational  
 ✅ Service deployed and healthy
-✅ 3072-dimension embeddings working
+✅ 2048-dimension Voyage embeddings working
 ✅ Neo4j cleaned and indexed
 ```
 
@@ -100,7 +100,7 @@ python scripts/check_test_data.py
 
 - **URL**: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
 - **Health**: ✅ Healthy
-- **Embedding**: text-embedding-3-large (3072 dims)
+- **Embedding**: voyage-context-3 (2048 dims)
 - **Neo4j**: 55 nodes, 5 communities
 - **Status**: 🚀 PRODUCTION READY
 

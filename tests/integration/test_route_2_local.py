@@ -31,7 +31,7 @@ try:
     )
 except ImportError:
     # Fallback for direct pytest execution
-    EMBEDDING_DIMENSIONS = 3072
+    EMBEDDING_DIMENSIONS = 2048
     LATENCY_ROUTE_2 = 5.0
     DEFAULT_GROUP_ID = "test-group"
 

@@ -44,6 +44,8 @@ class DimensionAwareAzureEmbeddings(AzureOpenAIEmbeddings):
     
     text-embedding-3-large supports configurable dimensions up to 3072.
     This wrapper ensures the dimensions parameter is always passed to the API.
+    
+    NOTE: This is V1 legacy. V2 uses Voyage voyage-context-3 (2048 dims) via VoyageEmbedService.
     """
     
     def __init__(self, dimensions: int = 3072, **kwargs):

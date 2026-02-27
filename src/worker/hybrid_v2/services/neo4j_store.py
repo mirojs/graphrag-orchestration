@@ -305,7 +305,7 @@ class Neo4jStoreV3:
             for query in vector_indexes:
                 try:
                     session.run(query)
-                    logger.info(f"Created vector index with 3072 dimensions")
+                    logger.info("Created vector index with 2048 dimensions (voyage-context-3)")
                 except Exception as e:
                     logger.warning(f"Vector index creation failed: {e}")
         

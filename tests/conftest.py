@@ -9,7 +9,7 @@ All fixtures are designed for the 4-route hybrid architecture:
 - Route 4: DRIFT Multi-Hop (ambiguous queries)
 
 Configuration:
-- Embedding dimensions: 3072 (text-embedding-3-large)
+- Embedding dimensions: 2048 (Voyage voyage-context-3)
 - Neo4j: Aura instance with vector indexes
 - Azure OpenAI: gpt-4o, gpt-4o-mini, gpt-4.1
 """
@@ -24,7 +24,7 @@ from unittest.mock import MagicMock, AsyncMock
 # Constants (aligned with current architecture)
 # ============================================================================
 
-EMBEDDING_DIMENSIONS = 3072  # text-embedding-3-large
+EMBEDDING_DIMENSIONS = 2048  # voyage-context-3
 DEFAULT_TOP_K = 10
 DEFAULT_GROUP_ID = "test-group"
 
@@ -44,7 +44,7 @@ def test_config() -> Dict[str, Any]:
     """Session-wide test configuration."""
     return {
         "embedding_dimensions": EMBEDDING_DIMENSIONS,
-        "embedding_model": "text-embedding-3-large",
+        "embedding_model": "voyage-context-3",
         "default_group_id": DEFAULT_GROUP_ID,
         "neo4j_uri": os.getenv("NEO4J_URI", "neo4j+s://a86dcf63.databases.neo4j.io"),
         "azure_openai_endpoint": os.getenv("AZURE_OPENAI_ENDPOINT", ""),
@@ -56,12 +56,12 @@ def test_config() -> Dict[str, Any]:
 
 
 # ============================================================================
-# Mock Embedding Model (3072 dimensions)
+# Mock Embedding Model (2048 dimensions — Voyage voyage-context-3)
 # ============================================================================
 
 @pytest.fixture
 def mock_embedder():
-    """Mock embedding model that returns 3072-dimensional vectors."""
+    """Mock embedding model that returns 2048-dimensional vectors (Voyage voyage-context-3)."""
     embedder = MagicMock()
     
     # Sync methods
@@ -80,7 +80,7 @@ def mock_embedder():
     
     # Metadata
     embedder.dimensions = EMBEDDING_DIMENSIONS
-    embedder.model_name = "text-embedding-3-large"
+    embedder.model_name = "voyage-context-3"
     
     return embedder
 

@@ -11,14 +11,15 @@ Enterprise-grade knowledge graph service using Neo4j GraphRAG for intelligent do
   - Text-to-Cypher (LLM-generated graph queries)
 - **Document Indexing**: SimpleKGPipeline with automatic entity resolution
 - **Multi-tenancy**: Group-based data isolation
-- **Azure OpenAI**: GPT-4o + text-embedding-3-large (3072 dimensions)
+- **Voyage AI**: voyage-context-3 contextual embeddings (2048 dimensions)
 - **91% Code Reduction**: Replaced 1,636 lines with ~150 lines
 
 ## 📋 Prerequisites
 
 - Azure subscription
 - Neo4j Aura Pro instance
-- Azure OpenAI service (GPT-4o + text-embedding-3-large)
+- Azure OpenAI service (GPT-4o)
+- Voyage AI API key (voyage-context-3 embeddings)
 - Azure CLI (`az`)
 - Azure Developer CLI (`azd`)
 - Python 3.11+
@@ -35,9 +36,8 @@ Enterprise-grade knowledge graph service using Neo4j GraphRAG for intelligent do
 │  ├─ Text2CypherRetriever               │
 │  └─ SimpleKGPipeline (Indexing)        │
 ├─────────────────────────────────────────┤
-│  Azure OpenAI                           │
-│  ├─ LLM: gpt-4o                        │
-│  └─ Embeddings: text-embedding-3-large │
+│  Voyage AI                                │
+│  └─ Embeddings: voyage-context-3 (2048d) │
 ├─────────────────────────────────────────┤
 │  Neo4j Aura Pro (Graph Database)       │
 │  └─ Group-aware multi-tenancy          │
@@ -69,9 +69,11 @@ Create `.env` file:
 AZURE_OPENAI_ENDPOINT=https://your-openai.openai.azure.com/
 AZURE_OPENAI_API_KEY=your-api-key
 AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4o
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-large
-AZURE_OPENAI_EMBEDDING_DIMENSIONS=3072
-AZURE_OPENAI_API_VERSION=2024-10-21
+
+# Voyage AI Embeddings
+VOYAGE_API_KEY=your-voyage-api-key
+VOYAGE_MODEL_NAME=voyage-context-3
+VOYAGE_EMBEDDING_DIM=2048
 
 # Neo4j
 NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io

@@ -9,7 +9,7 @@ These tests validate the deployed Azure Container App against:
 Prerequisites:
 - GRAPHRAG_CLOUD_URL environment variable set
 - TEST_GROUP_ID with indexed documents
-- Documents indexed with text-embedding-3-large (3072 dims)
+- Documents indexed with Voyage voyage-context-3 (2048 dims)
 
 Run:
     pytest tests/cloud/ -v --cloud

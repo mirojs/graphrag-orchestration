@@ -32,7 +32,7 @@ try:
     )
 except ImportError:
     # Fallback for direct pytest execution
-    EMBEDDING_DIMENSIONS = 3072
+    EMBEDDING_DIMENSIONS = 2048
     LATENCY_ROUTE_4 = 20.0
     DEFAULT_GROUP_ID = "test-group"
 
@@ -69,7 +69,7 @@ def mock_drift_vector_store():
     """Mock DRIFT vector store."""
     store = MagicMock()
     
-    # 3072-dimensional vectors
+    # 2048-dimensional vectors (Voyage voyage-context-3)
     store.embedding_dimensions = EMBEDDING_DIMENSIONS
     store.search = MagicMock(return_value=[
         {"node_id": "n1", "score": 0.92, "text": "Contract reference"},
@@ -140,9 +140,9 @@ class TestDRIFTVectorStore:
     """Test DRIFT vector store functionality."""
     
     def test_vector_store_uses_correct_dimensions(self, mock_drift_vector_store):
-        """Test that DRIFT uses 3072 dimensions."""
+        """Test that DRIFT uses 2048 dimensions (Voyage voyage-context-3)."""
         assert mock_drift_vector_store.embedding_dimensions == EMBEDDING_DIMENSIONS
-        assert mock_drift_vector_store.embedding_dimensions == 3072
+        assert mock_drift_vector_store.embedding_dimensions == 2048
     
     def test_vector_store_returns_ranked_results(self, mock_drift_vector_store):
         """Test that search returns ranked results."""

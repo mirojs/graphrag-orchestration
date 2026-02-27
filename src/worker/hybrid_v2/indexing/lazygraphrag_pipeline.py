@@ -176,7 +176,7 @@ def _entity_mentioned_in_text(name: str, aliases: List[str], text: str) -> bool:
 class LazyGraphRAGIndexingConfig:
     chunk_size: int = 512
     chunk_overlap: int = 64
-    embedding_dimensions: int = 3072
+    embedding_dimensions: int = 2048  # voyage-context-3
     # Phase 2: neo4j-graphrag LLMEntityRelationExtractor (DEFAULT for easy re-indexing)
     use_native_extractor: bool = True
     # Validation thresholds for reliable indexing (Option 2)

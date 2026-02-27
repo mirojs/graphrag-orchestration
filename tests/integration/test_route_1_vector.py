@@ -29,7 +29,7 @@ try:
     )
 except ImportError:
     # Fallback for direct pytest execution
-    EMBEDDING_DIMENSIONS = 3072
+    EMBEDDING_DIMENSIONS = 2048
     LATENCY_ROUTE_1 = 2.0
     DEFAULT_GROUP_ID = "test-group"
 
@@ -120,7 +120,7 @@ class TestVectorSearch:
         assert results[0]["score"] > 0.5
     
     def test_vector_search_uses_correct_dimensions(self, mock_embedder):
-        """Test that vector search uses 3072-dim embeddings."""
+        """Test that vector search uses 2048-dim embeddings (Voyage voyage-context-3)."""
         embedding = mock_embedder.embed_query("test query")
         
         assert len(embedding) == EMBEDDING_DIMENSIONS

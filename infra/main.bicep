@@ -216,6 +216,7 @@ module graphragApi './core/host/container-app.bicep' = {
         name: 'AZURE_OPENAI_INDEXING_DEPLOYMENT'
         value: 'gpt-4.1'
       }
+      // DEPRECATED: V1 legacy OpenAI embedding settings (V2 uses Voyage voyage-context-3 / 2048 dims)
       {
         name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
         value: 'text-embedding-3-large'
@@ -417,6 +418,7 @@ var sharedEnvVars = [
     name: 'AZURE_OPENAI_INDEXING_DEPLOYMENT'
     value: 'gpt-4.1'
   }
+  // DEPRECATED: V1 legacy OpenAI embedding settings (V2 uses Voyage voyage-context-3 / 2048 dims)
   {
     name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
     value: 'text-embedding-3-large'

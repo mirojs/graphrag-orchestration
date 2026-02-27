@@ -1382,6 +1382,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                sent.text AS text,
                sent.source AS source,
                sent.section_path AS section_path,
+               sent.hierarchical_id AS hierarchical_id,
                sent.page AS page,
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
@@ -1427,6 +1428,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
                 "section_path": r.get("section_path", ""),
+                "hierarchical_id": r.get("hierarchical_id", ""),
                 "page": r.get("page"),
                 "sentence_id": sid,
             })

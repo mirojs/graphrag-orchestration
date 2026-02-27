@@ -462,6 +462,7 @@ class DRIFTHandler(BaseRouteHandler):
                     document_url=c.get("document_url", "") or c.get("document_source", "") or meta.get("url", ""),
                     page_number=c.get("page_number") or meta.get("page_number"),
                     section_path=section_path,
+                    hierarchical_id=meta.get("hierarchical_id") or c.get("hierarchical_id", ""),
                     start_offset=c.get("start_offset") or meta.get("start_offset"),
                     end_offset=c.get("end_offset") or meta.get("end_offset"),
                     score=c.get("score", 0.0),
@@ -1211,14 +1212,15 @@ Sub-questions:"""
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
 
-        // Expand via NEXT for local context (1 hop each direction)
-        OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
-        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
+        // Expand via NEXT_IN_SECTION for section-bounded context (1 hop each direction)
+        OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
+        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(sent)
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
                sent.section_path AS section_path,
+               sent.hierarchical_id AS hierarchical_id,
                sent.page AS page,
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
@@ -1279,6 +1281,7 @@ Sub-questions:"""
                 "document_title": r.get("document_title", "Unknown"),
                 "document_id": r.get("document_id", ""),
                 "section_path": r.get("section_path", ""),
+                "hierarchical_id": r.get("hierarchical_id", ""),
                 "page": r.get("page"),
                 "sentence_id": sid,
             })

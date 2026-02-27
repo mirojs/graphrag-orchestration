@@ -523,6 +523,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                         page_number=c.get("page_number")
                         or meta.get("page_number"),
                         section_path=section_path,
+                        hierarchical_id=meta.get("hierarchical_id") or c.get("hierarchical_id", ""),
                         start_offset=c.get("start_offset")
                         or meta.get("start_offset"),
                         end_offset=c.get("end_offset")
@@ -693,13 +694,14 @@ class UnifiedSearchHandler(BaseRouteHandler):
         WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
            OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-        OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
-        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT]->(sent)
+        OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
+        OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(sent)
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
                sent.section_path AS section_path,
+               sent.hierarchical_id AS hierarchical_id,
                sent.page AS page,
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
@@ -762,6 +764,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
                     "document_title": r.get("document_title", "Unknown"),
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_path", ""),
+                    "hierarchical_id": r.get("hierarchical_id", ""),
                     "page": r.get("page"),
                     "sentence_id": sid,
                 }

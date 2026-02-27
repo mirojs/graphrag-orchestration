@@ -18,7 +18,7 @@ from src.core.config import settings
 _neo4j_store = None
 _indexing_pipeline = None
 _indexing_pipeline_v2 = None  # V2 pipeline with Voyage embeddings
-_factory_lock = threading.Lock()
+_factory_lock = threading.RLock()  # RLock: reentrant — get_*_pipeline() holds lock and calls get_neo4j_store()
 
 
 def get_neo4j_store():

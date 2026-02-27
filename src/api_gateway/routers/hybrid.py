@@ -1062,12 +1062,18 @@ async def _run_indexing_job(
             )
 
             def _run_pipeline_in_thread():
+                logger.info("indexing_thread_started", job_id=job_id, group_id=group_id)
                 loop = _aio.new_event_loop()
                 try:
                     async def _do_indexing():
+                        logger.info("indexing_pipeline_factory_start", job_id=job_id)
                         pipeline = get_lazygraphrag_indexing_pipeline_v2()
+                        logger.info("indexing_pipeline_factory_done", job_id=job_id)
                         return await pipeline.index_documents(**_pipeline_kwargs)
                     return loop.run_until_complete(_do_indexing())
+                except Exception:
+                    logger.exception("indexing_thread_error", job_id=job_id)
+                    raise
                 finally:
                     loop.close()
 

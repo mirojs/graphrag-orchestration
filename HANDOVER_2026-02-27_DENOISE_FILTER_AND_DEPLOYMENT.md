@@ -1,7 +1,7 @@
 # Handover: Denoise Filter, Deployment Fixes & Reindex — 2026-02-27
 
 **Date:** 2026-02-27  
-**Status:** Refined denoise filter deployed and reindexed (193 sentences); benchmark pending on new index  
+**Status:** Refined denoise filter deployed and reindexed (193 sentences); signature block semantic synthesis added; benchmark pending on new index  
 **Previous best (pre-denoise):** 56/57 (98.2%) LLM eval — `route7_hipporag2_r4questions_20260226T222346Z` (207 sentences)  
 **Current deployed commit:** `cb8320f fix: preserve signed dates and financial totals in denoise filter`
 
@@ -194,12 +194,12 @@ Two-layer filtering:
 | `ADDRESS_ONLY_RE` | Standalone street + city/state/zip | Addresses embedded in prose |
 | `SUBTOTAL_RE` (N/A only) | Table rows with "N/A" values | Rows with real dollar amounts |
 | Multi-line form (≤4 words × 3+ lines) | Structural form blocks | Blocks containing `$` |
-| Source D party names | "By: X", "Authorized Representative: X" | Signed dates (`source="signature_date"`) |
+| Source D party names | "By: X", "Authorized Representative: X" | Synthesized into semantic sentence via `_synthesize_signature_sentences()` (source=`signature_block`) |
 
 ### 19 Original Noise Items (from 207-sentence audit)
 - 4 HTML artifacts (`<table>`, `<!-- PageBreak -->`) — prevented upstream
-- 4 signature party names — filtered
-- 1 signed date — **preserved** (critical for Q-D7)
+- 4 signature party names — now synthesized into semantic sentences (not filtered)
+- 1 signed date — **preserved** as part of synthesized signature sentence
 - 1 SUBTOTAL with N/A — filtered
 - 2 SUBTOTAL/TOTAL with real amounts — **preserved** (critical for Q-D6)
 - 3 phone/address/form lines — filtered
@@ -207,7 +207,31 @@ Two-layer filtering:
 
 ---
 
-## 8. How to Resume
+## 8. Signature Block Semantic Sentence Synthesis
+
+### Problem
+The denoise filter (round 1) dropped signature party names entirely, and round 2 only preserved `"Signed date: 04/30/2025"` as a flat KVP string. This meant party names (who signed), roles (Seller/Buyer), and the date were **not retrievable** via semantic search — a problem when users ask "who signed the contract?" and expect a table with names, roles, and dates.
+
+### Solution (`_synthesize_signature_sentences()`)
+Instead of embedding raw signature lines individually (which get caught by noise filters) or discarding them, we now **synthesize a single semantically rich sentence** from the structured `signature_block` metadata that `_extract_signature_block_metadata()` already produces.
+
+**Before:** Only `"Signed date: 04/30/2025"` was embedded (source=`signature_date`).
+
+**After:** A natural-language sentence is synthesized (source=`signature_block`):
+- 2 parties + date → `"This document was signed by John Smith as Seller and Jane Doe as Buyer on 04/30/2025."`
+- 3 parties + date → `"This document was signed by Alice as Seller, Bob as Buyer and Charlie as Witness on 01/15/2026."`
+- 1 party, no date → `"This document was signed by Contoso Ltd. as Authorized Representative."`
+- Date only → `"This document was signed on 04/30/2025."`
+
+### Implementation
+- New helper: `_synthesize_signature_sentences()` in `sentence_extraction_service.py`
+- Updated both code paths (chunk-based Source D and DI-unit-based Source D)
+- Source field changed from `"signature_date"` → `"signature_block"`
+- **Reindex required** for existing documents to pick up the new sentences
+
+---
+
+## 9. How to Resume
 
 ```bash
 # 1. Run benchmark on current 193-sentence index

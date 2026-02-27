@@ -109,6 +109,39 @@ SUBTOTAL_RE = re.compile(
 )
 
 
+def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
+    """Synthesize semantically meaningful sentences from a structured signature block.
+
+    Returns a list of sentences (typically one) that capture all parties and
+    the signed date in natural language so they are retrievable via semantic search.
+    """
+    parties = sig_block.get("parties") or []
+    signed_date = (sig_block.get("signed_date") or "").strip()
+
+    sentences: List[str] = []
+
+    if parties:
+        # Build one sentence listing all signing parties with their roles.
+        party_parts = []
+        for p in parties:
+            name = (p.get("name") or "").strip()
+            role = (p.get("role") or "").strip()
+            if name and role:
+                party_parts.append(f"{name} as {role}")
+            elif name:
+                party_parts.append(name)
+        if party_parts:
+            joined = ", ".join(party_parts[:-1]) + " and " + party_parts[-1] if len(party_parts) > 1 else party_parts[0]
+            if signed_date:
+                sentences.append(f"This document was signed by {joined} on {signed_date}.")
+            else:
+                sentences.append(f"This document was signed by {joined}.")
+    elif signed_date:
+        sentences.append(f"This document was signed on {signed_date}.")
+
+    return sentences
+
+
 def _is_noise_sentence(
     text: str,
     min_chars: int = 0,
@@ -299,24 +332,22 @@ def extract_sentences_from_chunk(
             idx += 1
 
     # ─── Source D: Signature block ──────────────────────────────
-    # Party names are structured metadata (skip). But signed_date
-    # is a critical fact for date-based queries.
+    # Synthesize semantically rich sentences from structured signature
+    # metadata so party names, roles, and dates are retrievable.
     sig_block = metadata.get("signature_block", {})
     if isinstance(sig_block, dict):
-        signed_date = (sig_block.get("signed_date") or "").strip()
-        if signed_date:
-            date_text = f"Signed date: {signed_date}"
+        for sig_text in _synthesize_signature_sentences(sig_block):
             sentences.append({
                 "id": f"{chunk_id}_sent_{idx}",
-                "text": date_text,
+                "text": sig_text,
                 "chunk_id": chunk_id,
                 "document_id": document_id,
-                "source": "signature_date",
+                "source": "signature_block",
                 "index_in_chunk": idx,
                 "section_path": section_path,
                 "page": metadata.get("page_number"),
                 "confidence": 1.0,
-                "tokens": len(date_text.split()),
+                "tokens": len(sig_text.split()),
                 "parent_text": "",
             })
             idx += 1
@@ -542,14 +573,12 @@ def extract_sentences_from_di_units(
                 global_idx += 1
 
         # ─── Source D: Signature block ────────────────────────────
-        # Party names are structured metadata (skip). But signed_date
-        # is a critical fact for date-based queries.
+        # Synthesize semantically rich sentences from structured signature
+        # metadata so party names, roles, and dates are retrievable.
         sig_block = meta.get("signature_block", {})
         if isinstance(sig_block, dict):
-            signed_date = (sig_block.get("signed_date") or "").strip()
-            if signed_date:
-                date_text = f"Signed date: {signed_date}"
-                text_key = date_text.strip().lower()
+            for sig_text in _synthesize_signature_sentences(sig_block):
+                text_key = sig_text.strip().lower()
                 if text_key not in seen_texts:
                     sent_id = f"{doc_id}_sent_{global_idx}"
                     seen_texts[text_key] = sent_id
@@ -558,16 +587,16 @@ def extract_sentences_from_di_units(
                     section_counters[section_key] = idx_in_section + 1
                     all_sentences.append({
                         "id": sent_id,
-                        "text": date_text,
+                        "text": sig_text,
                         "chunk_id": "",
                         "document_id": doc_id,
-                        "source": "signature_date",
+                        "source": "signature_block",
                         "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": section_path,
                         "page": page,
                         "confidence": 1.0,
-                        "tokens": len(date_text.split()),
+                        "tokens": len(sig_text.split()),
                         "parent_text": "",
                         "index_in_section": idx_in_section,
                     })

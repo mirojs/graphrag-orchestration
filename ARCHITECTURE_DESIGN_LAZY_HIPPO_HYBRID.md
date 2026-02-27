@@ -3385,6 +3385,45 @@ After entity extraction and before storage, the pipeline applies **NLP-based ent
 *   `run_raptor` defaults to `false` (no new RAPTOR nodes are created)
 *   The hybrid routes (2/3/4) do not require RAPTOR data
 
+#### Sentence Extraction & Signature Block Processing (updated 2026-02-27)
+
+Sentences are extracted from document chunks via `sentence_extraction_service.py` using **wtpsplit sat-3l-sm** with `do_paragraph_segmentation=True`. Four source types feed into the sentence pool:
+
+| Source | Description | Example |
+|--------|-------------|---------|
+| **Source A** | wtpsplit-segmented prose from chunk text | `"The contract price is $29,900."` |
+| **Source B** | Table row linearization | `"Item: Widget \| Qty: 10 \| Price: $5.00"` |
+| **Source C** | Figure/image captions | `"Figure 1: Site plan overview"` |
+| **Source D** | Signature block synthesis | `"This document was signed by John Smith as Seller and Jane Doe as Buyer on 04/30/2025."` |
+
+**Noise filtering** (`_is_noise_sentence()`): Removes non-semantic content — all-caps labels, short lines (<3 words), KVP field labels, phone/address lines, numeric-only content, multi-line form blocks.
+
+**Signature block processing** (`_synthesize_signature_sentences()`):
+
+Signature blocks contain critical structured information (party names, roles, dates) that users need for tabular retrieval (e.g., "who signed the contract?"). However, raw signature lines individually fail noise filters and lack semantic context.
+
+**Approach:** Instead of embedding raw lines, the pipeline synthesizes a single semantically rich sentence from the structured `signature_block` metadata produced by `_extract_signature_block_metadata()` in the DI service:
+
+```
+DI paragraphs → _extract_signature_block_metadata()
+  → {"parties": [{role: "Seller", name: "John Smith"}, ...], "signed_date": "04/30/2025"}
+    → _synthesize_signature_sentences()
+      → "This document was signed by John Smith as Seller and Jane Doe as Buyer on 04/30/2025."
+        → Embedded as :Sentence node (source="signature_block")
+```
+
+| Scenario | Synthesized sentence |
+|----------|---------------------|
+| 2 parties + date | `"This document was signed by John Smith as Seller and Jane Doe as Buyer on 04/30/2025."` |
+| 3+ parties + date | `"This document was signed by Alice as Seller, Bob as Buyer and Charlie as Witness on 01/15/2026."` |
+| 1 party, no date | `"This document was signed by Contoso Ltd. as Authorized Representative."` |
+| Date only | `"This document was signed on 04/30/2025."` |
+
+**Why one sentence, not individual lines:**
+- **Semantic density** — all related facts in a single embedding vector → high cosine similarity to queries like "who signed?"
+- **Noise filter safe** — well-formed prose with sufficient length bypasses all noise filters naturally
+- **Table generation** — LLM can extract party/role/date columns from one sentence without cross-referencing fragments
+
 ### Python Pipeline Pseudocode
 
 ```python

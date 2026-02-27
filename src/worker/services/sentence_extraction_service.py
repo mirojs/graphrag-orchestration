@@ -93,6 +93,20 @@ ALL_CAPS_RE = re.compile(r"^[A-Z\s\d.,!?:;\-()]+$")
 FORM_LABEL_RE = re.compile(
     r"^[A-Z][^.!?]*:\s*[A-Z][a-z]",
 )
+# Phone/fax pattern — lines whose primary content is phone numbers
+PHONE_FAX_RE = re.compile(
+    r"^(phone|fax|tel|mobile|cell|emergency\s+number)\b.*\(?\d{3}\)?[\s\-]\d{3}",
+    re.IGNORECASE,
+)
+# Address-only line — street number + city/state/zip, no sentence content
+ADDRESS_ONLY_RE = re.compile(
+    r"^\d+\s+[A-Z][a-z]+.*,\s*[A-Z]{2}\s+\d{4,5}$",
+)
+# Subtotal/total aggregation rows in tables
+SUBTOTAL_RE = re.compile(
+    r"^(subtotal|total|grand\s*total|amount\s*due|balance\s*due)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_noise_sentence(
@@ -100,7 +114,7 @@ def _is_noise_sentence(
     min_chars: int = 0,
     min_words: int = 0,
 ) -> bool:
-    """Filter out noise: short fragments, labels, numeric-only content."""
+    """Filter out noise: short fragments, labels, numeric-only, metadata patterns."""
     min_chars = min_chars or settings.SKELETON_MIN_SENTENCE_CHARS
     min_words = min_words or settings.SKELETON_MIN_SENTENCE_WORDS
     
@@ -117,6 +131,23 @@ def _is_noise_sentence(
     # Numeric-only content (table cells like "12,450.00")
     cleaned = re.sub(r"[\d,.$%\s\-/·•]", "", text)
     if len(cleaned) < 10:
+        return True
+    # Phone/fax lines — contact metadata, not sentence content
+    if PHONE_FAX_RE.match(text):
+        return True
+    # Address-only lines (e.g. "811 Ocean Drive, Suite 405, Tampa, FL 33602")
+    if ADDRESS_ONLY_RE.match(text):
+        return True
+    # Multi-line form layout blocks (2+ lines with few words per line)
+    if "\n" in text:
+        lines = [l.strip() for l in text.split("\n") if l.strip()]
+        if len(lines) >= 3 and all(len(l.split()) <= 4 for l in lines):
+            return True
+        # 2-line form blocks (e.g. "Authorized Representative\nFabrikam Inc.")
+        if len(lines) == 2 and all(len(l.split()) <= 3 for l in lines):
+            return True
+    # Subtotal/total aggregation rows in tables
+    if SUBTOTAL_RE.match(text):
         return True
     return False
 
@@ -266,55 +297,9 @@ def extract_sentences_from_chunk(
             })
             idx += 1
 
-    # ─── Source D: Signature block parties from DI metadata ──────
-    sig_block = metadata.get("signature_block", {})
-    if isinstance(sig_block, dict):
-        parties = sig_block.get("parties", [])
-        signed_date = sig_block.get("signed_date", "")
-        for party in parties:
-            if not isinstance(party, dict):
-                continue
-            role = (party.get("role") or "").strip()
-            name = (party.get("name") or "").strip()
-            if not name:
-                continue
-            # Linearise as "role: name" so NER sees a meaningful phrase;
-            # falls back to just the name when role is absent.
-            text = f"{role}: {name}" if role else name
-            if _is_noise_sentence(text, min_chars=5, min_words=1):
-                continue
-            sentences.append({
-                "id": f"{chunk_id}_sent_{idx}",
-                "text": text,
-                "chunk_id": chunk_id,
-                "document_id": document_id,
-                "source": "signature_party",
-                "index_in_chunk": idx,
-                "section_path": section_path,
-                "page": metadata.get("page_number"),
-                "confidence": 1.0,
-                "tokens": len(text.split()),
-                "parent_text": "",  # Signature parties are self-contained
-            })
-            idx += 1
-        # Emit the signed date as a standalone sentence so extract_document_date()
-        # and the NER pipeline both see it regardless of body-text coverage.
-        if signed_date:
-            date_text = f"Signed date: {signed_date}"
-            sentences.append({
-                "id": f"{chunk_id}_sent_{idx}",
-                "text": date_text,
-                "chunk_id": chunk_id,
-                "document_id": document_id,
-                "source": "signature_party",
-                "index_in_chunk": idx,
-                "section_path": section_path,
-                "page": metadata.get("page_number"),
-                "confidence": 1.0,
-                "tokens": len(date_text.split()),
-                "parent_text": "",
-            })
-            idx += 1
+    # ─── Source D: Signature block parties — SKIPPED ──────────────
+    # Signatures are structured metadata, not embeddable sentence content.
+    # Entity names are already extracted from body text sentences.
 
     return sentences
 
@@ -536,70 +521,10 @@ def extract_sentences_from_di_units(
                 })
                 global_idx += 1
 
-        # ─── Source D: Signature parties ─────────────────────────
-        sig_block = meta.get("signature_block", {})
-        if isinstance(sig_block, dict):
-            parties = sig_block.get("parties", [])
-            signed_date = sig_block.get("signed_date", "")
-            for party in parties:
-                if not isinstance(party, dict):
-                    continue
-                role = (party.get("role") or "").strip()
-                name = (party.get("name") or "").strip()
-                if not name:
-                    continue
-                text = f"{role}: {name}" if role else name
-                if _is_noise_sentence(text, min_chars=5, min_words=1):
-                    continue
-                text_key = text.strip().lower()
-                if text_key in seen_texts:
-                    continue
-                sent_id = f"{doc_id}_sent_{global_idx}"
-                seen_texts[text_key] = sent_id
-                section_key = section_path or "[Document Root]"
-                idx_in_section = section_counters.get(section_key, 0)
-                section_counters[section_key] = idx_in_section + 1
-                all_sentences.append({
-                    "id": sent_id,
-                    "text": text,
-                    "chunk_id": "",
-                    "document_id": doc_id,
-                    "source": "signature_party",
-                    "index_in_chunk": 0,
-                    "index_in_doc": global_idx,
-                    "section_path": section_path,
-                    "page": page,
-                    "confidence": 1.0,
-                    "tokens": len(text.split()),
-                    "parent_text": "",
-                    "index_in_section": idx_in_section,
-                })
-                global_idx += 1
-            if signed_date:
-                date_text = f"Signed date: {signed_date}"
-                text_key = date_text.strip().lower()
-                if text_key not in seen_texts:
-                    sent_id = f"{doc_id}_sent_{global_idx}"
-                    seen_texts[text_key] = sent_id
-                    section_key = section_path or "[Document Root]"
-                    idx_in_section = section_counters.get(section_key, 0)
-                    section_counters[section_key] = idx_in_section + 1
-                    all_sentences.append({
-                        "id": sent_id,
-                        "text": date_text,
-                        "chunk_id": "",
-                        "document_id": doc_id,
-                        "source": "signature_party",
-                        "index_in_chunk": 0,
-                        "index_in_doc": global_idx,
-                        "section_path": section_path,
-                        "page": page,
-                        "confidence": 1.0,
-                        "tokens": len(date_text.split()),
-                        "parent_text": "",
-                        "index_in_section": idx_in_section,
-                    })
-                    global_idx += 1
+        # ─── Source D: Signature parties — SKIPPED ─────────────────
+        # Per architecture doc: signatures are structured metadata,
+        # not embeddable sentence content.  Entity names (Contoso Ltd.)
+        # are already extracted from body text sentences that reference them.
 
     # Backfill total_in_section from section_counters
     for sent in all_sentences:

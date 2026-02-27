@@ -320,6 +320,11 @@ class LazyGraphRAGIndexingPipeline:
         # This creates or updates the GroupMeta node to track GDS staleness, etc.
         self.neo4j_store.initialize_group_meta(group_id)
 
+        # Pre-load wtpsplit model BEFORE DI extraction so its ~1.4GB allocation
+        # happens while memory is still plentiful (DI results add ~1GB for 5 PDFs).
+        from src.worker.services.sentence_extraction_service import _get_sat
+        _get_sat()
+
         # 1) Normalize + (optional) extract with Document Intelligence.
         expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
 
@@ -608,14 +613,14 @@ class LazyGraphRAGIndexingPipeline:
 
         di_service = DocumentIntelligenceService()
 
-        # Process URLs in parallel with per-URL isolation (each URL is a single-item
-        # call, so cross-document contamination is impossible). Semaphore bounds
-        # concurrent Azure DI requests to avoid throttling.
+        # Process URLs sequentially to keep memory bounded (each DI result is
+        # stored before the next URL is processed).  Previous parallel version
+        # held all results in memory simultaneously which caused OOM on
+        # constrained environments (codespace, small container).
         by_source: Dict[str, List[LlamaDocument]] = {}
-        _di_sem = asyncio.Semaphore(5)
 
-        async def _extract_one_url(url: str) -> Tuple[str, List[LlamaDocument]]:
-            async with _di_sem:
+        for url in url_inputs:
+            try:
                 extracted = await di_service.extract_documents(
                     group_id=group_id,
                     input_items=cast(List[str | Dict[str, Any]], [url]),
@@ -623,18 +628,9 @@ class LazyGraphRAGIndexingPipeline:
                     model_strategy="auto",
                 )
                 logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
-                return url, extracted
-
-        di_results = await asyncio.gather(
-            *[_extract_one_url(u) for u in url_inputs],
-            return_exceptions=True,
-        )
-        for result in di_results:
-            if isinstance(result, Exception):
-                logger.warning(f"DI extraction failed for a URL: {result}")
-                continue
-            url, extracted = result
-            by_source[url] = extracted
+                by_source[url] = extracted
+            except Exception as exc:
+                logger.warning(f"DI extraction failed for a URL: {exc}")
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:

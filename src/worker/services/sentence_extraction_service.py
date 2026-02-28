@@ -251,6 +251,8 @@ def extract_sentences_from_chunk(
       - "table_row":       linearized DI table rows
       - "figure_caption":  DI figure caption text
       - "signature_party": party name + role from DI signature block
+      - "page_header":     first occurrence of DI pageHeader (deduped)
+      - "page_footer":     first occurrence of DI pageFooter (deduped)
     """
     sentences: List[Dict[str, Any]] = []
     idx = 0
@@ -346,6 +348,11 @@ def extract_sentences_from_chunk(
     # metadata so party names, roles, and dates are retrievable.
     sig_block = metadata.get("signature_block", {})
     if isinstance(sig_block, dict):
+        sig_meta = {
+            "parties": sig_block.get("parties", []),
+            "signed_date": sig_block.get("signed_date", ""),
+            "type": "signature_block",
+        }
         for sig_text in _synthesize_signature_sentences(sig_block):
             sentences.append({
                 "id": f"{chunk_id}_sent_{idx}",
@@ -359,6 +366,7 @@ def extract_sentences_from_chunk(
                 "confidence": 1.0,
                 "tokens": len(sig_text.split()),
                 "parent_text": "",
+                "metadata": sig_meta,
             })
             idx += 1
 
@@ -455,6 +463,9 @@ def extract_sentences_from_di_units(
     seen_texts: Dict[str, str] = {}  # lowered text → sentence id (dedup)
     global_idx = 0
     section_counters: Dict[str, int] = {}  # section_path → next index_in_section
+    # Track first occurrence of header/footer for dedup (one per doc)
+    _first_header_captured = False
+    _first_footer_captured = False
 
     for unit in di_units:
         meta = getattr(unit, "metadata", None) or {}
@@ -471,8 +482,69 @@ def extract_sentences_from_di_units(
 
         page = meta.get("page_number")
 
-        # Skip non-content DI roles
+        # ─── Source E: First-occurrence page header / footer ─────
+        # DI tags repeated header/footer paragraphs on every page.
+        # Capture only the first occurrence as a searchable sentence
+        # (denoising: one node per doc instead of N duplicate nodes).
         role = meta.get("role", "")
+        if role == "pageHeader" and not _first_header_captured:
+            hdr_text = unit_text.strip()
+            if hdr_text and len(hdr_text) >= 3:
+                _first_header_captured = True
+                text_key = hdr_text.strip().lower()
+                if text_key not in seen_texts:
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    section_key = "[Page Header]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": hdr_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "page_header",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": "[Page Header]",
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(hdr_text.split()),
+                        "parent_text": "",
+                        "index_in_section": idx_in_section,
+                    })
+                    global_idx += 1
+            continue
+        if role == "pageFooter" and not _first_footer_captured:
+            ftr_text = unit_text.strip()
+            if ftr_text and len(ftr_text) >= 3:
+                _first_footer_captured = True
+                text_key = ftr_text.strip().lower()
+                if text_key not in seen_texts:
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    section_key = "[Page Footer]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": ftr_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "page_footer",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": "[Page Footer]",
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(ftr_text.split()),
+                        "parent_text": "",
+                        "index_in_section": idx_in_section,
+                    })
+                    global_idx += 1
+            continue
+
+        # Skip non-content DI roles (remaining headers/footers, page numbers, etc.)
         if role in SKIP_ROLES:
             continue
 
@@ -587,6 +659,11 @@ def extract_sentences_from_di_units(
         # metadata so party names, roles, and dates are retrievable.
         sig_block = meta.get("signature_block", {})
         if isinstance(sig_block, dict):
+            sig_meta = {
+                "parties": sig_block.get("parties", []),
+                "signed_date": sig_block.get("signed_date", ""),
+                "type": "signature_block",
+            }
             for sig_text in _synthesize_signature_sentences(sig_block):
                 text_key = sig_text.strip().lower()
                 if text_key not in seen_texts:
@@ -609,6 +686,7 @@ def extract_sentences_from_di_units(
                         "tokens": len(sig_text.split()),
                         "parent_text": "",
                         "index_in_section": idx_in_section,
+                        "metadata": sig_meta,
                     })
                     global_idx += 1
 

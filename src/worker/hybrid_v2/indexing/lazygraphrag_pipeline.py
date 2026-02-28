@@ -733,6 +733,10 @@ class LazyGraphRAGIndexingPipeline:
                 parts.append(f"Document: {title}")
             if source == "signature_party":
                 parts.append("Signature Block")
+            elif source == "page_header":
+                parts.append("Page Header")
+            elif source == "page_footer":
+                parts.append("Page Footer")
             elif source == "table_row":
                 parts.append(f"Table: {sp}" if sp else "Table")
             elif source == "figure_caption":

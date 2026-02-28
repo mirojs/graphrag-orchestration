@@ -796,7 +796,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
         cleaned: List[Dict[str, Any]] = []
 
         # Sources that carry structured content — skip content heuristics.
-        _STRUCTURED_SOURCES = {"signature_party", "table_row", "figure_caption"}
+        _STRUCTURED_SOURCES = {"signature_party", "table_row", "figure_caption", "page_header", "page_footer"}
 
         for ev in evidence:
             text = (ev.get("sentence_text") or ev.get("text", "")).strip()

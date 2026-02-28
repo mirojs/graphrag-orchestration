@@ -87,7 +87,7 @@ class Sentence:
     text: str
     chunk_id: Optional[str] = None  # Legacy: parent chunk ID (deprecated)
     document_id: str = ""
-    source: str = "paragraph"  # "paragraph" | "table_row" | "figure_caption" | "signature_party"
+    source: str = "paragraph"  # "paragraph" | "table_row" | "figure_caption" | "signature_party" | "page_header" | "page_footer"
     index_in_chunk: int = 0  # Position within parent chunk (legacy)
     index_in_doc: int = 0  # Global ordinal position within document
     section_path: str = ""  # Section hierarchy path

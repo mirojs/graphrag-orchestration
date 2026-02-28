@@ -1695,7 +1695,18 @@ class DocumentIntelligenceService:
         figures = self._extract_figures(result)
         selection_marks = self._extract_selection_marks(result)
         signature_block = self._extract_signature_block_metadata(result)
-        
+
+        # Detect letterhead paragraph indices and build paragraph→role map
+        # so we can propagate these roles to the emitted DI unit metadata.
+        letterhead_para_indices = self._detect_letterhead_paragraph_indices(paragraphs)
+        para_role_map: Dict[int, str] = {}
+        for i, para in enumerate(paragraphs):
+            role = getattr(para, "role", None) or ""
+            if role:
+                para_role_map[i] = role
+        for i in letterhead_para_indices:
+            para_role_map[i] = "letterhead"
+
         # Build section_idx -> KVPs mapping for efficient lookup
         kvps_by_section: Dict[int, List[Dict[str, Any]]] = {}
         orphan_kvps: List[Dict[str, Any]] = []  # KVPs not associated with any section
@@ -1763,7 +1774,7 @@ class DocumentIntelligenceService:
             # captured by child sections (common for an intro paragraph).
             has_children = len(child_sections) > 0
 
-            def emit_chunk(*, part: str, spans: Any, paras: List[DocumentParagraph], tbls: List[DocumentTable]) -> None:
+            def emit_chunk(*, part: str, spans: Any, paras: List[DocumentParagraph], tbls: List[DocumentTable], para_idx: Optional[List[int]] = None) -> None:
                 merged = self._collect_span_union([spans] if spans else [getattr(p, "spans", None) or [] for p in paras])
                 text = ""
                 if content and merged:
@@ -1833,6 +1844,22 @@ class DocumentIntelligenceService:
                 # of which section/part combination happens to be first.
                 is_first_unit = len(docs) == 0
 
+                # Propagate paragraph-level role to chunk metadata.
+                # If ALL paragraphs share the same role (letterhead,
+                # pageHeader, pageFooter, ...), tag the DI unit so
+                # sentence extraction can handle it specially.
+                chunk_role = ""
+                if para_idx:
+                    if letterhead_para_indices and all(
+                        i in letterhead_para_indices for i in para_idx
+                    ):
+                        chunk_role = "letterhead"
+                    else:
+                        roles = {para_role_map.get(i, "") for i in para_idx}
+                        roles.discard("")
+                        if len(roles) == 1:
+                            chunk_role = roles.pop()
+
                 docs.append(
                     Document(
                         text=text,
@@ -1849,6 +1876,8 @@ class DocumentIntelligenceService:
                             "paragraph_count": len(paras),
                             "key_value_pairs": section_kvps,
                             "kvp_count": len(section_kvps),
+                            # Paragraph-level role propagation
+                            **({"role": chunk_role} if chunk_role else {}),
                             # Location metadata for citation tracking
                             **({"page_number": page_number} if page_number is not None else {}),
                             **({"start_offset": start_offset} if start_offset is not None else {}),
@@ -1867,7 +1896,7 @@ class DocumentIntelligenceService:
 
             # Emit direct content chunk (intro/body) if present.
             if direct_paras or direct_tables:
-                emit_chunk(part="direct", spans=section_spans, paras=direct_paras, tbls=direct_tables)
+                emit_chunk(part="direct", spans=section_spans, paras=direct_paras, tbls=direct_tables, para_idx=para_indices)
 
             # Recurse into child sections.
             for child_idx in child_sections:
@@ -1875,7 +1904,7 @@ class DocumentIntelligenceService:
 
             # Leaf section with no direct content but with explicit spans: emit anyway.
             if not has_children and not (direct_paras or direct_tables) and section_spans:
-                emit_chunk(part="spans", spans=section_spans, paras=[], tbls=[])
+                emit_chunk(part="spans", spans=section_spans, paras=[], tbls=[], para_idx=[])
 
         for idx in root_indices:
             walk(idx, [], [])
@@ -2156,6 +2185,18 @@ class DocumentIntelligenceService:
                     f"({len(result.paragraphs or [])} paragraphs, "
                     f"{len(result.tables or [])} tables)"
                 )
+
+                # Track DI usage (fire-and-forget)
+                try:
+                    from src.core.services.usage_tracker import get_usage_tracker
+                    _tracker = get_usage_tracker()
+                    asyncio.ensure_future(_tracker.log_doc_intel_usage(
+                        partition_id=group_id,
+                        pages_analyzed=len(result.pages),
+                        document_id=url.rsplit("/", 1)[-1] if url else "unknown",
+                    ))
+                except Exception:
+                    pass
                 
                 return (url, documents, None)
 

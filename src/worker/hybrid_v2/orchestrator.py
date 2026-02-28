@@ -415,6 +415,25 @@ class HybridPipeline:
             # Attach accumulated token usage to the result
             if result.usage is None and accumulator.call_count > 0:
                 result.usage = accumulator.snapshot()
+            elif result.usage is not None and "credits_used" not in result.usage:
+                # Snapshot already set but missing credit info
+                result.usage.update({"credits_used": accumulator.compute_credits()})
+
+            # Post-query credit deduction (fire-and-forget)
+            credits = accumulator.compute_credits()
+            if credits > 0:
+                try:
+                    from src.core.services.quota_enforcer import get_quota_enforcer
+                    enforcer = await get_quota_enforcer()
+                    user_id = getattr(self, "user_id", None) or self.group_id
+                    await enforcer.record_credits(user_id, credits)
+                    if result.usage is not None:
+                        credit_info = await enforcer.check_credit_limits(user_id)
+                        result.usage["credits_remaining"] = credit_info.get("credits_remaining")
+                        result.usage["credits_limit"] = credit_info.get("credits_limit")
+                except Exception as _ce:
+                    logger.warning("credit_deduction_failed", error=str(_ce))
+
             # Detach accumulator to avoid leaking across requests
             if hasattr(self.llm, "set_accumulator"):
                 self.llm.set_accumulator(None)

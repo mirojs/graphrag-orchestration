@@ -1383,6 +1383,24 @@ Sub-questions:"""
                 ),
             )
 
+            # Track reranker usage (fire-and-forget)
+            try:
+                _rerank_tokens = getattr(rr_result, "total_tokens", 0)
+                acc = getattr(self, "_token_accumulator", None)
+                if acc is not None:
+                    acc.add_rerank(rerank_model, _rerank_tokens, len(documents))
+                from src.core.services.usage_tracker import get_usage_tracker
+                _tracker = get_usage_tracker()
+                asyncio.ensure_future(_tracker.log_rerank_usage(
+                    partition_id=self.group_id,
+                    model=rerank_model,
+                    total_tokens=_rerank_tokens,
+                    documents_reranked=len(documents),
+                    route="route_4",
+                ))
+            except Exception:
+                pass
+
             reranked: List[Dict[str, Any]] = []
             for rr in rr_result.results:
                 ev = {**evidence[rr.index], "rerank_score": rr.relevance_score}

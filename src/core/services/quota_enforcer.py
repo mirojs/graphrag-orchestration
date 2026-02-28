@@ -35,6 +35,7 @@ _PREFIX = "quota"
 _DAILY_TTL = 48 * 3600       # 48 hours — allows reads after midnight rollover
 _MONTHLY_TTL = 35 * 86400    # 35 days  — covers full billing month + buffer
 _PLAN_CACHE_TTL = 3600       # 1 hour   — re-resolve plan periodically
+_CREDIT_TTL = 35 * 86400     # 35 days  — aligned with monthly billing cycle
 
 
 # =============================================================================
@@ -67,6 +68,11 @@ class QuotaEnforcer:
     @staticmethod
     def _plan_key(user_id: str) -> str:
         return f"{_PREFIX}:{user_id}:plan"
+
+    @staticmethod
+    def _credit_key(user_id: str, dt: Optional[datetime] = None) -> str:
+        d = dt or datetime.utcnow()
+        return f"{_PREFIX}:{user_id}:credits:{d.strftime('%Y%m')}"
 
     # ── Plan resolution ──────────────────────────────────────────────────
 
@@ -164,6 +170,74 @@ class QuotaEnforcer:
             logger.warning("quota_get_usage_failed", user_id=user_id, error=str(e))
             return {"queries_today": 0, "queries_this_month": 0}
 
+    # ── Credit operations ────────────────────────────────────────────────
+
+    async def record_credits(self, user_id: str, credits: int) -> int:
+        """
+        Atomically add credits consumed to the monthly counter.
+
+        Returns the new total credits used this month.
+        """
+        now = datetime.utcnow()
+        ck = self._credit_key(user_id, now)
+
+        try:
+            pipe = self._redis.pipeline(transaction=True)
+            pipe.incrby(ck, credits)
+            pipe.expire(ck, _CREDIT_TTL)
+            results = await pipe.execute()
+            used = int(results[0])
+
+            logger.debug(
+                "credits_recorded",
+                user_id=user_id,
+                credits_added=credits,
+                credits_used_month=used,
+            )
+            return used
+
+        except Exception as e:
+            logger.warning("credit_record_failed", user_id=user_id, error=str(e))
+            return 0  # fail-open
+
+    async def get_credit_usage(self, user_id: str) -> int:
+        """Read current monthly credit usage without incrementing."""
+        now = datetime.utcnow()
+        ck = self._credit_key(user_id, now)
+
+        try:
+            val = await self._redis.get(ck)
+            return int(val or 0)
+        except Exception as e:
+            logger.warning("credit_get_failed", user_id=user_id, error=str(e))
+            return 0
+
+    async def check_credit_limits(self, user_id: str) -> Dict[str, Any]:
+        """Check if user is within credit limits."""
+        plan = await self.get_plan(user_id)
+        limits: PlanLimits = PLAN_DEFINITIONS[plan]
+        monthly_limit = limits.monthly_credits
+        credits_used = await self.get_credit_usage(user_id)
+
+        if monthly_limit is None:
+            # Unlimited credits (Enterprise)
+            return {
+                "credits_allowed": True,
+                "credits_used": credits_used,
+                "credits_limit": None,
+                "credits_remaining": None,
+            }
+
+        remaining = max(0, monthly_limit - credits_used)
+        allowed = credits_used < monthly_limit
+
+        return {
+            "credits_allowed": allowed,
+            "credits_used": credits_used,
+            "credits_limit": monthly_limit,
+            "credits_remaining": remaining,
+        }
+
     async def check_limits(
         self, user_id: str
     ) -> Dict[str, Any]:
@@ -188,7 +262,12 @@ class QuotaEnforcer:
 
         over_daily = daily_used >= limits.queries_per_day
         over_monthly = monthly_used >= limits.queries_per_month
-        allowed = not over_daily and not over_monthly
+
+        # Check credit limits
+        credit_info = await self.check_credit_limits(user_id)
+        over_credits = not credit_info["credits_allowed"]
+
+        allowed = not over_daily and not over_monthly and not over_credits
 
         # Calculate seconds until next daily reset (midnight UTC)
         now = datetime.utcnow()
@@ -208,6 +287,12 @@ class QuotaEnforcer:
                 day=1, hour=0, minute=0, second=0, microsecond=0
             )
             retry_after = int((next_month_start - now).total_seconds())
+        elif over_credits:
+            reason = f"Monthly credit limit of {credit_info['credits_limit']} credits exhausted"
+            next_month_start = (now.replace(day=1) + timedelta(days=32)).replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            )
+            retry_after = int((next_month_start - now).total_seconds())
 
         return {
             "allowed": allowed,
@@ -219,6 +304,9 @@ class QuotaEnforcer:
             "monthly_used": monthly_used,
             "monthly_limit": limits.queries_per_month,
             "monthly_remaining": monthly_remaining,
+            "credits_used": credit_info["credits_used"],
+            "credits_limit": credit_info["credits_limit"],
+            "credits_remaining": credit_info["credits_remaining"],
             "retry_after_seconds": retry_after if not allowed else 0,
         }
 
@@ -243,11 +331,15 @@ class QuotaEnforcer:
         over_daily = daily_used >= limits.queries_per_day
         over_monthly = monthly_used >= limits.queries_per_month
 
-        if over_daily or over_monthly:
+        # Also check credit limits
+        credit_info = await self.check_credit_limits(user_id)
+        over_credits = not credit_info["credits_allowed"]
+
+        if over_daily or over_monthly or over_credits:
             # Over limit — don't increment, return limit info
             return await self.check_limits(user_id)
 
-        # Within limits — consume a unit
+        # Within limits — consume a query unit
         new_daily, new_monthly = await self.record_query(user_id)
 
         return {
@@ -260,6 +352,9 @@ class QuotaEnforcer:
             "monthly_used": new_monthly,
             "monthly_limit": limits.queries_per_month,
             "monthly_remaining": max(0, limits.queries_per_month - new_monthly),
+            "credits_used": credit_info["credits_used"],
+            "credits_limit": credit_info["credits_limit"],
+            "credits_remaining": credit_info["credits_remaining"],
             "retry_after_seconds": 0,
         }
 
@@ -335,6 +430,9 @@ async def enforce_plan_limits(
                     "daily_limit": result["daily_limit"],
                     "monthly_used": result["monthly_used"],
                     "monthly_limit": result["monthly_limit"],
+                    "credits_used": result.get("credits_used"),
+                    "credits_limit": result.get("credits_limit"),
+                    "credits_remaining": result.get("credits_remaining"),
                     "retry_after_seconds": result["retry_after_seconds"],
                     "upgrade_url": "/dashboard#plans",
                 },
@@ -366,6 +464,9 @@ async def enforce_plan_limits(
             "monthly_used": 0,
             "monthly_limit": 0,
             "monthly_remaining": 0,
+            "credits_used": 0,
+            "credits_limit": None,
+            "credits_remaining": None,
             "retry_after_seconds": 0,
         }
         request.state.quota = fallback
@@ -385,10 +486,16 @@ def quota_response_headers(quota: Dict[str, Any]) -> Dict[str, str]:
         for k, v in quota_response_headers(quota).items():
             response.headers[k] = v
     """
-    return {
+    headers = {
         "X-RateLimit-Limit-Daily": str(quota.get("daily_limit", "")),
         "X-RateLimit-Remaining-Daily": str(quota.get("daily_remaining", "")),
         "X-RateLimit-Limit-Monthly": str(quota.get("monthly_limit", "")),
         "X-RateLimit-Remaining-Monthly": str(quota.get("monthly_remaining", "")),
         "X-RateLimit-Plan": str(quota.get("plan", "")),
     }
+    # Credit headers (only if credit system is active for this plan)
+    if quota.get("credits_limit") is not None:
+        headers["X-Credits-Limit"] = str(quota.get("credits_limit", ""))
+        headers["X-Credits-Remaining"] = str(quota.get("credits_remaining", ""))
+        headers["X-Credits-Used"] = str(quota.get("credits_used", ""))
+    return headers

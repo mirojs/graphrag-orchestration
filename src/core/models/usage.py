@@ -12,6 +12,7 @@ class UsageType(str, Enum):
     LLM_COMPLETION = "llm_completion"
     EMBEDDING = "embedding"
     DOC_INTEL = "doc_intel"
+    RERANK = "rerank"
 
 
 class UsageRecord(BaseModel):
@@ -32,6 +33,10 @@ class UsageRecord(BaseModel):
     # Embedding-specific fields
     dimensions: Optional[int] = Field(None, description="Embedding dimensions")
     chunk_count: Optional[int] = Field(None, description="Number of chunks embedded")
+    
+    # Reranker-specific fields
+    rerank_model: Optional[str] = Field(None, description="Reranker model name")
+    documents_reranked: Optional[int] = Field(None, description="Number of documents reranked")
     
     # Document Intelligence-specific fields
     pages_analyzed: Optional[int] = Field(None, description="Pages processed by Azure DI")

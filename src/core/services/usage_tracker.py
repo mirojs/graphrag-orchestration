@@ -144,6 +144,46 @@ class UsageTracker:
             await self._write_record(record)
         except Exception as e:
             logger.warning("doc_intel_usage_tracking_failed", error=str(e))
+
+    async def log_rerank_usage(
+        self,
+        partition_id: str,
+        model: str,
+        total_tokens: int,
+        documents_reranked: int,
+        user_id: Optional[str] = None,
+        route: Optional[str] = None,
+        query_id: Optional[str] = None,
+        cost_estimate_usd: Optional[float] = None
+    ) -> None:
+        """
+        Log Voyage reranker usage.
+        
+        Fire-and-forget: Does not raise exceptions or block the caller.
+        """
+        try:
+            record = UsageRecord(
+                partition_id=partition_id,
+                user_id=user_id,
+                usage_type=UsageType.RERANK,
+                rerank_model=model,
+                total_tokens=total_tokens,
+                documents_reranked=documents_reranked,
+                route=route,
+                query_id=query_id,
+                cost_estimate_usd=cost_estimate_usd
+            )
+            
+            logger.info("rerank_usage_tracked",
+                       partition_id=partition_id,
+                       model=model,
+                       total_tokens=total_tokens,
+                       documents=documents_reranked,
+                       route=route)
+            
+            await self._write_record(record)
+        except Exception as e:
+            logger.warning("rerank_usage_tracking_failed", error=str(e))
     
     async def _write_record(self, record: UsageRecord) -> None:
         """

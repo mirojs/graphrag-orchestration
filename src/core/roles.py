@@ -48,6 +48,9 @@ class PlanLimits(BaseModel):
     queries_per_month: int = Field(description="Max chat queries per month")
     max_tokens_per_query: int = Field(default=4096, description="Max output tokens per query")
     
+    # Credit limits (1 credit = $0.001 USD)
+    monthly_credits: Optional[int] = Field(default=None, description="Monthly credit allowance (None = unlimited)")
+    
     # Document limits
     max_documents: int = Field(description="Max documents in knowledge base")
     max_document_size_mb: int = Field(default=10, description="Max single document size in MB")
@@ -73,6 +76,7 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         queries_per_day=20,
         queries_per_month=200,
         max_tokens_per_query=2048,
+        monthly_credits=500,          # ~$0.50/month — ~5-25 queries
         max_documents=10,
         max_document_size_mb=5,
         max_storage_gb=0.5,
@@ -86,6 +90,7 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         queries_per_day=100,
         queries_per_month=2000,
         max_tokens_per_query=4096,
+        monthly_credits=5_000,        # ~$5/month — ~50-250 queries
         max_documents=50,
         max_document_size_mb=10,
         max_storage_gb=2.0,
@@ -99,6 +104,7 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         queries_per_day=500,
         queries_per_month=10000,
         max_tokens_per_query=8192,
+        monthly_credits=50_000,       # ~$50/month — ~500-2500 queries
         max_documents=500,
         max_document_size_mb=50,
         max_storage_gb=20.0,
@@ -114,6 +120,7 @@ PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
         queries_per_day=999999,
         queries_per_month=999999,
         max_tokens_per_query=16384,
+        monthly_credits=None,         # Unlimited / custom agreement
         max_documents=999999,
         max_document_size_mb=200,
         max_storage_gb=500.0,

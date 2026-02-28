@@ -667,6 +667,35 @@ def extract_sentences_from_di_units(
                     global_idx += 1
             continue
 
+        # ─── Source F: Letterhead (tagged by section-aware path) ─────
+        if role == "letterhead":
+            lh_text = unit_text.strip()
+            if lh_text:
+                text_key = lh_text.strip().lower()
+                if text_key not in seen_texts:
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    section_key = "[Letterhead]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": lh_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "letterhead",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": "[Letterhead]",
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(lh_text.split()),
+                        "parent_text": "",
+                        "index_in_section": idx_in_section,
+                    })
+                    global_idx += 1
+            continue
+
         # Skip non-content DI roles (remaining headers/footers, page numbers, etc.)
         if role in SKIP_ROLES:
             continue

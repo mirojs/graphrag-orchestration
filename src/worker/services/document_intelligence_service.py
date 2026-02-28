@@ -1909,6 +1909,48 @@ class DocumentIntelligenceService:
         for idx in root_indices:
             walk(idx, [], [])
 
+        # Emit DI units for orphaned role-tagged paragraphs (pageHeader,
+        # pageFooter) not referenced by any section's elements list.
+        visited_para_indices: set = set()
+        for sec in sections:
+            for el in (getattr(sec, "elements", None) or []):
+                parsed = self._parse_di_element_ref(el)
+                if parsed and parsed[0] == "paragraphs":
+                    visited_para_indices.add(parsed[1])
+        _ORPHAN_ROLES = {"pageHeader", "pageFooter"}
+        for i, para in enumerate(paragraphs):
+            if i in visited_para_indices:
+                continue
+            role = getattr(para, "role", None) or ""
+            if role not in _ORPHAN_ROLES:
+                continue
+            para_content = (getattr(para, "content", "") or "").strip()
+            if not para_content or len(para_content) < 3:
+                continue
+            page_number = None
+            regions = getattr(para, "bounding_regions", None) or []
+            if regions:
+                page_number = getattr(regions[0], "page_number", None)
+            docs.append(Document(
+                text=para_content,
+                metadata={
+                    "group_id": group_id,
+                    "source": "document-intelligence",
+                    "url": url,
+                    "chunk_type": "role",
+                    "section_path": [],
+                    "di_section_path": [],
+                    "di_section_part": "role",
+                    "role": role,
+                    "tables": [],
+                    "table_count": 0,
+                    "paragraph_count": 1,
+                    "key_value_pairs": [],
+                    "kvp_count": 0,
+                    **({"page_number": page_number} if page_number is not None else {}),
+                },
+            ))
+
         # De-dup exact duplicates (can happen when roots include nested sections).
         seen: set[tuple[str, str]] = set()
         unique: List[Document] = []

@@ -408,13 +408,13 @@
   - **Methods:** `analyze_documents()` supports both URLs and text content
   - **Endpoints:** POST /analyze (batch), GET /backend-info (diagnostics), POST /analyze-single (convenience)
 - 🚀 **GDS Integration (AuraDB Professional):** Full Graph Data Science algorithms now run during V2 indexing
-  - **KNN (K-Nearest Neighbors):** Creates `SIMILAR_TO` edges (Figure/KVP → Entity) and `SEMANTICALLY_SIMILAR` edges (Entity ↔ Entity)
+  - **KNN (K-Nearest Neighbors):** Creates `SIMILAR_TO` edges (KVP → Entity) and `SEMANTICALLY_SIMILAR` edges (Entity ↔ Entity)
   - **Louvain Community Detection:** Assigns `community_id` property to all nodes for clustering
   - **PageRank:** Computes `pagerank` score for node importance ranking
   - Implementation: `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` (`_run_gds_graph_algorithms()`)
 - 🚀 **Azure DI Metadata → Graph Nodes:** FREE Azure DI add-ons now create proper graph entities
   - **Barcode nodes:** `:Barcode` with `FOUND_IN` edge to Document
-  - **Figure nodes:** `:Figure` with caption, `embedding_v2`, and `SIMILAR_TO` edges to Entities
+  - ~~**Figure nodes:** `:Figure` — **REMOVED Feb 28, 2026** (dead code; figure captions are already indexed as Sentence nodes; see §36)~~
   - **KeyValuePair nodes:** `:KeyValuePair` with key/value, `embedding_v2`, and `SIMILAR_TO` edges to Entities
   - **Language metadata:** `primary_language` and `detected_languages` on Document nodes
   - Implementation: `_process_di_metadata_to_graph()` in both V1 and V2 pipelines
@@ -2857,7 +2857,7 @@ SKELETON_MIN_SENTENCE_WORDS=3        # lowered from 5 in commit 019e584 — do n
 
 - **All semantic edges via GDS KNN only** (K=5, similarity cutoff 0.60)
 - **Single edge type:** `SEMANTICALLY_SIMILAR` (legacy `SIMILAR_TO` eliminated)
-- **Coverage:** Entity, Figure, KeyValuePair, Chunk nodes
+- **Coverage:** Entity, KeyValuePair, Chunk nodes (~~Figure~~ removed Feb 28, 2026; see §36)
 - **Results:** 506 SEMANTICALLY_SIMILAR edges (vs 50 SIMILAR_TO in V1 = 10x improvement)
 
 **Graph Verification (`check_edges.py`):**
@@ -2961,15 +2961,15 @@ python3 check_edges.py test-5pdfs-v2-fix2 --json
 
 **What the Check Script Verifies (Updated Feb 7, 2026):**
 
-1. **Node Counts** — Document, TextChunk, Section, Entity, Table, KeyValue, KeyValuePair, Figure, Barcode, Community, GroupMeta
+1. **Node Counts** — Document, TextChunk, Section, Entity, Table, KeyValue, KeyValuePair, Barcode, Community, GroupMeta (~~Figure~~ removed Feb 28)
 2. **Structural Edges** — IN_DOCUMENT (V2) / PART_OF (V1), HAS_SECTION, SUBSECTION_OF, IN_SECTION, IN_CHUNK; orphan Section detection
 3. **Entity / Knowledge Edges** — MENTIONS (TextChunk→Entity), RELATED_TO (Entity→Entity)
 4. **Phase 1 Foundation Edges** — APPEARS_IN_SECTION, APPEARS_IN_DOCUMENT, HAS_HUB_ENTITY
 5. **Phase 2 Connectivity Edges** — SHARES_ENTITY (cross-document section links)
 6. **Phase 3 Semantic Edges** — SIMILAR_TO (V1 entity cosine), SEMANTICALLY_SIMILAR (V2 Section↔Section + GDS KNN breakdown)
-7. **DI Metadata Edges** — FOUND_IN for Barcode, Figure, KeyValuePair
+7. **DI Metadata Edges** — FOUND_IN for Barcode, KeyValuePair (~~Figure~~ removed Feb 28)
 8. **GDS Properties** — community_id (Louvain), pagerank, importance_score, BELONGS_TO (Entity→Community)
-9. **Embeddings** — TextChunk V1/V2 (dim check), Section, Entity V1/V2, KeyValue key_embedding, KeyValuePair embedding_v2, Figure embedding_v2
+9. **Embeddings** — TextChunk V1/V2 (dim check), Section, Entity V1/V2, KeyValue key_embedding, KeyValuePair embedding_v2 (~~Figure embedding_v2~~ removed Feb 28)
 10. **Entity Aliases** — Count + samples
 11. **Language Spans** — Per-document language_spans and primary_language with ✅/❌ indicators
 12. **Validation Summary** — Aggregated issues list; exit code 1 if any issues found (CI-friendly)
@@ -3393,7 +3393,7 @@ Sentences are extracted from document chunks via `sentence_extraction_service.py
 |--------|-------------|---------|
 | **Source A** | wtpsplit-segmented prose from chunk text | `"The contract price is $29,900."` |
 | **Source B** | Table row linearization | `"Item: Widget \| Qty: 10 \| Price: $5.00"` |
-| **Source C** | Figure/image captions | `"Figure 1: Site plan overview"` |
+| **Source C** | Figure/image captions + table captions | `"Figure 1: Site plan overview"`, `"Table: Fee Schedule"` |
 | **Source D** | Signature block synthesis | `"This document was signed by John Smith as Seller and Jane Doe as Buyer on 04/30/2025."` |
 
 **Noise filtering** (`_is_noise_sentence()`): Removes non-semantic content — all-caps labels, short lines (<3 words), KVP field labels, phone/address lines, numeric-only content, multi-line form blocks.
@@ -4635,7 +4635,7 @@ AuraDB Professional includes GDS, and we now use it during indexing for:
 
 | Algorithm | Purpose | Output | Used For |
 |-----------|---------|--------|----------|
-| **gds.knn** | Semantic similarity | `SIMILAR_TO` edges (DI→Entity) | Connect Figure/KVP to related Entities |
+| **gds.knn** | Semantic similarity | `SIMILAR_TO` edges (DI→Entity) | Connect KVP to related Entities |
 | **gds.knn** | Entity similarity | `SEMANTICALLY_SIMILAR` edges | Connect semantically related Entities |
 | **gds.louvain** | Community detection | `community_id` property | Cluster related nodes for retrieval |
 | **gds.pageRank** | Node importance | `pagerank` property | Rank nodes for retrieval priority |
@@ -4659,7 +4659,7 @@ CALL gds.graph.project.remote(
     }
 )
 WHERE n.group_id = $group_id
-  AND (n:Entity OR n:Figure OR n:KeyValuePair OR n:Chunk)
+  AND (n:Entity OR n:KeyValuePair OR n:Chunk)
   AND n.embedding_v2 IS NOT NULL
 ```
 
@@ -5826,12 +5826,12 @@ Document           5     ❌ No             primary_language,   Metadata only
 Table            ~50     ❌ No             -                   Structured data extraction
 KeyValue          *      ✅ embedding_v2   -                   High-precision field extraction (Jan 22)
 Barcode           *      ❌ No             -                   Azure DI barcode extraction (Jan 27)
-Figure            *      ✅ embedding_v2   -                   Azure DI figure extraction (Jan 27)
+~~Figure~~        -      ❌ REMOVED        -                   Removed Feb 28, 2026 (see §36)
 KeyValuePair      *      ✅ embedding_v2   -                   Azure DI KVP extraction (Jan 27)
 ```
 
-*Barcode, Figure, KeyValuePair nodes are created from Azure DI FREE add-ons during indexing.
-Count depends on document content (e.g., barcodes in shipping docs, figures in technical manuals).
+*Barcode, KeyValuePair nodes are created from Azure DI FREE add-ons during indexing.
+Figure nodes were removed Feb 28, 2026 — captions are already indexed as Sentence nodes (see §36).
 
 **Relationship Types:**
 ```
@@ -5841,12 +5841,12 @@ MENTIONS                   831     TextChunk → Entity          ✅ Core
 RELATED_TO                 711     Entity ↔ Entity             ✅ Core
 SEMANTICALLY_SIMILAR       465     Section ↔ Section           ✅ Implemented Jan 2026
 SEMANTICALLY_SIMILAR        *      Entity ↔ Entity             ✅ GDS KNN (Jan 27, 2026)
-SIMILAR_TO                  *      Figure/KVP → Entity         ✅ GDS KNN (Jan 27, 2026)
+SIMILAR_TO                  *      KVP → Entity                ✅ GDS KNN (~~Figure~~ removed Feb 28)
 SUBSECTION_OF              120     Section → Section           ✅ Hierarchy
 PART_OF                     74     TextChunk → Document        ✅ Core
 IN_SECTION                  74     TextChunk → Section         ✅ Core
 HAS_SECTION                 21     Document → Section          ✅ Core
-FOUND_IN                    *      Barcode/Figure/KVP → Doc    ✅ Azure DI (Jan 27, 2026)
+FOUND_IN                    *      Barcode/KVP → Doc            ✅ Azure DI (~~Figure~~ removed Feb 28)
 IN_SECTION (KV)             *      KeyValue → Section          ✅ KVP feature (Jan 22, 2026)
 IN_CHUNK (KV)               *      KeyValue → TextChunk        ✅ KVP feature (Jan 22, 2026)
 IN_DOCUMENT (KV)            *      KeyValue → Document         ✅ KVP feature (Jan 22, 2026)
@@ -6165,14 +6165,14 @@ SET r.shared_entities = shared[0..10],  // Cap at 10 for storage
 
 #### 3.1 SEMANTICALLY_SIMILAR (All Nodes via GDS KNN) ✅ UNIFIED Jan 28, 2026
 
-**Purpose:** Connect semantically similar nodes across all types (Entity, Figure, KeyValuePair, Chunk).
+**Purpose:** Connect semantically similar nodes across all types (Entity, KeyValuePair, Chunk). *(~~Figure~~ removed Feb 28; see §36)*
 
 **Status:** ✅ **Fully implemented via GDS KNN** - Legacy cosine similarity method removed.
 
 **Schema:**
 ```cypher
 (n1)-[:SEMANTICALLY_SIMILAR {similarity: FLOAT}]->(n2)
-// Where n1, n2 can be Entity, Figure, KeyValuePair, or Chunk
+// Where n1, n2 can be Entity, KeyValuePair, or Chunk
 ```
 
 **Creation Method (GDS KNN):**
@@ -6195,7 +6195,7 @@ SET r.similarity = similarity
 
 **Results (test-5pdfs-v2-1769609082):**
 - **506 SEMANTICALLY_SIMILAR edges** created
-- Connects 187 entities + Figure/KVP/Chunk nodes
+- Connects 187 entities + KVP/Chunk nodes
 - **10x improvement** over V1 baseline (50 SIMILAR_TO edges)
 - **Semantic edge density:** 2.71 edges per entity (vs 0.42 in V1)
 
@@ -10443,3 +10443,207 @@ Then grant the Container App managed identity the `Key Vault Secrets User` role 
 | **P2** | Fix admin bypass (fail closed when `ADMIN_API_KEY` unset) | ⬜ Code |
 
 Route 6 outperforms Route 3 on containment and theme coverage with a single LLM call instead of N+1, confirming the design rationale of skipping the MAP phase.
+
+## 36. Indexing Pipeline Cleanup & Usage-Based Credit System (February 28, 2026)
+
+### 36.1. Figure Node Removal
+
+**Problem:** The V2 indexing pipeline created `:Figure` graph nodes with `embedding_v2`, `FOUND_IN` edges to Document, and `SIMILAR_TO` edges to Entities via GDS KNN. However, **no query route ever read Figure nodes**. Figure captions were already being indexed as `:Sentence` nodes (via `sentence_extraction_service.py`), making the `:Figure` pipeline pure dead code that inflated graph size and consumed GDS/embedding compute.
+
+**Change:** Removed from `lazygraphrag_pipeline.py`:
+- `_stable_figure_id()` helper
+- `:Figure` node creation in `_process_di_metadata_to_graph()`
+- `REFERENCES` edge creation (Figure → Document)
+- Figure embedding generation via VoyageEmbedService
+- Figure nodes from GDS KNN projection filter
+
+**Commit:** `0037851` (−213 lines)
+
+**Impact on reindex:** The indexing pipeline now produces a cleaner graph. Legacy `:Figure` nodes from prior indexes remain but are inert (no route reads them). A future reindex will not recreate them.
+
+### 36.2. Table Caption Extraction
+
+**Problem:** Figure captions were extracted as `:Sentence` nodes, but table captions (`table.caption` from Azure DI) were silently discarded. This created a coverage gap — queries about table content could miss the caption context.
+
+**Change:** Mirrored the existing figure-caption extraction pattern for table captions across 5 files:
+
+| File | Change |
+|------|--------|
+| `document_intelligence_service.py` | Extract `table.caption` from DI response, pass as `table_captions` list |
+| `sentence_extraction_service.py` | Accept `table_captions` param, create Sentence objects with `label="table_caption"` |
+| `lazygraphrag_pipeline.py` | Pass `table_captions` through to sentence extraction |
+| `neo4j_store.py` | Store `label` property on Sentence nodes |
+
+Table caption Sentences get the same hierarchical numbering as figure captions (flat within their section), and are embedded via the standard Voyage pipeline.
+
+**Commit:** `8c1e12d` (+63 lines)
+
+### 36.3. Token Tracking Architecture
+
+**Problem:** Only synchronous `LLMService.generate()` calls extracted token usage. All 22+ `acomplete()` call sites (synthesis, entity extraction, community summarization, etc.) discarded the `raw.usage` field from OpenAI responses. Reranker, DI, and GDS usage was also untracked.
+
+**Solution — Two-Layer Tracking:**
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Per-Request Tracking                        │
+│                                                                 │
+│  TokenAccumulator (async-safe, per-request)                     │
+│  ├── add(prompt_tokens, completion_tokens)  ← from TrackedLLM   │
+│  ├── add_rerank(input_tokens, output_tokens)                    │
+│  ├── add_embedding(token_count)                                 │
+│  ├── compute_credits() → float (using credit_schedule.py)       │
+│  └── snapshot() → dict (for RouteResult.usage)                  │
+│                                                                 │
+│  TrackedLLM (wraps AzureOpenAI)                                 │
+│  ├── Injected at LLMService._create_llm_client() factory        │
+│  ├── Intercepts acomplete()/complete()                          │
+│  ├── Extracts response.raw['usage'] → feeds TokenAccumulator    │
+│  └── astream_complete() → delegates without tracking            │
+├─────────────────────────────────────────────────────────────────┤
+│                     Persistent Tracking                         │
+│                                                                 │
+│  UsageTracker → Cosmos DB (fire-and-forget)                     │
+│  ├── log_llm_usage()       (UsageType.LLM_COMPLETION)           │
+│  ├── log_embedding_usage() (UsageType.EMBEDDING)                │
+│  ├── log_rerank_usage()    (UsageType.RERANK)                   │
+│  ├── log_doc_intel_usage() (UsageType.DOC_INTEL)                │
+│  └── log_gds_usage()       (UsageType.GDS_SESSION)              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Coverage Matrix:**
+
+| Service | Call Sites | Tracking Method | Status |
+|---------|-----------|-----------------|--------|
+| Azure OpenAI (LLM) | ~22 `acomplete()` | TrackedLLM wrapper → TokenAccumulator | ✅ |
+| Voyage Embeddings (V2) | ~18 `embed()` | VoyageEmbedService → UsageTracker | ✅ |
+| Voyage Reranker | 6 sites (routes 3–7) | Manual `add_rerank()` + UsageTracker | ✅ |
+| Azure Document Intelligence | 1 site | `log_doc_intel_usage()` (pages) | ✅ |
+| Neo4j GDS (Aura Serverless) | 1 site | Session timing + `log_gds_usage()` | ✅ |
+| Legacy V1 Embeddings | ~17 sites | ❌ Not tracked (semi-deprecated) | Deferred |
+
+**Key Design Decisions:**
+- TrackedLLM wraps at the **factory level** (`_create_llm_client()`), so every LLM client automatically tracks without touching call sites
+- `LlamaSettings.llm` receives the raw unwrapped `_llm` to avoid LlamaIndex type-checking issues
+- `astream_complete()` cannot be tracked (tokens unavailable mid-stream); delegated without interception
+- Reranker tracking is manual at each call site because `voyageai.Client.rerank()` doesn't support wrapping like LlamaIndex LLMs
+
+**Files:**
+- `src/core/services/token_accumulator.py` — Per-request counter
+- `src/core/services/tracked_llm.py` — Transparent LLM wrapper
+- `src/core/models/usage.py` — UsageType enum (LLM_COMPLETION, EMBEDDING, DOC_INTEL, RERANK, GDS_SESSION)
+- `src/core/services/usage_tracker.py` — Fire-and-forget Cosmos DB writes
+
+**Commits:** `2f8a42b` (LLM tracking), `68fb054` (reranker + DI + credit system)
+
+### 36.4. USD-Based Credit System
+
+**Problem:** The original quota system used raw query counts per tier. This is unfair — a simple Route 2 vector search costs ~$0.002 while a Route 3 global search with MAP-REDUCE costs ~$0.05. A flat query count penalizes light users and subsidizes heavy ones.
+
+**Solution — Credit normalization by USD cost:**
+
+```
+1 credit = $0.001 USD
+```
+
+**Exchange Rates** (`src/core/services/credit_schedule.py`):
+
+| Service | Model | Rate | Credits per unit |
+|---------|-------|------|------------------|
+| Azure OpenAI | GPT-4o input | $2.50/1M tokens | 2.5 credits/1K tokens |
+| Azure OpenAI | GPT-4o output | $10.00/1M tokens | 10.0 credits/1K tokens |
+| Voyage Embed | voyage-3-context | $0.06/1M tokens | 0.06 credits/1K tokens |
+| Voyage Rerank | rerank-2.5 | $0.05/1M tokens | 0.05 credits/1K tokens |
+| Azure DI | Layout model | $0.01/page | 10.0 credits/page |
+| Neo4j GDS | Aura Serverless | $0.035/hr/GB | 35.0 credits/hr/GB |
+
+**Tier Allocations** (`src/core/roles.py`):
+
+| Tier | Monthly Credits | ~Equivalent |
+|------|----------------|-------------|
+| Free | 500 | ~25 simple queries or ~10 global queries |
+| Starter | 5,000 | ~250 simple or ~100 global |
+| Pro | 50,000 | ~2,500 simple or ~1,000 global |
+| Enterprise | ∞ | Unlimited |
+
+**Credit Wallet (Redis):**
+- Key pattern: `quota:{user_id}:credits:{YYYYMM}`
+- TTL: 35 days (auto-expire after billing cycle)
+- Deduction: **POST-query** (query runs, then credits deducted) — not pre-query blocking
+- Query-count limits retained as safety net alongside credits
+
+**Flow:**
+```
+Request → TokenAccumulator created
+  ↓
+Route executes (LLM/rerank/embed calls tracked)
+  ↓
+TokenAccumulator.compute_credits() → total credits used
+  ↓
+QuotaEnforcer.record_credits(user_id, credits) → INCRBY Redis key
+  ↓
+Response headers: X-Credits-Used, X-Credits-Remaining, X-Credits-Limit
+```
+
+**Files:**
+- `src/core/services/credit_schedule.py` — Exchange rates + compute functions
+- `src/core/services/quota_enforcer.py` — Redis wallet (record_credits, check_credit_limits)
+- `src/core/roles.py` — monthly_credits per PlanLimits tier
+- `src/worker/hybrid_v2/orchestrator.py` — Post-query credit deduction
+
+### 36.5. GDS Session Tracking
+
+**Problem:** Neo4j GDS (Aura Serverless) charges by session memory-hours (~$0.07/hr for 2GB), not per-algorithm call. GDS runs only during indexing (KNN, Louvain, PageRank), making it an operational cost. Without tracking, we couldn't attribute indexing costs to users/groups.
+
+**Solution:** Wrap the GDS session lifecycle with timing:
+
+```python
+# In lazygraphrag_pipeline.py
+session_start = time.time()
+gds_session = sessions.get_or_create(session_name, memory=memory_gb, ttl=ttl)
+# ... run KNN, Louvain, PageRank ...
+sessions.delete(session_name)
+session_duration = time.time() - session_start
+
+# Track
+usage_tracker.log_gds_usage(
+    user_id=user_id, group_id=group_id,
+    session_duration_seconds=session_duration,
+    memory_gb=memory_gb,
+    algorithms_run=["knn", "louvain", "pagerank"],
+    cost_estimate_usd=session_duration / 3600 * memory_gb * GDS_PRICE_PER_HOUR_PER_GB
+)
+```
+
+**UsageRecord extensions:** `gds_session_duration_seconds`, `gds_memory_gb`, `gds_algorithms_run`, `gds_session_id`
+
+### 36.6. Dashboard API & Frontend Credit Visibility
+
+**API Changes** (`src/api_gateway/routers/`):
+
+| Endpoint | Change |
+|----------|--------|
+| `POST /chat` | `ChatUsage` response model expanded with 8 fields: `prompt_tokens`, `completion_tokens`, `total_tokens`, `rerank_tokens`, `embed_tokens`, `credits_used`, `credits_remaining`, `credits_limit` |
+| `GET /dashboard/me/usage` | Reads Redis credit balance via `QuotaEnforcer.check_credit_limits()` — returns `credits_used_month`, `credits_limit_month`, `credits_remaining` |
+| `GET /dashboard/plans` | Each tier includes `monthly_credits` field |
+
+**Frontend Changes** (`frontend/app/frontend/src/pages/dashboard/Dashboard.tsx`):
+
+```
+┌─────────┐ ┌──────────┐ ┌──────────────┐ ┌───────────┐ ┌─────────┐
+│ Queries │ │ Queries  │ │ Credits Used │ │ Documents │ │ Storage │
+│ Today   │ │ Month    │ │ ████░░ 60%   │ │ Indexed   │ │ Used    │
+└─────────┘ └──────────┘ └──────────────┘ └───────────┘ └─────────┘
+
+Activity Table:
+| Date | Route | Query | Tokens | Credits | ...
+                                    ↑ new column
+
+Plan Cards:
+| Free          | Starter       | Pro           |
+| 500 credits   | 5K credits    | 50K credits   |
+     ↑ new field
+```
+
+**Commits:** `a68bad6` (GDS tracking + dashboard + frontend credit fields)

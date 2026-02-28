@@ -739,6 +739,8 @@ class LazyGraphRAGIndexingPipeline:
                 parts.append("Page Footer")
             elif source == "table_row":
                 parts.append(f"Table: {sp}" if sp else "Table")
+            elif source == "table_caption":
+                parts.append(f"Table Caption: {sp}" if sp else "Table Caption")
             elif source == "figure_caption":
                 parts.append(f"Figure: {sp}" if sp else "Figure")
             elif sp:
@@ -1847,9 +1849,9 @@ Output:
         
         3. **Selection Marks** → logged for analysis (future enhancement)
         
-        Note: Figure captions and table rows are handled as Sentence nodes
-        (source="figure_caption" / "table_row") during sentence extraction,
-        which is the path all retrieval routes use.
+        Note: Figure captions, table captions, and table rows are handled as
+        Sentence nodes (source="figure_caption" / "table_caption" / "table_row")
+        during sentence extraction, which is the path all retrieval routes use.
         
         Args:
             group_id: Group identifier for multi-tenancy

@@ -305,6 +305,7 @@ def extract_sentences_from_chunk(
     Sources:
       - "paragraph":       wtpsplit-split body text sentences
       - "table_row":       linearized DI table rows
+      - "table_caption":   DI table caption text
       - "figure_caption":  DI figure caption text
       - "signature_party": party name + role from DI signature block
       - "page_header":     first occurrence of DI pageHeader (deduped)
@@ -372,6 +373,24 @@ def extract_sentences_from_chunk(
                     "confidence": 1.0,
                     "tokens": len(row_text.split()),
                     "parent_text": "",  # Table rows are self-contained
+                })
+                idx += 1
+
+            # Table caption (if DI detected one)
+            caption = (table.get("caption") or "").strip()
+            if caption and len(caption) >= 10:
+                sentences.append({
+                    "id": f"{chunk_id}_sent_{idx}",
+                    "text": caption,
+                    "chunk_id": chunk_id,
+                    "document_id": document_id,
+                    "source": "table_caption",
+                    "index_in_chunk": idx,
+                    "section_path": section_path,
+                    "page": metadata.get("page_number"),
+                    "confidence": 1.0,
+                    "tokens": len(caption.split()),
+                    "parent_text": "",
                 })
                 idx += 1
 
@@ -723,6 +742,33 @@ def extract_sentences_from_di_units(
                         "index_in_section": idx_in_section,
                     })
                     global_idx += 1
+
+                # Table caption (if DI detected one)
+                caption = (table.get("caption") or "").strip()
+                if caption and len(caption) >= 10:
+                    text_key = caption.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = section_path or "[Document Root]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": caption,
+                            "chunk_id": "",
+                            "document_id": doc_id,
+                            "source": "table_caption",
+                            "index_in_chunk": 0,
+                            "index_in_doc": global_idx,
+                            "section_path": section_path,
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(caption.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
 
         # ─── Source C: Figure captions ───────────────────────────
         figures = meta.get("figures", [])

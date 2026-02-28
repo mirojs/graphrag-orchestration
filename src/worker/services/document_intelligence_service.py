@@ -416,15 +416,23 @@ class DocumentIntelligenceService:
                 "row_count": int,
                 "column_count": int,
                 "headers": List[str],
-                "rows": List[Dict[str, str]]
+                "rows": List[Dict[str, str]],
+                "caption": str  (table caption from DI, empty if none)
             }
         """
+        # Extract caption (Azure DI DocumentTable.caption)
+        caption_obj = getattr(table, "caption", None)
+        caption_text = ""
+        if caption_obj:
+            caption_text = (getattr(caption_obj, "content", "") or "").strip()
+
         if not table.cells:
             return {
                 "row_count": table.row_count or 0,
                 "column_count": table.column_count or 0,
                 "headers": [],
                 "rows": [],
+                "caption": caption_text,
             }
 
         # Extract headers (row 0)
@@ -451,6 +459,7 @@ class DocumentIntelligenceService:
             "column_count": table.column_count or 0,
             "headers": headers,
             "rows": rows,
+            "caption": caption_text,
         }
 
     # ========================================================================

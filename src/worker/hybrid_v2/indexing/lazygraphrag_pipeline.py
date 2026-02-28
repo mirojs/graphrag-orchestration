@@ -435,8 +435,6 @@ class LazyGraphRAGIndexingPipeline:
             chunk_to_doc_id=chunk_to_doc_id,
         )
         stats["di_barcodes"] = di_metadata_stats.get("barcodes_created", 0)
-        stats["di_figures"] = di_metadata_stats.get("figures_created", 0)
-        stats["di_figure_refs"] = di_metadata_stats.get("figure_ref_edges", 0)
         stats["di_languages"] = di_metadata_stats.get("languages_updated", 0)
 
         # 5) Entity/relationship extraction — sentence-based (Phase B denoising).
@@ -733,6 +731,8 @@ class LazyGraphRAGIndexingPipeline:
                 parts.append(f"Document: {title}")
             if source == "signature_party":
                 parts.append("Signature Block")
+            elif source == "letterhead":
+                parts.append("Letterhead")
             elif source == "page_header":
                 parts.append("Page Header")
             elif source == "page_footer":
@@ -1841,23 +1841,15 @@ Output:
            - Entity types: PRODUCT_CODE, TRACKING_NUMBER, QR_DATA, URL, BARCODE
            - Enables queries like "find documents with tracking number 1Z..."
         
-        2. **Figures** → :Figure nodes with REFERENCES edges to elements + embedding_v2
-           - Captures cross-section relationships without LLM extraction
-           - Figure captions create searchable content with V2 embeddings
-        
-        3. **Key-Value Pairs** → :KeyValuePair nodes with FOUND_IN edges + embedding_v2
-           - Deterministic field lookups from Azure DI
-           - Enables queries like "find documents where 'Invoice Number' = '12345'"
-        
-        4. **Languages** → Updates Document nodes with detected_languages property
+        2. **Languages** → Updates Document nodes with detected_languages property
            - Primary language stored as metadata
            - Enables multilingual corpus queries
         
-        5. **Selection Marks** → :ChecklistItem nodes (future enhancement)
-           - Currently logged for analysis
+        3. **Selection Marks** → logged for analysis (future enhancement)
         
-        After creating nodes, embeddings are generated for Figure captions and KVP text
-        to enable GDS KNN similarity matching with Entity nodes.
+        Note: Figure captions and table rows are handled as Sentence nodes
+        (source="figure_caption" / "table_row") during sentence extraction,
+        which is the path all retrieval routes use.
         
         Args:
             group_id: Group identifier for multi-tenancy
@@ -1869,12 +1861,8 @@ Output:
         """
         stats: Dict[str, Any] = {
             "barcodes_created": 0,
-            "figures_created": 0,
-            "figure_ref_edges": 0,
             "kvps_created": 0,
             "languages_updated": 0,
-            "embeddings_generated": 0,
-            "knn_edges_created": 0,
             "entity_similarity_edges": 0,
             "communities_detected": 0,
             "pagerank_scored": 0,
@@ -1894,7 +1882,6 @@ Output:
             first_meta = getattr(first_unit, "metadata", None) or {}
             
             barcodes = first_meta.get("barcodes") or []
-            figures = first_meta.get("figures") or []
             languages = first_meta.get("languages") or []
             selection_marks = first_meta.get("selection_marks") or []
             
@@ -1905,7 +1892,7 @@ Output:
                 unit_kvps = unit_meta.get("key_value_pairs") or []
                 all_kvps.extend(unit_kvps)
             
-            if not any([barcodes, figures, languages, all_kvps]):
+            if not any([barcodes, languages, all_kvps]):
                 continue
             
             logger.info(
@@ -1914,14 +1901,13 @@ Output:
                     "group_id": group_id,
                     "doc_id": doc_id,
                     "barcodes": len(barcodes),
-                    "figures": len(figures),
                     "languages": len(languages),
                     "selection_marks": len(selection_marks),
                     "kvps": len(all_kvps),
                 }
             )
             
-            def _write_di_metadata(session, *, _barcodes=barcodes, _figures=figures,
+            def _write_di_metadata(session, *, _barcodes=barcodes,
                                    _doc_id=doc_id, _languages=languages,
                                    _selection_marks=selection_marks, _all_kvps=all_kvps):
                 # 1. Create Barcode nodes and FOUND_IN edges
@@ -1961,70 +1947,7 @@ Output:
                     stats["barcodes_created"] += result.single()["count"]
                     logger.info(f"📊 Created {result.single()['count'] if result else 0} Barcode nodes for {_doc_id}")
                 
-                # 2. Create Figure nodes with captions (cross-references captured via element_refs)
-                if _figures:
-                    figure_data = []
-                    for fig in _figures:
-                        fig_id = self._stable_figure_id(group_id, fig.get("id", ""))
-                        figure_data.append({
-                            "id": fig_id,
-                            "group_id": group_id,
-                            "di_id": fig.get("id", ""),
-                            "caption": fig.get("caption", ""),
-                            "footnotes": fig.get("footnotes", []),
-                            "element_count": fig.get("element_count", 0),
-                            "doc_id": _doc_id,
-                        })
-                    
-                    result = session.run(
-                        """
-                        UNWIND $figures AS fig
-                        MERGE (f:Figure {id: fig.id, group_id: fig.group_id})
-                        SET f.group_id = fig.group_id,
-                            f.di_id = fig.di_id,
-                            f.caption = fig.caption,
-                            f.footnotes = fig.footnotes,
-                            f.element_count = fig.element_count,
-                            f.updated_at = datetime()
-                        WITH f, fig
-                        MATCH (d:Document {id: fig.doc_id, group_id: fig.group_id})
-                        MERGE (f)-[:FOUND_IN]->(d)
-                        RETURN count(DISTINCT f) AS count
-                        """,
-                        figures=figure_data,
-                    )
-                    count = result.single()["count"]
-                    stats["figures_created"] += count
-                    
-                    # Create REFERENCES edges from figures to elements (cross-section graph edges!)
-                    ref_edges = []
-                    for fig in _figures:
-                        fig_id = self._stable_figure_id(group_id, fig.get("id", ""))
-                        for ref in fig.get("element_refs", []):
-                            # refs are like {"kind": "paragraphs", "index": 42, "ref": "/paragraphs/42"}
-                            ref_edges.append({
-                                "figure_id": fig_id,
-                                "ref_kind": ref.get("kind", ""),
-                                "ref_index": ref.get("index", -1),
-                                "ref_path": ref.get("ref", ""),
-                            })
-                    
-                    if ref_edges:
-                        # Store reference metadata on the Figure node for later retrieval
-                        session.run(
-                            """
-                            UNWIND $refs AS r
-                            MATCH (f:Figure {id: r.figure_id, group_id: $group_id})
-                            SET f.element_refs = coalesce(f.element_refs, []) + [r.ref_path]
-                            """,
-                            refs=ref_edges,
-                            group_id=group_id,
-                        )
-                        stats["figure_ref_edges"] += len(ref_edges)
-                    
-                    logger.info(f"📈 Created {count} Figure nodes with {len(ref_edges)} element references for {_doc_id}")
-                
-                # 3. Update Document nodes with detected languages (including spans for sentence-level extraction)
+                # 2. Update Document nodes with detected languages (including spans for sentence-level extraction)
                 if _languages:
                     import json as json_module
                     # Find primary language (most spans)
@@ -2052,7 +1975,7 @@ Output:
                     total_spans = sum(lang.get("span_count", 0) for lang in _languages)
                     logger.info(f"🌐 Updated language metadata for {_doc_id}: primary={primary_lang.get('locale')}, locales={all_locales}, total_spans={total_spans}")
                 
-                # 4. Log selection marks for future enhancement
+                # 3. Log selection marks for future enhancement
                 if _selection_marks:
                     selected = sum(1 for m in _selection_marks if m.get("state") == "selected")
                     logger.info(
@@ -2060,7 +1983,7 @@ Output:
                         extra={"doc_id": _doc_id, "total": len(_selection_marks), "selected": selected}
                     )
                 
-                # 5. Create KeyValuePair nodes with FOUND_IN edges
+                # 4. Create KeyValuePair nodes with FOUND_IN edges
                 if _all_kvps:
                     kvp_data = []
                     for kvp in _all_kvps:
@@ -2078,7 +2001,7 @@ Output:
                             "page_number": kvp.get("page_number", 1),
                             "section_id": kvp.get("section_id", ""),
                             "section_path": kvp.get("section_path", []),
-                            "searchable_text": f"{key_text}: {value_text}",  # For embedding
+                            "searchable_text": f"{key_text}: {value_text}",
                             "doc_id": _doc_id,
                         })
                     
@@ -2106,15 +2029,9 @@ Output:
                         count = result.single()["count"]
                         stats["kvps_created"] += count
                         logger.info(f"🔑 Created {count} KeyValuePair nodes for {_doc_id}")
-
+                
             await self.neo4j_store.arun_in_session(_write_di_metadata)
 
-        # 6. Generate embeddings for Figure captions and KVP searchable text
-        # Then use GDS KNN to create SIMILAR_TO edges with Entity nodes
-        embedding_stats = await self._generate_di_node_embeddings_and_knn(group_id=group_id)
-        stats["embeddings_generated"] = embedding_stats.get("embeddings_created", 0)
-        stats["knn_edges_created"] = embedding_stats.get("knn_edges_created", 0)
-        
         logger.info(
             "di_metadata_processing_complete",
             extra={
@@ -2130,127 +2047,11 @@ Output:
         key = f"barcode:{group_id}:{value}"
         return f"barcode_{hashlib.md5(key.encode()).hexdigest()[:16]}"
 
-    def _stable_figure_id(self, group_id: str, fig_id: str) -> str:
-        """Generate stable ID for figure entity."""
-        key = f"figure:{group_id}:{fig_id}"
-        return f"figure_{hashlib.md5(key.encode()).hexdigest()[:16]}"
-
     def _stable_kvp_id(self, group_id: str, doc_id: str, key: str, value: str) -> str:
         """Generate stable ID for key-value pair entity."""
         # Include doc_id to allow same key in different documents
         composite_key = f"kvp:{group_id}:{doc_id}:{key}:{value}"
         return f"kvp_{hashlib.md5(composite_key.encode()).hexdigest()[:16]}"
-
-    async def _generate_di_node_embeddings_and_knn(
-        self,
-        *,
-        group_id: str,
-    ) -> Dict[str, Any]:
-        """Generate V2 embeddings for Figure/KVP nodes and create SIMILAR_TO edges via GDS KNN.
-        
-        This method:
-        1. Finds Figure nodes with captions but no embeddings
-        2. Finds KeyValuePair nodes with searchable_text but no embeddings
-        3. Generates V2 (Voyage voyage-3) embeddings for these nodes
-        4. Uses GDS KNN algorithm to find similar Entity nodes
-        5. Creates SIMILAR_TO edges between DI nodes and Entities
-        
-        Args:
-            group_id: Group identifier for multi-tenancy
-            
-        Returns:
-            Statistics dictionary with embedding and edge counts
-        """
-        stats = {
-            "embeddings_created": 0,
-            "knn_edges_created": 0,
-            "figures_processed": 0,
-            "kvps_processed": 0,
-        }
-        
-        def _read_di_nodes(session):
-            # 1. Get Figure nodes needing embeddings (have caption, no embedding_v2)
-            figure_result = session.run(
-                """
-                MATCH (f:Figure {group_id: $group_id})
-                WHERE f.caption IS NOT NULL AND f.caption <> '' AND f.embedding_v2 IS NULL
-                RETURN f.id AS id, f.caption AS text
-                LIMIT 500
-                """,
-                group_id=group_id,
-            )
-            figures_to_embed_inner = [{"id": r["id"], "text": r["text"]} for r in figure_result]
-
-            # 2. Get KVP nodes needing embeddings
-            kvp_result = session.run(
-                """
-                MATCH (k:KeyValuePair {group_id: $group_id})
-                WHERE k.searchable_text IS NOT NULL AND k.embedding_v2 IS NULL
-                RETURN k.id AS id, k.searchable_text AS text
-                LIMIT 500
-                """,
-                group_id=group_id,
-            )
-            kvps_to_embed_inner = [{"id": r["id"], "text": r["text"]} for r in kvp_result]
-            return figures_to_embed_inner, kvps_to_embed_inner
-
-        figures_to_embed, kvps_to_embed = await self.neo4j_store.arun_in_session(_read_di_nodes, read_only=True)
-        
-        # 3. Generate embeddings for all nodes
-        all_nodes = figures_to_embed + kvps_to_embed
-        if not all_nodes:
-            logger.info("No DI nodes need embeddings")
-            return stats
-        
-        logger.info(f"🔢 Generating embeddings for {len(figures_to_embed)} Figures and {len(kvps_to_embed)} KVPs")
-        
-        texts = [n["text"] for n in all_nodes]
-        try:
-            embeddings = await self.embedder.aget_text_embedding_batch(texts)
-        except Exception as e:
-            logger.error(f"Failed to generate DI node embeddings: {e}")
-            return stats
-        
-        # 4. Update nodes with embeddings via UNWIND batch (2 queries instead of N)
-        fig_updates = [
-            {"id": fig["id"], "embedding": embeddings[i]}
-            for i, fig in enumerate(figures_to_embed)
-            if i < len(embeddings) and embeddings[i]
-        ]
-        kvp_start_idx = len(figures_to_embed)
-        kvp_updates = [
-            {"id": kvp["id"], "embedding": embeddings[kvp_start_idx + i]}
-            for i, kvp in enumerate(kvps_to_embed)
-            if (kvp_start_idx + i) < len(embeddings) and embeddings[kvp_start_idx + i]
-        ]
-        
-        def _write_di_embeddings(session):
-            if fig_updates:
-                session.run("""
-                    UNWIND $updates AS u
-                    MATCH (f:Figure {id: u.id, group_id: $group_id})
-                    SET f.embedding_v2 = u.embedding
-                """, updates=fig_updates, group_id=group_id)
-            stats["figures_processed"] = len(fig_updates)
-            stats["embeddings_created"] += len(fig_updates)
-
-            if kvp_updates:
-                session.run("""
-                    UNWIND $updates AS u
-                    MATCH (k:KeyValuePair {id: u.id, group_id: $group_id})
-                    SET k.embedding_v2 = u.embedding
-                """, updates=kvp_updates, group_id=group_id)
-            stats["kvps_processed"] = len(kvp_updates)
-            stats["embeddings_created"] += len(kvp_updates)
-
-        await self.neo4j_store.arun_in_session(_write_di_embeddings)
-        
-        logger.info(f"✅ Generated {stats['embeddings_created']} embeddings for DI nodes")
-        
-        # Note: GDS algorithms now run AFTER entities are committed (see index_documents step 8)
-        # This ensures all nodes (Entities, Figures, KVPs) are in Neo4j before GDS projection
-        
-        return stats
 
     async def _run_gds_graph_algorithms(
         self,

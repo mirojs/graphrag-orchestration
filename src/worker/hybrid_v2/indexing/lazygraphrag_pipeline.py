@@ -1413,15 +1413,17 @@ class LazyGraphRAGIndexingPipeline:
 
         # Build batches within each section group
         batches: List[Tuple[List[Dict], str, str]] = []  # (sentence_list, batch_uid, batch_text)
+        context_sentence_map: Dict[str, Optional[Dict]] = {}  # batch_uid → context sentence (if any)
         for (_doc_id, _sec_path), section_sents in section_groups:
             for i in range(0, len(section_sents), BATCH_SIZE):
                 batch = section_sents[i:i + BATCH_SIZE]
                 batch_uid = "|".join(s["id"] for s in batch)
 
                 # Cross-batch anaphora: prepend previous sentence as context
+                context_sent: Optional[Dict] = None
                 if i > 0:
-                    prev_sent = section_sents[i - 1]
-                    context_prefix = f"[Context] {prev_sent['text']}\n"
+                    context_sent = section_sents[i - 1]
+                    context_prefix = f"[Context] {context_sent['text']}\n"
                 else:
                     context_prefix = ""
 
@@ -1429,6 +1431,7 @@ class LazyGraphRAGIndexingPipeline:
                     s["text"] for s in batch
                 )
                 batches.append((batch, batch_uid, batch_text))
+                context_sentence_map[batch_uid] = context_sent
 
         logger.info(
             f"Section-aware batching: {len(section_groups)} section groups "
@@ -1550,19 +1553,28 @@ class LazyGraphRAGIndexingPipeline:
 
         # Batch-level attribution fallback: if an entity was extracted from
         # a batch but fuzzy matching found zero sentence-level mentions,
-        # assign ALL sentences in its source batches (the LLM definitely
-        # saw the entity in that text, so connectivity is more important
-        # than precision here).
+        # check whether the entity came from the [Context] prefix.  If so,
+        # attribute it to the context sentence instead of blindly assigning
+        # all batch sentences (which would create wrong MENTIONS edges).
         batch_fallback_count = 0
+        context_redirect_count = 0
         for ent in entities_by_id.values():
             if ent.text_unit_ids:
                 continue
             source_batches = entity_source_batches.get(ent.id, [])
             for b_uid in source_batches:
-                for s in batch_sentence_map.get(b_uid, []):
-                    if s["id"] not in ent.text_unit_ids:
-                        ent.text_unit_ids.append(s["id"])
-                        batch_fallback_count += 1
+                # Check if entity came from the [Context] prefix
+                ctx_sent = context_sentence_map.get(b_uid)
+                if ctx_sent and _entity_mentioned_in_text(ent.name, getattr(ent, "aliases", []) or [], ctx_sent["text"]):
+                    if ctx_sent["id"] not in ent.text_unit_ids:
+                        ent.text_unit_ids.append(ctx_sent["id"])
+                        context_redirect_count += 1
+                else:
+                    # True batch fallback — entity not from context
+                    for s in batch_sentence_map.get(b_uid, []):
+                        if s["id"] not in ent.text_unit_ids:
+                            ent.text_unit_ids.append(s["id"])
+                            batch_fallback_count += 1
 
         # Global fallback: for entities never found in any batch relationship,
         # do a fuzzy text match across all content sentences
@@ -1574,13 +1586,14 @@ class LazyGraphRAGIndexingPipeline:
                         ent.text_unit_ids.append(s["id"])
                         global_fallback_count += 1
 
-        total_mentions = mentions_total + batch_fallback_count + global_fallback_count
+        total_mentions = mentions_total + batch_fallback_count + context_redirect_count + global_fallback_count
         if total_mentions == 0:
             logger.warning("native_sentence_extractor_no_mentions_recovered",
                            extra={"group_id": group_id, "sentences": len(sentences), "entities": len(entities_by_id)})
         else:
             logger.info(
                 f"MENTIONS recovery: {mentions_total} fuzzy-matched, "
+                f"{context_redirect_count} context-redirected, "
                 f"{batch_fallback_count} batch-fallback, "
                 f"{global_fallback_count} global-fallback"
             )
@@ -1760,6 +1773,32 @@ Output:
   {"id": "1", "label": "CONCEPT", "properties": {"name": "$11,200.00", "aliases": ["11200"], "description": "Unit price for Savaria V1504 Telecab"}}
 ], "relationships": [
   {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "unit price"}}
+]}
+
+Example 4 (scope-of-work list items — ALWAYS extract each product/service as a CONCEPT):
+Text: "Contractor agrees to furnish and install the following:
+1 Vertical Platform Lift (Model XR-500).
+1 Power system: 220 VAC 50 Hz.
+1 Outdoor weatherproofing package.
+1 Aluminum door with inserts & automatic opener."
+Output:
+{"nodes": [
+  {"id": "0", "label": "CONCEPT", "properties": {"name": "Vertical Platform Lift (Model XR-500)", "aliases": ["XR-500", "platform lift", "VPL"], "description": "Vertical platform lift model XR-500"}},
+  {"id": "1", "label": "CONCEPT", "properties": {"name": "Power system 220 VAC 50 Hz", "aliases": ["power system", "220 VAC", "electrical system"], "description": "Electrical power system specification"}},
+  {"id": "2", "label": "CONCEPT", "properties": {"name": "Outdoor weatherproofing package", "aliases": ["weatherproofing", "outdoor package"], "description": "Outdoor weather protection accessory"}},
+  {"id": "3", "label": "CONCEPT", "properties": {"name": "Aluminum door with inserts & automatic opener", "aliases": ["aluminum door", "automatic opener", "door with inserts"], "description": "Aluminum entry door with glass inserts and auto opener"}}
+], "relationships": [
+  {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "lift power specification"}}
+]}
+
+Example 5 (payment terms and financial amounts):
+Text: "Total contract price is $45,000.00, payable in 3 installments: $25,000.00 upon signing. $15,000.00 upon delivery. $5,000.00 upon completion."
+Output:
+{"nodes": [
+  {"id": "0", "label": "CONCEPT", "properties": {"name": "$45,000.00 total contract price", "aliases": ["total price", "contract price", "45000"], "description": "Total contract price payable in installments"}},
+  {"id": "1", "label": "CONCEPT", "properties": {"name": "3-installment payment plan", "aliases": ["payment terms", "installment plan", "payment schedule"], "description": "Payment in 3 stages: signing, delivery, completion"}}
+], "relationships": [
+  {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "payment structure"}}
 ]}
 '''
 

@@ -3,6 +3,7 @@
 **Date:** 2026-03-01  
 **Status:** MENTIONS edge weight bug found and fixed (uncommitted). Full upstream code comparison identified 5 critical deviations (P0: entity seed IDF + mean-norm, P1: DPR min-max norm, P2: entity top-K=5 filter). Gap 1 (all-passage DPR seeding) does NOT improve scores. Baseline DPR_TOP_K=20 + edge fix = 54–55/57. Continue tomorrow with commit + P0/P1/P2 fixes.  
 **Previous handover:** `HANDOVER_2026-02-28_SENTENCE_SOURCE_TAGGING.md`  
+**Companion analysis:** `ANALYSIS_ROUTE7_VS_UPSTREAM_HIPPORAG2_2026-03-01.md` — Full 12-deviation code comparison with architecture diagrams, pseudocode diffs, and priority recommendations (P0–P3).  
 **Baseline (pre-changes):** 56/57 (98.2%) — `route7_hipporag2_r4questions_20260226T222346Z` (v7.2, rerank_top_k=30, PPR_TOP_K=20)  
 **Current HEAD:** `25659557 Clarify signature detection costs for both DI and CU`
 

@@ -112,8 +112,8 @@ class Settings(BaseSettings):
     SKELETON_ENRICHMENT_ENABLED: bool = True  # Master switch for sentence extraction + injection
     SKELETON_SENTENCE_TOP_K: int = 8  # Top-k sentence matches to inject into Route 2 prompt
     SKELETON_SIMILARITY_THRESHOLD: float = 0.45  # Min cosine similarity for sentence retrieval
-    SKELETON_MIN_SENTENCE_CHARS: int = 30  # Minimum characters for a valid sentence
-    SKELETON_MIN_SENTENCE_WORDS: int = 3  # Minimum words for a valid sentence (lowered from 5 — was dropping meaningful 3-4 word legal sentences like "Afterward, deposit is forfeited.")
+    SKELETON_MIN_SENTENCE_CHARS: int = 20  # Minimum characters for a valid sentence (lowered from 30 — was dropping informative KVP lines like "Phone: (813) 902-4455")
+    SKELETON_MIN_SENTENCE_WORDS: int = 2  # Minimum words for a valid sentence (lowered from 3 — was dropping 2-word KVP lines like "Email: user@example.com")
     
     # Phase 2: Sparse sentence-to-sentence RELATED_TO edges
     # Separate from GDS KNN (Entity/Figure/KVP/Chunk). Bounded: threshold 0.90, max k=2.

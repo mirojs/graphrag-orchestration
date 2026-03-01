@@ -179,7 +179,7 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Feature | CU | DI |
 |---|---|---|
 | Cross-page table detection | ✅ Automatic merging of tables spanning pages | ⚠️ Layout returns per-page; custom models + post-processing can merge ([sample](https://github.com/Azure-Samples/document-intelligence-code-samples/blob/main/Python(v4.0)/Pre_or_post_processing_samples/sample_identify_cross_page_tables.py)) |
-| Signature detection | ⚠️ Requires custom analyzer with field schema (not automatic) | ✅ `prebuilt-document` detects signature presence + bounding box automatically |
+| Signature detection | ⚠️ Requires custom analyzer with field schema (not automatic) | ⚠️ Via `prebuilt-document` model (not `prebuilt-layout`) — requires separate API call, effectively doubling per-page cost |
 | Formula extraction (LaTeX) | ✅ Via `enableFormula` config | ✅ Via `features=formulas` add-on — but costs **$6/1K pages extra** (doubles base cost from $5 to $11/1K pages) |
 | Hyperlink detection | ✅ (with URL + bounding box) | ❌ |
 | GPT-generated summaries | ✅ via documentSearch | ❌ |
@@ -195,7 +195,7 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Feature | Details |
 |---|---|
 | **Cross-page table detection** | CU automatically merges table fragments spanning page breaks. DI layout returns per-page tables; merging requires custom model training or [post-processing code](https://github.com/Azure-Samples/document-intelligence-code-samples/blob/main/Python(v4.0)/Pre_or_post_processing_samples/sample_identify_cross_page_tables.py). CU advantage: zero-effort automatic merging. |
-| **Signature extraction** | CU: requires custom analyzer with field schema — structured extraction (name, date, image) but NOT automatic. DI: `prebuilt-document` detects signature presence + bounding box automatically without extra config. DI advantage for basic detection; CU advantage only if you need schema-driven field extraction. |
+| **Signature extraction** | CU: requires custom analyzer with field schema — NOT automatic. DI: `prebuilt-document` model auto-detects presence + bounding box, but requires a separate API call from `prebuilt-layout` (our pipeline model), effectively doubling per-page cost. Neither provides signatures "for free" in a layout-only workflow. |
 | **Formula → LaTeX** | Both support LaTeX output. CU: `enableFormula` config flag. DI: `features=formulas` add-on at **$6/1K pages extra** (more than doubles the $5/1K base cost). CU advantage: likely cheaper. (Not verified on math-heavy docs in this test; our 5 PDFs had no formulas.) |
 | **Hyperlink extraction** | CU-only. Detected 2 hyperlinks in the invoice (email mailto: links) with bounding polygons. DI does not extract hyperlinks. |
 | **Document summaries** | CU-only. GPT-generated one-paragraph summary per document — useful for RAG retrieval ranking. |
@@ -244,7 +244,7 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 2. **Document summaries** — useful for search/ranking without extra LLM calls
 3. **Typed invoice extraction** — similar to DI's prebuilt-invoice but unified API surface
 4. **Hyperlink detection** — not available in DI at all
-5. **Signature extraction** — CU requires custom analyzer with schema; DI `prebuilt-document` auto-detects. CU advantage only for structured field extraction
+5. **Signature extraction** — neither is free: DI needs separate `prebuilt-document` call (2× per-page cost); CU needs custom analyzer with schema
 6. **Cheaper formula LaTeX** — DI's `features=formulas` add-on costs $6/1K pages extra; CU's `enableFormula` is a config flag
 7. **Multi-modal** — audio, video, image analysis not available in DI
 
@@ -309,7 +309,7 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Hyperlink detection | CU | Not available in DI |
 | Cross-page tables | CU | DI requires custom model or post-processing; CU automatic |
 | Formula LaTeX output | CU (cost) | Both support LaTeX; DI add-on costs $6/1K pages extra |
-| Signature extraction | DI (basic) | DI auto-detects presence; CU needs custom analyzer for structured extraction |
+| Signature extraction | Tie (both cost extra) | DI: separate `prebuilt-document` call; CU: custom analyzer. Neither free in layout workflow |
 | Custom field extraction | CU | Zero-shot (no training data) vs DI's labeled-sample approach |
 | Maturity/stability | DI | DI is GA, CU SDK is beta |
 | Byte upload support | DI | CU byte upload is broken (URL-only works) |

@@ -269,12 +269,14 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Config from env, with preset overrides
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "20"))
-        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "120"))
+        # Gap 1 fix: upstream seeds ALL passages into PPR (score × 0.05).
+        # Query corpus size dynamically so DPR covers every passage.
+        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "0"))  # 0 = all passages
+        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))  # 0 = all
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20")
+            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "100")
         )
         # Reranker: reranks PPR output for synthesis quality (v7.1 intent)
         rerank_enabled = os.getenv(
@@ -467,7 +469,16 @@ class HippoRAG2Handler(BaseRouteHandler):
             "step_4_ppr_complete",
             top_passages=len(passage_scores[:ppr_passage_top_k]),
             top_entities=len(entity_scores[:20]),
+            total_ppr_passages=len(passage_scores),
         )
+        # DEBUG: dump per-doc distribution in PPR output (top 100)
+        _doc_dist: dict = {}
+        for _cid, _sc in passage_scores[:100]:
+            _doc = _cid.rsplit("_sent_", 1)[0]
+            _doc_dist.setdefault(_doc, []).append((_cid, round(_sc, 6)))
+        for _doc, _items in sorted(_doc_dist.items(), key=lambda x: -len(x[1])):
+            logger.info("ppr_debug_doc_dist", doc=_doc, count=len(_items),
+                         top3=[f"{c}:{s}" for c, s in _items[:3]])
 
         # ------------------------------------------------------------------
         # Step 4.5: Rerank PPR output with cross-encoder (optional)
@@ -1010,19 +1021,41 @@ class HippoRAG2Handler(BaseRouteHandler):
     async def _dpr_passage_search(
         self,
         query_embedding: List[float],
-        top_k: int = 20,
-        sentence_top_k: int = 60,
+        top_k: int = 0,
+        sentence_top_k: int = 0,
     ) -> List[Tuple[str, float]]:
         """Dense Passage Retrieval via sentence-level vector search.
 
         Searches sentence_embeddings_v2 for sharp single-sentence matches.
         Returns sentence IDs as passage nodes for PPR.
+
+        When top_k=0 (default, upstream-aligned), queries the corpus size
+        first so ALL passages are returned and seeded into PPR.
         """
         if not self.neo4j_driver:
             return []
 
         group_id = self.group_id
         folder_id = self.folder_id
+        driver = self.neo4j_driver
+
+        # When top_k=0, resolve actual corpus size so we seed all passages
+        if top_k <= 0 or sentence_top_k <= 0:
+            count_cypher = """CYPHER 25
+            MATCH (s:Sentence {group_id: $group_id})
+            RETURN count(s) AS cnt
+            """
+            try:
+                def _count():
+                    with retry_session(driver, read_only=True) as session:
+                        return session.run(count_cypher, group_id=group_id).single()["cnt"]
+                corpus_size = await asyncio.to_thread(_count)
+            except Exception:
+                corpus_size = 200  # safe fallback
+            if top_k <= 0:
+                top_k = corpus_size
+            if sentence_top_k <= 0:
+                sentence_top_k = corpus_size
 
         sentence_cypher = """CYPHER 25
         CALL () {
@@ -1041,8 +1074,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         """
 
         try:
-            driver = self.neo4j_driver
-
             def _run_sentence():
                 with retry_session(driver, read_only=True) as session:
                     records = session.run(
@@ -1056,7 +1087,8 @@ class HippoRAG2Handler(BaseRouteHandler):
                     return [(r["chunk_id"], r["score"]) for r in records]
 
             results = await asyncio.to_thread(_run_sentence)
-            logger.debug("route7_dpr_sentence_complete", hits=len(results))
+            logger.debug("route7_dpr_sentence_complete", hits=len(results),
+                         corpus_size=top_k)
             return results
         except Exception as e:
             logger.warning("route7_dpr_failed", error=str(e))

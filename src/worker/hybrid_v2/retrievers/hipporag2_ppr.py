@@ -45,7 +45,7 @@ class HippoRAG2PPR:
         Nodes: Entity nodes + Sentence (passage) nodes
         Edges (undirected, weighted):
             - Entity <-> Entity via RELATED_TO (weight = r.weight, default 1.0)
-            - Entity <-> Passage via MENTIONS (weight = passage_node_weight)
+            - Entity <-> Passage via MENTIONS (weight = 1.0, matching upstream)
             - Entity <-> Entity via SEMANTICALLY_SIMILAR (weight = similarity)
 
     Seed vector:
@@ -242,6 +242,8 @@ class HippoRAG2PPR:
 
             # ----------------------------------------------------------
             # 4. Passage-Entity edges via MENTIONS
+            #    Upstream HippoRAG 2 uses weight=1.0 for passage-entity
+            #    graph edges (passage_node_weight is only for PPR seeding).
             # ----------------------------------------------------------
             result = session.run(
                 "MATCH (c:Sentence {group_id: $group_id})"
@@ -254,7 +256,7 @@ class HippoRAG2PPR:
                 src_idx = self._node_to_idx.get(record["chunk_id"])
                 tgt_idx = self._node_to_idx.get(record["entity_id"])
                 if src_idx is not None and tgt_idx is not None:
-                    self._add_edge(src_idx, tgt_idx, passage_node_weight)
+                    self._add_edge(src_idx, tgt_idx, 1.0)
                     mentions_edge_count += 1
 
             # ----------------------------------------------------------

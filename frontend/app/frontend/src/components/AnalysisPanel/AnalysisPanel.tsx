@@ -1,5 +1,5 @@
 import { useMsal } from "@azure/msal-react";
-import { Pivot, PivotItem } from "@fluentui/react";
+import { Tab, TabList, SelectTabData, SelectTabEvent } from "@fluentui/react-components";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -24,8 +24,6 @@ interface Props {
     answer: ChatAppResponse;
     onCitationClicked?: (citationFilePath: string) => void;
 }
-
-const pivotItemDisabledStyle = { disabled: true, style: { color: "grey" } };
 
 /**
  * Build SentenceHighlight[] from structured citations by extracting polygon data
@@ -197,33 +195,30 @@ export const AnalysisPanel = ({
     };
 
     return (
-        <Pivot
-            className={className}
-            selectedKey={activeTab}
-            onLinkClick={pivotItem => pivotItem && onActiveTabChanged(pivotItem.props.itemKey! as AnalysisPanelTabs)}
-        >
-            <PivotItem
-                itemKey={AnalysisPanelTabs.ThoughtProcessTab}
-                headerText={t("headerTexts.thoughtProcess")}
-                headerButtonProps={isDisabledThoughtProcessTab ? pivotItemDisabledStyle : undefined}
-            >
-                <ThoughtProcess thoughts={answer.context.thoughts || []} onCitationClicked={onCitationClicked} />
-            </PivotItem>
-            <PivotItem
-                itemKey={AnalysisPanelTabs.SupportingContentTab}
-                headerText={t("headerTexts.supportingContent")}
-                headerButtonProps={isDisabledSupportingContentTab ? pivotItemDisabledStyle : undefined}
-            >
-                <SupportingContent supportingContent={answer.context.data_points} />
-            </PivotItem>
-            <PivotItem
-                itemKey={AnalysisPanelTabs.CitationTab}
-                headerText={t("headerTexts.citation")}
-                headerButtonProps={isDisabledCitationTab ? pivotItemDisabledStyle : undefined}
-            >
-                {renderSentenceTextPanel()}
-                {renderFileViewer()}
-            </PivotItem>
-        </Pivot>
+        <div className={className}>
+            <TabList selectedValue={activeTab} onTabSelect={(_ev: SelectTabEvent, data: SelectTabData) => onActiveTabChanged(data.value as AnalysisPanelTabs)}>
+                <Tab value={AnalysisPanelTabs.ThoughtProcessTab} disabled={isDisabledThoughtProcessTab}>
+                    {t("headerTexts.thoughtProcess")}
+                </Tab>
+                <Tab value={AnalysisPanelTabs.SupportingContentTab} disabled={isDisabledSupportingContentTab}>
+                    {t("headerTexts.supportingContent")}
+                </Tab>
+                <Tab value={AnalysisPanelTabs.CitationTab} disabled={isDisabledCitationTab}>
+                    {t("headerTexts.citation")}
+                </Tab>
+            </TabList>
+            <div>
+                {activeTab === AnalysisPanelTabs.ThoughtProcessTab && (
+                    <ThoughtProcess thoughts={answer.context.thoughts || []} onCitationClicked={onCitationClicked} />
+                )}
+                {activeTab === AnalysisPanelTabs.SupportingContentTab && <SupportingContent supportingContent={answer.context.data_points} />}
+                {activeTab === AnalysisPanelTabs.CitationTab && (
+                    <>
+                        {renderSentenceTextPanel()}
+                        {renderFileViewer()}
+                    </>
+                )}
+            </div>
+        </div>
     );
 };

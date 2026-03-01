@@ -497,19 +497,42 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_ENTITY_DOC_MAP", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
-        # Apply semantic search ranking (already computed in step 2)
+        # Merge PPR + semantic search scores (weighted combination).
+        # PPR provides graph-based diversity across documents;
+        # semantic search provides relevance boosting for the query.
         if semantic_search_results:
-            passage_scores = semantic_search_results
+            sem_weight = float(os.getenv("ROUTE7_SEMANTIC_WEIGHT", "0.5"))
+            ppr_weight = 1.0 - sem_weight
+
+            # Normalize PPR scores to [0,1]
+            ppr_map: Dict[str, float] = {}
+            if passage_scores:
+                max_ppr = max(s for _, s in passage_scores) or 1.0
+                ppr_map = {cid: s / max_ppr for cid, s in passage_scores}
+
+            # Semantic search scores (already cosine sim in [0,1])
+            sem_map = {cid: score for cid, score in semantic_search_results}
+
+            # Union of all passage IDs from both sources
+            all_ids = set(ppr_map.keys()) | set(sem_map.keys())
+            merged: List[Tuple[str, float]] = []
+            for cid in all_ids:
+                combined = ppr_weight * ppr_map.get(cid, 0.0) + sem_weight * sem_map.get(cid, 0.0)
+                merged.append((cid, combined))
+            merged.sort(key=lambda x: x[1], reverse=True)
+            passage_scores = merged
+
             logger.info(
-                "step_4.7_semantic_search_applied",
+                "step_4.7_semantic_ppr_merged",
                 source="step_2_parallel",
-                passages=len(semantic_search_results),
+                ppr_passages=len(ppr_map),
+                sem_passages=len(sem_map),
+                merged_passages=len(merged),
+                sem_weight=sem_weight,
             )
 
         # Determine top passage IDs for chunk fetch
-        # When semantic search is active, use its full output;
-        # otherwise fall back to PPR passage count.
-        passage_limit = len(semantic_search_results) if semantic_search_results else ppr_passage_top_k
+        passage_limit = ppr_passage_top_k
         top_passage_scores = passage_scores[:passage_limit]
         top_chunk_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}

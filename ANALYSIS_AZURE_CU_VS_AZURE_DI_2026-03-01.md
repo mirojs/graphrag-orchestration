@@ -179,8 +179,8 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Feature | CU | DI |
 |---|---|---|
 | Cross-page table detection | ✅ Automatic merging of tables spanning pages | ⚠️ Layout returns per-page; custom models + post-processing can merge ([sample](https://github.com/Azure-Samples/document-intelligence-code-samples/blob/main/Python(v4.0)/Pre_or_post_processing_samples/sample_identify_cross_page_tables.py)) |
-| Signature detection | ✅ Via custom analyzer with field schema | ⚠️ `prebuilt-document` detects signature regions (presence + bounding box), not field-level extraction |
-| Formula extraction (LaTeX) | ✅ Via `enableFormula` config | ✅ Via `features=formulas` add-on (both return LaTeX strings) |
+| Signature detection | ⚠️ Requires custom analyzer with field schema (not automatic) | ✅ `prebuilt-document` detects signature presence + bounding box automatically |
+| Formula extraction (LaTeX) | ✅ Via `enableFormula` config | ✅ Via `features=formulas` add-on — but costs **$6/1K pages extra** (doubles base cost from $5 to $11/1K pages) |
 | Hyperlink detection | ✅ (with URL + bounding box) | ❌ |
 | GPT-generated summaries | ✅ via documentSearch | ❌ |
 | Typed field extraction (invoice, receipt, etc.) | ✅ 31 typed fields via single analyzer | ⚠️ DI has separate prebuilt models (`prebuilt-invoice`, `prebuilt-receipt`, etc.) — same capability, different API surface |
@@ -195,8 +195,8 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Feature | Details |
 |---|---|
 | **Cross-page table detection** | CU automatically merges table fragments spanning page breaks. DI layout returns per-page tables; merging requires custom model training or [post-processing code](https://github.com/Azure-Samples/document-intelligence-code-samples/blob/main/Python(v4.0)/Pre_or_post_processing_samples/sample_identify_cross_page_tables.py). CU advantage: zero-effort automatic merging. |
-| **Signature extraction** | CU: custom analyzer with field schema for structured extraction (name, date, image). DI: `prebuilt-document` detects signature presence + bounding box but doesn't extract as typed fields. CU advantage: richer, schema-driven extraction. |
-| **Formula → LaTeX** | Both support LaTeX output. CU: `enableFormula` config. DI: `features=formulas` add-on. (Not verified on math-heavy docs in this test; our 5 PDFs had no formulas.) **No meaningful difference.** |
+| **Signature extraction** | CU: requires custom analyzer with field schema — structured extraction (name, date, image) but NOT automatic. DI: `prebuilt-document` detects signature presence + bounding box automatically without extra config. DI advantage for basic detection; CU advantage only if you need schema-driven field extraction. |
+| **Formula → LaTeX** | Both support LaTeX output. CU: `enableFormula` config flag. DI: `features=formulas` add-on at **$6/1K pages extra** (more than doubles the $5/1K base cost). CU advantage: likely cheaper. (Not verified on math-heavy docs in this test; our 5 PDFs had no formulas.) |
 | **Hyperlink extraction** | CU-only. Detected 2 hyperlinks in the invoice (email mailto: links) with bounding polygons. DI does not extract hyperlinks. |
 | **Document summaries** | CU-only. GPT-generated one-paragraph summary per document — useful for RAG retrieval ranking. |
 | **Typed field extraction** | CU: single `prebuilt-invoice` analyzer returns 31 fields + line items in one call. DI: separate `prebuilt-invoice` model with similar capability but different API surface. Comparable functionality. |
@@ -218,7 +218,7 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Markdown output | ✅ | ✅ |
 | Selection marks | ✅ | ✅ |
 | Barcodes | ✅ | ✅ |
-| Formulas | ✅ (LaTeX output via `enableFormula`) | ✅ (LaTeX output via `features=formulas` add-on) |
+| Formulas | ✅ (LaTeX output via `enableFormula`) | ✅ (LaTeX output via `features=formulas` add-on — $6/1K pages extra) |
 | Language detection | ❓ Not observed | ✅ |
 | Styles (font, handwriting) | ❌ Not observed | ✅ |
 
@@ -244,8 +244,8 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 2. **Document summaries** — useful for search/ranking without extra LLM calls
 3. **Typed invoice extraction** — similar to DI's prebuilt-invoice but unified API surface
 4. **Hyperlink detection** — not available in DI at all
-5. **Richer signature extraction** — CU extracts via custom schema; DI only detects presence
-6. **Zero-shot custom field extraction** — define schema, no training data needed (DI requires 5+ labeled samples)
+5. **Signature extraction** — CU requires custom analyzer with schema; DI `prebuilt-document` auto-detects. CU advantage only for structured field extraction
+6. **Cheaper formula LaTeX** — DI's `features=formulas` add-on costs $6/1K pages extra; CU's `enableFormula` is a config flag
 7. **Multi-modal** — audio, video, image analysis not available in DI
 
 ---
@@ -254,13 +254,14 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 
 | Component | DI Pricing | CU Pricing |
 |---|---|---|
-| Layout extraction | $0.01/page (S0) | $0.01/page (same DI engine) |
-| DocumentSearch (with summary) | N/A | $0.01/page + GPT token costs |
-| Invoice extraction | $0.01/page (DI prebuilt-invoice) | $0.01/page + GPT token costs |
+| Layout extraction | $5/1,000 pages (S0) | $5/1,000 pages (same DI engine) |
+| Formula add-on (LaTeX) | $6/1,000 pages extra (via `features=formulas`) | Included via `enableFormula` config (pricing TBC) |
+| DocumentSearch (with summary) | N/A | $5/1,000 pages + GPT token costs |
+| Invoice extraction | $5/1,000 pages (DI prebuilt-invoice) | $5/1,000 pages + GPT token costs |
 | GPT-4.1-mini tokens | N/A | Per-token pricing (Global Standard) |
 | Text-embedding-3-large | N/A | Per-token pricing |
 
-**CU's layout-only extraction costs the same as DI.** The LLM-powered features (summaries, typed fields) add GPT token costs on top.
+**CU's layout-only extraction costs the same as DI.** The LLM-powered features (summaries, typed fields) add GPT token costs on top. DI's formula add-on at $6/1K pages is a significant cost premium that CU may avoid.
 
 ---
 
@@ -307,8 +308,8 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Document summaries | CU | GPT-generated, useful for RAG |
 | Hyperlink detection | CU | Not available in DI |
 | Cross-page tables | CU | DI requires custom model or post-processing; CU automatic |
-| Formula LaTeX output | Tie | Both support LaTeX (CU: `enableFormula`, DI: `features=formulas`) |
-| Signature extraction | CU (slight) | CU: schema-driven field extraction; DI: presence detection only |
+| Formula LaTeX output | CU (cost) | Both support LaTeX; DI add-on costs $6/1K pages extra |
+| Signature extraction | DI (basic) | DI auto-detects presence; CU needs custom analyzer for structured extraction |
 | Custom field extraction | CU | Zero-shot (no training data) vs DI's labeled-sample approach |
 | Maturity/stability | DI | DI is GA, CU SDK is beta |
 | Byte upload support | DI | CU byte upload is broken (URL-only works) |

@@ -68,7 +68,7 @@ def get_lazygraphrag_indexing_pipeline_v2():
     Create (or reuse) the V2 indexing pipeline with Voyage embeddings.
     
     V2 uses:
-    - voyage-3-large (2048 dimensions) instead of text-embedding-3-large (3072)
+    - voyage-context-3 (2048 dimensions) instead of text-embedding-3-large (3072)
     - Contextual embeddings with tuples (chunk, context) per Voyage API
     - Section-aware chunking from cu_standard_ingestion_service_v2.py
     - Stores embeddings in `embedding_v2` property for parallel operation

@@ -116,10 +116,14 @@ class Settings(BaseSettings):
     SKELETON_MIN_SENTENCE_WORDS: int = 2  # Minimum words for a valid sentence (lowered from 3 — was dropping 2-word KVP lines like "Email: user@example.com")
     
     # Phase 2: Sparse sentence-to-sentence RELATED_TO edges
-    # Separate from GDS KNN (Entity/Figure/KVP/Chunk). Bounded: threshold 0.90, max k=2.
+    # Separate from GDS KNN (Entity/Figure/KVP/Chunk). Bounded: threshold 0.86, max k=2.
     # Only cross-chunk pairs (same-chunk sentences already linked via NEXT edges).
     # See ARCHITECTURE_HYBRID_SKELETON_2026-02-11.md Phase 2.
-    SKELETON_KNN_THRESHOLD: float = 0.90  # Min cosine similarity for sentence RELATED_TO edges
+    # 2026-03-01: Lowered from 0.90→0.86. At 0.90, 26% of sentences were KNN-isolated
+    # (zero SEMANTICALLY_SIMILAR edges) because their best non-adjacent match fell below
+    # threshold. With max_k=2 the graph stays sparse (+59 edges, 120→179 total).
+    # Isolated drops from 67 (31%) to 15 (7%). All new edges are same-document.
+    SKELETON_KNN_THRESHOLD: float = 0.86  # Min cosine similarity for sentence RELATED_TO edges
     SKELETON_KNN_MAX_K: int = 2  # Max RELATED_TO edges per sentence (keeps graph sparse)
     
     # Strategy B: Graph traversal retrieval (replaces flat vector search with graph expansion)

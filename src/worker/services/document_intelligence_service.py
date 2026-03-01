@@ -995,7 +995,9 @@ class DocumentIntelligenceService:
             for span in (getattr(style, "spans", None) or []):
                 offset = getattr(span, "offset", 0) or 0
                 length = getattr(span, "length", 0) or 0
-                if length > 0:
+                # Require minimum length to avoid false-positive handwritten
+                # detections (Azure DI sometimes flags stray punctuation).
+                if length >= 3:
                     anchor_offsets.append(offset)
 
         # 1b. Fallback: scan paragraph text for typed-signature patterns.
@@ -1033,14 +1035,17 @@ class DocumentIntelligenceService:
             if pos < 0:
                 pos = 0
 
-            # Upward bound: for handwritten spans expand to nearest section heading;
-            # for typed (fallback) anchors start the window AT the anchor paragraph
-            # to avoid sweeping in preceding scope/content paragraphs.
+            # Upward bound: for handwritten spans expand to nearest section heading
+            # (capped at _MAX_SIG_UPWALK paragraphs to avoid sweeping in body text
+            # when there are no headings); for typed (fallback) anchors start the
+            # window AT the anchor paragraph.
+            _MAX_SIG_UPWALK = 5  # max paragraphs to walk above the anchor
             if used_fallback:
                 upper_pos = pos  # include only anchor + paragraphs below it
             else:
-                upper_pos = 0
-                for j in range(pos, -1, -1):
+                upper_limit = max(0, pos - _MAX_SIG_UPWALK)
+                upper_pos = upper_limit
+                for j in range(pos, upper_limit - 1, -1):
                     _, _, role = indexed[j]
                     if role in ("sectionHeading", "title"):
                         upper_pos = j + 1  # exclusive: start after the heading
@@ -1070,6 +1075,12 @@ class DocumentIntelligenceService:
                 if j > pos and role in ("sectionHeading", "title"):
                     lower_pos = j  # exclusive: stop before the heading
                     break
+
+            # Cap total window size to prevent runaway captures when anchor
+            # matches body text (e.g. "signature of the parties" in prose).
+            _MAX_SIG_WINDOW = 15
+            if lower_pos - upper_pos > _MAX_SIG_WINDOW:
+                continue  # skip this anchor — window too large to be a real sig block
 
             # Tag every non-boundary paragraph in the window.
             for j in range(upper_pos, lower_pos):
@@ -1723,9 +1734,10 @@ class DocumentIntelligenceService:
         selection_marks = self._extract_selection_marks(result)
         signature_block = self._extract_signature_block_metadata(result)
 
-        # Detect letterhead paragraph indices and build paragraph→role map
-        # so we can propagate these roles to the emitted DI unit metadata.
+        # Detect letterhead and signature block paragraph indices and build
+        # paragraph→role map so we can propagate roles to emitted DI units.
         letterhead_para_indices = self._detect_letterhead_paragraph_indices(paragraphs)
+        sig_block_para_indices = self._detect_signature_block_paragraphs(result)
         para_role_map: Dict[int, str] = {}
         for i, para in enumerate(paragraphs):
             role = getattr(para, "role", None) or ""
@@ -1790,8 +1802,9 @@ class DocumentIntelligenceService:
                 if kind == "sections":
                     child_sections.append(idx)
                 elif kind == "paragraphs":
-                    # Exclude letterhead paragraphs — they get their own DI unit
-                    if idx not in letterhead_para_indices:
+                    # Exclude letterhead and signature block paragraphs —
+                    # they get their own dedicated DI units.
+                    if idx not in letterhead_para_indices and idx not in sig_block_para_indices:
                         para_indices.append(idx)
                 elif kind == "tables":
                     table_indices.append(idx)
@@ -1965,7 +1978,12 @@ class DocumentIntelligenceService:
                      for parsed in [self._parse_di_element_ref(el)]
                      if parsed and parsed[0] == "paragraphs" and parsed[1] in letterhead_para_indices}
                 )
-                use_para_spans = has_children or lh_in_elements
+                sig_in_elements = bool(sig_block_para_indices) and bool(
+                    {idx for el in elements
+                     for parsed in [self._parse_di_element_ref(el)]
+                     if parsed and parsed[0] == "paragraphs" and parsed[1] in sig_block_para_indices}
+                )
+                use_para_spans = has_children or lh_in_elements or sig_in_elements
                 direct_spans = None if use_para_spans else section_spans
                 emit_chunk(part="direct", spans=direct_spans, paras=direct_paras, tbls=direct_tables, para_idx=para_indices)
 
@@ -1989,8 +2007,9 @@ class DocumentIntelligenceService:
                 parsed = self._parse_di_element_ref(el)
                 if parsed and parsed[0] == "paragraphs":
                     visited_para_indices.add(parsed[1])
-        # Also exclude letterhead paragraphs (they get their own DI unit below)
+        # Also exclude letterhead and signature block paragraphs (they get their own DI units below)
         visited_para_indices.update(letterhead_para_indices)
+        visited_para_indices.update(sig_block_para_indices)
         for i, para in enumerate(paragraphs):
             if i in visited_para_indices:
                 continue
@@ -2059,6 +2078,49 @@ class DocumentIntelligenceService:
                         "key_value_pairs": [],
                         "kvp_count": 0,
                         **({"page_number": lh_page} if lh_page is not None else {}),
+                    },
+                ))
+
+        # Emit a single DI unit for signature block paragraphs (excluded from
+        # sections above).  Join them into one text block so signature parties,
+        # dates, and roles are preserved as a coherent unit.
+        if sig_block_para_indices:
+            sig_texts = []
+            sig_page = None
+            for i in sorted(sig_block_para_indices):
+                para = paragraphs[i] if i < len(paragraphs) else None
+                if not para:
+                    continue
+                role = getattr(para, "role", None) or ""
+                if role in ("pageHeader", "pageFooter", "pageNumber"):
+                    continue
+                para_content = (getattr(para, "content", "") or "").strip()
+                if para_content:
+                    sig_texts.append(para_content)
+                if sig_page is None:
+                    regions = getattr(para, "bounding_regions", None) or []
+                    if regions:
+                        sig_page = getattr(regions[0], "page_number", None)
+            sig_joined = "\n".join(sig_texts)
+            if sig_joined:
+                docs.append(Document(
+                    text=sig_joined,
+                    metadata={
+                        "group_id": group_id,
+                        "source": "document-intelligence",
+                        "url": url,
+                        "chunk_type": "role",
+                        "section_path": [],
+                        "di_section_path": [],
+                        "di_section_part": "role",
+                        "role": "signature",
+                        "tables": [],
+                        "table_count": 0,
+                        "paragraph_count": len(sig_texts),
+                        "key_value_pairs": [],
+                        "kvp_count": 0,
+                        **({"page_number": sig_page} if sig_page is not None else {}),
+                        **({"signature_block": signature_block} if signature_block else {}),
                     },
                 ))
 

@@ -342,6 +342,8 @@ def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
     # Convert remaining paragraph breaks to sentence boundaries so the
     # sentence splitter treats them as separate sentences.
     text = re.sub(r"\n\n+", ". ", text)
+    # Clean up double periods from paragraph-break normalization
+    text = re.sub(r"\.{2,}", ".", text)
     return text.strip()
 
 
@@ -750,6 +752,35 @@ def extract_sentences_from_di_units(
                         "page": page,
                         "confidence": 1.0,
                         "tokens": len(lh_text.split()),
+                        "parent_text": "",
+                        "index_in_section": idx_in_section,
+                    })
+                    global_idx += 1
+            continue
+
+        # ─── Source G: Signature block (tagged by section-aware path) ──
+        if role == "signature":
+            sig_text = unit_text.strip()
+            if sig_text:
+                text_key = sig_text.strip().lower()
+                if text_key not in seen_texts:
+                    sent_id = f"{doc_id}_sent_{global_idx}"
+                    seen_texts[text_key] = sent_id
+                    section_key = "[Signature Block]"
+                    idx_in_section = section_counters.get(section_key, 0)
+                    section_counters[section_key] = idx_in_section + 1
+                    all_sentences.append({
+                        "id": sent_id,
+                        "text": sig_text,
+                        "chunk_id": "",
+                        "document_id": doc_id,
+                        "source": "signature_block",
+                        "index_in_chunk": 0,
+                        "index_in_doc": global_idx,
+                        "section_path": "[Signature Block]",
+                        "page": page,
+                        "confidence": 1.0,
+                        "tokens": len(sig_text.split()),
                         "parent_text": "",
                         "index_in_section": idx_in_section,
                     })

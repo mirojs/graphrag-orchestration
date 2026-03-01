@@ -178,6 +178,9 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 
 | Feature | CU | DI |
 |---|---|---|
+| Cross-page table detection | ✅ Tables spanning multiple pages are merged | ❌ DI treats each page's table fragment separately |
+| Signature extraction | ✅ Via separate API call (custom analyzer or prebuilt-document) | ❌ |
+| Formula extraction (LaTeX) | ✅ Formulas returned as LaTeX strings (needs verification on math-heavy docs) | ⚠️ DI detects formula bounding boxes but no LaTeX output |
 | Hyperlink detection | ✅ (with URL + bounding box) | ❌ |
 | GPT-generated summaries | ✅ via documentSearch | ❌ |
 | Typed field extraction (invoice, receipt, etc.) | ✅ 31 typed fields | ❌ (DI has separate prebuilt models) |
@@ -191,6 +194,9 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 
 | Feature | Details |
 |---|---|
+| **Cross-page table detection** | CU merges table fragments that span page breaks into a single logical table — DI treats each page separately |
+| **Signature extraction** | Available via separate API call (custom analyzer or utility analyzer) — not part of layout output |
+| **Formula → LaTeX** | CU's `enableFormula` config extracts formulas as LaTeX strings — DI only provides bounding boxes. (Not verified on math-heavy docs in this test; our 5 PDFs had no formulas) |
 | **Hyperlink extraction** | Detected 2 hyperlinks in the invoice (email mailto: links) with bounding polygons |
 | **Document summaries** | GPT-generated one-paragraph summary per document — useful for RAG retrieval |
 | **Typed field extraction** | 31 invoice fields, 6 line items with amounts, dates, addresses — all with confidence scores |
@@ -208,11 +214,11 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Paragraph segmentation | ✅ | ✅ |
 | Paragraph roles (title, heading, footer) | ✅ | ✅ |
 | Section tree | ✅ | ✅ |
-| Table extraction with cells | ✅ | ✅ |
+| Table extraction with cells | ✅ (+ cross-page table merging) | ✅ (single-page only) |
 | Markdown output | ✅ | ✅ |
 | Selection marks | ✅ | ✅ |
 | Barcodes | ✅ | ✅ |
-| Formulas | ✅ | ✅ |
+| Formulas | ✅ (LaTeX output via `enableFormula`) | ⚠️ (bounding box only, no LaTeX) |
 | Language detection | ❓ Not observed | ✅ |
 | Styles (font, handwriting) | ❌ Not observed | ✅ |
 
@@ -234,10 +240,13 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 
 ### What CU Adds for Free
 
-1. **Document summaries** — useful for search/ranking without extra LLM calls
-2. **Typed invoice extraction** — structured fields replace manual KVP parsing
-3. **Hyperlink detection** — not available in DI at all
-4. **Custom analyzers** — define extraction schema, CU handles the rest via GPT
+1. **Cross-page table merging** — DI splits tables at page boundaries; CU merges them
+2. **Document summaries** — useful for search/ranking without extra LLM calls
+3. **Typed invoice extraction** — structured fields replace manual KVP parsing
+4. **Hyperlink detection** — not available in DI at all
+5. **Signature extraction** — via separate API call (custom/utility analyzer)
+6. **Formula → LaTeX** — DI only gives bounding boxes; CU outputs LaTeX strings
+7. **Custom analyzers** — define extraction schema, CU handles the rest via GPT
 
 ---
 
@@ -293,10 +302,13 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 |---|---|---|
 | Layout extraction speed | CU (1.5×) | May be regional; same engine underneath |
 | OCR accuracy | Tie | Same engine, same results |
-| Structural metadata | Tie | Same paragraphs, sections, tables, polygons |
+| Structural metadata | CU | Same paragraphs, sections, polygons + cross-page tables, formula LaTeX, signatures |
 | Typed field extraction | CU | 31 invoice fields with confidence — DI doesn't have this in layout mode |
 | Document summaries | CU | GPT-generated, useful for RAG |
 | Hyperlink detection | CU | Not available in DI |
+| Cross-page tables | CU | DI splits at page boundary; CU merges |
+| Formula output | CU | LaTeX strings vs DI's bounding boxes only |
+| Signature extraction | CU | Via separate API call |
 | Maturity/stability | DI | DI is GA, CU SDK is beta |
 | Byte upload support | DI | CU byte upload is broken (URL-only works) |
 | Cost for layout-only | Tie | Same pricing |

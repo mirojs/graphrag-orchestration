@@ -795,6 +795,10 @@ def extract_sentences_from_di_units(
             for sent_text in _split_sentences(clean_text):
                 if not sent_text or _is_noise_sentence(sent_text) or _is_kvp_label(sent_text):
                     continue
+                # Strip leading sentence-boundary artifacts from \n\n→". " conversion
+                sent_text = re.sub(r'^[\.\s]+', '', sent_text).strip()
+                if not sent_text:
+                    continue
                 text_key = sent_text.strip().lower()
                 if text_key in seen_texts:
                     continue

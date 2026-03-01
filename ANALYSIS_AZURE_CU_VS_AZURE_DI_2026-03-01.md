@@ -174,34 +174,34 @@ Extracts **31 typed invoice fields** with confidence scores from the Contoso inv
 
 Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 
-### 4c. CU-Only Features Not Available in DI
+### 4c. CU vs DI Feature Comparison
 
 | Feature | CU | DI |
 |---|---|---|
-| Cross-page table detection | ✅ Tables spanning multiple pages are merged | ❌ DI treats each page's table fragment separately |
-| Signature extraction | ✅ Via separate API call (custom analyzer or prebuilt-document) | ❌ |
-| Formula extraction (LaTeX) | ✅ Formulas returned as LaTeX strings (needs verification on math-heavy docs) | ⚠️ DI detects formula bounding boxes but no LaTeX output |
+| Cross-page table detection | ✅ Automatic merging of tables spanning pages | ⚠️ Layout returns per-page; custom models + post-processing can merge ([sample](https://github.com/Azure-Samples/document-intelligence-code-samples/blob/main/Python(v4.0)/Pre_or_post_processing_samples/sample_identify_cross_page_tables.py)) |
+| Signature detection | ✅ Via custom analyzer with field schema | ⚠️ `prebuilt-document` detects signature regions (presence + bounding box), not field-level extraction |
+| Formula extraction (LaTeX) | ✅ Via `enableFormula` config | ✅ Via `features=formulas` add-on (both return LaTeX strings) |
 | Hyperlink detection | ✅ (with URL + bounding box) | ❌ |
 | GPT-generated summaries | ✅ via documentSearch | ❌ |
-| Typed field extraction (invoice, receipt, etc.) | ✅ 31 typed fields | ❌ (DI has separate prebuilt models) |
+| Typed field extraction (invoice, receipt, etc.) | ✅ 31 typed fields via single analyzer | ⚠️ DI has separate prebuilt models (`prebuilt-invoice`, `prebuilt-receipt`, etc.) — same capability, different API surface |
 | Audio/Video analysis | ✅ | ❌ |
 | Figure description (charts, diagrams) | ✅ via documentSearch | ❌ |
-| Custom analyzer creation | ✅ (define field schema → auto-extract) | ❌ (only custom classification) |
+| Custom field extraction | ✅ Zero-shot: define JSON schema → GPT auto-extracts (no training data) | ✅ Custom template/neural models (requires labeled training data, 5+ samples) |
 
 ---
 
-## 5. CU Unique Features Not in DI
+## 5. CU Advantages Over DI (Verified)
 
 | Feature | Details |
 |---|---|
-| **Cross-page table detection** | CU merges table fragments that span page breaks into a single logical table — DI treats each page separately |
-| **Signature extraction** | Available via separate API call (custom analyzer or utility analyzer) — not part of layout output |
-| **Formula → LaTeX** | CU's `enableFormula` config extracts formulas as LaTeX strings — DI only provides bounding boxes. (Not verified on math-heavy docs in this test; our 5 PDFs had no formulas) |
-| **Hyperlink extraction** | Detected 2 hyperlinks in the invoice (email mailto: links) with bounding polygons |
-| **Document summaries** | GPT-generated one-paragraph summary per document — useful for RAG retrieval |
-| **Typed field extraction** | 31 invoice fields, 6 line items with amounts, dates, addresses — all with confidence scores |
-| **Multi-modal** | CU extends to audio (transcription + diarization), video (frame extraction + transcripts), and images |
-| **Custom analyzers** | Define a JSON field schema → CU automatically extracts those fields from any document using GPT |
+| **Cross-page table detection** | CU automatically merges table fragments spanning page breaks. DI layout returns per-page tables; merging requires custom model training or [post-processing code](https://github.com/Azure-Samples/document-intelligence-code-samples/blob/main/Python(v4.0)/Pre_or_post_processing_samples/sample_identify_cross_page_tables.py). CU advantage: zero-effort automatic merging. |
+| **Signature extraction** | CU: custom analyzer with field schema for structured extraction (name, date, image). DI: `prebuilt-document` detects signature presence + bounding box but doesn't extract as typed fields. CU advantage: richer, schema-driven extraction. |
+| **Formula → LaTeX** | Both support LaTeX output. CU: `enableFormula` config. DI: `features=formulas` add-on. (Not verified on math-heavy docs in this test; our 5 PDFs had no formulas.) **No meaningful difference.** |
+| **Hyperlink extraction** | CU-only. Detected 2 hyperlinks in the invoice (email mailto: links) with bounding polygons. DI does not extract hyperlinks. |
+| **Document summaries** | CU-only. GPT-generated one-paragraph summary per document — useful for RAG retrieval ranking. |
+| **Typed field extraction** | CU: single `prebuilt-invoice` analyzer returns 31 fields + line items in one call. DI: separate `prebuilt-invoice` model with similar capability but different API surface. Comparable functionality. |
+| **Multi-modal** | CU-only. Extends to audio (transcription + diarization), video (frame extraction + transcripts), and images. |
+| **Custom field extraction** | CU: zero-shot extraction — define JSON schema, GPT auto-extracts without training data. DI: custom template/neural models — requires 5+ labeled training documents. CU advantage: no training needed. |
 
 ---
 
@@ -214,11 +214,11 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 | Paragraph segmentation | ✅ | ✅ |
 | Paragraph roles (title, heading, footer) | ✅ | ✅ |
 | Section tree | ✅ | ✅ |
-| Table extraction with cells | ✅ (+ cross-page table merging) | ✅ (single-page only) |
+| Table extraction with cells | ✅ (+ automatic cross-page merging) | ✅ (per-page; cross-page via custom model or post-processing) |
 | Markdown output | ✅ | ✅ |
 | Selection marks | ✅ | ✅ |
 | Barcodes | ✅ | ✅ |
-| Formulas | ✅ (LaTeX output via `enableFormula`) | ⚠️ (bounding box only, no LaTeX) |
+| Formulas | ✅ (LaTeX output via `enableFormula`) | ✅ (LaTeX output via `features=formulas` add-on) |
 | Language detection | ❓ Not observed | ✅ |
 | Styles (font, handwriting) | ❌ Not observed | ✅ |
 
@@ -240,13 +240,13 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 
 ### What CU Adds for Free
 
-1. **Cross-page table merging** — DI splits tables at page boundaries; CU merges them
+1. **Automatic cross-page table merging** — DI requires custom training or post-processing; CU does it out-of-the-box
 2. **Document summaries** — useful for search/ranking without extra LLM calls
-3. **Typed invoice extraction** — structured fields replace manual KVP parsing
+3. **Typed invoice extraction** — similar to DI's prebuilt-invoice but unified API surface
 4. **Hyperlink detection** — not available in DI at all
-5. **Signature extraction** — via separate API call (custom/utility analyzer)
-6. **Formula → LaTeX** — DI only gives bounding boxes; CU outputs LaTeX strings
-7. **Custom analyzers** — define extraction schema, CU handles the rest via GPT
+5. **Richer signature extraction** — CU extracts via custom schema; DI only detects presence
+6. **Zero-shot custom field extraction** — define schema, no training data needed (DI requires 5+ labeled samples)
+7. **Multi-modal** — audio, video, image analysis not available in DI
 
 ---
 
@@ -302,13 +302,14 @@ Latency: **37.1s** (vs 4.0s for layout-only). Requires gpt-4.1 model deployment.
 |---|---|---|
 | Layout extraction speed | CU (1.5×) | May be regional; same engine underneath |
 | OCR accuracy | Tie | Same engine, same results |
-| Structural metadata | CU | Same paragraphs, sections, polygons + cross-page tables, formula LaTeX, signatures |
-| Typed field extraction | CU | 31 invoice fields with confidence — DI doesn't have this in layout mode |
+| Structural metadata | CU (slight) | Same paragraphs, sections, polygons; CU adds automatic cross-page table merging |
+| Typed field extraction | Tie | Both have prebuilt-invoice; CU unifies under one API surface |
 | Document summaries | CU | GPT-generated, useful for RAG |
 | Hyperlink detection | CU | Not available in DI |
-| Cross-page tables | CU | DI splits at page boundary; CU merges |
-| Formula output | CU | LaTeX strings vs DI's bounding boxes only |
-| Signature extraction | CU | Via separate API call |
+| Cross-page tables | CU | DI requires custom model or post-processing; CU automatic |
+| Formula LaTeX output | Tie | Both support LaTeX (CU: `enableFormula`, DI: `features=formulas`) |
+| Signature extraction | CU (slight) | CU: schema-driven field extraction; DI: presence detection only |
+| Custom field extraction | CU | Zero-shot (no training data) vs DI's labeled-sample approach |
 | Maturity/stability | DI | DI is GA, CU SDK is beta |
 | Byte upload support | DI | CU byte upload is broken (URL-only works) |
 | Cost for layout-only | Tie | Same pricing |

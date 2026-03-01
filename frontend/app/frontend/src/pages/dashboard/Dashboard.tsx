@@ -14,7 +14,7 @@ const PLAN_BADGE_CLASS: Record<string, string> = {
 };
 
 const FEATURE_LABELS: Record<string, string> = {
-    graphrag: "GraphRAG Search",
+    graphrag: "Evidoc Search",
     advanced_analytics: "Advanced Analytics",
     custom_models: "Custom Models",
     api_access: "API Access",
@@ -248,7 +248,7 @@ const Dashboard = () => {
                                             : "Unlimited credits"}
                                     </p>
                                     <p className={styles.planCardDetail}>
-                                        {info.graphrag_enabled ? "✅ GraphRAG" : "❌ GraphRAG"}
+                                        {info.graphrag_enabled ? "✅ Evidoc" : "❌ Evidoc"}
                                     </p>
                                     <button
                                         className={styles.upgradeButton}

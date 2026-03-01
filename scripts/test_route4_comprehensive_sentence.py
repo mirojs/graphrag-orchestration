@@ -14,7 +14,7 @@ Ground Truth (18 items = 16 core + 2 observations):
   B (medium, 7): hall call, door height, WR-500 lock, outdoor term,
                  invoice self-contradiction, opener, power system
   C (minor, 6):  malformed URL, John Doe, Contoso Ltd/LLC, Bayfront site,
-                 address number, price decimal
+                 date discrepancy (2015 vs 2025), ship-to vs site address
   D (observation, 2): Tax N/A, entity role variation across corpus
 
 History: 14 → 15 (B6) → 16 (B7) → 16+2 obs (D1, D2).
@@ -74,8 +74,8 @@ GROUND_TRUTH = {
         "C2: John Doe contact (listed vs not in contract)",
         "C3: Contoso Ltd vs LLC (Exhibit A vs Contract)",
         "C4: Bayfront site mismatch (61 S 34th Street vs Bayfront Animal Clinic)",
-        "C5: Address number (61 vs 62 S 34th Street)",
-        "C6: Price decimal inconsistency ($29,900.00 vs $29,900)",
+        "C5: Date discrepancy (invoice 12/17/2015 vs contract signed 04/30/2025)",
+        "C6: Ship-to vs site address (61 S 34th St Dayton vs 811 Ocean Dr Tampa)",
     ],
     # ── Observations (bonus) ──────────────────────────────────────────────
     # Not strict invoice-vs-contract inconsistencies, but real cross-document
@@ -177,8 +177,8 @@ def score_response(response_text: str) -> Dict[str, Any]:
             "C2": check_item(["john doe", "contact"]),
             "C3": check_item(["contoso ltd", "contoso llc", "exhibit"]),
             "C4": check_item(["bayfront", "34th street", "site"]),
-            "C5": check_item(["61", "62", "34th", "address"]),
-            "C6": check_item(["decimal", "29900.00", "29,900.00"]),
+            "C5": check_item(["2015", "2025", "date", "ten-year", "ten year", "chronolog"]),
+            "C6": check_item(["ocean drive", "811", "tampa", "ship to", "site address", "dayton"]),
         },
         # Observations — bonus cross-document insights (not counted in core score)
         "observation": {

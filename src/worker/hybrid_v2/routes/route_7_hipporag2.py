@@ -276,9 +276,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
             os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20")
         )
-        # Semantic search replaces cross-encoder reranker (better for short
-        # metadata sentences due to contextual embeddings).
-        semantic_search_top_k_cfg = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "30"))
+        # Reranker: reranks PPR output for synthesis quality (v7.1 intent)
+        rerank_enabled = os.getenv(
+            "ROUTE7_RERANK", "1"
+        ).strip().lower() in {"1", "true", "yes"}
+        rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
 
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
@@ -302,7 +304,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             damping=ppr_damping,
             triple_top_k=triple_top_k,
             dpr_top_k=dpr_top_k,
-            semantic_search_top_k=semantic_search_top_k_cfg,
+            rerank_enabled=rerank_enabled,
             query_mode=query_mode,
             ppr_passage_top_k=ppr_passage_top_k,
             prompt_variant=prompt_variant,
@@ -322,13 +324,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         timings_ms["step_1_embed_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ------------------------------------------------------------------
-        # Step 2: Parallel — Triple linking + Semantic search/DPR
+        # Step 2: Parallel — Triple linking + DPR passage search
         #
-        # Semantic search (sentence_embeddings_v2 vector index) replaces
-        # DPR for passage seeding into PPR.  Contextual embeddings
-        # (voyage-context-3) handle short metadata sentences much better
-        # than DPR cosine similarity.  PPR's graph-based ranking remains
-        # the final authority.  DPR still runs as a fallback.
+        # DPR (dense passage retrieval via sentence_embeddings_v2 cosine)
+        # is the original HippoRAG2 passage seeding method.  Seeds feed
+        # into PPR which performs graph-based ranking (the final authority).
+        # After PPR, the cross-encoder reranker refines the top passages
+        # for synthesis quality.
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
 
@@ -337,18 +339,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._query_to_triple_linking(query, query_embedding, triple_top_k)
         )
 
-        # 2b. Semantic search via sentence_embeddings_v2 vector index
-        semantic_search_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEARCH_TOP_K", "30"))
-        semantic_task = asyncio.create_task(
-            self._semantic_search_passages(query, top_k=semantic_search_top_k)
-        )
-
-        # 2c. DPR passage search — fallback when semantic search fails
+        # 2b. DPR passage search (sentence-level Small-to-Big)
         dpr_task = asyncio.create_task(
             self._dpr_passage_search(query_embedding, dpr_top_k, dpr_sentence_top_k)
         )
 
-        # 2d. Optional sentence search for evidence augmentation (Phase 2)
+        # 2c. Optional sentence search for evidence augmentation (Phase 2)
         sentence_task = None
         if sentence_search_enabled:
             sentence_top_k = int(os.getenv("ROUTE7_SENTENCE_TOP_K", "30"))
@@ -357,7 +353,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             )
 
         # Await parallel tasks
-        tasks = [triple_task, dpr_task, semantic_task]
+        tasks = [triple_task, dpr_task]
         if sentence_task:
             tasks.append(sentence_task)
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -366,15 +362,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         surviving_triples = results[0] if not isinstance(results[0], BaseException) else []
         dpr_results = results[1] if not isinstance(results[1], BaseException) else []
 
-        semantic_search_results: List[Tuple[str, float]] = []
-        if isinstance(results[2], BaseException):
-            logger.warning("route7_semantic_search_failed_fallback_dpr", error=str(results[2]))
-        else:
-            semantic_search_results = results[2]
-
         sentence_evidence: List[Dict[str, Any]] = []
         if sentence_task:
-            raw_sent = results[3] if len(results) > 3 else []
+            raw_sent = results[2] if len(results) > 2 else []
             sentence_evidence = raw_sent if not isinstance(raw_sent, BaseException) else []
 
         if isinstance(results[0], BaseException):
@@ -388,7 +378,6 @@ class HippoRAG2Handler(BaseRouteHandler):
             "step_2_parallel_complete",
             surviving_triples=len(surviving_triples),
             dpr_hits=len(dpr_results),
-            semantic_search_hits=len(semantic_search_results),
             sentence_hits=len(sentence_evidence),
         )
 
@@ -433,16 +422,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Do NOT pre-normalize entity seeds — let PPR handle normalization
         # of the combined entity+passage personalization vector.
 
-        # Build passage seeds: prefer semantic search over DPR
+        # Build passage seeds from DPR (original HippoRAG2 design)
         passage_seeds: Dict[str, float] = {}
-        if semantic_search_results:
-            # Semantic search cosine scores; use as seed weight
-            for chunk_id, score in semantic_search_results:
-                passage_seeds[chunk_id] = score * passage_node_weight
-        else:
-            # Fallback to DPR cosine similarity
-            for chunk_id, score in dpr_results:
-                passage_seeds[chunk_id] = score * passage_node_weight
+        for chunk_id, score in dpr_results:
+            passage_seeds[chunk_id] = score * passage_node_weight
 
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -487,7 +470,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         # ------------------------------------------------------------------
-        # Step 4.5+4.7+5: Rerank apply → parallel entity-doc map + chunk fetch
+        # Step 4.5: Rerank PPR output with cross-encoder (optional)
+        #
+        # The cross-encoder (voyage-rerank-2.5) sees query+passage together
+        # and can interpret conceptual matches that cosine similarity misses
+        # (e.g., 'time windows' → '3 business days cancellation').
+        # This refines PPR's graph-based ranking for synthesis quality
+        # while preserving PPR's cross-document diversity.
         # ------------------------------------------------------------------
         graph_structural_header: Optional[str] = None
         entity_doc_rows: List[Dict[str, Any]] = []
@@ -497,8 +486,32 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_ENTITY_DOC_MAP", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
-        # Semantic search is used only for passage seeding (step 3).
-        # PPR's graph-based ranking is the final authority — do NOT override.
+        if rerank_enabled and passage_scores:
+            t0_rerank = time.perf_counter()
+            # Take PPR's top passages as the candidate pool
+            candidate_ids = [cid for cid, _ in passage_scores[:rerank_top_k]]
+            if len(candidate_ids) >= 2:
+                try:
+                    reranked_ids = await self._rerank_passages(
+                        query, candidate_ids, top_k=rerank_top_k,
+                    )
+                    if reranked_ids:
+                        passage_scores = [
+                            (cid, 1.0 - i * 0.01)
+                            for i, cid in enumerate(reranked_ids)
+                        ]
+                        logger.info(
+                            "step_4.5_rerank_ppr_output",
+                            candidates=len(candidate_ids),
+                            output=len(reranked_ids),
+                            elapsed_ms=int((time.perf_counter() - t0_rerank) * 1000),
+                        )
+                except Exception as e:
+                    logger.warning("step_4.5_rerank_failed_fallback", error=str(e))
+
+            timings_ms["step_4.5_rerank_ms"] = int(
+                (time.perf_counter() - t0_rerank) * 1000
+            )
 
         # Determine top passage IDs for chunk fetch
         passage_limit = ppr_passage_top_k
@@ -702,9 +715,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             "text_chunks_used": synthesis_result.get("text_chunks_used", 0),
             "sentence_evidence_count": len(sentence_evidence),
             "route_description": "True HippoRAG 2 with passage-node PPR (v7)",
-            "version": "v7.2",
-            "rerank_enabled": False,
-            "semantic_search_applied": bool(semantic_search_results),
+            "version": "v7.4",
+            "rerank_enabled": rerank_enabled,
             "query_mode": query_mode,
             "query_mode_preset_applied": query_mode in self.QUERY_MODE_PRESETS if query_mode else False,
         }

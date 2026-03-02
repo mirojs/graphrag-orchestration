@@ -602,7 +602,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         before=len(candidate_passages),
                         after=len(filtered),
                         removed=llm_filter_removed,
-                        applied=len(filtered) >= min_keep,
+                        applied=len(filtered) > 0,
                     )
             except Exception as e:
                 logger.warning("step_4.7_llm_filter_failed", error=str(e))
@@ -1891,8 +1891,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         text = response.text.strip()
 
         # Parse JSON array from response
-        import re as _re
-        match = _re.search(r'\[[\d,\s]*\]', text)
+        match = re.search(r'\[[\d,\s]*\]', text)
         if not match:
             logger.warning("llm_filter_no_json", raw=text[:200])
             return None

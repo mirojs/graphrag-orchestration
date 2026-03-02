@@ -269,14 +269,12 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Config from env, with preset overrides
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
-        # Gap 1 fix: upstream seeds ALL passages into PPR (score × 0.05).
-        # Query corpus size dynamically so DPR covers every passage.
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "0"))  # 0 = all passages
-        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))  # 0 = all
+        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "20"))
+        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "120"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "100")
+            os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20")
         )
         # Reranker: reranks PPR output for synthesis quality (v7.1 intent)
         rerank_enabled = os.getenv(
@@ -389,10 +387,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         t0 = time.perf_counter()
         entity_seeds: Dict[str, float] = {}
 
-        # Use raw cosine similarity scores from triple search (upstream HippoRAG2
-        # alignment). Each entity receives fact_score as weight — preserves the
-        # relevance signal and allows PPR's internal normalization to set the
-        # natural entity:passage ratio (~30:70 instead of 95:5).
         for triple, fact_score in surviving_triples:
             entity_seeds[triple.subject_id] = entity_seeds.get(triple.subject_id, 0) + fact_score
             entity_seeds[triple.object_id] = entity_seeds.get(triple.object_id, 0) + fact_score
@@ -421,13 +415,23 @@ class HippoRAG2Handler(BaseRouteHandler):
                     for eid in community_entity_ids:
                         entity_seeds[eid] = entity_seeds.get(eid, 0) + w_community
 
-        # Do NOT pre-normalize entity seeds — let PPR handle normalization
-        # of the combined entity+passage personalization vector.
+        # P2: Keep only top-5 entity seeds (upstream alignment)
+        # Concentrates PPR mass on the most relevant entities.
+        entity_top_k = int(os.getenv("ROUTE7_ENTITY_SEED_TOP_K", "5"))
+        if len(entity_seeds) > entity_top_k:
+            sorted_entities = sorted(entity_seeds.items(), key=lambda x: -x[1])
+            entity_seeds = dict(sorted_entities[:entity_top_k])
 
         # Build passage seeds from DPR (original HippoRAG2 design)
+        # P1: min-max normalize DPR scores to [0,1] (upstream alignment)
         passage_seeds: Dict[str, float] = {}
-        for chunk_id, score in dpr_results:
-            passage_seeds[chunk_id] = score * passage_node_weight
+        if dpr_results:
+            _scores = [s for _, s in dpr_results]
+            _s_min, _s_max = min(_scores), max(_scores)
+            _spread = _s_max - _s_min if _s_max > _s_min else 1.0
+            for chunk_id, score in dpr_results:
+                normalized = (score - _s_min) / _spread
+                passage_seeds[chunk_id] = normalized * passage_node_weight
 
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -471,14 +475,6 @@ class HippoRAG2Handler(BaseRouteHandler):
             top_entities=len(entity_scores[:20]),
             total_ppr_passages=len(passage_scores),
         )
-        # DEBUG: dump per-doc distribution in PPR output (top 100)
-        _doc_dist: dict = {}
-        for _cid, _sc in passage_scores[:100]:
-            _doc = _cid.rsplit("_sent_", 1)[0]
-            _doc_dist.setdefault(_doc, []).append((_cid, round(_sc, 6)))
-        for _doc, _items in sorted(_doc_dist.items(), key=lambda x: -len(x[1])):
-            logger.info("ppr_debug_doc_dist", doc=_doc, count=len(_items),
-                         top3=[f"{c}:{s}" for c, s in _items[:3]])
 
         # ------------------------------------------------------------------
         # Step 4.5: Rerank PPR output with cross-encoder (optional)
@@ -507,10 +503,16 @@ class HippoRAG2Handler(BaseRouteHandler):
                         query, candidate_ids, top_k=rerank_top_k,
                     )
                     if reranked_ids:
-                        passage_scores = [
+                        reranked_set = set(reranked_ids)
+                        reranked_list = [
                             (cid, 1.0 - i * 0.01)
                             for i, cid in enumerate(reranked_ids)
                         ]
+                        # Append PPR-ranked items not sent to reranker
+                        for cid, score in passage_scores[rerank_top_k:]:
+                            if cid not in reranked_set:
+                                reranked_list.append((cid, score))
+                        passage_scores = reranked_list
                         logger.info(
                             "step_4.5_rerank_ppr_output",
                             candidates=len(candidate_ids),

@@ -706,16 +706,21 @@ class Neo4jStoreV3:
     # ==================== Relationship Operations ====================
     
     def upsert_relationship(self, group_id: str, relationship: Relationship) -> str:
-        """Insert or update a relationship."""
+        """Insert or update a relationship with co-occurrence counting."""
         query = """
         MATCH (source:Entity {id: $source_id, group_id: $group_id})
         MATCH (target:Entity {id: $target_id, group_id: $group_id})
         MERGE (source)-[r:RELATED_TO]->(target)
-        SET r.id = $id,
+        ON CREATE SET r.id = $id,
             r.description = $description,
             r.rel_type = $rel_type,
             r.weight = $weight,
+            r.cooccurrence_count = 1,
             r.group_id = $group_id,
+            r.created_at = datetime(),
+            r.updated_at = datetime()
+        ON MATCH SET r.cooccurrence_count = coalesce(r.cooccurrence_count, 1) + 1,
+            r.weight = coalesce(r.cooccurrence_count, 1) + 1,
             r.updated_at = datetime()
         RETURN r.id AS id
         """
@@ -735,17 +740,28 @@ class Neo4jStoreV3:
             return cast(str, record["id"]) if record else (relationship.id or "")
     
     def upsert_relationships_batch(self, group_id: str, relationships: List[Relationship]) -> int:
-        """Batch insert/update relationships."""
+        """Batch insert/update relationships with co-occurrence counting.
+
+        When the same (source, target) pair is seen multiple times (e.g. two
+        entities co-occurring across several sentences), the co-occurrence count
+        and weight are accumulated via ON MATCH, giving PPR stronger signal for
+        frequently co-occurring entity pairs.
+        """
         query = """
         UNWIND $relationships AS rel
         MATCH (source:Entity {id: rel.source_id, group_id: $group_id})
         MATCH (target:Entity {id: rel.target_id, group_id: $group_id})
         MERGE (source)-[r:RELATED_TO]->(target)
-        SET r.id = rel.id,
+        ON CREATE SET r.id = rel.id,
             r.description = rel.description,
             r.rel_type = rel.rel_type,
             r.weight = rel.weight,
+            r.cooccurrence_count = 1,
             r.group_id = $group_id,
+            r.created_at = datetime(),
+            r.updated_at = datetime()
+        ON MATCH SET r.cooccurrence_count = coalesce(r.cooccurrence_count, 1) + 1,
+            r.weight = coalesce(r.cooccurrence_count, 1) + 1,
             r.updated_at = datetime()
         RETURN count(r) AS count
         """
@@ -785,6 +801,64 @@ class Neo4jStoreV3:
             result = session.run(cypher, group_id=group_id)
             record = result.single()
             return cast(int, record["updated"]) if record else 0
+
+    # ==================== Triple Embedding Operations ====================
+
+    def fetch_all_triples(self, group_id: str) -> List[Dict[str, Any]]:
+        """Fetch all RELATED_TO triples for pre-computing embeddings."""
+        cypher = """
+        MATCH (e1:Entity {group_id: $group_id})-[r:RELATED_TO]->(e2:Entity {group_id: $group_id})
+        WHERE r.description IS NOT NULL AND r.description <> ''
+        RETURN e1.id AS source_id, e1.name AS source_name,
+               r.description AS description,
+               e2.id AS target_id, e2.name AS target_name
+        """
+        triples: List[Dict[str, Any]] = []
+        with self.get_retry_session() as session:
+            result = session.run(cypher, group_id=group_id)
+            for record in result:
+                triples.append({
+                    "source_id": record["source_id"],
+                    "source_name": record["source_name"] or "",
+                    "description": record["description"] or "",
+                    "target_id": record["target_id"],
+                    "target_name": record["target_name"] or "",
+                })
+        return triples
+
+    def store_triple_embeddings_batch(
+        self, group_id: str, triples: List[Dict[str, Any]], embeddings: List[List[float]]
+    ) -> int:
+        """Store pre-computed embeddings on RELATED_TO edges.
+
+        Each triple dict must have source_id and target_id to match the edge.
+        """
+        cypher = """
+        UNWIND $items AS item
+        MATCH (e1:Entity {id: item.source_id, group_id: $group_id})
+              -[r:RELATED_TO]->
+              (e2:Entity {id: item.target_id, group_id: $group_id})
+        SET r.embedding_v2 = item.embedding
+        RETURN count(r) AS count
+        """
+        items = [
+            {
+                "source_id": t["source_id"],
+                "target_id": t["target_id"],
+                "embedding": emb,
+            }
+            for t, emb in zip(triples, embeddings)
+        ]
+        # Batch in groups of 100 to avoid transaction size limits
+        total = 0
+        batch_size = 100
+        for i in range(0, len(items), batch_size):
+            batch = items[i : i + batch_size]
+            with self.get_retry_session() as session:
+                result = session.run(cypher, items=batch, group_id=group_id)
+                record = result.single()
+                total += cast(int, record["count"]) if record else 0
+        return total
 
     # ==================== Community Operations ====================
     

@@ -456,6 +456,29 @@ class LazyGraphRAGIndexingPipeline:
                     f"(min_mentions={self.config.min_mentions}), entities={len(entities)}"
                 )
 
+        # 5b) Per-sentence OpenIE extraction (upstream HippoRAG 2 alignment).
+        #     Extracts open-domain (subject, predicate, object) triples from
+        #     individual sentences. Adds entities and relationships that the
+        #     schema-guided extractor may have missed.
+        if self.llm is not None and entities:
+            try:
+                openie_entities, openie_rels = await self._extract_openie_triples(
+                    group_id=group_id,
+                )
+                if openie_entities or openie_rels:
+                    entities.extend(openie_entities)
+                    relationships.extend(openie_rels)
+                    stats["openie_entities"] = len(openie_entities)
+                    stats["openie_relationships"] = len(openie_rels)
+                    logger.info(
+                        f"openie_complete: +{len(openie_entities)} entities, "
+                        f"+{len(openie_rels)} relationships"
+                    )
+            except Exception as e:
+                logger.warning(f"⚠️  OpenIE extraction failed (non-fatal): {e}")
+                stats["openie_entities"] = 0
+                stats["openie_relationships"] = 0
+
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
             entities, relationships, dedup_stats = self._deduplicate_entities(
@@ -482,7 +505,20 @@ class LazyGraphRAGIndexingPipeline:
         stats["entities"] = len(entities)
         stats["relationships"] = len(relationships)
         stats["foundation_edges"] = commit_result.get("details", {}).get("foundation_edges", {})
-        
+
+        # 7.5) Pre-compute triple embeddings for HippoRAG 2 Route 7.
+        # Embeds all RELATED_TO triples via Voyage and stores on edges as
+        # embedding_v2, eliminating cold-start latency at query time.
+        try:
+            triple_embed_stats = await self._precompute_triple_embeddings(group_id)
+            stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
+            logger.info(
+                f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
+            stats["triple_embeddings_stored"] = 0
+
         # 8) Run GDS graph algorithms (KNN, Louvain, PageRank) - AFTER entities are in Neo4j
         # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
         try:
@@ -1324,21 +1360,22 @@ class LazyGraphRAGIndexingPipeline:
                                 weight=1.0,
                             )
                         )
-        # Merge: LLM-extracted relationships + deterministic co-occurrence
-        # Deduplicate by (source, target) keeping the LLM relationship if it exists
+        # Merge: LLM-extracted relationships first (they have richer descriptions),
+        # then ALL co-occurrence edges. Neo4j's ON MATCH accumulates co-occurrence
+        # counts so duplicate (source, target) pairs are intentional — they increase
+        # edge weight for PPR signal strength.
         seen_pairs: set[tuple[str, str]] = set()
         merged_rels: List[Relationship] = []
+        # LLM edges first — deduplicated to keep only the first LLM edge per pair
         for r in relationships:
             pair = (r.source_id, r.target_id)
             if pair not in seen_pairs:
                 seen_pairs.add(pair)
                 merged_rels.append(r)
-        for r in cooccurrence_rels:
-            pair = (r.source_id, r.target_id)
-            rev_pair = (r.target_id, r.source_id)
-            if pair not in seen_pairs and rev_pair not in seen_pairs:
-                seen_pairs.add(pair)
-                merged_rels.append(r)
+        # Co-occurrence edges: pass ALL through (even duplicates of LLM edges)
+        # so Neo4j ON MATCH increments cooccurrence_count for frequently
+        # co-occurring entity pairs. This gives PPR weighted signal.
+        merged_rels.extend(cooccurrence_rels)
 
         logger.info(
             "sentence_entity_extraction_complete",
@@ -1352,6 +1389,164 @@ class LazyGraphRAGIndexingPipeline:
             },
         )
         return entities, merged_rels
+
+    # ────────────────────────────────────────────────────────────────────
+    # Step 5b: Open-domain triple extraction (HippoRAG 2 alignment)
+    # ────────────────────────────────────────────────────────────────────
+
+    _OPENIE_PROMPT = """Extract knowledge graph triples from each sentence below.
+For each sentence, identify (subject, predicate, object) triples where:
+- subject and object are named entities, key concepts, dates, or amounts
+- predicate is the exact relationship phrase from the text
+- Extract ALL factual relationships, not just the most obvious one
+- Use the entity names exactly as they appear in the text
+
+{sentences}
+
+Return ONLY valid JSON (no markdown fences):
+{{"triples": [
+  {{"sid": "<sentence_id>", "s": "<subject>", "p": "<predicate>", "o": "<object>"}},
+  ...
+]}}"""
+
+    async def _extract_openie_triples(
+        self,
+        *,
+        group_id: str,
+    ) -> Tuple[List[Entity], List[Relationship]]:
+        """Step 5b: Per-sentence open-domain triple extraction.
+
+        Runs an open-domain NER + RDF extraction prompt on each sentence,
+        producing open predicates (e.g. "signed by", "located in") that the
+        schema-guided extractor misses.  This aligns with upstream HippoRAG 2's
+        open-domain extraction for richer entity-entity edges in the PPR graph.
+
+        Returns new entities and relationships to merge before dedup (step 6).
+        """
+        import asyncio
+        import json as json_mod
+        from llama_index.core.llms import ChatMessage
+
+        raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+        content_sentences = [
+            s for s in raw_sentences if self._classify_sentence(s["text"]) == "content"
+        ]
+        if not content_sentences:
+            return [], []
+
+        BATCH_SIZE = 5
+        all_raw_triples: List[Dict[str, str]] = []
+
+        # Process in batches of 5 sentences with concurrent LLM calls
+        batches: List[List[Dict[str, Any]]] = []
+        for i in range(0, len(content_sentences), BATCH_SIZE):
+            batches.append(content_sentences[i : i + BATCH_SIZE])
+
+        sem = asyncio.Semaphore(4)  # max 4 concurrent LLM calls
+
+        async def _extract_batch(batch: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+            sentence_block = "\n".join(
+                f"[{s['id']}]: {s['text']}" for s in batch
+            )
+            prompt = self._OPENIE_PROMPT.format(sentences=sentence_block)
+            async with sem:
+                try:
+                    response = await self.llm.achat(
+                        [ChatMessage(role="user", content=prompt)]
+                    )
+                    text = response.message.content.strip()
+                    # Strip markdown code fences if present
+                    if text.startswith("```"):
+                        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+                    if text.endswith("```"):
+                        text = text[: -3].rstrip()
+                    if text.startswith("json"):
+                        text = text[4:].lstrip()
+                    parsed = json_mod.loads(text)
+                    return parsed.get("triples", [])
+                except Exception as e:
+                    logger.debug(f"OpenIE batch failed: {e}")
+                    return []
+
+        results = await asyncio.gather(*[_extract_batch(b) for b in batches])
+        for batch_triples in results:
+            all_raw_triples.extend(batch_triples)
+
+        if not all_raw_triples:
+            return [], []
+
+        # Build sentence lookup for attribution
+        sentence_map = {s["id"]: s for s in content_sentences}
+
+        # Convert raw triples to Entity + Relationship objects
+        entities_by_key: Dict[str, Entity] = {}
+        openie_rels: List[Relationship] = []
+
+        for t in all_raw_triples:
+            subj = (t.get("s") or "").strip()
+            pred = (t.get("p") or "").strip()
+            obj = (t.get("o") or "").strip()
+            sid = (t.get("sid") or "").strip()
+
+            if not subj or not pred or not obj:
+                continue
+
+            # Resolve or create entities
+            subj_key = self._canonical_entity_key(subj)
+            obj_key = self._canonical_entity_key(obj)
+            if not subj_key or not obj_key or subj_key == obj_key:
+                continue
+
+            if subj_key not in entities_by_key:
+                entities_by_key[subj_key] = Entity(
+                    id=self._stable_entity_id(group_id, subj_key),
+                    name=subj,
+                    type="CONCEPT",  # open-domain default
+                    text_unit_ids=[sid] if sid in sentence_map else [],
+                    metadata={"source": "openie"},
+                )
+            elif sid and sid in sentence_map:
+                ent = entities_by_key[subj_key]
+                if sid not in ent.text_unit_ids:
+                    ent.text_unit_ids.append(sid)
+
+            if obj_key not in entities_by_key:
+                entities_by_key[obj_key] = Entity(
+                    id=self._stable_entity_id(group_id, obj_key),
+                    name=obj,
+                    type="CONCEPT",
+                    text_unit_ids=[sid] if sid in sentence_map else [],
+                    metadata={"source": "openie"},
+                )
+            elif sid and sid in sentence_map:
+                ent = entities_by_key[obj_key]
+                if sid not in ent.text_unit_ids:
+                    ent.text_unit_ids.append(sid)
+
+            # Create relationship with open predicate as description
+            subj_ent = entities_by_key[subj_key]
+            obj_ent = entities_by_key[obj_key]
+            openie_rels.append(
+                Relationship(
+                    source_id=subj_ent.id,
+                    target_id=obj_ent.id,
+                    type="RELATED_TO",
+                    description=pred,
+                    weight=1.0,
+                )
+            )
+
+        logger.info(
+            "openie_extraction_done",
+            extra={
+                "group_id": group_id,
+                "sentences_processed": len(content_sentences),
+                "raw_triples": len(all_raw_triples),
+                "new_entities": len(entities_by_key),
+                "new_relationships": len(openie_rels),
+            },
+        )
+        return list(entities_by_key.values()), openie_rels
 
 
     async def _extract_with_native_extractor_sentences(
@@ -3526,6 +3721,51 @@ SUMMARY: <summary>"""
             "unique_keys": len(unique_keys),
             "keys_embedded": len(updates),
         }
+
+    async def _precompute_triple_embeddings(self, group_id: str) -> Dict[str, Any]:
+        """Pre-compute Voyage embeddings for all RELATED_TO triples (Step 7.5).
+
+        Builds the text ``source | description | target`` for each triple,
+        embeds them in batch via Voyage, and stores the vectors on the edges
+        as ``embedding_v2``.  This eliminates cold-start Voyage calls in the
+        TripleEmbeddingStore at Route 7 query time.
+        """
+        import asyncio
+        from src.worker.hybrid_v2.embeddings.voyage_embed import get_voyage_embed_service
+
+        triples = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: self.neo4j_store.fetch_all_triples(group_id)
+        )
+        if not triples:
+            logger.info("No RELATED_TO triples found — skipping triple embedding.")
+            return {"stored": 0}
+
+        # Build the same text representation used by TripleEmbeddingStore
+        texts = [
+            f"{t['source_name']} {t['description']} {t['target_name']}"
+            for t in triples
+        ]
+
+        voyage_svc = get_voyage_embed_service()
+        embeddings: list[list[float]] = []
+        batch_size = 128
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            batch_emb = await asyncio.get_event_loop().run_in_executor(
+                None, lambda b=batch: voyage_svc.embed_documents(b)
+            )
+            embeddings.extend(batch_emb)
+
+        stored = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: self.neo4j_store.store_triple_embeddings_batch(
+                group_id, triples, embeddings
+            ),
+        )
+        logger.info(
+            f"Pre-computed {stored}/{len(triples)} triple embeddings for group {group_id}"
+        )
+        return {"stored": stored, "total": len(triples)}
 
     async def _create_foundation_edges(self, group_id: str) -> Dict[str, int]:
         """Create foundation edges for graph schema enhancement.

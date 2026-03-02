@@ -92,15 +92,29 @@ class TripleEmbeddingStore:
             self._loaded = True
             return
 
-        # Batch-embed triple texts with Voyage
-        triple_texts = [t.triple_text for t in triples]
-        embeddings = await asyncio.to_thread(
-            voyage_service.embed_documents, triple_texts
-        )
+        # Check if triples have pre-computed embeddings from indexing
+        precomputed_count = sum(1 for t in triples if t.embedding is not None)
+        all_precomputed = precomputed_count == len(triples) and precomputed_count > 0
 
-        # Store as numpy matrix for fast cosine search
-        self._triples = triples
-        self._embeddings_matrix = np.array(embeddings, dtype=np.float32)
+        if all_precomputed:
+            # Use pre-computed embeddings — skip Voyage API call entirely
+            self._triples = triples
+            self._embeddings_matrix = np.array(
+                [t.embedding for t in triples], dtype=np.float32
+            )
+            logger.info(
+                "triple_store_using_precomputed_embeddings",
+                group_id=group_id,
+                triple_count=len(triples),
+            )
+        else:
+            # Batch-embed triple texts with Voyage (legacy / first-time path)
+            triple_texts = [t.triple_text for t in triples]
+            embeddings = await asyncio.to_thread(
+                voyage_service.embed_documents, triple_texts
+            )
+            self._triples = triples
+            self._embeddings_matrix = np.array(embeddings, dtype=np.float32)
 
         # Normalize for cosine similarity via dot product
         norms = np.linalg.norm(self._embeddings_matrix, axis=1, keepdims=True)
@@ -120,13 +134,19 @@ class TripleEmbeddingStore:
     def _fetch_triples_sync(
         self, neo4j_driver: Any, group_id: str
     ) -> List[Triple]:
-        """Fetch all RELATED_TO triples from Neo4j (synchronous)."""
+        """Fetch all RELATED_TO triples from Neo4j (synchronous).
+
+        If triples have pre-computed embeddings (embedding_v2 property stored
+        during indexing), those are loaded directly — avoiding a Voyage API
+        call at query time.
+        """
         cypher = """
         MATCH (e1:Entity {group_id: $group_id})-[r:RELATED_TO]->(e2:Entity {group_id: $group_id})
         WHERE r.description IS NOT NULL AND r.description <> ''
         RETURN e1.id AS subj_id, e1.name AS subj_name,
                r.description AS predicate,
-               e2.id AS obj_id, e2.name AS obj_name
+               e2.id AS obj_id, e2.name AS obj_name,
+               r.embedding_v2 AS embedding
         """
         triples: List[Triple] = []
         with retry_session(neo4j_driver) as session:
@@ -136,6 +156,7 @@ class TripleEmbeddingStore:
                 predicate = record["predicate"] or ""
                 obj_name = record["obj_name"] or ""
                 triple_text = f"{subj_name} {predicate} {obj_name}"
+                embedding = record["embedding"]
                 triples.append(
                     Triple(
                         subject_id=record["subj_id"],
@@ -144,12 +165,14 @@ class TripleEmbeddingStore:
                         object_id=record["obj_id"],
                         object_name=obj_name,
                         triple_text=triple_text,
+                        embedding=list(embedding) if embedding else None,
                     )
                 )
         logger.debug(
             "triple_store_fetched",
             group_id=group_id,
             count=len(triples),
+            precomputed=sum(1 for t in triples if t.embedding is not None),
         )
         return triples
 

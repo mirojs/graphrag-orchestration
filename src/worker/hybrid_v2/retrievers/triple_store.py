@@ -18,6 +18,8 @@ Reference: HippoRAG 2 (ICML '25) — https://arxiv.org/abs/2502.14802
 from __future__ import annotations
 
 import asyncio
+import difflib
+import json
 import re
 import time
 from dataclasses import dataclass
@@ -219,14 +221,15 @@ async def recognition_memory_filter(
     query: str,
     candidate_triples: List[Tuple[Triple, float]],
 ) -> List[Tuple[Triple, float]]:
-    """LLM-based recognition memory filter for retrieved triples.
+    """LLM-based recognition memory filter — upstream DSPy few-shot aligned.
 
-    After the embedding model retrieves the top-K triples by cosine similarity,
-    the LLM acts as a "recognition memory" — it examines each triple and judges
-    whether it is genuinely relevant to the query. This filters out false
-    positives from the embedding search.
+    Uses the same prompt structure as upstream HippoRAG 2's DSPyFilter:
+    - System prompt describing a high-stakes QA filtering task
+    - Few-shot demonstrations from the upstream optimized prompt
+    - Structured JSON output: {"fact": [["s","p","o"], ...]}
+    - difflib fuzzy matching to map generated facts back to candidates
 
-    Modeled after HippoRAG 2's recognition memory mechanism (Section 3.2).
+    Reference: OSU-NLP-Group/HippoRAG rerank.py + filter_default_prompt.py
 
     Args:
         llm_client: LLM client with ``acomplete(prompt)`` method.
@@ -239,31 +242,89 @@ async def recognition_memory_filter(
     if not candidate_triples:
         return []
 
-    # Build numbered list of triples for the LLM
-    triple_list_lines = []
-    triple_map: Dict[int, Tuple[Triple, float]] = {}
-    for i, (triple, score) in enumerate(candidate_triples, 1):
-        triple_list_lines.append(f"{i}. {triple.triple_text}")
-        triple_map[i] = (triple, score)
+    # Build fact list in upstream format: {"fact": [["s","p","o"], ...]}
+    fact_list = []
+    triple_text_to_item: Dict[str, Tuple[Triple, float]] = {}
+    for triple, score in candidate_triples:
+        parts = [triple.subject.lower(), triple.predicate.lower(), triple.object.lower()]
+        fact_list.append(parts)
+        triple_text_to_item[str(parts)] = (triple, score)
 
-    prompt = f"""You are filtering knowledge graph facts for relevance to a query.
+    fact_before_filter = json.dumps({"fact": fact_list})
 
-Query: "{query}"
+    # Upstream DSPy few-shot demonstrations (from filter_default_prompt.py)
+    _DEMOS = [
+        {
+            "q": "How many households were in the city where Angelical Tears located?",
+            "before": '{"fact": [["dow city", "had", "219 households"], ["tucson", "had", "229 762 households"], ["atlantic city", "has", "15 504 households"], ["angelical tears", "located in", "oklahoma city"], ["atlantic city", "had", "15 848 households"]]}',
+            "after": '{"fact": [["angelical tears", "located in", "oklahoma city"]]}',
+        },
+        {
+            "q": "Did the movies In The Pope's Eye and Virgin Mountain, originate from the same country?",
+            "before": '{"fact": [["virgin mountain", "released in", "icelandic cinemas"], ["virgin mountain", "directed by", "dagur k ri"], ["virgin mountain", "icelandic title is", "f si"], ["virgin mountain", "won", "2015 nordic council film prize"], ["virgin mountain", "is a", "2015 icelandic drama film"]]}',
+            "after": '{"fact": [["virgin mountain", "released in", "icelandic cinemas"], ["virgin mountain", "directed by", "dagur k ri"], ["virgin mountain", "icelandic title is", "f si"], ["virgin mountain", "won", "2015 nordic council film prize"], ["virgin mountain", "is a", "2015 icelandic drama film"]]}',
+        },
+        {
+            "q": "When is the director of film The Ancestor's birthday?",
+            "before": '{"fact": [["jean jacques annaud", "born on", "1 october 1943"], ["tsui hark", "born on", "15 february 1950"], ["pablo trapero", "born on", "4 october 1971"], ["the ancestor", "directed by", "guido brignone"], ["benh zeitlin", "born on", "october 14 1982"]]}',
+            "after": '{"fact": [["the ancestor", "directed by", "guido brignone"]]}',
+        },
+    ]
 
-Here are candidate facts retrieved from the knowledge graph:
-{chr(10).join(triple_list_lines)}
+    # Build messages in upstream format
+    _SYS = (
+        "You are a critical component of a high-stakes question-answering system. "
+        "Your task is to filter facts based on their relevance to a given query, "
+        "ensuring that the most crucial information is retained. "
+        "The query may require multi-hop reasoning to connect different pieces of information. "
+        "Select relevant facts from the candidate list that have a strong connection to the query. "
+        "Output JSON: {\"fact\": [[\"s1\",\"p1\",\"o1\"], [\"s2\",\"p2\",\"o2\"]]}. "
+        "If no facts are relevant, return {\"fact\": []}. "
+        "Only use facts from the candidate list — do not generate new facts."
+    )
 
-Which facts are relevant to answering the query?
-Return ONLY the numbers of relevant facts, comma-separated.
-If none are relevant, return "NONE".
+    _INPUT_TPL = "[[ ## question ## ]]\n{question}\n\n[[ ## fact_before_filter ## ]]\n{fact_before_filter}\n\nRespond with the corresponding output fields, starting with the field `[[ ## fact_after_filter ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+    _OUTPUT_TPL = "[[ ## fact_after_filter ## ]]\n{fact_after_filter}\n\n[[ ## completed ## ]]"
 
-Example: 1, 3, 5"""
+    # Build the full prompt: system + few-shot demos + current query
+    messages_parts = [_SYS, ""]
+    for demo in _DEMOS:
+        messages_parts.append(_INPUT_TPL.format(question=demo["q"], fact_before_filter=demo["before"]))
+        messages_parts.append(_OUTPUT_TPL.format(fact_after_filter=demo["after"]))
+    messages_parts.append(_INPUT_TPL.format(question=query, fact_before_filter=fact_before_filter))
+
+    prompt = "\n\n".join(messages_parts)
 
     try:
         response = await llm_client.acomplete(prompt)
         text = response.text.strip()
 
-        if text.upper() == "NONE":
+        # Parse upstream structured format: look for [[ ## fact_after_filter ## ]]
+        parsed_facts = []
+        if "[[ ## fact_after_filter ## ]]" in text:
+            after_section = text.split("[[ ## fact_after_filter ## ]]")[1]
+            if "[[ ## completed ## ]]" in after_section:
+                after_section = after_section.split("[[ ## completed ## ]]")[0]
+            after_section = after_section.strip()
+        else:
+            after_section = text
+
+        # Try to parse as JSON
+        try:
+            parsed = json.loads(after_section)
+            if isinstance(parsed, dict) and "fact" in parsed:
+                parsed_facts = parsed["fact"]
+        except json.JSONDecodeError:
+            # Try to extract JSON from the text
+            json_match = re.search(r'\{[^{}]*"fact"\s*:\s*\[.*?\]\s*\}', after_section, re.DOTALL)
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group())
+                    parsed_facts = parsed.get("fact", [])
+                except json.JSONDecodeError:
+                    pass
+
+        if not parsed_facts:
             logger.info(
                 "recognition_memory_all_filtered",
                 query=query[:60],
@@ -271,16 +332,26 @@ Example: 1, 3, 5"""
             )
             return []
 
-        # Parse comma-separated numbers
-        numbers = [int(n) for n in re.findall(r"\d+", text)]
-        surviving = [triple_map[n] for n in numbers if n in triple_map]
+        # Fuzzy match generated facts back to candidates (upstream uses difflib)
+        surviving: List[Tuple[Triple, float]] = []
+        seen_keys: set = set()
+        candidate_strs = [str(f) for f in fact_list]
+
+        for gen_fact in parsed_facts:
+            gen_str = str(gen_fact)
+            matches = difflib.get_close_matches(gen_str, candidate_strs, n=1, cutoff=0.0)
+            if matches:
+                matched_str = matches[0]
+                if matched_str not in seen_keys and matched_str in triple_text_to_item:
+                    seen_keys.add(matched_str)
+                    surviving.append(triple_text_to_item[matched_str])
 
         logger.info(
             "recognition_memory_filter",
             query=query[:60],
             candidates=len(candidate_triples),
             surviving=len(surviving),
-            selected_numbers=numbers,
+            generated_facts=len(parsed_facts),
         )
         return surviving
 

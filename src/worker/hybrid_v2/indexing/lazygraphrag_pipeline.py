@@ -521,40 +521,62 @@ class LazyGraphRAGIndexingPipeline:
 
         # 8) Run GDS graph algorithms (KNN, Louvain, PageRank) - AFTER entities are in Neo4j
         # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
-        try:
-            if knn_enabled:
-                logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, Louvain, PageRank)...")
-                gds_stats = await self._run_gds_graph_algorithms(
-                    group_id=group_id,
-                    knn_top_k=knn_top_k,
-                    knn_similarity_cutoff=knn_similarity_cutoff,
-                    knn_config=knn_config,
-                )
-            else:
-                logger.info("🔬 KNN disabled - running Louvain and PageRank only...")
-                gds_stats = await self._run_gds_graph_algorithms(
-                    group_id=group_id,
-                    knn_top_k=0,  # Signal to skip KNN
-                    knn_similarity_cutoff=1.0,  # No edges will pass this threshold
-                    knn_config=None,
-                )
-            stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
-            stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
-            stats["gds_communities"] = gds_stats.get("communities", 0)
-            stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
-            stats["knn_config"] = {
-                "enabled": knn_enabled,
-                "top_k": knn_top_k if knn_enabled else 0,
-                "similarity_cutoff": knn_similarity_cutoff if knn_enabled else None,
-                "config_tag": knn_config,
-            }
+        # Retry up to 3 times with exponential backoff for transient Neo4j/GDS errors.
+        gds_max_retries = 3
+        gds_base_delay = 15  # seconds
+        gds_stats: Dict[str, int] = {}
+        for gds_attempt in range(gds_max_retries):
+            try:
+                if knn_enabled:
+                    logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, Louvain, PageRank)...")
+                    gds_stats = await self._run_gds_graph_algorithms(
+                        group_id=group_id,
+                        knn_top_k=knn_top_k,
+                        knn_similarity_cutoff=knn_similarity_cutoff,
+                        knn_config=knn_config,
+                    )
+                else:
+                    logger.info("🔬 KNN disabled - running Louvain and PageRank only...")
+                    gds_stats = await self._run_gds_graph_algorithms(
+                        group_id=group_id,
+                        knn_top_k=0,  # Signal to skip KNN
+                        knn_similarity_cutoff=1.0,  # No edges will pass this threshold
+                        knn_config=None,
+                    )
+                # Success — break out of retry loop
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                is_transient = any(k in err_msg for k in (
+                    "no data", "connection closed", "defunct connection",
+                    "service unavailable", "timed out", "reset by peer",
+                    "incomplete handshake",
+                ))
+                if is_transient and gds_attempt < gds_max_retries - 1:
+                    delay = gds_base_delay * (2 ** gds_attempt)
+                    logger.warning(
+                        f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
+                        f"retrying in {delay}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
+                logger.warning("⚠️  Continuing indexing without GDS algorithms")
+                gds_stats = {}
+                break
+
+        stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
+        stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
+        stats["gds_communities"] = gds_stats.get("communities", 0)
+        stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
+        stats["knn_config"] = {
+            "enabled": knn_enabled,
+            "top_k": knn_top_k if knn_enabled else 0,
+            "similarity_cutoff": knn_similarity_cutoff if knn_enabled else None,
+            "config_tag": knn_config,
+        }
+        if gds_stats:
             logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities, {stats['gds_pagerank_nodes']} nodes scored")
-        except Exception as e:
-            logger.warning(f"⚠️  GDS algorithms failed: {e}")
-            stats["gds_knn_edges"] = 0
-            stats["gds_entity_edges"] = 0
-            stats["gds_communities"] = 0
-            stats["gds_pagerank_nodes"] = 0
 
         # ── Step 9: Materialize Louvain communities with LLM summaries ──
         if stats.get("gds_communities", 0) > 0:
@@ -2392,12 +2414,31 @@ Output:
             )
             
             # Get or create GDS session (2GB minimum for Aura Serverless)
-            gds = sessions.get_or_create(
-                session_name=session_name,
-                memory=SessionMemory.m_2GB,
-                db_connection=db_connection
-            )
-            logger.info(f"✅ GDS session ready: version {gds.version()}")
+            # Retry session creation: Aura Serverless sometimes returns transient
+            # HTTP/connection errors while provisioning the session container.
+            gds = None
+            for sess_attempt in range(3):
+                try:
+                    gds = sessions.get_or_create(
+                        session_name=session_name,
+                        memory=SessionMemory.m_2GB,
+                        db_connection=db_connection
+                    )
+                    logger.info(f"✅ GDS session ready: version {gds.version()}")
+                    break
+                except Exception as sess_err:
+                    if sess_attempt < 2:
+                        delay = 15 * (2 ** sess_attempt)
+                        logger.warning(
+                            f"⏳ GDS session creation failed (attempt {sess_attempt + 1}/3), "
+                            f"retrying in {delay}s: {sess_err}"
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        raise
+            
+            if gds is None:
+                raise RuntimeError("GDS session creation failed after all retries")
             
             # 2. Project graph using gds.graph.project.remote() - the correct Aura Serverless approach
             logger.info(f"📊 Creating GDS projection: {projection_name}")
@@ -2504,9 +2545,31 @@ Output:
                 return stats
             
             # 3. Run KNN algorithm (skip if knn_top_k is 0)
+            # Helper: retry GDS algorithm calls on transient connection errors.
+            # Aura Serverless can drop the session→Neo4j link mid-algorithm;
+            # a single retry typically succeeds once the link re-establishes.
+            async def _run_gds_algo(name: str, fn, *args, **kwargs):
+                for algo_attempt in range(2):
+                    try:
+                        return fn(*args, **kwargs)
+                    except Exception as algo_err:
+                        err_lower = str(algo_err).lower()
+                        is_transient = any(k in err_lower for k in (
+                            "no data", "connection closed", "defunct",
+                            "service unavailable", "timed out", "reset by peer",
+                        ))
+                        if is_transient and algo_attempt == 0:
+                            logger.warning(
+                                f"⏳ GDS {name} transient error, retrying in 10s: {algo_err}"
+                            )
+                            await asyncio.sleep(10)
+                            continue
+                        raise
+
             if knn_top_k > 0:
                 logger.info(f"🔗 Running GDS KNN (k={knn_top_k}, cutoff={knn_similarity_cutoff})...")
-                knn_df = gds.knn.stream(
+                knn_df = await _run_gds_algo(
+                    "KNN", gds.knn.stream,
                     G,
                     nodeProperties=["embedding_v2"],
                     topK=knn_top_k,
@@ -2565,7 +2628,10 @@ Output:
             
             # 4. Run Louvain community detection
             logger.info(f"🏘️ Running GDS Louvain community detection...")
-            louvain_df = gds.louvain.stream(G, includeIntermediateCommunities=False, concurrency=4)
+            louvain_df = await _run_gds_algo(
+                "Louvain", gds.louvain.stream,
+                G, includeIntermediateCommunities=False, concurrency=4
+            )
             
             updates = []
             community_ids = set()
@@ -2590,7 +2656,10 @@ Output:
             
             # 5. Run PageRank
             logger.info(f"📈 Running GDS PageRank...")
-            pagerank_df = gds.pageRank.stream(G, dampingFactor=0.85, maxIterations=20, concurrency=4)
+            pagerank_df = await _run_gds_algo(
+                "PageRank", gds.pageRank.stream,
+                G, dampingFactor=0.85, maxIterations=20, concurrency=4
+            )
             
             pr_updates = [
                 {"nodeId": int(row["nodeId"]), "score": float(row["score"])}
@@ -2648,7 +2717,6 @@ Output:
             
         except Exception as e:
             logger.error(f"⚠️  GDS graph algorithms failed: {e}", extra={"error": str(e)})
-            logger.warning(f"⚠️  Continuing indexing without GDS algorithms")
             # Try to cleanup session even on failure
             try:
                 if 'sessions' in locals() and 'session_name' in locals():
@@ -2656,7 +2724,8 @@ Output:
                     logger.info(f"🧹 Cleaned up failed session: {session_name}")
             except Exception:
                 pass
-            # Don't raise - allow indexing to continue without GDS
+            # Re-raise so pipeline-level retry can handle transient errors
+            raise
         
         return stats
 

@@ -21,10 +21,21 @@ i18nInstance.use(initReactI18next).init({
                 chat: "Chat",
                 login: "Login",
                 logout: "Logout",
+                citationWithColon: "Citation:",
+                followupQuestions: "Follow-up questions:",
+                retry: "Retry",
                 "history.openChatHistory": "Open chat history",
+                "history.chatHistory": "Chat history",
+                "history.noHistory": "No history",
                 "labels.closeButton": "Close",
                 "tooltips.submitQuestion": "Submit question",
-                retry: "Retry"
+                "tooltips.copy": "Copy",
+                "tooltips.copied": "Copied!",
+                "tooltips.showThoughtProcess": "Show thought process",
+                "tooltips.showSupportingContent": "Show supporting content",
+                "headerTexts.thoughtProcess": "Thought process",
+                "headerTexts.supportingContent": "Supporting content",
+                "headerTexts.citation": "Citation"
             }
         }
     },

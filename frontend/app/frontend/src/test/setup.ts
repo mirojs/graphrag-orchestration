@@ -1,6 +1,9 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
+// Polyfill Element.scrollIntoView for jsdom
+Element.prototype.scrollIntoView = vi.fn();
+
 // Mock authConfig module — it performs top-level await fetch("/auth_setup")
 // which fails in jsdom (no base URL for relative paths).
 vi.mock("../authConfig", () => ({

@@ -252,8 +252,43 @@ async def recognition_memory_filter(
 
     fact_before_filter = json.dumps({"fact": fact_list})
 
-    # Upstream DSPy few-shot demonstrations (from filter_default_prompt.py)
+    # All 10 upstream DSPy-optimized demonstrations (from filter_default_prompt.py)
     _DEMOS = [
+        {
+            "q": "Are Imperial River (Florida) and Amaradia (Dolj) both located in the same country?",
+            "before": '{"fact": [["imperial river", "is located in", "florida"], ["imperial river", "is a river in", "united states"], ["imperial river", "may refer to", "south america"], ["amaradia", "flows through", "ro ia de amaradia"], ["imperial river", "may refer to", "united states"]]}',
+            "after": '{"fact":[["imperial river","is located in","florida"],["imperial river","is a river in","united states"],["amaradia","flows through","ro ia de amaradia"]]}',
+        },
+        {
+            "q": "When is the director of film The Ancestor's birthday?",
+            "before": '{"fact": [["jean jacques annaud", "born on", "1 october 1943"], ["tsui hark", "born on", "15 february 1950"], ["pablo trapero", "born on", "4 october 1971"], ["the ancestor", "directed by", "guido brignone"], ["benh zeitlin", "born on", "october 14  1982"]]}',
+            "after": '{"fact":[["the ancestor","directed by","guido brignone"]]}',
+        },
+        {
+            "q": "In what geographic region is the country where Teafuone is located?",
+            "before": '{"fact": [["teafuaniua", "is on the", "east"], ["motuloa", "lies between", "teafuaniua"], ["motuloa", "lies between", "teafuanonu"], ["teafuone", "is", "islet"], ["teafuone", "located in", "nukufetau"]]}',
+            "after": '{"fact":[["teafuone","is","islet"],["teafuone","located in","nukufetau"]]}',
+        },
+        {
+            "q": "When did the director of film S.O.B. (Film) die?",
+            "before": '{"fact": [["allan dwan", "died on", "28 december 1981"], ["s o b", "written and directed by", "blake edwards"], ["robert aldrich", "died on", "december 5  1983"], ["robert siodmak", "died on", "10 march 1973"], ["bernardo bertolucci", "died on", "26 november 2018"]]}',
+            "after": '{"fact":[["s o b","written and directed by","blake edwards"]]}',
+        },
+        {
+            "q": "Do both films: Gloria (1980 Film) and A New Life (Film) have the directors from the same country?",
+            "before": '{"fact": [["sebasti n lelio watt", "received acclaim for directing", "gloria"], ["gloria", "is", "1980 american thriller crime drama film"], ["a brand new life", "is directed by", "ounie lecomte"], ["gloria", "written and directed by", "john cassavetes"], ["a new life", "directed by", "alan alda"]]}',
+            "after": '{"fact":[["gloria","is","1980 american thriller crime drama film"],["gloria","written and directed by","john cassavetes"],["a new life","directed by","alan alda"]]}',
+        },
+        {
+            "q": "What is the date of death of the director of film The Old Guard (1960 Film)?",
+            "before": '{"fact": [["the old guard", "is", "1960 french comedy film"], ["gilles grangier", "directed", "the old guard"], ["the old guard", "directed by", "gilles grangier"], ["the old fritz", "directed by", "gerhard lamprecht"], ["oswald albert mitchell", "directed", "old mother riley series of films"]]}',
+            "after": '{"fact":[["the old guard","is","1960 french comedy film"],["gilles grangier","directed","the old guard"],["the old guard","directed by","gilles grangier"]]}',
+        },
+        {
+            "q": "When is the composer of film Aulad (1968 Film)'s birthday?",
+            "before": '{"fact": [["aulad", "has music composed by", "chitragupta shrivastava"], ["aadmi sadak ka", "has music by", "ravi"], ["ravi shankar sharma", "composed music for", "hindi films"], ["gulzar", "was born on", "18 august 1934"], ["aulad", "is a", "1968 hindi language drama film"]]}',
+            "after": '{"fact":[["aulad","has music composed by","chitragupta shrivastava"],["aulad","is a","1968 hindi language drama film"]]}',
+        },
         {
             "q": "How many households were in the city where Angelical Tears located?",
             "before": '{"fact": [["dow city", "had", "219 households"], ["tucson", "had", "229 762 households"], ["atlantic city", "has", "15 504 households"], ["angelical tears", "located in", "oklahoma city"], ["atlantic city", "had", "15 848 households"]]}',
@@ -265,9 +300,9 @@ async def recognition_memory_filter(
             "after": '{"fact": [["virgin mountain", "released in", "icelandic cinemas"], ["virgin mountain", "directed by", "dagur k ri"], ["virgin mountain", "icelandic title is", "f si"], ["virgin mountain", "won", "2015 nordic council film prize"], ["virgin mountain", "is a", "2015 icelandic drama film"]]}',
         },
         {
-            "q": "When is the director of film The Ancestor's birthday?",
-            "before": '{"fact": [["jean jacques annaud", "born on", "1 october 1943"], ["tsui hark", "born on", "15 february 1950"], ["pablo trapero", "born on", "4 october 1971"], ["the ancestor", "directed by", "guido brignone"], ["benh zeitlin", "born on", "october 14 1982"]]}',
-            "after": '{"fact": [["the ancestor", "directed by", "guido brignone"]]}',
+            "q": "Which film has the director who died earlier, The Virtuous Model or Bulldog Drummond's Peril?",
+            "before": '{"fact": [["the virtuous model", "is", "1919 american silent drama film"], ["bulldog drummond s peril", "directed by", "james p  hogan"], ["the virtuous model", "directed by", "albert capellani"], ["bulldog drummond s revenge", "directed by", "louis king"], ["bulldog drummond s peril", "is", "american film"]]}',
+            "after": '{"fact": [["the virtuous model", "is", "1919 american silent drama film"], ["bulldog drummond s peril", "directed by", "james p  hogan"], ["the virtuous model", "directed by", "albert capellani"], ["bulldog drummond s peril", "is", "american film"]]}',
         },
     ]
 

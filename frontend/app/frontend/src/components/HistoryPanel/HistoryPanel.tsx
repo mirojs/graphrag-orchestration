@@ -112,7 +112,7 @@ export const HistoryPanel = ({
     );
 };
 
-function groupHistory(history: HistoryData[]) {
+export function groupHistory(history: HistoryData[]) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const yesterday = new Date(today);

@@ -276,9 +276,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
             os.getenv("ROUTE7_PPR_PASSAGE_TOP_K", "20")
         )
-        # Reranker: reranks PPR output for synthesis quality (v7.1 intent)
+        # Reranker: disabled by default to match upstream HippoRAG 2 (no passage reranker)
         rerank_enabled = os.getenv(
-            "ROUTE7_RERANK", "1"
+            "ROUTE7_RERANK", "0"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
 

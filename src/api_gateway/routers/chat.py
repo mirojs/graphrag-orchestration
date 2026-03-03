@@ -1155,8 +1155,15 @@ async def _frontend_stream_response(
             "session_state": session_state,
         }) + "\n"
         
-        # Execute query
-        result = await _execute_query(query, approach, group_id, force_route=force_route)
+        # Execute query in background while sending keepalive pings
+        query_task = asyncio.create_task(
+            _execute_query(query, approach, group_id, force_route=force_route)
+        )
+        while not query_task.done():
+            await asyncio.sleep(2)
+            if not query_task.done():
+                yield json.dumps({"delta": {}, "session_state": session_state}) + "\n"
+        result = query_task.result()
         
         # Extract context data
         thoughts = result.get("thoughts", [])

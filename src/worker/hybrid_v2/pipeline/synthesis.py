@@ -2543,6 +2543,7 @@ Instructions:
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested.
+10. When the specific information requested is absent from the evidence, always **lead with** an explicit statement that it was not found (e.g. "The documents do not provide X") before mentioning any related information.
 {document_guidance}
 
 Respond using this format:

@@ -52,6 +52,7 @@ Post-indexing workflow:
 
 import asyncio
 import os
+import subprocess
 import sys
 import time
 import argparse
@@ -61,6 +62,34 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(script_dir)  # /graphrag-orchestration
 app_root = os.path.join(project_root, "graphrag-orchestration")  # /graphrag-orchestration/graphrag-orchestration
 sys.path.insert(0, project_root)  # src/ is at project_root level
+
+
+def _resolve_azd_secrets():
+    """Auto-resolve secrets from `azd env` when not set in .env.
+
+    Container Apps inject secrets as env vars automatically. For local runs,
+    we bridge the gap by pulling from `azd env` (the deployment state store).
+    """
+    secrets_to_resolve = [
+        ("AURA_DS_CLIENT_SECRET", "Aura GDS API secret — needed for KNN, Louvain, PageRank"),
+    ]
+    for var_name, description in secrets_to_resolve:
+        if os.environ.get(var_name):
+            continue
+        try:
+            result = subprocess.run(
+                ["azd", "env", "get-value", var_name],
+                capture_output=True, text=True, timeout=10,
+            )
+            value = result.stdout.strip()
+            if value and result.returncode == 0:
+                os.environ[var_name] = value
+                print(f"  🔑 {var_name}: resolved from azd env ({description})")
+        except Exception:
+            pass  # azd not available — will warn later in config check
+
+
+_resolve_azd_secrets()
 
 from src.core.config import settings
 
@@ -139,6 +168,23 @@ def check_v2_config():
         azure_oai_key = getattr(settings, "AZURE_OPENAI_API_KEY", None)
         auth_mode = "API key" if azure_oai_key else "Managed Identity / az login token"
         print(f"  ✅ AZURE_OPENAI_ENDPOINT: {azure_oai}  [{auth_mode}]")
+
+    # GDS (Graph Data Science) — Aura Serverless for KNN, Louvain, PageRank
+    print("Aura GDS (required for graph algorithms):")
+    gds_id = getattr(settings, "AURA_DS_CLIENT_ID", None)
+    gds_secret = getattr(settings, "AURA_DS_CLIENT_SECRET", None)
+    if not gds_id or not gds_secret:
+        missing = []
+        if not gds_id:
+            missing.append("AURA_DS_CLIENT_ID")
+        if not gds_secret:
+            missing.append("AURA_DS_CLIENT_SECRET")
+        print(f"  ⚠️  GDS credentials missing: {', '.join(missing)}")
+        print("      KNN + Louvain + PageRank will be skipped")
+        print("      Fix: ensure azd env has the values, or set in .env")
+    else:
+        print(f"  ✅ AURA_DS_CLIENT_ID: {gds_id[:8]}...")
+        print(f"  ✅ AURA_DS_CLIENT_SECRET: {'*' * 8}...{gds_secret[-4:]}")
 
     print()
 
@@ -278,8 +324,8 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
         ingestion="document-intelligence",
         run_community_detection=True,    # eager — Route 5 requires communities at index time
         run_raptor=False,
-        knn_enabled=True,                # GDS KNN creates SEMANTICALLY_SIMILAR edges
-        knn_top_k=5,
+        knn_enabled=False,               # Entity-entity KNN removed (HippoRAG 2: cross-doc via shared entities)
+        knn_top_k=0,
         knn_similarity_cutoff=0.60,
     )
 

@@ -11420,3 +11420,93 @@ With LLM filter (proposed):
 - Net effect: Route 7 becomes competitive on BOTH Q-D and Q-G, potentially simplifying routing
 
 **Implementation plan:** Add as step 4.7 between rerank-all merge and chunk fetch, controlled by `ROUTE7_LLM_FILTER` env var (default: disabled until validated).
+
+---
+
+## §40. OpenIE Triple Extraction Migration (2026-03-03)
+
+### 40.1. Problem: Schema NER Hurts Cross-Document Retrieval
+
+Route 7's PPR-only mode scores 53/57 on Q-D, with persistent failures on cross-document aggregate queries (e.g., Q-D3: "Compare time windows across documents"). Root cause analysis identified three compounding issues:
+
+1. **Schema NER produces document-anchored entities.** The extraction schema defines 5 typed entities (ORGANIZATION, PERSON, DOCUMENT, LOCATION, CONCEPT) with `name`, `description`, and `aliases` properties. Entity embeddings use `f"{name}: {description}"` — the description injects source-document context (e.g., "90 days: Duration of contractor labor warranty") that suppresses cross-document KNN bridges. With name-only embedding, "90 days" ↔ "sixty (60) day term" achieves cosine 0.845, but with descriptions both entities anchor to their source documents (cosine 0.923 within same doc).
+
+2. **OpenIE triples are poor quality.** The current OpenIE step (5b) runs AFTER schema NER and resolves triple endpoints against existing NER entities — unresolved endpoints are silently dropped. Of 1,182 RELATED_TO edges, predicates include "is", "PERSON", "CONCEPT", or raw sentences. The triple embedding store (`TripleEmbeddingStore`) embeds these as `"subject predicate object"` for query-time linking — poor predicates produce poor query matches.
+
+3. **Entity-entity KNN is a band-aid.** 3,410 SEMANTICALLY_SIMILAR entity-entity edges compensate for poor RELATED_TO quality, but they dilute PPR signal by creating too many entity-space paths.
+
+### 40.2. Target Architecture: Upstream HippoRAG 2 Alignment
+
+Upstream HippoRAG 2 uses **OpenIE as the primary extraction method** — per-sentence `(subject, predicate, object)` triples. Subjects and objects ARE the entity nodes (untyped surface forms, no descriptions). This aligns naturally with our sentence-based architecture:
+
+| Upstream HippoRAG 2 | Our Architecture (Post-Migration) |
+|---|---|
+| Passage (paragraph chunk) | **Sentence** node |
+| Passage embedding (DPR/NV-Embed) | Sentence `embedding_v2` (Voyage 3) |
+| OpenIE triples per passage | OpenIE triples per sentence |
+| Entity = surface form from triple | Entity = surface form from triple |
+| Passage → Entity MENTIONS | Sentence → Entity MENTIONS |
+| Entity ↔ Entity via co-occurrence | Entity ↔ Entity via RELATED_TO (predicate) |
+| PPR returns top passages | PPR returns top Sentences |
+| _(no passage-passage edges)_ | Sentence ↔ Sentence KNN (**bonus**) |
+| Entity embedding for synonym merge (>0.8) | Entity embedding for synonym merge (>0.8) |
+| _(no entity-entity KNN)_ | _(removed)_ |
+
+**Key insight: Sentence = Passage.** Our sentence-based chunking maps 1:1 to upstream's "passage" concept. Each Sentence node plays the role of a passage node in the PPR graph. OpenIE runs per-sentence (batch of 5 per LLM call, each triple carries its `sid`), so MENTIONS edges connect naturally: when entity "Builder" appears in a triple from sentence S42, we create `S42 -[:MENTIONS]→ Builder`.
+
+**Sentence-sentence KNN is a bonus.** Upstream HippoRAG 2 does not have passage-passage edges. Our sentence KNN (step 4.2, ~146 edges) gives PPR an additional cross-document traversal path that upstream lacks. This is retained.
+
+**Granularity advantage.** Sentences are smaller than paragraphs, so each sentence produces fewer triples (1-2 vs 5-10), but each MENTION is more precise (entity definitely appears in that specific sentence). For contract analysis where individual clauses matter (e.g., "90 days", "one year"), sentence granularity is a strength.
+
+### 40.3. Changes
+
+**Indexing pipeline (`lazygraphrag_pipeline.py`):**
+- `_extract_openie_triples()` becomes the **primary** extraction path — creates Entity nodes from triple surface forms (instead of resolving against existing NER entities)
+- `_extract_entities_and_relationships()` dispatches to OpenIE instead of native/LlamaIndex schema NER
+- Step 5b (supplemental OpenIE) removed from main pipeline — OpenIE IS step 5
+- Entity embedding: `e.name` only (no description) — used for synonym detection (>0.8 → merge)
+- Entity dedup threshold: 0.95 → 0.8 (upstream synonym merging)
+- Entity-entity KNN edges: skipped in GDS/local builder (sentence-sentence KNN kept)
+
+**PPR graph loader (`hipporag2_ppr.py`):**
+- Entity ↔ Entity SEMANTICALLY_SIMILAR edges: skipped (cross-doc bridging via shared entity mentions)
+- Sentence ↔ Sentence SEMANTICALLY_SIMILAR edges: kept
+
+**Schema NER code is kept but bypassed (not deleted) for easy rollback.**
+
+### 40.4. Reindexing
+
+```bash
+# Canonical reindex command — full V2 pipeline on same group
+GROUP_ID=test-5pdfs-v2-fix2 PYTHONPATH=. python3 scripts/index_5pdfs_v2_local.py
+
+# Verify
+python3 check_edges.py test-5pdfs-v2-fix2 --expected-docs 5
+```
+
+Fully reversible: `git checkout` + reindex restores prior state.
+
+### 40.5. Benchmark Results (2026-03-03)
+
+**Score: 19/19 (10/10 positive, 9/9 negative) — PERFECT**
+
+| Metric | Before (Schema NER) | After (OpenIE) |
+|--------|---------------------|-----------------|
+| Entities | 350 | 229 (529 pre-dedup, 300 merged at 0.8) |
+| RELATED_TO edges | 1,182 | 1,213 |
+| MENTIONS edges | 723 | 489 |
+| Entity KNN edges | 3,410 | 0 |
+| Sentence KNN edges | 48 | 48 |
+| Communities | 0 (GDS was broken) | 16 (GDS fixed) |
+| **Q-D3 (cross-doc time)** | **FAIL (0.35)** | **PASS (0.72) ★** |
+| Q-D1 containment | 0.94 | 1.00 |
+| Q-D6 containment | 0.90 | 1.00 |
+| Q-D8 containment | 0.61 | 0.68 |
+| Overall positive | 9/10 | 10/10 |
+| Negative tests | 9/9 | 9/9 |
+
+Key win: Q-D3 ("Compare time windows across the set") was the hardest cross-document
+question and previously failed because schema NER entities were document-anchored.
+OpenIE surface forms like "60 days", "180 days", "90 days" bridge documents naturally.
+
+Benchmark file: `benchmarks/route7_hipporag2_r4questions_20260303T195150Z.json`

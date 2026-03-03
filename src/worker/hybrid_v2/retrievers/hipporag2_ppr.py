@@ -269,26 +269,11 @@ class HippoRAG2PPR:
 
             # ----------------------------------------------------------
             # 5. Entity-Entity synonym edges via SEMANTICALLY_SIMILAR
+            #    SKIPPED: With OpenIE-based entity extraction (HippoRAG 2),
+            #    cross-doc bridging happens via shared entity surface forms
+            #    in triples. Entity-entity KNN edges are no longer created.
             # ----------------------------------------------------------
-            result = session.run(
-                "MATCH (e1:Entity {group_id: $group_id})"
-                "-[s:SEMANTICALLY_SIMILAR]->"
-                "(e2:Entity {group_id: $group_id}) "
-                "WHERE s.similarity >= $threshold "
-                "RETURN e1.id AS src, e2.id AS tgt, "
-                "s.similarity AS weight",
-                group_id=group_id,
-                threshold=synonym_threshold,
-            )
-            for record in result:
-                src_idx = self._node_to_idx.get(record["src"])
-                tgt_idx = self._node_to_idx.get(record["tgt"])
-                if src_idx is not None and tgt_idx is not None:
-                    edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
-                    if edge_key not in seen_synonym_edges:
-                        seen_synonym_edges.add(edge_key)
-                        self._add_edge(src_idx, tgt_idx, float(record["weight"]))
-                        synonym_edge_count += 1
+            # (entity KNN edges removed — see §40 OpenIE migration)
 
             # ----------------------------------------------------------
             # 5b. Sentence-Sentence edges via SEMANTICALLY_SIMILAR

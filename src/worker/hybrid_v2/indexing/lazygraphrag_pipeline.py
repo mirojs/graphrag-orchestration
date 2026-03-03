@@ -456,29 +456,8 @@ class LazyGraphRAGIndexingPipeline:
                     f"(min_mentions={self.config.min_mentions}), entities={len(entities)}"
                 )
 
-        # 5b) Per-sentence OpenIE extraction (upstream HippoRAG 2 alignment).
-        #     Extracts open-domain (subject, predicate, object) triples from
-        #     individual sentences. Adds entities and relationships that the
-        #     schema-guided extractor may have missed.
-        if self.llm is not None and entities:
-            try:
-                openie_entities, openie_rels = await self._extract_openie_triples(
-                    group_id=group_id,
-                    existing_entities=entities,
-                )
-                if openie_entities or openie_rels:
-                    entities.extend(openie_entities)
-                    relationships.extend(openie_rels)
-                    stats["openie_entities"] = len(openie_entities)
-                    stats["openie_relationships"] = len(openie_rels)
-                    logger.info(
-                        f"openie_complete: +{len(openie_entities)} entities, "
-                        f"+{len(openie_rels)} relationships"
-                    )
-            except Exception as e:
-                logger.warning(f"⚠️  OpenIE extraction failed (non-fatal): {e}")
-                stats["openie_entities"] = 0
-                stats["openie_relationships"] = 0
+        # NOTE: Step 5b (supplemental OpenIE) removed — OpenIE is now the
+        # primary extraction path in step 5 via _extract_entities_and_relationships().
 
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
@@ -1304,14 +1283,13 @@ class LazyGraphRAGIndexingPipeline:
         group_id: str,
         chunks: Optional[list] = None,
     ) -> Tuple[List[Entity], List[Relationship]]:
-        """Extract entities and relationships from Sentence nodes (Phase B).
+        """Extract entities and relationships from Sentence nodes.
 
-        Pipeline:
+        Pipeline (HippoRAG 2 aligned — OpenIE as primary extraction):
         1. Fetch all :Sentence nodes for this group_id from Neo4j.
         2. Classify each sentence (content / metadata / noise).
-        3. Batch content sentences (groups of 6) and send to the LLM extractor.
-        4. Each entity's text_unit_ids point to Sentence IDs (not Chunk IDs).
-        5. Build deterministic co-occurrence edges: if 2+ entities appear in the
+        3. Run OpenIE triple extraction — surface forms become Entity nodes.
+        4. Build deterministic co-occurrence edges: if 2+ entities appear in the
            same sentence, create a RELATED_TO edge with the sentence as provenance.
         """
         if self.llm is None:
@@ -1343,23 +1321,27 @@ class LazyGraphRAGIndexingPipeline:
             logger.warning("sentence_extraction_no_content: all sentences filtered out")
             return [], []
 
-        # ── Step 3: Batch sentences and extract entities via native extractor ─
-        BATCH_SIZE = 6
-        all_entities: List[Entity] = []
-        all_relationships: List[Relationship] = []
-        entities_by_key: Dict[str, Entity] = {}
+        # ── Step 3: OpenIE triple extraction (HippoRAG 2 primary path) ──────
+        # Surface forms from triples become Entity nodes (untyped, no descriptions).
+        # Replaces schema-guided NER (native/LlamaIndex extractors).
+        entities, relationships = await self._extract_openie_triples(
+            group_id=group_id,
+            content_sentences=content_sentences,
+        )
 
-        if self.config.use_native_extractor and NATIVE_EXTRACTOR_AVAILABLE:
-            entities, relationships = await self._extract_with_native_extractor_sentences(
-                group_id, content_sentences
-            )
-        else:
-            # LlamaIndex fallback on sentence batches
-            entities, relationships = await self._extract_with_llamaindex_sentences(
-                group_id, content_sentences
-            )
+        # ── Step 3b: Embed entities (name-only, for synonym detection) ────────
+        if entities and self.embedder is not None:
+            texts = [e.name for e in entities]
+            try:
+                embs = await self.embedder.aget_text_embedding_batch(texts)
+                for ent, emb in zip(entities, embs):
+                    ent.embedding_v2 = emb
+                logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded")
+            except Exception as e:
+                logger.warning("openie_entity_embedding_failed", extra={"error": str(e)})
 
         # Build a lookup of entities by canonical key for co-occurrence step
+        entities_by_key: Dict[str, Entity] = {}
         for ent in entities:
             key = self._canonical_entity_key(ent.name)
             if key:
@@ -1379,25 +1361,23 @@ class LazyGraphRAGIndexingPipeline:
                                 source_id=e1.id,
                                 target_id=e2.id,
                                 type="RELATED_TO",
-                                description=s["text"][:200],  # sentence IS the provenance
+                                description=s["text"][:200],
                                 weight=1.0,
                             )
                         )
-        # Merge: LLM-extracted relationships first (they have richer descriptions),
+        # Merge: OpenIE relationships first (they have predicate descriptions),
         # then ALL co-occurrence edges. Neo4j's ON MATCH accumulates co-occurrence
         # counts so duplicate (source, target) pairs are intentional — they increase
         # edge weight for PPR signal strength.
         seen_pairs: set[tuple[str, str]] = set()
         merged_rels: List[Relationship] = []
-        # LLM edges first — deduplicated to keep only the first LLM edge per pair
+        # OpenIE edges first — deduplicated to keep only the first edge per pair
         for r in relationships:
             pair = (r.source_id, r.target_id)
             if pair not in seen_pairs:
                 seen_pairs.add(pair)
                 merged_rels.append(r)
-        # Co-occurrence edges: pass ALL through (even duplicates of LLM edges)
-        # so Neo4j ON MATCH increments cooccurrence_count for frequently
-        # co-occurring entity pairs. This gives PPR weighted signal.
+        # Co-occurrence edges: pass ALL through (even duplicates of OpenIE edges)
         merged_rels.extend(cooccurrence_rels)
 
         logger.info(
@@ -1405,7 +1385,7 @@ class LazyGraphRAGIndexingPipeline:
             extra={
                 "group_id": group_id,
                 "entities": len(entities),
-                "llm_relationships": len(relationships),
+                "openie_relationships": len(relationships),
                 "cooccurrence_relationships": len(cooccurrence_rels),
                 "merged_relationships": len(merged_rels),
                 "content_sentences": len(content_sentences),
@@ -1436,25 +1416,29 @@ Return ONLY valid JSON (no markdown fences):
         self,
         *,
         group_id: str,
+        content_sentences: Optional[List[Dict[str, Any]]] = None,
         existing_entities: Optional[List[Entity]] = None,
     ) -> Tuple[List[Entity], List[Relationship]]:
-        """Step 5b: Per-sentence open-domain triple extraction.
+        """Primary OpenIE extraction (HippoRAG 2 alignment).
 
-        Runs an open-domain NER + RDF extraction prompt on each sentence,
-        producing open predicates (e.g. "signed by", "located in") that the
-        schema-guided extractor misses.  This aligns with upstream HippoRAG 2's
-        open-domain extraction for richer entity-entity edges in the PPR graph.
+        Extracts (subject, predicate, object) triples from each sentence.
+        Subjects and objects become Entity nodes (untyped surface forms).
+        Predicates become RELATED_TO edge descriptions.
 
-        Returns new entities and relationships to merge before dedup (step 6).
+        This replaces the schema-guided NER as the primary entity extraction
+        path, matching upstream HippoRAG 2's OpenIE-first design.
+
+        Returns entities and relationships to merge before dedup (step 6).
         """
         import asyncio
         import json as json_mod
         from llama_index.core.llms import ChatMessage
 
-        raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
-        content_sentences = [
-            s for s in raw_sentences if self._classify_sentence(s) == "content"
-        ]
+        if content_sentences is None:
+            raw_sentences = self.neo4j_store.get_sentences_by_group(group_id)
+            content_sentences = [
+                s for s in raw_sentences if self._classify_sentence(s) == "content"
+            ]
         if not content_sentences:
             return [], []
 
@@ -1499,21 +1483,19 @@ Return ONLY valid JSON (no markdown fences):
         if not all_raw_triples:
             return [], []
 
-        # Convert raw triples to Relationship objects (no new entities)
-        openie_rels: List[Relationship] = []
-        skipped_unresolved = 0
+        # ── Build entities from triple surface forms ──────────────────
+        # Each unique subject/object becomes an Entity node (untyped).
+        # Track which sentences mention each entity (for MENTIONS edges).
+        entity_map: Dict[str, Entity] = {}       # canonical_key → Entity
+        entity_sids: Dict[str, set] = {}          # canonical_key → set of sentence IDs
 
-        # Build ID lookup from step-5 entities for resolving triple endpoints
-        existing_id_map: Dict[str, str] = {}
-        for e in (existing_entities or []):
-            key = self._canonical_entity_key(e.name)
-            if key:
-                existing_id_map[key] = e.id
+        openie_rels: List[Relationship] = []
 
         for t in all_raw_triples:
             subj = (t.get("s") or "").strip()
             pred = (t.get("p") or "").strip()
             obj = (t.get("o") or "").strip()
+            sid = (t.get("sid") or "").strip()
 
             if not subj or not pred or not obj:
                 continue
@@ -1523,22 +1505,48 @@ Return ONLY valid JSON (no markdown fences):
             if not subj_key or not obj_key or subj_key == obj_key:
                 continue
 
-            # Both endpoints must resolve to existing step-5 entities
-            subj_id = existing_id_map.get(subj_key)
-            obj_id = existing_id_map.get(obj_key)
-            if not subj_id or not obj_id:
-                skipped_unresolved += 1
-                continue
+            # Create or update subject entity
+            if subj_key not in entity_map:
+                entity_map[subj_key] = Entity(
+                    id=self._stable_entity_id(group_id, subj_key),
+                    name=subj,
+                    type="CONCEPT",
+                    description=None,
+                    text_unit_ids=[],
+                )
+                entity_sids[subj_key] = set()
+            if sid:
+                entity_sids[subj_key].add(sid)
 
+            # Create or update object entity
+            if obj_key not in entity_map:
+                entity_map[obj_key] = Entity(
+                    id=self._stable_entity_id(group_id, obj_key),
+                    name=obj,
+                    type="CONCEPT",
+                    description=None,
+                    text_unit_ids=[],
+                )
+                entity_sids[obj_key] = set()
+            if sid:
+                entity_sids[obj_key].add(sid)
+
+            # Create RELATED_TO edge
             openie_rels.append(
                 Relationship(
-                    source_id=subj_id,
-                    target_id=obj_id,
+                    source_id=entity_map[subj_key].id,
+                    target_id=entity_map[obj_key].id,
                     type="RELATED_TO",
                     description=pred,
                     weight=1.0,
                 )
             )
+
+        # Assign sentence IDs to entities for MENTIONS edges
+        for key, ent in entity_map.items():
+            ent.text_unit_ids = list(entity_sids.get(key, set()))
+
+        entities = list(entity_map.values())
 
         logger.info(
             "openie_extraction_done",
@@ -1546,11 +1554,11 @@ Return ONLY valid JSON (no markdown fences):
                 "group_id": group_id,
                 "sentences_processed": len(content_sentences),
                 "raw_triples": len(all_raw_triples),
-                "skipped_unresolved": skipped_unresolved,
-                "new_relationships": len(openie_rels),
+                "entities_created": len(entities),
+                "relationships_created": len(openie_rels),
             },
         )
-        return [], openie_rels
+        return entities, openie_rels
 
 
     async def _extract_with_native_extractor_sentences(
@@ -1814,9 +1822,9 @@ Return ONLY valid JSON (no markdown fences):
 
         entities = list(entities_by_id.values())
 
-        # Embeddings for entities
+        # Embeddings for entities — name-only (no description anchoring, HippoRAG 2)
         if entities and self.embedder is not None:
-            texts = [f"{e.name}: {e.description}" if e.description else e.name for e in entities]
+            texts = [e.name for e in entities]
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
@@ -1929,7 +1937,7 @@ Return ONLY valid JSON (no markdown fences):
 
         entities = list(entities_by_key.values())
         if entities and self.embedder is not None:
-            texts = [f"{e.name}: {e.description}" if e.description else e.name for e in entities]
+            texts = [e.name for e in entities]  # name-only (HippoRAG 2)
             try:
                 embs = await self.embedder.aget_text_embedding_batch(texts)
                 for ent, emb in zip(entities, embs):
@@ -2960,7 +2968,7 @@ SUMMARY: <summary>"""
         relationships: List[Relationship],
     ) -> Tuple[List[Entity], List[Relationship], Dict[str, Any]]:
         dedup_service = EntityDeduplicationService(
-            similarity_threshold=0.95,
+            similarity_threshold=0.8,  # upstream HippoRAG 2 synonym merging threshold
             min_entities_for_dedup=10,
         )
 

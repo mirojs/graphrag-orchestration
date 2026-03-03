@@ -36,7 +36,7 @@ describe("AnalysisPanel", () => {
     beforeEach(() => {
         onTabChanged = vi.fn();
         vi.spyOn(globalThis, "fetch").mockResolvedValue(
-            new Response(new Blob(["fake"]), { status: 200 })
+            new Response("fake", { status: 200 })
         );
     });
 

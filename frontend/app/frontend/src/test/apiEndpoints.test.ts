@@ -66,8 +66,7 @@ describe("chatApi", () => {
 
 describe("getSpeechApi", () => {
     it("returns blob URL on 200", async () => {
-        const blob = new Blob(["audio"], { type: "audio/mpeg" });
-        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response(blob, { status: 200 }));
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("audio", { status: 200, headers: { "Content-Type": "audio/mpeg" } }));
         const result = await getSpeechApi("hello");
         expect(result).toMatch(/^blob:/);
     });

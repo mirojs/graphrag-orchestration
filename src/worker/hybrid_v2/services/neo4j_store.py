@@ -483,15 +483,19 @@ class Neo4jStoreV3:
                 logger.warning(f"   embedding_v2 dim: {len(sample['embedding_v2'])}")
         
         def _sync_upsert():
-            with self.get_retry_session() as session:
-                result = session.run(query, entities=entity_data, group_id=group_id)
-                record = result.single()
-                count = cast(int, record["count"]) if record else 0
+            # Batch UNWIND to avoid Neo4j internal errors on large batches
+            BATCH_SIZE = 100
+            total_count = 0
+            for i in range(0, len(entity_data), BATCH_SIZE):
+                batch = entity_data[i : i + BATCH_SIZE]
+                with self.get_retry_session() as session:
+                    result = session.run(query, entities=batch, group_id=group_id)
+                    record = result.single()
+                    total_count += cast(int, record["count"]) if record else 0
 
-                mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
-                logger.info(f"Created {count} entities with {mentions_count} Sentence MENTIONS (async)")
-
-                return count
+            mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
+            logger.info(f"Created {total_count} entities with {mentions_count} Sentence MENTIONS (async)")
+            return total_count
 
         return await asyncio.to_thread(_sync_upsert)
     
@@ -778,10 +782,17 @@ class Neo4jStoreV3:
             for r in relationships
         ]
         
-        with self.get_retry_session() as session:
-            result = session.run(query, relationships=rel_data, group_id=group_id)
-            record = result.single()
-            return cast(int, record["count"]) if record else 0
+        # Batch UNWIND to avoid Neo4j "Index N out of bounds" internal error
+        # on large MERGE operations (observed with Aura at ~640+ relationships).
+        BATCH_SIZE = 100
+        total = 0
+        for i in range(0, len(rel_data), BATCH_SIZE):
+            batch = rel_data[i : i + BATCH_SIZE]
+            with self.get_retry_session() as session:
+                result = session.run(query, relationships=batch, group_id=group_id)
+                record = result.single()
+                total += cast(int, record["count"]) if record else 0
+        return total
 
     def backfill_rel_type(self, group_id: str) -> int:
         """Stamp rel_type on pre-existing RELATED_TO edges that predate this property.

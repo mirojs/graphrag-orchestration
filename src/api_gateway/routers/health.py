@@ -87,6 +87,24 @@ async def detailed_health_check() -> Dict[str, Any]:
     return health_status
 
 
+@router.get("/health/stream-test")
+async def stream_test():
+    """Diagnostic: test if SSE streaming works through EasyAuth proxy."""
+    import asyncio
+    from fastapi.responses import StreamingResponse
+
+    async def generate():
+        for i in range(10):
+            yield f'{{"tick": {i}, "ts": "{__import__("datetime").datetime.utcnow().isoformat()}Z"}}\n'
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
+
+
 @router.get("/metrics")
 async def metrics() -> Dict[str, Any]:
     """

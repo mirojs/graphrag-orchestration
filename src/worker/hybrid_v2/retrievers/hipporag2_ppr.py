@@ -63,6 +63,7 @@ class HippoRAG2PPR:
         self._node_types: Dict[int, str] = {}  # index -> "entity"|"passage"
         self._node_names: Dict[int, str] = {}  # index -> display name
         self._passage_full_texts: Dict[str, str] = {}  # node_id -> full text (for reranker)
+        self._entity_mention_counts: Dict[str, int] = {}  # entity_id -> # passages mentioning it
         # Weighted adjacency: source_idx -> [(target_idx, weight)]
         self._adj: Dict[int, List[Tuple[int, float]]] = {}
         # Precomputed sum of outgoing weights per node (for rank distribution)
@@ -84,6 +85,11 @@ class HippoRAG2PPR:
         Used by the cross-encoder reranker to avoid a separate Neo4j fetch.
         """
         return self._passage_full_texts
+
+    @property
+    def entity_mention_counts(self) -> Dict[str, int]:
+        """entity_id -> number of passages mentioning it (IDF denominator)."""
+        return self._entity_mention_counts
 
     def _add_node(self, node_id: str, node_type: str, name: str) -> int:
         """Add a node to the graph, return its index."""
@@ -258,6 +264,8 @@ class HippoRAG2PPR:
                 if src_idx is not None and tgt_idx is not None:
                     self._add_edge(src_idx, tgt_idx, 1.0)
                     mentions_edge_count += 1
+                    eid = record["entity_id"]
+                    self._entity_mention_counts[eid] = self._entity_mention_counts.get(eid, 0) + 1
 
             # ----------------------------------------------------------
             # 5. Entity-Entity synonym edges via SEMANTICALLY_SIMILAR

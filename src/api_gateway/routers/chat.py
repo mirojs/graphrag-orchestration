@@ -925,6 +925,46 @@ class FrontendChatResponse(BaseModel):
     session_state: Optional[Any] = None
 
 
+def _replace_citation_markers(
+    answer: str,
+    raw_citations: List[Dict[str, Any]],
+) -> str:
+    """Replace numeric [N]/[Na] markers with document-based references.
+
+    The frontend AnswerParser validates citations by checking
+    ``possibleCitations.some(c => c.endsWith(part))``.  Numeric markers
+    like ``[1]`` never match document titles, so we swap them out.
+    """
+    import re
+
+    marker_to_ref: Dict[str, str] = {}
+    for cit in raw_citations:
+        marker = cit.get("citation", "")
+        if not marker:
+            continue
+        doc_title = cit.get("document_title", "")
+        doc_url = cit.get("document_url", "")
+        ref = doc_url if doc_url else doc_title
+        if not ref:
+            continue
+        inner = marker.strip("[]")
+        marker_to_ref[inner] = ref
+
+    if not marker_to_ref:
+        return answer
+
+    def _replacer(m: re.Match) -> str:
+        inner = m.group(1)
+        if inner in marker_to_ref:
+            return f"[{marker_to_ref[inner]}]"
+        return m.group(0)
+
+    # Sentence-level [Na] first, then chunk-level [N]
+    answer = re.sub(r'\[(\d+[a-z])\]', _replacer, answer)
+    answer = re.sub(r'\[(\d+)\](?![a-z])', _replacer, answer)
+    return answer
+
+
 def _build_frontend_citations(
     raw_citations: List[Dict[str, Any]],
     max_citations: int = 15,
@@ -965,6 +1005,8 @@ def _build_frontend_citations(
             "text_preview": preview,
             "score": cit.get("score", 0.0),
         }
+        if cit.get("citation"):
+            sc["citation"] = cit["citation"]
         if cit.get("section_path"):
             sc["section_path"] = cit["section_path"]
         if cit.get("page_number") is not None:
@@ -1037,9 +1079,13 @@ async def frontend_chat(
         ]
         
         # Build citations from pipeline result
+        raw_citations = result.get("citations", [])
         flat_citations, text_points, structured_citations = _build_frontend_citations(
-            result.get("citations", [])
+            raw_citations
         )
+
+        # Replace numeric [N] markers with document titles so frontend parser can match
+        answer_text = _replace_citation_markers(result.get("answer", ""), raw_citations)
 
         # Generate followup questions if requested
         followup_questions = None
@@ -1055,7 +1101,7 @@ async def frontend_chat(
         return FrontendChatResponse(
             message=ChatMessage(
                 role="assistant",
-                content=result.get("answer", ""),
+                content=answer_text,
             ),
             context=FrontendResponseContext(
                 data_points=FrontendDataPoints(
@@ -1169,8 +1215,9 @@ async def _frontend_stream_response(
         thoughts = result.get("thoughts", [])
 
         # Build citations from pipeline result
+        raw_citations = result.get("citations", [])
         flat_citations, text_points, structured_citations = _build_frontend_citations(
-            result.get("citations", [])
+            raw_citations
         )
 
         # Build context for streaming
@@ -1188,8 +1235,8 @@ async def _frontend_stream_response(
             ] if overrides and overrides.suggest_followup_questions else None,
         }
         
-        # Stream answer progressively
-        answer = result.get("answer", "")
+        # Replace numeric [N] markers with document titles and stream progressively
+        answer = _replace_citation_markers(result.get("answer", ""), raw_citations)
         words = answer.split()
         chunk_size = 3  # Words per chunk for natural feel
         

@@ -114,75 +114,54 @@ export const Answer = ({
                 </div>
             </div>
 
-            {!!parsedAnswer.citations.length && (
-                <div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                        <span className={styles.citationLearnMore}>{t("citationWithColon")}</span>
-                        {parsedAnswer.citations.map(citation => {
-                            const isWeb = citation.isWeb;
-                            const displayIndex = citation.index;
-                            const reference = citation.reference;
-                            if (isWeb) {
-                                // Attempt to find the matching web data point to retrieve its title
-                                const webEntry = answer.context.data_points.external_results_metadata?.find(w => w.url === reference);
-                                const titleOrUrl = webEntry?.title?.trim() ? webEntry.title : reference;
-                                return (
-                                    <span key={`${reference}-${displayIndex}`} className={styles.citationEntry}>
-                                        <a className={styles.citation} title={reference} href={reference} target="_blank" rel="noopener noreferrer">
-                                            {`${displayIndex}. ${titleOrUrl}`}
-                                        </a>
-                                    </span>
-                                );
-                            } else {
-                                // Look up structured citation to get document title + page for URL building
-                                const structuredCitations = answer.context.data_points.structured_citations || [];
-                                const strippedRef = reference.replace(/[[\]]/g, "");
-                                const matchedCit = structuredCitations.find(sc => {
-                                    const scKey = (sc.citation || "").replace(/[[\]]/g, "");
-                                    return (
-                                        sc.source === reference ||
-                                        sc.document_title === reference ||
-                                        scKey === strippedRef
-                                    );
-                                });
-
-                                // Build file path: prefer document_title (real filename), fallback to reference
-                                const docName = matchedCit?.document_title || reference;
+            {(() => {
+                // Build citation list directly from data_points (not inline markers)
+                const structuredCitations = answer.context?.data_points?.structured_citations || [];
+                // De-duplicate by document title
+                const seen = new Set<string>();
+                const uniqueCitations = structuredCitations.filter(sc => {
+                    const key = sc.document_title || sc.source || "";
+                    if (!key || seen.has(key)) return false;
+                    seen.add(key);
+                    return true;
+                });
+                if (!uniqueCitations.length) return null;
+                return (
+                    <div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+                            <span className={styles.citationLearnMore}>{t("citationWithColon")}</span>
+                            {uniqueCitations.map((sc, idx) => {
+                                const docName = sc.document_title || sc.source || "Unknown";
                                 let path = getCitationFilePath(docName);
-                                // Add #page= for direct page navigation
-                                if (matchedCit?.page_number) {
-                                    path += `#page=${matchedCit.page_number}`;
+                                if (sc.page_number) {
+                                    path += `#page=${sc.page_number}`;
                                 }
-
-                                // Display label: document title + page info
-                                const label = matchedCit?.document_title || reference;
-                                const pageInfo = matchedCit?.page_number ? ` (p.${matchedCit.page_number})` : "";
-
+                                const pageInfo = sc.page_number ? ` (p.${sc.page_number})` : "";
                                 return (
-                                    <span key={`${reference}-${displayIndex}`} className={styles.citationEntry}>
+                                    <span key={`${docName}-${idx}`} className={styles.citationEntry}>
                                         <a
                                             className={styles.citation}
-                                            title={reference}
+                                            title={docName}
                                             onClick={e => {
                                                 e.preventDefault();
                                                 onCitationClicked(path);
                                             }}
                                         >
-                                            {`${displayIndex}. ${label}${pageInfo}`}
+                                            {`${idx + 1}. ${docName}${pageInfo}`}
                                         </a>
                                     </span>
                                 );
-                            }
-                        })}
+                            })}
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
 
             {!!followupQuestions?.length && showFollowupQuestions && onFollowupQuestionClicked && (
                 <div>
                     <div
                         style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}
-                        className={`${!!parsedAnswer.citations.length ? styles.followupQuestionsList : ""}`}
+                        className={`${!!(answer.context?.data_points?.structured_citations?.length) ? styles.followupQuestionsList : ""}`}
                     >
                         <span className={styles.followupQuestionLearnMore}>{t("followupQuestions")}</span>
                         {followupQuestions.map((x, i) => {

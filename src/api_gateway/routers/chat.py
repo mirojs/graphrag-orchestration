@@ -925,44 +925,19 @@ class FrontendChatResponse(BaseModel):
     session_state: Optional[Any] = None
 
 
-def _replace_citation_markers(
-    answer: str,
-    raw_citations: List[Dict[str, Any]],
-) -> str:
-    """Replace numeric [N]/[Na] markers with document-based references.
+def _strip_citation_markers(answer: str) -> str:
+    """Remove numeric [N] and [Na] citation markers from the answer text.
 
-    The frontend AnswerParser validates citations by checking
-    ``possibleCitations.some(c => c.endsWith(part))``.  Numeric markers
-    like ``[1]`` never match document titles, so we swap them out.
+    The citation list is rendered separately by the frontend from
+    ``context.data_points``, so inline markers are unnecessary clutter.
     """
     import re
 
-    marker_to_ref: Dict[str, str] = {}
-    for cit in raw_citations:
-        marker = cit.get("citation", "")
-        if not marker:
-            continue
-        doc_title = cit.get("document_title", "")
-        doc_url = cit.get("document_url", "")
-        ref = doc_url if doc_url else doc_title
-        if not ref:
-            continue
-        inner = marker.strip("[]")
-        marker_to_ref[inner] = ref
-
-    if not marker_to_ref:
-        return answer
-
-    def _replacer(m: re.Match) -> str:
-        inner = m.group(1)
-        if inner in marker_to_ref:
-            return f"[{marker_to_ref[inner]}]"
-        return m.group(0)
-
-    # Sentence-level [Na] first, then chunk-level [N]
-    answer = re.sub(r'\[(\d+[a-z])\]', _replacer, answer)
-    answer = re.sub(r'\[(\d+)\](?![a-z])', _replacer, answer)
-    return answer
+    # Sentence-level [Na] (e.g. [1a], [2b])
+    answer = re.sub(r'\s*\[\d+[a-z]\]', '', answer)
+    # Chunk-level [N] (negative lookahead to avoid [1] inside e.g. [10])
+    answer = re.sub(r'\s*\[\d+\](?![0-9a-z])', '', answer)
+    return answer.strip()
 
 
 def _build_frontend_citations(
@@ -1085,7 +1060,7 @@ async def frontend_chat(
         )
 
         # Replace numeric [N] markers with document titles so frontend parser can match
-        answer_text = _replace_citation_markers(result.get("answer", ""), raw_citations)
+        answer_text = _strip_citation_markers(result.get("answer", ""))
 
         # Generate followup questions if requested
         followup_questions = None
@@ -1236,7 +1211,7 @@ async def _frontend_stream_response(
         }
         
         # Replace numeric [N] markers with document titles and stream progressively
-        answer = _replace_citation_markers(result.get("answer", ""), raw_citations)
+        answer = _strip_citation_markers(result.get("answer", ""))
         words = answer.split()
         chunk_size = 3  # Words per chunk for natural feel
         

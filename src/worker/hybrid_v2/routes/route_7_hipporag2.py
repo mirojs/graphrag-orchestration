@@ -270,8 +270,8 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Config from env, with preset overrides
         triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "20"))
-        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "120"))
+        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "0"))
+        dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(

@@ -2414,6 +2414,7 @@ REQUIREMENTS:
    - Question asks for a "bank routing number" but evidence has no routing number → REFUSE
    - Question asks for "VAT/Tax ID" but evidence has no VAT number → REFUSE
    - Question asks for "governed by California law" but evidence shows a different state → REFUSE
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → REFUSE. Do NOT infer that an unnamed concept falls under a broader or related category.
    When refusing, respond ONLY with: "The requested information was not found in the available documents."
 4. For general questions (warranty terms, agreement details, obligations, etc.),
    synthesize all relevant information from the evidence even if the text is
@@ -2528,6 +2529,7 @@ Instructions:
    - Question asks for "bank routing number" but evidence has no routing number → Refuse
    - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
    - Question asks for "California law" but evidence shows a different state → Refuse
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → Refuse. Do NOT infer that an unnamed concept falls under a broader or related category.
    When refusing, respond ONLY with: "The requested information was not found in the available documents."
 3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
    synthesize all relevant information from the evidence even if the text is
@@ -2535,10 +2537,12 @@ Instructions:
 4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
    - Include ONLY items matching that qualifier
    - EXCLUDE items that don't match, even if they seem related
+   - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
 5. Include citations [N] for factual claims (aim for every sentence that states a fact).
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
+9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested.
 {document_guidance}
 
 Respond using this format:

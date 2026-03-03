@@ -1590,11 +1590,14 @@ class Neo4jStoreV3:
             ("sections", "MATCH (s:Section {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("sentences", "MATCH (s:Sentence {group_id: $group_id}) DETACH DELETE s RETURN count(*) AS count"),
             ("figures", "MATCH (f:Figure {group_id: $group_id}) DETACH DELETE f RETURN count(*) AS count"),
+            ("barcodes", "MATCH (b:Barcode {group_id: $group_id}) DETACH DELETE b RETURN count(*) AS count"),
             # Legacy node labels from pre-Sentence migration
             ("text_chunks", "MATCH (c:TextChunk {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
             ("chunks", "MATCH (c:Chunk {group_id: $group_id}) DETACH DELETE c RETURN count(*) AS count"),
             # Documents last — other nodes may reference them
             ("documents", "MATCH (d:Document {group_id: $group_id}) DETACH DELETE d RETURN count(*) AS count"),
+            # Lifecycle metadata — must be deleted last so stale timestamps don't persist
+            ("group_meta", "MATCH (g:GroupMeta {group_id: $group_id}) DETACH DELETE g RETURN count(*) AS count"),
         ]
         
         deleted: Dict[str, int] = {}

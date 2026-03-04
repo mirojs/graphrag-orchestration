@@ -3437,12 +3437,18 @@ SUMMARY: <summary>"""
         """Parse TITLE: / SUMMARY: from LLM response text."""
         title = ""
         summary = ""
-        for line in text.split("\n"):
-            line = line.strip()
-            if line.upper().startswith("TITLE:"):
-                title = line[6:].strip()
-            elif line.upper().startswith("SUMMARY:"):
-                summary = line[8:].strip()
+        lines = text.split("\n")
+        summary_start = -1
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.upper().startswith("TITLE:"):
+                title = stripped[6:].strip()
+            elif stripped.upper().startswith("SUMMARY:"):
+                # Capture rest of this line + all subsequent lines
+                first_part = stripped[8:].strip()
+                remaining = "\n".join(l.strip() for l in lines[i + 1:]).strip()
+                summary = f"{first_part}\n{remaining}".strip() if first_part else remaining
+                break
         # If parsing fails, use the whole text as summary
         if not summary:
             summary = text[:500]

@@ -304,6 +304,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_SENTENCE_SEARCH", "0"
         ).strip().lower() in {"1", "true", "yes"}
 
+        # Triple reranking config (read early for logging)
+        triple_rerank_enabled = os.getenv(
+            "ROUTE7_TRIPLE_RERANK", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "30"))
+
         logger.info(
             "route_7_hipporag2_start",
             query=query[:80],
@@ -312,6 +318,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             triple_top_k=triple_top_k,
             dpr_top_k=dpr_top_k,
             rerank_enabled=rerank_enabled,
+            triple_rerank=triple_rerank_enabled,
+            triple_candidates_k=triple_candidates_k if triple_rerank_enabled else triple_top_k,
             query_mode=query_mode,
             ppr_passage_top_k=ppr_passage_top_k,
             prompt_variant=prompt_variant,
@@ -1084,8 +1092,14 @@ class HippoRAG2Handler(BaseRouteHandler):
         """
         from ..retrievers.triple_store import recognition_memory_filter
 
-        # Search triple embeddings
-        candidates = self._triple_store.search(query_embedding, top_k=top_k)
+        # Stage 1: Widen cosine search when triple reranking is enabled
+        triple_rerank = os.getenv(
+            "ROUTE7_TRIPLE_RERANK", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "30"))
+        fetch_k = candidates_k if triple_rerank else top_k
+
+        candidates = self._triple_store.search(query_embedding, top_k=fetch_k)
 
         if not candidates:
             logger.info("route7_no_triple_candidates", query=query[:60])
@@ -1097,7 +1111,11 @@ class HippoRAG2Handler(BaseRouteHandler):
             top_scores=[round(s, 4) for _, s in candidates[:5]],
         )
 
-        # LLM recognition memory filter
+        # Stage 2: Instruction-following reranking with Voyage rerank-2.5
+        if triple_rerank and len(candidates) > top_k:
+            candidates = await self._rerank_triples(query, candidates, top_k=top_k)
+
+        # Stage 3: LLM recognition memory filter
         llm_client = getattr(self.pipeline.disambiguator, "llm", None)
         if not llm_client:
             logger.warning("route7_no_llm_for_recognition_memory")
@@ -1105,6 +1123,71 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         surviving = await recognition_memory_filter(llm_client, query, candidates)
         return surviving
+
+    async def _rerank_triples(
+        self,
+        query: str,
+        candidates: List[Tuple],
+        top_k: int = 5,
+    ) -> List[Tuple]:
+        """Rerank triple candidates using Voyage rerank-2.5 with instruction.
+
+        The instruction steers the cross-encoder to understand abstract
+        category membership (e.g., "time windows" → "3 business days").
+        """
+        import voyageai
+        from src.core.config import settings
+
+        rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
+        documents = [triple.triple_text for triple, _ in candidates]
+
+        try:
+            # Use Reranking.create directly to pass the instruction parameter
+            # (Client.rerank() doesn't expose it in SDK 0.3.7)
+            loop = asyncio.get_running_loop()
+            rr_response = await loop.run_in_executor(
+                None,
+                lambda: voyageai.Reranking.create(
+                    query=query,
+                    documents=documents,
+                    model=rerank_model,
+                    top_k=min(top_k, len(documents)),
+                    instruction="Score each fact based on how relevant it is to answering the query. Consider abstract category membership: e.g., if the query asks about 'time windows' or 'timeframes', facts mentioning specific durations like '3 business days' or '90 days' are highly relevant.",
+                    api_key=settings.VOYAGE_API_KEY,
+                ),
+            )
+
+            # Map results back to (Triple, rerank_score) tuples
+            reranked = []
+            for item in rr_response.data:
+                idx = item.index
+                score = item.relevance_score
+                reranked.append((candidates[idx][0], score))
+
+            logger.info(
+                "route7_triple_rerank_complete",
+                model=rerank_model,
+                input=len(documents),
+                output=len(reranked),
+                top_score=round(reranked[0][1], 4) if reranked else 0,
+                top_triple=reranked[0][0].triple_text[:60] if reranked else "",
+            )
+
+            # Track usage
+            try:
+                _tokens = getattr(rr_response, "usage", None)
+                _total = getattr(_tokens, "total_tokens", 0) if _tokens else 0
+                acc = getattr(self, "_token_accumulator", None)
+                if acc is not None:
+                    acc.add_rerank(rerank_model, _total, len(documents))
+            except Exception:
+                pass
+
+            return reranked
+
+        except Exception as e:
+            logger.warning("route7_triple_rerank_failed", error=str(e))
+            return candidates[:top_k]
 
     # ======================================================================
     # DPR Passage Search (Small-to-Big: sentence → parent chunk)

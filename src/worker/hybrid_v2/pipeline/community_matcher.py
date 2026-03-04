@@ -604,7 +604,7 @@ class CommunityMatcher:
         return [
             {
                 "title": c.get("title", f"Community {i}"),
-                "summary": c.get("summary", "No summary available")[:500]
+                "summary": c.get("summary", "No summary available")
             }
             for i, c in enumerate(self._communities)
         ]

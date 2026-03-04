@@ -1130,10 +1130,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         candidates: List[Tuple],
         top_k: int = 5,
     ) -> List[Tuple]:
-        """Rerank triple candidates using Voyage rerank-2.5 with instruction.
+        """Rerank triple candidates using Voyage rerank-2.5.
 
-        The instruction steers the cross-encoder to understand abstract
-        category membership (e.g., "time windows" → "3 business days").
+        Prepends an instruction to the query to steer the cross-encoder
+        toward abstract category membership (e.g., "time windows" → "3 business days").
         """
         import voyageai
         from src.core.config import settings
@@ -1141,28 +1141,32 @@ class HippoRAG2Handler(BaseRouteHandler):
         rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
         documents = [triple.triple_text for triple, _ in candidates]
 
+        # Prepend instruction to query to guide reranker scoring
+        instructed_query = (
+            "Identify facts relevant to answering this query. "
+            "Consider abstract category membership — e.g., specific durations "
+            "like '3 business days' or '90 days' are relevant to 'timeframes'. "
+            f"Query: {query}"
+        )
+
         try:
-            # Use Reranking.create directly to pass the instruction parameter
-            # (Client.rerank() doesn't expose it in SDK 0.3.7)
+            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
             loop = asyncio.get_running_loop()
-            rr_response = await loop.run_in_executor(
+            rr_result = await loop.run_in_executor(
                 None,
-                lambda: voyageai.Reranking.create(
-                    query=query,
+                lambda: vc.rerank(
+                    query=instructed_query,
                     documents=documents,
                     model=rerank_model,
                     top_k=min(top_k, len(documents)),
-                    instruction="Score each fact based on how relevant it is to answering the query. Consider abstract category membership: e.g., if the query asks about 'time windows' or 'timeframes', facts mentioning specific durations like '3 business days' or '90 days' are highly relevant.",
-                    api_key=settings.VOYAGE_API_KEY,
                 ),
             )
 
             # Map results back to (Triple, rerank_score) tuples
-            reranked = []
-            for item in rr_response.data:
-                idx = item.index
-                score = item.relevance_score
-                reranked.append((candidates[idx][0], score))
+            reranked = [
+                (candidates[rr.index][0], rr.relevance_score)
+                for rr in rr_result.results
+            ]
 
             logger.info(
                 "route7_triple_rerank_complete",
@@ -1175,8 +1179,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
             # Track usage
             try:
-                _tokens = getattr(rr_response, "usage", None)
-                _total = getattr(_tokens, "total_tokens", 0) if _tokens else 0
+                _total = getattr(rr_result, "total_tokens", 0)
                 acc = getattr(self, "_token_accumulator", None)
                 if acc is not None:
                     acc.add_rerank(rerank_model, _total, len(documents))

@@ -138,14 +138,12 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
             allowedPrincipals: {}
           }
         }
-        login: {
-          loginParameters: authType == 'B2B' ? [
+        login: authType == 'B2B' ? {
+          loginParameters: [
             'scope=openid profile email offline_access'
             'response_type=code'
-          ] : [
-            'scope=openid profile email offline_access'
           ]
-        }
+        } : {}
       }
     }
     login: {
@@ -161,10 +159,11 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
         convention: 'FixedTime'
         timeToExpiration: '08:00:00'
       }
-      nonce: {
+      // CIAM (External ID) does not support nonce validation — only enable for B2B
+      nonce: authType == 'B2B' ? {
         validateNonce: true
         nonceExpirationInterval: '00:05:00'
-      }
+      } : null
     }
   }
 }

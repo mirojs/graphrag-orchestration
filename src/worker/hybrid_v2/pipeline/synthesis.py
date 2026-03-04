@@ -2542,9 +2542,8 @@ Instructions:
 6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
 7. Prefer concrete obligations/thresholds over general paraphrases.
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
-9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested. Keep the response focused — one or two sentences per key point is sufficient.
+9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested.
 10. When the specific information requested is absent from the evidence, always **lead with** an explicit statement that it was not found (e.g. "The documents do not provide X") before mentioning any related information.
-11. The evidence may come from multiple documents (separated by "=== DOCUMENT: ... ===" headers). Ensure your answer draws from ALL relevant documents, not just the one with the most text. A short clause from a less prominent document is just as important as a lengthy section from a dominant one.
 {document_guidance}
 
 Respond using this format:

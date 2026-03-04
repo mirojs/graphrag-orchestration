@@ -39,6 +39,28 @@ _background_tasks: set = set()
 # Routes that should use async pattern (typically >5s execution time)
 ASYNC_ROUTES = {"global", "drift"}
 
+
+async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: int, model: str) -> None:
+    """Fire-and-forget: write a UsageRecord to Cosmos for dashboard recent_queries."""
+    try:
+        from src.core.services.cosmos_client import get_cosmos_client
+        from src.core.models.usage import UsageRecord
+        cosmos = get_cosmos_client()
+        if cosmos.endpoint and not cosmos._usage_container:
+            await asyncio.wait_for(cosmos.initialize(), timeout=10)
+        record = UsageRecord(
+            partition_id=user_id,
+            user_id=user_id,
+            usage_type="llm_completion",
+            model=model,
+            total_tokens=tokens,
+            route=route,
+            query_id=query_id,
+        )
+        await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
+    except Exception as e:
+        logger.debug("chat_cosmos_usage_write_skipped", error=repr(e))
+
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
@@ -533,10 +555,12 @@ async def chat_completions(
         result = await _execute_query(query, approach, group_id, body.folder_id)
         
         response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        route_used = result.get("route_used", approach)
+        result_usage = result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})
         chat_resp = ChatResponse(
             id=response_id,
             created=int(time.time()),
-            model=f"graphrag-{result.get('route_used', approach).lower()}",
+            model=f"graphrag-{route_used.lower()}",
             choices=[
                 ChatChoice(
                     message=ChatMessage(
@@ -546,8 +570,20 @@ async def chat_completions(
                     finish_reason="stop",
                 )
             ],
-            usage=ChatUsage(**result.get("usage", {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0})),
+            usage=ChatUsage(**result_usage),
         )
+
+        # Fire-and-forget: write usage to Cosmos for dashboard
+        task = asyncio.create_task(_write_cosmos_usage(
+            user_id=user_id,
+            route=route_used,
+            query_id=response_id,
+            tokens=result_usage.get("total_tokens", 0),
+            model=f"graphrag-{route_used.lower()}",
+        ))
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+
         return JSONResponse(
             content=chat_resp.model_dump(),
             headers=quota_response_headers(quota),
@@ -584,7 +620,7 @@ async def _submit_async_job(
     )
     
     # Start background execution
-    task = asyncio.create_task(_execute_async_job(job_id, query, approach, group_id, folder_id))
+    task = asyncio.create_task(_execute_async_job(job_id, query, approach, group_id, user_id, folder_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
     
@@ -614,6 +650,7 @@ async def _execute_async_job(
     query: str,
     approach: str,
     group_id: str,
+    user_id: str,
     folder_id: Optional[str] = None,
 ) -> None:
     """
@@ -643,6 +680,19 @@ async def _execute_async_job(
         )
         
         logger.info("async_job_completed", job_id=job_id)
+
+        # Fire-and-forget: write usage to Cosmos for dashboard
+        result_usage = result.get("usage", {})
+        route_used = result.get("route_used", approach)
+        cosmos_task = asyncio.create_task(_write_cosmos_usage(
+            user_id=user_id,
+            route=route_used,
+            query_id=job_id,
+            tokens=result_usage.get("total_tokens", 0) if result_usage else 0,
+            model=f"graphrag-{route_used.lower()}",
+        ))
+        _background_tasks.add(cosmos_task)
+        cosmos_task.add_done_callback(_background_tasks.discard)
         
     except Exception as e:
         logger.error("async_job_failed", job_id=job_id, error=str(e))
@@ -728,6 +778,18 @@ async def _stream_chat_response(
             yield _format_stream_chunk(
                 response_id, created, route_used, "", thoughts, finish_reason="stop"
             )
+
+            # Fire-and-forget: write usage to Cosmos for dashboard
+            result_usage = result.get("usage", {})
+            task = asyncio.create_task(_write_cosmos_usage(
+                user_id=user_id,
+                route=route_used,
+                query_id=response_id,
+                tokens=result_usage.get("total_tokens", 0),
+                model=f"graphrag-{route_used.lower()}",
+            ))
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
             
         except Exception as e:
             logger.error("streaming_query_failed", error=str(e))

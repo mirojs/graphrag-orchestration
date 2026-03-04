@@ -211,7 +211,8 @@ class LazyGraphRAGIndexingPipeline:
         # Structured extraction: "deterministic" (rules for sig/letterhead) or "llm" (send to OpenIE)
         self._structured_extraction = os.getenv("STRUCTURED_EXTRACTION", "deterministic")
         # Two-step NER→Triple extraction (upstream HippoRAG 2 alignment)
-        self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
+        # Default false: single-step scored 55/57 vs two-step 52/57 (entity singleton explosion)
+        self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "false").strip().lower() in {"1", "true", "yes"}
 
     async def index_documents(
         self,

@@ -75,7 +75,7 @@ export type StructuredCitation = {
     document_id?: string;
     document_title?: string;
     document_url?: string;
-    chunk_id?: string;
+    chunk_id?: string;  // Legacy name kept for API backward compat; holds sentence_id
     section_path?: string;
     text_preview?: string;
     score?: number;

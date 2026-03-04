@@ -50,7 +50,7 @@ class Citation:
     - page_dimensions: Page sizes for normalized→pixel coordinate transformation
     """
     index: int
-    chunk_id: str
+    sentence_id: str
     document_id: str
     document_title: str
     score: float
@@ -65,9 +65,9 @@ class Citation:
     # Polygon geometry for pixel-accurate highlighting
     sentences: Optional[List[Dict[str, Any]]] = None  # List of sentence spans with polygons
     page_dimensions: Optional[List[Dict[str, Any]]] = None  # Page sizes for coordinate transformation
-    # Sentence-level match (narrowed from chunk by post-synthesis matching)
-    sentence_text: Optional[str] = None  # The specific sentence within the chunk
-    sentence_offset: Optional[int] = None  # Character offset of sentence within chunk
+    # Sentence-level match (narrowed from sentence by post-synthesis matching)
+    sentence_text: Optional[str] = None  # The specific sentence matched
+    sentence_offset: Optional[int] = None  # Character offset of sentence within passage
     sentence_length: Optional[int] = None  # Character length of the matched sentence
     # Citation marker and source for frontend inline-badge matching
     citation_key: str = ""        # The LLM marker string, e.g. "[1]", "[1a]"
@@ -78,7 +78,7 @@ class Citation:
         """Convert to dictionary for API response."""
         result = {
             "index": self.index,
-            "chunk_id": self.chunk_id,
+            "chunk_id": self.sentence_id,
             "document_id": self.document_id,
             "document_title": self.document_title,
             "document_url": self.document_url,
@@ -850,7 +850,7 @@ class BaseRouteHandler:
             
             citations.append(Citation(
                 index=i,
-                chunk_id=chunk.get("id", f"chunk_{i}"),
+                sentence_id=chunk.get("id", f"chunk_{i}"),
                 document_id=chunk.get("document_id", ""),
                 document_title=chunk.get("document_title", "Unknown"),
                 document_url=chunk.get("document_source", "") or chunk.get("document_url", "") or meta.get("url", ""),
@@ -881,12 +881,12 @@ class BaseRouteHandler:
         if not citations or not self.neo4j_driver:
             return
 
-        # Collect chunk IDs, skipping community reports
-        chunk_ids_to_enrich = [
-            c.chunk_id for c in citations
-            if c.chunk_id and not c.chunk_id.startswith("community_")
+        # Collect sentence IDs, skipping community reports
+        sentence_ids_to_enrich = [
+            c.sentence_id for c in citations
+            if c.sentence_id and not c.sentence_id.startswith("community_")
         ]
-        if not chunk_ids_to_enrich:
+        if not sentence_ids_to_enrich:
             return
 
         # Batch fetch metadata from Sentence nodes
@@ -898,7 +898,7 @@ class BaseRouteHandler:
         metadata_map: Dict[str, Dict[str, Any]] = {}
         try:
             with retry_session(self.neo4j_driver, read_only=True) as session:
-                result = session.run(query, ids=chunk_ids_to_enrich, group_id=self.group_id)
+                result = session.run(query, ids=sentence_ids_to_enrich, group_id=self.group_id)
                 for record in result:
                     raw = record["metadata"]
                     meta: Dict[str, Any] = {}
@@ -920,7 +920,7 @@ class BaseRouteHandler:
 
         # Attach geometry to each citation
         for citation in citations:
-            cid = citation.chunk_id
+            cid = citation.sentence_id
             if not cid or cid.startswith("community_"):
                 continue
             meta = metadata_map.get(cid, {})

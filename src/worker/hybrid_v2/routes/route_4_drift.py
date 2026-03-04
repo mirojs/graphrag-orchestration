@@ -166,7 +166,7 @@ class DRIFTHandler(BaseRouteHandler):
                     section_path = " > ".join(str(s) for s in section_path if s)
                 citations.append(Citation(
                     index=c.get("index", i + 1),
-                    chunk_id=c.get("chunk_id", ""),
+                    sentence_id=c.get("chunk_id", ""),
                     document_id=c.get("document_id", c.get("source", "")),
                     document_title=c.get("document_title", c.get("document", "")),
                     document_url=c.get("document_url", "") or c.get("document_source", "") or meta.get("url", ""),
@@ -460,7 +460,7 @@ class DRIFTHandler(BaseRouteHandler):
                     section_path = " > ".join(str(s) for s in section_path if s)
                 citations.append(Citation(
                     index=i,
-                    chunk_id=c.get("chunk_id", f"chunk_{i}"),
+                    sentence_id=c.get("chunk_id", f"chunk_{i}"),
                     document_id=c.get("document_id", ""),
                     document_title=c.get("document_title", c.get("document", "Unknown")),
                     document_url=c.get("document_url", "") or c.get("document_source", "") or meta.get("url", ""),
@@ -559,7 +559,7 @@ class DRIFTHandler(BaseRouteHandler):
             route_used=self.ROUTE_NAME,
             citations=[Citation(
                 index=1,
-                chunk_id=f"{top_doc['doc_id']}_metadata",
+                sentence_id=f"{top_doc['doc_id']}_metadata",
                 document_id=top_doc.get("doc_id", ""),
                 document_title=doc_name,
                 document_url=top_doc.get("doc_source", ""),

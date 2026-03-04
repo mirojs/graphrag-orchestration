@@ -772,7 +772,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 citations.append(
                     Citation(
                         index=i,
-                        chunk_id=c.get("chunk_id", f"chunk_{i}"),
+                        sentence_id=c.get("chunk_id", f"chunk_{i}"),
                         document_id=c.get("document_id", ""),
                         document_title=c.get("document_title", c.get("document", "Unknown")),
                         document_url=c.get("document_url", "") or c.get("document_source", "") or meta.get("url", ""),

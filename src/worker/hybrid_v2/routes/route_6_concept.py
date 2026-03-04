@@ -1797,7 +1797,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 citations.append(
                     Citation(
                         index=i,
-                        chunk_id=f"community_{community.get('id', i)}",
+                        sentence_id=f"community_{community.get('id', i)}",
                         document_id="",
                         document_title=title,
                         score=round(score, 4),
@@ -1820,7 +1820,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             citations.append(
                 Citation(
                     index=offset,
-                    chunk_id=ev.get("sentence_id", f"sentence_{offset}"),
+                    sentence_id=ev.get("sentence_id", f"sentence_{offset}"),
                     document_id=ev.get("document_id", ""),
                     document_title=doc_title,
                     score=round(ev.get("score", 0), 4),

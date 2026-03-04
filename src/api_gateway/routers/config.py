@@ -61,9 +61,9 @@ async def get_config() -> Dict[str, Any]:
             and bool(os.getenv("AZURE_USERSTORAGE_ACCOUNT"))
             and bool(os.getenv("AZURE_USERSTORAGE_CONTAINER"))
         ),
-        "showLanguagePicker": os.getenv("ENABLE_LANGUAGE_PICKER", "false").lower() == "true",
-        "showSpeechInput": os.getenv("ENABLE_SPEECH_INPUT", "false").lower() == "true",
-        "showSpeechOutputBrowser": os.getenv("ENABLE_SPEECH_OUTPUT_BROWSER", "false").lower() == "true",
+        "showLanguagePicker": os.getenv("ENABLE_LANGUAGE_PICKER", "true").lower() == "true",
+        "showSpeechInput": os.getenv("ENABLE_SPEECH_INPUT", "true").lower() == "true",
+        "showSpeechOutputBrowser": os.getenv("ENABLE_SPEECH_OUTPUT_BROWSER", "true").lower() == "true",
         "showSpeechOutputAzure": os.getenv("ENABLE_SPEECH_OUTPUT_AZURE", "false").lower() == "true",
         "showChatHistoryBrowser": os.getenv("ENABLE_CHAT_HISTORY_BROWSER", "true").lower() == "true",
         "showChatHistoryCosmos": os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "true").lower() == "true",

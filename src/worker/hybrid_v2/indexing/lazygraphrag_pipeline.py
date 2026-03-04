@@ -1461,6 +1461,7 @@ Rules:
 4. Subjects and objects are named entities, key concepts, legal terms, dates, or amounts.
 5. Include abstract concepts as entities when present: warranties, liabilities, rights, obligations, limitations, conditions.
 6. Extract ALL factual relationships from each sentence, not just the most obvious one.
+7. Entity names MUST come from the sentence text — do NOT invent or hallucinate names not present in the source.
 
 {sentences}
 
@@ -1552,6 +1553,9 @@ Return ONLY valid JSON (no markdown fences):
 
         Returns (raw_triples, count) in the same format as LLM triples:
         [{"sid": ..., "s": ..., "p": ..., "o": ...}, ...]
+
+        All subject/object names in returned triples carry a "_det" flag
+        so the caller can mark them as dedup-protected.
         """
         triples: List[Dict[str, str]] = []
 
@@ -1564,6 +1568,12 @@ Return ONLY valid JSON (no markdown fences):
                 triples.extend(self._deterministic_signature_triples(sid, text))
             elif source == "letterhead":
                 triples.extend(self._deterministic_letterhead_triples(sid, text))
+            elif source == "signature_block":
+                triples.extend(self._deterministic_signature_block_triples(sid, text))
+
+        # Tag all deterministic triples so entities from them are dedup-protected
+        for t in triples:
+            t["_det"] = "1"
 
         return triples, len(triples)
 
@@ -1603,6 +1613,79 @@ Return ONLY valid JSON (no markdown fences):
         if not role and not date:
             # Fallback: at least record the signer
             triples.append({"sid": sid, "s": name, "p": "is", "o": "signatory"})
+
+        return triples
+
+    # Regex for organization suffixes in signature blocks
+    _ORG_SUFFIX_RE = re.compile(
+        r'\b(?:Inc|LLC|Ltd|Corp|Co|LP|LLP|Association|Foundation|Group|Partners)'
+        r'\.?\s*$',
+        re.IGNORECASE,
+    )
+
+    def _deterministic_signature_block_triples(
+        self, sid: str, text: str
+    ) -> List[Dict[str, str]]:
+        """Parse multiline signature block into triples.
+
+        Signature blocks contain party names (orgs), roles, and dates on
+        separate lines.  We extract organization names deterministically
+        so that entities like "Fabrikam Inc." are never missed due to LLM
+        non-determinism.
+
+        Lines are classified as:
+        - org: matches _ORG_SUFFIX_RE (possibly after stripping prefixes)
+        - date: matches _DATE_PATTERN
+        - skip: parenthesized roles like (Buyer/Owner), labels like "Date:"
+        """
+        lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+        if not lines:
+            return []
+
+        triples: List[Dict[str, str]] = []
+        orgs_seen: set = set()
+        orgs: List[str] = []
+        dates: List[str] = []
+
+        for line in lines:
+            # Skip pure labels like "Date:", "By:", "(Buyer/Owner)", "Title"
+            if re.match(r'^\(.*\)$', line):
+                continue
+            if re.match(r'^(?:Date|Title|By)\s*:\s*$', line, re.IGNORECASE):
+                continue
+
+            # Strip common prefixes to expose org name
+            remainder = re.sub(
+                r'^(?:By\s*:?\s*|Authorized\s+Representative\s+|'
+                r"(?:Pumper's|Owner's|Owner\(s\))\s+\S+(?:\s+\(\S+\))?\s+|"
+                r'AGENT\s*:\s*)',
+                '', line, flags=re.IGNORECASE,
+            ).strip()
+
+            if self._ORG_SUFFIX_RE.search(remainder):
+                norm = remainder.lower()
+                if norm not in orgs_seen:
+                    orgs_seen.add(norm)
+                    orgs.append(remainder)
+            elif self._DATE_PATTERN.search(line):
+                # Extract just the date portion
+                m = self._DATE_PATTERN.search(line)
+                if m:
+                    dates.append(m.group(0))
+
+        # Deduplicate dates
+        dates = list(dict.fromkeys(dates))
+
+        # Emit triples: each org "signed" the document
+        for org in orgs:
+            triples.append({"sid": sid, "s": org, "p": "signed", "o": "document"})
+            for date in dates:
+                triples.append({"sid": sid, "s": org, "p": "signed on", "o": date})
+
+        # Cross-link organizations as co-signatories
+        for i, org_a in enumerate(orgs):
+            for org_b in orgs[i + 1:]:
+                triples.append({"sid": sid, "s": org_a, "p": "co signed with", "o": org_b})
 
         return triples
 
@@ -1693,7 +1776,7 @@ Return ONLY valid JSON (no markdown fences):
         deterministic_count = 0
 
         # ── Route structured sentences to deterministic or LLM path ──
-        _STRUCTURED_SOURCES = {"signature_party", "letterhead"}
+        _STRUCTURED_SOURCES = {"signature_party", "letterhead", "signature_block"}
         if self._structured_extraction == "deterministic":
             structured = [s for s in content_sentences if s.get("source") in _STRUCTURED_SOURCES]
             llm_sentences = [s for s in content_sentences if s.get("source") not in _STRUCTURED_SOURCES]
@@ -1841,6 +1924,7 @@ Return ONLY valid JSON (no markdown fences):
 
         entity_map: Dict[str, Entity] = {}       # canonical_key → Entity
         entity_sids: Dict[str, set] = {}          # canonical_key → set of sentence IDs
+        deterministic_keys: set = set()            # keys from deterministic extraction (dedup-protected)
 
         openie_rels: List[Relationship] = []
         skipped_garbage = 0
@@ -1850,6 +1934,7 @@ Return ONLY valid JSON (no markdown fences):
             pred = (t.get("p") or "").strip()
             obj = _text_processing((t.get("o") or "").strip())
             sid = (t.get("sid") or "").strip()
+            is_det = t.get("_det") == "1"
 
             if not subj or not pred or not obj:
                 continue
@@ -1862,6 +1947,11 @@ Return ONLY valid JSON (no markdown fences):
             obj_key = self._canonical_entity_key(obj)
             if not subj_key or not obj_key or subj_key == obj_key:
                 continue
+
+            # Track deterministic entity keys (protected from dedup merge-away)
+            if is_det:
+                deterministic_keys.add(subj_key)
+                deterministic_keys.add(obj_key)
 
             # Create or update subject entity
             if subj_key not in entity_map:
@@ -1905,6 +1995,11 @@ Return ONLY valid JSON (no markdown fences):
         # entities from its OWN triples — no cross-passage text matching.
         for key, ent in entity_map.items():
             ent.text_unit_ids = list(entity_sids.get(key, set()))
+            # Mark deterministic entities for dedup protection
+            if key in deterministic_keys:
+                if not ent.metadata:
+                    ent.metadata = {}
+                ent.metadata["deterministic"] = True
 
         entities = list(entity_map.values())
 
@@ -3390,6 +3485,24 @@ SUMMARY: <summary>"""
             }
 
         merge_map = dedup_result.merge_map
+
+        # Protect deterministic entities from being merged away.
+        # They can still be merge TARGETS (other entities → them), but never
+        # lose their identity in a transitive chain.
+        deterministic_names = {
+            e.name for e in entities
+            if (e.metadata or {}).get("deterministic")
+        }
+        protected_removed = 0
+        for name in list(merge_map.keys()):
+            if name in deterministic_names:
+                del merge_map[name]
+                protected_removed += 1
+        if protected_removed:
+            logger.info(
+                "dedup_protected_deterministic",
+                extra={"protected": protected_removed, "names": sorted(deterministic_names)},
+            )
 
         # Rebuild entities keyed by canonical name, keep deterministic IDs.
         by_canonical: Dict[str, List[Entity]] = {}

@@ -1276,7 +1276,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # R6-1: folder scope filter (same pattern as sentence vector search)
         folder_filter_clause = (
             "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
-            "        WITH expanded, shared_entity_count, chunk, doc, sec,"
+            "        WITH expanded, shared_entity_count, doc, sec,"
             " prev_sent, next_sent\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
             " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id,"

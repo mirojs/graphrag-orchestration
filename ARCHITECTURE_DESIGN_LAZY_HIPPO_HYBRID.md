@@ -11620,3 +11620,76 @@ Removed both buttons from `Answer.tsx`. The copy button and citation links remai
 | File | Change |
 |------|--------|
 | `frontend/app/frontend/src/components/Answer/Answer.tsx` | Removed lightbulb and clipboard button JSX; removed unused icon imports (`LightbulbFilament24Regular`, `ClipboardTextLtr24Regular`) |
+
+## §43. Route 2 Traffic Consolidated to Route 7 (2026-03-04)
+
+### Background
+
+Route 2 (`local_search`) handles simple entity-lookup questions — "Who is the buyer?", "What is the commission rate?". Route 7 (HippoRAG 2) was designed as a multi-hop deep-reasoning engine but includes a `local_search` query-mode preset (§ ANALYSIS_ROUTE7_LATENCY_OPTIMIZATION_2026-02-26) that constrains it to Route 2-style behavior: `ppr_passage_top_k=5`, `prompt_variant="v1_concise"`, `max_tokens=150`.
+
+After Route 7 underwent significant changes (OpenIE migration §40, section-context batching §41, corpus-wide reranking §39), re-validation was needed.
+
+### Benchmark Results (2026-03-04)
+
+Both routes tested on the full Q-L (10 positive) + Q-N (9 negative) = 19 question benchmark:
+
+| Metric | Route 2 | Route 7 (`local_search` preset) |
+|---|---|---|
+| Positive accuracy | 10/10 ✅ | 10/10 ✅ |
+| Negative accuracy | 9/9 ✅ | 9/9 ✅ |
+| **Total** | **19/19** | **19/19** |
+| Avg positive latency | 6.3s | 3.4s **(1.9× faster)** |
+| Avg negative latency | 4.1s | 5.2s |
+| Avg response length (positive) | ~40 chars | ~69 chars |
+
+Route 7 is 1.9× faster on positive (entity-lookup) questions. Responses are slightly longer because PPR retrieves full source sentences with qualifying clauses (e.g., "Walt Flood Realty, a Hawaii sole proprietorship" vs just "Walt Flood Realty"). This is more informative, not wrong.
+
+**Q-N2 outlier:** Route 7 takes ~29s on the IBAN/SWIFT negative question vs ~5s on Route 2. This is a known cold-path issue with financial-term entity resolution and does not affect accuracy.
+
+### Response Comparison (6/10 identical, 4 differ)
+
+| Question | Route 2 | Route 7 |
+|---|---|---|
+| Q-L5 (late fee) | 1.5% per month | 1.5% per month of the overdue amount |
+| Q-L6 (commission) | 6% of gross sale price | 6% of Gross Sale Price |
+| Q-L7 (additional commission) | 2.5% of the gross sale price | 2.5% of the gross sale price of the property |
+| Q-L8 (deposit) | $1,000.00 | $1,000.00 (one thousand dollars) |
+
+Route 7's longer answers include more qualifying context from source sentences — strictly more informative.
+
+### Routing Change
+
+**Before:** Router classifies query as `LOCAL_SEARCH` → dispatches to Route 2 (`LocalSearchHandler`).
+
+**After:** Router classifies query as `LOCAL_SEARCH` → redirects to Route 7 (`HippoRAG2Handler`) with `query_mode="local_search"` → Route 7 applies the `local_search` preset.
+
+```
+# orchestrator.py query() method
+original_route = selected_route            # e.g. LOCAL_SEARCH
+if original_route == RouteType.LOCAL_SEARCH:
+    selected_route = RouteType.HIPPORAG2_SEARCH
+    query_mode = original_route.value      # "local_search"
+```
+
+**Backward compatibility:** `force_route=local_search` in the API still dispatches to the original Route 2 handler via `force_route()` (unchanged). This preserves the ability to A/B test or fall back.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/worker/hybrid_v2/orchestrator.py` | In `query()`: capture `original_route`, redirect `LOCAL_SEARCH` → `HIPPORAG2_SEARCH` with `query_mode` |
+| `src/api_gateway/routers/hybrid.py` | Added `query_mode` field to `HybridQueryRequest`, passed through to `pipeline.force_route()` |
+| `scripts/benchmark_route7_hipporag2.py` | Added `--query-mode` CLI arg for preset benchmarking |
+| `scripts/benchmark_accuracy_utils.py` | Fixed inline `Expected:` parsing (Q-L10 bug); added substring containment check (Q-L1 bug) |
+
+### Commits
+
+| SHA | Description |
+|-----|-------------|
+| `46f85137` | feat: add query_mode passthrough for Route 7 presets + fix benchmark accuracy |
+| `c0acb708` | feat: consolidate LOCAL_SEARCH auto-routing to Route 7 with local_search preset |
+
+### Benchmark Artifacts
+
+- `benchmarks/route2_local_r2questions_20260304T124249Z.json` — Route 2 baseline (19/19)
+- `benchmarks/route7_hipporag2_qm-local_search_r2questions_20260304T124446Z.json` — Route 7 local_search (19/19)

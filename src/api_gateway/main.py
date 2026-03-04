@@ -424,7 +424,12 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
             return FileResponse(str(static_file))
 
         # Default: serve index.html for client-side routing
-        return FileResponse(str(STATIC_DIR / "index.html"))
+        # no-cache ensures browser revalidates on every load so new
+        # deployments are picked up without manual cache clearing.
+        return FileResponse(
+            str(STATIC_DIR / "index.html"),
+            headers={"Cache-Control": "no-cache"},
+        )
 
     logger.info("spa_serving_enabled", static_dir=str(STATIC_DIR))
 else:

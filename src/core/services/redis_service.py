@@ -617,7 +617,7 @@ class RedisService:
         """Create RedisService with connection."""
         url = redis_url or get_redis_url()
         
-        kwargs = {"decode_responses": True}
+        kwargs = {"decode_responses": True, "socket_timeout": 5, "socket_connect_timeout": 5}
         if url.startswith("rediss://"):
             kwargs["ssl_cert_reqs"] = None  # Azure Redis uses managed certs
         

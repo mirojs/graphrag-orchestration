@@ -108,7 +108,14 @@ export async function fetchUsageStats(idToken: string | undefined): Promise<Usag
         headers: { ...headers, "Content-Type": "application/json" }
     });
     if (!response.ok) {
-        throw new Error(`Failed to fetch usage: ${response.status} ${response.statusText}`);
+        let detail = "";
+        try {
+            const body = await response.json();
+            detail = body.detail || body.message || "";
+        } catch {
+            detail = response.statusText || "";
+        }
+        throw new Error(`Failed to fetch usage (${response.status}): ${detail}`);
     }
     return response.json();
 }

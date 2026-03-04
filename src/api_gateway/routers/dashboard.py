@@ -11,6 +11,7 @@ These endpoints serve data to the frontend dashboard pages.
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
+import asyncio
 import structlog
 import os
 from datetime import datetime, timezone
@@ -184,6 +185,15 @@ async def get_my_usage(
     """
     Get detailed usage statistics for the current user.
     """
+    try:
+        async with asyncio.timeout(15):
+            return await _fetch_user_usage(user)
+    except TimeoutError:
+        logger.warning("dashboard_usage_timeout", user_id=user.get("oid", ""))
+        raise HTTPException(status_code=504, detail="Usage data fetch timed out")
+
+
+async def _fetch_user_usage(user: Dict[str, Any]) -> UsageStatsResponse:
     user_id = user.get("oid", "")
 
     # Get plan and usage from quota enforcer

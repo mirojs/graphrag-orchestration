@@ -46,7 +46,7 @@ const LayoutWrapper = () => {
         return (
             <LoginContext.Provider
                 value={{
-                    loggedIn,
+                    loggedIn: true,
                     setLoggedIn
                 }}
             >

@@ -450,9 +450,8 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.section_path AS section_path,
                sent.parent_text AS parent_text,
                sent.page AS page,
-               sent.id AS chunk_id,
                sent.document_id AS document_id,
-               sent.parent_text AS chunk_text,
+               sent.parent_text AS parent_passage,
                doc.title AS document_title,
                sec.path_key AS section_key,
                score
@@ -640,9 +639,8 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.hierarchical_id AS hierarchical_id,
                sent.parent_text AS parent_text,
                sent.page AS page,
-               sent.id AS chunk_id,
                sent.document_id AS document_id,
-               sent.parent_text AS chunk_text,
+               sent.parent_text AS parent_passage,
                doc.title AS document_title,
                sec.path_key AS section_key,
                final_score AS score,
@@ -677,11 +675,10 @@ class LocalSearchHandler(BaseRouteHandler):
             return []
         
         # 3. Format as coverage_chunks (same format as Strategy A for seamless integration)
-        seen_chunks: set = set()  # Deduplicate by chunk_id (multiple sentences per chunk)
+        seen_sentences: set = set()  # Deduplicate by sentence_id
         coverage_chunks = []
         
         for result in traversal_results:
-            chunk_id = result.get("chunk_id", "")
             sentence_id = result.get("sentence_id", "")
             
             # Use sentence text directly — parent_text causes dedup with entity chunks
@@ -694,12 +691,12 @@ class LocalSearchHandler(BaseRouteHandler):
             sources = result.get("sources", [])
             is_context_expansion = any(s in ("next", "prev") for s in sources) and "seed" not in sources
             
-            if is_context_expansion and chunk_id and chunk_id not in seen_chunks:
-                # Context expansion: inject the full chunk text (coherent multi-sentence passage)
-                chunk_text = result.get("chunk_text", "")
-                if chunk_text and len(chunk_text) > len(display_text):
-                    display_text = chunk_text
-                    seen_chunks.add(chunk_id)
+            if is_context_expansion and sentence_id and sentence_id not in seen_sentences:
+                # Context expansion: inject the full parent passage (coherent multi-sentence passage)
+                parent_passage = result.get("parent_passage", "")
+                if parent_passage and len(parent_passage) > len(display_text):
+                    display_text = parent_passage
+                    seen_sentences.add(sentence_id)
                     source_label = "chunk_expansion"
                 else:
                     source_label = "next_sentence"

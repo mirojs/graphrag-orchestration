@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     SKELETON_SIMILARITY_THRESHOLD: float = 0.45  # Min cosine similarity for sentence retrieval
     SKELETON_MIN_SENTENCE_CHARS: int = 20  # Minimum characters for a valid sentence (lowered from 30 — was dropping informative KVP lines like "Phone: (813) 902-4455")
     SKELETON_MIN_SENTENCE_WORDS: int = 2  # Minimum words for a valid sentence (lowered from 3 — was dropping 2-word KVP lines like "Email: user@example.com")
-    SKELETON_LLM_SENTENCE_REVIEW: bool = False  # Enable LLM post-review of sentence boundaries (selective: only ambiguous splits)
+    SKELETON_LLM_SENTENCE_REVIEW: bool = True  # Enable bundled LLM post-review of sentence boundaries (gpt-4.1, zero-risk verified)
     
     # Phase 2: Sparse sentence-to-sentence RELATED_TO edges
     # Separate from GDS KNN (Entity/Figure/KVP/Chunk). Bounded: threshold 0.86, max k=2.

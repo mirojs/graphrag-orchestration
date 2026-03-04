@@ -4,7 +4,7 @@
  * Talks to /dashboard/* endpoints on the API gateway.
  */
 
-import { getHeaders } from "./api";
+import { getHeaders, fetchWithAuthRetry } from "./api";
 
 // ============================================================================
 // Types
@@ -91,7 +91,7 @@ export interface PlanInfo {
 
 export async function fetchUserProfile(idToken: string | undefined): Promise<UserProfileResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/dashboard/me", {
+    const response = await fetchWithAuthRetry("/dashboard/me", {
         method: "GET",
         headers: { ...headers, "Content-Type": "application/json" }
     });
@@ -103,7 +103,7 @@ export async function fetchUserProfile(idToken: string | undefined): Promise<Use
 
 export async function fetchUsageStats(idToken: string | undefined): Promise<UsageStats> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/dashboard/me/usage", {
+    const response = await fetchWithAuthRetry("/dashboard/me/usage", {
         method: "GET",
         headers: { ...headers, "Content-Type": "application/json" }
     });
@@ -122,7 +122,7 @@ export async function fetchUsageStats(idToken: string | undefined): Promise<Usag
 
 export async function fetchSystemMetrics(idToken: string | undefined): Promise<SystemMetrics> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/dashboard/admin/metrics", {
+    const response = await fetchWithAuthRetry("/dashboard/admin/metrics", {
         method: "GET",
         headers: { ...headers, "Content-Type": "application/json" }
     });
@@ -134,7 +134,7 @@ export async function fetchSystemMetrics(idToken: string | undefined): Promise<S
 
 export async function fetchPlanInfo(idToken: string | undefined): Promise<PlanInfo> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/dashboard/plans", {
+    const response = await fetchWithAuthRetry("/dashboard/plans", {
         method: "GET",
         headers: { ...headers, "Content-Type": "application/json" }
     });

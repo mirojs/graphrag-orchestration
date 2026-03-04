@@ -5,7 +5,7 @@
  * upload, delete, bulk-delete, rename, move, copy, list, metadata, lock/unlock.
  */
 
-import { getHeaders } from "./api";
+import { getHeaders, fetchWithAuthRetry } from "./api";
 
 // ======================== Types ========================
 
@@ -91,7 +91,7 @@ export async function uploadFilesApi(
         });
     }
 
-    const response = await fetch("/upload", {
+    const response = await fetchWithAuthRetry("/upload", {
         method: "POST",
         headers: await getHeaders(idToken),
         body: formData,
@@ -106,7 +106,7 @@ export async function uploadFilesApi(
 
 export async function deleteFileApi(filename: string, idToken: string): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/delete_uploaded", {
+    const response = await fetchWithAuthRetry("/delete_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ filename }),
@@ -117,7 +117,7 @@ export async function deleteFileApi(filename: string, idToken: string): Promise<
 
 export async function bulkDeleteFilesApi(filenames: string[], idToken: string): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/delete_uploaded_bulk", {
+    const response = await fetchWithAuthRetry("/delete_uploaded_bulk", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ filenames }),
@@ -129,7 +129,7 @@ export async function bulkDeleteFilesApi(filenames: string[], idToken: string): 
 // ======================== List ========================
 
 export async function listFilesApi(idToken: string): Promise<string[]> {
-    const response = await fetch("/list_uploaded", {
+    const response = await fetchWithAuthRetry("/list_uploaded", {
         method: "GET",
         headers: await getHeaders(idToken),
     });
@@ -154,7 +154,7 @@ export async function renameFileApi(
     idToken: string
 ): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/rename_uploaded", {
+    const response = await fetchWithAuthRetry("/rename_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ old_filename: oldFilename, new_filename: newFilename }),
@@ -170,7 +170,7 @@ export async function moveFileApi(
     sourceFolder?: string
 ): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/move_uploaded", {
+    const response = await fetchWithAuthRetry("/move_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ filename, source_folder: sourceFolder, dest_folder: destFolder }),
@@ -185,7 +185,7 @@ export async function copyFileApi(
     idToken: string
 ): Promise<FileOperationResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/copy_uploaded", {
+    const response = await fetchWithAuthRetry("/copy_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ filename, dest_filename: destFilename }),
@@ -208,7 +208,7 @@ export async function getFileMetadataListApi(
     if (continuationToken) params.set("continuation_token", continuationToken);
 
     const url = `/file_metadata${params.toString() ? "?" + params.toString() : ""}`;
-    const response = await fetch(url, {
+    const response = await fetchWithAuthRetry(url, {
         method: "GET",
         headers: await getHeaders(idToken),
     });
@@ -217,7 +217,7 @@ export async function getFileMetadataListApi(
 }
 
 export async function getFileMetadataApi(filename: string, idToken: string): Promise<FileItem> {
-    const response = await fetch(`/file_metadata/${encodeURIComponent(filename)}`, {
+    const response = await fetchWithAuthRetry(`/file_metadata/${encodeURIComponent(filename)}`, {
         method: "GET",
         headers: await getHeaders(idToken),
     });
@@ -241,7 +241,7 @@ export async function updateFileMetadataApi(
     if (etag) {
         headers["If-Match"] = etag;
     }
-    const response = await fetch(`/file_metadata/${encodeURIComponent(filename)}`, {
+    const response = await fetchWithAuthRetry(`/file_metadata/${encodeURIComponent(filename)}`, {
         method: "PUT",
         headers,
         body: JSON.stringify(updates),
@@ -258,7 +258,7 @@ export async function lockFileApi(
     idToken: string
 ): Promise<{ message: string }> {
     const headers = await getHeaders(idToken);
-    const response = await fetch(`/file_metadata/${encodeURIComponent(filename)}/lock`, {
+    const response = await fetchWithAuthRetry(`/file_metadata/${encodeURIComponent(filename)}/lock`, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ duration_seconds: durationSeconds }),
@@ -268,7 +268,7 @@ export async function lockFileApi(
 }
 
 export async function unlockFileApi(filename: string, idToken: string): Promise<{ message: string }> {
-    const response = await fetch(`/file_metadata/${encodeURIComponent(filename)}/lock`, {
+    const response = await fetchWithAuthRetry(`/file_metadata/${encodeURIComponent(filename)}/lock`, {
         method: "DELETE",
         headers: await getHeaders(idToken),
     });

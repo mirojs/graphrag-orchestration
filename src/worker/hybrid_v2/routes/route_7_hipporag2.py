@@ -783,6 +783,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                         text_preview=c.get("text_preview", c.get("text", ""))[:200],
                         sentences=c.get("sentences"),
                         page_dimensions=c.get("page_dimensions"),
+                        citation_key=c.get("citation", ""),
+                        source=c.get("source", ""),
+                        citation_type=c.get("citation_type", "chunk"),
                     )
                 )
 

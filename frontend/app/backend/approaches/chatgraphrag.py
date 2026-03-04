@@ -304,6 +304,11 @@ class ChatGraphRAGApproach(Approach):
             #   2. Source / document title — matches [filename.pdf] markers
             #   3. Truncated text preview as last resort
             raw_key = citation.get("citation", "").strip("[]").strip()
+            if not raw_key:
+                # Derive from index — matches LLM's [1], [2] inline markers
+                idx = citation.get("index")
+                if idx is not None:
+                    raw_key = str(idx)
             if raw_key:
                 citation_names.append(raw_key)
             elif source:

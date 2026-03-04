@@ -69,6 +69,10 @@ class Citation:
     sentence_text: Optional[str] = None  # The specific sentence within the chunk
     sentence_offset: Optional[int] = None  # Character offset of sentence within chunk
     sentence_length: Optional[int] = None  # Character length of the matched sentence
+    # Citation marker and source for frontend inline-badge matching
+    citation_key: str = ""        # The LLM marker string, e.g. "[1]", "[1a]"
+    source: str = ""              # Original source/filename
+    citation_type: str = "chunk"  # "chunk" or "sentence"
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -81,6 +85,12 @@ class Citation:
             "score": self.score,
             "text_preview": self.text_preview,
         }
+        # Citation marker and source for frontend inline-badge matching
+        if self.citation_key:
+            result["citation"] = self.citation_key
+        if self.source:
+            result["source"] = self.source
+        result["citation_type"] = self.citation_type
         # Include optional location fields only if present
         if self.page_number is not None:
             result["page_number"] = self.page_number

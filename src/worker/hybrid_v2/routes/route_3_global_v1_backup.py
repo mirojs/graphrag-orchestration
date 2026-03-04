@@ -307,6 +307,9 @@ class GlobalSearchHandler(BaseRouteHandler):
                     # Sentence-level citation data (comprehensive_sentence mode)
                     sentences=c.get("sentences"),
                     page_dimensions=c.get("page_dimensions"),
+                    citation_key=c.get("citation", ""),
+                    source=c.get("source", ""),
+                    citation_type=c.get("citation_type", "chunk"),
                 ))
         
         timings_ms["total_ms"] = int((time.perf_counter() - t_route0) * 1000)

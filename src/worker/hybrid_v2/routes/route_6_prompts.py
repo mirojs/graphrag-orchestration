@@ -61,3 +61,32 @@ You are a document analysis assistant. Answer the query using the evidence below
 
 **Answer**:
 """
+
+# ─────────────────────────────────────────────────────────────────
+# COMMUNITY KEY-POINT EXTRACTION PROMPT  (lightweight MAP)
+# ─────────────────────────────────────────────────────────────────
+# Single LLM call replaces upstream's N-call MAP phase.
+# Input:  {query}, {community_summaries}
+# Output: JSON array of key points with importance scores.
+
+COMMUNITY_EXTRACT_PROMPT = """\
+You are an analyst. Given the user query and a set of thematic community summaries from a knowledge graph, extract ONLY the specific facts, terms, conditions, or data points from the summaries that are directly relevant to answering the query.
+
+**Query**: {query}
+
+**Community Summaries**:
+{community_summaries}
+
+**Instructions**:
+1. For each community, identify specific facts relevant to the query. Ignore irrelevant information.
+2. Each key point must be a concrete, specific fact — not a vague theme description.
+3. Score each point 0-100 for importance to answering the query.
+4. If a community has no relevant facts for this query, skip it entirely.
+5. Preserve exact terminology: names, amounts, dates, legal terms, conditions.
+
+Respond with ONLY a JSON object:
+{{"points": [
+    {{"description": "specific fact or detail", "score": importance_0_to_100, "community": "community title"}},
+    ...
+]}}
+"""

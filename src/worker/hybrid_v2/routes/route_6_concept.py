@@ -35,7 +35,7 @@ import structlog
 import tiktoken
 
 from .base import BaseRouteHandler, Citation, RouteResult
-from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT
+from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
 from ..services.neo4j_retry import retry_session
 
 # Shared tiktoken encoder for token budget control (Feature 4)
@@ -428,6 +428,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "entity_doc_map_count": len(entity_doc_map),
             "entity_expansion_enabled": expansion_enabled,
             "entity_expansion_count": expansion_count,
+            "community_extract_enabled": os.getenv("ROUTE6_COMMUNITY_EXTRACT", "0").strip().lower() in {"1", "true", "yes"},
             "dynamic_community_enabled": dynamic_community,
             "community_children_enabled": community_children_enabled,
             "community_children_count": len([c for c in community_data if c.get("_is_child")]),
@@ -512,7 +513,15 @@ class ConceptSearchHandler(BaseRouteHandler):
             Synthesized response text.
         """
         # Format community summaries as thematic context
-        if communities:
+        # Feature 1b: When ROUTE6_COMMUNITY_EXTRACT is enabled, replace raw
+        # summaries with LLM-extracted key points (lightweight MAP).
+        community_extract = os.getenv(
+            "ROUTE6_COMMUNITY_EXTRACT", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if community_extract and communities:
+            summaries_text = await self._extract_community_key_points(query, communities)
+        elif communities:
             summary_lines = []
             for i, c in enumerate(communities, 1):
                 title = c.get("title", f"Theme {i}")
@@ -873,6 +882,75 @@ class ConceptSearchHandler(BaseRouteHandler):
         return filtered_communities, filtered_scores
 
     # ==================================================================
+    # Feature 1b: Community Key-Point Extraction (lightweight MAP)
+    # ==================================================================
+
+    async def _extract_community_key_points(
+        self,
+        query: str,
+        communities: List[Dict[str, Any]],
+    ) -> str:
+        """Extract query-relevant key points from community summaries in a single LLM call.
+
+        Replaces upstream GraphRAG's N-call MAP phase with 1 call.
+        Returns a formatted string of scored key points for synthesis,
+        or falls back to raw summaries on failure.
+        """
+        # Format communities for the extraction prompt
+        summary_lines = []
+        for i, c in enumerate(communities, 1):
+            title = c.get("title", f"Theme {i}")
+            summary = c.get("summary", "").strip()
+            if summary:
+                summary_lines.append(f"{i}. **{title}**: {summary}")
+        if not summary_lines:
+            return "(No thematic context available)"
+
+        summaries_text = "\n".join(summary_lines)
+        prompt = COMMUNITY_EXTRACT_PROMPT.format(
+            query=query,
+            community_summaries=summaries_text,
+        )
+
+        try:
+            resp = await self.llm.acomplete(prompt)
+            text = resp.text.strip()
+            parsed = json.loads(text)
+            points = parsed.get("points", [])
+            if not points:
+                logger.info("route6_community_extract_no_points")
+                return summaries_text  # fallback to raw
+
+            # Sort by score descending, format as compact key points
+            points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
+            # Filter out low-importance points (score < 20)
+            points = [p for p in points if p.get("score", 0) >= 20]
+            if not points:
+                return summaries_text
+
+            formatted = []
+            for p in points:
+                desc = p.get("description", "")
+                score = p.get("score", 0)
+                community = p.get("community", "")
+                tag = f" [{community}]" if community else ""
+                formatted.append(f"- (importance: {score}) {desc}{tag}")
+
+            logger.info(
+                "route6_community_extract_done",
+                total_points=len(points),
+                top_score=points[0].get("score", 0) if points else 0,
+            )
+            return "\n".join(formatted)
+
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("route6_community_extract_parse_error", error=str(e))
+            return summaries_text  # fallback to raw
+        except Exception as e:
+            logger.warning("route6_community_extract_failed", error=str(e))
+            return summaries_text  # fallback to raw
+
+    # ==================================================================
     # Feature 2: Community Children Traversal
     # ==================================================================
 
@@ -981,7 +1059,13 @@ class ConceptSearchHandler(BaseRouteHandler):
     ) -> str:
         """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize."""
         # Format community summaries
-        if communities:
+        community_extract = os.getenv(
+            "ROUTE6_COMMUNITY_EXTRACT", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+
+        if community_extract and communities:
+            summaries_text = await self._extract_community_key_points(query, communities)
+        elif communities:
             summary_lines = []
             for i, c in enumerate(communities, 1):
                 title = c.get("title", f"Theme {i}")

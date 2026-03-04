@@ -138,12 +138,17 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
             allowedPrincipals: {}
           }
         }
-        login: authType == 'B2B' ? {
-          loginParameters: [
+        // Both B2B and B2C need offline_access to get refresh tokens.
+        // B2B also uses response_type=code for auth code flow.
+        // CIAM supports offline_access at the protocol level — the earlier 401 was caused by nonce, not this.
+        login: {
+          loginParameters: authType == 'B2B' ? [
             'scope=openid profile email offline_access'
             'response_type=code'
+          ] : [
+            'scope=openid profile email offline_access'
           ]
-        } : {}
+        }
       }
     }
     login: {

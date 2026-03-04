@@ -130,9 +130,9 @@ async def get_my_profile(
 
     # Resolve plan from quota enforcer (Redis-cached) with fallback
     try:
-        enforcer = await get_quota_enforcer()
-        plan_tier = await enforcer.get_plan(user_id)
-        usage = await enforcer.get_usage(user_id)
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=10)
+        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=5)
+        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=5)
     except Exception:
         plan_tier = PlanTier.FREE
         usage = {"queries_today": 0, "queries_this_month": 0}
@@ -198,9 +198,9 @@ async def _fetch_user_usage(user: Dict[str, Any]) -> UsageStatsResponse:
 
     # Get plan and usage from quota enforcer
     try:
-        enforcer = await get_quota_enforcer()
-        plan_tier = await enforcer.get_plan(user_id)
-        usage = await enforcer.get_usage(user_id)
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=10)
+        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=5)
+        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=5)
     except Exception:
         plan_tier = PlanTier.FREE
         usage = {"queries_today": 0, "queries_this_month": 0}
@@ -292,8 +292,8 @@ async def get_available_plans(
     user_id = user.get("oid", "")
 
     try:
-        enforcer = await get_quota_enforcer()
-        current_plan = await enforcer.get_plan(user_id)
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=10)
+        current_plan = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=5)
     except Exception:
         current_plan = PlanTier.FREE
 

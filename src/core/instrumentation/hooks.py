@@ -168,10 +168,10 @@ class InstrumentationHooks:
             if user_id:
                 try:
                     from src.core.services.quota_enforcer import get_quota_enforcer
-                    enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
-                    await asyncio.wait_for(enforcer.record_query(user_id), timeout=5)
+                    enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=15)
+                    await asyncio.wait_for(enforcer.record_query(user_id), timeout=10)
                 except Exception as rq_err:
-                    logger.debug("redis_record_query_skipped", error=str(rq_err))
+                    logger.warning("redis_record_query_skipped", error=repr(rq_err))
 
             # --- Cosmos: write usage record ---
             try:

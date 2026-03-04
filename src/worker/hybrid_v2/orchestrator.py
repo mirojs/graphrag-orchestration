@@ -392,6 +392,12 @@ class HybridPipeline:
         # =======================================================================
         # Modular Handler Dispatch (Jan 2026 refactor)
         # =======================================================================
+        # Consolidate LOCAL_SEARCH → Route 7 with local_search preset.
+        # Route 7 matches Route 2 accuracy (19/19) at 1.9x lower latency.
+        original_route = route
+        if route == QueryRoute.LOCAL_SEARCH:
+            route = QueryRoute.HIPPORAG2_SEARCH
+
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
             # Attach accumulator to handler for RouteResult.usage population
@@ -402,7 +408,7 @@ class HybridPipeline:
             if route == QueryRoute.UNIFIED_SEARCH:
                 extra_kwargs["weight_profile"] = weight_profile
             if route == QueryRoute.HIPPORAG2_SEARCH:
-                extra_kwargs["query_mode"] = route.value
+                extra_kwargs["query_mode"] = original_route.value
             result = await handler.execute(
                 query, response_type,
                 knn_config=knn_config,

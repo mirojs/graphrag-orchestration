@@ -198,11 +198,10 @@ async def lifespan(app: FastAPI):
             storage_account = os.getenv("AZURE_USERSTORAGE_ACCOUNT")
             storage_container = os.getenv("AZURE_USERSTORAGE_CONTAINER")
             if storage_account and storage_container:
-                from prepdocslib.blobmanager import BlobManager
-                app.state.user_blob_manager = BlobManager(
+                from src.api_gateway.services.user_blob_manager import UserBlobManager
+                app.state.user_blob_manager = UserBlobManager(
                     endpoint=f"https://{storage_account}.blob.core.windows.net",
                     container=storage_container,
-                    account=storage_account,
                     credential=azure_credential,
                 )
                 logger.info("user_blob_manager_initialized")

@@ -67,6 +67,16 @@ param b2cClientId string = ''
 @description('External ID app client secret')
 param b2cClientSecret string = ''
 
+@secure()
+@description('Azure AD client secret for EasyAuth token refresh (B2B)')
+param authClientSecret string = ''
+
+@description('Storage account name for EasyAuth token store blob container')
+param tokenStoreStorageAccount string = ''
+
+@description('Blob container name for EasyAuth token store')
+param tokenStoreContainerName string = 'easyauth-tokens'
+
 // Custom domain parameters
 @description('Custom domain for B2B app (e.g., evidoc-enterprise.hulkdesign.com). Empty = no custom domain.')
 param b2bCustomDomain string = ''
@@ -202,6 +212,9 @@ module graphragApi './core/host/container-app.bicep' = {
     authClientId: authClientId
     authTenantId: subscription().tenantId
     authType: authType
+    clientSecretSettingName: !empty(authClientSecret) ? 'aad-client-secret' : ''
+    tokenStoreBlobUri: !empty(tokenStoreStorageAccount) ? 'https://${tokenStoreStorageAccount}.blob.${environment().suffixes.storage}/${tokenStoreContainerName}' : ''
+    tokenStoreIdentityResourceId: ''
     env: concat([
       {
         name: 'SERVICE_ROLE'
@@ -428,6 +441,11 @@ module graphragApi './core/host/container-app.bicep' = {
         name: 'admin-api-key'
         value: adminApiKey
       }
+    ] : [], !empty(authClientSecret) ? [
+      {
+        name: 'aad-client-secret'
+        value: authClientSecret
+      }
     ] : [])
   }
 }
@@ -593,6 +611,9 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     authType: 'B2C'
     useExternalIdIssuer: true
     externalIdTenantName: b2cTenantName
+    clientSecretSettingName: !empty(b2cClientSecret) ? 'b2c-client-secret' : ''
+    tokenStoreBlobUri: !empty(tokenStoreStorageAccount) ? 'https://${tokenStoreStorageAccount}.blob.${environment().suffixes.storage}/${tokenStoreContainerName}' : ''
+    tokenStoreIdentityResourceId: ''
     env: concat([
       {
         name: 'SERVICE_ROLE'
@@ -629,6 +650,11 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
       {
         name: 'admin-api-key'
         value: adminApiKey
+      }
+    ] : [], !empty(b2cClientSecret) ? [
+      {
+        name: 'b2c-client-secret'
+        value: b2cClientSecret
       }
     ] : [])
   }

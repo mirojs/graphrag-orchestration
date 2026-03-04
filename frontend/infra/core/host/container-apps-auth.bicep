@@ -59,10 +59,19 @@ resource auth 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview' = {
       // https://learn.microsoft.com/azure/container-apps/token-store
       tokenStore: {
         enabled: true
+        tokenRefreshExtensionHours: 72
         azureBlobStorage: {
           blobContainerUri: blobContainerUri
           managedIdentityResourceId: appIdentityResourceId
         }
+      }
+      cookieExpiration: {
+        convention: 'FixedTime'
+        timeToExpiration: '08:00:00'
+      }
+      nonce: {
+        validateNonce: true
+        nonceExpirationInterval: '00:05:00'
       }
     }
   }

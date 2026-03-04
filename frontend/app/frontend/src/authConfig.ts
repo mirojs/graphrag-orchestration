@@ -169,6 +169,44 @@ const getAppServicesToken = (): Promise<AppServicesToken | null> => {
 
 export const isUsingAppServicesLogin = (await getAppServicesToken()) != null;
 
+// Proactive background refresh: schedule a silent .auth/refresh call 5 minutes
+// before the token expires. This prevents users from ever hitting a 401.
+let proactiveRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleProactiveRefresh() {
+    if (!isUsingAppServicesLogin) return;
+
+    // Clear any existing timer
+    if (proactiveRefreshTimer) {
+        clearTimeout(proactiveRefreshTimer);
+        proactiveRefreshTimer = null;
+    }
+
+    const token = globalThis.cachedAppServicesToken;
+    if (!token?.expires_on) return;
+
+    const expiresMs = new Date(token.expires_on).getTime();
+    const nowMs = Date.now();
+    // Refresh 5 minutes before expiry, but at least 30 seconds from now
+    const refreshInMs = Math.max(expiresMs - nowMs - 5 * 60 * 1000, 30_000);
+
+    proactiveRefreshTimer = setTimeout(async () => {
+        try {
+            const resp = await fetch(appServicesAuthTokenRefreshUrl);
+            if (resp.ok) {
+                // Invalidate cache so next getAppServicesToken fetches fresh data
+                globalThis.cachedAppServicesToken = null;
+                await getAppServicesToken();
+                scheduleProactiveRefresh();
+            }
+        } catch {
+            // Silently ignore — the 401 retry in api.ts is the fallback
+        }
+    }, refreshInMs);
+}
+
+scheduleProactiveRefresh();
+
 // Sign out of app services
 // Learn more at https://learn.microsoft.com/azure/app-service/configure-authentication-customize-sign-in-out#sign-out-of-a-session
 export const appServicesLogout = () => {

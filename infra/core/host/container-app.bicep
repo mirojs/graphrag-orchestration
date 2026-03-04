@@ -39,6 +39,16 @@ param useExternalIdIssuer bool = false
 @description('External ID tenant name (e.g., graphragb2c) - required if useExternalIdIssuer is true')
 param externalIdTenantName string = ''
 
+@secure()
+@description('Name of the Container App secret holding the Azure AD client secret (required for token refresh)')
+param clientSecretSettingName string = ''
+
+@description('Blob container URI for EasyAuth token store (e.g., https://storageaccount.blob.core.windows.net/tokens)')
+param tokenStoreBlobUri string = ''
+
+@description('Managed identity resource ID for accessing the token store blob container')
+param tokenStoreIdentityResourceId string = ''
+
 // Calculate the OpenID issuer URL based on auth type
 var openIdIssuerUrl = useExternalIdIssuer && !empty(externalIdTenantName) 
   ? 'https://${externalIdTenantName}.ciamlogin.com/${authTenantId}/v2.0'
@@ -119,6 +129,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
         enabled: true
         registration: {
           clientId: authClientId
+          clientSecretSettingName: !empty(clientSecretSettingName) ? clientSecretSettingName : null
           openIdIssuer: openIdIssuerUrl
         }
         validation: {
@@ -132,10 +143,10 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
         }
         login: {
           loginParameters: authType == 'B2B' ? [
-            'scope=openid profile email'
+            'scope=openid profile email offline_access'
             'response_type=code'
           ] : [
-            'scope=openid profile email'
+            'scope=openid profile email offline_access'
           ]
         }
       }
@@ -143,8 +154,21 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
     login: {
       tokenStore: {
         enabled: true
+        tokenRefreshExtensionHours: 72
+        azureBlobStorage: !empty(tokenStoreBlobUri) ? {
+          blobContainerUri: tokenStoreBlobUri
+          managedIdentityResourceId: tokenStoreIdentityResourceId
+        } : null
       }
       preserveUrlFragmentsForLogins: true
+      cookieExpiration: {
+        convention: 'FixedTime'
+        timeToExpiration: '08:00:00'
+      }
+      nonce: {
+        validateNonce: true
+        nonceExpirationInterval: '00:05:00'
+      }
     }
   }
 }

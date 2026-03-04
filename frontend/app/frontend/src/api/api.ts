@@ -3,6 +3,54 @@ const BACKEND_URI = "";
 import { ChatAppResponse, ChatAppResponseOrError, ChatAppRequest, Config, SimpleAPIResponse, HistoryListApiResponse, HistoryApiResponse } from "./models";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../authConfig";
 
+let isRefreshingAuth = false;
+let authRefreshPromise: Promise<boolean> | null = null;
+
+/**
+ * Attempt to refresh the EasyAuth session token via the /.auth/refresh endpoint.
+ * Uses a singleton pattern to prevent multiple simultaneous refresh attempts.
+ * Returns true if refresh succeeded, false otherwise.
+ */
+async function refreshEasyAuthToken(): Promise<boolean> {
+    if (isRefreshingAuth && authRefreshPromise) {
+        return authRefreshPromise;
+    }
+    isRefreshingAuth = true;
+    authRefreshPromise = (async () => {
+        try {
+            const resp = await fetch(".auth/refresh");
+            return resp.ok;
+        } catch {
+            return false;
+        } finally {
+            isRefreshingAuth = false;
+            authRefreshPromise = null;
+        }
+    })();
+    return authRefreshPromise;
+}
+
+/**
+ * Wrapper around fetch that automatically retries once on 401 after refreshing
+ * the EasyAuth token. For non-EasyAuth (MSAL) auth, the caller already
+ * refreshes via acquireTokenSilent, so no retry is attempted.
+ */
+export async function fetchWithAuthRetry(url: string, init: RequestInit): Promise<Response> {
+    const response = await fetch(url, init);
+
+    if (response.status === 401 && isUsingAppServicesLogin) {
+        const refreshed = await refreshEasyAuthToken();
+        if (refreshed) {
+            // Retry — EasyAuth middleware will inject the new token headers
+            return fetch(url, init);
+        }
+        // Refresh failed — redirect to fresh login
+        window.location.href = ".auth/login/aad?post_login_redirect_uri=" + encodeURIComponent(window.location.pathname + window.location.search);
+    }
+
+    return response;
+}
+
 export async function getHeaders(idToken: string | undefined): Promise<Record<string, string>> {
     // If using login and not using app services, add the id token of the logged in account as the authorization
     if (useLogin && !isUsingAppServicesLogin) {
@@ -28,7 +76,7 @@ export async function chatApi(request: ChatAppRequest, shouldStream: boolean, id
         url += "/stream";
     }
     const headers = await getHeaders(idToken);
-    return await fetch(url, {
+    return await fetchWithAuthRetry(url, {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(request),
@@ -67,7 +115,7 @@ export function getCitationFilePath(citation: string): string {
 }
 
 export async function uploadFileApi(request: FormData, idToken: string): Promise<SimpleAPIResponse> {
-    const response = await fetch("/upload", {
+    const response = await fetchWithAuthRetry("/upload", {
         method: "POST",
         headers: await getHeaders(idToken),
         body: request
@@ -83,7 +131,7 @@ export async function uploadFileApi(request: FormData, idToken: string): Promise
 
 export async function deleteUploadedFileApi(filename: string, idToken: string): Promise<SimpleAPIResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/delete_uploaded", {
+    const response = await fetchWithAuthRetry("/delete_uploaded", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify({ filename })
@@ -98,7 +146,7 @@ export async function deleteUploadedFileApi(filename: string, idToken: string): 
 }
 
 export async function listUploadedFilesApi(idToken: string): Promise<string[]> {
-    const response = await fetch(`/list_uploaded`, {
+    const response = await fetchWithAuthRetry(`/list_uploaded`, {
         method: "GET",
         headers: await getHeaders(idToken)
     });
@@ -113,7 +161,7 @@ export async function listUploadedFilesApi(idToken: string): Promise<string[]> {
 
 export async function postChatHistoryApi(item: any, idToken: string): Promise<any> {
     const headers = await getHeaders(idToken);
-    const response = await fetch("/chat_history", {
+    const response = await fetchWithAuthRetry("/chat_history", {
         method: "POST",
         headers: { ...headers, "Content-Type": "application/json" },
         body: JSON.stringify(item)
@@ -134,7 +182,7 @@ export async function getChatHistoryListApi(count: number, continuationToken: st
         url += `&continuationToken=${continuationToken}`;
     }
 
-    const response = await fetch(url.toString(), {
+    const response = await fetchWithAuthRetry(url.toString(), {
         method: "GET",
         headers: { ...headers, "Content-Type": "application/json" }
     });
@@ -149,7 +197,7 @@ export async function getChatHistoryListApi(count: number, continuationToken: st
 
 export async function getChatHistoryApi(id: string, idToken: string): Promise<HistoryApiResponse> {
     const headers = await getHeaders(idToken);
-    const response = await fetch(`/chat_history/sessions/${id}`, {
+    const response = await fetchWithAuthRetry(`/chat_history/sessions/${id}`, {
         method: "GET",
         headers: { ...headers, "Content-Type": "application/json" }
     });
@@ -164,7 +212,7 @@ export async function getChatHistoryApi(id: string, idToken: string): Promise<Hi
 
 export async function deleteChatHistoryApi(id: string, idToken: string): Promise<any> {
     const headers = await getHeaders(idToken);
-    const response = await fetch(`/chat_history/sessions/${id}`, {
+    const response = await fetchWithAuthRetry(`/chat_history/sessions/${id}`, {
         method: "DELETE",
         headers: { ...headers, "Content-Type": "application/json" }
     });

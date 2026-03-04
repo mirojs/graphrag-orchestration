@@ -518,15 +518,10 @@ class HippoRAG2Handler(BaseRouteHandler):
                         query, candidate_ids, top_k=rerank_top_k,
                     )
                     if reranked_ids:
-                        reranked_set = set(reranked_ids)
                         reranked_list = [
                             (cid, 1.0 - i * 0.01)
                             for i, cid in enumerate(reranked_ids)
                         ]
-                        # Append PPR-ranked items not sent to reranker
-                        for cid, score in passage_scores[rerank_top_k:]:
-                            if cid not in reranked_set:
-                                reranked_list.append((cid, score))
                         passage_scores = reranked_list
                         logger.info(
                             "step_4.5_rerank_ppr_output",

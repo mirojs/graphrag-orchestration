@@ -1,7 +1,7 @@
 # Implementation Plan: Section-Context OpenIE & Deterministic Extraction Experiments
 
 **Date**: 2026-03-04  
-**Status**: Plan ready, awaiting implementation  
+**Status**: Implementation complete, E0–E3 extraction experiment done, quality evaluation next  
 **Baseline**: Route 7 = 55/57 (benchmark `route7_hipporag2_r4questions_20260302T100905Z.json`)
 
 ---
@@ -373,3 +373,59 @@ This allows running any experiment combination by just changing env vars before 
 - Phase 3 (Deterministic + E2/E3): Implementation + 2 re-index/benchmark cycles
 - Phase 4 (Compare): Analysis
 - Phase 5 (Merge): Commit + deploy
+
+---
+
+## Experiment Results
+
+### E0–E3 Extraction Comparison (2026-03-04)
+
+**Setup**: 201 content sentences from `test-5pdfs-v2-fix2` (179 paragraph, 2 signature_party, 4 signature_block, 1 letterhead, 2 page_footer, 13 table_row), 24 sections across 5 PDFs.
+
+#### Extraction Counts
+
+| Experiment | Entities | Rels | Unique Predicates | Time |
+|---|---|---|---|---|
+| **E0** sequential + llm (old) | 544 | 464 | 274 | 73.6s |
+| **E1** section + llm | 302 | 267 | 171 | 31.6s |
+| **E2** section + deterministic | 295 | 265 | 172 | 32.6s |
+| **E3** sequential + deterministic | 504 | 448 | 285 | 65.7s |
+
+*Files: `experiment_section_context_20260304T075411Z.json`, `experiment_section_context_20260304T075750Z.json`*
+
+#### Key Finding: Section Batching Halves Time, Improves Entity Quality
+
+Section batching (E1/E2) produces fewer, more coherent LLM calls → 2× speedup.
+
+#### Current Production vs E2 Quality Comparison
+
+Compared E2 extraction against the existing entities/triples in Neo4j (produced by the old sequential+llm code).
+
+| Metric | Current (prod) | E2 | Delta |
+|---|---|---|---|
+| Entities | 207 | 302 | +95 |
+| Triples | 619 | 261 | −358 |
+| Common entities | 88 | — | — |
+| Entity overlap % | 42.5% | 29.1% | — |
+
+*File: `comparison_current_vs_e2_20260304T080907Z.json`*
+
+**Entities LOST in E2 (119)** — mostly generic/garbage, low retrieval value:
+- Generic nouns: `damage`, `charge`, `fee`, `deposit`, `date`, `flood`, `fire`, `cracks`, `smoke`
+- Vague references: `anyone`, `you`, `this`, `first`, `none`, `herewith`, `afterward`
+- Legal boilerplate: `counterclaim`, `cross claim`, `replevin`, `garnishment`
+
+**Entities NEW in E2 (214)** — specific, high retrieval value:
+- Real amounts: `29900 00`, `11200 00`, `2 900 00`, `5800 00`
+- Real addresses: `456 palm tree avenue honolulu hi 96815`, `480 willow glen drive chubbuck id 83202`
+- Real people/orgs: `elizabeth nolasco`, `fabrikam construction`, `contoso lifts llc`
+- Legal specifics: `the american arbitration association aaa`, `the applicable substantive law of the state of idaho`
+- Detailed equipment: `80 high low profile aluminum door with plexi glass inserts`
+
+**Triple count drop (619→261)**: Current graph has many redundant/verbose triples (e.g., `agent shall obtain prior written approval` ×7, `all other warranties including implied w` ×16). Section context reduces cross-batch duplication.
+
+**Verdict**: E2 produces higher quality extraction — fewer garbage entities, more specific named entities, less redundant triples. Section context helps the LLM avoid re-extracting the same relationships differently per batch.
+
+### Next Step: Full Reindex + Route 7 Benchmark
+
+Pending user decision to proceed with E2 reindex and end-to-end benchmark evaluation.

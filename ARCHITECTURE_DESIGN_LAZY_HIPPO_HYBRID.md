@@ -1,6 +1,9 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** March 2, 2026
+**Last Updated:** March 4, 2026
+
+**Recent Updates (March 4, 2026):**
+- ✅ **Section-Context OpenIE Batching — E2 Extraction Quality Validated:** Replaced sequential 5-sentence batching with section-grouped batching + section title prefix. Added deterministic extraction for signature/letterhead. E2 produces 302 entities (vs 207 current) with far fewer garbage entities and less triple duplication. See [§41](#41-section-context-openie-batching--deterministic-structured-extraction-2026-03-04).
 
 **Recent Updates (March 2, 2026):**
 - ✅ **Route 7 Corpus-Wide Reranking — 53/57 → 57/57 (100%):** Added step 4.6 `_rerank_all_passages()` as parallel retrieval channel using Voyage rerank-2.5 cross-encoder on ALL sentences. Fixed critical dedup bug where PPR's non-zero scores for every passage silently prevented injection. Default: `ROUTE7_RERANK_ALL=1`, `ROUTE7_RERANK_ALL_TOP_K=50`. Latency overhead: ~400ms. See [§39](#39-route-7-corpus-wide-reranking--journey-from-53-to-5757-march-2-2026).
@@ -11510,3 +11513,89 @@ question and previously failed because schema NER entities were document-anchore
 OpenIE surface forms like "60 days", "180 days", "90 days" bridge documents naturally.
 
 Benchmark file: `benchmarks/route7_hipporag2_r4questions_20260303T195150Z.json`
+
+## §41. Section-Context OpenIE Batching & Deterministic Structured Extraction (2026-03-04)
+
+### Problem
+
+The OpenIE triple extraction pipeline (§40) used **sequential 5-sentence batching** — sentences were sent to the LLM in arbitrary groups of 5 regardless of document structure. This caused:
+1. **Missing context**: the LLM couldn't disambiguate pronouns or understand domain-specific terms without knowing which section a sentence belonged to
+2. **Cross-batch duplication**: the same relationship was extracted differently across batches
+3. **Wasted LLM calls**: signature blocks and letterhead sent to OpenIE for generic triple extraction when their structure is predictable
+
+### Design
+
+Two orthogonal improvements, controlled by feature flags:
+
+| Feature Flag | Values | Default |
+|---|---|---|
+| `OPENIE_BATCHING` | `section` / `sequential` | `section` |
+| `STRUCTURED_EXTRACTION` | `deterministic` / `llm` | `deterministic` |
+
+**Section-context batching** (`OPENIE_BATCHING=section`):
+- Groups sentences by `(document_id, section_path)` using `itertools.groupby`
+- Prepends context prefix: `"Section: {leaf_title}\n\n"` before the sentence block
+- Large sections (>15 sentences) split at `chunk_id` boundaries
+- Pattern ported from the native extractor's existing section-aware batching (`_extract_with_native_extractor_sentences`)
+
+**Deterministic extraction** (`STRUCTURED_EXTRACTION=deterministic`):
+- Routes `signature_party` and `letterhead` sentences to regex-based parsers instead of LLM
+- Signature parser: extracts name, role (via title regex), date → triples like `(name, signed as, role)`
+- Letterhead parser: extracts company, address, phone, email, website → triples like `(company, located at, address)`
+- All other content sentences continue to LLM OpenIE
+
+### Experiment Matrix
+
+Four configurations tested on 201 content sentences from `test-5pdfs-v2-fix2`:
+
+| Experiment | Entities | Rels | Unique Predicates | Time |
+|---|---|---|---|---|
+| **E0** sequential + llm (old) | 544 | 464 | 274 | 73.6s |
+| **E1** section + llm | 302 | 267 | 171 | 31.6s |
+| **E2** section + deterministic | 295 | 265 | 172 | 32.6s |
+| **E3** sequential + deterministic | 504 | 448 | 285 | 65.7s |
+
+Key observations:
+- Section batching (E1/E2) **halves extraction time** (31–33s vs 66–74s) — fewer, larger LLM calls
+- Section batching produces ~45% fewer entities — the LLM **deduplicates better** within coherent batches
+- Deterministic vs LLM for structured elements (E1 vs E2) shows minimal delta (7 entities) — only 3 structured sentences affected
+
+### Current Production vs E2 Quality Comparison
+
+Compared E2's extraction output against the entities/triples already stored in Neo4j (from the old sequential+llm code):
+
+| Metric | Current (prod) | E2 | Delta |
+|---|---|---|---|
+| Entities | 207 | 302 | +95 |
+| Triples | 619 | 261 | −358 |
+| Common entities | 88 | — | — |
+
+**Entities lost in E2 (119)** — predominantly generic/garbage, low retrieval value:
+- Generic nouns: `damage`, `charge`, `fee`, `deposit`, `date`, `flood`, `fire`, `cracks`, `smoke`
+- Vague references: `anyone`, `you`, `this`, `first`, `none`, `herewith`, `afterward`
+- Legal boilerplate: `counterclaim`, `cross claim`, `replevin`, `garnishment`
+
+**Entities new in E2 (214)** — specific, high retrieval value:
+- Real amounts: `29900 00`, `11200 00`, `2 900 00`, `5800 00`
+- Real addresses: `456 palm tree avenue honolulu hi 96815`, `480 willow glen drive chubbuck id 83202`
+- Real people/orgs: `elizabeth nolasco`, `fabrikam construction`, `contoso lifts llc`
+- Legal specifics: `the american arbitration association aaa`, `the applicable substantive law of the state of idaho`
+
+**Triple count drop (619→261)**: Current graph has many redundant/verbose triples (e.g., `agent shall obtain prior written approval` ×7, `all other warranties including implied w` ×16). Section context reduces cross-batch duplication.
+
+**Verdict**: E2 produces higher quality extraction — fewer garbage entities, more specific named entities, less redundant triples.
+
+### Files Changed
+
+- `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py`: Feature flags, `_section_context_prefix()`, `_build_section_batches()`, `_extract_deterministic_triples()`, routing logic in `_extract_openie_triples()`
+- `src/worker/hybrid_v2/services/neo4j_store.py`: Extended `get_sentences_by_group()` with `index_in_section`, `total_in_section`, `page`; section-aware ordering
+
+### Experiment Data Files
+
+- `experiment_section_context_20260304T075411Z.json` — 10-sentence smoke test
+- `experiment_section_context_20260304T075750Z.json` — full 201-sentence E0–E3 comparison
+- `comparison_current_vs_e2_20260304T080907Z.json` — current production vs E2 quality diff
+
+### Next Step
+
+Full reindex with E2 → deploy → Route 7 benchmark to validate retrieval quality is maintained (≥55/57).

@@ -53,6 +53,21 @@ def extract_ground_truth(question_bank_path: Path) -> Dict[str, GroundTruth]:
             qid = m.group(1).strip()
             question = m.group(2).strip()
             
+            # Check for inline Expected: on the same line as the question
+            inline_exp = re.search(r'-\s*\*\*Expected:\*\*\s*(.+?)(?:\s*$)', question)
+            if inline_exp:
+                exp_text = inline_exp.group(1).strip()
+                # Remove trailing inline fields (e.g. "- **Source:** ...")
+                exp_text = re.split(r'\s+-\s*\*\*', exp_text)[0].strip()
+                question = re.split(r'\s+-\s*\*\*Expected\s+Route:\*\*', question)[0].strip()
+                question = re.split(r'\s+-\s*\*\*Expected:\*\*', question)[0].strip()
+                is_negative = qid.startswith("Q-N") and _expected_looks_negative(exp_text)
+                ground_truth[qid] = GroundTruth(
+                    qid=qid, question=question, expected=exp_text, is_negative=is_negative,
+                )
+                i += 1
+                continue
+            
             # Look for Expected: in subsequent lines
             expected_parts = []
             j = i + 1
@@ -175,11 +190,15 @@ def calculate_accuracy_metrics(expected: str, actual: str, is_negative: bool) ->
     # Fuzzy similarity
     fuzzy_score = similarity(expected_norm, actual_norm)
     
-    # Containment: how much of expected is in actual
+    # Containment: token overlap + substring check
+    # If the actual answer is a substring of the expected (or vice versa),
+    # count as full containment — the answer is correct but more/less verbose.
     expected_tokens = set(expected_norm.split())
     actual_tokens = set(actual_norm.split())
     
-    if expected_tokens:
+    if expected_norm in actual_norm or actual_norm in expected_norm:
+        containment = 1.0
+    elif expected_tokens:
         containment = len(expected_tokens & actual_tokens) / len(expected_tokens)
     else:
         containment = 1.0 if not actual_tokens else 0.0

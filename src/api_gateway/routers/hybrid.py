@@ -220,6 +220,10 @@ class HybridQueryRequest(BaseModel):
         default=None,
         description="ISO 639-1 language code for the response (e.g., 'en', 'fr', 'ja'). When set, the synthesis LLM is instructed to respond in this language. If None, the LLM responds in the language of the query."
     )
+    query_mode: Optional[str] = Field(
+        default=None,
+        description="Query mode hint for Route 7 presets. Options: 'local_search' (fast factual, top_k=5, concise), 'global_search' (broad, top_k=15), 'drift_multi_hop' (full context, top_k=20). Only applies when force_route=hipporag2_search."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -459,6 +463,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
                 synthesis_model=body.synthesis_model,
                 include_context=body.include_context,
                 language=body.language,
+                query_mode=body.query_mode,
             )
         else:
             result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language)

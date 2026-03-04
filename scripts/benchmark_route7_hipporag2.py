@@ -251,6 +251,7 @@ def benchmark_scenario(
     ground_truth: Dict[str, GroundTruth],
     synthesis_model: Optional[str] = None, include_context: bool = False,
     no_auth: bool = False, query_delay: float = 0,
+    query_mode: Optional[str] = None,
 ) -> Dict[str, Any]:
     print(f"\n{'=' * 70}")
     print(f"Scenario: {scenario_name} (response_type={response_type})")
@@ -293,6 +294,8 @@ def benchmark_scenario(
                 payload["synthesis_model"] = synthesis_model
             if include_context:
                 payload["include_context"] = True
+            if query_mode:
+                payload["query_mode"] = query_mode
 
             status, resp, elapsed, err = _http_post_json(
                 url=url, headers=headers, payload=payload, timeout_s=timeout_s,
@@ -513,6 +516,11 @@ def main():
         choices=["hipporag2_search", "concept_search", "local_search", "global_search", "drift_multi_hop", "auto"],
         help="Override FORCE_ROUTE (default: hipporag2_search). Use 'concept_search' for Route 6, 'auto' to use the auto-router without any force_route.",
     )
+    parser.add_argument(
+        "--query-mode", type=str, default=None,
+        choices=["local_search", "global_search", "drift_multi_hop"],
+        help="Route 7 query_mode preset. Use 'local_search' for fast factual (top_k=5, concise), 'global_search' for broad (top_k=15), 'drift_multi_hop' for full context (top_k=20). Only applies with force_route=hipporag2_search.",
+    )
 
     args = parser.parse_args()
 
@@ -566,6 +574,13 @@ def main():
         print(f"Synthesis model override: {args.synthesis_model}")
     if args.include_context:
         print("Including LLM context in output")
+    if args.query_mode:
+        print(f"Query mode: {args.query_mode}")
+
+    # When query_mode is set, reflect it in the label for distinct output filenames
+    effective_label = ROUTE_LABEL
+    if args.query_mode:
+        effective_label = f"{ROUTE_LABEL}_qm-{args.query_mode}"
 
     result = benchmark_scenario(
         api_base_url=args.url, group_id=args.group_id, questions=questions,
@@ -573,13 +588,14 @@ def main():
         repeats=args.repeats, timeout_s=args.timeout, ground_truth=ground_truth,
         synthesis_model=args.synthesis_model, include_context=args.include_context,
         no_auth=args.no_auth, query_delay=args.query_delay,
+        query_mode=args.query_mode,
     )
 
     out_dir = Path(__file__).resolve().parents[1] / "benchmarks"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_json = out_dir / f"{ROUTE_LABEL}_{qset_label}_{timestamp}.json"
-    out_md = out_dir / f"{ROUTE_LABEL}_{qset_label}_{timestamp}.md"
+    out_json = out_dir / f"{effective_label}_{qset_label}_{timestamp}.json"
+    out_md = out_dir / f"{effective_label}_{qset_label}_{timestamp}.md"
 
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(
@@ -588,6 +604,7 @@ def main():
                 "api_base_url": args.url,
                 "group_id": args.group_id,
                 "force_route": FORCE_ROUTE,
+                "query_mode": args.query_mode,
                 "response_type": args.response_type,
                 "synthesis_model": args.synthesis_model or "default",
                 "comparison_baseline": "route5_unified (53/57)",

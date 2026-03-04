@@ -167,12 +167,28 @@ sequenceDiagram
 - **Azure Blob Storage**: Stores original documents and processed content
 - **Application Insights**: Provides monitoring and telemetry
 
+## Speech Input/Output
+
+Browser-based speech input and output are **enabled by default**. No additional Azure resources are required for these features.
+
+| Feature | Component | API | Default |
+|---|---|---|---|
+| 🎤 Speech Input | `SpeechInput.tsx` | Browser [Speech Recognition API](https://developer.mozilla.org/docs/Web/API/SpeechRecognition) | **Enabled** |
+| 🔊 Speech Output (Browser) | `SpeechOutputBrowser.tsx` | Browser [Speech Synthesis API](https://developer.mozilla.org/docs/Web/API/SpeechSynthesis) | **Enabled** |
+| 🔊 Speech Output (Azure) | `SpeechOutputAzure.tsx` | [Azure Speech Service](https://learn.microsoft.com/azure/ai-services/speech-service/overview) | Disabled |
+
+- **Speech Input** renders a microphone button in the chat input bar. It converts spoken words to text via the browser's native Web Speech API, with automatic locale matching.
+- **Speech Output (Browser)** renders a speaker button on each answer bubble. It reads the answer aloud using the browser's `speechSynthesis` API.
+- **Speech Output (Azure)** is an alternative TTS option that uses Azure Speech Service for higher-quality voices. It requires a provisioned Azure Speech resource (`AZURE_SPEECH_SERVICE_ID`, `AZURE_SPEECH_SERVICE_LOCATION`) and incurs [additional costs](https://azure.microsoft.com/pricing/details/cognitive-services/speech-services/).
+
+All three features are controlled by environment variables (`USE_SPEECH_INPUT_BROWSER`, `USE_SPEECH_OUTPUT_BROWSER`, `USE_SPEECH_OUTPUT_AZURE`) and feature-flagged through the `/config` API endpoint. The frontend renders the corresponding components only when enabled. Browser API availability varies by browser/OS; the components gracefully hide themselves when unsupported.
+
 ## Optional Features
 
 The architecture supports several optional features that can be enabled. For detailed configuration instructions, see the [optional features guide](deploy_features.md):
 
 - **GPT-4 with Vision**: Process image-heavy documents
-- **Speech Services**: Voice input/output capabilities
+- **Speech Services**: Voice input/output capabilities (browser-based enabled by default; see above)
 - **Chat History**: Persistent conversation storage in Cosmos DB
 - **Authentication**: User login and access control
 - **Private Endpoints**: Network isolation for enhanced security

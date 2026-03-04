@@ -1076,15 +1076,18 @@ class Neo4jStoreV3:
         """Fetch all Sentence nodes for a group_id.
 
         Returns list of dicts with keys: id, text, chunk_id, document_id,
-        source, section_path.
+        source, section_path, index_in_section, total_in_section, page.
         Used by Phase B sentence-based entity extraction.
         """
         query = """
         MATCH (s:Sentence {group_id: $group_id})
         RETURN s.id AS id, s.text AS text, s.chunk_id AS chunk_id,
                s.document_id AS document_id, s.source AS source,
-               s.section_path AS section_path
-        ORDER BY s.document_id, s.chunk_id, s.index_in_chunk
+               s.section_path AS section_path,
+               s.index_in_section AS index_in_section,
+               s.total_in_section AS total_in_section,
+               s.page AS page
+        ORDER BY s.document_id, s.section_path, s.index_in_section
         """
         with self.get_retry_session() as session:
             result = session.run(query, group_id=group_id)
@@ -1096,6 +1099,9 @@ class Neo4jStoreV3:
                     "document_id": record["document_id"],
                     "source": record["source"],
                     "section_path": record["section_path"] or "",
+                    "index_in_section": record["index_in_section"] or 0,
+                    "total_in_section": record["total_in_section"] or 0,
+                    "page": record["page"],
                 }
                 for record in result
             ]

@@ -206,6 +206,11 @@ class LazyGraphRAGIndexingPipeline:
         # Chunking strategy: "section_aware" (default) or "sliding_3sentence"
         self._chunk_strategy = os.getenv("CHUNK_STRATEGY", "section_aware")
 
+        # OpenIE batching: "section" (group by section + title prefix) or "sequential" (legacy 5-sentence)
+        self._openie_batching = os.getenv("OPENIE_BATCHING", "section")
+        # Structured extraction: "deterministic" (rules for sig/letterhead) or "llm" (send to OpenIE)
+        self._structured_extraction = os.getenv("STRUCTURED_EXTRACTION", "deterministic")
+
     async def index_documents(
         self,
         *,
@@ -1412,6 +1417,158 @@ Return ONLY valid JSON (no markdown fences):
   ...
 ]}}"""
 
+    @staticmethod
+    def _leaf_section_title(section_path: str) -> str:
+        """Extract the leaf section title from a ' > ' delimited path."""
+        if not section_path:
+            return ""
+        return section_path.split(" > ")[-1].strip()
+
+    @staticmethod
+    def _section_context_prefix(section_path: str) -> str:
+        """Build a context prefix line for an OpenIE batch."""
+        if not section_path:
+            return ""
+        if section_path == "[Signature Block]":
+            return "Signature Block:\n\n"
+        if section_path == "[Letterhead]":
+            return "Letterhead:\n\n"
+        if section_path in ("[Page Footer]", "[Page Header]"):
+            return ""
+        title = section_path.split(" > ")[-1].strip()
+        return f"Section: {title}\n\n" if title else ""
+
+    # ── Deterministic triple extraction for structured elements ──────
+
+    _SIG_ROLE_PATTERN = re.compile(
+        r'\b(CEO|CFO|COO|CTO|CIO|CMO|President|Vice\s*President|VP|'
+        r'Director|Manager|Officer|Partner|Attorney|Counsel|'
+        r'Secretary|Treasurer|Representative|Agent|Broker|'
+        r'Supervisor|Superintendent|Inspector|Engineer|Architect|'
+        r'Authorized\s+(?:Signatory|Representative|Agent))\b',
+        re.IGNORECASE,
+    )
+    _DATE_PATTERN = re.compile(
+        r'\b(?:'
+        r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
+        r'\s+\d{1,2},?\s+\d{4}'
+        r'|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}'
+        r'|\d{4}[/-]\d{1,2}[/-]\d{1,2}'
+        r')\b',
+        re.IGNORECASE,
+    )
+
+    def _extract_deterministic_triples(
+        self,
+        sentences: List[Dict[str, Any]],
+        group_id: str,
+    ) -> Tuple[List[Dict[str, str]], int]:
+        """Extract triples from structured elements (signature, letterhead) using rules.
+
+        Returns (raw_triples, count) in the same format as LLM triples:
+        [{"sid": ..., "s": ..., "p": ..., "o": ...}, ...]
+        """
+        triples: List[Dict[str, str]] = []
+
+        for s in sentences:
+            sid = s["id"]
+            text = s.get("text", "")
+            source = s.get("source", "")
+
+            if source == "signature_party":
+                triples.extend(self._deterministic_signature_triples(sid, text))
+            elif source == "letterhead":
+                triples.extend(self._deterministic_letterhead_triples(sid, text))
+
+        return triples, len(triples)
+
+    def _deterministic_signature_triples(
+        self, sid: str, text: str
+    ) -> List[Dict[str, str]]:
+        """Parse joined signature text into triples.
+
+        Input example: "John Smith. CEO. December 15, 2025"
+        Output: [{"sid": ..., "s": "john smith", "p": "signed as", "o": "ceo"}, ...]
+        """
+        parts = [p.strip() for p in text.split(". ") if p.strip()]
+        if not parts:
+            return []
+
+        triples: List[Dict[str, str]] = []
+        name = None
+        role = None
+        date = None
+
+        for part in parts:
+            if self._DATE_PATTERN.search(part):
+                date = part
+            elif self._SIG_ROLE_PATTERN.search(part):
+                role = part
+            elif name is None:
+                name = part
+            # Additional name-like parts after first are ignored
+
+        if not name:
+            return []
+
+        if role:
+            triples.append({"sid": sid, "s": name, "p": "signed as", "o": role})
+        if date:
+            triples.append({"sid": sid, "s": name, "p": "signed on", "o": date})
+        if not role and not date:
+            # Fallback: at least record the signer
+            triples.append({"sid": sid, "s": name, "p": "is", "o": "signatory"})
+
+        return triples
+
+    def _deterministic_letterhead_triples(
+        self, sid: str, text: str
+    ) -> List[Dict[str, str]]:
+        """Parse joined letterhead text into triples.
+
+        Input example: "SolarTech Inc. 123 Main Street. San Francisco, CA 94102. (800) 555-0100"
+        Output: [{"sid": ..., "s": "solartech inc", "p": "located at", "o": "123 main street ..."}, ...]
+        """
+        parts = [p.strip() for p in text.split(". ") if p.strip()]
+        if not parts:
+            return []
+
+        triples: List[Dict[str, str]] = []
+        company = parts[0]  # First part is typically the company name
+
+        # Collect address parts, phone, email
+        address_parts: List[str] = []
+        phone = None
+        email = None
+        website = None
+
+        for part in parts[1:]:
+            if re.match(r'[\(\+]?\d[\d\s\-\(\)]{6,}', part):
+                phone = part
+            elif '@' in part:
+                email = part
+            elif re.match(r'(?:www\.|https?://)', part, re.IGNORECASE):
+                website = part
+            else:
+                address_parts.append(part)
+
+        if address_parts:
+            addr = ", ".join(address_parts)
+            triples.append({"sid": sid, "s": company, "p": "located at", "o": addr})
+        if phone:
+            triples.append({"sid": sid, "s": company, "p": "has phone", "o": phone})
+        if email:
+            triples.append({"sid": sid, "s": company, "p": "has email", "o": email})
+        if website:
+            triples.append({"sid": sid, "s": company, "p": "has website", "o": website})
+        if not triples:
+            # Fallback: at least record the company as an entity
+            triples.append({"sid": sid, "s": company, "p": "is", "o": "organization"})
+
+        return triples
+
+    # ── Main OpenIE extraction method ────────────────────────────────
+
     async def _extract_openie_triples(
         self,
         *,
@@ -1425,8 +1582,13 @@ Return ONLY valid JSON (no markdown fences):
         Subjects and objects become Entity nodes (untyped surface forms).
         Predicates become RELATED_TO edge descriptions.
 
-        This replaces the schema-guided NER as the primary entity extraction
-        path, matching upstream HippoRAG 2's OpenIE-first design.
+        Supports two batching modes (env OPENIE_BATCHING):
+        - "section": group by (document_id, section_path) with title prefix
+        - "sequential": legacy 5-sentence sequential batches
+
+        Supports two structured extraction modes (env STRUCTURED_EXTRACTION):
+        - "deterministic": rules for signature_party / letterhead sentences
+        - "llm": send all content sentences to OpenIE LLM
 
         Returns entities and relationships to merge before dedup (step 6).
         """
@@ -1442,18 +1604,55 @@ Return ONLY valid JSON (no markdown fences):
         if not content_sentences:
             return [], []
 
-        BATCH_SIZE = 5
         all_raw_triples: List[Dict[str, str]] = []
+        deterministic_count = 0
 
-        # Process in batches of 5 sentences with concurrent LLM calls
-        batches: List[List[Dict[str, Any]]] = []
-        for i in range(0, len(content_sentences), BATCH_SIZE):
-            batches.append(content_sentences[i : i + BATCH_SIZE])
+        # ── Route structured sentences to deterministic or LLM path ──
+        _STRUCTURED_SOURCES = {"signature_party", "letterhead"}
+        if self._structured_extraction == "deterministic":
+            structured = [s for s in content_sentences if s.get("source") in _STRUCTURED_SOURCES]
+            llm_sentences = [s for s in content_sentences if s.get("source") not in _STRUCTURED_SOURCES]
+            if structured:
+                det_triples, deterministic_count = self._extract_deterministic_triples(structured, group_id)
+                all_raw_triples.extend(det_triples)
+                logger.info(
+                    "deterministic_extraction_done",
+                    extra={
+                        "group_id": group_id,
+                        "structured_sentences": len(structured),
+                        "deterministic_triples": deterministic_count,
+                    },
+                )
+        else:
+            llm_sentences = content_sentences
+
+        # ── Build batches for LLM OpenIE ─────────────────────────────
+        if self._openie_batching == "section":
+            batches = self._build_section_batches(llm_sentences)
+        else:
+            # Legacy sequential batching
+            BATCH_SIZE = 5
+            batches = [
+                (llm_sentences[i : i + BATCH_SIZE], "")
+                for i in range(0, len(llm_sentences), BATCH_SIZE)
+            ]
+
+        logger.info(
+            "openie_batching",
+            extra={
+                "group_id": group_id,
+                "mode": self._openie_batching,
+                "structured_mode": self._structured_extraction,
+                "llm_sentences": len(llm_sentences),
+                "batches": len(batches),
+                "deterministic_triples": deterministic_count,
+            },
+        )
 
         sem = asyncio.Semaphore(4)  # max 4 concurrent LLM calls
 
-        async def _extract_batch(batch: List[Dict[str, Any]]) -> List[Dict[str, str]]:
-            sentence_block = "\n".join(
+        async def _extract_batch(batch: List[Dict[str, Any]], context: str) -> List[Dict[str, str]]:
+            sentence_block = context + "\n".join(
                 f"[{s['id']}]: {s['text']}" for s in batch
             )
             prompt = self._OPENIE_PROMPT.format(sentences=sentence_block)
@@ -1476,9 +1675,10 @@ Return ONLY valid JSON (no markdown fences):
                     logger.debug(f"OpenIE batch failed: {e}")
                     return []
 
-        results = await asyncio.gather(*[_extract_batch(b) for b in batches])
-        for batch_triples in results:
-            all_raw_triples.extend(batch_triples)
+        if batches:
+            results = await asyncio.gather(*[_extract_batch(b, ctx) for b, ctx in batches])
+            for batch_triples in results:
+                all_raw_triples.extend(batch_triples)
 
         if not all_raw_triples:
             return [], []
@@ -1574,14 +1774,51 @@ Return ONLY valid JSON (no markdown fences):
             extra={
                 "group_id": group_id,
                 "sentences_processed": len(content_sentences),
+                "llm_sentences": len(llm_sentences),
                 "raw_triples": len(all_raw_triples),
+                "deterministic_triples": deterministic_count,
                 "entities_created": len(entities),
                 "relationships_created": len(openie_rels),
                 "mentions_from_triples": sum(len(entity_sids.get(k, set())) for k in entity_map),
                 "skipped_garbage_entities": skipped_garbage,
+                "batching_mode": self._openie_batching,
+                "structured_mode": self._structured_extraction,
             },
         )
         return entities, openie_rels
+
+    def _build_section_batches(
+        self, sentences: List[Dict[str, Any]]
+    ) -> List[Tuple[List[Dict[str, Any]], str]]:
+        """Group sentences by (document_id, section_path) with context prefix.
+
+        Ported from the native extractor's section-aware batching pattern
+        (see _extract_with_native_extractor_sentences).
+
+        Large sections (>MAX_SECTION_BATCH) are split at chunk_id boundaries.
+        """
+        from itertools import groupby as _groupby
+
+        MAX_SECTION_BATCH = 15
+
+        def _section_key(s: Dict[str, Any]) -> Tuple[str, str]:
+            return (s.get("document_id", ""), s.get("section_path", ""))
+
+        batches: List[Tuple[List[Dict[str, Any]], str]] = []
+        for (_doc_id, _sec_path), grp in _groupby(sentences, key=_section_key):
+            section_sents = list(grp)
+            context = self._section_context_prefix(_sec_path)
+
+            if len(section_sents) <= MAX_SECTION_BATCH:
+                batches.append((section_sents, context))
+            else:
+                # Split at chunk_id boundaries for very large sections
+                for _, chunk_grp in _groupby(
+                    section_sents, key=lambda s: s.get("chunk_id", "")
+                ):
+                    batches.append((list(chunk_grp), context))
+
+        return batches
 
 
     async def _extract_with_native_extractor_sentences(

@@ -70,11 +70,59 @@ class DocumentSyncService:
                 self._pipeline = get_lazygraphrag_indexing_pipeline_v2()
         return self._pipeline
 
+    async def _delete_existing_document(
+        self, group_id: str, blob_url: str
+    ) -> Optional[str]:
+        """Delete any existing document with the same source URL (handles overwrites).
+
+        Returns the deleted document ID, or None if no prior version existed.
+        """
+        try:
+            def _find_and_delete():
+                with self.neo4j_store.driver.session(
+                    database=self.neo4j_store.database
+                ) as session:
+                    result = session.run(
+                        "MATCH (d:Document {group_id: $gid}) "
+                        "WHERE d.source = $url "
+                        "RETURN d.id AS doc_id LIMIT 1",
+                        gid=group_id,
+                        url=blob_url,
+                    )
+                    record = result.single()
+                    return record["doc_id"] if record else None
+
+            existing_id = await asyncio.to_thread(_find_and_delete)
+            if existing_id:
+                await self.lifecycle.hard_delete_document(group_id, existing_id)
+                logger.info(
+                    "doc_sync_overwrite_cleaned",
+                    extra={
+                        "group_id": group_id,
+                        "old_doc_id": existing_id,
+                        "source": blob_url,
+                    },
+                )
+            return existing_id
+        except Exception as e:
+            logger.warning(
+                "doc_sync_overwrite_cleanup_failed",
+                extra={"group_id": group_id, "error": str(e)},
+            )
+            return None
+
     async def on_file_uploaded(
         self, group_id: str, filename: str, blob_url: str
     ) -> None:
-        """Trigger indexing for a newly uploaded file."""
+        """Trigger indexing for a newly uploaded file.
+
+        If a document with the same source URL already exists (overwrite),
+        hard-deletes it first to prevent orphan entities.
+        """
         try:
+            # Clean previous version if this is an overwrite
+            await self._delete_existing_document(group_id, blob_url)
+
             docs = [
                 {
                     "content": "",
@@ -86,7 +134,7 @@ class DocumentSyncService:
             stats = await self.pipeline.index_documents(
                 group_id=group_id,
                 documents=docs,
-                ingestion="azure_di",
+                ingestion="document-intelligence",
             )
             logger.info(
                 "doc_sync_upload_indexed",
@@ -107,7 +155,12 @@ class DocumentSyncService:
             )
 
     async def on_file_deleted(self, group_id: str, filename: str) -> None:
-        """Hard-delete document and all children from Neo4j."""
+        """Hard-delete document and all children from Neo4j.
+
+        Sets gds_stale=true on GroupMeta. The next index_documents() call
+        (e.g., on next upload) will recompute GDS for the whole group.
+        Manual recompute: POST /api/v2/maintenance/groups/{group_id}/recompute-gds
+        """
         try:
             # hard_delete_document is async def but uses sync driver internally
             result = await self.lifecycle.hard_delete_document(group_id, filename)

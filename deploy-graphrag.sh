@@ -54,6 +54,7 @@ AZURE_RESOURCE_GROUP=$(get_env_value_or_default "AZURE_RESOURCE_GROUP" "rg-graph
 AZURE_LOCATION=$(get_env_value_or_default "AZURE_LOCATION" "swedencentral")
 CONTAINER_REGISTRY_NAME=$(get_env_value_or_default "CONTAINER_REGISTRY_NAME" "graphragacr12153" true)
 CONTAINER_APP_API=$(get_env_value_or_default "CONTAINER_APP_API" "graphrag-api")
+CONTAINER_APP_API_B2C=$(get_env_value_or_default "CONTAINER_APP_API_B2C" "graphrag-api-b2c")
 CONTAINER_APP_WORKER=$(get_env_value_or_default "CONTAINER_APP_WORKER" "graphrag-worker")
 CONTAINER_APP_ENVIRONMENT=$(get_env_value_or_default "CONTAINER_APP_ENVIRONMENT" "graphrag-env")
 AZURE_ENV_IMAGETAG=$(get_env_value_or_default "AZURE_ENV_IMAGETAG" "")
@@ -89,6 +90,7 @@ echo "Resource Group:       $AZURE_RESOURCE_GROUP"
 echo "Location:             $AZURE_LOCATION"
 echo "Container Registry:   $CONTAINER_REGISTRY_NAME"
 echo "Container App (API):   $CONTAINER_APP_API"
+echo "Container App (B2C):   $CONTAINER_APP_API_B2C"
 echo "Container App (Worker):$CONTAINER_APP_WORKER"
 echo "Image Tag:            $AZURE_ENV_IMAGETAG"
 echo "DI Endpoint:          ${AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT:-${AZURE_CONTENT_UNDERSTANDING_ENDPOINT:-<unset>}}"
@@ -176,16 +178,22 @@ echo "=================================================="
 echo "🚀 Updating Container Apps"
 echo "=================================================="
 
-for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
+for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WORKER"; do
     CA_EXISTS=$(az containerapp show \
         --name "$CA_NAME" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
         --query name -o tsv 2>/dev/null || echo "")
     if [ -z "$CA_EXISTS" ]; then
-        echo "❌ Container App '$CA_NAME' not found in resource group '$AZURE_RESOURCE_GROUP'"
-        exit 1
+        if [ "$CA_NAME" = "$CONTAINER_APP_API_B2C" ]; then
+            echo "⚠️  B2C Container App '$CA_NAME' not found — skipping (optional)"
+            SKIP_B2C=true
+        else
+            echo "❌ Container App '$CA_NAME' not found in resource group '$AZURE_RESOURCE_GROUP'"
+            exit 1
+        fi
+    else
+        echo "✅ Container App found: $CA_NAME"
     fi
-    echo "✅ Container App found: $CA_NAME"
 done
 echo ""
 
@@ -210,8 +218,9 @@ if [ -z "$CONTAINER_APP_USER_IDENTITY_ID" ]; then
     fi
 fi
 
-# Ensure ACR registry auth is configured on both container apps
-for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
+# Ensure ACR registry auth is configured on all container apps
+for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WORKER"; do
+    if [ "$CA_NAME" = "$CONTAINER_APP_API_B2C" ] && [ "${SKIP_B2C:-}" = "true" ]; then continue; fi
     EXISTING_REGISTRY=$(az containerapp show \
         --name "$CA_NAME" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -291,7 +300,8 @@ _SECRETS_TO_SET=""
 
 if [ -n "$_SECRETS_TO_SET" ]; then
     echo "🔑 Updating Container App secrets..."
-    for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_WORKER"; do
+    for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WORKER"; do
+        if [ "$CA_NAME" = "$CONTAINER_APP_API_B2C" ] && [ "${SKIP_B2C:-}" = "true" ]; then continue; fi
         az containerapp secret set \
             --name "$CA_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -370,6 +380,17 @@ az containerapp update \
     --set-env-vars "${ENV_VARS[@]}" \
     --only-show-errors
 echo "✅ $CONTAINER_APP_API updated"
+
+# Update graphrag-api-b2c (image only — preserves its own auth env vars)
+if [ "${SKIP_B2C:-}" != "true" ]; then
+    echo "⏳ Updating $CONTAINER_APP_API_B2C with $API_IMAGE_URI..."
+    az containerapp update \
+        --name "$CONTAINER_APP_API_B2C" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --image "$API_IMAGE_URI" \
+        --only-show-errors
+    echo "✅ $CONTAINER_APP_API_B2C updated"
+fi
 
 # Update graphrag-worker
 echo "⏳ Updating $CONTAINER_APP_WORKER with $WORKER_IMAGE_URI..."

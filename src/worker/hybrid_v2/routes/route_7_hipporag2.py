@@ -436,9 +436,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             _scores = [s for _, s in dpr_results]
             _s_min, _s_max = min(_scores), max(_scores)
             _spread = _s_max - _s_min if _s_max > _s_min else 1.0
-            for chunk_id, score in dpr_results:
+            for sentence_id, score in dpr_results:
                 normalized = (score - _s_min) / _spread
-                passage_seeds[chunk_id] = normalized * passage_node_weight
+                passage_seeds[sentence_id] = normalized * passage_node_weight
 
         timings_ms["step_3_seed_build_ms"] = int((time.perf_counter() - t0) * 1000)
 
@@ -612,18 +612,18 @@ class HippoRAG2Handler(BaseRouteHandler):
             )
 
         top_passage_scores = passage_scores[:passage_limit]
-        top_chunk_ids = [cid for cid, _ in top_passage_scores]
+        top_sentence_ids = [cid for cid, _ in top_passage_scores]
         ppr_scores_map = {cid: score for cid, score in top_passage_scores}
 
-        # Launch parallel tasks: entity-doc map + chunk text fetch
+        # Launch parallel tasks: entity-doc map + sentence text fetch
         t0 = time.perf_counter()
 
         _parallel_tasks: List[Tuple[str, Any]] = []
 
-        # Chunk text fetch (always needed for synthesis)
+        # Sentence text fetch (always needed for synthesis)
         _parallel_tasks.append((
             "chunks",
-            self._fetch_chunks_by_ids(top_chunk_ids, ppr_scores_map=ppr_scores_map),
+            self._fetch_sentences_by_ids(top_sentence_ids, ppr_scores_map=ppr_scores_map),
         ))
 
         # Entity-doc map (conditional: only for exhaustive enumeration queries)
@@ -846,7 +846,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         if include_context:
             metadata["ppr_top_passages"] = [
-                {"chunk_id": cid, "score": round(s, 6)}
+                {"sentence_id": cid, "score": round(s, 6)}
                 for cid, s in passage_scores[:10]
             ]
             metadata["ppr_top_entities"] = [
@@ -1158,9 +1158,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             WITH s, score, d
             WHERE $folder_id IS NULL OR d IS NULL
                OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-            RETURN s.id AS chunk_id, score
+            RETURN s.id AS sentence_id, score
         }
-        RETURN chunk_id, max(score) AS score
+        RETURN sentence_id, max(score) AS score
         ORDER BY score DESC
         LIMIT $top_k
         """
@@ -1176,7 +1176,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         top_k=top_k,
                         folder_id=folder_id,
                     )
-                    return [(r["chunk_id"], r["score"]) for r in records]
+                    return [(r["sentence_id"], r["score"]) for r in records]
 
             results = await asyncio.to_thread(_run_sentence)
             logger.debug("route7_dpr_sentence_complete", hits=len(results),
@@ -1187,44 +1187,44 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
     # ======================================================================
-    # Fetch Chunk Texts by IDs
+    # Fetch Sentence Texts by IDs
     # ======================================================================
 
-    async def _fetch_chunks_by_ids(
+    async def _fetch_sentences_by_ids(
         self,
-        chunk_ids: List[str],
+        sentence_ids: List[str],
         ppr_scores_map: Optional[Dict[str, float]] = None,
         entity_names: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Fetch chunk text + metadata from Neo4j by chunk IDs.
+        """Fetch sentence text + metadata from Neo4j by sentence IDs.
 
         Uses single-sentence ``node.text`` as synthesis context.  When
         *entity_names* is provided, builds focused 3-sentence windows
         around sentences that mention those entities (via graph MENTIONS
-        edges), falling back to full chunk text otherwise.
+        edges), falling back to full sentence text otherwise.
 
-        Returns flat list of chunk dicts in the format expected by the
+        Returns flat list of sentence dicts in the format expected by the
         synthesizer's ``pre_fetched_chunks`` parameter, sorted by PPR
         score descending when ``ppr_scores_map`` is provided.
         """
-        if not chunk_ids or not self.neo4j_driver:
+        if not sentence_ids or not self.neo4j_driver:
             return []
 
         group_id = self.group_id
         driver = self.neo4j_driver
 
         # ── Pass 1: Sentence metadata ──
-        cypher_chunks = """
-        UNWIND $chunk_ids AS cid
+        cypher_sentences = """
+        UNWIND $sentence_ids AS cid
         MATCH (node:Sentence {id: cid, group_id: $group_id})
         OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)
         WITH cid, node, d
         WHERE $folder_id IS NULL OR d IS NULL
            OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
-        RETURN cid AS chunk_id,
+        RETURN cid AS sentence_id,
                coalesce(node.text, '') AS text,
-               coalesce(node.index_in_doc, 0) AS chunk_index,
+               coalesce(node.index_in_doc, 0) AS index_in_doc,
                node.hierarchical_id AS hierarchical_id,
                d.id AS document_id, d.title AS document_title,
                s.title AS section_title, s.id AS section_id
@@ -1234,8 +1234,8 @@ class HippoRAG2Handler(BaseRouteHandler):
             def _run():
                 with retry_session(driver, read_only=True) as session:
                     records = session.run(
-                        cypher_chunks,
-                        chunk_ids=chunk_ids,
+                        cypher_sentences,
+                        sentence_ids=sentence_ids,
                         group_id=group_id,
                         folder_id=self.folder_id,
                     )
@@ -1247,7 +1247,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         scores = ppr_scores_map or {}
 
-        # ── Merge adjacent same-section chunks ──
+        # ── Merge adjacent same-section sentences ──
         from collections import defaultdict
 
         section_groups: dict[tuple, list] = defaultdict(list)
@@ -1259,13 +1259,13 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         merged_results: list[dict] = []
         for _key, group in section_groups.items():
-            group.sort(key=lambda x: x.get("chunk_index", 0))
+            group.sort(key=lambda x: x.get("index_in_doc", 0))
             merged = [group[0]]
             for r in group[1:]:
                 prev = merged[-1]
-                prev_idx = prev.get("chunk_index", 0)
-                curr_idx = r.get("chunk_index", 0)
-                merge_count = len(prev.get("_merged_ids", [prev.get("chunk_id", "")]))
+                prev_idx = prev.get("index_in_doc", 0)
+                curr_idx = r.get("index_in_doc", 0)
+                merge_count = len(prev.get("_merged_ids", [prev.get("sentence_id", "")]))
                 # Option B: use hierarchical_id section prefix for merge guard
                 prev_sec = (prev.get("hierarchical_id") or "").rsplit("-S", 1)[0]
                 curr_sec = (r.get("hierarchical_id") or "").rsplit("-S", 1)[0]
@@ -1275,16 +1275,16 @@ class HippoRAG2Handler(BaseRouteHandler):
                         (prev.get("text", "") + " " + r.get("text", ""))
                         .strip()
                     )
-                    prev["chunk_index"] = curr_idx
-                    prev.setdefault("_merged_ids", [prev.get("chunk_id", "")])
-                    prev["_merged_ids"].append(r.get("chunk_id", ""))
+                    prev["index_in_doc"] = curr_idx
+                    prev.setdefault("_merged_ids", [prev.get("sentence_id", "")])
+                    prev["_merged_ids"].append(r.get("sentence_id", ""))
                 else:
                     merged.append(r)
             merged_results.extend(merged)
 
         chunks_list: List[Dict[str, Any]] = []
         for r in merged_results:
-            cid = r.get("chunk_id", "")
+            cid = r.get("sentence_id", "")
             merged_ids = r.get("_merged_ids", [cid])
             best_score = max(scores.get(mid, 0.0) for mid in merged_ids) if scores else 0.0
 
@@ -1299,7 +1299,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 "metadata": {
                     "document_id": r.get("document_id", ""),
                     "section_path": r.get("section_title", ""),
-                    "chunk_index": r.get("chunk_index", 0),
+                    "index_in_doc": r.get("index_in_doc", 0),
                     "hierarchical_id": r.get("hierarchical_id", ""),
                 },
             })

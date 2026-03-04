@@ -167,6 +167,10 @@ sequenceDiagram
 - **Azure Blob Storage**: Stores original documents and processed content
 - **Application Insights**: Provides monitoring and telemetry
 
+## Multi-Language Support
+
+The language picker is **enabled by default** (`ENABLE_LANGUAGE_PICKER=true`), allowing users to switch the UI language. Supported languages: English, Spanish, French, Japanese, Danish, Dutch, Brazilian Portuguese, Turkish, Italian, and Polish. Locale files are in `app/frontend/src/locales/`. To add a language, create a new locale folder and register it in `app/frontend/src/i18n/config.ts`. Set `ENABLE_LANGUAGE_PICKER=false` to disable.
+
 ## Speech Input/Output
 
 Browser-based speech input and output are **enabled by default**. No additional Azure resources are required for these features.

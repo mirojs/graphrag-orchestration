@@ -5,6 +5,9 @@ param containerAppPrincipalIds array  // Array of principal IDs for multiple con
 param azureOpenAiName string
 param cosmosAccountName string
 
+@description('Name of the ADLS Gen2 user storage account (empty = skip user storage roles)')
+param userStorageAccountName string = ''
+
 // Reference existing Document Intelligence resource
 resource documentIntelligence 'Microsoft.CognitiveServices/accounts@2024-10-01' existing = {
   name: documentIntelligenceName
@@ -80,6 +83,23 @@ resource cosmosDataContributorRole 'Microsoft.Authorization/roleAssignments@2022
   scope: cosmosAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')
+    principalId: principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
+
+// Reference existing ADLS Gen2 user storage account (optional)
+resource userStorageAccount 'Microsoft.Storage/storageAccounts@2023-01-01' existing = if (!empty(userStorageAccountName)) {
+  name: userStorageAccountName
+}
+
+// Storage Blob Data Owner role on user storage (for each principal)
+// Required for ADLS Gen2 file operations: upload, delete, rename, move, ACL management
+resource userStorageBlobDataOwnerRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (principalId, i) in containerAppPrincipalIds: if (!empty(userStorageAccountName)) {
+  name: guid(userStorageAccount.id, principalId, 'storageBlobDataOwner-${i}')
+  scope: userStorageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')
     principalId: principalId
     principalType: 'ServicePrincipal'
   }

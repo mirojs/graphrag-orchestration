@@ -38,9 +38,9 @@ from src.worker.hybrid_v2.services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
 
-# Regex pattern to detect internal chunk-ID shaped entity names
+# Regex pattern to detect internal chunk/sentence-ID shaped entity names
 # These are artifacts from ingestion and should not be used as hub entities
-_CHUNK_ID_PATTERN = re.compile(r"^doc_[a-f0-9]{20,}_chunk_\d+", re.IGNORECASE)
+_CHUNK_ID_PATTERN = re.compile(r"^doc_[a-f0-9]{20,}_(chunk|sent)_\d+", re.IGNORECASE)
 
 # Regex patterns for detecting coverage-intent queries
 _COVERAGE_INTENT_PATTERNS = [

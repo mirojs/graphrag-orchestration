@@ -1,2 +1,0 @@
-GraphRAG Service: https://graphrag-orchestration.salmonhill-df6033f3.swedencentral.azurecontainerapps.io
-Neo4j URI: neo4j+s://a86dcf63.databases.neo4j.io

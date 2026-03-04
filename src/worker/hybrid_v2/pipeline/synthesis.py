@@ -464,7 +464,7 @@ class EvidenceSynthesizer:
                 source = chunk.document_source or chunk.document_title or "Unknown"
                 text_chunks.append(
                     {
-                        "id": chunk.chunk_id or f"chunk_{i}",
+                        "id": chunk.sentence_id or f"chunk_{i}",
                         "source": source,
                         "section": section_str,
                         "entity": chunk.entity_name,
@@ -742,9 +742,9 @@ class EvidenceSynthesizer:
                 
                 citation_map[citation_id] = {
                     "source": chunk.document_source or chunk.document_title,
-                    "chunk_id": chunk.chunk_id,
+                    "chunk_id": chunk.sentence_id,
                     "document": doc_title,  # Add document for proper attribution
-                    "document_id": chunk.document_id or "",  # Include document ID from SourceChunk
+                    "document_id": chunk.document_id or "",  # Include document ID from SourceSentence
                     "document_title": chunk.document_title or doc_title,  # Include document title
                     "section": section_str,
                     "entity": chunk.entity_name,
@@ -759,7 +759,7 @@ class EvidenceSynthesizer:
                 
                 logger.info(
                     "sentence_segmentation_per_chunk",
-                    chunk_id=chunk.chunk_id,
+                    sentence_id=chunk.sentence_id,
                     doc_id=chunk.document_id,
                     has_offsets=chunk.start_offset is not None and chunk.end_offset is not None,
                     start_offset=chunk.start_offset,
@@ -787,7 +787,7 @@ class EvidenceSynthesizer:
                         # Build sentence citation map entry
                         sentence_citation_map[sent_citation_id] = {
                             "source": chunk.document_source or chunk.document_title,
-                            "chunk_id": chunk.chunk_id,
+                            "chunk_id": chunk.sentence_id,
                             "document": doc_title,
                             "document_id": chunk.document_id or "",
                             "document_title": chunk.document_title or doc_title,
@@ -1482,14 +1482,14 @@ Response:"""
                     entity_scores["__vector_fallback__"] = fallback_score_cap
                     
                     for chunk_dict, sim_score in vector_results:
-                        chunk_id = chunk_dict.get("id", "")
-                        if chunk_id in existing_ids:
+                        sentence_id = chunk_dict.get("id", "")
+                        if sentence_id in existing_ids:
                             vector_duplicate += 1
                             continue
                         # Scale similarity into entity-score space
                         chunk_dict["_vector_similarity"] = sim_score
                         raw_chunks.append(("__vector_fallback__", chunk_dict))
-                        existing_ids.add(chunk_id)
+                        existing_ids.add(sentence_id)
                         vector_new += 1
                     
                     vector_fallback_stats.update({

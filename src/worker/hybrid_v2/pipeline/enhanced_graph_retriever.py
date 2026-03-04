@@ -65,9 +65,9 @@ _DATE_METADATA_PATTERNS = [
 
 
 @dataclass
-class SourceChunk:
-    """A source text chunk with metadata."""
-    chunk_id: str
+class SourceSentence:
+    """A source sentence with metadata."""
+    sentence_id: str
     text: str
     entity_name: str  # Which entity this was retrieved via
     section_path: List[str] = field(default_factory=list)
@@ -97,7 +97,7 @@ class EnhancedGraphContext:
     hub_entities: List[str]
     related_entities: List[str]
     relationships: List[EntityRelationship]
-    source_chunks: List[SourceChunk]
+    source_chunks: List[SourceSentence]
     entity_descriptions: Dict[str, str]
     
     def get_citations(self) -> List[Dict[str, Any]]:
@@ -105,7 +105,7 @@ class EnhancedGraphContext:
         citations = []
         for chunk in self.source_chunks:
             citations.append({
-                "id": chunk.chunk_id,
+                "id": chunk.sentence_id,
                 "text": chunk.text[:500],
                 "entity": chunk.entity_name,
                 "section": " > ".join(chunk.section_path) if chunk.section_path else None,
@@ -183,7 +183,7 @@ class EnhancedGraphRetriever:
         return " ".join("".join(out).split())
 
     @staticmethod
-    def _doc_key(chunk: SourceChunk) -> str:
+    def _doc_key(chunk: SourceSentence) -> str:
         """Stable key for per-document diversification.
 
         Prefer Document.id when available; fall back to source/title.
@@ -825,7 +825,7 @@ class EnhancedGraphRetriever:
         self,
         entity_names: List[str],
         max_per_entity: int = 3,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """
         Get source chunks for entities using 1-hop APPEARS_IN_SECTION edges.
         
@@ -841,7 +841,7 @@ class EnhancedGraphRetriever:
             max_per_entity: Maximum chunks to return per entity
             
         Returns:
-            List of SourceChunk objects with section and document metadata
+            List of SourceSentence objects with section and document metadata
         """
         if not entity_names:
             return []
@@ -872,7 +872,7 @@ class EnhancedGraphRetriever:
                      CASE WHEN exists((e)-[:MENTIONS]->(c)) THEN 1.0 ELSE 0.5 END AS score
                 ORDER BY score DESC, coalesce(c.chunk_index, 0)
                 WITH entity_name, collect({{
-                    chunk_id: c.id,
+                    sentence_id: c.id,
                     text: c.text,
                     metadata: c.metadata,
                     chunk_index: coalesce(c.chunk_index, 0),
@@ -886,7 +886,7 @@ class EnhancedGraphRetriever:
                 UNWIND chunks AS chunk
                 RETURN
                     entity_name,
-                    chunk.chunk_id AS chunk_id,
+                    chunk.sentence_id AS sentence_id,
                     chunk.text AS text,
                     chunk.metadata AS metadata,
                     chunk.section_id AS section_id,
@@ -913,7 +913,7 @@ class EnhancedGraphRetriever:
             
             records = await loop.run_in_executor(None, _run_query)
 
-            chunks: List[SourceChunk] = []
+            chunks: List[SourceSentence] = []
             for record in records:
                 metadata: Dict[str, Any] = {}
                 if record.get("metadata"):
@@ -929,8 +929,8 @@ class EnhancedGraphRetriever:
                     section_path = (record["section_path_key"] or "").split(" > ")
 
                 chunks.append(
-                    SourceChunk(
-                        chunk_id=record.get("chunk_id") or "",
+                    SourceSentence(
+                        sentence_id=record.get("sentence_id") or "",
                         text=record.get("text") or "",
                         entity_name=record.get("entity_name") or "",
                         section_path=section_path,
@@ -967,7 +967,7 @@ class EnhancedGraphRetriever:
         self,
         entity_names: List[str],
         max_per_entity: int = 3,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """
         Get source chunks that MENTION these entities.
 
@@ -1004,7 +1004,7 @@ class EnhancedGraphRetriever:
                 WITH entity_name, t, s, d
                 ORDER BY coalesce(t.chunk_index, 0), d.id
                 WITH entity_name, collect({{
-                        chunk_id: t.id,
+                        sentence_id: t.id,
                         text: t.text,
                         metadata: t.metadata,
                         chunk_index: coalesce(t.chunk_index, 0),
@@ -1017,7 +1017,7 @@ class EnhancedGraphRetriever:
                 UNWIND chunks AS chunk
                 RETURN
                         entity_name,
-                        chunk.chunk_id AS chunk_id,
+                        chunk.sentence_id AS sentence_id,
                         chunk.text AS text,
                         chunk.metadata AS metadata,
                         chunk.section_id AS section_id,
@@ -1052,7 +1052,7 @@ class EnhancedGraphRetriever:
                     d
                 ORDER BY score DESC
                 WITH entity_name, max_per_entity, collect({{
-                    chunk_id: t.id,
+                    sentence_id: t.id,
                     text: t.text,
                     metadata: t.metadata,
                     section_id: s.id,
@@ -1065,7 +1065,7 @@ class EnhancedGraphRetriever:
                 UNWIND chunks AS chunk
                 RETURN
                     entity_name,
-                    chunk.chunk_id AS chunk_id,
+                    chunk.sentence_id AS sentence_id,
                     chunk.text AS text,
                     chunk.metadata AS metadata,
                     chunk.section_id AS section_id,
@@ -1092,7 +1092,7 @@ class EnhancedGraphRetriever:
             
             records = await loop.run_in_executor(None, _run_query)
 
-            chunks: List[SourceChunk] = []
+            chunks: List[SourceSentence] = []
             for record in records:
                 metadata: Dict[str, Any] = {}
                 if record.get("metadata"):
@@ -1108,8 +1108,8 @@ class EnhancedGraphRetriever:
                     section_path = (record["section_path_key"] or "").split(" > ")
 
                 chunks.append(
-                    SourceChunk(
-                        chunk_id=record.get("chunk_id") or "",
+                    SourceSentence(
+                        sentence_id=record.get("sentence_id") or "",
                         text=record.get("text") or "",
                         entity_name=record.get("entity_name") or "",
                         section_path=section_path,
@@ -1163,8 +1163,8 @@ class EnhancedGraphRetriever:
                             section_path = (record["section_path_key"] or "").split(" > ")
 
                         chunks.append(
-                            SourceChunk(
-                                chunk_id=record.get("chunk_id") or "",
+                            SourceSentence(
+                                sentence_id=record.get("sentence_id") or "",
                                 text=record.get("text") or "",
                                 entity_name=record.get("entity_name") or "",
                                 section_path=section_path,
@@ -1199,7 +1199,7 @@ class EnhancedGraphRetriever:
         max_per_document: int = 5,
         max_total: int = 25,
         use_new_edges: bool = False,  # MENTIONS path is faster for chunk retrieval
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """
         Fetch text chunks for HippoRAG PPR evidence nodes (DETAIL RECOVERY).
         
@@ -1219,7 +1219,7 @@ class EnhancedGraphRetriever:
             max_total: Total cap on returned chunks
             
         Returns:
-            List of SourceChunks with section metadata, ordered by PPR relevance then diversified
+            List of SourceSentences with section metadata, ordered by PPR relevance then diversified
         """
         if not evidence_nodes:
             return []
@@ -1276,17 +1276,17 @@ class EnhancedGraphRetriever:
 
     async def _diversify_chunks_by_section(
         self,
-        chunks: List[SourceChunk],
+        chunks: List[SourceSentence],
         max_per_section: int = 3,
         max_per_document: int = 6,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Diversify chunks across sections and documents.
         
         Uses a greedy selection algorithm that respects per-section and per-document caps
         while preserving the original ordering (which reflects entity relevance).
         
         Args:
-            chunks: List of SourceChunks (already ordered by relevance)
+            chunks: List of SourceSentences (already ordered by relevance)
             max_per_section: Maximum chunks to take from any single section
             max_per_document: Maximum chunks to take from any single document
             
@@ -1298,7 +1298,7 @@ class EnhancedGraphRetriever:
         
         per_section_counts: Dict[str, int] = {}
         per_doc_counts: Dict[str, int] = {}
-        diversified: List[SourceChunk] = []
+        diversified: List[SourceSentence] = []
         skipped_section = 0
         skipped_doc = 0
         
@@ -1340,7 +1340,7 @@ class EnhancedGraphRetriever:
         max_per_document: int = 2,
         max_total: int = 10,
         min_matches: int = 1,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Retrieve chunks by lexical keyword matching for evidence boosting.
 
         Intended as a small additive boost to improve cross-document coverage
@@ -1400,7 +1400,7 @@ class EnhancedGraphRetriever:
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
         WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
-            t.id AS chunk_id,
+            t.id AS sentence_id,
             t.text AS text,
             t.metadata AS metadata,
             t.chunk_index AS chunk_index,
@@ -1435,7 +1435,7 @@ class EnhancedGraphRetriever:
 
             records = await loop.run_in_executor(None, _run_query)
 
-            candidates: List[SourceChunk] = []
+            candidates: List[SourceSentence] = []
             for record in records:
                 metadata: Dict[str, Any] = {}
                 raw_meta = record.get("metadata")
@@ -1451,8 +1451,8 @@ class EnhancedGraphRetriever:
                     section_path = section_path_key.split(" > ")
 
                 candidates.append(
-                    SourceChunk(
-                        chunk_id=record["chunk_id"],
+                    SourceSentence(
+                        sentence_id=record["sentence_id"],
                         text=record.get("text") or "",
                         entity_name="keyword_boost",
                         section_path=section_path,
@@ -1468,7 +1468,7 @@ class EnhancedGraphRetriever:
             # candidates are already sorted by match_count DESC, then chunk order.
             # Greedily take the best remaining chunk, respecting per-document caps.
             per_doc_counts: Dict[str, int] = {}
-            diversified: List[SourceChunk] = []
+            diversified: List[SourceSentence] = []
             for chunk in candidates:
                 doc_key = self._doc_key(chunk)
                 if per_doc_counts.get(doc_key, 0) >= max_per_document:
@@ -1499,7 +1499,7 @@ class EnhancedGraphRetriever:
         max_total: int = 8,
         candidate_chunk_indexes: Optional[List[int]] = None,
         min_text_chars: int = 20,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Return one early ("lead") chunk per document.
 
         Strategy: For each document, pick the **earliest** chunk (lowest
@@ -1527,7 +1527,7 @@ class EnhancedGraphRetriever:
         {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         RETURN
-            t.id AS chunk_id,
+            t.id AS sentence_id,
             t.text AS text,
             t.metadata AS metadata,
             t.chunk_index AS chunk_index,
@@ -1554,7 +1554,7 @@ class EnhancedGraphRetriever:
 
             records = await loop.run_in_executor(None, _run_query)
 
-            def _make_chunk(record: Any, *, text: str) -> SourceChunk:
+            def _make_chunk(record: Any, *, text: str) -> SourceSentence:
                 metadata: Dict[str, Any] = {}
                 raw_meta = record.get("metadata")
                 if raw_meta:
@@ -1569,8 +1569,8 @@ class EnhancedGraphRetriever:
                     section_path = section_path_key.split(" > ")
 
                 doc_id = (record.get("doc_id") or "").strip()
-                return SourceChunk(
-                    chunk_id=record["chunk_id"],
+                return SourceSentence(
+                    sentence_id=record["sentence_id"],
                     text=text,
                     entity_name="doc_lead",
                     section_path=section_path,
@@ -1596,7 +1596,7 @@ class EnhancedGraphRetriever:
 
             # Pick the "Lead" chunk per doc.
             # Strategy: Prefer the EARLIEST chunk (lowest index) that meets the length threshold.
-            choices: List[SourceChunk] = []
+            choices: List[SourceSentence] = []
 
             for doc_id, cands in candidates_by_doc.items():
                 if len(choices) >= max_total:
@@ -1632,7 +1632,7 @@ class EnhancedGraphRetriever:
         max_per_document: int = 3,
         max_total: int = 12,
         min_matches: int = 1,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Retrieve chunks from sections whose path_key matches section keywords.
 
         This is meant as a Route-1-like alternative to brittle keyword matching over
@@ -1661,7 +1661,7 @@ class EnhancedGraphRetriever:
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
         WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
-            t.id AS chunk_id,
+            t.id AS sentence_id,
             t.text AS text,
             t.metadata AS metadata,
             t.chunk_index AS chunk_index,
@@ -1692,7 +1692,7 @@ class EnhancedGraphRetriever:
 
             records = await loop.run_in_executor(None, _run_query)
 
-            candidates: List[SourceChunk] = []
+            candidates: List[SourceSentence] = []
             for record in records:
                 metadata: Dict[str, Any] = {}
                 raw_meta = record.get("metadata")
@@ -1708,8 +1708,8 @@ class EnhancedGraphRetriever:
                     section_path = section_path_key.split(" > ")
 
                 candidates.append(
-                    SourceChunk(
-                        chunk_id=record["chunk_id"],
+                    SourceSentence(
+                        sentence_id=record["sentence_id"],
                         text=record.get("text") or "",
                         entity_name="section_boost",
                         section_path=section_path,
@@ -1724,7 +1724,7 @@ class EnhancedGraphRetriever:
             # Diversify across sections + documents, preserving match_count/chunk order.
             per_section_counts: Dict[str, int] = {}
             per_doc_counts: Dict[str, int] = {}
-            diversified: List[SourceChunk] = []
+            diversified: List[SourceSentence] = []
             for chunk in candidates:
                 section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
                 doc_key = self._doc_key(chunk)
@@ -1763,7 +1763,7 @@ class EnhancedGraphRetriever:
         max_per_document: int = 3,
         max_total: int = 12,
         spread_within_section: bool = False,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Retrieve chunks from explicitly selected section IDs.
 
         This is used by Route 3 "semantic section discovery": we first find the
@@ -1787,7 +1787,7 @@ class EnhancedGraphRetriever:
         OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
         WHERE d IS NULL OR (d.group_id = $group_id AND ($folder_id IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})))
         RETURN
-            t.id AS chunk_id,
+            t.id AS sentence_id,
             t.text AS text,
             t.metadata AS metadata,
             t.chunk_index AS chunk_index,
@@ -1816,7 +1816,7 @@ class EnhancedGraphRetriever:
 
             records = await loop.run_in_executor(None, _run_query)
 
-            candidates: List[SourceChunk] = []
+            candidates: List[SourceSentence] = []
             for record in records:
                 metadata: Dict[str, Any] = {}
                 raw_meta = record.get("metadata")
@@ -1832,8 +1832,8 @@ class EnhancedGraphRetriever:
                     section_path = section_path_key.split(" > ")
 
                 candidates.append(
-                    SourceChunk(
-                        chunk_id=record["chunk_id"],
+                    SourceSentence(
+                        sentence_id=record["sentence_id"],
                         text=record.get("text") or "",
                         entity_name="section_boost",
                         section_path=section_path,
@@ -1854,8 +1854,8 @@ class EnhancedGraphRetriever:
 
             per_section_counts: Dict[str, int] = {}
             per_doc_counts: Dict[str, int] = {}
-            diversified: List[SourceChunk] = []
-            seen_chunk_ids: set[str] = set()
+            diversified: List[SourceSentence] = []
+            seen_sentence_ids: set[str] = set()
 
             if not spread_within_section:
                 for chunk in candidates:
@@ -1868,7 +1868,7 @@ class EnhancedGraphRetriever:
                         continue
 
                     diversified.append(chunk)
-                    seen_chunk_ids.add(chunk.chunk_id)
+                    seen_sentence_ids.add(chunk.sentence_id)
                     per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
                     per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
                     if len(diversified) >= max_total:
@@ -1876,7 +1876,7 @@ class EnhancedGraphRetriever:
             else:
                 from collections import defaultdict, deque
 
-                by_section: Dict[str, List[SourceChunk]] = defaultdict(list)
+                by_section: Dict[str, List[SourceSentence]] = defaultdict(list)
                 for chunk in candidates:
                     section_key = chunk.section_id or (" > ".join(chunk.section_path) if chunk.section_path else "[unknown]")
                     by_section[section_key].append(chunk)
@@ -1942,14 +1942,14 @@ class EnhancedGraphRetriever:
                             if idx < 0 or idx >= len(lst):
                                 continue
                             chunk = lst[idx]
-                            if chunk.chunk_id in seen_chunk_ids:
+                            if chunk.sentence_id in seen_sentence_ids:
                                 continue
                             doc_key = self._doc_key(chunk)
                             if per_doc_counts.get(doc_key, 0) >= max_per_document:
                                 continue
 
                             diversified.append(chunk)
-                            seen_chunk_ids.add(chunk.chunk_id)
+                            seen_sentence_ids.add(chunk.sentence_id)
                             per_section_counts[section_key] = per_section_counts.get(section_key, 0) + 1
                             per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
                             made_progress = True
@@ -2003,9 +2003,9 @@ class EnhancedGraphRetriever:
         WHERE (e2:Entity)
           AND e2.group_id = $group_id AND e2 <> e1
         
-        WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS chunk_ids
+        WITH e1, e2, count(DISTINCT c) AS shared_chunks, collect(DISTINCT c.id)[0..2] AS sentence_ids
         WHERE shared_chunks > 0
-        WITH e1, e2, shared_chunks, chunk_ids
+        WITH e1, e2, shared_chunks, sentence_ids
         WHERE elementId(e1) < elementId(e2)
         RETURN
             e1.name AS source,
@@ -2337,7 +2337,7 @@ class EnhancedGraphRetriever:
         max_per_document: int = 2,
         max_total: int = 20,
         prefer_early_chunks: bool = True,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Get representative chunks from (ideally) every document for coverage-style queries.
         
         This is the key method for solving the "summarize each document" problem.
@@ -2359,7 +2359,7 @@ class EnhancedGraphRetriever:
             prefer_early_chunks: If True, prefer chunks with low chunk_index (introductions)
             
         Returns:
-            List of SourceChunks with guaranteed document coverage
+            List of SourceSentences with guaranteed document coverage
         """
         if not self.driver:
             return []
@@ -2381,7 +2381,7 @@ class EnhancedGraphRetriever:
                                      ELSE -t.chunk_index
                                  END ASC
         WITH d, collect({
-            chunk_id: t.id,
+            sentence_id: t.id,
             text: t.text,
             metadata: t.metadata,
             chunk_index: t.chunk_index,
@@ -2393,7 +2393,7 @@ class EnhancedGraphRetriever:
         })[0..$max_per_document] AS chunks
         UNWIND chunks AS chunk
         RETURN
-            chunk.chunk_id AS chunk_id,
+            chunk.sentence_id AS sentence_id,
             chunk.text AS text,
             chunk.metadata AS metadata,
             chunk.chunk_index AS chunk_index,
@@ -2421,7 +2421,7 @@ class EnhancedGraphRetriever:
             
             records = await loop.run_in_executor(None, _run_query)
             
-            per_doc: Dict[str, List[SourceChunk]] = {}
+            per_doc: Dict[str, List[SourceSentence]] = {}
             
             for record in records:
                 metadata: Dict[str, Any] = {}
@@ -2445,8 +2445,8 @@ class EnhancedGraphRetriever:
                 doc_key_norm = doc_key.lower()
 
                 per_doc.setdefault(doc_key_norm, []).append(
-                    SourceChunk(
-                        chunk_id=record.get("chunk_id") or "",
+                    SourceSentence(
+                        sentence_id=record.get("sentence_id") or "",
                         text=record.get("text") or "",
                         entity_name="coverage_retrieval",  # Mark source for traceability
                         section_path=section_path,
@@ -2461,7 +2461,7 @@ class EnhancedGraphRetriever:
             # Deterministic selection: sort docs, then add chunks in a round-robin
             # across documents to maximize unique-document coverage under `max_total`.
             doc_keys_sorted = sorted(per_doc.keys())
-            chunks: List[SourceChunk] = []
+            chunks: List[SourceSentence] = []
             max_per_document = max(0, max_per_document)
 
             for i in range(max_per_document):
@@ -2500,7 +2500,7 @@ class EnhancedGraphRetriever:
         query_embedding: List[float],
         max_per_document: int = 1,
         max_total: int = 20,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Get the most query-relevant chunk from each document for coverage-style queries.
         
         Unlike get_coverage_chunks() which prefers early chunks (chunk_index=0),
@@ -2519,7 +2519,7 @@ class EnhancedGraphRetriever:
             max_total: Total cap on returned chunks (default: 20)
             
         Returns:
-            List of SourceChunks - one (most relevant) per document
+            List of SourceSentences - one (most relevant) per document
         """
         if not self.driver or not query_embedding:
             return []
@@ -2537,7 +2537,7 @@ class EnhancedGraphRetriever:
         WITH d, t, s, vector.similarity.cosine(t.embedding_v2, $query_embedding) AS score
         ORDER BY d.id, score DESC
         WITH d, collect({{
-            chunk_id: t.id,
+            sentence_id: t.id,
             text: t.text,
             metadata: t.metadata,
             chunk_index: t.chunk_index,
@@ -2550,7 +2550,7 @@ class EnhancedGraphRetriever:
         }})[0..$max_per_document] AS chunks
         UNWIND chunks AS chunk
         RETURN
-            chunk.chunk_id AS chunk_id,
+            chunk.sentence_id AS sentence_id,
             chunk.text AS text,
             chunk.metadata AS metadata,
             chunk.chunk_index AS chunk_index,
@@ -2578,7 +2578,7 @@ class EnhancedGraphRetriever:
             
             records = await loop.run_in_executor(None, _run_query)
             
-            per_doc: Dict[str, List[SourceChunk]] = {}
+            per_doc: Dict[str, List[SourceSentence]] = {}
             
             for record in records:
                 metadata: Dict[str, Any] = {}
@@ -2603,8 +2603,8 @@ class EnhancedGraphRetriever:
                 similarity_score = record.get("similarity_score") or 0.0
 
                 per_doc.setdefault(doc_key_norm, []).append(
-                    SourceChunk(
-                        chunk_id=record.get("chunk_id") or "",
+                    SourceSentence(
+                        sentence_id=record.get("sentence_id") or "",
                         text=record.get("text") or "",
                         entity_name="semantic_coverage",  # Mark source for traceability
                         section_path=section_path,
@@ -2618,7 +2618,7 @@ class EnhancedGraphRetriever:
 
             # Build final list: round-robin across documents for fairness
             doc_keys_sorted = sorted(per_doc.keys())
-            chunks: List[SourceChunk] = []
+            chunks: List[SourceSentence] = []
             max_per_document = max(0, max_per_document)
 
             for i in range(max_per_document):
@@ -2649,7 +2649,7 @@ class EnhancedGraphRetriever:
     async def get_all_sections_chunks(
         self,
         max_per_section: Optional[int] = None,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Get chunks from all sections across all documents.
         
         This is ideal for "list ALL X" queries where comprehensive section 
@@ -2671,7 +2671,7 @@ class EnhancedGraphRetriever:
                             1 = First chunk only (may miss content in later chunks)
             
         Returns:
-            List of SourceChunks from all sections in corpus
+            List of SourceSentences from all sections in corpus
         """
         if not self.driver:
             return []
@@ -2691,7 +2691,7 @@ class EnhancedGraphRetriever:
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             RETURN
-                t.id AS chunk_id,
+                t.id AS sentence_id,
                 t.text AS text,
                 t.metadata AS metadata,
                 t.chunk_index AS chunk_index,
@@ -2713,7 +2713,7 @@ class EnhancedGraphRetriever:
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             WITH s, collect({{
-                chunk_id: t.id,
+                sentence_id: t.id,
                 text: t.text,
                 metadata: t.metadata,
                 chunk_index: t.chunk_index,
@@ -2726,7 +2726,7 @@ class EnhancedGraphRetriever:
             }})[0..$max_per_section] AS section_chunks
             UNWIND section_chunks AS chunk
             RETURN
-                chunk.chunk_id AS chunk_id,
+                chunk.sentence_id AS sentence_id,
                 chunk.text AS text,
                 chunk.metadata AS metadata,
                 chunk.chunk_index AS chunk_index,
@@ -2772,8 +2772,8 @@ class EnhancedGraphRetriever:
                 section_path_key = (record.get("section_path_key") or "").strip()
                 section_path = section_path_key.split(" > ") if section_path_key else []
                 
-                chunks.append(SourceChunk(
-                    chunk_id=record["chunk_id"],
+                chunks.append(SourceSentence(
+                    sentence_id=record["sentence_id"],
                     text=record["text"] or "",
                     entity_name="",  # Section-based retrieval
                     section_path=section_path,
@@ -2903,7 +2903,7 @@ class EnhancedGraphRetriever:
         self,
         max_per_document: int = 1,
         max_total: int = 200,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """Get one (or a few) summary-like chunks per document using section metadata.
 
         This is intended for coverage-style queries ("summarize each document").
@@ -2933,7 +2933,7 @@ class EnhancedGraphRetriever:
                  CASE WHEN coalesce(meta.is_summary_section, false) = true THEN 0 ELSE 1 END ASC,
                  t.chunk_index ASC
         WITH d, collect({{
-            chunk_id: t.id,
+            sentence_id: t.id,
             text: t.text,
             metadata: t.metadata,
             chunk_index: t.chunk_index,
@@ -2945,7 +2945,7 @@ class EnhancedGraphRetriever:
         }})[0..$max_per_document] AS chunks
         UNWIND chunks AS chunk
         RETURN
-            chunk.chunk_id AS chunk_id,
+            chunk.sentence_id AS sentence_id,
             chunk.text AS text,
             chunk.metadata AS metadata,
             chunk.chunk_index AS chunk_index,
@@ -2971,7 +2971,7 @@ class EnhancedGraphRetriever:
 
             records = await loop.run_in_executor(None, _run_query)
 
-            per_doc: Dict[str, List[SourceChunk]] = {}
+            per_doc: Dict[str, List[SourceSentence]] = {}
             for record in records:
                 metadata: Dict[str, Any] = {}
                 raw_meta = record.get("metadata")
@@ -2993,8 +2993,8 @@ class EnhancedGraphRetriever:
                 doc_key_norm = doc_key.lower()
 
                 per_doc.setdefault(doc_key_norm, []).append(
-                    SourceChunk(
-                        chunk_id=record.get("chunk_id") or "",
+                    SourceSentence(
+                        sentence_id=record.get("sentence_id") or "",
                         text=record.get("text") or "",
                         entity_name="summary_section_retrieval",
                         section_path=section_path,
@@ -3008,7 +3008,7 @@ class EnhancedGraphRetriever:
 
             # Deterministic selection: round-robin across docs (same as coverage chunks).
             doc_keys_sorted = sorted(per_doc.keys())
-            chunks: List[SourceChunk] = []
+            chunks: List[SourceSentence] = []
             for i in range(max_per_document):
                 for k in doc_keys_sorted:
                     doc_chunks = per_doc.get(k) or []
@@ -3037,7 +3037,7 @@ class EnhancedGraphRetriever:
         self,
         section_keywords: List[str],
         top_k: int = 10,
-    ) -> List[SourceChunk]:
+    ) -> List[SourceSentence]:
         """
         Get Sentences from sections matching keywords.
         
@@ -3066,7 +3066,7 @@ class EnhancedGraphRetriever:
           AND ({conditions})
           AND ($folder_id IS NULL OR d IS NULL {folder_filter})
         RETURN 
-            t.id as chunk_id,
+            t.id as sentence_id,
             t.text as text,
             t.metadata as metadata,
             sections as section_path
@@ -3092,8 +3092,8 @@ class EnhancedGraphRetriever:
             
             chunks = []
             for record in records:
-                chunks.append(SourceChunk(
-                    chunk_id=record["chunk_id"],
+                chunks.append(SourceSentence(
+                    sentence_id=record["sentence_id"],
                     text=record["text"] or "",
                     entity_name="",  # Retrieved by section, not entity
                     section_path=record["section_path"] or [],

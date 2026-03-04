@@ -255,11 +255,11 @@ class HippoRAG2PPR:
                 "MATCH (c:Sentence {group_id: $group_id})"
                 "-[:MENTIONS]->"
                 "(e:Entity {group_id: $group_id}) "
-                "RETURN c.id AS chunk_id, e.id AS entity_id",
+                "RETURN c.id AS sentence_id, e.id AS entity_id",
                 group_id=group_id,
             )
             for record in result:
-                src_idx = self._node_to_idx.get(record["chunk_id"])
+                src_idx = self._node_to_idx.get(record["sentence_id"])
                 tgt_idx = self._node_to_idx.get(record["entity_id"])
                 if src_idx is not None and tgt_idx is not None:
                     self._add_edge(src_idx, tgt_idx, 1.0)
@@ -343,11 +343,11 @@ class HippoRAG2PPR:
             "MATCH (c:Sentence {group_id: $group_id})"
             "-[:IN_SECTION]->"
             "(s:Section {group_id: $group_id}) "
-            "RETURN c.id AS chunk_id, s.id AS section_id",
+            "RETURN c.id AS sentence_id, s.id AS section_id",
             group_id=group_id,
         )
         for record in result:
-            src_idx = self._node_to_idx.get(record["chunk_id"])
+            src_idx = self._node_to_idx.get(record["sentence_id"])
             tgt_idx = self._node_to_idx.get(record["section_id"])
             if src_idx is not None and tgt_idx is not None:
                 self._add_edge(src_idx, tgt_idx, section_edge_weight)
@@ -392,14 +392,14 @@ class HippoRAG2PPR:
 
         Args:
             entity_seeds: {entity_id: weight} — from triple linking.
-            passage_seeds: {chunk_id: weight} — from DPR (score * passage_node_weight).
+            passage_seeds: {sentence_id: weight} — from DPR (score * passage_node_weight).
             damping: Damping factor (default 0.5, upstream HippoRAG 2).
             max_iterations: Max power iteration steps.
             convergence_threshold: L1 convergence threshold.
 
         Returns:
             Tuple of:
-                - passage_scores: [(chunk_id, score)] sorted desc
+                - passage_scores: [(sentence_id, score)] sorted desc
                 - entity_scores: [(entity_name, score)] sorted desc
         """
         if self._node_count == 0:

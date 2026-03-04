@@ -378,7 +378,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             return metadata
         
         try:
-            from src.worker.hybrid_v2.pipeline.enhanced_graph_retriever import SourceChunk
+            from src.worker.hybrid_v2.pipeline.enhanced_graph_retriever import SourceSentence
             from src.worker.hybrid_v2.orchestrator import get_query_embedding
             
             # Get query embedding (V2 Voyage 2048D if enabled, else V1 OpenAI 3072D)
@@ -439,11 +439,11 @@ class GlobalSearchHandler(BaseRouteHandler):
                 ).strip()
             
             # Compute which BM25 candidates are actually addable (not already present)
-            existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+            existing_ids = {c.sentence_id for c in graph_context.source_chunks}
             sorted_bm25 = sorted(bm25_results, key=lambda t: float(t[1] or 0.0), reverse=True)
             
             diversified_bm25: List[Tuple[Dict[str, Any], float, bool]] = []
-            picked_chunk_ids: set = set()
+            picked_sentence_ids: set = set()
             per_doc_counts: Dict[str, int] = {}
             picked_docs: set = set()
             
@@ -452,13 +452,13 @@ class GlobalSearchHandler(BaseRouteHandler):
                 if len(diversified_bm25) >= bm25_merge_top_k:
                     break
                 cid = (chunk_dict.get("id") or "").strip()
-                if not cid or cid in existing_ids or cid in picked_chunk_ids:
+                if not cid or cid in existing_ids or cid in picked_sentence_ids:
                     continue
                 doc_key = _bm25_doc_key(chunk_dict)
                 if doc_key in picked_docs:
                     continue
                 diversified_bm25.append((chunk_dict, score, is_anchor))
-                picked_chunk_ids.add(cid)
+                picked_sentence_ids.add(cid)
                 picked_docs.add(doc_key)
                 per_doc_counts[doc_key] = 1
                 if len(picked_docs) >= bm25_min_docs:
@@ -469,13 +469,13 @@ class GlobalSearchHandler(BaseRouteHandler):
                 if len(diversified_bm25) >= bm25_merge_top_k:
                     break
                 cid = (chunk_dict.get("id") or "").strip()
-                if not cid or cid in existing_ids or cid in picked_chunk_ids:
+                if not cid or cid in existing_ids or cid in picked_sentence_ids:
                     continue
                 doc_key = _bm25_doc_key(chunk_dict)
                 if per_doc_counts.get(doc_key, 0) >= bm25_max_per_doc:
                     continue
                 diversified_bm25.append((chunk_dict, score, is_anchor))
-                picked_chunk_ids.add(cid)
+                picked_sentence_ids.add(cid)
                 per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
             
             metadata["merge"] = {
@@ -486,7 +486,7 @@ class GlobalSearchHandler(BaseRouteHandler):
                 "unique_docs": len(per_doc_counts),
             }
             
-            # Merge into graph_context.source_chunks (deduplicated by chunk_id)
+            # Merge into graph_context.source_chunks (deduplicated by sentence_id)
             added_count = 0
             
             for chunk_dict, score, is_anchor in diversified_bm25:
@@ -502,8 +502,8 @@ class GlobalSearchHandler(BaseRouteHandler):
                 source_marker = "bm25_phrase"
                 
                 graph_context.source_chunks.append(
-                    SourceChunk(
-                        chunk_id=cid,
+                    SourceSentence(
+                        sentence_id=cid,
                         text=chunk_dict.get("text") or "",
                         entity_name=source_marker,
                         section_path=list(section_path),
@@ -610,8 +610,8 @@ class GlobalSearchHandler(BaseRouteHandler):
             if not fill_chunks:
                 return
             
-            existing_ids = {c.chunk_id for c in graph_context.source_chunks}
-            added = [c for c in fill_chunks if c.chunk_id not in existing_ids]
+            existing_ids = {c.sentence_id for c in graph_context.source_chunks}
+            added = [c for c in fill_chunks if c.sentence_id not in existing_ids]
             
             if added:
                 for c in added:

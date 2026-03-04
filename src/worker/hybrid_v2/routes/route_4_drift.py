@@ -1086,19 +1086,19 @@ Sub-questions:"""
                 # Support both 'section_based' and 'section_based_exhaustive' naming
                 if coverage_strategy.startswith("section_based"):
                     # Section-based: Skip only if chunk already exists
-                    skip_chunk = chunk.chunk_id in existing_evidence_ids
+                    skip_chunk = chunk.sentence_id in existing_evidence_ids
                 else:
                     # Semantic/early-chunk: Skip if document already covered
                     skip_chunk = doc_key and doc_key in covered_docs
                 
                 # Skip if chunk already exists
-                if chunk.chunk_id in existing_evidence_ids:
+                if chunk.sentence_id in existing_evidence_ids:
                     skip_chunk = True
                 
                 if not skip_chunk:
-                    # Convert SourceChunk to dict format expected by synthesizer
+                    # Convert SourceSentence to dict format expected by synthesizer
                     coverage_chunk_dict = {
-                        "id": chunk.chunk_id,
+                        "id": chunk.sentence_id,
                         "text": chunk.text,
                         "source": chunk.document_source or chunk.document_title or "coverage",
                         "metadata": {
@@ -1113,7 +1113,7 @@ Sub-questions:"""
                     if doc_key:
                         covered_docs.add(doc_key)
                         new_docs.add(doc_key)
-                    existing_evidence_ids.add(chunk.chunk_id)
+                    existing_evidence_ids.add(chunk.sentence_id)
                     added_count += 1
             
             coverage_metadata = {

@@ -712,7 +712,7 @@ class HybridPipeline:
 
         if enable_cypher25_hybrid_rrf or enable_graph_native_bm25:
             try:
-                from .pipeline.enhanced_graph_retriever import SourceChunk
+                from .pipeline.enhanced_graph_retriever import SourceSentence
                 
                 # Get query embedding for hybrid search (V2 or V1 based on config)
                 query_embedding = None
@@ -764,12 +764,12 @@ class HybridPipeline:
                     ).strip()
 
                 # Compute which BM25 candidates are actually addable (not already present).
-                existing_ids = {c.chunk_id for c in graph_context.source_chunks}
+                existing_ids = {c.sentence_id for c in graph_context.source_chunks}
 
                 sorted_bm25 = sorted(bm25_results, key=lambda t: float(t[1] or 0.0), reverse=True)
 
                 diversified_bm25: List[Tuple[Dict[str, Any], float, bool]] = []
-                picked_chunk_ids: set[str] = set()
+                picked_sentence_ids: set[str] = set()
                 per_doc_counts: Dict[str, int] = {}
                 picked_docs: set[str] = set()
 
@@ -778,13 +778,13 @@ class HybridPipeline:
                     if len(diversified_bm25) >= bm25_merge_top_k:
                         break
                     cid = (chunk_dict.get("id") or "").strip()
-                    if not cid or cid in existing_ids or cid in picked_chunk_ids:
+                    if not cid or cid in existing_ids or cid in picked_sentence_ids:
                         continue
                     doc_key = _bm25_doc_key(chunk_dict)
                     if doc_key in picked_docs:
                         continue
                     diversified_bm25.append((chunk_dict, score, is_anchor))
-                    picked_chunk_ids.add(cid)
+                    picked_sentence_ids.add(cid)
                     picked_docs.add(doc_key)
                     per_doc_counts[doc_key] = 1
                     if len(picked_docs) >= bm25_min_docs:
@@ -795,13 +795,13 @@ class HybridPipeline:
                     if len(diversified_bm25) >= bm25_merge_top_k:
                         break
                     cid = (chunk_dict.get("id") or "").strip()
-                    if not cid or cid in existing_ids or cid in picked_chunk_ids:
+                    if not cid or cid in existing_ids or cid in picked_sentence_ids:
                         continue
                     doc_key = _bm25_doc_key(chunk_dict)
                     if per_doc_counts.get(doc_key, 0) >= bm25_max_per_doc:
                         continue
                     diversified_bm25.append((chunk_dict, score, is_anchor))
-                    picked_chunk_ids.add(cid)
+                    picked_sentence_ids.add(cid)
                     per_doc_counts[doc_key] = per_doc_counts.get(doc_key, 0) + 1
 
                 bm25_phrase_metadata["merge"] = {
@@ -812,7 +812,7 @@ class HybridPipeline:
                     "unique_docs": len(per_doc_counts),
                 }
 
-                # Merge into graph_context.source_chunks (deduplicated by chunk_id)
+                # Merge into graph_context.source_chunks (deduplicated by sentence_id)
                 added_count = 0
 
                 for chunk_dict, score, is_anchor in diversified_bm25:
@@ -828,8 +828,8 @@ class HybridPipeline:
                     source_marker = "bm25_phrase"
 
                     graph_context.source_chunks.append(
-                        SourceChunk(
-                            chunk_id=cid,
+                        SourceSentence(
+                            sentence_id=cid,
                             text=chunk_dict.get("text") or "",
                             entity_name=source_marker,
                             section_path=section_path,
@@ -906,7 +906,7 @@ class HybridPipeline:
                         "doc": doc,
                         "section": section_str,
                         "entity": getattr(chunk, "entity_name", "?"),
-                        "chunk_id": getattr(chunk, "chunk_id", "?"),
+                        "sentence_id": getattr(chunk, "sentence_id", "?"),
                         "preview": preview,
                     }
                 )
@@ -1139,7 +1139,7 @@ class HybridPipeline:
             logger.info("stage_3.4.1_coverage_gap_fill_start")
             t0_cov = time.perf_counter()
             try:
-                from .pipeline.enhanced_graph_retriever import SourceChunk
+                from .pipeline.enhanced_graph_retriever import SourceSentence
                 import os
 
                 # Identify which documents we already have coverage for (from relevance-based retrieval).
@@ -1149,8 +1149,8 @@ class HybridPipeline:
                     doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
                     if doc_key:
                         existing_docs.add(doc_key)
-                    if getattr(chunk, "chunk_id", None):
-                        existing_ids.add(chunk.chunk_id)
+                    if getattr(chunk, "sentence_id", None):
+                        existing_ids.add(chunk.sentence_id)
 
                 # Count documents up-front for accurate metadata and to size coverage retrieval.
                 all_documents = await self.enhanced_retriever.get_all_documents()
@@ -1192,9 +1192,9 @@ class HybridPipeline:
 
                     for chunk in coverage_chunks:
                         doc_key = (chunk.document_id or chunk.document_source or chunk.document_title or "").strip().lower()
-                        if doc_key and doc_key not in existing_docs and chunk.chunk_id not in existing_ids:
+                        if doc_key and doc_key not in existing_docs and chunk.sentence_id not in existing_ids:
                             graph_context.source_chunks.append(chunk)
-                            existing_ids.add(chunk.chunk_id)
+                            existing_ids.add(chunk.sentence_id)
                             new_docs.add(doc_key)
                             existing_docs.add(doc_key)  # Track to avoid duplicates within coverage
                             added_count += 1
@@ -1656,7 +1656,7 @@ class HybridPipeline:
                             seed_entities=additional_seeds,
                             top_k=15  # Smaller for refinement pass
                         )
-                        # Deduplicate evidence by chunk ID
+                        # Deduplicate evidence by ID
                         def _evidence_key(ev: Any) -> Optional[str]:
                             if isinstance(ev, tuple):
                                 return ev[0] if ev else None
@@ -1750,7 +1750,7 @@ class HybridPipeline:
                 
                 # 1. Build set of documents already covered by evidence
                 covered_docs: set = set()
-                existing_chunk_ids: set = set()
+                existing_evidence_ids: set = set()
                 
                 def _extract_doc_key(ev: Any) -> Optional[str]:
                     """Extract document identifier from evidence node."""
@@ -1770,8 +1770,8 @@ class HybridPipeline:
                         return None
                     return None
                 
-                def _extract_chunk_id(ev: Any) -> Optional[str]:
-                    """Extract chunk ID from evidence node."""
+                def _extract_evidence_id(ev: Any) -> Optional[str]:
+                    """Extract unique ID from an evidence node."""
                     if isinstance(ev, dict):
                         return ev.get("id") or ev.get("chunk_id")
                     elif isinstance(ev, tuple) and len(ev) >= 1:
@@ -1782,9 +1782,9 @@ class HybridPipeline:
                     doc_key = _extract_doc_key(ev)
                     if doc_key:
                         covered_docs.add(doc_key)
-                    chunk_id = _extract_chunk_id(ev)
-                    if chunk_id:
-                        existing_chunk_ids.add(chunk_id)
+                    evidence_id = _extract_evidence_id(ev)
+                    if evidence_id:
+                        existing_evidence_ids.add(evidence_id)
                 
                 # 2. Get all documents in the corpus
                 all_documents = await self.enhanced_retriever.get_all_documents()
@@ -1882,19 +1882,19 @@ class HybridPipeline:
                         # Support both 'section_based' and 'section_based_exhaustive' naming
                         if coverage_strategy.startswith("section_based"):
                             # Section-based: Skip only if chunk already exists
-                            skip_chunk = chunk.chunk_id in existing_chunk_ids
+                            skip_chunk = chunk.sentence_id in existing_evidence_ids
                         else:
                             # Semantic/early-chunk: Skip if document already covered
                             skip_chunk = doc_key and doc_key in covered_docs
                         
                         # Skip if chunk already exists
-                        if chunk.chunk_id in existing_chunk_ids:
+                        if chunk.sentence_id in existing_evidence_ids:
                             skip_chunk = True
                         
                         if not skip_chunk:
-                            # Convert SourceChunk to dict format expected by synthesizer
+                            # Convert SourceSentence to dict format expected by synthesizer
                             coverage_chunk_dict = {
-                                "id": chunk.chunk_id,
+                                "id": chunk.sentence_id,
                                 "text": chunk.text,
                                 "source": chunk.document_source or chunk.document_title or "coverage",
                                 "metadata": {
@@ -1909,7 +1909,7 @@ class HybridPipeline:
                             if doc_key:
                                 covered_docs.add(doc_key)
                                 new_docs.add(doc_key)
-                            existing_chunk_ids.add(chunk.chunk_id)
+                            existing_evidence_ids.add(chunk.sentence_id)
                             added_count += 1
                     
                     coverage_metadata = {

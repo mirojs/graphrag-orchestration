@@ -555,7 +555,7 @@ class DRIFTWorkflow(Workflow):
         try:
             # Build set of covered documents
             covered_docs: set = set()
-            existing_chunk_ids: set = set()
+            existing_evidence_ids: set = set()
             
             for ev in evidence:
                 if isinstance(ev, dict):
@@ -563,9 +563,9 @@ class DRIFTWorkflow(Workflow):
                     doc = meta.get("document_id") or meta.get("document_title") or ev.get("source")
                     if doc:
                         covered_docs.add(str(doc).strip().lower())
-                    chunk_id = ev.get("id") or ev.get("chunk_id")
-                    if chunk_id:
-                        existing_chunk_ids.add(chunk_id)
+                    evidence_id = ev.get("id") or ev.get("chunk_id")
+                    if evidence_id:
+                        existing_evidence_ids.add(evidence_id)
             
             # Get all documents
             all_documents = await self.pipeline.enhanced_retriever.get_all_documents()
@@ -587,11 +587,11 @@ class DRIFTWorkflow(Workflow):
                 doc_key = (chunk.document_id or chunk.document_source or "").strip().lower()
                 if doc_key and doc_key in covered_docs:
                     continue
-                if chunk.chunk_id in existing_chunk_ids:
+                if chunk.sentence_id in existing_evidence_ids:
                     continue
                 
                 result.append({
-                    "id": chunk.chunk_id,
+                    "id": chunk.sentence_id,
                     "text": chunk.text,
                     "source": chunk.document_source or chunk.document_title or "coverage",
                     "metadata": {
@@ -601,7 +601,7 @@ class DRIFTWorkflow(Workflow):
                     },
                 })
                 covered_docs.add(doc_key)
-                existing_chunk_ids.add(chunk.chunk_id)
+                existing_evidence_ids.add(chunk.sentence_id)
             
             if result:
                 logger.info("drift_coverage_gap_fill", chunks_added=len(result))

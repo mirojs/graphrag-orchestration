@@ -190,7 +190,7 @@ async def lifespan(app: FastAPI):
                 app.state._cosmos_metadata_client = cosmos_client2
                 logger.info("cosmos_file_metadata_initialized")
 
-        # ADLS Blob Manager (for user file uploads)
+        # Blob Manager (for user file uploads)
         enable_upload = os.getenv(
             "USE_USER_UPLOAD", os.getenv("ENABLE_USER_UPLOAD", "")
         ).lower() == "true"
@@ -198,13 +198,14 @@ async def lifespan(app: FastAPI):
             storage_account = os.getenv("AZURE_USERSTORAGE_ACCOUNT")
             storage_container = os.getenv("AZURE_USERSTORAGE_CONTAINER")
             if storage_account and storage_container:
-                from prepdocslib.blobmanager import AdlsBlobManager
-                app.state.user_blob_manager = AdlsBlobManager(
-                    endpoint=f"https://{storage_account}.dfs.core.windows.net",
+                from prepdocslib.blobmanager import BlobManager
+                app.state.user_blob_manager = BlobManager(
+                    endpoint=f"https://{storage_account}.blob.core.windows.net",
                     container=storage_container,
+                    account=storage_account,
                     credential=azure_credential,
                 )
-                logger.info("adls_user_blob_manager_initialized")
+                logger.info("user_blob_manager_initialized")
 
         # Global blob manager (for content/citations)
         global_storage = os.getenv("AZURE_STORAGE_ACCOUNT")

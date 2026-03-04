@@ -164,7 +164,7 @@ class BaseRouteHandler:
     All shared retrieval methods are defined here.
     
     Subclasses must implement:
-        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False, language: Optional[str] = None) -> RouteResult
+        async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False, language: Optional[str] = None, folder_id: Optional[str] = None) -> RouteResult
     """
 
     # Route identifier (override in subclasses)
@@ -186,6 +186,10 @@ class BaseRouteHandler:
         self.synthesizer = pipeline.synthesizer
         self._executor = pipeline._executor
         self._async_neo4j = pipeline._async_neo4j
+
+    def _resolve_folder_id(self, folder_id: Optional[str] = None) -> Optional[str]:
+        """Return per-query folder_id if provided, else fall back to pipeline default."""
+        return folder_id if folder_id is not None else self.folder_id
 
     async def _fetch_language_spans(
         self, doc_ids: List[str]
@@ -251,7 +255,7 @@ class BaseRouteHandler:
             logger.warning("language_spans_fetch_failed", error=str(e))
             return {}
 
-    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False, language: Optional[str] = None) -> RouteResult:
+    async def execute(self, query: str, response_type: str = "summary", knn_config: Optional[str] = None, prompt_variant: Optional[str] = None, synthesis_model: Optional[str] = None, include_context: bool = False, language: Optional[str] = None, folder_id: Optional[str] = None) -> RouteResult:
         """Execute the route on a query.
         
         Args:
@@ -259,6 +263,7 @@ class BaseRouteHandler:
             response_type: Response format ("summary", "detailed_report", etc.)
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
             include_context: If True, include the full LLM context in response metadata.
+            folder_id: Per-query folder scope (overrides pipeline default).
             
         Returns:
             RouteResult with response, citations, and metadata
@@ -449,6 +454,7 @@ class BaseRouteHandler:
         bm25_k: int = 30,
         rrf_k: int = 60,
         use_phrase_boost: bool = True,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float, bool]]:
         """Cypher 25 hybrid search with native BM25 + Vector RRF fusion.
 
@@ -462,7 +468,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
-        folder_id = self.folder_id
+        folder_id = self._resolve_folder_id(folder_id)
 
         if use_phrase_boost:
             bm25_query = self._build_phrase_aware_fulltext_query(query_text)
@@ -597,6 +603,7 @@ class BaseRouteHandler:
         anchor_limit: int = 15,
         graph_decay: float = 0.5,
         use_phrase_boost: bool = True,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float, bool]]:
         """Pure BM25 retrieval with phrase-aware queries (no vector search).
 
@@ -608,7 +615,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
-        folder_id = self.folder_id
+        folder_id = self._resolve_folder_id(folder_id)
         driver = self.neo4j_driver
 
         if use_phrase_boost:
@@ -689,6 +696,7 @@ class BaseRouteHandler:
         self,
         query: str,
         top_k: int = 8,
+        folder_id: Optional[str] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Graph-based retrieval via Entity nodes when hybrid search fails.
         
@@ -728,7 +736,7 @@ class BaseRouteHandler:
         
         term_pattern = '|'.join(re.escape(t) for t in search_terms)
         group_id = self.group_id
-        folder_id = self.folder_id
+        folder_id = self._resolve_folder_id(folder_id)
         driver = self.neo4j_driver  # Local ref for closure
         
         def _run_sync():

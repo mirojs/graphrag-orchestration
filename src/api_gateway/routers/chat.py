@@ -342,9 +342,10 @@ async def _execute_query(
                 query=query,
                 route=route,
                 response_type=response_type,
+                folder_id=folder_id,
             )
         else:
-            result = await pipeline.query(query, response_type)
+            result = await pipeline.query(query, response_type, folder_id=folder_id)
         
         # Extract thoughts from result
         thoughts = _extract_thoughts(result)
@@ -869,6 +870,7 @@ class FrontendChatOverrides(BaseModel):
     search_image_embeddings: Optional[bool] = False
     language: Optional[str] = "en"
     use_agentic_knowledgebase: Optional[bool] = False
+    folder_id: Optional[str] = Field(default=None, description="Folder ID to scope query within the group")
 
 
 class FrontendChatContext(BaseModel):
@@ -1045,7 +1047,8 @@ async def frontend_chat(
     )
 
     try:
-        result = await _execute_query(query, approach, group_id, force_route=force_route_str)
+        folder_id = overrides.folder_id if overrides else None
+        result = await _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route_str)
         
         # Build frontend-compatible response
         thoughts = [
@@ -1177,8 +1180,9 @@ async def _frontend_stream_response(
         }) + "\n"
         
         # Execute query in background while sending keepalive pings
+        folder_id = overrides.folder_id if overrides else None
         query_task = asyncio.create_task(
-            _execute_query(query, approach, group_id, force_route=force_route)
+            _execute_query(query, approach, group_id, folder_id=folder_id, force_route=force_route)
         )
         while not query_task.done():
             await asyncio.sleep(2)

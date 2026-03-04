@@ -87,6 +87,7 @@ class LocalSearchHandler(BaseRouteHandler):
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 2: LazyGraphRAG for entity-focused queries.
@@ -449,7 +450,7 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.section_path AS section_path,
                sent.parent_text AS parent_text,
                sent.page AS page,
-               sent.chunk_id AS chunk_id,
+               sent.id AS chunk_id,
                sent.document_id AS document_id,
                sent.parent_text AS chunk_text,
                doc.title AS document_title,
@@ -639,7 +640,7 @@ class LocalSearchHandler(BaseRouteHandler):
                sent.hierarchical_id AS hierarchical_id,
                sent.parent_text AS parent_text,
                sent.page AS page,
-               sent.chunk_id AS chunk_id,
+               sent.id AS chunk_id,
                sent.document_id AS document_id,
                sent.parent_text AS chunk_text,
                doc.title AS document_title,

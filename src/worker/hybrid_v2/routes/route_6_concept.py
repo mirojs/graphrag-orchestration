@@ -89,6 +89,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 6: Community-aware concept synthesis.
 
@@ -1102,7 +1103,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # Uses Cypher's IS NULL test so the WHERE is a no-op when no folder scope is set.
         folder_filter_clause = (
             "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
-            "        WITH sent, score, chunk, doc, sec, prev_sent, next_sent\n"
+            "        WITH sent, score, doc, sec, prev_sent, next_sent\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
             " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})\n"
         )

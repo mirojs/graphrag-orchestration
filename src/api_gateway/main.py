@@ -310,8 +310,8 @@ app.add_middleware(VersionHeaderMiddleware)
 app.add_middleware(GroupIsolationMiddleware)
 
 # 4. JWT Authentication - validates Azure Easy Auth tokens and extracts tenant claims
-# SECURITY: REQUIRE_AUTH defaults to False for local dev. Set REQUIRE_AUTH=true in production.
-_require_auth = settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else False
+# SECURITY: REQUIRE_AUTH defaults to True (fail closed). Set REQUIRE_AUTH=false for local dev.
+_require_auth = settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else True
 if not _require_auth:
     import warnings
     warnings.warn(

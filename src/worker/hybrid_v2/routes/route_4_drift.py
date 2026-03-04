@@ -109,6 +109,7 @@ class DRIFTHandler(BaseRouteHandler):
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 4: DRIFT for complex multi-hop queries.

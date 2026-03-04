@@ -224,6 +224,10 @@ class HybridQueryRequest(BaseModel):
         default=None,
         description="Query mode hint for Route 7 presets. Options: 'local_search' (fast factual, top_k=5, concise), 'global_search' (broad, top_k=15), 'drift_multi_hop' (full context, top_k=20). Only applies when force_route=hipporag2_search."
     )
+    folder_id: Optional[str] = Field(
+        default=None,
+        description="Optional folder ID to scope the query to a specific folder within the group. If None, all folders are searched."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -464,9 +468,10 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
                 include_context=body.include_context,
                 language=body.language,
                 query_mode=body.query_mode,
+                folder_id=body.folder_id,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language, folder_id=body.folder_id)
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000

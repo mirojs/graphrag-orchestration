@@ -100,6 +100,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         weight_profile: Optional[str] = None,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 5: Unified Hierarchical Seed PPR.
 

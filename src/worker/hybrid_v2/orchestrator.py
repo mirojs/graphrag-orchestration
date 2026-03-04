@@ -358,6 +358,7 @@ class HybridPipeline:
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -370,6 +371,7 @@ class HybridPipeline:
             knn_config: Optional KNN configuration for SEMANTICALLY_SIMILAR edge filtering.
                         If None, no KNN edges are traversed (baseline).
             synthesis_model: Optional override for synthesis LLM deployment name.
+            folder_id: Per-query folder scope (overrides pipeline default, None = all folders).
             
         Returns:
             Dictionary containing:
@@ -416,6 +418,7 @@ class HybridPipeline:
                 synthesis_model=synthesis_model,
                 include_context=include_context,
                 language=language,
+                folder_id=folder_id,
                 **extra_kwargs,
             )
             # Attach accumulated token usage to the result
@@ -2242,6 +2245,7 @@ Sub-questions:"""
         weight_profile: Optional[str] = None,
         language: Optional[str] = None,
         query_mode: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2255,6 +2259,7 @@ Sub-questions:"""
             synthesis_model: Optional override for synthesis LLM deployment name.
             weight_profile: Optional Route 5 weight profile name override.
             query_mode: Optional query mode hint for Route 7 presets (e.g. "local_search").
+            folder_id: Per-query folder scope (overrides pipeline default, None = all folders).
         """
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
@@ -2274,6 +2279,7 @@ Sub-questions:"""
                 synthesis_model=synthesis_model,
                 include_context=include_context,
                 language=language,
+                folder_id=folder_id,
                 **extra_kwargs,
             )
             return result.to_dict()

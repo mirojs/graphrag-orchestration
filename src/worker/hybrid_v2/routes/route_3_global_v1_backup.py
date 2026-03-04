@@ -50,6 +50,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         synthesis_model: Optional[str] = None,
         include_context: bool = False,
         language: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 3: Global Search for thematic queries.

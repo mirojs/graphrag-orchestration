@@ -217,7 +217,7 @@ class Settings(BaseSettings):
 
     # Authentication & Security
     AUTH_TYPE: str = "B2B"  # B2B (Azure AD with groups) or B2C (Azure AD B2C with oid)
-    REQUIRE_AUTH: bool = False  # Set to True in production with Easy Auth enabled
+    REQUIRE_AUTH: bool = True  # Fail closed. Set to False for local dev without Easy Auth.
     ALLOW_LEGACY_GROUP_HEADER: bool = True  # Allow X-Group-ID header (deprecated, disable in production)
     GROUP_ID_OVERRIDE: Optional[str] = Field(default=None)  # Optional fixed group_id override for auth testing
     

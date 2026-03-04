@@ -8,8 +8,10 @@ to trigger Neo4j graph synchronization via DocumentSyncService.
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
+
+from src.api_gateway.middleware.auth import get_group_id
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,7 @@ async def notify_upload(
     request: Request,
     body: NotifyUploadRequest,
     background_tasks: BackgroundTasks,
-    x_group_id: str = Header(..., alias="X-Group-ID"),
+    group_id: str = Depends(get_group_id),
 ):
     """
     Receive upload notification from the BFF and trigger graph indexing.
@@ -53,7 +55,7 @@ async def notify_upload(
 
     background_tasks.add_task(
         doc_sync.on_file_uploaded,
-        x_group_id,
+        group_id,
         body.document_id,
         body.source,
     )
@@ -61,7 +63,7 @@ async def notify_upload(
     logger.info(
         "notify_upload_accepted",
         extra={
-            "group_id": x_group_id,
+            "group_id": group_id,
             "document_id": body.document_id,
             "trigger_indexing": body.trigger_indexing,
         },
@@ -79,7 +81,7 @@ async def notify_delete(
     request: Request,
     body: NotifyDeleteRequest,
     background_tasks: BackgroundTasks,
-    x_group_id: str = Header(..., alias="X-Group-ID"),
+    group_id: str = Depends(get_group_id),
 ):
     """
     Receive delete notification from the BFF and trigger graph cleanup.
@@ -93,7 +95,7 @@ async def notify_delete(
 
     background_tasks.add_task(
         doc_sync.on_file_deleted,
-        x_group_id,
+        group_id,
         body.document_id,
     )
 

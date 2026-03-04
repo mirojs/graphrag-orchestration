@@ -639,7 +639,7 @@ class EnhancedGraphRetriever:
         # Build folder filter for related document - only allow sections from same folder
         folder_filter_clause = ""
         if self.folder_id:
-            folder_filter_clause = "WHERE d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})"
+            folder_filter_clause = "WHERE d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
         
         query = f"""
         UNWIND $section_ids AS source_section_id

@@ -257,6 +257,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         weight_profile: Optional[str] = None,
         language: Optional[str] = None,
         query_mode: Optional[str] = None,
+        folder_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
         enable_timings = os.getenv(

@@ -66,8 +66,6 @@ RUN mkdir -p /app/data/graphrag /app/data/lancedb /app/data/cache \
 ARG CACHE_BUST=""
 RUN echo "CACHE_BUST=${CACHE_BUST}" > /dev/null
 COPY --chown=appuser:appuser src/ /app/src/
-# prepdocslib is needed by the ADLS blob manager for user file uploads
-COPY --chown=appuser:appuser frontend/app/backend/prepdocslib/ /app/prepdocslib/
 
 # Copy built frontend static files from Stage 1
 # Vite outputs to dist/ in the /frontend workdir

@@ -475,6 +475,7 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000
+        user = getattr(request.state, "user", None)
         track_query(
             query=body.query,
             route=result.get("route_used", "unknown"),
@@ -482,10 +483,12 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
             tokens_used=result.get("usage", {}).get("total_tokens", 0),
             success=True,
             group_id=group_id,
+            user_id=user.get("oid", "") if user else "",
             metadata={
                 "response_type": body.response_type,
                 "forced": body.force_route is not None,
                 "confidence": result.get("confidence"),
+                "model": result.get("usage", {}).get("model", ""),
             },
         )
         

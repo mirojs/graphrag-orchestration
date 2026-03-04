@@ -135,7 +135,7 @@ class InstrumentationHooks:
             logger.warning("track_query_failed", error=str(e))
     
     async def _log_query_async(self, **kwargs) -> None:
-        """Async logging for query metrics."""
+        """Async logging for query metrics + Redis counters + Cosmos usage."""
         try:
             logger.info(
                 "query_tracked",
@@ -149,7 +149,7 @@ class InstrumentationHooks:
                 success=kwargs.get("success"),
             )
             
-            # Store metrics (could be extended to write to Cosmos DB)
+            # Store metrics in buffer
             metrics = QueryMetrics(
                 query_id=kwargs.get("query_id", ""),
                 group_id=kwargs.get("group_id", ""),
@@ -163,6 +163,36 @@ class InstrumentationHooks:
             )
             self._query_buffer.append(metrics)
             
+            # --- Redis: increment daily/monthly query counters ---
+            user_id = kwargs.get("user_id") or kwargs.get("group_id", "")
+            if user_id:
+                try:
+                    from src.core.services.quota_enforcer import get_quota_enforcer
+                    enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+                    await asyncio.wait_for(enforcer.record_query(user_id), timeout=5)
+                except Exception as rq_err:
+                    logger.debug("redis_record_query_skipped", error=str(rq_err))
+
+            # --- Cosmos: write usage record ---
+            try:
+                from src.core.services.cosmos_client import get_cosmos_client
+                from src.core.models.usage import UsageRecord
+                cosmos = get_cosmos_client()
+                if cosmos.endpoint and not cosmos._usage_container:
+                    await asyncio.wait_for(cosmos.initialize(), timeout=10)
+                record = UsageRecord(
+                    partition_id=user_id or kwargs.get("group_id", ""),
+                    user_id=user_id if user_id != kwargs.get("group_id") else None,
+                    usage_type="llm_completion",
+                    model=kwargs.get("metadata", {}).get("model", ""),
+                    total_tokens=kwargs.get("tokens_used", 0),
+                    route=kwargs.get("route", ""),
+                    query_id=kwargs.get("query_id", ""),
+                )
+                await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
+            except Exception as cosmos_err:
+                logger.debug("cosmos_usage_write_skipped", error=str(cosmos_err))
+
             # Auto-flush if buffer is full
             if len(self._query_buffer) >= self._buffer_size:
                 await self._flush_query_buffer()

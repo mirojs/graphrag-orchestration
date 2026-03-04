@@ -627,7 +627,7 @@ def extract_sentences_from_chunk(
     """Extract sentence-level units from a single TextChunk.
 
     Returns list of dicts with keys:
-      id, text, chunk_id, document_id, source, index_in_chunk,
+      id, text, document_id, source,
       section_path, page, confidence, tokens, parent_text
 
     Sources:
@@ -653,10 +653,8 @@ def extract_sentences_from_chunk(
             sentences.append({
                 "id": f"{chunk_id}_sent_{idx}",
                 "text": sent_text,
-                "chunk_id": chunk_id,
                 "document_id": document_id,
                 "source": "paragraph",
-                "index_in_chunk": idx,
                 "section_path": section_path,
                 "page": metadata.get("page_number"),
                 "confidence": 1.0,
@@ -690,10 +688,8 @@ def extract_sentences_from_chunk(
                 sentences.append({
                     "id": f"{chunk_id}_sent_{idx}",
                     "text": row_text,
-                    "chunk_id": chunk_id,
                     "document_id": document_id,
                     "source": "table_row",
-                    "index_in_chunk": idx,
                     "section_path": section_path,
                     "page": metadata.get("page_number"),
                     "confidence": 1.0,
@@ -708,10 +704,8 @@ def extract_sentences_from_chunk(
                 sentences.append({
                     "id": f"{chunk_id}_sent_{idx}",
                     "text": caption,
-                    "chunk_id": chunk_id,
                     "document_id": document_id,
                     "source": "table_caption",
-                    "index_in_chunk": idx,
                     "section_path": section_path,
                     "page": metadata.get("page_number"),
                     "confidence": 1.0,
@@ -732,10 +726,8 @@ def extract_sentences_from_chunk(
             sentences.append({
                 "id": f"{chunk_id}_sent_{idx}",
                 "text": caption,
-                "chunk_id": chunk_id,
                 "document_id": document_id,
                 "source": "figure_caption",
-                "index_in_chunk": idx,
                 "section_path": section_path,
                 "page": fig.get("page_number") or metadata.get("page_number"),
                 "confidence": 1.0,
@@ -758,10 +750,8 @@ def extract_sentences_from_chunk(
             sentences.append({
                 "id": f"{chunk_id}_sent_{idx}",
                 "text": sig_text,
-                "chunk_id": chunk_id,
                 "document_id": document_id,
                 "source": "signature_party",
-                "index_in_chunk": idx,
                 "section_path": section_path,
                 "page": metadata.get("page_number"),
                 "confidence": 1.0,
@@ -857,7 +847,7 @@ def extract_sentences_from_di_units(
     handles them.
 
     Returns a deduplicated list of sentence dicts with:
-        id, text, document_id, source, index_in_chunk (0),
+        id, text, document_id, source,
         index_in_doc, section_path, page, confidence, tokens, parent_text.
     """
     all_sentences: List[Dict[str, Any]] = []
@@ -895,7 +885,6 @@ def extract_sentences_from_di_units(
                     "text": lh_joined,
                     "document_id": doc_id,
                     "source": "letterhead",
-                    "index_in_chunk": 0,
                     "index_in_doc": global_idx,
                     "section_path": "[Letterhead]",
                     "page": lh_page,
@@ -953,7 +942,6 @@ def extract_sentences_from_di_units(
                         "text": hdr_text,
                         "document_id": doc_id,
                         "source": "page_header",
-                        "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": "[Page Header]",
                         "page": page,
@@ -980,7 +968,6 @@ def extract_sentences_from_di_units(
                         "text": ftr_text,
                         "document_id": doc_id,
                         "source": "page_footer",
-                        "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": "[Page Footer]",
                         "page": page,
@@ -1008,7 +995,6 @@ def extract_sentences_from_di_units(
                         "text": lh_text,
                         "document_id": doc_id,
                         "source": "letterhead",
-                        "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": "[Letterhead]",
                         "page": page,
@@ -1036,7 +1022,6 @@ def extract_sentences_from_di_units(
                         "text": sig_text,
                         "document_id": doc_id,
                         "source": "signature_block",
-                        "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": "[Signature Block]",
                         "page": page,
@@ -1075,7 +1060,6 @@ def extract_sentences_from_di_units(
                     "text": sent_text,
                     "document_id": doc_id,
                     "source": "paragraph",
-                    "index_in_chunk": 0,
                     "index_in_doc": global_idx,
                     "section_path": section_path,
                     "page": _page_for_sentence(sent_text, unit_text, paragraph_pages, page),
@@ -1115,7 +1099,6 @@ def extract_sentences_from_di_units(
                         "text": row_text,
                         "document_id": doc_id,
                         "source": "table_row",
-                        "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": section_path,
                         "page": page,
@@ -1141,7 +1124,6 @@ def extract_sentences_from_di_units(
                             "text": caption,
                             "document_id": doc_id,
                             "source": "table_caption",
-                            "index_in_chunk": 0,
                             "index_in_doc": global_idx,
                             "section_path": section_path,
                             "page": page,
@@ -1174,7 +1156,6 @@ def extract_sentences_from_di_units(
                     "text": caption,
                     "document_id": doc_id,
                     "source": "figure_caption",
-                    "index_in_chunk": 0,
                     "index_in_doc": global_idx,
                     "section_path": section_path,
                     "page": fig.get("page_number") or page,
@@ -1208,7 +1189,6 @@ def extract_sentences_from_di_units(
                         "text": sig_text,
                         "document_id": doc_id,
                         "source": "signature_party",
-                        "index_in_chunk": 0,
                         "index_in_doc": global_idx,
                         "section_path": section_path,
                         "page": page,
@@ -1261,7 +1241,6 @@ def extract_sentences_from_raw_text(
             "text": sent_text,
             "document_id": doc_id,
             "source": "paragraph",
-            "index_in_chunk": 0,
             "index_in_doc": sent_idx,
             "section_path": "",
             "page": None,

@@ -40,7 +40,7 @@ You are a document analysis assistant. Answer the query using the evidence below
 {entity_coverage}
 
 **Rules**:
-1. Use all three sources. Thematic context helps you organize; document evidence provides facts. Document structure is a reference list of section headings — do NOT treat each heading as a separate finding.
+1. Use all three sources. Thematic context helps you organize; document evidence provides facts. Document structure is a reference list of section headings — do NOT treat each heading as a separate finding. Thematic context entries are topic clusters, NOT separate documents — never present a community theme as if it were a distinct document.
 2. Include facts from document evidence even if they are not mentioned in thematic context.
 3. Use thematic context to frame your answer — group related findings under clear headings.
 4. Preserve important terminology from evidence labels (e.g. role names, section titles, legal terms).
@@ -55,7 +55,9 @@ You are a document analysis assistant. Answer the query using the evidence below
    d. If no evidence exists for a document, write "[Document name]: no evidence found" — never guess.
 8. Entity counting (R6-XI) — for queries asking which entity appears in more/most/fewer documents: use the Entity-Document Coverage table above as the authoritative source. The coverage table is exact graph data — do not count from passage evidence.
 9. Do not mention methodology, sources, or how the evidence was retrieved.
-10. If no evidence is available, say: "The requested information was not found in the available documents."
+10. REFUSE for specific lookups where the exact data point is absent:
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the document evidence → say: "The requested information was not found in the available documents." Do NOT infer that an unnamed concept falls under a broader or related category.
+   - If no evidence at all is available, say: "The requested information was not found in the available documents."
 
 **Answer**:
 """

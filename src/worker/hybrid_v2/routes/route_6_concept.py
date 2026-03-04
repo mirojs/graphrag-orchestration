@@ -250,6 +250,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "ROUTE6_ENTITY_EXPANSION", "0"
         ).strip().lower() in {"1", "true", "yes"}
         expansion_count = 0
+        expanded: List[Dict[str, Any]] = []
 
         if expansion_enabled and sentence_evidence:
             t_exp = time.perf_counter()
@@ -268,11 +269,13 @@ class ConceptSearchHandler(BaseRouteHandler):
                 )
                 if expanded:
                     expansion_count = len(expanded)
-                    sentence_evidence.extend(expanded)
+                    # Do NOT merge into sentence_evidence here — expanded
+                    # sentences have synthetic scores that the diversity
+                    # score_gate would filter out.  Keep them separate so
+                    # they bypass diversity and go straight to the reranker.
                     logger.info(
-                        "route6_entity_expansion_merged",
+                        "route6_entity_expansion_retrieved",
                         expanded_count=expansion_count,
-                        total_pool=len(sentence_evidence),
                     )
             except Exception as e:
                 logger.warning("route6_entity_expansion_failed", error=str(e))
@@ -320,6 +323,24 @@ class ConceptSearchHandler(BaseRouteHandler):
                         top_k=diversity_pool_k,
                         min_per_doc=min_per_doc,
                         score_gate=score_gate,
+                    )
+
+            # Inject entity-expanded sentences AFTER diversity, BEFORE reranking.
+            # Expanded sentences carry synthetic scores that the diversity score_gate
+            # would filter out.  By injecting them here the reranker (not the score
+            # gate) decides whether they are relevant.
+            if expanded:
+                expanded_denoised = self._denoise_sentences(expanded)
+                if expanded_denoised:
+                    seen_ids = {ev.get("sentence_id") for ev in sentence_evidence}
+                    for ev in expanded_denoised:
+                        if ev.get("sentence_id") not in seen_ids:
+                            sentence_evidence.append(ev)
+                            seen_ids.add(ev.get("sentence_id"))
+                    logger.info(
+                        "route6_expansion_injected_for_rerank",
+                        injected=len(expanded_denoised),
+                        rerank_pool=len(sentence_evidence),
                     )
 
             if rerank_enabled and sentence_evidence:

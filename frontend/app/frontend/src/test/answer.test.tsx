@@ -62,7 +62,7 @@ describe("Answer component", () => {
         expect(screen.getByText("Test answer")).toBeInTheDocument();
     });
 
-    it("disables thought process button when streaming", () => {
+    it("does not render thought process button (hidden for end users)", () => {
         renderWithProviders(
             <Answer
                 answer={makeResponse()}
@@ -74,11 +74,10 @@ describe("Answer component", () => {
                 onSupportingContentClicked={onSupporting}
             />
         );
-        const thoughtBtn = screen.getByTitle("Show thought process");
-        expect(thoughtBtn).toBeDisabled();
+        expect(screen.queryByTitle("Show thought process")).not.toBeInTheDocument();
     });
 
-    it("disables thought process button when no thoughts", () => {
+    it("does not render thought process button even with thoughts", () => {
         const resp = makeResponse({
             context: { data_points: { text: [], images: [], citations: [] }, followup_questions: null, thoughts: [] },
         });
@@ -93,11 +92,10 @@ describe("Answer component", () => {
                 onSupportingContentClicked={onSupporting}
             />
         );
-        const thoughtBtn = screen.getByTitle("Show thought process");
-        expect(thoughtBtn).toBeDisabled();
+        expect(screen.queryByTitle("Show thought process")).not.toBeInTheDocument();
     });
 
-    it("calls onThoughtProcessClicked when thought button is clicked", () => {
+    it("does not render thought process or supporting content buttons", () => {
         renderWithProviders(
             <Answer
                 answer={makeResponse()}
@@ -109,24 +107,8 @@ describe("Answer component", () => {
                 onSupportingContentClicked={onSupporting}
             />
         );
-        fireEvent.click(screen.getByTitle("Show thought process"));
-        expect(onThought).toHaveBeenCalledOnce();
-    });
-
-    it("calls onSupportingContentClicked when supporting button is clicked", () => {
-        renderWithProviders(
-            <Answer
-                answer={makeResponse()}
-                index={0}
-                speechConfig={makeSpeechConfig()}
-                isStreaming={false}
-                onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
-                onSupportingContentClicked={onSupporting}
-            />
-        );
-        fireEvent.click(screen.getByTitle("Show supporting content"));
-        expect(onSupporting).toHaveBeenCalledOnce();
+        expect(screen.queryByTitle("Show thought process")).not.toBeInTheDocument();
+        expect(screen.queryByTitle("Show supporting content")).not.toBeInTheDocument();
     });
 
     it("copies answer text to clipboard on copy button click", async () => {

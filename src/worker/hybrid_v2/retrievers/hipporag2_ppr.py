@@ -120,7 +120,7 @@ class HippoRAG2PPR:
         neo4j_driver: Any,
         group_id: str,
         passage_node_weight: float = 0.05,
-        synonym_threshold: float = 0.8,
+        synonym_threshold: float = 0.70,
         include_section_graph: bool = False,
         section_edge_weight: float = 0.1,
         section_sim_threshold: float = 0.5,
@@ -269,11 +269,31 @@ class HippoRAG2PPR:
 
             # ----------------------------------------------------------
             # 5. Entity-Entity synonym edges via SEMANTICALLY_SIMILAR
-            #    SKIPPED: With OpenIE-based entity extraction (HippoRAG 2),
-            #    cross-doc bridging happens via shared entity surface forms
-            #    in triples. Entity-entity KNN edges are no longer created.
+            #    Re-enabled: entity synonymy provides critical cross-doc
+            #    bridges (upstream HippoRAG 2 uses topk=2047 @0.8).
+            #    Our entity dedup at 0.8 merges identical entities, so
+            #    synonymy edges at lower thresholds connect semantically
+            #    related but distinct entities across documents.
             # ----------------------------------------------------------
-            # (entity KNN edges removed — see §40 OpenIE migration)
+            result = session.run(
+                "MATCH (e1:Entity {group_id: $group_id})"
+                "-[r:SEMANTICALLY_SIMILAR]->"
+                "(e2:Entity {group_id: $group_id}) "
+                "WHERE r.similarity >= $threshold "
+                "RETURN e1.id AS src, e2.id AS tgt, "
+                "r.similarity AS weight",
+                group_id=group_id,
+                threshold=synonym_threshold,
+            )
+            for record in result:
+                src_idx = self._node_to_idx.get(record["src"])
+                tgt_idx = self._node_to_idx.get(record["tgt"])
+                if src_idx is not None and tgt_idx is not None:
+                    edge_key = (min(src_idx, tgt_idx), max(src_idx, tgt_idx))
+                    if edge_key not in seen_synonym_edges:
+                        seen_synonym_edges.add(edge_key)
+                        self._add_edge(src_idx, tgt_idx, float(record["weight"]))
+                        synonym_edge_count += 1
 
             # ----------------------------------------------------------
             # 5b. Sentence-Sentence edges via SEMANTICALLY_SIMILAR
@@ -382,6 +402,9 @@ class HippoRAG2PPR:
         damping: float = 0.5,
         max_iterations: int = 50,
         convergence_threshold: float = 1e-6,
+        dangling_redistribution: bool = False,
+        passage_self_loops: float = 0.0,
+        hub_devaluation: bool = False,
     ) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
         """Run Personalized PageRank with weighted seeds.
 
@@ -396,6 +419,15 @@ class HippoRAG2PPR:
             damping: Damping factor (default 0.5, upstream HippoRAG 2).
             max_iterations: Max power iteration steps.
             convergence_threshold: L1 convergence threshold.
+            dangling_redistribution: If True, mass from dangling nodes
+                (zero out-degree) teleports back to the personalization
+                vector instead of being lost.
+            passage_self_loops: If > 0, add virtual self-loops of this
+                weight to passage nodes during the walk. Prevents passage
+                mass from draining entirely to entities.
+            hub_devaluation: If True, normalize entity→passage walk
+                contributions by entity degree (IDF-style), preventing
+                high-degree hubs from diluting mass.
 
         Returns:
             Tuple of:
@@ -425,6 +457,20 @@ class HippoRAG2PPR:
             return [], []
         personalization = [p / total_p for p in personalization]
 
+        # Precompute effective out-weight sums with virtual self-loops
+        effective_out_sum = dict(self._out_weight_sum)
+        if passage_self_loops > 0:
+            for idx in range(self._node_count):
+                if self._node_types.get(idx) == "passage":
+                    effective_out_sum[idx] = effective_out_sum.get(idx, 0.0) + passage_self_loops
+
+        # Precompute hub-devaluation divisors (entity degree for IDF-style)
+        hub_divisor: Dict[int, float] = {}
+        if hub_devaluation:
+            for idx in range(self._node_count):
+                if self._node_types.get(idx) == "entity":
+                    hub_divisor[idx] = max(len(self._adj.get(idx, [])), 1.0)
+
         # Initialize rank to personalization vector
         rank = list(personalization)
 
@@ -435,16 +481,33 @@ class HippoRAG2PPR:
                 for i in range(self._node_count)
             ]
 
+            dangling_mass = 0.0
             for src in range(self._node_count):
                 if rank[src] == 0.0:
                     continue
-                out_sum = self._out_weight_sum.get(src, 0.0)
+                out_sum = effective_out_sum.get(src, 0.0)
                 if out_sum == 0.0:
+                    # Dangling node: accumulate mass for redistribution
+                    if dangling_redistribution:
+                        dangling_mass += damping * rank[src]
                     continue
+
+                # Virtual self-loop: passage retains some mass
+                if passage_self_loops > 0 and self._node_types.get(src) == "passage":
+                    self_share = damping * rank[src] * passage_self_loops / out_sum
+                    new_rank[src] += self_share
+
                 for tgt, edge_weight in self._adj[src]:
-                    # Weighted random walk: probability proportional to edge weight
                     share = damping * rank[src] * edge_weight / out_sum
+                    # Hub devaluation: reduce share from high-degree entities
+                    if hub_devaluation and src in hub_divisor:
+                        share /= hub_divisor[src]
                     new_rank[tgt] += share
+
+            # Redistribute dangling mass to personalization vector
+            if dangling_redistribution and dangling_mass > 0:
+                for i in range(self._node_count):
+                    new_rank[i] += dangling_mass * personalization[i]
 
             # Check convergence (L1 norm)
             diff = sum(abs(new_rank[i] - rank[i]) for i in range(self._node_count))

@@ -217,7 +217,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05")
             )
             synonym_threshold = float(
-                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.8")
+                os.getenv("ROUTE7_SYNONYM_THRESHOLD", "0.70")
             )
 
             # Load triple store and PPR graph in parallel
@@ -318,6 +318,15 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ROUTE7_TRIPLE_RERANK", "0"
         ).strip().lower() in {"1", "true", "yes"}
         triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "30"))
+
+        # PPR coverage fixes (ref: standard PageRank literature)
+        ppr_dangling = os.getenv(
+            "ROUTE7_PPR_DANGLING", "0"
+        ).strip().lower() in {"1", "true", "yes"}
+        ppr_self_loops = float(os.getenv("ROUTE7_PPR_SELF_LOOPS", "0.0"))
+        ppr_hub_deval = os.getenv(
+            "ROUTE7_PPR_HUB_DEVAL", "0"
+        ).strip().lower() in {"1", "true", "yes"}
 
         logger.info(
             "route_7_hipporag2_start",
@@ -526,6 +535,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             entity_seeds=entity_seeds,
             passage_seeds=passage_seeds,
             damping=ppr_damping,
+            dangling_redistribution=ppr_dangling,
+            passage_self_loops=ppr_self_loops,
+            hub_devaluation=ppr_hub_deval,
         )
 
         # Bug 3 fix: if PPR produced no passage scores, fall back to raw DPR order

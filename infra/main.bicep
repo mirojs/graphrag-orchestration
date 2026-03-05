@@ -174,6 +174,7 @@ module b2bManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2bCu
     environmentName: 'graphrag-env'
     location: location
     domainName: b2bCustomDomain
+    existingCertName: 'mc-rg-graphrag-fe-evidoc-enterpris-4005'
   }
   dependsOn: [containerAppsEnvironment]
 }
@@ -186,6 +187,7 @@ module b2cManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2cCu
     environmentName: 'graphrag-env'
     location: location
     domainName: b2cCustomDomain
+    existingCertName: 'mc-rg-graphrag-fe-evidoc-hulkdesig-2553'
   }
   dependsOn: [containerAppsEnvironment]
 }

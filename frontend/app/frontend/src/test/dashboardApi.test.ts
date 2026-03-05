@@ -7,7 +7,8 @@ import {
 } from "../api/dashboard";
 
 vi.mock("../api/api", () => ({
-    getHeaders: vi.fn(async () => ({ Authorization: "Bearer test-token" }))
+    getHeaders: vi.fn(async () => ({ Authorization: "Bearer test-token" })),
+    fetchWithAuthRetry: vi.fn((url: string, init: RequestInit) => globalThis.fetch(url, init))
 }));
 
 function mockFetchOnce(body: unknown, status = 200) {

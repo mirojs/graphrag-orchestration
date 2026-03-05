@@ -13,9 +13,10 @@ import {
     unlockFileApi
 } from "../api/files";
 
-// Mock getHeaders to return a simple auth header
+// Mock getHeaders and fetchWithAuthRetry (delegates to globalThis.fetch so spies work)
 vi.mock("../api/api", () => ({
-    getHeaders: vi.fn(async () => ({ Authorization: "Bearer test-token" }))
+    getHeaders: vi.fn(async () => ({ Authorization: "Bearer test-token" })),
+    fetchWithAuthRetry: vi.fn((url: string, init: RequestInit) => globalThis.fetch(url, init))
 }));
 
 // Helper to set up a fetch mock for one call

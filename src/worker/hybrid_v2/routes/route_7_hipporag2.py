@@ -285,7 +285,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         rerank_top_k = int(os.getenv("ROUTE7_RERANK_TOP_K", "30"))
         # Corpus-wide reranker: cross-encoder on ALL passages as parallel retrieval channel
         rerank_all_enabled = os.getenv(
-            "ROUTE7_RERANK_ALL", "1"
+            "ROUTE7_RERANK_ALL", "0"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_all_top_k = int(os.getenv("ROUTE7_RERANK_ALL_TOP_K", "50"))
 

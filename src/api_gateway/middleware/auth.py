@@ -328,6 +328,11 @@ def get_group_id(
             logger.warning(f"Using legacy X-Group-ID header: {x_group_id}")
             return x_group_id
     
+    # When auth is disabled, return a default group_id for local development
+    if not settings.REQUIRE_AUTH:
+        logger.info("REQUIRE_AUTH is False — using default local-dev group_id")
+        return "local-dev"
+    
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Group ID not found. Authentication required."
@@ -366,6 +371,11 @@ def get_user_id(
         else:
             logger.warning(f"Using legacy X-User-ID header: {x_user_id}")
             return x_user_id
+    
+    # When auth is disabled, return a default user_id for local development
+    if not settings.REQUIRE_AUTH:
+        logger.info("REQUIRE_AUTH is False — using default local-dev user_id")
+        return "local-dev"
     
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

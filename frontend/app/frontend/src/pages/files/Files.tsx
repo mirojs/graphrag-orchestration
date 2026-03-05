@@ -11,7 +11,7 @@
 
 import { useState, useEffect, useCallback, useRef, useContext } from "react";
 import { useMsal } from "@azure/msal-react";
-import { useLogin, getToken } from "../../authConfig";
+import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import {
     listFilesApi,
@@ -66,16 +66,15 @@ const Files = () => {
 
     // Load files
     const loadFiles = useCallback(async () => {
-        if (!client) return;
         try {
             setLoading(true);
-            const token = await getToken(client);
-            if (!token) {
-                // User hasn't signed in yet — nothing to load, not an error
+            const token = client ? await getToken(client) : undefined;
+            if (useLogin && !token) {
+                // Auth enabled but user hasn't signed in yet — nothing to load
                 setFiles([]);
                 return;
             }
-            const result = await listFilesApi(token);
+            const result = await listFilesApi(token as string);
             setFiles(result);
         } catch (err: any) {
             addToast("error", `Failed to load files: ${err.message}`);
@@ -91,13 +90,13 @@ const Files = () => {
     // Upload handler
     const handleUpload = useCallback(
         async (fileList: File[]) => {
-            if (!client || fileList.length === 0) return;
+            if (fileList.length === 0) return;
             try {
                 setUploading(true);
                 setUploadProgress(0);
-                const token = await getToken(client);
-                if (!token) throw new Error("Not authenticated");
-                const result = await uploadFilesApi(fileList, token, (loaded, total) => {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                const result = await uploadFilesApi(fileList, token as string, (loaded, total) => {
                     setUploadProgress(Math.round((loaded / total) * 100));
                 });
                 addToast("success", result.message || `${fileList.length} file(s) uploaded`);
@@ -116,17 +115,16 @@ const Files = () => {
     // Delete handler
     const handleDelete = useCallback(
         async (filenames: string[]) => {
-            if (!client) return;
             const confirmMsg = filenames.length === 1 ? `Delete "${filenames[0]}"?` : `Delete ${filenames.length} files?`;
             if (!window.confirm(confirmMsg)) return;
 
             try {
-                const token = await getToken(client);
-                if (!token) throw new Error("Not authenticated");
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
                 if (filenames.length === 1) {
-                    await deleteFileApi(filenames[0], token);
+                    await deleteFileApi(filenames[0], token as string);
                 } else {
-                    await bulkDeleteFilesApi(filenames, token);
+                    await bulkDeleteFilesApi(filenames, token as string);
                 }
                 addToast("success", `${filenames.length} file(s) deleted`);
                 await loadFiles();
@@ -145,11 +143,10 @@ const Files = () => {
     // Rename handler
     const handleRename = useCallback(
         async (oldName: string, newName: string) => {
-            if (!client) return;
             try {
-                const token = await getToken(client);
-                if (!token) throw new Error("Not authenticated");
-                await renameFileApi(oldName, newName, token);
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await renameFileApi(oldName, newName, token as string);
                 addToast("success", `Renamed to "${newName}"`);
                 setRenameFile(null);
                 await loadFiles();
@@ -191,8 +188,8 @@ const Files = () => {
             return sortAsc ? cmp : -cmp;
         });
 
-    // Not logged in guard — check actual login state, not just auth config
-    if (!useLogin || !loggedIn) {
+    // Not logged in guard — only block when login is required and user hasn't signed in
+    if (requireLogin && !loggedIn) {
         return (
             <div className={styles.container}>
                 <div className={styles.emptyState}>

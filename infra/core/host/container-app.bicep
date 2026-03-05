@@ -47,8 +47,9 @@ param clientSecretSettingName string = ''
 param tokenStoreSasSecretName string = ''
 
 // Calculate the OpenID issuer URL based on auth type
+// CIAM issuer uses tenant ID (not tenant name) as subdomain in the iss claim
 var openIdIssuerUrl = useExternalIdIssuer && !empty(externalIdTenantName) 
-  ? 'https://${externalIdTenantName}.ciamlogin.com/${authTenantId}/v2.0'
+  ? 'https://${authTenantId}.ciamlogin.com/${authTenantId}/v2.0'
   : 'https://login.microsoftonline.com/${authTenantId}/v2.0'
 
 resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {

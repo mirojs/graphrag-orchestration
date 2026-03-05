@@ -232,6 +232,8 @@ class LazyGraphRAGIndexingPipeline:
         knn_top_k: int = 5,
         knn_similarity_cutoff: float = 0.60,
         knn_config: Optional[str] = None,  # Tag for KNN edges (e.g., "knn-1", "knn-2") for A/B testing
+        # Entity synonymy parameters (cross-doc bridging via embedding similarity)
+        entity_synonymy_threshold: float = 0.70,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -506,6 +508,28 @@ class LazyGraphRAGIndexingPipeline:
         except Exception as e:
             logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
             stats["triple_embeddings_stored"] = 0
+
+        # 7.6) Compute entity-entity synonymy edges.
+        # After entity dedup merges near-identical entities (≥0.8), remaining
+        # entity pairs in the 0.70–0.79 range are semantically related but
+        # distinct. Connecting them with SEMANTICALLY_SIMILAR edges creates
+        # cross-document bridges for PPR traversal (see §47).
+        try:
+            synonymy_stats = await self._compute_entity_synonymy_edges(
+                group_id=group_id,
+                threshold=entity_synonymy_threshold,
+            )
+            stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
+            stats["entity_synonymy_cross_community"] = synonymy_stats.get("cross_community", 0)
+            logger.info(
+                "✅ Step 7.6: %d entity synonymy edges (%d cross-community) at threshold %.2f",
+                stats["entity_synonymy_edges"],
+                stats["entity_synonymy_cross_community"],
+                entity_synonymy_threshold,
+            )
+        except Exception as e:
+            logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
+            stats["entity_synonymy_edges"] = 0
 
         # 8) Run GDS graph algorithms (KNN, Louvain, PageRank) - AFTER entities are in Neo4j
         # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
@@ -4358,6 +4382,101 @@ SUMMARY: <summary>"""
             f"Pre-computed {stored}/{len(triples)} triple embeddings for group {group_id}"
         )
         return {"stored": stored, "total": len(triples)}
+
+    async def _compute_entity_synonymy_edges(
+        self,
+        group_id: str,
+        threshold: float = 0.70,
+    ) -> Dict[str, Any]:
+        """Compute entity-entity synonymy edges from embedding similarity (Step 7.6).
+
+        After entity dedup merges near-identical entities (≥0.8 cosine), the
+        remaining entity pairs in the threshold–0.79 range are semantically
+        related but distinct.  Connecting them with SEMANTICALLY_SIMILAR edges
+        creates cross-document bridges for PPR traversal.
+
+        This replaces the upstream HippoRAG 2 entity KNN (topk=2047, @0.8)
+        mechanism, adapted for our post-dedup entity landscape where max
+        pairwise similarity is <0.80.  See architecture doc §47.
+        """
+        import numpy as np
+
+        def _compute_and_write(session) -> Dict[str, Any]:
+            # Load entity embeddings
+            result = session.run(
+                "MATCH (e:Entity {group_id: $gid}) "
+                "WHERE e.embedding_v2 IS NOT NULL "
+                "RETURN e.id AS id, e.name AS name, "
+                "e.embedding_v2 AS emb, e.community_id AS comm",
+                gid=group_id,
+            )
+            entities = [(r["id"], r["name"], np.array(r["emb"]), r["comm"])
+                        for r in result]
+            if len(entities) < 2:
+                return {"edges_created": 0, "cross_community": 0, "entities": len(entities)}
+
+            # All-pairs cosine similarity
+            embs = np.array([e[2] for e in entities])
+            norms = np.linalg.norm(embs, axis=1, keepdims=True)
+            embs_normed = embs / (norms + 1e-10)
+            sim_matrix = embs_normed @ embs_normed.T
+
+            # Find pairs above threshold
+            edges = []
+            cross_community = 0
+            for i in range(len(entities)):
+                for j in range(i + 1, len(entities)):
+                    if sim_matrix[i, j] >= threshold:
+                        edges.append({
+                            "src_id": entities[i][0],
+                            "tgt_id": entities[j][0],
+                            "similarity": float(sim_matrix[i, j]),
+                        })
+                        if entities[i][3] != entities[j][3]:
+                            cross_community += 1
+
+            if not edges:
+                return {"edges_created": 0, "cross_community": 0, "entities": len(entities)}
+
+            # Clear old entity synonymy edges
+            session.run(
+                "MATCH (e1:Entity {group_id: $gid})"
+                "-[r:SEMANTICALLY_SIMILAR]->(e2:Entity {group_id: $gid}) "
+                "WHERE r.method = 'entity_synonymy' DELETE r",
+                gid=group_id,
+            )
+
+            # Write bidirectional edges in batches
+            batch_size = 50
+            for start in range(0, len(edges), batch_size):
+                batch = edges[start : start + batch_size]
+                session.run(
+                    "UNWIND $edges AS edge "
+                    "MATCH (e1:Entity {id: edge.src_id, group_id: $gid}) "
+                    "MATCH (e2:Entity {id: edge.tgt_id, group_id: $gid}) "
+                    "CREATE (e1)-[:SEMANTICALLY_SIMILAR {"
+                    "  similarity: edge.similarity,"
+                    "  method: 'entity_synonymy',"
+                    "  group_id: $gid,"
+                    "  threshold: $thresh"
+                    "}]->(e2) "
+                    "CREATE (e2)-[:SEMANTICALLY_SIMILAR {"
+                    "  similarity: edge.similarity,"
+                    "  method: 'entity_synonymy',"
+                    "  group_id: $gid,"
+                    "  threshold: $thresh"
+                    "}]->(e1)",
+                    edges=batch, gid=group_id, thresh=threshold,
+                )
+
+            return {
+                "edges_created": len(edges),
+                "cross_community": cross_community,
+                "entities": len(entities),
+                "threshold": threshold,
+            }
+
+        return await self.neo4j_store.arun_in_session(_compute_and_write)
 
     async def _create_foundation_edges(self, group_id: str) -> Dict[str, int]:
         """Create foundation edges for graph schema enhancement.

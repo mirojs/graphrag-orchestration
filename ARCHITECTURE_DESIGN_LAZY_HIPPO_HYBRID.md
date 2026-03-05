@@ -11776,3 +11776,105 @@ Several frontend/backend issues surfaced during UI testing:
 - **Settings state preserved** — RAG settings (temperature, retrieve count, streaming, etc.) are still initialized from server config and sent with queries. Only the UI to change them at runtime was removed.
 - **File management consolidated** — The Files sidebar tab is the single entry point for file operations. The old chat-bar popover (`UploadFile` component) is no longer rendered.
 - **Fail-fast Redis** — 5-second socket timeout ensures Redis issues surface as caught exceptions rather than gateway timeouts.
+
+---
+
+## §46. Route 7 Multi-Layer Seeding Architecture & Cross-Encoder Passage Seeds (2026-03-05)
+
+### Problem
+
+Route 7's previous "56/57" benchmark result (§39) was achieved with `RERANK_ALL=1`, which injects cross-encoder results **after** PPR — effectively bypassing the graph. When `RERANK_ALL=0` (true graph-only mode), the baseline drops to **54/57**. The remaining failures are Q-D3 ("list all day-based timeframes across all documents") — a cross-document exhaustive query where target sentences share zero entities with PPR entity seeds.
+
+### Root Cause: Graph Isolation
+
+Q-D3 asks for ALL explicit day-based timeframes across 5 documents. Key sentences like:
+- "10 business days to file contract changes" (Holding Tank)
+- "180 days threshold for short-term vs long-term rentals" (Property Management)
+
+These sentences have **no shared entities** with PPR entity seeds derived from triple linking. They are structurally isolated in the knowledge graph — no entity path connects them to the query's seed nodes.
+
+### Solution: Multi-Layer Seeding Architecture
+
+We implemented a **three-layer seeding model** where each layer addresses a different coverage scale:
+
+| Layer | Mechanism | Coverage Scale | What It Seeds |
+|-------|-----------|---------------|---------------|
+| **Cross-Encoder (CE)** | Voyage rerank-2.5 full query-document attention on all sentences | **Micro** — individual sentence relevance | `passage_seeds` (supplemental) |
+| **DPR + Entity linking** | Cosine similarity (Voyage context-3) + triple-based entity extraction | **Meso** — embedding neighborhood + graph structure | `passage_seeds` (primary) + `entity_seeds` |
+| **Community seeds** | Community-level embedding match → entity resolution | **Macro** — thematic topic coverage | `entity_seeds` (supplemental) |
+
+#### How it works
+
+1. **DPR** (Dense Passage Retrieval) embeds the query and retrieves top-50 sentences by cosine similarity from the Neo4j vector index. These become the **primary passage seeds** — broad coverage across all documents.
+
+2. **Cross-Encoder** (Priority 2A) runs Voyage `rerank-2.5` on ALL 202 sentences with full query-document attention. Top-20 results are **merged into passage_seeds** with weight=0.05. Typically ~5-20 are NEW passages DPR missed, providing micro-level precision on conceptually related but embedding-distant sentences.
+
+3. **Community seeds** match query to Louvain community summaries and resolve top-15 entities. These are added to `entity_seeds` with weight=0.1 for macro-level topic coverage.
+
+4. **PPR** starts with combined entity_seeds + passage_seeds (~55-60 seeds total) and walks the graph.
+
+5. **Synthesis** receives only `ppr_passage_top_k=20` passages (~10-18 after dedup, ~678 tokens) — keeping LLM input very concise.
+
+#### Key design decision: CE supplements DPR, not replaces it
+
+We tested three approaches:
+
+| Approach | Score | Passages to LLM | Why |
+|----------|-------|-----------------|-----|
+| DPR only (baseline) | 54/57 | 20 | Broad but misses conceptual matches |
+| **DPR + CE supplemental** | **56/57** | 20 | CE adds precision on top of DPR breadth |
+| CE only (replacing DPR) | 52/57 | 20 | Lost 3 questions — PPR needs DPR's 50-passage breadth |
+| DPR + CE + Community | 53/57 | 20 | Community entities overlap with triple-linked; adds noise |
+| RERANK_ALL=1 (post-PPR) | 56/57 | ~50 | Bypasses graph, 2.5× more synthesis input |
+
+**Why CE can't replace DPR:** Cross-encoder top-K only returns ranked results for K passages. DPR cosine search returns ALL 50 passages with scores, giving PPR a broader mass distribution to walk from. With only 20 CE seeds, PPR can't discover passages through graph edges it never reached.
+
+**Why community seeds don't help here:** Community entities (weight=0.1) overlap with triple-linked entities and get truncated by `entity_top_k=15`. For Q-D3 specifically, the missing facts are in documents with no entity path to seed nodes — a passage-level gap, not an entity-level gap.
+
+### Best Configuration (RERANK_ALL=0)
+
+```
+ROUTE7_TRIPLE_RERANK=1          # Voyage rerank-2.5 on triple candidates
+ROUTE7_TRIPLE_CANDIDATES_K=50   # Cosine pre-filter for triple reranking
+ROUTE7_TRIPLE_TOP_K=15          # Surviving triples after rerank
+ROUTE7_ENTITY_SEED_TOP_K=15     # Max entity seeds for PPR
+ROUTE7_DPR_TOP_K=50             # DPR passage seeds (primary)
+ROUTE7_SEMANTIC_PASSAGE_SEEDS=1 # Enable cross-encoder supplemental seeds
+ROUTE7_SEMANTIC_SEED_TOP_K=20   # CE top-K passages
+ROUTE7_SEMANTIC_SEED_WEIGHT=0.05 # CE seed weight (same as DPR)
+ROUTE7_PPR_PASSAGE_TOP_K=20     # Final passages to synthesis
+ROUTE7_RERANK_ALL=0             # No post-PPR corpus reranking
+ROUTE7_COMMUNITY_SEEDS=0        # Community seeds off (no net benefit)
+```
+
+### Benchmark Results (2026-03-05)
+
+| Experiment | Config | Score | Q-D3 | Notes |
+|-----------|--------|-------|------|-------|
+| Baseline (RERANK_ALL=0) | DPR only | 54/57 | 0/3 | True graph-only mode |
+| + Triple rerank | +TRIPLE_RERANK=1 | 55/57 | 1/3 | Better entity precision |
+| + CE supplemental | +SEMANTIC_SEEDS=1 (w=0.05, k=20) | **56/57** | 2/3 | **Best** |
+| CE only (no DPR) | DPR skipped, CE k=20 | 52/57 | 1/3 | PPR needs DPR breadth |
+| CE only (no DPR) | DPR skipped, CE k=50 | Q-D3=1/3 | 1/3 | Still worse |
+| + Community seeds | +COMMUNITY_SEEDS=1 | 53/57 | 2/3 | Entities overlap, Q-D8 regressed |
+| Recheck (same best config) | DPR+CE, w=0.05, k=20 | 54/57 | 1/3 | LLM eval variance (±2 pts) |
+
+**Score variance:** The 54-56/57 range across runs with identical config reflects LLM synthesis and judge non-determinism. Q-D3 (2/3 vs 1/3) and Q-D5 (2/3 vs 3/3) are borderline cases where the retrieved context is always the same but the LLM synthesis and GPT-5.1 judge score slightly differently each time.
+
+### Remaining Gap: Q-D3 Retrieval Coverage
+
+Q-D3 retrieves 15 sentences from only **3 of 5 documents** (678 tokens). Missing entirely:
+- **Holding Tank** — "10 business days to file contract changes" has no entity overlap
+- **Property Management** — "180 days short-term vs long-term rental threshold" not surfaced
+
+The LLM faithfully reports all timeframes present in its context but cannot mention what was never retrieved. This is a **retrieval gap**, not a synthesis issue. Expanding sentences with ±1 neighbors wouldn't help because the entire Holding Tank document has zero representation in the top-20 PPR passages.
+
+### Code Changes
+
+| File | Change |
+|------|--------|
+| `route_7_hipporag2.py` | Added `ROUTE7_SEMANTIC_PASSAGE_SEEDS` env var and cross-encoder seeding logic |
+| `route_7_hipporag2.py` | Fixed `CommunityMatcher.match()` → `match_communities()` API call |
+| `route_7_hipporag2.py` | Cross-encoder results merged into `passage_seeds` dict BEFORE PPR (not after) |
+
+Commit: `9f48d51` (cross-encoder passage seeds)

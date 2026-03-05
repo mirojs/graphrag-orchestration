@@ -1549,11 +1549,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             if not community_matcher or not self._async_neo4j:
                 return [], []
 
-            # Match communities
-            matched = await community_matcher.match(query, top_k=3)
-            if not matched:
+            # Match communities (returns list of (community_dict, score) tuples)
+            matched_tuples = await community_matcher.match_communities(query, top_k=3)
+            if not matched_tuples:
                 return [], []
 
+            matched = [t[0] for t in matched_tuples]
             # Resolve entities from matched communities
             community_ids = [c.get("id") for c in matched if c.get("id")]
             if not community_ids:

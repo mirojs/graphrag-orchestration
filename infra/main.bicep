@@ -135,6 +135,23 @@ var acrUsername = acrCredentials.username
 var acrPassword = acrCredentials.passwords[0].value
 var useAcrPassword = !empty(acrPassword)
 
+// Reference existing storage account for generating token store SAS
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' existing = {
+  name: storageAccountName
+  scope: rg
+}
+
+// Generate SAS URL for EasyAuth token store blob container
+var tokenStoreSasExpiry = '2036-01-01T00:00:00Z'
+var tokenStoreSas = storageAccount.listAccountSas('2023-05-01', {
+  signedProtocol: 'https'
+  signedResourceTypes: 'sco'
+  signedPermission: 'rwdlacup'
+  signedServices: 'b'
+  signedExpiry: tokenStoreSasExpiry
+}).accountSasToken
+var tokenStoreSasUrl = 'https://${storageAccountName}.blob.core.windows.net/tokenstore?${tokenStoreSas}'
+
 // Cosmos DB for chat history and usage tracking
 module cosmosDb './core/database/cosmos-db.bicep' = {
   name: 'cosmos-db'
@@ -667,7 +684,12 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
         secretRef: 'admin-api-key'
       }
     ] : [])
-    secrets: concat(sharedSecrets, !empty(adminApiKey) ? [
+    secrets: concat(sharedSecrets, [
+      {
+        name: 'token-store-sas'
+        value: tokenStoreSasUrl
+      }
+    ], !empty(adminApiKey) ? [
       {
         name: 'admin-api-key'
         value: adminApiKey

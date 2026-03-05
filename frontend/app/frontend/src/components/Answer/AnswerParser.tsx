@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { ChatAppResponse, getCitationFilePath } from "../../api";
+import { StructuredCitation } from "../../api/models";
 import { QueryPlanStep, getStepLabel, activityTypeLabels } from "../AnalysisPanel/agentPlanUtils";
 
 export type CitationDetail = {
@@ -10,6 +11,8 @@ export type CitationDetail = {
     stepNumber?: number;
     stepLabel?: string;
     stepSource?: string;
+    /** Original marker key from the LLM, e.g. "[1]" or "[1a]" */
+    citationKey?: string;
 };
 
 type CitationFragment =
@@ -75,28 +78,44 @@ const buildActivityStepMap = (answer: ChatAppResponse): Record<string, ActivityS
     return mapping;
 };
 
+/**
+ * Build a lookup from citation inner text (e.g. "1", "2", "1a") to the
+ * index in the structured_citations array.  The backend citation field
+ * stores the marker as "[1]", "[1a]", etc.
+ */
+const buildStructuredCitationMap = (structured: StructuredCitation[]): Map<string, number> => {
+    const map = new Map<string, number>();
+    structured.forEach((sc, idx) => {
+        if (sc.citation) {
+            const inner = sc.citation.replace(/^\[|\]$/g, "");
+            if (inner) map.set(inner, idx);
+        }
+    });
+    return map;
+};
+
 const collectCitations = (answer: ChatAppResponse, isStreaming: boolean): { fragments: CitationFragment[]; citations: CitationDetail[] } => {
     const possibleCitations = answer.context.data_points.citations || [];
+    const structuredCitations = answer.context.data_points.structured_citations || [];
     const citationActivityDetails = answer.context.data_points.citation_activity_details ?? {};
     const activitySteps = buildActivityStepMap(answer);
     const externalResults = answer.context.data_points.external_results_metadata || [];
     const parsedAnswer = normalizeAnswerText(answer, isStreaming);
     const parts = parsedAnswer.split(/\[([^\]]+)\]/g);
 
+    // Map from bracket inner text → structured citation index
+    const scMap = buildStructuredCitationMap(structuredCitations);
+
     // Helper to resolve SharePoint filename to URL
     const resolveSharePointUrl = (citation: string): string => {
-        // If it's already a URL, return as-is
         if (isWebCitation(citation)) {
             return citation;
         }
-        // Check if this looks like a filename (has an extension)
         const hasFileExtension = /\.(pdf|docx?|xlsx?|pptx?|txt|html?|csv)$/i.test(citation);
         if (!hasFileExtension) {
             return citation;
         }
 
-        // Look for matching SharePoint URL in external_results_metadata
-        // Match by checking if the URL ends with the filename
         const matchingResult = externalResults.find(result => {
             if (!result.url) return false;
             const urlParts = result.url.split("/");
@@ -117,16 +136,43 @@ const collectCitations = (answer: ChatAppResponse, isStreaming: boolean): { frag
             return;
         }
 
+        // --- Strategy 1: Match [N] / [Na] against structured_citations ---
+        const scIdx = scMap.get(part);
+        if (scIdx !== undefined) {
+            const sc = structuredCitations[scIdx];
+            const ref = sc.document_url || sc.document_title || sc.source || part;
+            const resolvedRef = resolveSharePointUrl(ref);
+
+            // De-duplicate by citation key to avoid rendering the same badge twice
+            const dedupeKey = `sc:${part}`;
+            const existing = citationMap.get(dedupeKey);
+            if (existing) {
+                fragments.push({ type: "citation", detail: existing });
+                return;
+            }
+
+            const detail: CitationDetail = {
+                reference: resolvedRef,
+                index: citationList.length + 1,
+                isWeb: isWebCitation(resolvedRef),
+                citationKey: sc.citation || `[${part}]`,
+            };
+
+            citationMap.set(dedupeKey, detail);
+            citationList.push(detail);
+            fragments.push({ type: "citation", detail });
+            return;
+        }
+
+        // --- Strategy 2: Legacy filename-based matching (upstream compat) ---
         const isValidCitation = possibleCitations.some(citation => citation.endsWith(part));
         if (!isValidCitation) {
             fragments.push({ type: "text", value: `[${part}]` });
             return;
         }
 
-        // Resolve SharePoint filename to URL if applicable
         const resolvedReference = resolveSharePointUrl(part);
 
-        // Check if this resolved reference already exists
         const existing = citationMap.get(resolvedReference);
         if (existing) {
             fragments.push({ type: "citation", detail: existing });
@@ -136,8 +182,6 @@ const collectCitations = (answer: ChatAppResponse, isStreaming: boolean): { frag
         const backendDetail = citationActivityDetails?.[part];
         const activityId = backendDetail?.id;
         const stepMeta = activityId ? activitySteps[String(activityId)] : undefined;
-
-        // Get label from backend type using our mapping, or fallback to stepMeta
         const activityLabel = backendDetail?.type ? activityTypeLabels[backendDetail.type] || backendDetail.type : undefined;
 
         const detail: CitationDetail = {

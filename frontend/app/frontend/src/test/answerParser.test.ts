@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { parseAnswerToHtml, extractCitationDetails } from "../components/Answer/AnswerParser";
-import { ChatAppResponse } from "../api/models";
+import { ChatAppResponse, StructuredCitation } from "../api/models";
 
 // Helper to build a minimal ChatAppResponse
 function makeResponse(content: string, citations: string[] = [], overrides?: Partial<ChatAppResponse["context"]>): ChatAppResponse {
@@ -13,7 +13,8 @@ function makeResponse(content: string, citations: string[] = [], overrides?: Par
                 images: [],
                 citations,
                 citation_activity_details: overrides?.data_points?.citation_activity_details ?? {},
-                external_results_metadata: overrides?.data_points?.external_results_metadata ?? []
+                external_results_metadata: overrides?.data_points?.external_results_metadata ?? [],
+                structured_citations: overrides?.data_points?.structured_citations ?? []
             },
             followup_questions: null,
             thoughts: overrides?.thoughts ?? [],
@@ -122,6 +123,87 @@ describe("parseAnswerToHtml", () => {
         expect(result.citations[0].stepLabel).toBe("Index search");
         expect(result.citations[0].stepSource).toBe("Knowledge Base");
     });
+
+    // --- Structured citation [N] marker tests ---
+
+    it("matches [N] markers against structured_citations", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "Contract.pdf", page_number: 3, sentence_text: "Delivery in 30 days" },
+            { citation: "[2]", document_title: "Invoice.pdf", page_number: 1, sentence_text: "Total: $5000" }
+        ];
+        const response = makeResponse("Delivery is 30 days [1]. Total is $5000 [2].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, noopClick);
+        expect(result.citations).toHaveLength(2);
+        expect(result.citations[0].reference).toBe("Contract.pdf");
+        expect(result.citations[0].citationKey).toBe("[1]");
+        expect(result.citations[1].reference).toBe("Invoice.pdf");
+        expect(result.citations[1].citationKey).toBe("[2]");
+        expect(result.answerHtml).toContain("supContainer");
+    });
+
+    it("prefers document_url over document_title for reference", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "Contract.pdf", document_url: "https://blob.example.com/Contract.pdf" }
+        ];
+        const response = makeResponse("See [1].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, noopClick);
+        expect(result.citations[0].reference).toBe("https://blob.example.com/Contract.pdf");
+        expect(result.citations[0].isWeb).toBe(true);
+    });
+
+    it("deduplicates repeated [N] markers", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "Contract.pdf" }
+        ];
+        const response = makeResponse("Fact [1]. Another fact [1].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, noopClick);
+        expect(result.citations).toHaveLength(1);
+    });
+
+    it("handles [Na] sentence-level markers", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1a]", citation_type: "sentence", document_title: "Contract.pdf", sentence_text: "First sentence" },
+            { citation: "[1b]", citation_type: "sentence", document_title: "Contract.pdf", sentence_text: "Second sentence" }
+        ];
+        const response = makeResponse("Fact one [1a]. Fact two [1b].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, noopClick);
+        expect(result.citations).toHaveLength(2);
+        expect(result.citations[0].citationKey).toBe("[1a]");
+        expect(result.citations[1].citationKey).toBe("[1b]");
+    });
+
+    it("ignores [N] markers not in structured_citations", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "Contract.pdf" }
+        ];
+        const response = makeResponse("Valid [1]. Invalid [99].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, noopClick);
+        expect(result.citations).toHaveLength(1);
+        expect(result.answerHtml).toContain("[99]");
+    });
+
+    it("mixes structured [N] and legacy filename citations", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "Contract.pdf" }
+        ];
+        const response = makeResponse("Graph [1]. Also see [other.pdf].", ["other.pdf"], {
+            data_points: { text: [], images: [], citations: ["other.pdf"], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, noopClick);
+        expect(result.citations).toHaveLength(2);
+        expect(result.citations[0].citationKey).toBe("[1]");
+        expect(result.citations[1].reference).toBe("other.pdf");
+    });
 });
 
 describe("extractCitationDetails", () => {
@@ -136,5 +218,17 @@ describe("extractCitationDetails", () => {
     it("returns empty array when no citations", () => {
         const response = makeResponse("No citations here.");
         expect(extractCitationDetails(response)).toHaveLength(0);
+    });
+
+    it("extracts structured citation details", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "Report.pdf", sentence_text: "Key finding" }
+        ];
+        const response = makeResponse("Finding [1].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const details = extractCitationDetails(response);
+        expect(details).toHaveLength(1);
+        expect(details[0].citationKey).toBe("[1]");
     });
 });

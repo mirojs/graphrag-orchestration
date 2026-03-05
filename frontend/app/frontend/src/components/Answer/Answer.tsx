@@ -108,17 +108,20 @@ export const Answer = ({
             </div>
 
             {(() => {
-                // Build citation list directly from data_points (not inline markers)
+                // Build citation list from structured_citations (sentence-level)
                 const structuredCitations = answer.context?.data_points?.structured_citations || [];
-                // De-duplicate by document title
+                if (!structuredCitations.length) return null;
+
+                // De-duplicate by citation key or chunk_id (sentence-level), not document title
                 const seen = new Set<string>();
                 const uniqueCitations = structuredCitations.filter(sc => {
-                    const key = sc.document_title || sc.source || "";
+                    const key = sc.citation || sc.chunk_id || `${sc.document_title}-${sc.page_number}-${sc.sentence_text || sc.text_preview || ""}`;
                     if (!key || seen.has(key)) return false;
                     seen.add(key);
                     return true;
                 });
                 if (!uniqueCitations.length) return null;
+
                 return (
                     <div>
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
@@ -129,18 +132,24 @@ export const Answer = ({
                                 if (sc.page_number) {
                                     path += `#page=${sc.page_number}`;
                                 }
-                                const pageInfo = sc.page_number ? ` (p.${sc.page_number})` : "";
+                                const pageInfo = sc.page_number ? ` p.${sc.page_number}` : "";
+                                const sectionInfo = sc.section_path && sc.section_path !== "General" ? ` §${sc.section_path}` : "";
+                                const sentencePreview = sc.sentence_text || sc.text_preview || "";
+                                const truncated = sentencePreview.length > 80 ? sentencePreview.substring(0, 77) + "…" : sentencePreview;
+                                const locationParts = [docName, pageInfo, sectionInfo].filter(Boolean).join(",");
+                                const label = truncated ? `${truncated} (${locationParts})` : `${docName}${pageInfo}`;
+
                                 return (
-                                    <span key={`${docName}-${idx}`} className={styles.citationEntry}>
+                                    <span key={`${sc.citation || docName}-${idx}`} className={styles.citationEntry}>
                                         <a
                                             className={styles.citation}
-                                            title={docName}
+                                            title={sentencePreview || docName}
                                             onClick={e => {
                                                 e.preventDefault();
                                                 onCitationClicked(path);
                                             }}
                                         >
-                                            {`${idx + 1}. ${docName}${pageInfo}`}
+                                            {`${idx + 1}. ${label}`}
                                         </a>
                                     </span>
                                 );

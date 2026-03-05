@@ -338,11 +338,12 @@ if [ -n "$_SECRETS_TO_SET" ]; then
     echo "🔑 Updating Container App secrets..."
     for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WORKER"; do
         if [ "$CA_NAME" = "$CONTAINER_APP_API_B2C" ] && [ "${SKIP_B2C:-}" = "true" ]; then continue; fi
+        echo "   → $CA_NAME"
         az containerapp secret set \
             --name "$CA_NAME" \
             --resource-group "$AZURE_RESOURCE_GROUP" \
             --secrets $_SECRETS_TO_SET \
-            --only-show-errors 2>/dev/null || true
+            --only-show-errors || echo "⚠️  Warning: failed to set secrets on $CA_NAME"
     done
 fi
 
@@ -399,10 +400,6 @@ ENV_VARS=(
     SEMANTIC_DEDUP_THRESHOLD="$SEMANTIC_DEDUP_THRESHOLD"
     DENOISE_VECTOR_FALLBACK="$DENOISE_VECTOR_FALLBACK"
     VECTOR_FALLBACK_TOP_K="$VECTOR_FALLBACK_TOP_K"
-    VOYAGE_API_KEY="secretref:voyage-api-key"
-    NEO4J_PASSWORD="secretref:neo4j-password"
-    AURA_DS_CLIENT_ID="$AURA_DS_CLIENT_ID"
-    AURA_DS_CLIENT_SECRET="secretref:aura-ds-client-secret"
     SKELETON_ENRICHMENT_ENABLED="$SKELETON_ENRICHMENT_ENABLED"
     SKELETON_GRAPH_TRAVERSAL_ENABLED="$SKELETON_GRAPH_TRAVERSAL_ENABLED"
     SKELETON_SYNTHESIS_MODEL="$SKELETON_SYNTHESIS_MODEL"
@@ -419,9 +416,12 @@ ENV_VARS=(
     RUNNING_IN_PRODUCTION="true"
 )
 
-# Only add secret-ref env vars for optional secrets that actually exist
-[ -n "$MISTRAL_API_KEY" ]      && ENV_VARS+=(MISTRAL_API_KEY="secretref:mistral-api-key")
-[ -n "$LLMWHISPERER_API_KEY" ] && ENV_VARS+=(LLMWHISPERER_API_KEY="secretref:llmwhisperer-api-key")
+# Only add secret-ref env vars when the corresponding secret exists
+[ -n "$VOYAGE_API_KEY" ]        && ENV_VARS+=(VOYAGE_API_KEY="secretref:voyage-api-key")
+[ -n "$NEO4J_PASSWORD" ]        && ENV_VARS+=(NEO4J_PASSWORD="secretref:neo4j-password")
+[ -n "$AURA_DS_CLIENT_SECRET" ] && ENV_VARS+=(AURA_DS_CLIENT_ID="$AURA_DS_CLIENT_ID" AURA_DS_CLIENT_SECRET="secretref:aura-ds-client-secret")
+[ -n "$MISTRAL_API_KEY" ]       && ENV_VARS+=(MISTRAL_API_KEY="secretref:mistral-api-key")
+[ -n "$LLMWHISPERER_API_KEY" ]  && ENV_VARS+=(LLMWHISPERER_API_KEY="secretref:llmwhisperer-api-key")
 
 # Update graphrag-api
 echo "⏳ Updating $CONTAINER_APP_API with $API_IMAGE_URI..."

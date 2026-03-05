@@ -59,7 +59,7 @@ async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: i
         )
         await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
     except Exception as e:
-        logger.debug("chat_cosmos_usage_write_skipped", error=repr(e))
+        logger.warning("chat_cosmos_usage_write_skipped", error=repr(e))
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -1058,6 +1058,14 @@ def _build_frontend_citations(
             sc["sentences"] = cit["sentences"]
         if cit.get("page_dimensions"):
             sc["page_dimensions"] = cit["page_dimensions"]
+        if cit.get("sentence_text"):
+            sc["sentence_text"] = cit["sentence_text"]
+        if cit.get("sentence_offset") is not None:
+            sc["sentence_offset"] = cit["sentence_offset"]
+        if cit.get("sentence_length") is not None:
+            sc["sentence_length"] = cit["sentence_length"]
+        if cit.get("citation_type"):
+            sc["citation_type"] = cit["citation_type"]
 
         structured.append(sc)
 
@@ -1124,8 +1132,9 @@ async def frontend_chat(
             raw_citations
         )
 
-        # Replace numeric [N] markers with document titles so frontend parser can match
-        answer_text = _strip_citation_markers(result.get("answer", ""))
+        # Keep inline [N] citation markers so the frontend parser can render
+        # them as clickable superscript badges linked to structured_citations.
+        answer_text = result.get("answer", "")
 
         # Generate followup questions if requested
         followup_questions = None
@@ -1276,8 +1285,8 @@ async def _frontend_stream_response(
             ] if overrides and overrides.suggest_followup_questions else None,
         }
         
-        # Replace numeric [N] markers with document titles and stream progressively
-        answer = _strip_citation_markers(result.get("answer", ""))
+        # Keep inline [N] citation markers for frontend rendering
+        answer = result.get("answer", "")
         words = answer.split()
         chunk_size = 3  # Words per chunk for natural feel
         

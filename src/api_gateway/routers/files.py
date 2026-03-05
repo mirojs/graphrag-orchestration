@@ -144,19 +144,21 @@ async def upload_files(
             results.append({"filename": f.filename, "status": "failed", "error": str(e)})
 
     # Trigger background indexing for successful uploads
+    indexing_queued = False
     if doc_sync:
         for r in results:
             if r["status"] == "success":
                 background_tasks.add_task(
-                    doc_sync.on_file_uploaded, group_id, r["filename"], r["url"]
+                    doc_sync.on_file_uploaded, group_id, r["filename"], r["url"], user_id
                 )
+                indexing_queued = True
 
     success_count = sum(1 for r in results if r["status"] == "success")
     if success_count == len(results):
-        return JSONResponse({"message": f"{len(results)} file(s) uploaded successfully", "results": results})
+        return JSONResponse({"message": f"{len(results)} file(s) uploaded successfully", "results": results, "indexing_queued": indexing_queued})
     elif success_count > 0:
         return JSONResponse(
-            {"message": f"{success_count}/{len(results)} files uploaded", "results": results},
+            {"message": f"{success_count}/{len(results)} files uploaded", "results": results, "indexing_queued": indexing_queued},
             status_code=207,
         )
     else:

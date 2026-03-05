@@ -16,7 +16,7 @@ import structlog
 import os
 from datetime import datetime, timezone
 
-from src.api_gateway.middleware.auth import get_current_user, get_user_roles, get_user_id
+from src.api_gateway.middleware.auth import get_current_user, get_user_roles, get_user_id, get_group_id
 from src.api_gateway.routers.admin import verify_admin
 from src.core.roles import (
     AppRole,
@@ -120,6 +120,7 @@ class PlanInfoResponse(BaseModel):
 async def get_my_profile(
     request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
+    group_id: str = Depends(get_group_id),
 ):
     """
     Get the current user's profile, roles, plan, and usage stats.
@@ -148,6 +149,18 @@ async def get_my_profile(
 
     profile = resolve_user_profile(user, plan_tier=plan_tier, billing_type=billing_type)
 
+    # Populate document count and storage from blob storage
+    documents_count = 0
+    storage_used_gb = 0.0
+    blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+    if blob_mgr:
+        try:
+            documents_count = await blob_mgr.count_blobs(group_id)
+            storage_bytes = await blob_mgr.get_storage_used_bytes(group_id)
+            storage_used_gb = round(storage_bytes / (1024 ** 3), 4)
+        except Exception:
+            logger.warning("blob_count_failed", group_id=group_id)
+
     limits = profile.plan_limits or PLAN_DEFINITIONS[PlanTier.FREE]
 
     features = {
@@ -172,28 +185,34 @@ async def get_my_profile(
         billing_type=billing_type,
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
-        documents_count=profile.documents_count,
-        storage_used_gb=profile.storage_used_gb,
+        documents_count=documents_count,
+        storage_used_gb=storage_used_gb,
         features=features,
     )
 
 
 @router.get("/me/usage", response_model=UsageStatsResponse)
 async def get_my_usage(
+    request: Request,
     user: Dict[str, Any] = Depends(get_current_user),
+    group_id: str = Depends(get_group_id),
 ):
     """
     Get detailed usage statistics for the current user.
     """
     try:
         async with asyncio.timeout(15):
-            return await _fetch_user_usage(user)
+            return await _fetch_user_usage(user, request, group_id)
     except TimeoutError:
         logger.warning("dashboard_usage_timeout", user_id=user.get("oid", ""))
         raise HTTPException(status_code=504, detail="Usage data fetch timed out")
 
 
-async def _fetch_user_usage(user: Dict[str, Any]) -> UsageStatsResponse:
+async def _fetch_user_usage(
+    user: Dict[str, Any],
+    request: Request,
+    group_id: str,
+) -> UsageStatsResponse:
     user_id = user.get("oid", "")
 
     # Get plan and usage from quota enforcer
@@ -211,9 +230,18 @@ async def _fetch_user_usage(user: Dict[str, Any]) -> UsageStatsResponse:
 
     limits = PLAN_DEFINITIONS[plan_tier]
 
-    # Fetch document count and recent queries from Cosmos (best-effort)
+    # Fetch document count from blob storage (primary source)
     documents_count = 0
     storage_used_gb = 0.0
+    blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+    if blob_mgr:
+        try:
+            documents_count = await blob_mgr.count_blobs(group_id)
+            storage_bytes = await blob_mgr.get_storage_used_bytes(group_id)
+            storage_used_gb = round(storage_bytes / (1024 ** 3), 4)
+        except Exception:
+            logger.warning("usage_blob_count_failed", group_id=group_id)
+
     recent_queries: List[Dict[str, Any]] = []
 
     try:
@@ -239,16 +267,16 @@ async def _fetch_user_usage(user: Dict[str, Any]) -> UsageStatsResponse:
             }
             for r in sorted_records
         ]
-        # Approximate document count from distinct document_id values
-        doc_records = await cosmos.query_usage(
-            partition_id=user_id,
-            usage_type="document_intelligence",
-        )
-        doc_ids = {r.get("document_id") for r in doc_records if r.get("document_id")}
-        documents_count = len(doc_ids)
-        # Approximate storage from pages analysed (est. ~0.0001 GB per page)
-        total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
-        storage_used_gb = round(total_pages * 0.0001, 4)
+        # If blob count unavailable, fall back to Cosmos doc_intel records
+        if documents_count == 0:
+            doc_records = await cosmos.query_usage(
+                partition_id=user_id,
+                usage_type="doc_intel",
+            )
+            doc_ids = {r.get("document_id") for r in doc_records if r.get("document_id")}
+            documents_count = len(doc_ids)
+            total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
+            storage_used_gb = round(total_pages * 0.0001, 4)
     except Exception:
         logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
 

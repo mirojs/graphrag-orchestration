@@ -9,9 +9,6 @@ from azure.storage.blob.aio import BlobServiceClient
 
 logger = logging.getLogger(__name__)
 
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp"}
-
-
 class UserBlobManager:
     """Manages user-uploaded files in Azure Blob Storage (no ADLS/HNS required)."""
 
@@ -30,13 +27,31 @@ class UserBlobManager:
         files = []
         async for blob in container_client.list_blobs(name_starts_with=prefix):
             name = blob.name[len(prefix):]
-            # Only top-level files, skip images and subdirectories
+            # Only top-level files, skip subdirectories
             if "/" in name:
-                continue
-            if any(name.lower().endswith(ext) for ext in _IMAGE_EXTS):
                 continue
             files.append(name)
         return files
+
+    async def count_blobs(self, group_id: str) -> int:
+        """Count top-level blobs for a group (for dashboard document count)."""
+        prefix = f"{group_id}/"
+        container_client = self.blob_service_client.get_container_client(self.container)
+        count = 0
+        async for blob in container_client.list_blobs(name_starts_with=prefix):
+            name = blob.name[len(prefix):]
+            if "/" not in name:
+                count += 1
+        return count
+
+    async def get_storage_used_bytes(self, group_id: str) -> int:
+        """Sum blob sizes for a group (for dashboard storage metric)."""
+        prefix = f"{group_id}/"
+        container_client = self.blob_service_client.get_container_client(self.container)
+        total = 0
+        async for blob in container_client.list_blobs(name_starts_with=prefix):
+            total += blob.size or 0
+        return total
 
     async def upload_blob(self, file: IO, filename: str, group_id: str) -> str:
         blob_name = f"{group_id}/{filename}"

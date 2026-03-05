@@ -69,8 +69,18 @@ class CosmosDBClient:
     # Usage Tracking Methods
     # ========================================================================
     
+    async def ensure_initialized(self) -> None:
+        """Initialize Cosmos DB connection if not already done (lazy init for B2C)."""
+        if self._usage_container is not None:
+            return
+        if not self.endpoint:
+            return
+        await self.initialize()
+
     async def write_usage_record(self, record: UsageRecord) -> None:
         """Write a single usage record to Cosmos DB."""
+        if not self._usage_container:
+            await self.ensure_initialized()
         if not self._usage_container:
             logger.warning("usage_write_skipped", reason="Cosmos not initialized")
             return
@@ -106,6 +116,8 @@ class CosmosDBClient:
         usage_type: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Query usage records by partition and time range."""
+        if not self._usage_container:
+            await self.ensure_initialized()
         if not self._usage_container:
             logger.warning("usage_query_skipped", reason="Cosmos not initialized")
             return []

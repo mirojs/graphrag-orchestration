@@ -111,8 +111,42 @@ class DocumentSyncService:
             )
             return None
 
+    async def _write_document_usage(
+        self,
+        user_id: str,
+        group_id: str,
+        filename: str,
+        sentences: int = 0,
+    ) -> None:
+        """Write a document_intelligence usage record to Cosmos for dashboard tracking."""
+        try:
+            from src.core.services.cosmos_client import get_cosmos_client
+            from src.core.models.usage import UsageRecord
+
+            cosmos = get_cosmos_client()
+            record = UsageRecord(
+                partition_id=user_id,
+                user_id=user_id,
+                usage_type="doc_intel",
+                document_id=filename,
+                pages_analyzed=sentences,
+                model="document-intelligence",
+                route="upload",
+                query_id=f"upload-{group_id}-{filename}",
+            )
+            await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
+            logger.info(
+                "doc_sync_cosmos_usage_written",
+                extra={"user_id": user_id, "filename": filename},
+            )
+        except Exception as e:
+            logger.warning(
+                "doc_sync_cosmos_usage_failed",
+                extra={"user_id": user_id, "filename": filename, "error": str(e)},
+            )
+
     async def on_file_uploaded(
-        self, group_id: str, filename: str, blob_url: str
+        self, group_id: str, filename: str, blob_url: str, user_id: str = ""
     ) -> None:
         """Trigger indexing for a newly uploaded file.
 
@@ -143,6 +177,14 @@ class DocumentSyncService:
                     "filename": filename,
                     "stats": stats,
                 },
+            )
+
+            # Write document_intelligence usage record to Cosmos for dashboard
+            await self._write_document_usage(
+                user_id=user_id or group_id,
+                group_id=group_id,
+                filename=filename,
+                sentences=stats.get("sentences", 0),
             )
         except Exception as e:
             logger.error(

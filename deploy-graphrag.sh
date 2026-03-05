@@ -399,13 +399,15 @@ az containerapp update \
     --only-show-errors
 echo "✅ $CONTAINER_APP_API updated"
 
-# Update graphrag-api-b2c (image only — preserves its own auth env vars)
+# Update graphrag-api-b2c (same env vars as B2B — auth-specific vars are set separately via Bicep/manual config)
+# --set-env-vars merges; it won't overwrite B2C-specific auth vars that were set independently.
 if [ "${SKIP_B2C:-}" != "true" ]; then
     echo "⏳ Updating $CONTAINER_APP_API_B2C with $API_IMAGE_URI..."
     az containerapp update \
         --name "$CONTAINER_APP_API_B2C" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
         --image "$API_IMAGE_URI" \
+        --set-env-vars "${ENV_VARS[@]}" \
         --only-show-errors
     echo "✅ $CONTAINER_APP_API_B2C updated"
 fi

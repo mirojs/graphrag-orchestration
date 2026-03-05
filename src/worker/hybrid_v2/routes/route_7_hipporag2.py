@@ -939,7 +939,16 @@ class HippoRAG2Handler(BaseRouteHandler):
             response=synthesis_result.get("response", ""),
             route_used=self.ROUTE_NAME,
             citations=citations,
-            evidence_path=[name for name, _ in entity_scores[:20]],
+            evidence_path=[name for name, _ in entity_scores[:20]]
+            + [
+                {
+                    "sentence_id": c["id"],
+                    "text": (c.get("text") or "")[:200],
+                    "document_title": c.get("source", ""),
+                    "ppr_score": round(c.get("_ppr_score", 0.0), 6),
+                }
+                for c in (pre_fetched_chunks or [])[:10]
+            ],
             metadata=metadata,
             usage=synthesis_result.get("usage"),
             timing=(

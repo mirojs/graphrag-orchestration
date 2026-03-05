@@ -219,7 +219,7 @@ module graphragApi './core/host/container-app.bicep' = {
     authTenantId: subscription().tenantId
     authType: authType
     clientSecretSettingName: !empty(authClientSecret) ? 'aad-client-secret' : ''
-    tokenStoreSasSecretName: !empty(authClientSecret) ? 'token-store-sas' : ''
+    tokenStoreSasSecretName: ''
     env: concat([
       {
         name: 'SERVICE_ROLE'
@@ -634,7 +634,7 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     useExternalIdIssuer: true
     externalIdTenantName: b2cTenantName
     clientSecretSettingName: !empty(b2cClientSecret) ? 'b2c-client-secret' : ''
-    tokenStoreSasSecretName: !empty(b2cClientSecret) ? 'token-store-sas' : ''
+    tokenStoreSasSecretName: ''
     env: concat([
       {
         name: 'SERVICE_ROLE'

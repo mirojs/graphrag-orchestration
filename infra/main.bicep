@@ -634,7 +634,7 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     useExternalIdIssuer: true
     externalIdTenantName: b2cTenantName
     clientSecretSettingName: !empty(b2cClientSecret) ? 'b2c-client-secret' : ''
-    tokenStoreSasSecretName: ''
+    tokenStoreSasSecretName: 'token-store-sas'
     env: concat([
       {
         name: 'SERVICE_ROLE'

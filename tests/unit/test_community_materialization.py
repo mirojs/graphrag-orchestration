@@ -9,6 +9,7 @@ detection.
 Run: pytest tests/unit/test_community_materialization.py -v
 """
 
+import asyncio
 import hashlib
 import json
 import pytest
@@ -94,19 +95,12 @@ class TestSummarizeCommunity:
             MagicMock(return_value=("Test Title", "Test summary."))
         )
 
-        # Mock Neo4j session for relationship query
-        mock_session = MagicMock()
-        mock_result = MagicMock()
-        mock_result.__iter__ = MagicMock(return_value=iter([
+        # Mock Neo4j arun_query (async) for relationship query
+        mock_records = [
             {"source": "Contoso Ltd", "rel_type": "PARTY_TO", "target": "Contract A", "description": ""},
-        ]))
-        mock_session.run.return_value = mock_result
-        mock_session.__enter__ = MagicMock(return_value=mock_session)
-        mock_session.__exit__ = MagicMock(return_value=False)
-
+        ]
         pipeline.neo4j_store = MagicMock()
-        pipeline.neo4j_store.driver.session.return_value = mock_session
-        pipeline.neo4j_store.database = "neo4j"
+        pipeline.neo4j_store.arun_query = AsyncMock(return_value=mock_records)
 
         # Mock LLM
         mock_llm_response = MagicMock()
@@ -148,16 +142,9 @@ class TestSummarizeCommunity:
 
         pipeline = MagicMock()
 
-        # Mock Neo4j session
-        mock_session = MagicMock()
-        mock_result = MagicMock()
-        mock_result.__iter__ = MagicMock(return_value=iter([]))
-        mock_session.run.return_value = mock_result
-        mock_session.__enter__ = MagicMock(return_value=mock_session)
-        mock_session.__exit__ = MagicMock(return_value=False)
+        # Mock Neo4j arun_query (async)
         pipeline.neo4j_store = MagicMock()
-        pipeline.neo4j_store.driver.session.return_value = mock_session
-        pipeline.neo4j_store.database = "neo4j"
+        pipeline.neo4j_store.arun_query = AsyncMock(return_value=[])
 
         # Make LLM raise
         pipeline.llm = AsyncMock()
@@ -201,6 +188,7 @@ class TestCommunityMatcherLoading:
         matcher._community_embeddings = {}
         matcher._summary_hashes = {}
         matcher._loaded = False
+        matcher._load_lock = asyncio.Lock()
         return matcher
 
     def _mock_neo4j_records(self, records_data: List[Dict]):
@@ -305,6 +293,7 @@ class TestCommunityMatcherLoading:
         ]
         neo4j_service = self._mock_neo4j_records(records)
         matcher = self._make_matcher(neo4j_service=neo4j_service)
+        matcher._ensure_embeddings = AsyncMock()
 
         result = await matcher.load_communities()
 
@@ -333,6 +322,7 @@ class TestCommunityMatcherLoading:
             neo4j_service=None,
             communities_path=json_file,
         )
+        matcher._ensure_embeddings = AsyncMock()
 
         result = await matcher.load_communities()
 
@@ -342,14 +332,14 @@ class TestCommunityMatcherLoading:
 
     @pytest.mark.asyncio
     async def test_load_communities_returns_false_no_source(self):
-        """Should return False when no Neo4j or JSON available."""
+        """Should raise RuntimeError when no Neo4j or JSON available."""
         matcher = self._make_matcher(
             neo4j_service=None,
             communities_path=Path("/nonexistent/path.json"),
         )
 
-        result = await matcher.load_communities()
-        assert result is False
+        with pytest.raises(RuntimeError, match="No community data found"):
+            await matcher.load_communities()
 
 
 # ============================================================================
@@ -528,7 +518,7 @@ class TestSemanticMatch:
 
     @pytest.mark.asyncio
     async def test_dimension_mismatch_skipped(self):
-        """Communities with wrong-dimension embeddings should be skipped."""
+        """Communities with wrong-dimension embeddings should raise RuntimeError."""
         communities = [
             {"id": "c1", "title": "Community 1", "summary": "A summary"},
         ]
@@ -540,13 +530,12 @@ class TestSemanticMatch:
         query_emb = [0.5] * 2048
         matcher._get_embedding = AsyncMock(return_value=query_emb)
 
-        results = await matcher._semantic_match("query", top_k=3)
-
-        assert len(results) == 0  # Dimension mismatch → skipped
+        with pytest.raises(RuntimeError, match="dimension mismatch"):
+            await matcher._semantic_match("query", top_k=3)
 
     @pytest.mark.asyncio
     async def test_no_query_embedding_returns_empty(self):
-        """Should return empty list when query embedding fails."""
+        """Should raise RuntimeError when query embedding fails."""
         communities = [
             {"id": "c1", "title": "Community 1", "summary": "Summary"},
         ]
@@ -555,8 +544,8 @@ class TestSemanticMatch:
         )
         matcher._get_embedding = AsyncMock(return_value=None)
 
-        results = await matcher._semantic_match("query", top_k=3)
-        assert len(results) == 0
+        with pytest.raises(RuntimeError, match="Failed to embed query"):
+            await matcher._semantic_match("query", top_k=3)
 
     # ----- Stale Embedding Detection Tests -----
 
@@ -723,5 +712,6 @@ class TestSemanticMatch:
         assert CommunityMatcher._cosine_similarity([1, 0], [-1, 0]) == pytest.approx(-1.0)
         # Zero vector → 0.0
         assert CommunityMatcher._cosine_similarity([0, 0], [1, 0]) == pytest.approx(0.0)
-        # Dimension mismatch → 0.0
-        assert CommunityMatcher._cosine_similarity([1, 0], [1, 0, 0]) == pytest.approx(0.0)
+        # Dimension mismatch → RuntimeError
+        with pytest.raises(RuntimeError, match="dimension mismatch"):
+            CommunityMatcher._cosine_similarity([1, 0], [1, 0, 0])

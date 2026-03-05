@@ -9,6 +9,7 @@ Run: pytest tests/unit/test_triple_store.py -v
 
 import importlib.util
 import sys
+import types
 
 import pytest
 import numpy as np
@@ -16,12 +17,32 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 # Direct import to avoid the full app dependency chain triggered by
 # hybrid_v2.__init__.py  →  orchestrator  →  routes  →  config  →  pydantic_settings
+#
+# Register parent packages and mock the neo4j_retry dependency so that the
+# relative import ``from ..services.neo4j_retry import retry_session`` resolves.
+import os as _os
+for _pkg in [
+    "src", "src.worker", "src.worker.hybrid_v2",
+    "src.worker.hybrid_v2.retrievers", "src.worker.hybrid_v2.services",
+]:
+    if _pkg not in sys.modules:
+        _m = types.ModuleType(_pkg)
+        _m.__path__ = [_os.path.join(_os.getcwd(), _pkg.replace(".", "/"))]
+        _m.__package__ = _pkg
+        sys.modules[_pkg] = _m
+
+if "src.worker.hybrid_v2.services.neo4j_retry" not in sys.modules:
+    _retry_mod = types.ModuleType("src.worker.hybrid_v2.services.neo4j_retry")
+    _retry_mod.retry_session = MagicMock()  # type: ignore[attr-defined]
+    sys.modules["src.worker.hybrid_v2.services.neo4j_retry"] = _retry_mod
+
 _spec = importlib.util.spec_from_file_location(
-    "triple_store",
+    "src.worker.hybrid_v2.retrievers.triple_store",
     "src/worker/hybrid_v2/retrievers/triple_store.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
-sys.modules["triple_store"] = _mod
+_mod.__package__ = "src.worker.hybrid_v2.retrievers"
+sys.modules["src.worker.hybrid_v2.retrievers.triple_store"] = _mod
 _spec.loader.exec_module(_mod)
 Triple = _mod.Triple
 TripleEmbeddingStore = _mod.TripleEmbeddingStore
@@ -176,18 +197,18 @@ class TestRecognitionMemoryFilter:
 
     @pytest.mark.asyncio
     async def test_selects_relevant_triples(self, mock_llm, sample_candidates):
-        """LLM returning "1, 3" should keep triples 1 and 3."""
+        """LLM returning matching facts should keep those triples."""
         response = MagicMock()
-        response.text = "1, 3"
+        response.text = '[[ ## fact_after_filter ## ]]\n{"fact": [["alpha corp", "acquired", "beta fund"], ["delta inc", "is subsidiary of", "alpha corp"]]}\n\n[[ ## completed ## ]]'
         mock_llm.acomplete.return_value = response
 
         result = await recognition_memory_filter(
             mock_llm, "What did Alpha Corp acquire?", sample_candidates
         )
         assert len(result) == 2
-        assert result[0].subject_name == "Alpha Corp"
-        assert result[0].predicate == "acquired"
-        assert result[1].subject_name == "Delta Inc"
+        assert result[0][0].subject_name == "Alpha Corp"
+        assert result[0][0].predicate == "acquired"
+        assert result[1][0].subject_name == "Delta Inc"
 
     @pytest.mark.asyncio
     async def test_none_response_returns_empty(self, mock_llm, sample_candidates):
@@ -203,9 +224,9 @@ class TestRecognitionMemoryFilter:
 
     @pytest.mark.asyncio
     async def test_all_selected(self, mock_llm, sample_candidates):
-        """LLM returning all indices keeps all triples."""
+        """LLM returning all facts keeps all triples."""
         response = MagicMock()
-        response.text = "1, 2, 3, 4, 5"
+        response.text = '[[ ## fact_after_filter ## ]]\n{"fact": [["alpha corp", "acquired", "beta fund"], ["beta fund", "manages", "gamma llc"], ["delta inc", "is subsidiary of", "alpha corp"], ["gamma llc", "headquartered in", "new york"], ["alpha corp", "founded in", "2010"]]}\n\n[[ ## completed ## ]]'
         mock_llm.acomplete.return_value = response
 
         result = await recognition_memory_filter(
@@ -215,28 +236,28 @@ class TestRecognitionMemoryFilter:
 
     @pytest.mark.asyncio
     async def test_single_selection(self, mock_llm, sample_candidates):
-        """LLM returning a single number should work."""
+        """LLM returning a single fact should work."""
         response = MagicMock()
-        response.text = "2"
+        response.text = '[[ ## fact_after_filter ## ]]\n{"fact": [["beta fund", "manages", "gamma llc"]]}\n\n[[ ## completed ## ]]'
         mock_llm.acomplete.return_value = response
 
         result = await recognition_memory_filter(
             mock_llm, "What does Beta Fund manage?", sample_candidates
         )
         assert len(result) == 1
-        assert result[0].subject_name == "Beta Fund"
+        assert result[0][0].subject_name == "Beta Fund"
 
     @pytest.mark.asyncio
-    async def test_invalid_indices_ignored(self, mock_llm, sample_candidates):
-        """Out-of-range indices should be silently ignored."""
+    async def test_unmatched_facts_ignored(self, mock_llm, sample_candidates):
+        """Facts not matching any candidate should be silently ignored."""
         response = MagicMock()
-        response.text = "1, 99, 2"
+        response.text = '[[ ## fact_after_filter ## ]]\n{"fact": [["alpha corp", "acquired", "beta fund"], ["nonexistent", "relation", "entity"], ["beta fund", "manages", "gamma llc"]]}\n\n[[ ## completed ## ]]'
         mock_llm.acomplete.return_value = response
 
         result = await recognition_memory_filter(
             mock_llm, "Alpha Corp history", sample_candidates
         )
-        assert len(result) == 2  # indices 1 and 2, 99 ignored
+        assert len(result) == 2  # only 2 matched, nonexistent ignored
 
     @pytest.mark.asyncio
     async def test_llm_failure_passes_through_all(self, mock_llm, sample_candidates):
@@ -270,22 +291,24 @@ class TestRecognitionMemoryFilter:
 
     @pytest.mark.asyncio
     async def test_llm_prompt_contains_triple_text(self, mock_llm, sample_candidates):
-        """The prompt should contain all triple texts."""
+        """The prompt should contain all triple texts in lowercase fact format."""
         response = MagicMock()
-        response.text = "NONE"
+        response.text = '{"fact": []}'
         mock_llm.acomplete.return_value = response
 
         await recognition_memory_filter(mock_llm, "query", sample_candidates)
 
         prompt_arg = mock_llm.acomplete.call_args[0][0]
+        # The DSPy prompt uses lowercase [s, p, o] format, not Triple.triple_text
         for triple, _ in sample_candidates:
-            assert triple.triple_text in prompt_arg
+            assert triple.subject_name.lower() in prompt_arg
+            assert triple.predicate.lower() in prompt_arg
 
     @pytest.mark.asyncio
     async def test_handles_whitespace_in_response(self, mock_llm, sample_candidates):
-        """LLM responses with extra whitespace should be handled."""
+        """LLM responses with extra whitespace in JSON should be handled."""
         response = MagicMock()
-        response.text = "  1 ,  3 , 5  "
+        response.text = ' [[ ## fact_after_filter ## ]] \n { "fact" : [ ["alpha corp", "acquired", "beta fund"] ,  ["delta inc", "is subsidiary of", "alpha corp"] , ["alpha corp", "founded in", "2010"] ] } \n\n [[ ## completed ## ]] '
         mock_llm.acomplete.return_value = response
 
         result = await recognition_memory_filter(

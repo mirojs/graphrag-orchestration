@@ -18,17 +18,40 @@ Run: pytest tests/unit/test_hipporag2_ppr.py -v
 
 import importlib.util
 import sys
+import types
 
 import pytest
 
 # Direct import to avoid the full app dependency chain triggered by
 # hybrid_v2.__init__.py  →  orchestrator  →  routes  →  config  →  pydantic_settings
+#
+# Register parent packages and mock the neo4j_retry dependency so that the
+# relative import ``from ..services.neo4j_retry import retry_session`` resolves.
+from unittest.mock import MagicMock
+
+import os as _os
+for _pkg in [
+    "src", "src.worker", "src.worker.hybrid_v2",
+    "src.worker.hybrid_v2.retrievers", "src.worker.hybrid_v2.services",
+]:
+    if _pkg not in sys.modules:
+        _m = types.ModuleType(_pkg)
+        _m.__path__ = [_os.path.join(_os.getcwd(), _pkg.replace(".", "/"))]
+        _m.__package__ = _pkg
+        sys.modules[_pkg] = _m
+
+if "src.worker.hybrid_v2.services.neo4j_retry" not in sys.modules:
+    _retry_mod = types.ModuleType("src.worker.hybrid_v2.services.neo4j_retry")
+    _retry_mod.retry_session = MagicMock()  # type: ignore[attr-defined]
+    sys.modules["src.worker.hybrid_v2.services.neo4j_retry"] = _retry_mod
+
 _spec = importlib.util.spec_from_file_location(
-    "hipporag2_ppr",
+    "src.worker.hybrid_v2.retrievers.hipporag2_ppr",
     "src/worker/hybrid_v2/retrievers/hipporag2_ppr.py",
 )
 _mod = importlib.util.module_from_spec(_spec)
-sys.modules["hipporag2_ppr"] = _mod
+_mod.__package__ = "src.worker.hybrid_v2.retrievers"
+sys.modules["src.worker.hybrid_v2.retrievers.hipporag2_ppr"] = _mod
 _spec.loader.exec_module(_mod)
 HippoRAG2PPR = _mod.HippoRAG2PPR
 

@@ -241,7 +241,7 @@ const renderCitation = (detail: CitationDetail) => {
     const path = getCitationFilePath(detail.reference, detail.documentUrl);
     return renderToStaticMarkup(
         <span className="citationBadgeContainer">
-            <a className="supContainer" title={detail.reference} href="#" data-citation-path={path}>
+            <a className="supContainer" title={detail.reference} href="#" data-citation-path={path} data-citation-key={detail.citationKey || ""}>
                 {supElement}
             </a>
         </span>

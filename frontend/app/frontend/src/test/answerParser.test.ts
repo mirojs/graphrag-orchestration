@@ -231,4 +231,52 @@ describe("extractCitationDetails", () => {
         expect(details).toHaveLength(1);
         expect(details[0].citationKey).toBe("[1]");
     });
+
+    it("passes documentUrl through CitationDetail for structured citations", () => {
+        const sc: StructuredCitation[] = [
+            {
+                citation: "[1]",
+                document_title: "purchase contract",
+                document_url: "https://storage.blob.core.windows.net/docs/PURCHASE%20CONTRACT.pdf",
+                sentence_text: "The tenant shall pay rent"
+            }
+        ];
+        const response = makeResponse("See [1].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const details = extractCitationDetails(response);
+        expect(details).toHaveLength(1);
+        expect(details[0].documentUrl).toBe("https://storage.blob.core.windows.net/docs/PURCHASE%20CONTRACT.pdf");
+        // reference should be extracted from document_url, not document_title
+        expect(details[0].reference).toBe("PURCHASE CONTRACT.pdf");
+    });
+
+    it("emits data-citation-key attribute in rendered HTML", () => {
+        const sc: StructuredCitation[] = [
+            { citation: "[1]", document_title: "report.pdf", sentence_text: "Finding A" }
+        ];
+        const response = makeResponse("See [1].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, vi.fn());
+        expect(result.answerHtml).toContain('data-citation-key="[1]"');
+        expect(result.answerHtml).toContain('data-citation-path=');
+    });
+
+    it("uses document_url in getCitationFilePath for inline badges", () => {
+        const sc: StructuredCitation[] = [
+            {
+                citation: "[1]",
+                document_title: "purchase contract",
+                document_url: "https://storage.blob.core.windows.net/docs/PURCHASE%20CONTRACT.pdf"
+            }
+        ];
+        const response = makeResponse("See [1].", [], {
+            data_points: { text: [], images: [], citations: [], structured_citations: sc }
+        });
+        const result = parseAnswerToHtml(response, false, vi.fn());
+        // The path should use the filename from document_url, not the document_title
+        expect(result.answerHtml).toContain("PURCHASE%20CONTRACT.pdf");
+        expect(result.answerHtml).not.toContain("/content/purchase%20contract\"");
+    });
 });

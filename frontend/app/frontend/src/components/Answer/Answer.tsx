@@ -99,7 +99,8 @@ export const Answer = ({
                         if (target) {
                             e.preventDefault();
                             const path = target.getAttribute("data-citation-path");
-                            if (path) onCitationClicked(path);
+                            const ck = target.getAttribute("data-citation-key");
+                            if (path) onCitationClicked(ck ? `${path}#ck=${encodeURIComponent(ck)}` : path);
                         }
                     }}
                 >
@@ -129,9 +130,10 @@ export const Answer = ({
                             {uniqueCitations.map((sc, idx) => {
                                 const docName = sc.document_title || sc.source || "Unknown";
                                 let path = getCitationFilePath(docName, sc.document_url);
-                                if (sc.page_number) {
-                                    path += `#page=${sc.page_number}`;
-                                }
+                                const hashParts: string[] = [];
+                                if (sc.page_number) hashParts.push(`page=${sc.page_number}`);
+                                if (sc.citation) hashParts.push(`ck=${encodeURIComponent(sc.citation)}`);
+                                if (hashParts.length) path += `#${hashParts.join("&")}`;
                                 const pageInfo = sc.page_number ? ` p.${sc.page_number}` : "";
                                 const sectionInfo = sc.section_path && sc.section_path !== "General" ? ` §${sc.section_path}` : "";
                                 const sentencePreview = sc.sentence_text || sc.text_preview || "";

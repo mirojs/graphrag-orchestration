@@ -389,19 +389,32 @@ const Chat = () => {
             const answer = (isStreaming ? streamedAnswers : answers)[index]?.[1];
             const structured = answer?.context?.data_points?.structured_citations;
             if (structured && structured.length > 0) {
-                // Extract document name from citation URL: /content/docname.pdf#page=N
-                const pathPart = citation.split("#")[0];
-                const docName = decodeURIComponent(pathPart.replace(/^.*\/content\//, ""));
-                // Also compute name without extension for matching against document_title (which strips .pdf)
-                const docNameNoExt = docName.replace(/\.[^.]+$/, "");
-                // Find ALL structured citations for this document
-                const matched = structured.filter(
-                    sc =>
-                        sc.document_title === docName ||
-                        sc.document_title === docNameNoExt ||
-                        sc.source === docName ||
-                        (sc.document_url && sc.document_url.endsWith(encodeURIComponent(docName)))
-                );
+                // Try precise match by citation key first (e.g., "[1]", "[1a]")
+                const ckMatch = citation.match(/[#&]ck=([^#&]+)/);
+                const citationKey = ckMatch ? decodeURIComponent(ckMatch[1]) : null;
+
+                let matched: typeof structured = [];
+                if (citationKey) {
+                    matched = structured.filter(sc => sc.citation === citationKey);
+                }
+
+                // Fallback: match by document name (case-insensitive)
+                if (matched.length === 0) {
+                    // Extract document name from citation URL: /content/docname.pdf#page=N
+                    const pathPart = citation.split("#")[0];
+                    const docName = decodeURIComponent(pathPart.replace(/^.*\/content\//, ""));
+                    const docNameLower = docName.toLowerCase();
+                    // Also compute name without extension for matching against document_title (which strips .pdf)
+                    const docNameNoExtLower = docName.replace(/\.[^.]+$/, "").toLowerCase();
+                    // Find ALL structured citations for this document
+                    matched = structured.filter(
+                        sc =>
+                            (sc.document_title || "").toLowerCase() === docNameLower ||
+                            (sc.document_title || "").toLowerCase() === docNameNoExtLower ||
+                            (sc.source || "").toLowerCase() === docNameLower ||
+                            (sc.document_url && sc.document_url.endsWith(encodeURIComponent(docName)))
+                    );
+                }
                 setActiveCitationObj(matched.length > 0 ? matched : structured.length > 0 ? [structured[0]] : undefined);
             } else {
                 setActiveCitationObj(undefined);

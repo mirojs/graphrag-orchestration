@@ -171,8 +171,8 @@ class HippoRAG2Handler(BaseRouteHandler):
     QUERY_MODE_PRESETS: Dict[str, Dict[str, Any]] = {
         "local_search": {              # Factual extraction — fast & concise
             "ppr_passage_top_k": 5,
-            "prompt_variant": "v1_concise",
-            "max_tokens": 150,
+            "prompt_variant": "v3_keypoints",
+            "max_tokens": 300,
         },
         "global_search": {             # Thematic/community-level — needs breadth
             "ppr_passage_top_k": 15,

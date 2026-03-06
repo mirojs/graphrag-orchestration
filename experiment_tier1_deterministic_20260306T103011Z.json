@@ -1,0 +1,152 @@
+{
+  "timestamp": "20260306T103011Z",
+  "content_sentences": 201,
+  "baseline_time_s": 83.7,
+  "json_mode_time_s": 84.3,
+  "results": [
+    {
+      "label": "BASELINE",
+      "entities": 577,
+      "relationships": 533,
+      "unique_predicates_raw": 321,
+      "unique_predicates_normalized": 316,
+      "effective_unique_predicates": 321,
+      "grounded_entities": 480,
+      "ungrounded_entities": 97,
+      "grounding_rate": "83.2%",
+      "ungrounded_examples": [
+        "document",
+        "original buyer owner of the property at 480 willow glen drive  chubbuck  id 83202",
+        "floors  ceilings  walls  internal structural components  plumbing  heating  electric wiring systems  roof",
+        "builder s warranty",
+        "provisions for appliances"
+      ]
+    },
+    {
+      "label": "BASELINE + grounding(B)",
+      "entities": 480,
+      "relationships": 414,
+      "unique_predicates_raw": 321,
+      "unique_predicates_normalized": 316,
+      "effective_unique_predicates": 321,
+      "grounded_entities": 480,
+      "ungrounded_entities": 97,
+      "grounding_rate": "83.2%",
+      "ungrounded_examples": [
+        "document",
+        "original buyer owner of the property at 480 willow glen drive  chubbuck  id 83202",
+        "floors  ceilings  walls  internal structural components  plumbing  heating  electric wiring systems  roof",
+        "builder s warranty",
+        "provisions for appliances"
+      ]
+    },
+    {
+      "label": "BASELINE + pred_norm(C)",
+      "entities": 577,
+      "relationships": 533,
+      "unique_predicates_raw": 321,
+      "unique_predicates_normalized": 316,
+      "effective_unique_predicates": 316,
+      "grounded_entities": 480,
+      "ungrounded_entities": 97,
+      "grounding_rate": "83.2%",
+      "ungrounded_examples": [
+        "document",
+        "original buyer owner of the property at 480 willow glen drive  chubbuck  id 83202",
+        "floors  ceilings  walls  internal structural components  plumbing  heating  electric wiring systems  roof",
+        "builder s warranty",
+        "provisions for appliances"
+      ]
+    },
+    {
+      "label": "BASELINE + B + C",
+      "entities": 480,
+      "relationships": 414,
+      "unique_predicates_raw": 321,
+      "unique_predicates_normalized": 316,
+      "effective_unique_predicates": 316,
+      "grounded_entities": 480,
+      "ungrounded_entities": 97,
+      "grounding_rate": "83.2%",
+      "ungrounded_examples": [
+        "document",
+        "original buyer owner of the property at 480 willow glen drive  chubbuck  id 83202",
+        "floors  ceilings  walls  internal structural components  plumbing  heating  electric wiring systems  roof",
+        "builder s warranty",
+        "provisions for appliances"
+      ]
+    },
+    {
+      "label": "JSON_MODE(A)",
+      "entities": 570,
+      "relationships": 525,
+      "unique_predicates_raw": 326,
+      "unique_predicates_normalized": 322,
+      "effective_unique_predicates": 326,
+      "grounded_entities": 477,
+      "ungrounded_entities": 93,
+      "grounding_rate": "83.7%",
+      "ungrounded_examples": [
+        "document",
+        "one  1  year after commencement",
+        "sixty  60  days after commencement",
+        "exceptions as otherwise provided herein",
+        "claims not made in writing as provided herein"
+      ]
+    },
+    {
+      "label": "JSON_MODE(A) + grounding(B)",
+      "entities": 477,
+      "relationships": 407,
+      "unique_predicates_raw": 326,
+      "unique_predicates_normalized": 322,
+      "effective_unique_predicates": 326,
+      "grounded_entities": 477,
+      "ungrounded_entities": 93,
+      "grounding_rate": "83.7%",
+      "ungrounded_examples": [
+        "document",
+        "one  1  year after commencement",
+        "sixty  60  days after commencement",
+        "exceptions as otherwise provided herein",
+        "claims not made in writing as provided herein"
+      ]
+    },
+    {
+      "label": "JSON_MODE(A) + pred_norm(C)",
+      "entities": 570,
+      "relationships": 525,
+      "unique_predicates_raw": 326,
+      "unique_predicates_normalized": 322,
+      "effective_unique_predicates": 322,
+      "grounded_entities": 477,
+      "ungrounded_entities": 93,
+      "grounding_rate": "83.7%",
+      "ungrounded_examples": [
+        "document",
+        "one  1  year after commencement",
+        "sixty  60  days after commencement",
+        "exceptions as otherwise provided herein",
+        "claims not made in writing as provided herein"
+      ]
+    },
+    {
+      "label": "JSON_MODE(A) + B + C",
+      "entities": 477,
+      "relationships": 407,
+      "unique_predicates_raw": 326,
+      "unique_predicates_normalized": 322,
+      "effective_unique_predicates": 322,
+      "grounded_entities": 477,
+      "ungrounded_entities": 93,
+      "grounding_rate": "83.7%",
+      "ungrounded_examples": [
+        "document",
+        "one  1  year after commencement",
+        "sixty  60  days after commencement",
+        "exceptions as otherwise provided herein",
+        "claims not made in writing as provided herein"
+      ]
+    }
+  ]
+}

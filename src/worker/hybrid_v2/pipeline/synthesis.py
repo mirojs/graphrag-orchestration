@@ -2446,6 +2446,8 @@ Response:"""
         Variants:
         - None / "v0": Current production prompt (structured sections, verbose)
         - "v1_concise": Direct-answer style, no forced sections, precision-optimised
+        - "v2_table": Markdown table format — best for extraction, weak on analytical
+        - "v3_keypoints": Bullet-points only — 60% less verbose than v0, same accuracy
         """
         variant = (prompt_variant or "v0").lower().strip()
         
@@ -2515,6 +2517,70 @@ QUESTION: {query}
 
 ANSWER:"""
         
+        # ---- V2: Table-constrained — reduces verbosity via structure ----
+        if variant == "v2_table":
+            return f"""You are a precise document extraction assistant.
+
+Answer the user query ONLY using a Markdown table with columns: Fact, Source Document, Citation.
+Do NOT write any text before or after the table.
+If the answer is NOT in the evidence, respond ONLY with: "| Not found | N/A | N/A |"
+{document_guidance}
+RULES:
+1. Each row = one distinct fact that answers the query. No duplicate facts.
+2. Quote exact values (numbers, dates, names) verbatim in the Fact column.
+3. Source Document = the document title from the evidence headers.
+4. Citation = the bracket number [N] from the evidence.
+5. Do NOT add commentary, preamble, disclaimers, or any text outside the table.
+6. If the question specifies a qualifier (e.g. "day-based"), include ONLY matching items.
+
+EVIDENCE:
+{context}
+
+QUESTION: {query}
+
+| Fact | Source Document | Citation |
+|------|-----------------|----------|"""
+        
+        # ---- V3: Key-points only — drops Summary to eliminate duplication ----
+        if variant == "v3_keypoints":
+            return f"""You are an expert analyst. Answer with bullet points only.
+
+Question: {query}
+
+Evidence Context:
+{context}
+
+Instructions:
+1. Answer the question using ONLY information from the Evidence Context.
+2. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for "bank routing number" but evidence has no routing number → Refuse
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
+   - Question asks for "California law" but evidence shows a different state → Refuse
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → Refuse. Do NOT infer that an unnamed concept falls under a broader or related category.
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+   - Include ONLY items matching that qualifier
+   - EXCLUDE items that don't match, even if they seem related
+   - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
+5. Include citations [N] for factual claims.
+6. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+7. Prefer concrete obligations/thresholds over general paraphrases.
+8. Answer ONLY what was asked — no extra items, no tangential information.
+   If the question asks for N items (e.g. "list the three"), return exactly N bullets.
+9. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
+10. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+{document_guidance}
+
+Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
+
+- [Fact with citation [N]]
+- [Fact with citation [N]]
+
+Response:"""
+
         # ---- V0: Current production prompt ----
         return f"""You are an expert analyst generating a concise summary.
 

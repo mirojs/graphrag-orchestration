@@ -1317,9 +1317,11 @@ async def _frontend_stream_response(
             if i + chunk_size < len(words):
                 content += " "
             
+            # Content chunks must NOT include context.data_points — the
+            # frontend condition checks context.data_points first and would
+            # skip the delta.content accumulation branch.
             yield json.dumps({
                 "delta": {"content": content},
-                "context": stream_context,
                 "session_state": session_state,
             }) + "\n"
             

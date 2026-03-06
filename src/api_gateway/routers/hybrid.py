@@ -56,6 +56,27 @@ _pipeline_cache: Dict[str, HybridPipeline] = {}
 _pipeline_cache_lock = asyncio.Lock()
 
 
+async def _invalidate_pipeline_cache(group_id: str) -> int:
+    """Clear cached pipelines for a group after reindex/sync.
+
+    Route 7's triple store and PPR engine are lazy-loaded once via
+    ``_ensure_initialized()`` and never refreshed.  Evicting the
+    ``HybridPipeline`` (which owns the handler) forces a fresh load on
+    the next query.
+
+    Returns the number of cache entries removed.
+    """
+    removed = 0
+    async with _pipeline_cache_lock:
+        keys = [k for k in _pipeline_cache if k.startswith(f"{group_id}:")]
+        for key in keys:
+            del _pipeline_cache[key]
+            removed += 1
+    if removed:
+        logger.info("pipeline_cache_invalidated", group_id=group_id, entries_removed=removed)
+    return removed
+
+
 # ============================================================================
 # Redis-backed Indexing Job Tracker
 # ============================================================================
@@ -756,12 +777,7 @@ async def configure_pipeline(request: Request, config: PipelineConfigRequest):
         profile = _get_deployment_profile(config.profile)
         
         # Clear cache to force recreation with new settings
-        async with _pipeline_cache_lock:
-            cache_keys_to_remove = [
-                k for k in _pipeline_cache.keys() if k.startswith(f"{group_id}:")
-            ]
-            for key in cache_keys_to_remove:
-                del _pipeline_cache[key]
+        await _invalidate_pipeline_cache(group_id)
         
         # Create new pipeline with updated config
         pipeline = await _get_or_create_pipeline(
@@ -1108,6 +1124,9 @@ async def _run_indexing_job(
             stats=stats,
         )
         
+        # Invalidate cached pipelines so next query loads fresh graph data
+        await _invalidate_pipeline_cache(group_id)
+        
         logger.info("hybrid_index_documents_complete", group_id=group_id, job_id=job_id, stats=stats)
         
     except Exception as e:
@@ -1369,6 +1388,8 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
         result = await dual_index.sync_from_neo4j()
         
         if result["status"] == "success":
+            # Invalidate cached pipelines so next query loads fresh graph data
+            await _invalidate_pipeline_cache(group_id)
             return SyncIndexResponse(
                 status="success",
                 group_id=group_id,
@@ -1472,6 +1493,8 @@ async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_ind
         success = await hipporag_service.initialize()
         
         if success:
+            # Invalidate cached pipelines so next query loads fresh graph data
+            await _invalidate_pipeline_cache(group_id)
             return {
                 "status": "initialized",
                 "group_id": group_id,

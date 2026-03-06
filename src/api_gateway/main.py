@@ -2,6 +2,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 import os
 
+from dotenv import load_dotenv
+load_dotenv()  # pick up .env for local development; no-op in containerized deployments
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -272,6 +275,8 @@ async def lifespan(app: FastAPI):
             pass
 
 
+_require_auth_for_docs = settings.REQUIRE_AUTH if hasattr(settings, "REQUIRE_AUTH") else True
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="""
@@ -291,6 +296,9 @@ app = FastAPI(
     - `/auth_setup` - MSAL authentication setup
     """,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    # SECURITY: Disable Swagger UI and ReDoc in production to prevent API surface disclosure
+    docs_url=None if _require_auth_for_docs else "/docs",
+    redoc_url=None if _require_auth_for_docs else "/redoc",
     lifespan=lifespan
 )
 

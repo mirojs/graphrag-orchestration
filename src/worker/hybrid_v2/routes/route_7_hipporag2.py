@@ -60,6 +60,26 @@ _ENTITY_TYPE_KEYWORDS: Dict[str, List[str]] = {
         "address", "addresses", "jurisdiction", "jurisdictions",
         "city", "cities", "state", "states", "country", "countries",
     ],
+    "TIMEFRAME": [
+        "timeframe", "timeframes", "timeline", "timelines",
+        "deadline", "deadlines", "duration", "durations",
+        "period", "periods", "date", "dates",
+    ],
+    "AMOUNT": [
+        "amount", "amounts", "price", "prices", "cost", "costs",
+        "payment", "payments", "fee", "fees", "value", "values",
+        "rate", "rates", "percentage", "percentages",
+    ],
+    "DOCUMENT": [
+        "document", "documents", "contract", "contracts",
+        "agreement", "agreements", "exhibit", "exhibits",
+        "addendum", "addenda", "form", "forms",
+    ],
+    "PRODUCT": [
+        "product", "products", "item", "items", "equipment",
+        "material", "materials", "service", "services",
+        "component", "components", "part", "parts",
+    ],
 }
 
 # Structural signals for exhaustive intent (no domain nouns)

@@ -1477,6 +1477,12 @@ class LazyGraphRAGIndexingPipeline:
     # Step 5b: Open-domain triple extraction (HippoRAG 2 alignment)
     # ────────────────────────────────────────────────────────────────────
 
+    # Valid entity types for typed extraction
+    _VALID_ENTITY_TYPES = {
+        "ORGANIZATION", "PERSON", "DOCUMENT", "TIMEFRAME",
+        "AMOUNT", "LOCATION", "PRODUCT", "CONCEPT",
+    }
+
     # Single-step prompt (fallback when OPENIE_TWO_STEP=false)
     _OPENIE_PROMPT = """Extract knowledge graph triples from the sentences below.
 
@@ -1558,6 +1564,49 @@ Return ONLY valid JSON (no markdown fences):
             return ""
         title = section_path.split(" > ")[-1].strip()
         return f"Section: {title}\n\n" if title else ""
+
+    # ── Rule-based entity type classifier ────────────────────────────
+    # Assigns types based on surface form patterns — deterministic,
+    # no LLM involvement, runs after extraction.
+
+    _ORG_TYPE_RE = re.compile(
+        r'\b(?:inc|llc|ltd|corp|co|lp|llp|association|foundation|group|partners)\b',
+        re.IGNORECASE,
+    )
+    _AMOUNT_TYPE_RE = re.compile(
+        r'(?:^\$[\d,.]+|^\d[\d,.]*\s*%|^\d[\d,.]+\s*(?:dollars|usd|percent))',
+        re.IGNORECASE,
+    )
+    _TIMEFRAME_TYPE_RE = re.compile(
+        r'(?:'
+        r'\b\d+\s*(?:days?|business\s+days?|months?|years?|weeks?|hours?)\b'
+        r'|(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d'
+        r'|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b'
+        r'|\b\d{4}[/-]\d{1,2}[/-]\d{1,2}\b'
+        r')',
+        re.IGNORECASE,
+    )
+    _DOCUMENT_TYPE_RE = re.compile(
+        r'\b(?:agreement|contract|warranty|invoice|addendum|exhibit|amendment|certificate|deed|lease|license)\b',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _classify_entity_type(cls, name: str) -> str:
+        """Classify entity type from surface form using deterministic rules.
+
+        Priority: AMOUNT > TIMEFRAME > ORGANIZATION > DOCUMENT > CONCEPT.
+        Returns the most specific type that matches.
+        """
+        if cls._AMOUNT_TYPE_RE.search(name):
+            return "AMOUNT"
+        if cls._TIMEFRAME_TYPE_RE.search(name):
+            return "TIMEFRAME"
+        if cls._ORG_TYPE_RE.search(name):
+            return "ORGANIZATION"
+        if cls._DOCUMENT_TYPE_RE.search(name):
+            return "DOCUMENT"
+        return "CONCEPT"
 
     # ── Deterministic triple extraction for structured elements ──────
 
@@ -1642,12 +1691,12 @@ Return ONLY valid JSON (no markdown fences):
             return []
 
         if role:
-            triples.append({"sid": sid, "s": name, "p": "signed as", "o": role})
+            triples.append({"sid": sid, "s": name, "s_type": "PERSON", "p": "signed as", "o": role, "o_type": "CONCEPT"})
         if date:
-            triples.append({"sid": sid, "s": name, "p": "signed on", "o": date})
+            triples.append({"sid": sid, "s": name, "s_type": "PERSON", "p": "signed on", "o": date, "o_type": "TIMEFRAME"})
         if not role and not date:
             # Fallback: at least record the signer
-            triples.append({"sid": sid, "s": name, "p": "is", "o": "signatory"})
+            triples.append({"sid": sid, "s": name, "s_type": "PERSON", "p": "is", "o": "signatory", "o_type": "CONCEPT"})
 
         return triples
 
@@ -1713,14 +1762,14 @@ Return ONLY valid JSON (no markdown fences):
 
         # Emit triples: each org "signed" the document
         for org in orgs:
-            triples.append({"sid": sid, "s": org, "p": "signed", "o": "document"})
+            triples.append({"sid": sid, "s": org, "s_type": "ORGANIZATION", "p": "signed", "o": "document", "o_type": "DOCUMENT"})
             for date in dates:
-                triples.append({"sid": sid, "s": org, "p": "signed on", "o": date})
+                triples.append({"sid": sid, "s": org, "s_type": "ORGANIZATION", "p": "signed on", "o": date, "o_type": "TIMEFRAME"})
 
         # Cross-link organizations as co-signatories
         for i, org_a in enumerate(orgs):
             for org_b in orgs[i + 1:]:
-                triples.append({"sid": sid, "s": org_a, "p": "co signed with", "o": org_b})
+                triples.append({"sid": sid, "s": org_a, "s_type": "ORGANIZATION", "p": "co signed with", "o": org_b, "o_type": "ORGANIZATION"})
 
         return triples
 
@@ -1757,16 +1806,16 @@ Return ONLY valid JSON (no markdown fences):
 
         if address_parts:
             addr = ", ".join(address_parts)
-            triples.append({"sid": sid, "s": company, "p": "located at", "o": addr})
+            triples.append({"sid": sid, "s": company, "s_type": "ORGANIZATION", "p": "located at", "o": addr, "o_type": "LOCATION"})
         if phone:
-            triples.append({"sid": sid, "s": company, "p": "has phone", "o": phone})
+            triples.append({"sid": sid, "s": company, "s_type": "ORGANIZATION", "p": "has phone", "o": phone, "o_type": "CONCEPT"})
         if email:
-            triples.append({"sid": sid, "s": company, "p": "has email", "o": email})
+            triples.append({"sid": sid, "s": company, "s_type": "ORGANIZATION", "p": "has email", "o": email, "o_type": "CONCEPT"})
         if website:
-            triples.append({"sid": sid, "s": company, "p": "has website", "o": website})
+            triples.append({"sid": sid, "s": company, "s_type": "ORGANIZATION", "p": "has website", "o": website, "o_type": "CONCEPT"})
         if not triples:
             # Fallback: at least record the company as an entity
-            triples.append({"sid": sid, "s": company, "p": "is", "o": "organization"})
+            triples.append({"sid": sid, "s": company, "s_type": "ORGANIZATION", "p": "is", "o": "organization", "o_type": "CONCEPT"})
 
         return triples
 
@@ -1782,7 +1831,8 @@ Return ONLY valid JSON (no markdown fences):
         """Primary OpenIE extraction (HippoRAG 2 alignment).
 
         Extracts (subject, predicate, object) triples from each sentence.
-        Subjects and objects become Entity nodes (untyped surface forms).
+        Subjects and objects become Entity nodes with typed labels
+        (ORGANIZATION, PERSON, TIMEFRAME, AMOUNT, etc.).
         Predicates become RELATED_TO edge descriptions.
 
         Supports two batching modes (env OPENIE_BATCHING):
@@ -1973,6 +2023,15 @@ Return ONLY valid JSON (no markdown fences):
             sid = (t.get("sid") or "").strip()
             is_det = t.get("_det") == "1"
 
+            # Assign entity types: use explicit type from deterministic triples,
+            # or fall back to rule-based classification from surface form
+            subj_type = (t.get("s_type") or "").strip().upper()
+            obj_type = (t.get("o_type") or "").strip().upper()
+            if subj_type not in self._VALID_ENTITY_TYPES:
+                subj_type = self._classify_entity_type(subj) if subj else "CONCEPT"
+            if obj_type not in self._VALID_ENTITY_TYPES:
+                obj_type = self._classify_entity_type(obj) if obj else "CONCEPT"
+
             if not subj or not pred or not obj:
                 continue
             # Filter garbage entities (≤2 alphanumeric chars)
@@ -1995,11 +2054,13 @@ Return ONLY valid JSON (no markdown fences):
                 entity_map[subj_key] = Entity(
                     id=self._stable_entity_id(group_id, subj_key),
                     name=subj,
-                    type="CONCEPT",
+                    type=subj_type,
                     description=None,
                     text_unit_ids=[],
                 )
                 entity_sids[subj_key] = set()
+            elif subj_type != "CONCEPT" and entity_map[subj_key].type == "CONCEPT":
+                entity_map[subj_key].type = subj_type
             if sid:
                 entity_sids[subj_key].add(sid)
 
@@ -2008,11 +2069,13 @@ Return ONLY valid JSON (no markdown fences):
                 entity_map[obj_key] = Entity(
                     id=self._stable_entity_id(group_id, obj_key),
                     name=obj,
-                    type="CONCEPT",
+                    type=obj_type,
                     description=None,
                     text_unit_ids=[],
                 )
                 entity_sids[obj_key] = set()
+            elif obj_type != "CONCEPT" and entity_map[obj_key].type == "CONCEPT":
+                entity_map[obj_key].type = obj_type
             if sid:
                 entity_sids[obj_key].add(sid)
 
@@ -2503,13 +2566,13 @@ Example 3:
 Text: "QUANTITY: 1 | DESCRIPTION: Savaria V1504 Telecab residential elevator with automatic doors | UNIT PRICE: $11,200.00"
 Output:
 {"nodes": [
-  {"id": "0", "label": "CONCEPT", "properties": {"name": "Savaria V1504 Telecab", "aliases": ["V1504", "Telecab", "Savaria elevator"], "description": "Residential elevator with automatic doors"}},
-  {"id": "1", "label": "CONCEPT", "properties": {"name": "$11,200.00", "aliases": ["11200"], "description": "Unit price for Savaria V1504 Telecab"}}
+  {"id": "0", "label": "PRODUCT", "properties": {"name": "Savaria V1504 Telecab", "aliases": ["V1504", "Telecab", "Savaria elevator"], "description": "Residential elevator with automatic doors"}},
+  {"id": "1", "label": "AMOUNT", "properties": {"name": "$11,200.00", "aliases": ["11200"], "description": "Unit price for Savaria V1504 Telecab"}}
 ], "relationships": [
   {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "unit price"}}
 ]}
 
-Example 4 (scope-of-work list items — ALWAYS extract each product/service as a CONCEPT):
+Example 4 (scope-of-work list items — ALWAYS extract each product/service as a PRODUCT):
 Text: "Contractor agrees to furnish and install the following:
 1 Vertical Platform Lift (Model XR-500).
 1 Power system: 220 VAC 50 Hz.
@@ -2517,10 +2580,10 @@ Text: "Contractor agrees to furnish and install the following:
 1 Aluminum door with inserts & automatic opener."
 Output:
 {"nodes": [
-  {"id": "0", "label": "CONCEPT", "properties": {"name": "Vertical Platform Lift (Model XR-500)", "aliases": ["XR-500", "platform lift", "VPL"], "description": "Vertical platform lift model XR-500"}},
-  {"id": "1", "label": "CONCEPT", "properties": {"name": "Power system 220 VAC 50 Hz", "aliases": ["power system", "220 VAC", "electrical system"], "description": "Electrical power system specification"}},
-  {"id": "2", "label": "CONCEPT", "properties": {"name": "Outdoor weatherproofing package", "aliases": ["weatherproofing", "outdoor package"], "description": "Outdoor weather protection accessory"}},
-  {"id": "3", "label": "CONCEPT", "properties": {"name": "Aluminum door with inserts & automatic opener", "aliases": ["aluminum door", "automatic opener", "door with inserts"], "description": "Aluminum entry door with glass inserts and auto opener"}}
+  {"id": "0", "label": "PRODUCT", "properties": {"name": "Vertical Platform Lift (Model XR-500)", "aliases": ["XR-500", "platform lift", "VPL"], "description": "Vertical platform lift model XR-500"}},
+  {"id": "1", "label": "PRODUCT", "properties": {"name": "Power system 220 VAC 50 Hz", "aliases": ["power system", "220 VAC", "electrical system"], "description": "Electrical power system specification"}},
+  {"id": "2", "label": "PRODUCT", "properties": {"name": "Outdoor weatherproofing package", "aliases": ["weatherproofing", "outdoor package"], "description": "Outdoor weather protection accessory"}},
+  {"id": "3", "label": "PRODUCT", "properties": {"name": "Aluminum door with inserts & automatic opener", "aliases": ["aluminum door", "automatic opener", "door with inserts"], "description": "Aluminum entry door with glass inserts and auto opener"}}
 ], "relationships": [
   {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "lift power specification"}}
 ]}
@@ -2529,7 +2592,7 @@ Example 5 (payment terms and financial amounts):
 Text: "Total contract price is $45,000.00, payable in 3 installments: $25,000.00 upon signing. $15,000.00 upon delivery. $5,000.00 upon completion."
 Output:
 {"nodes": [
-  {"id": "0", "label": "CONCEPT", "properties": {"name": "$45,000.00 total contract price", "aliases": ["total price", "contract price", "45000"], "description": "Total contract price payable in installments"}},
+  {"id": "0", "label": "AMOUNT", "properties": {"name": "$45,000.00 total contract price", "aliases": ["total price", "contract price", "45000"], "description": "Total contract price payable in installments"}},
   {"id": "1", "label": "CONCEPT", "properties": {"name": "3-installment payment plan", "aliases": ["payment terms", "installment plan", "payment schedule"], "description": "Payment in 3 stages: signing, delivery, completion"}}
 ], "relationships": [
   {"type": "RELATED_TO", "start_node_id": "0", "end_node_id": "1", "properties": {"context": "payment structure"}}
@@ -3574,6 +3637,9 @@ SUMMARY: <summary>"""
                 if not merged_desc and m.description:
                     merged_desc = m.description
                 merged_type = m.type or merged_type
+                # Prefer non-CONCEPT types (more specific wins, never downgrade)
+                if m.type and m.type != "CONCEPT":
+                    merged_type = m.type
                 merged_meta.update(m.metadata or {})
                 # V2: Copy embedding_v2 property (Voyage embeddings)
                 if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:

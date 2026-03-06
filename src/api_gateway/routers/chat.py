@@ -1191,6 +1191,7 @@ async def frontend_chat_stream(
     body: FrontendChatRequest,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
+    quota: dict = Depends(enforce_plan_limits),
 ):
     """
     Streaming chat endpoint for azure-search-openai-demo frontend.
@@ -1283,13 +1284,8 @@ async def _frontend_stream_response(
                 yield json.dumps({"delta": {}, "session_state": session_state}) + "\n"
         result = query_task.result()
         
-        # Track query usage for dashboard counters
+        # Fire-and-forget Cosmos usage record (quota already tracked by enforce_plan_limits)
         try:
-            from src.core.services.quota_enforcer import QuotaEnforcer
-            redis_svc = await get_redis_service()
-            enforcer = QuotaEnforcer(redis_svc)
-            await enforcer.record_query(user_id)
-            # Fire-and-forget Cosmos usage record
             route_used = result.get("route_used", approach)
             query_id = str(uuid.uuid4())
             task = asyncio.create_task(
@@ -1298,7 +1294,7 @@ async def _frontend_stream_response(
             _background_tasks.add(task)
             task.add_done_callback(_background_tasks.discard)
         except Exception as e:
-            logger.warning("stream_quota_tracking_failed", error=str(e))
+            logger.warning("stream_cosmos_usage_failed", error=str(e))
         
         # Extract context data
         thoughts = result.get("thoughts", [])

@@ -126,7 +126,8 @@ export const Answer = ({
                         <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
                             <span className={styles.citationLearnMore}>{t("citationWithColon")}</span>
                             {uniqueCitations.map((sc, idx) => {
-                                const docName = sc.document_title || sc.source || "Unknown";
+                                const rawName = sc.document_title || sc.source || "Unknown";
+                                const docName = (() => { try { return decodeURIComponent(rawName); } catch { return rawName; } })();
                                 let path = getCitationFilePath(docName, sc.document_url);
                                 const hashParts: string[] = [];
                                 if (sc.page_number) hashParts.push(`page=${sc.page_number}`);

@@ -10,7 +10,8 @@ interface Props {
 }
 
 const StructuredCitationItem = ({ citation, index }: { citation: StructuredCitation; index: number }) => {
-    const title = citation.document_title || citation.source || `Citation ${index + 1}`;
+    const rawTitle = citation.document_title || citation.source || `Citation ${index + 1}`;
+    const title = (() => { try { return decodeURIComponent(rawTitle); } catch { return rawTitle; } })();
     const sectionLabel = citation.section_path && citation.section_path !== "General" ? citation.section_path : null;
     const pageLabel = citation.page_number != null ? `Page ${citation.page_number}` : null;
     const locationParts = [pageLabel, sectionLabel].filter(Boolean).join(" · ");

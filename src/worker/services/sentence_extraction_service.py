@@ -1167,6 +1167,13 @@ def extract_sentences_from_di_units(
                         "parent_text": "",
                         "index_in_section": idx_in_section,
                     }
+                    # Attach DI polygon geometry for table row highlighting
+                    if unit_geometry_sentences:
+                        geo = _match_geometry_for_sentence(row_text, unit_geometry_sentences)
+                        if geo and geo.get("polygons"):
+                            row_dict["polygons"] = geo["polygons"]
+                            if geo.get("page"):
+                                row_dict["page"] = geo["page"]
                     if unit_page_dimensions:
                         row_dict["page_dimensions"] = unit_page_dimensions
                     all_sentences.append(row_dict)

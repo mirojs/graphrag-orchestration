@@ -66,7 +66,10 @@ async def get_config() -> Dict[str, Any]:
         "showSpeechOutputBrowser": os.getenv("ENABLE_SPEECH_OUTPUT_BROWSER", "true").lower() == "true",
         "showSpeechOutputAzure": os.getenv("ENABLE_SPEECH_OUTPUT_AZURE", "false").lower() == "true",
         "showChatHistoryBrowser": os.getenv("ENABLE_CHAT_HISTORY_BROWSER", "true").lower() == "true",
-        "showChatHistoryCosmos": os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "true").lower() == "true",
+        "showChatHistoryCosmos": (
+            os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+            or os.getenv("USE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+        ),
         "showAgenticRetrievalOption": os.getenv("ENABLE_AGENTIC_RETRIEVAL", "false").lower() == "true",
         
         # RAG settings

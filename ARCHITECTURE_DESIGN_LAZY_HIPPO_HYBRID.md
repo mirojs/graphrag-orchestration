@@ -12188,3 +12188,52 @@ days", "ten (10) business days") lack the entity connections needed for PPR prom
 |------|--------|
 | `route_7_hipporag2.py` | `ROUTE7_PPR_PASSAGE_TOP_K` default 20 → 30 |
 | `.env` | `ROUTE7_PPR_PASSAGE_TOP_K` 20 → 30 |
+
+## §49. Entity Embedding Contextual Bleed Fix (2026-03-06)
+
+### Root Cause
+
+Entity names were embedded using `contextualized_embed(inputs=[[name1, name2, ..., name252]])` — treating ALL 252 entity names as **chunks of a single document**. Voyage-context-3's contextual embedding method intentionally makes each chunk's vector incorporate surrounding context. For document sentences this is beneficial, but for **independent short entity names** it creates catastrophic **contextual bleed**: each entity's embedding becomes a mixture of all 252 entities rather than a representation of that entity alone.
+
+**Measured impact** (pairwise cosine similarity):
+
+| Entity Pair | Contextualized (old) | Independent (new) | Δ |
+|---|---|---|---|
+| "3 business days" ↔ "90 days" | 0.5903 | 0.6918 | +0.10 |
+| "3 business days" ↔ "ten 10 business days..." | — | 0.7481 | — |
+| "3 business days" synonym neighbors | **0** | **4** | +4 |
+| Total SEMANTICALLY_SIMILAR edges | ~48 | **918** | +870 |
+
+With the old contextual embeddings, "3 business days" had **zero** synonym edges — it was completely isolated in the PPR graph, making Q-D3 (timeframe enumeration) impossible to answer fully. With independent embeddings, it now bridges to "90 days", "ten 10 business days", "8 10 weeks", and other timeframe entities.
+
+### How It Happened
+
+The call chain was:
+1. `lazygraphrag_pipeline.py` calls `self.embedder.aget_text_embedding_batch([name1,...,nameN])`
+2. Which calls `embed_documents(texts)` → `embed_documents_contextualized([texts])`
+3. Which calls `contextualized_embed(inputs=[[name1,...,nameN]])` — **one document, N chunks**
+
+For **sentence** embeddings, this is correct: sentences from the same document should share context. But entity names are **independent concepts** that should NOT share context.
+
+### Fix
+
+Added `embed_independent_texts()` method to `VoyageEmbedService` that embeds each text as its own single-chunk document: `inputs=[[name1], [name2], ...]`. Entity embeddings at all 3 indexing call sites now use this method.
+
+The `VoyageEmbedService` is passed directly to the pipeline as `voyage_service` (separate from the LlamaIndex `embedder` wrapper) to avoid changing the LlamaIndex API surface.
+
+### Benchmark Impact
+
+| Config | Score | Q-D3 | Q-D10 | Notes |
+|--------|-------|------|-------|-------|
+| Before (contextual bleed) | 54.0 mean (53-56) | 1.6/3 | 1.6/3 | High variance |
+| After (independent embed) | **55/57 x3** | **2/3** | 2/3 | Consistent |
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `voyage_embed.py` | Added `embed_independent_texts()` + `aembed_independent_texts()` |
+| `lazygraphrag_pipeline.py` | 3 entity embedding sites → use `voyage_service.aembed_independent_texts()` |
+| `lazygraphrag_pipeline.py` | Added `voyage_service` constructor parameter |
+| `pipeline_factory.py` | Pass `voyage_service` to pipeline |
+| `index_5pdfs_v2_local.py` | Pass `voyage_service` to pipeline |

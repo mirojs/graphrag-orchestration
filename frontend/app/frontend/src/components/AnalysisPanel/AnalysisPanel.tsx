@@ -11,7 +11,6 @@ import { MarkdownViewer } from "../MarkdownViewer";
 import { SupportingContent } from "../SupportingContent";
 import styles from "./AnalysisPanel.module.css";
 import { AnalysisPanelTabs } from "./AnalysisPanelTabs";
-import { ThoughtProcess } from "./ThoughtProcess";
 
 interface Props {
     className: string;
@@ -63,7 +62,6 @@ export const AnalysisPanel = ({
     onActiveTabChanged,
     onCitationClicked,
 }: Props) => {
-    const isDisabledThoughtProcessTab: boolean = !answer.context.thoughts;
     const dataPoints = answer.context.data_points;
     const hasSupportingContent = Boolean(
         dataPoints &&
@@ -197,9 +195,6 @@ export const AnalysisPanel = ({
     return (
         <div className={className}>
             <TabList selectedValue={activeTab} onTabSelect={(_ev: SelectTabEvent, data: SelectTabData) => onActiveTabChanged(data.value as AnalysisPanelTabs)}>
-                <Tab value={AnalysisPanelTabs.ThoughtProcessTab} disabled={isDisabledThoughtProcessTab}>
-                    {t("headerTexts.thoughtProcess")}
-                </Tab>
                 <Tab value={AnalysisPanelTabs.SupportingContentTab} disabled={isDisabledSupportingContentTab}>
                     {t("headerTexts.supportingContent")}
                 </Tab>
@@ -208,9 +203,6 @@ export const AnalysisPanel = ({
                 </Tab>
             </TabList>
             <div>
-                {activeTab === AnalysisPanelTabs.ThoughtProcessTab && (
-                    <ThoughtProcess thoughts={answer.context.thoughts || []} onCitationClicked={onCitationClicked} />
-                )}
                 {activeTab === AnalysisPanelTabs.SupportingContentTab && <SupportingContent supportingContent={answer.context.data_points} />}
                 {activeTab === AnalysisPanelTabs.CitationTab && (
                     <>

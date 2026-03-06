@@ -21,7 +21,6 @@ interface Props {
     isSelected?: boolean;
     isStreaming: boolean;
     onCitationClicked: (filePath: string) => void;
-    onThoughtProcessClicked: () => void;
     onSupportingContentClicked: () => void;
     onFollowupQuestionClicked?: (question: string) => void;
     showFollowupQuestions?: boolean;
@@ -36,7 +35,6 @@ export const Answer = ({
     isSelected,
     isStreaming,
     onCitationClicked,
-    onThoughtProcessClicked,
     onSupportingContentClicked,
     onFollowupQuestionClicked,
     showFollowupQuestions,
@@ -82,7 +80,7 @@ export const Answer = ({
                             aria-label={copied ? t("tooltips.copied") : t("tooltips.copy")}
                             onClick={handleCopy}
                         />
-{/* Thought process and supporting content buttons hidden — not useful for end users */}
+{/* Supporting content button hidden — not useful for end users */}
                         {showSpeechOutputAzure && (
                             <SpeechOutputAzure answer={sanitizedAnswerHtml} index={index} speechConfig={speechConfig} isStreaming={isStreaming} />
                         )}

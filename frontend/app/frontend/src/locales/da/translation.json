@@ -55,7 +55,6 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Indtal spørgsmål",
         "stopRecording": "Stop optagelse af spørgsmål",
-        "showThoughtProcess": "Vis tankeproces",
         "showSupportingContent": "Vis understøttende indhold",
         "speakAnswer": "Afspil svar",
         "info": "Info",
@@ -64,7 +63,6 @@
         "copied": "Kopieret!"
     },
     "headerTexts": {
-        "thoughtProcess": "Tankeproces",
         "supportingContent": "Understøttende indhold",
         "citation": "Kilde"
     },

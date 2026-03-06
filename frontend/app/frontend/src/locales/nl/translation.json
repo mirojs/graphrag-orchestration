@@ -55,7 +55,6 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Vraag stellen met stem",
         "stopRecording": "Opname stoppen",
-        "showThoughtProcess": "Denkproces tonen",
         "showSupportingContent": "Ondersteunende inhoud tonen",
         "speakAnswer": "Antwoord uitspreken",
         "info": "Info",
@@ -64,7 +63,6 @@
         "copied": "Gekopieerd!"
     },
     "headerTexts": {
-        "thoughtProcess": "Denkproces",
         "supportingContent": "Ondersteunende Inhoud",
         "citation": "Citaat"
     },

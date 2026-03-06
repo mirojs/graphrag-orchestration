@@ -57,7 +57,6 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Ask question with voice",
         "stopRecording": "Stop recording question",
-        "showThoughtProcess": "Show thought process",
         "showSupportingContent": "Show supporting content",
         "speakAnswer": "Speak answer",
         "info": "Info",
@@ -67,7 +66,6 @@
     },
 
     "headerTexts":{
-        "thoughtProcess": "Thought Process",
         "supportingContent": "Supporting Content",
         "citation": "Citation"
     },

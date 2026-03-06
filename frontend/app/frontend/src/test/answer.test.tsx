@@ -38,12 +38,10 @@ function makeResponse(overrides: Partial<ChatAppResponse> = {}): ChatAppResponse
 
 describe("Answer component", () => {
     let onCitation: (filePath: string) => void;
-    let onThought: () => void;
     let onSupporting: () => void;
 
     beforeEach(() => {
         onCitation = vi.fn();
-        onThought = vi.fn();
         onSupporting = vi.fn();
     });
 
@@ -55,47 +53,13 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
             />
         );
         expect(screen.getByText("Test answer")).toBeInTheDocument();
     });
 
-    it("does not render thought process button (hidden for end users)", () => {
-        renderWithProviders(
-            <Answer
-                answer={makeResponse()}
-                index={0}
-                speechConfig={makeSpeechConfig()}
-                isStreaming={true}
-                onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
-                onSupportingContentClicked={onSupporting}
-            />
-        );
-        expect(screen.queryByTitle("Show thought process")).not.toBeInTheDocument();
-    });
-
-    it("does not render thought process button even with thoughts", () => {
-        const resp = makeResponse({
-            context: { data_points: { text: [], images: [], citations: [] }, followup_questions: null, thoughts: [] },
-        });
-        renderWithProviders(
-            <Answer
-                answer={resp}
-                index={0}
-                speechConfig={makeSpeechConfig()}
-                isStreaming={false}
-                onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
-                onSupportingContentClicked={onSupporting}
-            />
-        );
-        expect(screen.queryByTitle("Show thought process")).not.toBeInTheDocument();
-    });
-
-    it("does not render thought process or supporting content buttons", () => {
+    it("does not render supporting content button (hidden for end users)", () => {
         renderWithProviders(
             <Answer
                 answer={makeResponse()}
@@ -103,11 +67,9 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
             />
         );
-        expect(screen.queryByTitle("Show thought process")).not.toBeInTheDocument();
         expect(screen.queryByTitle("Show supporting content")).not.toBeInTheDocument();
     });
 
@@ -122,7 +84,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
             />
         );
@@ -146,7 +107,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
                 onFollowupQuestionClicked={onFollowup}
                 showFollowupQuestions={true}
@@ -172,7 +132,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
                 onFollowupQuestionClicked={onFollowup}
                 showFollowupQuestions={true}
@@ -190,7 +149,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
                 showSpeechOutputAzure={true}
             />
@@ -206,7 +164,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onThoughtProcessClicked={onThought}
                 onSupportingContentClicked={onSupporting}
                 showSpeechOutputBrowser={true}
             />

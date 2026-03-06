@@ -31,9 +31,7 @@ i18nInstance.use(initReactI18next).init({
                 "tooltips.submitQuestion": "Submit question",
                 "tooltips.copy": "Copy",
                 "tooltips.copied": "Copied!",
-                "tooltips.showThoughtProcess": "Show thought process",
                 "tooltips.showSupportingContent": "Show supporting content",
-                "headerTexts.thoughtProcess": "Thought process",
                 "headerTexts.supportingContent": "Supporting content",
                 "headerTexts.citation": "Citation"
             }

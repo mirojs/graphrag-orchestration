@@ -40,11 +40,11 @@ describe("AnalysisPanel", () => {
         );
     });
 
-    it("renders all three tab roles", () => {
+    it("renders both tab roles", () => {
         renderWithProviders(
             <AnalysisPanel
                 className=""
-                activeTab={AnalysisPanelTabs.ThoughtProcessTab}
+                activeTab={AnalysisPanelTabs.SupportingContentTab}
                 onActiveTabChanged={onTabChanged}
                 activeCitation={undefined}
                 citationHeight="600px"
@@ -52,22 +52,22 @@ describe("AnalysisPanel", () => {
             />
         );
         const tabs = screen.getAllByRole("tab");
-        expect(tabs).toHaveLength(3);
+        expect(tabs).toHaveLength(2);
     });
 
-    it("renders thought process content when tab is active", () => {
+    it("renders supporting content when tab is active", () => {
         renderWithProviders(
             <AnalysisPanel
                 className=""
-                activeTab={AnalysisPanelTabs.ThoughtProcessTab}
+                activeTab={AnalysisPanelTabs.SupportingContentTab}
                 onActiveTabChanged={onTabChanged}
                 activeCitation={undefined}
                 citationHeight="600px"
                 answer={makeResponse()}
             />
         );
-        // ThoughtProcess component renders thought titles
-        expect(screen.getByText("Step 1")).toBeInTheDocument();
+        // SupportingContent component renders data points
+        expect(screen.getByText(/point1/)).toBeInTheDocument();
     });
 
     it("enables citation tab when activeCitation is set", () => {
@@ -90,7 +90,7 @@ describe("AnalysisPanel", () => {
         renderWithProviders(
             <AnalysisPanel
                 className=""
-                activeTab={AnalysisPanelTabs.ThoughtProcessTab}
+                activeTab={AnalysisPanelTabs.SupportingContentTab}
                 onActiveTabChanged={onTabChanged}
                 activeCitation="/content/report.pdf"
                 citationHeight="600px"

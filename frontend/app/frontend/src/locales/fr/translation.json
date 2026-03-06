@@ -55,7 +55,6 @@
         "stopStreaming": "Arrêter la diffusion",
         "askWithVoice": "Poser une question à l'aide de la voix",
         "stopRecording": "Arrêter l'enregistrement de la question",
-        "showThoughtProcess": "Montrer le processus de réflexion",
         "showSupportingContent": "Montrer le contenu de soutien",
         "speakAnswer": "Parler réponse",
         "info": "Info",
@@ -64,7 +63,6 @@
         "copied": "Copié!"
     },
     "headerTexts": {
-        "thoughtProcess": "Processus de Réflexion",
         "supportingContent": "Contenu d'Appui",
         "citation": "Citation"
     },

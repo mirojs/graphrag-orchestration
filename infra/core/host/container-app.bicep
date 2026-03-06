@@ -47,8 +47,9 @@ param clientSecretSettingName string = ''
 param tokenStoreSasSecretName string = ''
 
 // Calculate the OpenID issuer URL based on auth type
-// CIAM issuer uses tenant ID (not tenant name) as subdomain in the iss claim
-var openIdIssuerUrl = useExternalIdIssuer && !empty(externalIdTenantName) 
+// CIAM (Entra External ID): use tenant ID as subdomain per Microsoft guidance
+// https://learn.microsoft.com/en-ca/answers/questions/5615481/issuer-id-is-always-https-sts-windows-net
+var openIdIssuerUrl = useExternalIdIssuer
   ? 'https://${authTenantId}.ciamlogin.com/${authTenantId}/v2.0'
   : 'https://login.microsoftonline.com/${authTenantId}/v2.0'
 
@@ -111,6 +112,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
 }
 
 // Easy Auth configuration (Microsoft Entra ID / Azure AD)
+// Both B2B and B2C use the standard azureActiveDirectory provider.
+// CIAM (Entra External ID) works with the default hybrid flow (code id_token)
+// when client secret is set and nonce validation is disabled for B2C.
 resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview' = if (enableAuth && !empty(authClientId)) {
   parent: containerApp
   name: 'current'
@@ -139,13 +143,9 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
             allowedPrincipals: {}
           }
         }
-        // Both B2B and B2C need offline_access to get refresh tokens.
-        // B2B also uses response_type=code for auth code flow.
-        // CIAM supports offline_access at the protocol level — the earlier 401 was caused by nonce, not this.
         login: {
           loginParameters: [
             'scope=openid profile email offline_access'
-            'response_type=code'
           ]
         }
       }
@@ -163,10 +163,7 @@ resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-10-02-preview'
         convention: 'FixedTime'
         timeToExpiration: '08:00:00'
       }
-      // CIAM (External ID) email OTP flow does NOT include nonce in id_tokens,
-      // even though claims_supported lists it. Enabling validateNonce for B2C
-      // causes EasyAuth to reject the callback → 401.
-      // B2B (standard Entra ID) fully supports nonce validation.
+      // CIAM (External ID) does not support nonce validation — only enable for B2B
       nonce: authType == 'B2B' ? {
         validateNonce: true
         nonceExpirationInterval: '00:05:00'

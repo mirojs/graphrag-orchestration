@@ -171,8 +171,8 @@ class HippoRAG2Handler(BaseRouteHandler):
     QUERY_MODE_PRESETS: Dict[str, Dict[str, Any]] = {
         "local_search": {              # Factual extraction — fast & concise
             "ppr_passage_top_k": 5,
-            "prompt_variant": "v3_keypoints",
-            "max_tokens": 300,
+            "prompt_variant": "v1_concise",
+            "max_tokens": 150,
         },
         "global_search": {             # Thematic/community-level — needs breadth
             "ppr_passage_top_k": 15,
@@ -292,6 +292,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Preset can override prompt_variant (only if caller didn't explicitly set one)
         if prompt_variant is None and preset.get("prompt_variant"):
             prompt_variant = preset["prompt_variant"]
+        # Env var default for hipporag2_search (when no preset/caller override)
+        if prompt_variant is None:
+            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", None) or None
 
         # Phase 2 feature flags
         structural_seeds_enabled = os.getenv(

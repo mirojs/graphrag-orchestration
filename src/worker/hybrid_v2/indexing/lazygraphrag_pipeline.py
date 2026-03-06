@@ -213,6 +213,8 @@ class LazyGraphRAGIndexingPipeline:
         # Two-step NER→Triple extraction (upstream HippoRAG 2 alignment)
         # Default false: single-step scored 55/57 vs two-step 52/57 (entity singleton explosion)
         self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "false").strip().lower() in {"1", "true", "yes"}
+        # NER scope: "broad" (includes abstract concepts) or "narrow" (proper nouns only, HippoRAG 2 style)
+        self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
 
     async def index_documents(
         self,
@@ -1496,9 +1498,18 @@ Return ONLY valid JSON (no markdown fences):
 ]}}"""
 
     # ── Two-step prompts (upstream HippoRAG 2 alignment) ────────────
-    # Step 1: NER — enhanced from upstream to also capture abstract concepts
-    _NER_PROMPT = """Your task is to extract named entities from the given sentences.
+    # Step 1: NER — "broad" includes abstract concepts, "narrow" matches upstream HippoRAG 2
+    _NER_PROMPT_BROAD = """Your task is to extract named entities from the given sentences.
 Extract: proper nouns, organizations, people, dates, amounts, legal terms, AND abstract concepts (warranties, liabilities, rights, obligations, limitations, conditions, terms).
+Respond with a JSON list of entities.
+
+{sentences}
+
+Return ONLY valid JSON (no markdown fences):
+{{"named_entities": [...]}}"""
+
+    _NER_PROMPT_NARROW = """Your task is to extract named entities from the given sentences.
+Extract: proper nouns, organizations, people, locations, dates, amounts, legal terms.
 Respond with a JSON list of entities.
 
 {sentences}
@@ -1883,8 +1894,9 @@ Return ONLY valid JSON (no markdown fences):
                 f"[{s['id']}]: {s['text']}" for s in batch
             )
 
-            # Step 1: NER
-            ner_prompt = self._NER_PROMPT.format(sentences=sentence_block)
+            # Step 1: NER (scope-dependent prompt)
+            ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
+            ner_prompt = ner_template.format(sentences=sentence_block)
             async with sem:
                 try:
                     ner_response = await self.llm.achat(

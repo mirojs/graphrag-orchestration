@@ -219,14 +219,15 @@ async def _fetch_user_usage(
 ) -> UsageStatsResponse:
     user_id = user.get("oid", "")
 
-    # Get plan and usage from quota enforcer.
-    # Inner timeouts must sum to less than the outer asyncio.timeout(15)
-    # so the fallback executes instead of the outer raising 504.
+    # ── Phase 1: Redis (fast, needed for plan limits) ────────────────────
     try:
         enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
-        plan_tier = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=2)
-        usage = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=2)
+        plan_tier, usage = await asyncio.gather(
+            asyncio.wait_for(enforcer.get_plan(user_id), timeout=2),
+            asyncio.wait_for(enforcer.get_usage(user_id), timeout=2),
+        )
     except Exception:
+        enforcer = None
         plan_tier = PlanTier.FREE
         usage = {"queries_today": 0, "queries_this_month": 0}
 
@@ -236,67 +237,76 @@ async def _fetch_user_usage(
 
     limits = PLAN_DEFINITIONS[plan_tier]
 
-    # Fetch document count from blob storage (single-pass, cached)
-    documents_count = 0
-    storage_used_gb = 0.0
-    blob_mgr = getattr(request.app.state, "user_blob_manager", None)
-    if blob_mgr:
+    # ── Phase 2: Blob stats + Cosmos + credits in parallel ───────────────
+    async def _blob_stats() -> tuple[int, float]:
+        blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+        if not blob_mgr:
+            return 0, 0.0
         try:
             async with asyncio.timeout(5):
-                documents_count, storage_bytes = await blob_mgr.get_blob_stats(group_id)
-                storage_used_gb = round(storage_bytes / (1024 ** 3), 4)
+                count, size_bytes = await blob_mgr.get_blob_stats(group_id)
+                return count, round(size_bytes / (1024 ** 3), 4)
         except (TimeoutError, Exception):
             logger.warning("usage_blob_count_failed", group_id=group_id)
+            return 0, 0.0
 
-    recent_queries: List[Dict[str, Any]] = []
-
-    try:
-        cosmos = get_cosmos_client()
-        records = await cosmos.query_usage(
-            partition_id=user_id,
-            usage_type="llm_completion",
-        )
-        # Most recent 20 queries
-        sorted_records = sorted(
-            records,
-            key=lambda r: r.get("timestamp", ""),
-            reverse=True,
-        )[:20]
-        recent_queries = [
-            {
-                "query_id": r.get("query_id", ""),
-                "timestamp": r.get("timestamp", ""),
-                "model": r.get("model", ""),
-                "route": r.get("route", ""),
-                "total_tokens": r.get("total_tokens", 0),
-                "credits_used": r.get("credits_used", 0),
-            }
-            for r in sorted_records
-        ]
-        # If blob count unavailable, fall back to Cosmos doc_intel records
-        if documents_count == 0:
+    async def _recent_queries() -> tuple[list, int, float]:
+        """Fetch recent queries and (fallback) doc count from Cosmos."""
+        queries: list = []
+        doc_count = 0
+        doc_storage = 0.0
+        try:
+            cosmos = get_cosmos_client()
+            records = await cosmos.query_usage(
+                partition_id=user_id,
+                usage_type="llm_completion",
+            )
+            sorted_records = sorted(
+                records, key=lambda r: r.get("timestamp", ""), reverse=True
+            )[:20]
+            queries = [
+                {
+                    "query_id": r.get("query_id", ""),
+                    "timestamp": r.get("timestamp", ""),
+                    "model": r.get("model", ""),
+                    "route": r.get("route", ""),
+                    "total_tokens": r.get("total_tokens", 0),
+                    "credits_used": r.get("credits_used", 0),
+                }
+                for r in sorted_records
+            ]
+            # Fetch doc_intel records as fallback for blob count
             doc_records = await cosmos.query_usage(
                 partition_id=user_id,
                 usage_type="doc_intel",
             )
             doc_ids = {r.get("document_id") for r in doc_records if r.get("document_id")}
-            documents_count = len(doc_ids)
+            doc_count = len(doc_ids)
             total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
-            storage_used_gb = round(total_pages * 0.0001, 4)
-    except Exception:
-        logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
+            doc_storage = round(total_pages * 0.0001, 4)
+        except Exception:
+            logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
+        return queries, doc_count, doc_storage
 
-    # Read credit balance from Redis
-    credits_used_month = 0
-    credits_limit_month: Optional[int] = None
-    credits_remaining: Optional[int] = None
-    try:
-        credit_info = await enforcer.check_credit_limits(user_id)
-        credits_used_month = credit_info.get("credits_used", 0)
-        credits_limit_month = credit_info.get("credits_limit")
-        credits_remaining = credit_info.get("credits_remaining")
-    except Exception:
-        logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
+    async def _credits() -> dict:
+        if not enforcer:
+            return {}
+        try:
+            return await enforcer.check_credit_limits(user_id)
+        except Exception:
+            logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
+            return {}
+
+    (documents_count, storage_used_gb), \
+        (recent_queries, cosmos_doc_count, cosmos_doc_storage), \
+        credit_info = await asyncio.gather(
+            _blob_stats(), _recent_queries(), _credits()
+        )
+
+    # Fall back to Cosmos doc count if blob stats returned 0
+    if documents_count == 0:
+        documents_count = cosmos_doc_count
+        storage_used_gb = cosmos_doc_storage
 
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
@@ -307,9 +317,9 @@ async def _fetch_user_usage(
         documents_limit=limits.max_documents,
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
-        credits_used_month=credits_used_month,
-        credits_limit_month=credits_limit_month,
-        credits_remaining=credits_remaining,
+        credits_used_month=credit_info.get("credits_used", 0),
+        credits_limit_month=credit_info.get("credits_limit"),
+        credits_remaining=credit_info.get("credits_remaining"),
         recent_queries=recent_queries,
         top_topics=[],
     )
@@ -326,8 +336,8 @@ async def get_available_plans(
     user_id = user.get("oid", "")
 
     try:
-        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=10)
-        current_plan = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=5)
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        current_plan = await asyncio.wait_for(enforcer.get_plan(user_id), timeout=2)
     except Exception:
         current_plan = PlanTier.FREE
 

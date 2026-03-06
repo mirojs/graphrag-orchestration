@@ -428,7 +428,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             "entity_doc_map_count": len(entity_doc_map),
             "entity_expansion_enabled": expansion_enabled,
             "entity_expansion_count": expansion_count,
-            "community_extract_enabled": os.getenv("ROUTE6_COMMUNITY_EXTRACT", "0").strip().lower() in {"1", "true", "yes"},
+            "community_extract_enabled": os.getenv("ROUTE6_COMMUNITY_EXTRACT", "1").strip().lower() in {"1", "true", "yes"},
             "dynamic_community_enabled": dynamic_community,
             "community_children_enabled": community_children_enabled,
             "community_children_count": len([c for c in community_data if c.get("_is_child")]),
@@ -516,7 +516,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # Feature 1b: When ROUTE6_COMMUNITY_EXTRACT is enabled, replace raw
         # summaries with LLM-extracted key points (lightweight MAP).
         community_extract = os.getenv(
-            "ROUTE6_COMMUNITY_EXTRACT", "0"
+            "ROUTE6_COMMUNITY_EXTRACT", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
         if community_extract and communities:
@@ -1060,7 +1060,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         """Build the full synthesis prompt. Shared by _synthesize and _stream_synthesize."""
         # Format community summaries
         community_extract = os.getenv(
-            "ROUTE6_COMMUNITY_EXTRACT", "0"
+            "ROUTE6_COMMUNITY_EXTRACT", "1"
         ).strip().lower() in {"1", "true", "yes"}
 
         if community_extract and communities:

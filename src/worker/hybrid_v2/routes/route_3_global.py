@@ -111,7 +111,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         t_route_start = time.perf_counter()
 
         max_claims = int(os.getenv("ROUTE3_MAP_MAX_CLAIMS", "10"))
-        community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "3"))
         sentence_top_k = int(os.getenv("ROUTE3_SENTENCE_TOP_K", "30"))
 
         logger.info(

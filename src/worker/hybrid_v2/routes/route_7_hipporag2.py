@@ -270,8 +270,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         preset = self.QUERY_MODE_PRESETS.get(query_mode or "", {})
 
         # Config from env, with preset overrides
-        triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "5"))
-        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "0"))
+        triple_top_k = int(os.getenv("ROUTE7_TRIPLE_TOP_K", "15"))
+        dpr_top_k = int(os.getenv("ROUTE7_DPR_TOP_K", "50"))
         dpr_sentence_top_k = int(os.getenv("ROUTE7_DPR_SENTENCE_TOP_K", "0"))
         ppr_damping = float(os.getenv("ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(os.getenv("ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
@@ -294,7 +294,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             prompt_variant = preset["prompt_variant"]
         # Env var default for hipporag2_search (when no preset/caller override)
         if prompt_variant is None:
-            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", None) or None
+            prompt_variant = os.getenv("ROUTE7_PROMPT_VARIANT", "v3_keypoints") or None
 
         # Phase 2 feature flags
         structural_seeds_enabled = os.getenv(
@@ -311,16 +311,16 @@ class HippoRAG2Handler(BaseRouteHandler):
         # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
         # relevant passages (catches graph-isolated sentences that DPR misses).
         semantic_passage_seeds_enabled = os.getenv(
-            "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "0"
+            "ROUTE7_SEMANTIC_PASSAGE_SEEDS", "1"
         ).strip().lower() in {"1", "true", "yes"}
         semantic_seed_top_k = int(os.getenv("ROUTE7_SEMANTIC_SEED_TOP_K", "20"))
-        semantic_seed_weight = float(os.getenv("ROUTE7_SEMANTIC_SEED_WEIGHT", "0.1"))
+        semantic_seed_weight = float(os.getenv("ROUTE7_SEMANTIC_SEED_WEIGHT", "0.05"))
 
         # Triple reranking config (read early for logging)
         triple_rerank_enabled = os.getenv(
-            "ROUTE7_TRIPLE_RERANK", "0"
+            "ROUTE7_TRIPLE_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "30"))
+        triple_candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "50"))
 
         # PPR coverage fixes (ref: standard PageRank literature)
         ppr_dangling = os.getenv(
@@ -470,7 +470,7 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # P2: Keep only top-5 entity seeds (upstream alignment)
         # Concentrates PPR mass on the most relevant entities.
-        entity_top_k = int(os.getenv("ROUTE7_ENTITY_SEED_TOP_K", "5"))
+        entity_top_k = int(os.getenv("ROUTE7_ENTITY_SEED_TOP_K", "15"))
         if len(entity_seeds) > entity_top_k:
             sorted_entities = sorted(entity_seeds.items(), key=lambda x: -x[1])
             entity_seeds = dict(sorted_entities[:entity_top_k])
@@ -1167,9 +1167,9 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # Stage 1: Widen cosine search when triple reranking is enabled
         triple_rerank = os.getenv(
-            "ROUTE7_TRIPLE_RERANK", "0"
+            "ROUTE7_TRIPLE_RERANK", "1"
         ).strip().lower() in {"1", "true", "yes"}
-        candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "30"))
+        candidates_k = int(os.getenv("ROUTE7_TRIPLE_CANDIDATES_K", "50"))
         fetch_k = candidates_k if triple_rerank else top_k
 
         candidates = self._triple_store.search(query_embedding, top_k=fetch_k)

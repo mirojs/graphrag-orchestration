@@ -629,7 +629,7 @@ class HybridPipeline:
         # Stage 3.1: Community Matching (LazyGraphRAG: on-the-fly generation if needed)
         logger.info("stage_3.1_community_matching")
         t0 = time.perf_counter()
-        community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE3_COMMUNITY_TOP_K", "3"))
         matched_communities = await self.community_matcher.match_communities(query, top_k=community_top_k)
         community_data = [c for c, _ in matched_communities]
         timings_ms["stage_3.1_ms"] = int((time.perf_counter() - t0) * 1000)

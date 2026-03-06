@@ -395,6 +395,22 @@ async def _execute_query(
         raise
 
 
+_ROUTE_DISPLAY_NAMES: Dict[str, str] = {
+    "route_2_local_search": "Document Search",
+    "route_3_global_search": "Global Analysis",
+    "route_4_drift_multi_hop": "Deep Reasoning",
+    "route_4_drift_workflow": "Deep Reasoning",
+    "route_5_unified": "Unified Search",
+    "route_6_concept_search": "Concept Search",
+    "route_7_hipporag2": "Knowledge Graph Search",
+}
+
+
+def _friendly_route_name(internal_name: str) -> str:
+    """Map internal route identifier to a user-friendly display name."""
+    return _ROUTE_DISPLAY_NAMES.get(internal_name, "Hybrid Search")
+
+
 def _extract_thoughts(result: Dict[str, Any]) -> List[Dict[str, str]]:
     """
     Extract thoughts from HybridPipeline result for frontend display.
@@ -407,7 +423,7 @@ def _extract_thoughts(result: Dict[str, Any]) -> List[Dict[str, str]]:
     route = result.get("route_used", "unknown")
     thoughts.append({
         "title": "Route Selection",
-        "description": f"Using {route} for this query",
+        "description": f"Using {_friendly_route_name(route)} for this query",
     })
     
     # Entities found
@@ -741,12 +757,12 @@ async def _stream_chat_response(
         )
         
         # Send initial chunk with role and first thought
-        initial_thoughts = [{"title": "Starting Query", "description": f"Processing with {approach} approach..."}]
+        initial_thoughts = [{"title": "Starting Query", "description": f"Processing with {_friendly_route_name(approach)} approach..."}]
         yield _format_stream_chunk(response_id, created, approach, "", initial_thoughts, role="assistant")
         
         # Add route selection thought
         await asyncio.sleep(0.1)  # Small delay for progressive feel
-        thoughts = initial_thoughts + [{"title": "Route Selection", "description": f"Using {approach} route"}]
+        thoughts = initial_thoughts + [{"title": "Route Selection", "description": f"Using {_friendly_route_name(approach)} route"}]
         yield _format_stream_chunk(response_id, created, approach, "", thoughts)
         
         # Execute the actual query (with optional folder scope)
@@ -845,7 +861,7 @@ def _format_stream_chunk(
         "id": response_id,
         "object": "chat.completion.chunk",
         "created": created,
-        "model": f"graphrag-{model.lower() if model else 'hybrid'}",
+        "model": f"graphrag-{_friendly_route_name(model).lower().replace(' ', '-') if model else 'hybrid'}",
         "choices": [{
             "index": 0,
             "delta": delta,
@@ -1244,7 +1260,7 @@ async def _frontend_stream_response(
     try:
         # Initial chunk with role and starting thought
         initial_thoughts = [
-            {"title": "Processing", "description": f"Analyzing query with {approach} approach..."}
+            {"title": "Processing", "description": f"Analyzing query with {_friendly_route_name(approach)} approach..."}
         ]
         yield json.dumps({
             "delta": {"role": "assistant"},

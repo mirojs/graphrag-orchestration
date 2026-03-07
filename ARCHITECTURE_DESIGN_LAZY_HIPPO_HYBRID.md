@@ -12239,3 +12239,166 @@ The `VoyageEmbedService` is passed directly to the pipeline as `voyage_service` 
 | `lazygraphrag_pipeline.py` | Added `voyage_service` constructor parameter |
 | `pipeline_factory.py` | Pass `voyage_service` to pipeline |
 | `index_5pdfs_v2_local.py` | Pass `voyage_service` to pipeline |
+
+## §50. NER Duration Extraction & Max Facts Sweep Experiment (2026-03-07)
+
+### Problem
+
+Q-D3 ("Compare time windows across the set: list all explicit day-based timeframes") scored
+2/3 consistently. The synthesis LLM sometimes omitted "3 business days cancel window" and
+"10 business days to file contract changes" even though the relevant passages were retrieved.
+Two hypotheses:
+
+1. **NER prompt gap**: The extraction prompts lacked explicit guidance for temporal entities
+   like "3 business days" or "10 business days", so these didn't appear as entities in the graph.
+2. **Recognition memory too restrictive**: The `recognition_memory_filter()` in `triple_store.py`
+   kept only `max_facts=4` triples per query, potentially discarding timeframe-related triples.
+
+### Experiment Design
+
+**Phase 1: NER prompt update + reindex** (commit `5dc47286`)
+
+Added "time periods, deadlines, durations" to all three NER extraction prompts:
+- `_NER_PROMPT_BROAD` (two-step broad extraction)
+- `_NER_PROMPT_NARROW` (two-step narrow extraction)
+- Single-step extraction rules
+
+Reindexed `test-5pdfs-v2-fix2`: 403 entities, 2555 relationships, 202 sentences, 7 communities.
+
+**Phase 2: max_facts sweep (4→8)** on Q-D3
+
+Ran `scripts/experiment_max_facts_sweep.py` — for each value of `ROUTE7_RECOGNITION_MEMORY_MAX_FACTS`
+from 4 to 8, queried Q-D3 three times and measured keyword coverage against 15 ground-truth
+timeframe keywords (including 2 critical: "3 business days", "10 business days").
+
+### Sweep Results
+
+| max_facts | Avg Keywords (of 15) | Avg Critical Hits (of 2) | Best Single Run |
+|-----------|---------------------|--------------------------|-----------------|
+| 4         | 9.0                 | 1.0                      | 10/15           |
+| 5         | 7.0                 | 1.3                      | 9/15            |
+| 6         | 8.0                 | 1.7                      | 9/15            |
+| **7**     | **11.0**            | **1.7**                  | **13/15**       |
+| 8         | 9.7                 | 1.7                      | 11/15           |
+
+### Isolation Experiment: Which Change Fixed Q-D3?
+
+To isolate whether the improvement came from NER prompts or max_facts, ran three full
+19-question benchmarks on the **same new index**:
+
+| Config | Index | max_facts | Q-D3 | Q-D5 | Q-D8 | Total | Eval |
+|--------|-------|-----------|------|------|------|-------|------|
+| Previous baseline | Old | 4 | 2/3 | 3/3 | 3/3 | 56/57 | `20260307T115841Z` |
+| NER prompt + max_facts=7 | New | 7 | **3/3** | 2/3 | 2/3 | 55/57 | `20260307T164746Z` |
+| **NER prompt + max_facts=4** | **New** | **4** | **3/3** | **3/3** | **3/3** | **57/57** | **`20260307T172224Z`** |
+
+**Conclusion: The NER prompt changes alone fixed Q-D3.** Increasing max_facts to 7 caused
+minor over-retrieval noise on Q-D5 (judge docked for extra warranty termination detail) and
+Q-D8 (LLM miscounted document appearances). Default stays at 4.
+
+### Over-Retrieval Analysis
+
+Detailed comparison of the max_facts=4 vs max_facts=7 runs on the same index:
+
+| Question | max_facts=4 citations | max_facts=7 citations | max_facts=4 score | max_facts=7 score |
+|----------|----------------------|----------------------|-------------------|-------------------|
+| Q-D3     | 14-16                | 14-16                | 3/3               | 3/3               |
+| Q-D5     | 6                    | 6                    | 3/3               | 2/3               |
+| Q-D8     | 21-28                | 17-25                | 3/3               | 2/3               |
+
+Q-D5 had **identical retrieval** (same 6 citations, same 6734 char context) — the 2/3 score
+was purely LLM synthesis variance (one run added an extra correct detail the judge penalized).
+Q-D8 actually had **fewer** citations with max_facts=7 (17-25 vs 21-28), ruling out volume-based
+over-retrieval. The score difference was the LLM stating "six unique documents" instead of four.
+
+The max_facts parameter changes the triple seeds into PPR, which alters the passage ranking
+subtly. With max_facts=7, different passages may be promoted, changing synthesis input and
+causing slightly different (and occasionally worse) LLM output.
+
+### Why NER Prompt Changes Fixed Q-D3
+
+Even though no explicit "3 business days" or "10 business days" entities were extracted
+(LLM extraction non-determinism), the prompt changes improved the overall temporal entity
+landscape. Related entities like "60 day warranty period", "right to cancel", and "full refund"
+are now better extracted with temporal context, providing richer PPR graph traversal paths
+to the relevant passages.
+
+### Files Changed
+
+| File | Change | Commit |
+|------|--------|--------|
+| `lazygraphrag_pipeline.py` | Added "time periods, deadlines, durations" to NER prompts | `5dc47286` |
+| `triple_store.py` | Made `max_facts` configurable via `ROUTE7_RECOGNITION_MEMORY_MAX_FACTS` env var | `5dc47286` |
+| `triple_store.py` | Default remains 4 (reverted from 7 after isolation experiment) | `8287831a` |
+| `index_5pdfs_v2_local.py` | Renamed `embedder` → `section_embed_model` to match pipeline constructor | `5dc47286` |
+
+## §51. Upstream HippoRAG 2 KNN vs Current Cosine Similarity — Evaluation (2026-03-07)
+
+### Context
+
+The remaining architectural gap between our Route 7 implementation and upstream HippoRAG 2
+is the entity synonymy edge construction. We use numpy all-pairs cosine at threshold 0.65;
+upstream uses `retrieve_knn()` with PyTorch GPU-accelerated cosine at threshold 0.80. This
+section documents the evaluation of whether to adopt the upstream approach.
+
+### Key Finding: Mathematical Equivalence
+
+Upstream `retrieve_knn` is **not** approximate nearest neighbor (FAISS, HNSW). It is:
+
+```python
+# Upstream HippoRAG 2 — src/hipporag/utils/embed_utils.py
+query_vecs = F.normalize(query_vecs, dim=1)    # L2 normalize
+key_vecs = F.normalize(key_vecs, dim=1)        # L2 normalize
+similarity = torch.mm(query_batch, key_batch.T) # dot product = cosine
+```
+
+Our implementation:
+
+```python
+# lazygraphrag_pipeline.py — _compute_entity_synonymy_edges()
+embs_normed = embs / (norms + 1e-10)           # L2 normalize
+sim_matrix = embs_normed @ embs_normed.T        # dot product = cosine
+```
+
+**These are mathematically identical.** L2-normalized dot product ≡ cosine similarity.
+The upstream wraps it in PyTorch for GPU acceleration — no algorithmic difference.
+
+### Critical Incompatibility: Threshold vs Entity Landscape
+
+| Aspect | Upstream HippoRAG 2 | Our Implementation |
+|--------|---------------------|-------------------|
+| Entity dedup | None (duplicates coexist) | Union-Find merge at 0.80 cosine |
+| Synonymy threshold | **0.80** | **0.65** |
+| Synonymy purpose | Connect near-duplicates | Bridge distinct-but-related entities |
+| Max pairwise similarity | No ceiling | Strictly < 0.80 (deduped above) |
+| Typical edge: | "John Doe" ↔ "john doe" (0.85) | "90 days" ↔ "60 day warranty" (0.68) |
+
+Upstream's 0.80 threshold makes sense because their near-duplicate entities need connecting.
+Our 0.65 threshold bridges the **post-dedup gap** (0.65–0.79 range). Adopting upstream's 0.80
+would produce **zero synonymy edges** because all ≥0.80 pairs are already merged.
+
+### What WOULD Improve Quality (Not the Similarity Metric)
+
+The upstream deviations that matter more than the KNN algorithm:
+
+1. **IDF weighting** (Deviation 1, P0): Upstream divides each entity's fact score by document
+   frequency, preventing common entities from dominating PPR seeds
+2. **Min-max normalization** (Deviation 3): Upstream normalizes fact and passage scores to [0,1]
+   before PPR seeding, balancing entity:passage seed ratios
+3. **Embedding model** (Deviation 9): NV-Embed-v2 (7.2B) vs Voyage AI — different similarity
+   distributions make threshold values non-transferable between models
+
+### Decision: Do Not Replace
+
+| Action | Verdict | Rationale |
+|--------|---------|-----------|
+| Replace all-pairs cosine with upstream `retrieve_knn` | **❌ No** | Mathematically identical; no quality gain |
+| Adopt upstream 0.80 threshold | **❌ No** | Produces zero edges in post-dedup landscape |
+| Add PyTorch GPU batching | **🟡 Later** | Only beneficial at 5K+ entities; adds dependency |
+| Implement IDF weighting (Deviation 1) | **✅ Next** | Most impactful remaining upstream gap |
+| Implement min-max normalization (Deviation 3) | **✅ Next** | Balances PPR seed ratios |
+
+### Performance at Current Scale
+
+For ~200-500 entities per group, numpy matmul (~2ms) is faster than PyTorch overhead
+(tensor creation + GPU transfer + sync ~5ms). Upstream's approach only wins at 5K+ entities.

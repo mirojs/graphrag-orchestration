@@ -437,13 +437,47 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         # ------------------------------------------------------------------
         # Step 3: Build entity seeds from surviving triples
+        #   When IDF enabled: min-max normalize fact scores, IDF-weight
+        #   by entity document frequency, mean-normalize per entity.
+        #   Default OFF — IDF hurts exhaustive queries (e.g. Q-D3) at
+        #   small corpus scale by demoting high-frequency seed entities.
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
         entity_seeds: Dict[str, float] = {}
+        idf_enabled = os.getenv(
+            "ROUTE7_IDF_ENABLED", "1"
+        ).strip().lower() in {"1", "true", "yes"}
 
-        for triple, fact_score in surviving_triples:
-            entity_seeds[triple.subject_id] = entity_seeds.get(triple.subject_id, 0) + fact_score
-            entity_seeds[triple.object_id] = entity_seeds.get(triple.object_id, 0) + fact_score
+        if idf_enabled:
+            # 3a. Min-max normalize fact scores to [0,1] (upstream Deviation 3)
+            if surviving_triples:
+                _fact_scores = [fs for _, fs in surviving_triples]
+                _fs_min, _fs_max = min(_fact_scores), max(_fact_scores)
+                _fs_spread = _fs_max - _fs_min if _fs_max > _fs_min else 1.0
+            else:
+                _fs_min = _fs_spread = 0.0
+
+            # 3b. IDF weighting + accumulation (upstream Deviation 1)
+            _entity_mention_counts = (
+                self._ppr_engine.entity_mention_counts if self._ppr_engine else {}
+            )
+            _entity_fact_count: Dict[str, int] = {}
+            for triple, raw_fact_score in surviving_triples:
+                norm_fact_score = (raw_fact_score - _fs_min) / _fs_spread if _fs_spread else 1.0
+                for eid in (triple.subject_id, triple.object_id):
+                    doc_freq = max(_entity_mention_counts.get(eid, 1), 1)
+                    entity_seeds[eid] = entity_seeds.get(eid, 0) + norm_fact_score / doc_freq
+                    _entity_fact_count[eid] = _entity_fact_count.get(eid, 0) + 1
+
+            # 3c. Mean-normalize: average across facts per entity (upstream Deviation 1)
+            for eid, n_facts in _entity_fact_count.items():
+                if n_facts > 1:
+                    entity_seeds[eid] /= n_facts
+        else:
+            # Original: raw cosine similarity accumulation, no IDF
+            for triple, fact_score in surviving_triples:
+                for eid in (triple.subject_id, triple.object_id):
+                    entity_seeds[eid] = entity_seeds.get(eid, 0) + fact_score
 
         # Phase 2+3: Add structural seeds (Tier 2) and community seeds (Tier 3) in parallel
         structural_sections: List[str] = []

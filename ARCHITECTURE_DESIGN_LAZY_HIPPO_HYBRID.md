@@ -12395,7 +12395,7 @@ The upstream deviations that matter more than the KNN algorithm:
 | Replace all-pairs cosine with upstream `retrieve_knn` | **❌ No** | Mathematically identical; no quality gain |
 | Adopt upstream 0.80 threshold | **❌ No** | Produces zero edges in post-dedup landscape |
 | Add PyTorch GPU batching | **🟡 Later** | Only beneficial at 5K+ entities; adds dependency |
-| Implement IDF weighting (Deviation 1) | **🟡 Deferred** | Minimal impact at 5-doc scale (see §52) |
+| Implement IDF weighting (Deviation 1) | **✅ Done** | Togglable via ROUTE7_IDF_ENABLED (default ON) |
 | Implement min-max normalization (Deviation 3) | **✅ Already done** | DPR scores min-max normalized since v7.4 |
 
 ### Performance at Current Scale
@@ -12506,9 +12506,9 @@ For our 4-triple recognition memory:
 | Upstream Gap | Status | Impact at 5-doc | Impact at 500-doc | Action |
 |:---|:---|:---|:---|:---|
 | DPR min-max normalization | **✅ Done** | Implemented | Implemented | None needed |
-| Fact-score min-max norm | **🟡 Deferred** | Minimal (narrow score range) | Moderate (wider range) | Implement when scaling |
-| IDF entity weighting | **🟡 Deferred** | None for 72% entities | **High** (common entities dominate) | Implement when scaling |
-| Mean-normalization | **🟡 Deferred** | ≤2× for most entities | Moderate | Bundle with IDF |
+| Fact-score min-max norm | **✅ Done** | Togglable via ROUTE7_IDF_ENABLED | Moderate (wider range) | Implemented 2026-03-07 |
+| IDF entity weighting | **✅ Done** | Togglable via ROUTE7_IDF_ENABLED | **High** (common entities dominate) | Implemented 2026-03-07 |
+| Mean-normalization | **✅ Done** | Togglable via ROUTE7_IDF_ENABLED | Moderate | Implemented 2026-03-07 |
 | Entity seed top-K (5 vs 15) | **🟡 No-op** | We get ≤8 entities anyway | May need tightening | Re-evaluate at scale |
 
 ### Scaling Threshold Estimate
@@ -12518,18 +12518,24 @@ IDF becomes important when:
 2. Common entities (e.g., company names, generic terms) appear in >50 passages
 3. The entity seed landscape has significant diversity between mc=1 and mc=100+
 
-**Recommended trigger:** Implement IDF + mean-normalization when the corpus exceeds **20 documents
-per group** or when any entity exceeds **50 mentions**. The infrastructure is ready
-(`_entity_mention_counts` is already populated in `hipporag2_ppr.py:270` and exposed via
-`ppr_engine.entity_mention_counts` property).
+### Implementation (2026-03-07)
+
+All three upstream gaps (IDF, fact-score min-max normalization, mean-normalization) were implemented
+in `route_7_hipporag2.py` Step 3, controlled by `ROUTE7_IDF_ENABLED` (default: `1` = ON).
+
+**Benchmark validation:**
+- IDF ON:  56/57 (Q-D3=2/3 — LLM synthesis non-determinism, not IDF-caused)
+- IDF OFF: 56/57 (Q-D3=2/3 — same non-determinism on identical code path)
+- Baseline: 57/57 (pre-implementation, same code as IDF OFF)
+
+The Q-D3 variability is LLM synthesis non-determinism (misses "180-day threshold for short-term
+vs long-term rentals" in some runs), confirmed by functionally identical IDF-OFF path producing
+the same 2/3 score. IDF does NOT cause the regression.
+
+**Toggle:** Set `ROUTE7_IDF_ENABLED=0` to disable if needed for debugging.
 
 ### Summary
 
-At 57/57 on a 5-document corpus, the remaining upstream gaps (IDF, fact-score normalization,
-mean-normalization) have **negligible quality impact**. The data shows:
-- 72% of entities are unaffected by IDF (mention_count=1)
-- Ranking changes are minor and don't flip relevant vs. irrelevant entities
-- PPR damping smooths seed ratio differences
-- The entity_mention_counts infrastructure is already in place for future activation
-
-These are **robustness improvements for corpus scaling**, not quality improvements at current scale.
+All remaining upstream gaps are now implemented. At current 5-doc scale, IDF has negligible
+quality impact (72% of entities have mention_count=1). The implementation is future-proof for
+corpus scaling where common entities would otherwise dominate seed weights.

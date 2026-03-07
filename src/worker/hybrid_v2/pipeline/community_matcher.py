@@ -41,6 +41,7 @@ class CommunityMatcher:
         group_id: str = "default",
         neo4j_service: Optional[Any] = None,
         folder_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
     ):
         """
         Args:
@@ -49,9 +50,12 @@ class CommunityMatcher:
             group_id: Tenant identifier.
             neo4j_service: Neo4j service for validating dynamic communities.
             folder_id: Optional folder ID for scoped search (None = all folders).
+            group_ids: Multi-tenant group IDs for two-tier retrieval.
+                       Defaults to [group_id, "__global__"].
         """
         self.embedding_client = embedding_client
         self.group_id = group_id
+        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
         self.folder_id = folder_id
         self.communities_path = Path(communities_path) if communities_path else None
         self.neo4j_service = neo4j_service
@@ -125,9 +129,10 @@ class CommunityMatcher:
             True if communities were loaded successfully (at least 1 found).
         """
         query = """
-        MATCH (c:Community {group_id: $group_id})
-        WHERE c.title IS NOT NULL AND c.title <> ''
-        OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity {group_id: $group_id})
+        MATCH (c:Community)
+        WHERE c.group_id IN $group_ids AND c.title IS NOT NULL AND c.title <> ''
+        OPTIONAL MATCH (c)<-[:BELONGS_TO]-(e:Entity)
+        WHERE e.group_id IN $group_ids
         WITH c, collect(e.name) AS entity_names
         RETURN c.id AS id,
                c.title AS title,
@@ -140,7 +145,7 @@ class CommunityMatcher:
         ORDER BY c.rank DESC
         """
         async with self.neo4j_service._get_session() as session:
-            result = await session.run(query, group_id=self.group_id)
+            result = await session.run(query, group_ids=self.group_ids)
             records = await result.data()
 
         if not records:
@@ -309,11 +314,15 @@ class CommunityMatcher:
 
         query = """
         UNWIND $community_ids AS cid
-        MATCH (c:Community {id: cid, group_id: $group_id})
-              <-[:BELONGS_TO]-(e:Entity)
-              <-[:MENTIONS]-(tc:Sentence {group_id: $group_id})
-              -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-              -[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+        MATCH (c:Community {id: cid})
+        WHERE c.group_id IN $group_ids
+        MATCH (c)<-[:BELONGS_TO]-(e:Entity)
+              <-[:MENTIONS]-(tc:Sentence)
+              -[:IN_DOCUMENT]->(d:Document)
+              -[:IN_FOLDER]->(f:Folder {id: $folder_id})
+        WHERE tc.group_id IN $group_ids
+          AND d.group_id IN $group_ids
+          AND f.group_id IN $group_ids
         RETURN DISTINCT cid
         """
         try:
@@ -321,7 +330,7 @@ class CommunityMatcher:
                 result = await session.run(
                     query,
                     community_ids=community_ids,
-                    group_id=self.group_id,
+                    group_ids=self.group_ids,
                     folder_id=self.folder_id,
                 )
                 records = await result.data()
@@ -562,8 +571,8 @@ class CommunityMatcher:
         """
         cypher = """
         UNWIND $rows AS row
-        MATCH (c:Community {group_id: $group_id})
-        WHERE c.id = row.id
+        MATCH (c:Community)
+        WHERE c.group_id IN $group_ids AND c.id = row.id
         SET c.embedding = row.embedding,
             c.embedding_text_hash = row.text_hash
         """
@@ -587,7 +596,7 @@ class CommunityMatcher:
             return
 
         async with self.neo4j_service._get_session() as session:
-            await session.run(cypher, rows=rows, group_id=self.group_id)
+            await session.run(cypher, rows=rows, group_ids=self.group_ids)
 
         # Update in-memory hashes
         for row in rows:

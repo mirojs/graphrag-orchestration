@@ -351,21 +351,6 @@ def get_group_id(
     )
 
 
-def get_group_ids(
-    group_id: str = Depends(get_group_id),
-) -> List[str]:
-    """
-    Dependency returning group_ids list for multi-tenant Neo4j queries.
-
-    Always includes the user's own group_id plus the global sentinel
-    so that shared/public documents are visible alongside personal ones.
-    """
-    global_id = settings.GLOBAL_GROUP_ID
-    if group_id == global_id:
-        return [global_id]
-    return [group_id, global_id]
-
-
 def get_user_id(
     request: Request,
     x_user_id: Optional[str] = Header(None, alias="X-User-ID")

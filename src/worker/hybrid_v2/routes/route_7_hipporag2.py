@@ -1522,6 +1522,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 query=query,
                 group_id=self.group_id,
                 embed_model=voyage_service,
+                group_ids=self.group_ids,
             )
 
             if not matched_sections:
@@ -1560,6 +1561,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 section_paths=expanded_sections,
                 group_id=self.group_id,
                 folder_id=self.folder_id,
+                group_ids=self.group_ids,
             )
 
             entity_ids = list({e["id"] for e in section_entities if e.get("id")})

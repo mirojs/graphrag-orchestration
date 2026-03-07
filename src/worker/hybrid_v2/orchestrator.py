@@ -251,6 +251,7 @@ class HybridPipeline:
             group_id=group_id,
             neo4j_service=self._async_neo4j,
             folder_id=folder_id,
+            group_ids=self.group_ids,
         )
         
         # Route 3: Hub extraction (for seeding HippoRAG)
@@ -266,6 +267,7 @@ class HybridPipeline:
             neo4j_driver=neo4j_driver,
             group_id=group_id,
             folder_id=folder_id,
+            group_ids=self.group_ids,
         )
         
         # Routes 3 & 4: Deterministic tracing

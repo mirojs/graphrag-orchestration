@@ -134,6 +134,7 @@ async def match_sections_by_embedding(
     group_id: str,
     top_k: int = 5,
     min_similarity: float = 0.25,
+    group_ids: Optional[List[str]] = None,
 ) -> List[str]:
     """Match query against section structural embeddings stored in Neo4j.
 
@@ -145,6 +146,7 @@ async def match_sections_by_embedding(
     Returns:
         List of section title strings that match the query.
     """
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
     # Embed query with Voyage
     try:
         from src.worker.hybrid_v2.routes.route_5_unified import _get_voyage_service
@@ -166,8 +168,8 @@ async def match_sections_by_embedding(
     # similarity server-side in Neo4j (brute-force — typically <20 sections).
     try:
         cypher = """
-        MATCH (s:Section {group_id: $group_id})
-        WHERE s.structural_embedding IS NOT NULL
+        MATCH (s:Section)
+        WHERE s.group_id IN $group_ids AND s.structural_embedding IS NOT NULL
         WITH s, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
         WHERE score >= $min_similarity
         RETURN s.title AS title, score
@@ -177,7 +179,7 @@ async def match_sections_by_embedding(
         async with async_neo4j._get_session() as session:
             result = await session.run(
                 cypher,
-                group_id=group_id,
+                group_ids=effective_group_ids,
                 query_embedding=query_emb,
                 min_similarity=min_similarity,
                 top_k=top_k,
@@ -207,6 +209,7 @@ async def match_sections_by_llm(
     query: str,
     group_id: str,
     llm_client: Optional[Any] = None,
+    group_ids: Optional[List[str]] = None,
 ) -> List[str]:
     """Ask LLM which document sections are relevant to the query.
 
@@ -217,6 +220,8 @@ async def match_sections_by_llm(
     Returns:
         List of section title strings selected by the LLM.
     """
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+
     if not llm_client:
         logger.warning("tier2_llm_no_client")
         return []
@@ -224,7 +229,8 @@ async def match_sections_by_llm(
     # Fetch section titles + summaries from Neo4j
     try:
         cypher = """
-        MATCH (s:Section {group_id: $group_id})
+        MATCH (s:Section)
+        WHERE s.group_id IN $group_ids
         OPTIONAL MATCH (s)<-[:IN_SECTION]-(chunk)
         WITH s, count(chunk) AS chunk_count
         RETURN s.title AS title, s.id AS id, chunk_count,
@@ -232,7 +238,7 @@ async def match_sections_by_llm(
         ORDER BY s.title
         """
         async with async_neo4j._get_session() as session:
-            result = await session.run(cypher, group_id=group_id)
+            result = await session.run(cypher, group_ids=effective_group_ids)
             records = await result.data()
     except Exception as e:
         logger.warning("tier2_llm_fetch_sections_failed", error=str(e))
@@ -302,6 +308,7 @@ async def resolve_section_entities(
     group_id: str,
     max_entities_per_section: int = 10,
     folder_id: Optional[str] = None,
+    group_ids: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Find entities mentioned in text chunks belonging to matched sections.
 
@@ -313,32 +320,35 @@ async def resolve_section_entities(
     if not section_paths:
         return []
 
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+
     folder_filter = ""
     folder_params: Dict[str, Any] = {}
     if folder_id is not None:
         folder_filter = (
             "AND EXISTS { "
             "  MATCH (chunk)-[:PART_OF|IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
-            "  WHERE f.id = $folder_id AND f.group_id = $group_id "
+            "  WHERE f.id = $folder_id AND f.group_id IN $group_ids "
             "} "
         )
         folder_params["folder_id"] = folder_id
 
     cypher = f"""
     UNWIND $paths AS path
-    MATCH (s:Section {{group_id: $group_id}})
-    WHERE s.title = path
+    MATCH (s:Section)
+    WHERE s.group_id IN $group_ids
+      AND (s.title = path
        OR path CONTAINS s.title
-       OR s.title CONTAINS path
+       OR s.title CONTAINS path)
 
     WITH s, path
     MATCH (chunk)-[:IN_SECTION]->(s)
-    WHERE chunk.group_id = $group_id
+    WHERE chunk.group_id IN $group_ids
       AND (chunk:Sentence OR chunk:Chunk OR chunk:`__Node__`)
       {folder_filter}
 
     MATCH (chunk)-[:MENTIONS]->(e)
-    WHERE e.group_id = $group_id
+    WHERE e.group_id IN $group_ids
       AND (e:Entity)
 
     WITH path, e, count(chunk) AS mention_count
@@ -354,7 +364,7 @@ async def resolve_section_entities(
             result = await session.run(
                 cypher,
                 paths=section_paths,
-                group_id=group_id,
+                group_ids=effective_group_ids,
                 **folder_params,
             )
             records = await result.data()
@@ -379,6 +389,7 @@ async def resolve_signatureblock_entities(
     async_neo4j: "AsyncNeo4jService",
     group_id: str,
     folder_id: Optional[str] = None,
+    group_ids: Optional[List[str]] = None,
 ) -> List[str]:
     """Resolve entities reachable from signature-block sentence nodes.
 
@@ -394,23 +405,26 @@ async def resolve_signatureblock_entities(
     Returns:
         List of unique entity IDs extracted from signature blocks.
     """
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
+
     folder_filter = ""
     folder_params: Dict[str, Any] = {}
     if folder_id is not None:
         folder_filter = (
             "AND EXISTS { "
             "  MATCH (s)-[:IN_DOCUMENT|PART_OF*1..2]->(doc:Document)-[:IN_FOLDER]->(f:Folder) "
-            "  WHERE f.id = $folder_id AND f.group_id = $group_id "
+            "  WHERE f.id = $folder_id AND f.group_id IN $group_ids "
             "} "
         )
         folder_params["folder_id"] = folder_id
 
     cypher = f"""
-    MATCH (s:Sentence {{group_id: $group_id}})
-    WHERE s.source = "signature_party"
+    MATCH (s:Sentence)
+    WHERE s.group_id IN $group_ids
+      AND s.source = "signature_party"
       {folder_filter}
     MATCH (s)-[:MENTIONS]->(e)
-    WHERE e.group_id = $group_id
+    WHERE e.group_id IN $group_ids
       AND (e:Entity)
     RETURN DISTINCT e.id AS id, e.name AS name
     """
@@ -419,7 +433,7 @@ async def resolve_signatureblock_entities(
         async with async_neo4j._get_session() as session:
             result = await session.run(
                 cypher,
-                group_id=group_id,
+                group_ids=effective_group_ids,
                 **folder_params,
             )
             records = await result.data()
@@ -448,6 +462,7 @@ async def resolve_thematic_seeds(
     top_k_communities: int = 5,
     max_entities_per_community: int = 5,
     folder_id: Optional[str] = None,
+    group_ids: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Resolve thematic (community) seeds to entity node IDs.
 
@@ -460,6 +475,7 @@ async def resolve_thematic_seeds(
         entity_records: List[{id, name, community}]
         matched_community_data: raw community dicts for optional synthesis context
     """
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
     # Step 1: Community match
     try:
         matched = await community_matcher.match_communities(
@@ -493,18 +509,19 @@ async def resolve_thematic_seeds(
                     "  MATCH (chunk2)-[:MENTIONS]->(e) "
                     "  WHERE (chunk2:Sentence OR chunk2:Chunk OR chunk2:`__Node__`) "
                     "  MATCH (chunk2)-[:IN_DOCUMENT]->(doc2:Document)-[:IN_FOLDER]->(f:Folder) "
-                    "  WHERE f.id = $folder_id AND f.group_id = $group_id "
+                    "  WHERE f.id = $folder_id AND f.group_id IN $group_ids "
                     "} "
                 )
                 folder_params["folder_id"] = folder_id
 
             cypher = f"""
             UNWIND $community_ids AS cid
-            MATCH (c:Community {{group_id: $group_id}})
-            WHERE c.id = cid OR c.community_id = cid
+            MATCH (c:Community)
+            WHERE c.group_id IN $group_ids
+              AND (c.id = cid OR c.community_id = cid)
 
             MATCH (e)-[:BELONGS_TO]->(c)
-            WHERE e.group_id = $group_id
+            WHERE e.group_id IN $group_ids
               AND (e:Entity)
               {folder_filter}
 
@@ -521,7 +538,7 @@ async def resolve_thematic_seeds(
                 result = await session.run(
                     cypher,
                     community_ids=community_ids,
-                    group_id=group_id,
+                    group_ids=effective_group_ids,
                     **folder_params,
                 )
                 entity_records = await result.data()
@@ -709,6 +726,7 @@ async def resolve_all_tiers(
     folder_id: Optional[str] = None,
     embed_model: Optional[Any] = None,
     llm_client: Optional[Any] = None,
+    group_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Orchestrate all three seed tiers in parallel and build unified seed dict.
 
@@ -722,6 +740,7 @@ async def resolve_all_tiers(
         community_data: List[Dict] — matched communities (for optional synthesis context)
         structural_sections: List[str] — section paths used as anchors
     """
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
     min_sentences = int(os.getenv("ROUTE5_STRUCTURAL_MIN_SENTENCES", "2"))
 
     # ------------------------------------------------------------------
@@ -794,24 +813,28 @@ async def resolve_all_tiers(
         elif tier2_mode == "embedding":
             structural_sections = await match_sections_by_embedding(
                 async_neo4j=async_neo4j, query=query, group_id=group_id,
+                group_ids=effective_group_ids,
             )
 
         elif tier2_mode == "llm":
             structural_sections = await match_sections_by_llm(
                 async_neo4j=async_neo4j, query=query,
                 group_id=group_id, llm_client=llm_client,
+                group_ids=effective_group_ids,
             )
 
         else:  # hybrid (default): embedding + LLM in parallel, union results
             emb_task = asyncio.create_task(
                 match_sections_by_embedding(
                     async_neo4j=async_neo4j, query=query, group_id=group_id,
+                    group_ids=effective_group_ids,
                 )
             )
             llm_task = asyncio.create_task(
                 match_sections_by_llm(
                     async_neo4j=async_neo4j, query=query,
                     group_id=group_id, llm_client=llm_client,
+                    group_ids=effective_group_ids,
                 )
             )
             emb_sections, llm_sections = await asyncio.gather(
@@ -842,6 +865,7 @@ async def resolve_all_tiers(
                 section_paths=structural_sections,
                 group_id=group_id,
                 folder_id=folder_id,
+                group_ids=effective_group_ids,
             )
         )
         if sigblock_enabled:
@@ -850,6 +874,7 @@ async def resolve_all_tiers(
                     async_neo4j=async_neo4j,
                     group_id=group_id,
                     folder_id=folder_id,
+                    group_ids=effective_group_ids,
                 )
             )
             section_records, sigblock_ids = await asyncio.gather(section_task, sigblock_task)
@@ -870,6 +895,7 @@ async def resolve_all_tiers(
             query=query,
             group_id=group_id,
             folder_id=folder_id,
+            group_ids=effective_group_ids,
         )
         entity_ids = list({r["id"] for r in entity_records})
         return entity_ids, community_data
@@ -935,6 +961,7 @@ async def resolve_flat_seed_pool(
     embed_model: Optional[Any] = None,
     llm_client: Optional[Any] = None,
     max_semantic_sentences: int = 10,
+    group_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Resolve seeds into a flat deduped pool for equal-weight PPR.
 
@@ -960,6 +987,8 @@ async def resolve_flat_seed_pool(
         community_data: List[Dict] — matched communities for synthesis
         structural_sections: List[str] — matched section titles
     """
+
+    effective_group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
 
     # ------------------------------------------------------------------
     # NER: primary seed source (identical to _resolve_tier1 logic)
@@ -1023,6 +1052,7 @@ async def resolve_flat_seed_pool(
                 query=query,
                 group_id=group_id,
                 folder_id=folder_id,
+                group_ids=effective_group_ids,
             )
             entity_ids = list({r["id"] for r in entity_records})
             return entity_ids, community_data
@@ -1037,6 +1067,7 @@ async def resolve_flat_seed_pool(
         try:
             structural_sections = await match_sections_by_embedding(
                 async_neo4j=async_neo4j, query=query, group_id=group_id,
+                group_ids=effective_group_ids,
             )
             sigblock_enabled = os.getenv("ROUTE5_SIGBLOCK_SEEDS", "0").strip() == "1"
 
@@ -1046,6 +1077,7 @@ async def resolve_flat_seed_pool(
                     section_paths=structural_sections,
                     group_id=group_id,
                     folder_id=folder_id,
+                    group_ids=effective_group_ids,
                 )
             )
             if sigblock_enabled:
@@ -1054,6 +1086,7 @@ async def resolve_flat_seed_pool(
                         async_neo4j=async_neo4j,
                         group_id=group_id,
                         folder_id=folder_id,
+                        group_ids=effective_group_ids,
                     )
                 )
                 section_records, sigblock_ids = await asyncio.gather(

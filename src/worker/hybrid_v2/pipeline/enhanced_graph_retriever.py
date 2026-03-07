@@ -136,7 +136,8 @@ class EnhancedGraphRetriever:
     4. Semantic entity search: Find entities by embedding similarity
     """
     
-    def __init__(self, neo4j_driver, group_id: str, folder_id: Optional[str] = None):
+    def __init__(self, neo4j_driver, group_id: str, folder_id: Optional[str] = None,
+                 group_ids: Optional[List[str]] = None):
         """
         Initialize the enhanced retriever.
         
@@ -144,9 +145,11 @@ class EnhancedGraphRetriever:
             neo4j_driver: Neo4j driver instance
             group_id: Document group ID for filtering
             folder_id: Optional folder ID for scoped search (None = all folders)
+            group_ids: Optional list of group IDs (two-tier: [user_group, "__global__"])
         """
         self.driver = neo4j_driver
         self.group_id = group_id
+        self.group_ids = group_ids or ([group_id, "__global__"] if group_id != "__global__" else ["__global__"])
         self.folder_id = folder_id
     
     def _get_folder_filter_clause(self, doc_alias: str = "d") -> str:
@@ -156,7 +159,7 @@ class EnhancedGraphRetriever:
         """
         if self.folder_id is None:
             return ""
-        return f"AND ({doc_alias})-[:IN_FOLDER]->(:Folder {{id: $folder_id, group_id: $group_id}})"
+        return f"AND ({doc_alias})-[:IN_FOLDER]->(:Folder {{id: $folder_id}}) AND {doc_alias}.group_id IN $group_ids"
     
     def _get_folder_params(self) -> dict:
         """Get folder_id parameter dict for Cypher queries."""
@@ -2219,7 +2222,7 @@ class EnhancedGraphRetriever:
         
         query = f"""
         MATCH (d:Document)
-        WHERE d.group_id = $group_id
+        WHERE d.group_id IN $group_ids
         {folder_filter}
         RETURN 
             d.id AS doc_id,
@@ -2231,7 +2234,7 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
-            params = {"group_id": self.group_id, "max_docs": max_docs}
+            params = {"group_ids": self.group_ids, "max_docs": max_docs}
             params.update(self._get_folder_params())
             
             def _run_query():
@@ -2287,7 +2290,7 @@ class EnhancedGraphRetriever:
         
         query = f"""
         MATCH (d:Document)
-        WHERE d.group_id = $group_id AND d.date IS NOT NULL
+        WHERE d.group_id IN $group_ids AND d.date IS NOT NULL
         {folder_filter}
         RETURN 
             d.id AS doc_id,
@@ -2300,7 +2303,7 @@ class EnhancedGraphRetriever:
         
         try:
             loop = asyncio.get_event_loop()
-            params = {"group_id": self.group_id, "limit": limit}
+            params = {"group_ids": self.group_ids, "limit": limit}
             params.update(self._get_folder_params())
             
             def _run_query():
@@ -2370,8 +2373,8 @@ class EnhancedGraphRetriever:
         folder_filter = self._get_folder_filter_clause("d")
         query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
-        WHERE d.group_id = $group_id
-          AND t.group_id = $group_id
+        WHERE d.group_id IN $group_ids
+          AND t.group_id IN $group_ids
           {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
         WITH d, t, s
@@ -2408,7 +2411,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             params = {
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "max_per_document": max_per_document,
                 "prefer_early_chunks": prefer_early_chunks,
             }
@@ -2529,8 +2532,8 @@ class EnhancedGraphRetriever:
         # Use native vector similarity to find the best chunk per document
         query = f"""
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
-        WHERE d.group_id = $group_id
-          AND t.group_id = $group_id
+        WHERE d.group_id IN $group_ids
+          AND t.group_id IN $group_ids
           AND t.embedding_v2 IS NOT NULL
         {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
@@ -2565,7 +2568,7 @@ class EnhancedGraphRetriever:
         try:
             loop = asyncio.get_event_loop()
             params = {
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "query_embedding": query_embedding,
                 "max_per_document": max_per_document,
             }
@@ -2684,10 +2687,10 @@ class EnhancedGraphRetriever:
             # No slicing - just collect and unwind all chunks per section
             query = f"""
             MATCH (t:Sentence)-[:IN_SECTION]->(s:Section)
-            WHERE t.group_id = $group_id
-              AND s.group_id = $group_id
+            WHERE t.group_id IN $group_ids
+              AND s.group_id IN $group_ids
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-            WHERE d IS NULL OR (d.group_id = $group_id {folder_filter.replace('AND ', 'AND ')})
+            WHERE d IS NULL OR (d.group_id IN $group_ids {folder_filter.replace('AND ', 'AND ')})
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             RETURN
@@ -2706,10 +2709,10 @@ class EnhancedGraphRetriever:
             # SAMPLING: Return max_per_section chunks from each section
             query = f"""
             MATCH (t:Sentence)-[:IN_SECTION]->(s:Section)
-            WHERE t.group_id = $group_id
-              AND s.group_id = $group_id
+            WHERE t.group_id IN $group_ids
+              AND s.group_id IN $group_ids
             OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
-            WHERE d IS NULL OR (d.group_id = $group_id {folder_filter.replace('AND ', 'AND ')})
+            WHERE d IS NULL OR (d.group_id IN $group_ids {folder_filter.replace('AND ', 'AND ')})
             WITH s, t, d
             ORDER BY s.path_key, t.chunk_index ASC
             WITH s, collect({{
@@ -2744,7 +2747,7 @@ class EnhancedGraphRetriever:
             def _run_query():
                 with retry_session(self.driver) as session:
                     # Only pass max_per_section when using sampling mode
-                    params = {"group_id": self.group_id}
+                    params = {"group_ids": self.group_ids}
                     params.update(self._get_folder_params())
                     if max_per_section is not None:
                         params["max_per_section"] = max_per_section
@@ -2836,8 +2839,9 @@ class EnhancedGraphRetriever:
             folder_filter_clause = "AND (d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id}))"
         
         query = f"""
-        MATCH (s:Section {{group_id: $group_id}})
-        WHERE s.structural_embedding IS NOT NULL
+        MATCH (s:Section)
+        WHERE s.group_id IN $group_ids
+          AND s.structural_embedding IS NOT NULL
         OPTIONAL MATCH (s)<-[:IN_SECTION]-(t:Sentence)-[:IN_DOCUMENT]->(d:Document)
         WITH s, d, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
         WHERE score >= $score_threshold {folder_filter_clause}
@@ -2858,7 +2862,7 @@ class EnhancedGraphRetriever:
             loop = asyncio.get_event_loop()
             
             params = {
-                "group_id": self.group_id,
+                "group_ids": self.group_ids,
                 "query_embedding": query_embedding,
                 "top_k": top_k,
                 "score_threshold": score_threshold,

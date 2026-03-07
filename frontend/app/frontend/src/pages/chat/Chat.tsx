@@ -76,6 +76,7 @@ const Chat = () => {
     const [showSpeechOutputBrowser, setShowSpeechOutputBrowser] = useState<boolean>(false);
     const [showSpeechOutputAzure, setShowSpeechOutputAzure] = useState<boolean>(false);
     const [showSpeechTranslation, setShowSpeechTranslation] = useState<boolean>(false);
+    const [speechDetectedLanguage, setSpeechDetectedLanguage] = useState<string | null>(null);
     const [showChatHistoryBrowser, setShowChatHistoryBrowser] = useState<boolean>(false);
     const [showChatHistoryCosmos, setShowChatHistoryCosmos] = useState<boolean>(false);
     const [showAgenticRetrievalOption, setShowAgenticRetrievalOption] = useState<boolean>(false);
@@ -286,12 +287,16 @@ const Chat = () => {
                         use_agentic_knowledgebase: useAgenticKnowledgeBase,
                         use_web_source: webSourceSupported ? webSourceEnabled : false,
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
-                        ...(seed !== null ? { seed: seed } : {})
+                        ...(seed !== null ? { seed: seed } : {}),
+                        ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
                 session_state: answers.length ? answers[answers.length - 1][1].session_state : null
             };
+
+            // Clear speech metadata after including it in the request
+            setSpeechDetectedLanguage(null);
 
             const response = await chatApi(request, shouldStream, token, controller.signal);
             if (!response.body) {
@@ -571,6 +576,7 @@ const Chat = () => {
                             onSend={question => makeApiRequest(question)}
                             showSpeechInput={showSpeechInput}
                             showSpeechTranslation={showSpeechTranslation}
+                            onSpeechResult={(info) => setSpeechDetectedLanguage(info.detectedLanguage)}
                             isStreaming={isStreaming}
                             isLoading={isLoading}
                             onStop={onStopClick}

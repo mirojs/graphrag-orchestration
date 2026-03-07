@@ -201,3 +201,80 @@ class TestTTSEndpointRegression:
             resp = client.post("/speech", json={"text": "hello"})
 
         assert resp.status_code == 400
+
+
+# ============================================================================
+# 5. Speech stats in UsageRecord
+# ============================================================================
+
+
+class TestUsageRecordSpeechFields:
+    def test_speech_fields_stored(self):
+        from src.core.models.usage import UsageRecord
+        record = UsageRecord(
+            partition_id="test-group",
+            usage_type="llm_completion",
+            speech_detected_language="ja",
+            was_speech_input=True,
+        )
+        assert record.speech_detected_language == "ja"
+        assert record.was_speech_input is True
+
+    def test_speech_fields_default_none(self):
+        from src.core.models.usage import UsageRecord
+        record = UsageRecord(
+            partition_id="test-group",
+            usage_type="llm_completion",
+        )
+        assert record.speech_detected_language is None
+        assert record.was_speech_input is None
+
+    def test_speech_and_translation_fields_coexist(self):
+        """A voice query can be both speech-translated and text-translated."""
+        from src.core.models.usage import UsageRecord
+        record = UsageRecord(
+            partition_id="test-group",
+            usage_type="llm_completion",
+            detected_language="ja",
+            was_translated=True,
+            characters_translated=50,
+            speech_detected_language="ja",
+            was_speech_input=True,
+        )
+        assert record.was_translated is True
+        assert record.was_speech_input is True
+
+
+# ============================================================================
+# 6. FrontendChatOverrides speech field
+# ============================================================================
+
+
+class TestFrontendOverridesSpeech:
+    def test_speech_detected_language_field(self):
+        from src.api_gateway.routers.chat import FrontendChatOverrides
+        overrides = FrontendChatOverrides(speech_detected_language="fr")
+        assert overrides.speech_detected_language == "fr"
+
+    def test_speech_detected_language_default_none(self):
+        from src.api_gateway.routers.chat import FrontendChatOverrides
+        overrides = FrontendChatOverrides()
+        assert overrides.speech_detected_language is None
+
+
+# ============================================================================
+# 7. Dashboard speech stats
+# ============================================================================
+
+
+class TestDashboardSpeechStats:
+    def test_speech_queries_month_in_response(self):
+        from src.api_gateway.routers.dashboard import UsageStatsResponse
+        resp = UsageStatsResponse(speech_queries_month=3, translated_queries_month=5)
+        assert resp.speech_queries_month == 3
+        assert resp.translated_queries_month == 5
+
+    def test_speech_queries_count_default_zero(self):
+        from src.api_gateway.routers.dashboard import UsageStatsResponse
+        resp = UsageStatsResponse()
+        assert resp.speech_queries_month == 0

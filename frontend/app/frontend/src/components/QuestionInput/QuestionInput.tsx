@@ -24,12 +24,13 @@ interface Props {
     clearOnSend?: boolean;
     showSpeechInput?: boolean;
     showSpeechTranslation?: boolean;
+    onSpeechResult?: (info: { detectedLanguage: string; wasTranslated: boolean }) => void;
     onStop: () => void;
     isStreaming: boolean;
     isLoading: boolean;
 }
 
-export const QuestionInput = ({ onSend, onStop, disabled, placeholder, clearOnSend, initQuestion, showSpeechInput, showSpeechTranslation, isStreaming, isLoading }: Props) => {
+export const QuestionInput = ({ onSend, onStop, disabled, placeholder, clearOnSend, initQuestion, showSpeechInput, showSpeechTranslation, onSpeechResult, isStreaming, isLoading }: Props) => {
     const [question, setQuestion] = useState<string>("");
     const { loggedIn } = useContext(LoginContext);
     const { t } = useTranslation();
@@ -127,7 +128,7 @@ export const QuestionInput = ({ onSend, onStop, disabled, placeholder, clearOnSe
             </div>
             {showSpeechInput && (
                 showSpeechTranslation
-                    ? <SpeechTranslationInput updateQuestion={setQuestion} />
+                    ? <SpeechTranslationInput updateQuestion={setQuestion} onSpeechResult={onSpeechResult} />
                     : <SpeechInput updateQuestion={setQuestion} />
             )}
         </div>

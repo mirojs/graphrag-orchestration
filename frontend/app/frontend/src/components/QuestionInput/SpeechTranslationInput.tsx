@@ -20,9 +20,10 @@ import { SpeechInput } from "./SpeechInput";
 
 interface Props {
     updateQuestion: (question: string) => void;
+    onSpeechResult?: (info: { detectedLanguage: string; wasTranslated: boolean }) => void;
 }
 
-export const SpeechTranslationInput = ({ updateQuestion }: Props) => {
+export const SpeechTranslationInput = ({ updateQuestion, onSpeechResult }: Props) => {
     const { t, i18n } = useTranslation();
     const [isRecording, setIsRecording] = useState(false);
     const [detectedLang, setDetectedLang] = useState<string | null>(null);
@@ -123,7 +124,13 @@ export const SpeechTranslationInput = ({ updateQuestion }: Props) => {
                     const autoDetectResult = sdk.AutoDetectSourceLanguageResult.fromResult(event.result);
                     const lang = autoDetectResult?.language;
                     if (lang && lang !== "Unknown") {
-                        setDetectedLang(lang.split("-")[0]);
+                        const langCode = lang.split("-")[0];
+                        setDetectedLang(langCode);
+                        // Report speech metadata for dashboard stats
+                        onSpeechResult?.({
+                            detectedLanguage: langCode,
+                            wasTranslated: langCode !== targetLang,
+                        });
                     }
                 } else if (reason === sdk.ResultReason.NoMatch) {
                     console.warn("Speech not recognized");

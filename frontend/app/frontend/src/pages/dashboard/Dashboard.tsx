@@ -193,6 +193,7 @@ const Dashboard = () => {
                     <span className={styles.statSubtext}>
                         of {usage.credits_limit_month != null ? usage.credits_limit_month.toLocaleString() : "∞"} monthly credits
                         {usage.translated_queries_month > 0 && ` · ${usage.translated_queries_month} translated`}
+                        {usage.speech_queries_month > 0 && ` · ${usage.speech_queries_month} voice`}
                     </span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${credits.color}`} style={{ width: `${credits.pct}%` }} />
@@ -242,8 +243,8 @@ const Dashboard = () => {
                                     <td>{q.total_tokens ?? "—"}</td>
                                     <td>{q.credits_used ?? "—"}</td>
                                     <td>
-                                        {q.detected_language
-                                            ? `${q.detected_language.toUpperCase()}${q.was_translated ? " 🌐" : ""}`
+                                        {q.detected_language || q.speech_detected_language
+                                            ? `${q.was_speech_input ? "🎤 " : ""}${(q.speech_detected_language || q.detected_language || "").toUpperCase()}${q.was_translated ? " 🌐" : ""}`
                                             : "—"}
                                     </td>
                                 </tr>

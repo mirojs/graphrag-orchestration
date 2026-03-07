@@ -55,6 +55,10 @@ class UsageRecord(BaseModel):
     detected_language: Optional[str] = Field(None, description="Auto-detected source language code (e.g., 'ja')")
     was_translated: Optional[bool] = Field(None, description="Whether query was translated before retrieval")
 
+    # Speech input fields
+    speech_detected_language: Optional[str] = Field(None, description="Language detected by Azure Speech SDK (e.g., 'ja')")
+    was_speech_input: Optional[bool] = Field(None, description="Whether query originated from voice input with translation")
+
     # Common fields
     route: Optional[str] = Field(None, description="Route used (route_2, route_3, route_4)")
     query_id: Optional[str] = Field(None, description="Associated query ID")

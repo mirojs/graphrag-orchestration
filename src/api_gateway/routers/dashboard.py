@@ -81,6 +81,8 @@ class UsageStatsResponse(BaseModel):
     credits_remaining: Optional[int] = None
     # Translation stats
     translated_queries_month: int = 0
+    # Speech input stats
+    speech_queries_month: int = 0
     # Recent activity
     recent_queries: List[Dict[str, Any]] = []
     top_topics: List[Dict[str, Any]] = []
@@ -296,6 +298,8 @@ async def _fetch_user_usage(
                     "credits_used": r.get("total_tokens", 0),
                     "detected_language": r.get("detected_language"),
                     "was_translated": r.get("was_translated", False),
+                    "speech_detected_language": r.get("speech_detected_language"),
+                    "was_speech_input": r.get("was_speech_input", False),
                 }
                 for r in sorted_records
             ]
@@ -337,6 +341,7 @@ async def _fetch_user_usage(
 
     # Count translated queries from recent activity
     translated_queries_month = sum(1 for q in recent_queries if q.get("was_translated"))
+    speech_queries_month = sum(1 for q in recent_queries if q.get("was_speech_input"))
 
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
@@ -353,6 +358,7 @@ async def _fetch_user_usage(
         credits_limit_month=credit_info.get("credits_limit"),
         credits_remaining=credit_info.get("credits_remaining"),
         translated_queries_month=translated_queries_month,
+        speech_queries_month=speech_queries_month,
         recent_queries=recent_queries,
         top_topics=[],
     )

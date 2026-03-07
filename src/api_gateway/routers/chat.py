@@ -42,7 +42,8 @@ ASYNC_ROUTES = {"global", "drift"}
 
 async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: int, model: str,
                              detected_language: str | None = None, was_translated: bool = False,
-                             translation_chars: int = 0) -> None:
+                             translation_chars: int = 0,
+                             speech_detected_language: str | None = None) -> None:
     """Fire-and-forget: write a UsageRecord to Cosmos for dashboard recent_queries."""
     try:
         from src.core.services.cosmos_client import get_cosmos_client
@@ -61,6 +62,8 @@ async def _write_cosmos_usage(user_id: str, route: str, query_id: str, tokens: i
             detected_language=detected_language,
             was_translated=was_translated,
             characters_translated=translation_chars if was_translated else None,
+            speech_detected_language=speech_detected_language,
+            was_speech_input=bool(speech_detected_language),
         )
         await asyncio.wait_for(cosmos.write_usage_record(record), timeout=10)
     except Exception as e:
@@ -963,6 +966,7 @@ class FrontendChatOverrides(BaseModel):
     language: Optional[str] = "en"
     use_agentic_knowledgebase: Optional[bool] = False
     folder_id: Optional[str] = Field(default=None, description="Folder ID to scope query within the group")
+    speech_detected_language: Optional[str] = Field(default=None, description="Language detected by Azure Speech SDK voice input")
 
 
 class FrontendChatContext(BaseModel):
@@ -1190,6 +1194,7 @@ async def frontend_chat(
             detected_language=result_usage.get("detected_language"),
             was_translated=result_usage.get("was_translated", False),
             translation_chars=result_usage.get("translation_chars", 0),
+            speech_detected_language=overrides.speech_detected_language if overrides else None,
         ))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
@@ -1330,6 +1335,7 @@ async def _frontend_stream_response(
                     detected_language=result_usage.get("detected_language"),
                     was_translated=result_usage.get("was_translated", False),
                     translation_chars=result_usage.get("translation_chars", 0),
+                    speech_detected_language=overrides.speech_detected_language if overrides else None,
                 )
             )
             _background_tasks.add(task)

@@ -6,6 +6,7 @@ import { renderWithProviders } from "./testUtils";
 // Mock authConfig before importing Files
 vi.mock("../authConfig", () => ({
     useLogin: true,
+    requireLogin: true,
     getToken: vi.fn().mockResolvedValue("mock-token"),
 }));
 

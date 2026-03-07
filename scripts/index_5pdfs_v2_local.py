@@ -265,13 +265,13 @@ async def run_v2_indexing(group_id: str, reindex: bool, dry_run: bool):
     pipeline = LazyGraphRAGIndexingPipeline(
         neo4j_store=neo4j_store,
         llm=llm_service.get_indexing_llm() if llm_service.llm is not None else None,
-        embedder=embedder,
+        section_embed_model=embedder,
         voyage_service=voyage_service,
         config=config,
     )
 
     log(f"   Pipeline: {type(pipeline).__module__}")
-    log(f"   Embedder: {type(pipeline.embedder).__name__}")
+    log(f"   Embedder: {type(embedder).__name__}")
     log(f"   Dimensions: {pipeline.config.embedding_dimensions}")
     log("")
 

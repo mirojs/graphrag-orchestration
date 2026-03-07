@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -225,6 +226,7 @@ async def recognition_memory_filter(
     llm_client: Any,
     query: str,
     candidate_triples: List[Tuple[Triple, float]],
+    max_facts: int | None = None,
 ) -> List[Tuple[Triple, float]]:
     """LLM-based recognition memory filter — upstream DSPy few-shot aligned.
 
@@ -240,12 +242,16 @@ async def recognition_memory_filter(
         llm_client: LLM client with ``acomplete(prompt)`` method.
         query: The user query.
         candidate_triples: List of (Triple, score) from TripleEmbeddingStore.search().
+        max_facts: Maximum facts to select. Defaults to env ROUTE7_RECOGNITION_MEMORY_MAX_FACTS (4).
 
     Returns:
         List of (Triple, score) tuples that survived filtering. May be empty.
     """
     if not candidate_triples:
         return []
+
+    if max_facts is None:
+        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "4"))
 
     # Build fact list in upstream format: {"fact": [["s","p","o"], ...]}
     fact_list = []
@@ -339,7 +345,7 @@ async def recognition_memory_filter(
         "        You are a critical component of a high-stakes question-answering system used by top researchers and "
         "decision-makers worldwide. Your task is to filter facts based on their relevance to a given query, ensuring "
         "that the most crucial information is presented to these stakeholders. The query requires careful analysis and "
-        "possibly multi-hop reasoning to connect different pieces of information. You must select up to 4 relevant facts "
+        "possibly multi-hop reasoning to connect different pieces of information. You must select up to {max_facts} relevant facts "
         "from the provided candidate list that have a strong connection to the query, aiding in reasoning and providing "
         'an accurate answer. The output should be in JSON format, e.g., {"fact": [["s1", "p1", "o1"], ["s2", "p2", "o2"]]}, '
         'and if no facts are relevant, return an empty list, {"fact": []}. The accuracy of your response is paramount, '
@@ -352,7 +358,7 @@ async def recognition_memory_filter(
     _OUTPUT_TPL = "[[ ## fact_after_filter ## ]]\n{fact_after_filter}\n\n[[ ## completed ## ]]"
 
     # Build the full prompt: system + few-shot demos + current query
-    messages_parts = [_SYS, ""]
+    messages_parts = [_SYS.replace("{max_facts}", str(max_facts)), ""]
     for demo in _DEMOS:
         messages_parts.append(_INPUT_TPL.format(question=demo["q"], fact_before_filter=demo["before"]))
         messages_parts.append(_OUTPUT_TPL.format(fact_after_filter=demo["after"]))

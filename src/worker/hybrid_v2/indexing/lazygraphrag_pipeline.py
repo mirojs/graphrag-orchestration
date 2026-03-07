@@ -1503,7 +1503,7 @@ Rules:
 1. Process EACH sentence [ID] independently — extract 2-5 triples per sentence.
 2. Predicates MUST be short verb phrases (1-5 words). Examples: "warrants for", "is not transferable", "holds risk until", "disclaims", "shall indemnify".
 3. Do NOT use the full sentence as a predicate.
-4. Subjects and objects are named entities, key concepts, legal terms, dates, or amounts.
+4. Subjects and objects are named entities, key concepts, legal terms, dates, time periods, durations, or amounts.
 5. Include abstract concepts as entities when present: warranties, liabilities, rights, obligations, limitations, conditions.
 6. Extract ALL factual relationships from each sentence, not just the most obvious one.
 7. Entity names MUST come from the sentence text — do NOT invent or hallucinate names not present in the source.
@@ -1519,7 +1519,7 @@ Return ONLY valid JSON (no markdown fences):
     # ── Two-step prompts (upstream HippoRAG 2 alignment) ────────────
     # Step 1: NER — "broad" includes abstract concepts, "narrow" matches upstream HippoRAG 2
     _NER_PROMPT_BROAD = """Your task is to extract named entities from the given sentences.
-Extract: proper nouns, organizations, people, dates, amounts, legal terms, AND abstract concepts (warranties, liabilities, rights, obligations, limitations, conditions, terms).
+Extract: proper nouns, organizations, people, dates, time periods, deadlines, durations (e.g., "10 business days", "90-day period"), amounts, legal terms, AND abstract concepts (warranties, liabilities, rights, obligations, limitations, conditions, terms).
 Respond with a JSON list of entities.
 
 {sentences}
@@ -1528,7 +1528,7 @@ Return ONLY valid JSON (no markdown fences):
 {{"named_entities": [...]}}"""
 
     _NER_PROMPT_NARROW = """Your task is to extract named entities from the given sentences.
-Extract: proper nouns, organizations, people, locations, dates, amounts, legal terms.
+Extract: proper nouns, organizations, people, locations, dates, time periods, deadlines, durations (e.g., "10 business days", "90-day period"), amounts, legal terms.
 Respond with a JSON list of entities.
 
 {sentences}

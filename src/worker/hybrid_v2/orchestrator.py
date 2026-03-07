@@ -208,6 +208,7 @@ class HybridPipeline:
         self.relevance_budget = relevance_budget
         self.graph_communities = graph_communities
         self.group_id = group_id
+        self.group_ids = [group_id, "__global__"] if group_id != "__global__" else ["__global__"]
         self.folder_id = folder_id  # None means search all folders
         self.neo4j_driver = neo4j_driver
 

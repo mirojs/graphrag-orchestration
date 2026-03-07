@@ -497,15 +497,18 @@ class Neo4jStoreV3:
 
         return await asyncio.to_thread(_sync_upsert)
     
-    def get_entity(self, group_id: str, entity_id: str) -> Optional[Entity]:
+    def get_entity(self, group_id: str, entity_id: str, group_ids: List[str] = None) -> Optional[Entity]:
         """Get an entity by ID."""
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         query = """
-        MATCH (e:Entity {id: $id, group_id: $group_id})
+        MATCH (e:Entity {id: $id})
+        WHERE e.group_id IN $group_ids
         RETURN e
         """
         
         with self.get_retry_session() as session:
-            result = session.run(query, id=entity_id, group_id=group_id)
+            result = session.run(query, id=entity_id, group_ids=group_ids)
             record = result.single()
             if record:
                 e = record["e"]
@@ -524,6 +527,7 @@ class Neo4jStoreV3:
         query_text: str,
         embedding: List[float],
         top_k: int = 10,
+        group_ids: List[str] = None,
     ) -> List[Tuple[Entity, float]]:
         """
         Hybrid search combining vector similarity and keyword matching with RRF and Quality Boost.
@@ -539,17 +543,20 @@ class Neo4jStoreV3:
             query_text: Original query string for keyword matching
             embedding: Query embedding for vector search
             top_k: Number of final results to return
+            group_ids: List of group IDs to search across (defaults to [group_id, "__global__"])
             
         Returns:
             List of (Entity, combined_score) tuples sorted by fused rank
         """
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         k_constant = 60  # RRF constant
         candidate_k = max(top_k * 3, 20)  # Retrieve more for fusion
         
         query = """
         // Step 1: Vector Search (Native - using vector.similarity.cosine)
-        MATCH (e:Entity {group_id: $group_id})
-        WHERE e.embedding_v2 IS NOT NULL
+        MATCH (e:Entity)
+        WHERE e.group_id IN $group_ids AND e.embedding_v2 IS NOT NULL
         WITH e, vector.similarity.cosine(e.embedding_v2, $embedding) AS vectorScore
         ORDER BY vectorScore DESC
         LIMIT $retrieval_k
@@ -558,7 +565,7 @@ class Neo4jStoreV3:
         // Step 2: Full-text Search
         OPTIONAL CALL db.index.fulltext.queryNodes('entity_fulltext', $query_text, {limit: $retrieval_k})
         YIELD node AS fNode, score AS fScore
-        WHERE fNode.group_id = $group_id
+        WHERE fNode.group_id IN $group_ids
         WITH vectorResults, collect({node: fNode, score: fScore}) AS textResults
         
         // Step 3: RRF Fusion
@@ -570,7 +577,8 @@ class Neo4jStoreV3:
         
         // Step 4: Quality/RAPTOR Boost
         // Boost entities that belong to high-ranking communities (RAPTOR/Leiden)
-        OPTIONAL MATCH (node)-[:BELONGS_TO]->(c:Community {group_id: $group_id})
+        OPTIONAL MATCH (node)-[:BELONGS_TO]->(c:Community)
+        WHERE c.group_id IN $group_ids
         WITH node, rrfScore, coalesce(max(c.rank), 0.0) AS communityRank
         
         // Apply boost: 5% boost per rank unit to avoid over-weighting community membership
@@ -592,7 +600,7 @@ class Neo4jStoreV3:
                     retrieval_k=candidate_k,
                     k_constant=k_constant,
                     top_k=top_k,
-                    group_id=group_id,
+                    group_ids=group_ids,
                 )
                 for record in result:
                     e = record["node"]
@@ -617,17 +625,31 @@ class Neo4jStoreV3:
         group_id: str,
         embedding: List[float],
         top_k: int = 10,
+        group_ids: List[str] = None,
     ) -> List[Tuple[Entity, float]]:
         """Vector similarity search for entities using native vector index.
         
         Uses SEARCH clause with in-index group_id pre-filtering (Cypher 25).
+        Searches across group_id and __global__ via UNION ALL.
         """
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
+        global_group_id = "__global__"
         query = """CYPHER 25
-        MATCH (node:Entity)
-        SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
-        SCORE AS score
+        CALL () {
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            RETURN node, score
+            UNION ALL
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $global_group_id LIMIT $top_k)
+            SCORE AS score
+            RETURN node, score
+        }
         RETURN node, score
         ORDER BY score DESC
+        LIMIT $top_k
         """
         
         results = []
@@ -637,6 +659,7 @@ class Neo4jStoreV3:
                 embedding=embedding,
                 top_k=top_k,
                 group_id=group_id,
+                global_group_id=global_group_id,
             )
             for record in result:
                 e = record["node"]
@@ -655,6 +678,7 @@ class Neo4jStoreV3:
         self,
         group_id: str,
         top_k: int = 10,
+        group_ids: List[str] = None,
     ) -> List[Tuple[Entity, float]]:
         """
         Search for entities with numeric content (amounts, values, etc).
@@ -662,14 +686,17 @@ class Neo4jStoreV3:
         Prioritizes entities that mention financial amounts, quantities, or dates.
         Useful for locating invoice amounts, contract values, etc.
         """
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         query = """
-        MATCH (e:Entity {group_id: $group_id})
-        WHERE e.description CONTAINS '$' 
+        MATCH (e:Entity)
+        WHERE e.group_id IN $group_ids
+          AND (e.description CONTAINS '$' 
            OR e.description CONTAINS 'amount' 
            OR e.description CONTAINS 'invoice' 
            OR e.description CONTAINS 'cost'
            OR e.description CONTAINS 'price'
-           OR e.name CONTAINS '$'
+           OR e.name CONTAINS '$')
         RETURN e, 
                CASE 
                    WHEN e.description CONTAINS 'invoice' THEN 5
@@ -687,7 +714,7 @@ class Neo4jStoreV3:
         with self.get_retry_session() as session:
             result = session.run(
                 query,
-                group_id=group_id,
+                group_ids=group_ids,
                 top_k=top_k,
             )
             for record in result:
@@ -813,18 +840,21 @@ class Neo4jStoreV3:
 
     # ==================== Triple Embedding Operations ====================
 
-    def fetch_all_triples(self, group_id: str) -> List[Dict[str, Any]]:
+    def fetch_all_triples(self, group_id: str, group_ids: List[str] = None) -> List[Dict[str, Any]]:
         """Fetch all RELATED_TO triples for pre-computing embeddings."""
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         cypher = """
-        MATCH (e1:Entity {group_id: $group_id})-[r:RELATED_TO]->(e2:Entity {group_id: $group_id})
-        WHERE r.description IS NOT NULL AND r.description <> ''
+        MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
+        WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
+          AND r.description IS NOT NULL AND r.description <> ''
         RETURN e1.id AS source_id, e1.name AS source_name,
                r.description AS description,
                e2.id AS target_id, e2.name AS target_name
         """
         triples: List[Dict[str, Any]] = []
         with self.get_retry_session() as session:
-            result = session.run(cypher, group_id=group_id)
+            result = session.run(cypher, group_ids=group_ids)
             for record in result:
                 triples.append({
                     "source_id": record["source_id"],
@@ -934,19 +964,22 @@ class Neo4jStoreV3:
         with self.get_retry_session() as session:
             session.run(query, community_id=community_id, group_id=group_id, embedding=embedding)
 
-    def get_communities_by_level(self, group_id: str, level: int) -> List[Community]:
+    def get_communities_by_level(self, group_id: str, level: int, group_ids: List[str] = None) -> List[Community]:
         """Get all communities at a specific level."""
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         query = """
-        MATCH (c:Community {group_id: $group_id, level: $level})
-        OPTIONAL MATCH (e:Entity {group_id: $group_id})-[r:BELONGS_TO]->(c)
-        WHERE r.group_id = $group_id
+        MATCH (c:Community)
+        WHERE c.group_id IN $group_ids AND c.level = $level
+        OPTIONAL MATCH (e:Entity)-[r:BELONGS_TO]->(c)
+        WHERE e.group_id IN $group_ids
         RETURN c, collect(DISTINCT e.id) AS entity_ids
         ORDER BY c.rank DESC
         """
         
         communities = []
         with self.get_retry_session() as session:
-            result = session.run(query, group_id=group_id, level=level)
+            result = session.run(query, group_ids=group_ids, level=level)
             for record in result:
                 c = record["c"]
                 communities.append(Community(
@@ -961,15 +994,18 @@ class Neo4jStoreV3:
         
         return communities
 
-    def get_community_levels(self, group_id: str) -> List[int]:
+    def get_community_levels(self, group_id: str, group_ids: List[str] = None) -> List[int]:
         """Return sorted distinct community levels for a group."""
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         query = """
-        MATCH (c:Community {group_id: $group_id})
+        MATCH (c:Community)
+        WHERE c.group_id IN $group_ids
         RETURN DISTINCT c.level AS level
         ORDER BY level ASC
         """
         with self.get_retry_session() as session:
-            result = session.run(query, group_id=group_id)
+            result = session.run(query, group_ids=group_ids)
             levels: list[int] = []
             for record in result:
                 lvl = record.get("level")
@@ -1070,15 +1106,18 @@ class Neo4jStoreV3:
     
     # ==================== Sentence Operations (Skeleton Enrichment) ====================
 
-    def get_sentences_by_group(self, group_id: str) -> List[Dict[str, Any]]:
+    def get_sentences_by_group(self, group_id: str, group_ids: List[str] = None) -> List[Dict[str, Any]]:
         """Fetch all Sentence nodes for a group_id.
 
         Returns list of dicts with keys: id, text, document_id,
         source, section_path, index_in_section, total_in_section, page.
         Used by Phase B sentence-based entity extraction.
         """
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
         query = """
-        MATCH (s:Sentence {group_id: $group_id})
+        MATCH (s:Sentence)
+        WHERE s.group_id IN $group_ids
         RETURN s.id AS id, s.text AS text,
                s.document_id AS document_id, s.source AS source,
                s.section_path AS section_path,
@@ -1088,7 +1127,7 @@ class Neo4jStoreV3:
         ORDER BY s.document_id, s.section_path, s.index_in_section
         """
         with self.get_retry_session() as session:
-            result = session.run(query, group_id=group_id)
+            result = session.run(query, group_ids=group_ids)
             sentences = [
                 {
                     "id": record["id"],
@@ -1323,16 +1362,27 @@ class Neo4jStoreV3:
         group_id: str,
         top_k: int = 8,
         similarity_threshold: float = 0.45,
+        group_ids: List[str] = None,
     ) -> List[Dict[str, Any]]:
         """Query Sentence nodes by vector similarity for skeleton enrichment.
         
         Returns sentence text + parent chunk context for LLM prompt injection.
         Uses the sentence_embeddings_v2 vector index.
+        Searches across group_id and __global__ via UNION ALL.
         """
+        if group_ids is None:
+            group_ids = [group_id, "__global__"]
+        global_group_id = "__global__"
         query = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
@@ -1352,6 +1402,7 @@ class Neo4jStoreV3:
                sec.path_key AS section_key,
                score
         ORDER BY score DESC
+        LIMIT $top_k
         """
         
         results = []
@@ -1360,6 +1411,7 @@ class Neo4jStoreV3:
                 query,
                 embedding=query_embedding,
                 group_id=group_id,
+                global_group_id=global_group_id,
                 top_k=top_k,
                 threshold=similarity_threshold,
             )

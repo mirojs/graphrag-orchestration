@@ -82,8 +82,8 @@ STORAGE_ACCOUNT=$(get_env_value_or_default "STORAGE_ACCOUNT_NAME" "neo4jstorage2
 AZURE_USERSTORAGE_ACCOUNT=${AZURE_USERSTORAGE_ACCOUNT:-$STORAGE_ACCOUNT}
 AZURE_USERSTORAGE_CONTAINER=${AZURE_USERSTORAGE_CONTAINER:-user-content}
 
-# Group ID override — maps all users to a shared demo tenant (critical for B2C)
-GROUP_ID_OVERRIDE=$(get_env_value_or_default "GROUP_ID_OVERRIDE" "test-5pdfs-v2-fix2" false)
+# Group ID override — leave empty for per-user isolation; set for shared demo tenant
+GROUP_ID_OVERRIDE=$(get_env_value_or_default "GROUP_ID_OVERRIDE" "" false)
 
 # Docker cleanup control (default: enabled for deployment)
 DOCKER_CLEANUP_ENABLED=${DOCKER_CLEANUP_ENABLED:-true}

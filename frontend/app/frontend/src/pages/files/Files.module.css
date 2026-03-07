@@ -10,6 +10,33 @@
     background: #f5f5f5;
 }
 
+/* ── Tab Bar ──────────────────────────────────────── */
+.tabBar {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid #e5e5e5;
+    flex-shrink: 0;
+}
+.tab {
+    padding: 10px 24px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #777;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+.tab:hover {
+    color: #333;
+}
+.tabActive {
+    color: #0d8ab5;
+    border-bottom-color: #4cc9f0;
+}
+
 /* ── Upload Zone ─────────────────────────────────── */
 .uploadZone {
     border: 2px dashed #c4c4c4;

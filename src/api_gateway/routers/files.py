@@ -59,6 +59,11 @@ def _get_blob_manager(request: Request):
     return manager
 
 
+def _get_global_blob_manager(request: Request):
+    """Get the global blob manager from app state (read-only, for shared docs)."""
+    return getattr(request.app.state, "global_blob_manager", None)
+
+
 def _get_ingester(request: Request):
     """Get the file ingester from app state (optional, for search index updates)."""
     return getattr(request.app.state, "ingester", None)
@@ -261,6 +266,30 @@ async def list_uploaded(
         logger.exception("Failed to list files for group %s: %s", group_id, e)
         raise HTTPException(status_code=502, detail=f"Storage error: {type(e).__name__}: {e}")
     return files
+
+
+@router.get("/list_global")
+async def list_global(request: Request):
+    """List shared/public documents from the global blob container (read-only)."""
+    global_blob_manager = _get_global_blob_manager(request)
+    if global_blob_manager is None:
+        return []
+    try:
+        async with asyncio.timeout(10):
+            container_client = global_blob_manager.blob_service_client.get_container_client(
+                global_blob_manager.container
+            )
+            files = []
+            async for blob in container_client.list_blobs():
+                # Only top-level files, skip subdirectories
+                if "/" not in blob.name:
+                    files.append(blob.name)
+            return files
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="Global file listing timed out")
+    except Exception as e:
+        logger.exception("Failed to list global files: %s", e)
+        raise HTTPException(status_code=502, detail=f"Storage error: {type(e).__name__}: {e}")
 
 
 @router.post("/rename_uploaded")

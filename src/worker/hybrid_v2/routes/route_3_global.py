@@ -391,14 +391,20 @@ class GlobalSearchHandler(BaseRouteHandler):
         # Over-fetch when diversity is enabled so we have enough
         # candidates from minority documents.
         fetch_k = top_k * 3 if diversity_enabled else top_k
-        group_id = self.group_id
 
         # 2. Vector search on Sentence nodes + collect parent context
         # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # UNION ALL across user group + __global__ for multi-group retrieval
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
@@ -408,7 +414,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR (doc)-[:IN_FOLDER]->(:Folder WHERE .id = $folder_id AND .group_id IN $group_ids)
 
         // Expand via NEXT for local context (1 hop each direction)
         OPTIONAL MATCH (sent)-[:NEXT]->(next_sent:Sentence)
@@ -437,7 +443,9 @@ class GlobalSearchHandler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=self.group_ids,
                         top_k=fetch_k,
                         threshold=threshold,
                         folder_id=self.folder_id,

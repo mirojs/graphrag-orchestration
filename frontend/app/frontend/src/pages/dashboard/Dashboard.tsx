@@ -191,7 +191,11 @@ const Dashboard = () => {
                 <div className={styles.statCard}>
                     <span className={styles.statLabel}>Documents</span>
                     <span className={styles.statValue}>{usage.documents_count}</span>
-                    <span className={styles.statSubtext}>of {usage.documents_limit} limit</span>
+                    <span className={styles.statSubtext}>
+                        {usage.personal_documents_count != null && usage.global_documents_count != null
+                            ? `(${usage.personal_documents_count} personal + ${usage.global_documents_count} shared) of ${usage.documents_limit} limit`
+                            : `of ${usage.documents_limit} limit`}
+                    </span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${docs.color}`} style={{ width: `${docs.pct}%` }} />
                     </div>

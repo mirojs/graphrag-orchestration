@@ -182,6 +182,7 @@ class BaseRouteHandler:
         self.llm = pipeline.llm
         self.neo4j_driver = pipeline.neo4j_driver
         self.group_id = pipeline.group_id
+        self.group_ids = pipeline.group_ids
         self.folder_id = pipeline.folder_id  # Optional folder scope (None = all)
         self.synthesizer = pipeline.synthesizer
         self._executor = pipeline._executor
@@ -211,19 +212,19 @@ class BaseRouteHandler:
             return {}
 
         query = """
-        MATCH (d:Document {group_id: $group_id})
-        WHERE d.id IN $doc_ids AND d.language_spans IS NOT NULL
+        MATCH (d:Document)
+        WHERE d.group_id IN $group_ids AND d.id IN $doc_ids AND d.language_spans IS NOT NULL
         RETURN d.id AS doc_id, d.language_spans AS spans
         """
 
         try:
             loop = asyncio.get_running_loop()
             driver = self.neo4j_driver
-            group_id = self.group_id
+            group_ids = self.group_ids
 
             def _run():
                 with retry_session(driver, read_only=True) as session:
-                    result = session.run(query, group_id=group_id, doc_ids=doc_ids)
+                    result = session.run(query, group_ids=group_ids, doc_ids=doc_ids)
                     return list(result)
 
             records = await loop.run_in_executor(None, _run)
@@ -468,6 +469,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self._resolve_folder_id(folder_id)
 
         if use_phrase_boost:
@@ -488,46 +490,55 @@ class BaseRouteHandler:
             if folder_id:
                 folder_filter = (
                     "\n            WITH node, rrfScore, hasBM25, hasVector, d, top_k"
-                    "\n            WHERE d IS NULL OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+                    "\n            WHERE d IS NULL OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }"
                 )
 
             cypher = f"""
             CYPHER 25
-            WITH $bm25_query AS bm25_query, $group_id AS group_id,
+            WITH $bm25_query AS bm25_query, $group_ids AS group_ids,
+                 $group_id AS group_id, $global_group_id AS global_group_id,
                  $bm25_k AS bm25_k, $embedding AS embedding,
                  $vector_k AS vector_k, $rrf_k AS rrf_k, $top_k AS top_k
 
-            CALL (bm25_query, group_id) {{
+            CALL (bm25_query, group_ids) {{
                 CALL db.index.fulltext.queryNodes('sentence_fulltext', bm25_query)
                 YIELD node, score
-                WHERE node.group_id = group_id
+                WHERE node.group_id IN group_ids
                 WITH node, score ORDER BY score DESC LIMIT $bm25_k
                 WITH collect(node) AS nodes
                 UNWIND range(0, size(nodes)-1) AS i
                 RETURN nodes[i] AS node, (i + 1) AS rank
             }}
             WITH collect({{node: node, rank: rank}}) AS bm25List,
-                 embedding, group_id, vector_k, rrf_k, top_k
+                 embedding, group_id, global_group_id, group_ids, vector_k, rrf_k, top_k
 
-            CALL (embedding, group_id) {{
+            CALL (embedding, group_id, global_group_id) {{
                 MATCH (node:Sentence)
                 SEARCH node IN (VECTOR INDEX {vector_index} FOR embedding WHERE node.group_id = group_id LIMIT $vector_k)
                 SCORE AS score
-                WITH collect(node) AS nodes
-                UNWIND range(0, size(nodes)-1) AS i
-                RETURN nodes[i] AS node, (i + 1) AS rank
+                RETURN node, score
+                UNION ALL
+                MATCH (node:Sentence)
+                SEARCH node IN (VECTOR INDEX {vector_index} FOR embedding WHERE node.group_id = global_group_id LIMIT $vector_k)
+                SCORE AS score
+                RETURN node, score
             }}
+            WITH bm25List, group_ids, rrf_k, top_k, node, score
+            ORDER BY score DESC LIMIT $vector_k
+            WITH bm25List, collect(node) AS nodes, group_ids, rrf_k, top_k
+            UNWIND range(0, size(nodes)-1) AS i
+            WITH bm25List, nodes[i] AS node, (i + 1) AS rank, group_ids, rrf_k, top_k
             WITH bm25List, collect({{node: node, rank: rank}}) AS vectorList,
-                 group_id, rrf_k, top_k
+                 group_ids, rrf_k, top_k
 
-            WITH bm25List, vectorList, group_id, rrf_k, top_k,
+            WITH bm25List, vectorList, group_ids, rrf_k, top_k,
                  [x IN bm25List | x.node] + [y IN vectorList | y.node] AS allNodes
             UNWIND allNodes AS node
-            WITH DISTINCT node, bm25List, vectorList, group_id, rrf_k, top_k
-            WITH node, group_id, rrf_k, top_k,
+            WITH DISTINCT node, bm25List, vectorList, group_ids, rrf_k, top_k
+            WITH node, group_ids, rrf_k, top_k,
                  [b IN bm25List WHERE b.node = node | b.rank][0] AS bm25Rank,
                  [v IN vectorList WHERE v.node = node | v.rank][0] AS vectorRank
-            WITH node, group_id, top_k,
+            WITH node, group_ids, top_k,
                  (CASE WHEN bm25Rank IS NULL THEN 0.0
                        ELSE 1.0 / (rrf_k + bm25Rank) END) +
                  (CASE WHEN vectorRank IS NULL THEN 0.0
@@ -535,7 +546,8 @@ class BaseRouteHandler:
                  bm25Rank IS NOT NULL AS hasBM25,
                  vectorRank IS NOT NULL AS hasVector
 
-            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document {{group_id: group_id}})
+            OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)
+            WHERE d.group_id IN group_ids
             {folder_filter}
             OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
 
@@ -556,6 +568,8 @@ class BaseRouteHandler:
                         bm25_query=bm25_query,
                         embedding=embedding,
                         group_id=group_id,
+                        global_group_id="__global__",
+                        group_ids=group_ids,
                         vector_k=vector_k,
                         bm25_k=bm25_k,
                         rrf_k=rrf_k,
@@ -615,6 +629,7 @@ class BaseRouteHandler:
 
         await self._ensure_textchunk_fulltext_index()
         group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self._resolve_folder_id(folder_id)
         driver = self.neo4j_driver
 
@@ -630,14 +645,15 @@ class BaseRouteHandler:
             # Build folder filter clause
             folder_filter = ""
             if folder_id:
-                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }"
 
             cypher = f"""
             CALL db.index.fulltext.queryNodes('sentence_fulltext', $search_query)
             YIELD node AS chunk, score AS bm25_score
-            WHERE chunk.group_id = $group_id
+            WHERE chunk.group_id IN $group_ids
 
-            OPTIONAL MATCH (chunk)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+            OPTIONAL MATCH (chunk)-[:IN_DOCUMENT]->(d:Document)
+            WHERE d.group_id IN $group_ids
             WITH chunk, d, bm25_score
             WHERE d IS NULL OR d IS NOT NULL {folder_filter}
             OPTIONAL MATCH (chunk)-[:IN_SECTION]->(s:Section)
@@ -657,7 +673,7 @@ class BaseRouteHandler:
                 with retry_session(driver, read_only=True) as session:
                     params = dict(
                         search_query=search_query,
-                        group_id=group_id,
+                        group_ids=group_ids,
                         top_k=top_k,
                     )
                     if folder_id:
@@ -736,6 +752,7 @@ class BaseRouteHandler:
         
         term_pattern = '|'.join(re.escape(t) for t in search_terms)
         group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self._resolve_folder_id(folder_id)
         driver = self.neo4j_driver  # Local ref for closure
         
@@ -743,18 +760,20 @@ class BaseRouteHandler:
             # Build folder filter clause
             folder_filter = ""
             if folder_id:
-                folder_filter = "AND (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})"
+                folder_filter = "AND EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }"
             
             cypher = f"""
             CYPHER 25
-            MATCH (e:Entity {{group_id: $group_id}})
-            WHERE e.name =~ $pattern
-               OR any(a IN coalesce(e.aliases, []) WHERE a =~ $pattern)
+            MATCH (e:Entity)
+            WHERE e.group_id IN $group_ids
+              AND (e.name =~ $pattern
+               OR any(a IN coalesce(e.aliases, []) WHERE a =~ $pattern))
             
             // Use Sentence MENTIONS for entity graph traversal
             MATCH (t:Sentence)-[:MENTIONS]->(e)
-            WHERE t.group_id = $group_id
-            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document {{group_id: $group_id}})
+            WHERE t.group_id IN $group_ids
+            OPTIONAL MATCH (t)-[:IN_DOCUMENT]->(d:Document)
+            WHERE d.group_id IN $group_ids
             WITH t, d, e
             WHERE d IS NULL OR d IS NOT NULL {folder_filter}
             OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
@@ -780,7 +799,7 @@ class BaseRouteHandler:
                     regex_pattern = f'(?i).*({term_pattern}).*'
                     
                     params = {
-                        "group_id": group_id,
+                        "group_ids": group_ids,
                         "pattern": regex_pattern,
                         "top_k": top_k,
                     }
@@ -892,13 +911,14 @@ class BaseRouteHandler:
         # Batch fetch metadata from Sentence nodes
         query = (
             "UNWIND $ids AS tid "
-            "MATCH (s:Sentence {id: tid, group_id: $group_id}) "
+            "MATCH (s:Sentence {id: tid}) "
+            "WHERE s.group_id IN $group_ids "
             "RETURN s.id AS id, s.metadata AS metadata"
         )
         metadata_map: Dict[str, Dict[str, Any]] = {}
         try:
             with retry_session(self.neo4j_driver, read_only=True) as session:
-                result = session.run(query, ids=sentence_ids_to_enrich, group_id=self.group_id)
+                result = session.run(query, ids=sentence_ids_to_enrich, group_ids=self.group_ids)
                 for record in result:
                     raw = record["metadata"]
                     meta: Dict[str, Any] = {}

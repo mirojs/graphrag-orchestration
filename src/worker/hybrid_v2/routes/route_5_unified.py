@@ -692,12 +692,18 @@ class UnifiedSearchHandler(BaseRouteHandler):
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
         }
 
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR EXISTS { (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }
         OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
         OPTIONAL MATCH (prev_sent:Sentence)-[:NEXT_IN_SECTION]->(sent)
 
@@ -726,6 +732,8 @@ class UnifiedSearchHandler(BaseRouteHandler):
                         cypher,
                         embedding=query_embedding,
                         group_id=group_id,
+                        global_group_id="__global__",
+                        group_ids=self.group_ids,
                         top_k=top_k,
                         threshold=threshold,
                         folder_id=self.folder_id,
@@ -943,12 +951,13 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
         # Query Sentence nodes: tagged source OR content-pattern fallback
         cypher = """
-        MATCH (sent:Sentence {group_id: $group_id})-[:IN_DOCUMENT]->(doc:Document)
-        WHERE sent.source = 'signature_party'
+        MATCH (sent:Sentence)-[:IN_DOCUMENT]->(doc:Document)
+        WHERE sent.group_id IN $group_ids
+          AND (sent.source = 'signature_party'
            OR sent.text CONTAINS 'Authorized Representative'
-           OR sent.text CONTAINS 'Signed this'
+           OR sent.text CONTAINS 'Signed this')
         WITH sent, doc
-        WHERE $folder_id IS NULL OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+        WHERE $folder_id IS NULL OR EXISTS { (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id}) WHERE f.group_id IN $group_ids }
         RETURN DISTINCT sent.id AS sentence_id,
                sent.text AS text,
                doc.title AS document_title,
@@ -964,7 +973,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
 
             def _run_query():
                 with retry_session(driver, read_only=True) as session:
-                    records = session.run(cypher, group_id=group_id, folder_id=self.folder_id)
+                    records = session.run(cypher, group_ids=self.group_ids, folder_id=self.folder_id)
                     return [dict(r) for r in records]
 
             results = await loop.run_in_executor(self._executor, _run_query)

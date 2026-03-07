@@ -447,6 +447,21 @@ async def list_uploaded(auth_claims: dict[str, Any]):
     return jsonify(files), 200
 
 
+@bp.get("/list_global")
+@authenticated
+async def list_global(auth_claims: dict[str, Any]):
+    """Lists shared/public documents from the global blob container (read-only)."""
+    blob_manager: BlobManager = current_app.config.get(CONFIG_GLOBAL_BLOB_MANAGER)
+    if not blob_manager:
+        return jsonify([]), 200
+    container_client = blob_manager.blob_service_client.get_container_client(blob_manager.container)
+    files = []
+    async for blob in container_client.list_blobs():
+        if "/" not in blob.name:
+            files.append(blob.name)
+    return jsonify(files), 200
+
+
 @bp.post("/rename_uploaded")
 @authenticated
 async def rename_uploaded(auth_claims: dict[str, Any]):

@@ -99,6 +99,7 @@ class HippoRAGRetriever(BaseRetriever):
         config: Optional[HippoRAGRetrieverConfig] = None,
         callback_manager: Optional[CallbackManager] = None,
         group_id: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
     ):
         """
         Initialize the HippoRAG retriever.
@@ -109,7 +110,9 @@ class HippoRAGRetriever(BaseRetriever):
             embed_model: Embedding model for semantic entity matching
             config: Retriever configuration
             callback_manager: LlamaIndex callback manager
-            group_id: Tenant ID for multi-tenant filtering (required)
+            group_id: Primary tenant ID for multi-tenant filtering (required)
+            group_ids: List of group IDs for multi-group retrieval.
+                       Defaults to [group_id] if not provided.
         """
         if not group_id:
             raise ValueError("group_id is required for HippoRAGRetriever to ensure tenant isolation")
@@ -121,6 +124,7 @@ class HippoRAGRetriever(BaseRetriever):
         self.embed_model = embed_model
         self.config = config or HippoRAGRetrieverConfig()
         self.group_id = group_id
+        self.group_ids = group_ids or [group_id]
         
         # Graph cache (lazy loaded)
         self._adjacency: Dict[str, List[str]] = {}
@@ -137,6 +141,7 @@ class HippoRAGRetriever(BaseRetriever):
             has_llm=llm is not None,
             has_embed=embed_model is not None,
             group_id=group_id,
+            group_ids=self.group_ids,
             top_k=self.config.top_k,
         )
     
@@ -155,12 +160,12 @@ class HippoRAGRetriever(BaseRetriever):
                 return
             
             # Build group filter for multi-tenant isolation (always applied)
-            params: Dict[str, Any] = {"group_id": self.group_id}
+            params: Dict[str, Any] = {"group_ids": self.group_ids}
             
             # Query all relationships to build adjacency
             query = """
             MATCH (n)-[r]->(m)
-            WHERE n.group_id = $group_id AND m.group_id = $group_id
+            WHERE n.group_id IN $group_ids AND m.group_id IN $group_ids
             RETURN n.id AS source, m.id AS target, type(r) AS rel_type
             """
             
@@ -186,7 +191,7 @@ class HippoRAGRetriever(BaseRetriever):
             # Include aliases for Entity nodes and key for KeyValue nodes
             props_query = """
             MATCH (n)
-            WHERE n.group_id = $group_id
+            WHERE n.group_id IN $group_ids
             RETURN n.id AS node_id, n.name AS name, n.text AS text, labels(n) AS labels,
                    coalesce(n.aliases, []) AS aliases,
                    n.key AS kvp_key
@@ -323,12 +328,19 @@ class HippoRAGRetriever(BaseRetriever):
                 return []
             
             # Query vector index - use entity_embedding_v2 for V2 data
-            # SEARCH clause with in-index group_id pre-filtering (Cypher 25)
-            # No oversampling needed — SEARCH guarantees top_k results for the group.
+            # UNION ALL of primary group + __global__ group for cross-tenant entities
             query = """CYPHER 25
-            MATCH (node:Entity)
-            SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
-            SCORE AS score
+            CALL () {
+                MATCH (node:Entity)
+                SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+                SCORE AS score
+                RETURN node, score
+                UNION ALL
+                MATCH (node:Entity)
+                SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $global_group_id LIMIT $top_k)
+                SCORE AS score
+                RETURN node, score
+            }
             RETURN node.id AS node_id, score
             ORDER BY score DESC
             """
@@ -337,6 +349,7 @@ class HippoRAGRetriever(BaseRetriever):
                 "embedding": seed_embedding,
                 "top_k": top_k,
                 "group_id": self.group_id,
+                "global_group_id": "__global__",
             }
             
             results: List[str] = []
@@ -830,6 +843,7 @@ def create_hipporag_retriever_from_service(
     llm_service: Any,  # LLMService instance
     config: Optional[HippoRAGRetrieverConfig] = None,
     group_id: Optional[str] = None,
+    group_ids: Optional[List[str]] = None,
 ) -> HippoRAGRetriever:
     """
     Factory function to create HippoRAGRetriever from existing services.
@@ -840,7 +854,8 @@ def create_hipporag_retriever_from_service(
         graph_store: Neo4j graph store
         llm_service: LLMService instance (has .llama_llm and .llama_embed)
         config: Retriever configuration
-        group_id: Tenant ID
+        group_id: Primary tenant ID
+        group_ids: List of group IDs for multi-group retrieval
         
     Returns:
         Configured HippoRAGRetriever instance
@@ -854,4 +869,5 @@ def create_hipporag_retriever_from_service(
         embed_model=embed_model,
         config=config,
         group_id=group_id,
+        group_ids=group_ids,
     )

@@ -18,7 +18,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import Header, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 import jwt as pyjwt
 from jwt.exceptions import DecodeError as JWTDecodeError, ExpiredSignatureError
@@ -349,6 +349,21 @@ def get_group_id(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Group ID not found. Authentication required."
     )
+
+
+def get_group_ids(
+    group_id: str = Depends(get_group_id),
+) -> List[str]:
+    """
+    Dependency returning group_ids list for multi-tenant Neo4j queries.
+
+    Always includes the user's own group_id plus the global sentinel
+    so that shared/public documents are visible alongside personal ones.
+    """
+    global_id = settings.GLOBAL_GROUP_ID
+    if group_id == global_id:
+        return [global_id]
+    return [group_id, global_id]
 
 
 def get_user_id(

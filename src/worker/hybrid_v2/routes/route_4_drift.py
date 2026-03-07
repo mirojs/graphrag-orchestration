@@ -1200,14 +1200,20 @@ Sub-questions:"""
             raise RuntimeError(f"Voyage embedding failed in sentence search: {e}") from e
 
         threshold = float(os.getenv("ROUTE4_SENTENCE_THRESHOLD", "0.2"))
-        group_id = self.group_id
 
         # 2. Vector search on Sentence nodes + collect parent context
         # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # Uses UNION ALL to search both user group and __global__ group
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
@@ -1217,7 +1223,10 @@ Sub-questions:"""
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR EXISTS {
+               MATCH (doc)-[:IN_FOLDER]->(f:Folder {id: $folder_id})
+               WHERE f.group_id IN $group_ids
+           }
 
         // Expand via NEXT_IN_SECTION for section-bounded context (1 hop each direction)
         OPTIONAL MATCH (sent)-[:NEXT_IN_SECTION]->(next_sent:Sentence)
@@ -1247,7 +1256,9 @@ Sub-questions:"""
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=self.group_ids,
                         top_k=top_k,
                         threshold=threshold,
                         folder_id=self.folder_id,

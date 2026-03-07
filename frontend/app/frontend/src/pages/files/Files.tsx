@@ -15,6 +15,7 @@ import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import {
     listFilesApi,
+    listGlobalFilesApi,
     uploadFilesApi,
     deleteFileApi,
     bulkDeleteFilesApi,
@@ -41,7 +42,9 @@ const Files = () => {
     const { loggedIn } = useContext(LoginContext);
 
     // State
+    const [activeTab, setActiveTab] = useState<"my" | "shared">("my");
     const [files, setFiles] = useState<string[]>([]);
+    const [globalFiles, setGlobalFiles] = useState<string[]>([]);
     const [loading, setLoading] = useState(true);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [sortBy, setSortBy] = useState<"name" | "ext">("name");
@@ -70,7 +73,6 @@ const Files = () => {
             setLoading(true);
             const token = client ? await getToken(client) : undefined;
             if (useLogin && !token) {
-                // Auth enabled but user hasn't signed in yet — nothing to load
                 setFiles([]);
                 return;
             }
@@ -83,9 +85,27 @@ const Files = () => {
         }
     }, [client, addToast]);
 
+    const loadGlobalFiles = useCallback(async () => {
+        try {
+            setLoading(true);
+            const result = await listGlobalFilesApi();
+            setGlobalFiles(result);
+        } catch (err: any) {
+            addToast("error", `Failed to load shared files: ${err.message}`);
+        } finally {
+            setLoading(false);
+        }
+    }, [addToast]);
+
     useEffect(() => {
         loadFiles();
     }, [loadFiles]);
+
+    useEffect(() => {
+        if (activeTab === "shared") {
+            loadGlobalFiles();
+        }
+    }, [activeTab, loadGlobalFiles]);
 
     // Upload handler
     const handleUpload = useCallback(
@@ -174,7 +194,8 @@ const Files = () => {
     const selectNone = useCallback(() => setSelected(new Set()), []);
 
     // Filter & sort
-    const filteredFiles = files
+    const activeFiles = activeTab === "my" ? files : globalFiles;
+    const filteredFiles = activeFiles
         .filter(f => !searchQuery || f.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
             let cmp = 0;
@@ -201,20 +222,40 @@ const Files = () => {
         );
     }
 
+    const isShared = activeTab === "shared";
+
     return (
         <div className={styles.container}>
-            {/* Upload zone (drag & drop) */}
-            <UploadZone
-                onUpload={handleUpload}
-                uploading={uploading}
-                progress={uploadProgress}
-                acceptedTypes={ACCEPTED_FILE_TYPES}
-            />
+            {/* Tab bar */}
+            <div className={styles.tabBar}>
+                <button
+                    className={`${styles.tab} ${activeTab === "my" ? styles.tabActive : ""}`}
+                    onClick={() => setActiveTab("my")}
+                >
+                    My Files
+                </button>
+                <button
+                    className={`${styles.tab} ${activeTab === "shared" ? styles.tabActive : ""}`}
+                    onClick={() => setActiveTab("shared")}
+                >
+                    Shared Library
+                </button>
+            </div>
+
+            {/* Upload zone (drag & drop) — only for My Files */}
+            {!isShared && (
+                <UploadZone
+                    onUpload={handleUpload}
+                    uploading={uploading}
+                    progress={uploadProgress}
+                    acceptedTypes={ACCEPTED_FILE_TYPES}
+                />
+            )}
 
             {/* Toolbar: search, sort, bulk actions */}
             <FileToolbar
                 fileCount={filteredFiles.length}
-                selectedCount={selected.size}
+                selectedCount={isShared ? 0 : selected.size}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 sortBy={sortBy}
@@ -223,24 +264,24 @@ const Files = () => {
                     if (by === sortBy) setSortAsc(!sortAsc);
                     else { setSortBy(by); setSortAsc(true); }
                 }}
-                onSelectAll={selectAll}
-                onSelectNone={selectNone}
-                onDeleteSelected={() => handleDelete(Array.from(selected))}
-                onRefresh={loadFiles}
+                onSelectAll={isShared ? () => {} : selectAll}
+                onSelectNone={isShared ? () => {} : selectNone}
+                onDeleteSelected={isShared ? () => {} : () => handleDelete(Array.from(selected))}
+                onRefresh={isShared ? loadGlobalFiles : loadFiles}
             />
 
             {/* File list */}
             <FileList
                 files={filteredFiles}
-                selected={selected}
+                selected={isShared ? new Set<string>() : selected}
                 loading={loading}
-                onToggleSelect={toggleSelect}
-                onDelete={(f) => handleDelete([f])}
-                onRename={(f) => setRenameFile(f)}
+                onToggleSelect={isShared ? () => {} : toggleSelect}
+                onDelete={isShared ? () => {} : (f) => handleDelete([f])}
+                onRename={isShared ? () => {} : (f) => setRenameFile(f)}
             />
 
-            {/* Rename dialog */}
-            {renameFile && (
+            {/* Rename dialog — only for My Files */}
+            {!isShared && renameFile && (
                 <RenameDialog
                     currentName={renameFile}
                     onRename={(newName) => handleRename(renameFile, newName)}

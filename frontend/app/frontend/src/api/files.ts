@@ -146,6 +146,23 @@ export async function listFilesApi(idToken: string): Promise<string[]> {
     return response.json();
 }
 
+export async function listGlobalFilesApi(): Promise<string[]> {
+    const response = await fetch("/list_global", {
+        method: "GET",
+    });
+    if (!response.ok) {
+        let detail = "";
+        try {
+            const body = await response.json();
+            detail = body.detail || body.message || JSON.stringify(body);
+        } catch {
+            detail = response.statusText || `HTTP ${response.status}`;
+        }
+        throw new Error(`List global files failed (${response.status}): ${detail}`);
+    }
+    return response.json();
+}
+
 // ======================== Rename / Move / Copy ========================
 
 export async function renameFileApi(

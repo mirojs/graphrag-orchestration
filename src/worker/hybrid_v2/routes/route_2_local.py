@@ -430,20 +430,25 @@ class LocalSearchHandler(BaseRouteHandler):
         threshold = settings.SKELETON_SIMILARITY_THRESHOLD
         group_id = self.group_id
         
-        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # SEARCH clause with in-index group_id filtering (Cypher 25) – multi-group
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SCORE AS score
             RETURN sent, score
         }
+        WITH sent, score WHERE score >= $threshold
         OPTIONAL MATCH (sent)-[:IN_SECTION]->(sec:Section)
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, score, sec, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
         RETURN sent.id AS sentence_id,
                sent.text AS text,
                sent.source AS source,
@@ -468,7 +473,9 @@ class LocalSearchHandler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=self.group_ids,
                         top_k=top_k,
                         threshold=threshold,
                         folder_id=self.folder_id,
@@ -565,17 +572,25 @@ class LocalSearchHandler(BaseRouteHandler):
         
         # 2. Graph traversal query: seed → RELATED_TO → NEXT expansion → parent context
         # Single Cypher query that does the anchor + expand + collect in one round trip.
-        # SEARCH clause with in-index group_id filtering (Cypher 25)
+        # SEARCH clause with in-index group_id filtering (Cypher 25) – multi-group
         cypher = """CYPHER 25
-        // ANCHOR: Vector search for seed sentences
-        MATCH (seed:Sentence)
-        SEARCH seed IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE seed.group_id = $group_id LIMIT $top_k)
-        SCORE AS score
+        // ANCHOR: Vector search for seed sentences (multi-group)
+        CALL () {
+            MATCH (seed:Sentence)
+            SEARCH seed IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE seed.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            RETURN seed, score
+            UNION ALL
+            MATCH (seed:Sentence)
+            SEARCH seed IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE seed.group_id = $global_group_id LIMIT $top_k)
+            SCORE AS score
+            RETURN seed, score
+        }
         WITH seed, score WHERE score >= $threshold
         
         // EXPAND: Traverse RELATED_TO edges (cross-chunk semantic links)
         OPTIONAL MATCH (seed)-[rel:RELATED_TO {source: 'knn_sentence'}]-(related:Sentence)
-        WHERE related.group_id = $group_id
+        WHERE related.group_id IN $group_ids
         
         // Collect seed + related into a unified set (section-aware decay)
         WITH collect(DISTINCT {node: seed, score: score, hop: 0, via: 'seed'}) AS seeds,
@@ -591,13 +606,13 @@ class LocalSearchHandler(BaseRouteHandler):
         CALL {
             WITH sent
             OPTIONAL MATCH path = (sent)-[:NEXT_IN_SECTION*1..2]->(fwd:Sentence)
-            WHERE fwd.group_id = $group_id
+            WHERE fwd.group_id IN $group_ids
             RETURN collect(DISTINCT {node: fwd, hop_type: 'next'}) AS next_nodes
         }
         CALL {
             WITH sent
             OPTIONAL MATCH path = (sent)<-[:NEXT_IN_SECTION*1..2]-(prev:Sentence)
-            WHERE prev.group_id = $group_id
+            WHERE prev.group_id IN $group_ids
             RETURN collect(DISTINCT {node: prev, hop_type: 'prev'}) AS prev_nodes
         }
         
@@ -630,7 +645,7 @@ class LocalSearchHandler(BaseRouteHandler):
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
         WITH sent, final_score, sources, sec, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
@@ -657,7 +672,9 @@ class LocalSearchHandler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=self.group_ids,
                         top_k=top_k,
                         threshold=threshold,
                         folder_id=self.folder_id,

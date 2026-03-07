@@ -74,19 +74,23 @@ class TripleEmbeddingStore:
         neo4j_driver: Any,
         group_id: str,
         voyage_service: Any,
+        group_ids: Optional[List[str]] = None,
     ) -> None:
         """Load triples from Neo4j, embed with Voyage, cache in memory.
 
         Args:
             neo4j_driver: Sync Neo4j driver instance.
-            group_id: Multi-tenant group ID.
+            group_id: Multi-tenant group ID (primary).
             voyage_service: VoyageEmbedService instance for embedding.
+            group_ids: List of group IDs for multi-group retrieval.
+                       Defaults to [group_id] if not provided.
         """
+        effective_group_ids = group_ids or [group_id]
         t0 = time.perf_counter()
 
         # Fetch all RELATED_TO triples from Neo4j
         triples = await asyncio.to_thread(
-            self._fetch_triples_sync, neo4j_driver, group_id
+            self._fetch_triples_sync, neo4j_driver, effective_group_ids
         )
 
         if not triples:
@@ -134,7 +138,7 @@ class TripleEmbeddingStore:
         )
 
     def _fetch_triples_sync(
-        self, neo4j_driver: Any, group_id: str
+        self, neo4j_driver: Any, group_ids: List[str]
     ) -> List[Triple]:
         """Fetch all RELATED_TO triples from Neo4j (synchronous).
 
@@ -143,8 +147,9 @@ class TripleEmbeddingStore:
         call at query time.
         """
         cypher = """
-        MATCH (e1:Entity {group_id: $group_id})-[r:RELATED_TO]->(e2:Entity {group_id: $group_id})
-        WHERE r.description IS NOT NULL AND r.description <> ''
+        MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
+        WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
+              AND r.description IS NOT NULL AND r.description <> ''
         RETURN e1.id AS subj_id, e1.name AS subj_name,
                r.description AS predicate,
                e2.id AS obj_id, e2.name AS obj_name,
@@ -152,7 +157,7 @@ class TripleEmbeddingStore:
         """
         triples: List[Triple] = []
         with retry_session(neo4j_driver) as session:
-            result = session.run(cypher, group_id=group_id)
+            result = session.run(cypher, group_ids=group_ids)
             for record in result:
                 subj_name = record["subj_name"] or ""
                 predicate = record["predicate"] or ""
@@ -172,7 +177,7 @@ class TripleEmbeddingStore:
                 )
         logger.debug(
             "triple_store_fetched",
-            group_id=group_id,
+            group_ids=group_ids,
             count=len(triples),
             precomputed=sum(1 for t in triples if t.embedding is not None),
         )

@@ -977,13 +977,14 @@ class ConceptSearchHandler(BaseRouteHandler):
         if not parent_ids:
             return []
 
-        group_id = self.group_id
+        group_ids = self.group_ids
 
         # Fetch children up to max_depth levels below parents
         cypher = """
         UNWIND $parent_ids AS pid
-        MATCH (child:Community {group_id: $group_id})-[:PARENT_COMMUNITY*1..]->(parent:Community {id: pid, group_id: $group_id})
-        WHERE child.summary IS NOT NULL AND child.summary <> ''
+        MATCH (child:Community)-[:PARENT_COMMUNITY*1..]->(parent:Community {id: pid})
+        WHERE child.group_id IN $group_ids AND parent.group_id IN $group_ids
+              AND child.summary IS NOT NULL AND child.summary <> ''
         WITH DISTINCT child, parent
         RETURN child.id AS id,
                child.title AS title,
@@ -1003,7 +1004,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         parent_ids=parent_ids,
-                        group_id=group_id,
+                        group_ids=group_ids,
                     )
                     return [dict(r) for r in records]
 
@@ -1202,7 +1203,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         # R6-6: Fetch 3x for denoising headroom; diversity is applied AFTER reranking
         # in execute() so there is no need for diversity logic inside this method.
         fetch_k = top_k * 3
-        group_id = self.group_id
+        group_ids = self.group_ids
 
         # R6-1: Build folder filter clause — applied AFTER OPTIONAL MATCH for doc.
         # Uses Cypher's IS NULL test so the WHERE is a no-op when no folder scope is set.
@@ -1210,14 +1211,21 @@ class ConceptSearchHandler(BaseRouteHandler):
             "// R6-1: folder scope filter (no-op when $folder_id IS NULL)\n"
             "        WITH sent, score, doc, sec, prev_sent, next_sent\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})\n"
+            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})\n"
         )
 
         # 2. Vector search on Sentence nodes + collect parent context
+        # UNION ALL of two branches for multi-group (user + __global__)
         cypher = f"""CYPHER 25
         CALL () {{
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
@@ -1257,7 +1265,9 @@ class ConceptSearchHandler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=group_ids,
                         top_k=fetch_k,
                         threshold=threshold,
                         folder_id=folder_id,
@@ -1375,7 +1385,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         seed_scores = [s.get("score", 0) for s in seeds if s.get("score")]
         synthetic_score = min(seed_scores) * 0.8 if seed_scores else 0.3
 
-        group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self.folder_id
 
         # R6-1: folder scope filter (same pattern as sentence vector search)
@@ -1384,16 +1394,18 @@ class ConceptSearchHandler(BaseRouteHandler):
             "        WITH expanded, shared_entity_count, doc, sec,"
             " prev_sent, next_sent\n"
             "        WHERE $folder_id IS NULL OR doc IS NULL"
-            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id,"
-            " group_id: $group_id})\n"
+            " OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})\n"
         )
 
         cypher = f"""
         UNWIND $seed_ids AS seed_id
-        MATCH (seed:Sentence {{id: seed_id, group_id: $group_id}})
-              -[:MENTIONS]->(e:Entity {{group_id: $group_id}})
-              <-[:MENTIONS]-(expanded:Sentence {{group_id: $group_id}})
-        WHERE NOT expanded.id IN $exclude_ids
+        MATCH (seed:Sentence {{id: seed_id}})
+        WHERE seed.group_id IN $group_ids
+        MATCH (seed)-[:MENTIONS]->(e:Entity)
+        WHERE e.group_id IN $group_ids
+        MATCH (e)<-[:MENTIONS]-(expanded:Sentence)
+        WHERE expanded.group_id IN $group_ids
+              AND NOT expanded.id IN $exclude_ids
 
         WITH expanded, count(DISTINCT e) AS shared_entity_count
         WHERE shared_entity_count >= $min_overlap
@@ -1430,7 +1442,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                         cypher,
                         seed_ids=seed_ids,
                         exclude_ids=exclude_ids,
-                        group_id=group_id,
+                        group_ids=group_ids,
                         folder_id=folder_id,
                         min_overlap=min_overlap,
                         top_k=top_k,
@@ -1530,7 +1542,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             return []
 
         min_similarity = float(os.getenv("ROUTE6_SECTION_MIN_SIMILARITY", "0.25"))
-        group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self.folder_id
 
         # 2. Cosine similarity against Section.structural_embedding
@@ -1538,8 +1550,8 @@ class ConceptSearchHandler(BaseRouteHandler):
         # decision — see ARCHITECTURE_ROUTE5_UNIFIED_HIPPORAG_2026-02-16.md §section).
         # Brute-force scan is acceptable: typically <20 sections per group.
         cypher = """
-        MATCH (s:Section {group_id: $group_id})
-        WHERE s.structural_embedding IS NOT NULL
+        MATCH (s:Section)
+        WHERE s.group_id IN $group_ids AND s.structural_embedding IS NOT NULL
         WITH s, vector.similarity.cosine(s.structural_embedding, $query_embedding) AS score
         WHERE score >= $min_similarity
 
@@ -1549,7 +1561,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         // R6-2: Folder scope filter (no-op when $folder_id IS NULL)
         WITH s, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id})
 
         RETURN s.title AS title,
                s.summary AS summary,
@@ -1570,7 +1582,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         query_embedding=query_embedding,
-                        group_id=group_id,
+                        group_ids=group_ids,
                         min_similarity=min_similarity,
                         top_k=top_k,
                         folder_id=folder_id,
@@ -1630,16 +1642,17 @@ class ConceptSearchHandler(BaseRouteHandler):
         if not self.neo4j_driver:
             return {}
 
-        group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self.folder_id
 
         cypher = """
-        MATCH (e:Entity {group_id: $group_id})<-[:MENTIONS]-(s:Sentence {group_id: $group_id})-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
+        MATCH (e:Entity)<-[:MENTIONS]-(s:Sentence)-[:IN_DOCUMENT]->(d:Document)
+        WHERE e.group_id IN $group_ids AND s.group_id IN $group_ids AND d.group_id IN $group_ids
 
         // R6-1 pattern: folder scope filter (no-op when $folder_id IS NULL)
         WITH e, d
         WHERE $folder_id IS NULL
-           OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id})
 
         WITH e, collect(DISTINCT d.title) AS doc_titles, count(DISTINCT d) AS doc_count
         WHERE doc_count >= 2
@@ -1656,7 +1669,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 with retry_session(driver, read_only=True) as session:
                     records = session.run(
                         cypher,
-                        group_id=group_id,
+                        group_ids=group_ids,
                         folder_id=folder_id,
                         top_k=top_k,
                     )

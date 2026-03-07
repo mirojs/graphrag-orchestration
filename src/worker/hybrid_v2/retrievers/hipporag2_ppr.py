@@ -118,7 +118,7 @@ class HippoRAG2PPR:
     async def load_graph(
         self,
         neo4j_driver: Any,
-        group_id: str,
+        group_ids: List[str],
         passage_node_weight: float = 0.05,
         synonym_threshold: float = 0.70,
         include_section_graph: bool = False,
@@ -129,7 +129,7 @@ class HippoRAG2PPR:
 
         Args:
             neo4j_driver: Sync Neo4j driver instance.
-            group_id: Multi-tenant group ID.
+            group_ids: Multi-tenant group IDs to load into a single graph.
             passage_node_weight: Weight for MENTIONS edges (default 0.05).
             synonym_threshold: Min similarity for SEMANTICALLY_SIMILAR entity
                 edges (default 0.8, matching upstream HippoRAG 2).
@@ -143,7 +143,7 @@ class HippoRAG2PPR:
         await asyncio.to_thread(
             self._load_graph_sync,
             neo4j_driver,
-            group_id,
+            group_ids,
             passage_node_weight,
             synonym_threshold,
             include_section_graph,
@@ -168,7 +168,7 @@ class HippoRAG2PPR:
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
             "hipporag2_ppr_graph_loaded",
-            group_id=group_id,
+            group_ids=group_ids,
             total_nodes=self._node_count,
             entity_nodes=entity_count,
             passage_nodes=passage_count,
@@ -180,7 +180,7 @@ class HippoRAG2PPR:
     def _load_graph_sync(
         self,
         neo4j_driver: Any,
-        group_id: str,
+        group_ids: List[str],
         passage_node_weight: float,
         synonym_threshold: float,
         include_section_graph: bool,
@@ -204,9 +204,10 @@ class HippoRAG2PPR:
             # 1. Load Entity nodes
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (e:Entity {group_id: $group_id}) "
+                "MATCH (e:Entity) "
+                "WHERE e.group_id IN $group_ids "
                 "RETURN e.id AS id, e.name AS name",
-                group_id=group_id,
+                group_ids=group_ids,
             )
             for record in result:
                 self._add_node(record["id"], "entity", record["name"] or "")
@@ -215,9 +216,10 @@ class HippoRAG2PPR:
             # 2. Load Sentence (passage) nodes
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (c:Sentence {group_id: $group_id}) "
+                "MATCH (c:Sentence) "
+                "WHERE c.group_id IN $group_ids "
                 "RETURN c.id AS id, c.text AS text",
-                group_id=group_id,
+                group_ids=group_ids,
             )
             for record in result:
                 # Use first 80 chars of text as display name
@@ -229,12 +231,12 @@ class HippoRAG2PPR:
             # 3. Entity-Entity edges via RELATED_TO
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (e1:Entity {group_id: $group_id})"
-                "-[r:RELATED_TO]->"
-                "(e2:Entity {group_id: $group_id}) "
+                "MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity) "
+                "WHERE e1.group_id IN $group_ids "
+                "AND e2.group_id IN $group_ids "
                 "RETURN e1.id AS src, e2.id AS tgt, "
                 "coalesce(r.weight, 1.0) AS weight",
-                group_id=group_id,
+                group_ids=group_ids,
             )
             for record in result:
                 src_idx = self._node_to_idx.get(record["src"])
@@ -252,11 +254,11 @@ class HippoRAG2PPR:
             #    graph edges (passage_node_weight is only for PPR seeding).
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (c:Sentence {group_id: $group_id})"
-                "-[:MENTIONS]->"
-                "(e:Entity {group_id: $group_id}) "
+                "MATCH (c:Sentence)-[:MENTIONS]->(e:Entity) "
+                "WHERE c.group_id IN $group_ids "
+                "AND e.group_id IN $group_ids "
                 "RETURN c.id AS sentence_id, e.id AS entity_id",
-                group_id=group_id,
+                group_ids=group_ids,
             )
             for record in result:
                 src_idx = self._node_to_idx.get(record["sentence_id"])
@@ -276,13 +278,13 @@ class HippoRAG2PPR:
             #    related but distinct entities across documents.
             # ----------------------------------------------------------
             result = session.run(
-                "MATCH (e1:Entity {group_id: $group_id})"
-                "-[r:SEMANTICALLY_SIMILAR]->"
-                "(e2:Entity {group_id: $group_id}) "
-                "WHERE r.similarity >= $threshold "
+                "MATCH (e1:Entity)-[r:SEMANTICALLY_SIMILAR]->(e2:Entity) "
+                "WHERE e1.group_id IN $group_ids "
+                "AND e2.group_id IN $group_ids "
+                "AND r.similarity >= $threshold "
                 "RETURN e1.id AS src, e2.id AS tgt, "
                 "r.similarity AS weight",
-                group_id=group_id,
+                group_ids=group_ids,
                 threshold=synonym_threshold,
             )
             for record in result:
@@ -303,13 +305,13 @@ class HippoRAG2PPR:
             seen_sentence_edges: set = set()
             sentence_sim_count = 0
             result = session.run(
-                "MATCH (s1:Sentence {group_id: $group_id})"
-                "-[r:SEMANTICALLY_SIMILAR]->"
-                "(s2:Sentence {group_id: $group_id}) "
-                "WHERE r.similarity >= $threshold "
+                "MATCH (s1:Sentence)-[r:SEMANTICALLY_SIMILAR]->(s2:Sentence) "
+                "WHERE s1.group_id IN $group_ids "
+                "AND s2.group_id IN $group_ids "
+                "AND r.similarity >= $threshold "
                 "RETURN s1.id AS src, s2.id AS tgt, "
                 "r.similarity AS weight",
-                group_id=group_id,
+                group_ids=group_ids,
                 threshold=synonym_threshold,
             )
             for record in result:
@@ -327,7 +329,7 @@ class HippoRAG2PPR:
             # ----------------------------------------------------------
             if include_section_graph:
                 self._load_section_graph_sync(
-                    session, group_id, section_edge_weight, section_sim_threshold
+                    session, group_ids, section_edge_weight, section_sim_threshold
                 )
 
         logger.debug(
@@ -341,16 +343,17 @@ class HippoRAG2PPR:
     def _load_section_graph_sync(
         self,
         session: Any,
-        group_id: str,
+        group_ids: List[str],
         section_edge_weight: float,
         section_sim_threshold: float,
     ) -> None:
         """Load Section nodes and edges for Phase 2 augmentation."""
         # Section nodes — include section_ordinal for ordinal-weighted edges
         result = session.run(
-            "MATCH (s:Section {group_id: $group_id}) "
+            "MATCH (s:Section) "
+            "WHERE s.group_id IN $group_ids "
             "RETURN s.id AS id, s.title AS title, s.section_ordinal AS ordinal",
-            group_id=group_id,
+            group_ids=group_ids,
         )
         section_ordinals: Dict[str, int] = {}
         for record in result:
@@ -360,11 +363,11 @@ class HippoRAG2PPR:
 
         # Passage <-> Section via IN_SECTION
         result = session.run(
-            "MATCH (c:Sentence {group_id: $group_id})"
-            "-[:IN_SECTION]->"
-            "(s:Section {group_id: $group_id}) "
+            "MATCH (c:Sentence)-[:IN_SECTION]->(s:Section) "
+            "WHERE c.group_id IN $group_ids "
+            "AND s.group_id IN $group_ids "
             "RETURN c.id AS sentence_id, s.id AS section_id",
-            group_id=group_id,
+            group_ids=group_ids,
         )
         for record in result:
             src_idx = self._node_to_idx.get(record["sentence_id"])
@@ -374,13 +377,13 @@ class HippoRAG2PPR:
 
         # Section <-> Section via SEMANTICALLY_SIMILAR — ordinal-weighted
         result = session.run(
-            "MATCH (s1:Section {group_id: $group_id})"
-            "-[sim:SEMANTICALLY_SIMILAR]->"
-            "(s2:Section {group_id: $group_id}) "
-            "WHERE sim.similarity >= $threshold "
+            "MATCH (s1:Section)-[sim:SEMANTICALLY_SIMILAR]->(s2:Section) "
+            "WHERE s1.group_id IN $group_ids "
+            "AND s2.group_id IN $group_ids "
+            "AND sim.similarity >= $threshold "
             "RETURN s1.id AS src, s2.id AS tgt, "
             "sim.similarity AS weight",
-            group_id=group_id,
+            group_ids=group_ids,
             threshold=section_sim_threshold,
         )
         for record in result:

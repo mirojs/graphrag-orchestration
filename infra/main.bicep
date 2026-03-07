@@ -450,6 +450,27 @@ module graphragApi './core/host/container-app.bicep' = {
         name: 'ADMIN_API_KEY'
         secretRef: 'admin-api-key'
       }
+    ] : [], useUserUpload ? [
+      {
+        name: 'USE_USER_UPLOAD'
+        value: 'true'
+      }
+      {
+        name: 'AZURE_STORAGE_ACCOUNT'
+        value: storageAccountName
+      }
+      {
+        name: 'AZURE_STORAGE_CONTAINER'
+        value: 'content'
+      }
+      {
+        name: 'AZURE_USERSTORAGE_ACCOUNT'
+        value: storageAccountName
+      }
+      {
+        name: 'AZURE_USERSTORAGE_CONTAINER'
+        value: userStorageContainerName
+      }
     ] : [])
     secrets: concat([
       {
@@ -600,6 +621,10 @@ var sharedEnvVars = concat([
     value: '2048'
   }
 ], useUserUpload ? [
+  {
+    name: 'USE_USER_UPLOAD'
+    value: 'true'
+  }
   {
     name: 'AZURE_STORAGE_ACCOUNT'
     value: storageAccountName

@@ -226,11 +226,12 @@ class HippoRAG2Handler(BaseRouteHandler):
 
             await asyncio.gather(
                 triple_store.load(
-                    self.neo4j_driver, self.group_id, voyage_service
+                    self.neo4j_driver, self.group_id, voyage_service,
+                    group_ids=self.group_ids,
                 ),
                 ppr_engine.load_graph(
                     self.neo4j_driver,
-                    self.group_id,
+                    self.group_ids,
                     passage_node_weight=passage_node_weight,
                     synonym_threshold=synonym_threshold,
                     include_section_graph=include_section_graph,
@@ -1089,21 +1090,26 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not entity_types or not self.neo4j_driver:
             return []
 
-        group_id = self.group_id
+        group_ids = self.group_ids
         cypher = """
-        MATCH (e:Entity {group_id: $group_id})
-              <-[:MENTIONS]-(tc:Sentence {group_id: $group_id})
-              -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-        WHERE e.type IN $entity_types
+        MATCH (e:Entity)
+              <-[:MENTIONS]-(tc:Sentence)
+              -[:IN_DOCUMENT]->(d:Document)
+        WHERE e.group_id IN $group_ids
+          AND tc.group_id IN $group_ids
+          AND d.group_id IN $group_ids
+          AND e.type IN $entity_types
           AND ($folder_id IS NULL
-               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id}))
+               OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids })
         WITH e, d, count(tc) AS doc_mentions,
              collect(tc.text)[0] AS doc_sample_chunk
-        OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity {group_id: $group_id})
-        WHERE r.rel_type IN $role_rel_types
+        OPTIONAL MATCH (e)-[r:RELATED_TO]-(e2:Entity)
+        WHERE e2.group_id IN $group_ids
+          AND r.rel_type IN $role_rel_types
           AND EXISTS {
-            MATCH (e2)<-[:MENTIONS]-(:Sentence {group_id: $group_id})
+            MATCH (e2)<-[:MENTIONS]-(s2:Sentence)
                   -[:IN_DOCUMENT]->(d)
+            WHERE s2.group_id IN $group_ids
           }
         WITH e, d, doc_mentions, doc_sample_chunk,
              collect(DISTINCT r.rel_type)[0..3] AS doc_role_labels
@@ -1118,7 +1124,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             with retry_session(driver, read_only=True) as session:
                 records = session.run(
                     cypher,
-                    group_id=group_id,
+                    group_ids=group_ids,
                     entity_types=entity_types,
                     role_rel_types=_STRUCTURED_ROLE_TYPES,
                     folder_id=self.folder_id,
@@ -1286,20 +1292,21 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not self.neo4j_driver:
             return []
 
-        group_id = self.group_id
+        group_ids = self.group_ids
         folder_id = self.folder_id
         driver = self.neo4j_driver
 
         # When top_k=0, resolve actual corpus size so we seed all passages
         if top_k <= 0 or sentence_top_k <= 0:
             count_cypher = """CYPHER 25
-            MATCH (s:Sentence {group_id: $group_id})
+            MATCH (s:Sentence)
+            WHERE s.group_id IN $group_ids
             RETURN count(s) AS cnt
             """
             try:
                 def _count():
                     with retry_session(driver, read_only=True) as session:
-                        return session.run(count_cypher, group_id=group_id).single()["cnt"]
+                        return session.run(count_cypher, group_ids=group_ids).single()["cnt"]
                 corpus_size = await asyncio.to_thread(_count)
             except Exception:
                 corpus_size = 200  # safe fallback
@@ -1309,17 +1316,24 @@ class HippoRAG2Handler(BaseRouteHandler):
                 sentence_top_k = corpus_size
 
         sentence_cypher = """CYPHER 25
-        CALL () {
+        CALL (...) {
             MATCH (s:Sentence)
             SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
-            OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-            WITH s, score, d
-            WHERE $folder_id IS NULL OR d IS NULL
-               OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-            RETURN s.id AS sentence_id, score
+            RETURN s, score
+            UNION ALL
+            MATCH (s:Sentence)
+            SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $global_group_id LIMIT $sentence_top_k)
+            SCORE AS score
+            RETURN s, score
         }
-        RETURN sentence_id, max(score) AS score
+        WITH s, max(score) AS score
+        OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d.group_id IN $group_ids
+        WITH s, score, d
+        WHERE $folder_id IS NULL OR d IS NULL
+           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
+        RETURN s.id AS sentence_id, score
         ORDER BY score DESC
         LIMIT $top_k
         """
@@ -1330,7 +1344,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                     records = session.run(
                         sentence_cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=group_ids,
                         sentence_top_k=sentence_top_k,
                         top_k=top_k,
                         folder_id=folder_id,
@@ -1369,17 +1385,19 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not sentence_ids or not self.neo4j_driver:
             return []
 
-        group_id = self.group_id
+        group_ids = self.group_ids
         driver = self.neo4j_driver
 
         # ── Pass 1: Sentence metadata ──
         cypher_sentences = """
         UNWIND $sentence_ids AS cid
-        MATCH (node:Sentence {id: cid, group_id: $group_id})
+        MATCH (node:Sentence {id: cid})
+        WHERE node.group_id IN $group_ids
         OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)
+        WHERE d.group_id IN $group_ids
         WITH cid, node, d
         WHERE $folder_id IS NULL OR d IS NULL
-           OR (d)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR EXISTS { MATCH (d)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
         OPTIONAL MATCH (node)-[:IN_SECTION]->(s:Section)
         RETURN cid AS sentence_id,
                coalesce(node.text, '') AS text,
@@ -1397,7 +1415,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                     records = session.run(
                         cypher_sentences,
                         sentence_ids=sentence_ids,
-                        group_id=group_id,
+                        group_ids=group_ids,
                         folder_id=self.folder_id,
                     )
                     return [dict(r) for r in records]
@@ -1517,11 +1535,13 @@ class HippoRAG2Handler(BaseRouteHandler):
                         with retry_session(self.neo4j_driver, read_only=True) as session:
                             records = session.run("""
                                 UNWIND $paths AS parent_path
-                                MATCH (parent:Section {group_id: $group_id})
-                                WHERE parent.path_key = parent_path
-                                MATCH (child:Section {group_id: $group_id})-[:SUBSECTION_OF*1..3]->(parent)
+                                MATCH (parent:Section)
+                                WHERE parent.group_id IN $group_ids
+                                  AND parent.path_key = parent_path
+                                MATCH (child:Section)-[:SUBSECTION_OF*1..3]->(parent)
+                                WHERE child.group_id IN $group_ids
                                 RETURN DISTINCT child.path_key AS child_path
-                            """, paths=matched_sections, group_id=self.group_id)
+                            """, paths=matched_sections, group_ids=self.group_ids)
                             return [r["child_path"] for r in records if r["child_path"]]
                     child_paths = await asyncio.to_thread(_expand_children)
                     expanded_sections.extend(child_paths)
@@ -1586,13 +1606,17 @@ class HippoRAG2Handler(BaseRouteHandler):
 
             cypher = """
             UNWIND $community_ids AS cid
-            MATCH (e:Entity {group_id: $group_id})-[:BELONGS_TO]->(c:Community {id: cid})
-            WHERE $folder_id IS NULL
+            MATCH (e:Entity)-[:BELONGS_TO]->(c:Community {id: cid})
+            WHERE e.group_id IN $group_ids
+              AND ($folder_id IS NULL
                OR EXISTS {
-                 MATCH (e)<-[:MENTIONS]-(:Sentence {group_id: $group_id})
-                       -[:IN_DOCUMENT]->(d:Document {group_id: $group_id})
-                       -[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
-               }
+                 MATCH (e)<-[:MENTIONS]-(s2:Sentence)
+                       -[:IN_DOCUMENT]->(d:Document)
+                       -[:IN_FOLDER]->(f:Folder)
+                 WHERE s2.group_id IN $group_ids
+                   AND d.group_id IN $group_ids
+                   AND f.id = $folder_id AND f.group_id IN $group_ids
+               })
             RETURN e.id AS entity_id, e.name AS entity_name, c.id AS community_id
             ORDER BY e.degree DESC
             LIMIT 15
@@ -1602,7 +1626,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                 result = await session.run(
                     cypher,
                     community_ids=community_ids,
-                    group_id=self.group_id,
+                    group_ids=self.group_ids,
                     folder_id=self.folder_id,
                 )
                 records = await result.data()
@@ -1645,21 +1669,28 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         threshold = float(os.getenv("ROUTE7_SENTENCE_THRESHOLD", "0.2"))
-        group_id = self.group_id
+        group_ids = self.group_ids
 
         cypher = """CYPHER 25
-        CALL () {
+        CALL (...) {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
         }
 
         OPTIONAL MATCH (sent)-[:IN_DOCUMENT]->(doc:Document)
+        WHERE doc.group_id IN $group_ids
         WITH sent, score, doc
         WHERE $folder_id IS NULL OR doc IS NULL
-           OR (doc)-[:IN_FOLDER]->(:Folder {id: $folder_id, group_id: $group_id})
+           OR EXISTS { MATCH (doc)-[:IN_FOLDER]->(f:Folder) WHERE f.id = $folder_id AND f.group_id IN $group_ids }
 
         RETURN sent.id AS sentence_id,
                sent.text AS text,
@@ -1683,7 +1714,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
+                        group_ids=group_ids,
                         top_k=top_k,
                         threshold=threshold,
                         folder_id=self.folder_id,
@@ -1754,16 +1787,17 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not self.neo4j_driver:
             return candidate_ids[:top_k]
 
-        group_id = self.group_id
+        group_ids = self.group_ids
 
         def _fetch_texts():
             with retry_session(self.neo4j_driver, read_only=True) as session:
                 result = session.run(
                     "UNWIND $ids AS sid "
-                    "MATCH (s:Sentence {id: sid, group_id: $group_id}) "
+                    "MATCH (s:Sentence {id: sid}) "
+                    "WHERE s.group_id IN $group_ids "
                     "RETURN s.id AS id, s.text AS text",
                     ids=candidate_ids,
-                    group_id=group_id,
+                    group_ids=group_ids,
                 )
                 return {r["id"]: r["text"] or "" for r in result}
 
@@ -1859,12 +1893,17 @@ class HippoRAG2Handler(BaseRouteHandler):
             return []
 
         threshold = float(os.getenv("ROUTE7_SEMANTIC_THRESHOLD", "0.2"))
-        group_id = self.group_id
 
         cypher = """CYPHER 25
-        CALL () {
+        CALL (...) {
             MATCH (sent:Sentence)
             SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            WHERE score >= $threshold
+            RETURN sent, score
+            UNION ALL
+            MATCH (sent:Sentence)
+            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
@@ -1881,7 +1920,8 @@ class HippoRAG2Handler(BaseRouteHandler):
                     records = session.run(
                         cypher,
                         embedding=query_embedding,
-                        group_id=group_id,
+                        group_id=self.group_id,
+                        global_group_id="__global__",
                         top_k=top_k,
                         threshold=threshold,
                     )

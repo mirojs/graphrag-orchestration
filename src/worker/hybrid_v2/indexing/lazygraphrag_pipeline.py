@@ -213,8 +213,8 @@ class LazyGraphRAGIndexingPipeline:
         # Structured extraction: "deterministic" (rules for sig/letterhead) or "llm" (send to OpenIE)
         self._structured_extraction = os.getenv("STRUCTURED_EXTRACTION", "deterministic")
         # Two-step NER→Triple extraction (upstream HippoRAG 2 alignment)
-        # Default false: single-step scored 55/57 vs two-step 52/57 (entity singleton explosion)
-        self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "false").strip().lower() in {"1", "true", "yes"}
+        # Default true: two-step scores 56/57 after entity embedding bleed fix (commit 72fde278)
+        self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
         # NER scope: "broad" (includes abstract concepts) or "narrow" (proper nouns only, HippoRAG 2 style)
         self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
 

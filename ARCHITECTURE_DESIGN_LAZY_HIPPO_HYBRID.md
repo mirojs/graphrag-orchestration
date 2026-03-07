@@ -11727,11 +11727,11 @@ The NER step finds many fine-grained entities that appear in only one sentence (
 
 ### Decision
 
-**Keep single-step as default.** The improved single-step prompt (§41) already captures abstract concepts and enforces entity quality. The two-step code is retained behind `OPENIE_TWO_STEP=true` for future experiments (e.g., singleton filtering, NER prompt tuning).
+**Updated 2026-03-07: Two-step is now the default.** After fixing the entity embedding contextual bleed bug (§49, commit `72fde278`), two-step NER scores **56/57** vs single-step's 55/57. The earlier 52/57 result was caused by the bleed bug corrupting the shorter, more precise entity names that two-step produces. Upstream HippoRAG 2's architecture choice is validated.
 
 ### Key Insight
 
-For small corpora (5 PDFs, ~200 sentences), entity **connectivity** matters more than entity **count**. PPR traversal needs multi-hop paths between sentences. Fewer, well-connected entities (single-step: 2.5 mentions/entity) outperform many loosely-connected entities (two-step: 1.9 mentions/entity).
+For small corpora (5 PDFs, ~200 sentences), entity **connectivity** matters more than entity **count**. The embedding bleed bug disproportionately degraded two-step entities (shorter names = less intrinsic signal to resist noise). With correct independent embedding, two-step's denser graph (415 entities, 1354 synonym edges) outperforms single-step (409 entities, 918 synonym edges).
 
 ### Commits
 
@@ -11739,11 +11739,13 @@ For small corpora (5 PDFs, ~200 sentences), entity **connectivity** matters more
 |-----|-------------|
 | `f326d962` | feat: two-step NER→Triple extraction (upstream HippoRAG 2 alignment) |
 | `ed578585` | feat: default OPENIE_TWO_STEP=false — single-step scores 55/57 vs two-step 52/57 |
+| `5dad19cb` | feat: default OPENIE_TWO_STEP=true — two-step scores 56/57 after embedding bleed fix |
 
 ### Benchmark Artifacts
 
-- `benchmarks/route7_hipporag2_r4questions_20260304T122203Z.json` — Two-step (52/57)
+- `benchmarks/route7_hipporag2_r4questions_20260304T122203Z.json` — Two-step (52/57, pre-bleed-fix)
 - `benchmarks/route7_hipporag2_r4questions_20260304T125842Z.json` — Single-step reindex (54/57)
+- `benchmarks/route7_hipporag2_r4questions_20260307T115841Z.json` — Two-step (56/57, post-bleed-fix)
 
 ## §45. Frontend Cleanup: Error Handling, Button Removal, Auth Guard (2026-03-04)
 

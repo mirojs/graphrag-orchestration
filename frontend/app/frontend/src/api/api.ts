@@ -156,7 +156,12 @@ export function getCitationFilePath(citation: string, documentUrl?: string): str
     }
     // Remove only the last parenthesized suffix (e.g., "(page 3)")
     const cleanedCitation = filename.replace(/\s*\([^)]*\)\s*$/, "").trim();
-    return `${BACKEND_URI}/content/${encodeURIComponent(cleanedCitation)}`;
+    let url = `${BACKEND_URI}/content/${encodeURIComponent(cleanedCitation)}`;
+    // Pass the original blob URL so the backend can proxy from it directly
+    if (documentUrl) {
+        url += `?source=${encodeURIComponent(documentUrl)}`;
+    }
+    return url;
 }
 
 export async function uploadFileApi(request: FormData, idToken: string): Promise<SimpleAPIResponse> {

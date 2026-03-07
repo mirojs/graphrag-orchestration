@@ -405,14 +405,41 @@ async def copy_uploaded(
 async def content_file(
     request: Request,
     path: str,
+    source: Optional[str] = None,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
     """
     Serve content files (citations/PDFs) from blob storage.
 
-    Streams the blob content back to the client.
+    When ``source`` query param is provided (a full blob URL), proxy directly
+    from that URL.  Otherwise fall back to user/global blob manager lookups.
     """
+    filename = path.split("/")[-1]
+
+    # --- Primary path: proxy from the original source blob URL ---
+    if source:
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(source)
+            if parsed.hostname and parsed.hostname.endswith(".blob.core.windows.net"):
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(source, follow_redirects=True, timeout=30.0)
+                    if resp.status_code == 200:
+                        content_type = resp.headers.get("content-type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
+                        return StreamingResponse(
+                            iter([resp.content]),
+                            media_type=content_type,
+                            headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                        )
+                    logger.debug("Source URL returned %s for %s", resp.status_code, source)
+            else:
+                logger.warning("Rejected non-Azure source URL: %s", parsed.hostname)
+        except Exception as e:
+            logger.debug("Source URL proxy failed for %s: %s", source, e)
+
+    # --- Fallback: blob manager lookups (user-uploaded files) ---
     global_blob_manager = getattr(request.app.state, "global_blob_manager", None)
     user_blob_manager = getattr(request.app.state, "user_blob_manager", None)
 
@@ -426,7 +453,7 @@ async def content_file(
                 return StreamingResponse(
                     iter([content_bytes]),
                     media_type=content_type,
-                    headers={"Content-Disposition": f'inline; filename="{path.split("/")[-1]}"'},
+                    headers={"Content-Disposition": f'inline; filename="{filename}"'},
                 )
         except Exception as e:
             logger.debug("User blob manager failed for %s: %s", path, e)
@@ -442,7 +469,7 @@ async def content_file(
                 return StreamingResponse(
                     iter([content_bytes]),
                     media_type=content_type,
-                    headers={"Content-Disposition": f'inline; filename="{path.split("/")[-1]}"'},
+                    headers={"Content-Disposition": f'inline; filename="{filename}"'},
                 )
         except Exception as e:
             logger.debug("Global blob manager failed for %s: %s", path, e)

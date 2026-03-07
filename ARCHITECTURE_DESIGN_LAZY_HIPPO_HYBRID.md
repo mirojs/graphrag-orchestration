@@ -12539,3 +12539,102 @@ the same 2/3 score. IDF does NOT cause the regression.
 All remaining upstream gaps are now implemented. At current 5-doc scale, IDF has negligible
 quality impact (72% of entities have mention_count=1). The implementation is future-proof for
 corpus scaling where common entities would otherwise dominate seed weights.
+
+## §53 — DPR Cypher Syntax Fix & Cross-Encoder Superiority Discovery (2026-03-07)
+
+### Discovery: DPR Silently Broken on Neo4j Aura 5.27
+
+During investigation of the Q-D3 retrieval gap, we discovered that **Dense Passage Retrieval (DPR) has been silently broken in ALL benchmark runs**, including the 57/57 baseline. The root cause:
+
+- Three Cypher queries in `route_7_hipporag2.py` used `CALL (...) {}` (Cypher 25 spread import syntax)
+- Neo4j Aura 5.27 does NOT support this syntax — it fails with `Invalid input '..'`
+- The error was caught silently (DPR returns empty list on failure)
+- All `passage_seeds_count: 20` came exclusively from cross-encoder semantic seeds
+
+**Affected queries** (lines ~1353, ~1711, ~1934):
+- `_dpr_passage_search()` — main DPR vector search
+- `_retrieve_sentence_evidence()` — sentence evidence augmentation
+- `_semantic_expansion()` — semantic expansion search
+
+**Fix:** Changed `CALL (...) {` → `CALL {` (deprecated but functional on Neo4j 5.x).
+
+### Experiment: DPR Enabled vs Disabled
+
+| Config | DPR Seeds | Semantic Seeds | Total Seeds | Score |
+|--------|-----------|----------------|-------------|-------|
+| DPR broken (baseline) | 0 | 20 | 20 | 56/57 |
+| DPR enabled (top_k=50) | ~50 | ~8 | ~58 | **53/57** |
+| DPR disabled (top_k=-1) | 0 | 20 | 20 | 56/57 |
+
+**Key findings:**
+1. DPR adds 50 loosely vector-matched passages as PPR seeds, overwhelming the 20 precise cross-encoder seeds
+2. Cross-encoder (voyage-rerank-2.5) sees query+passage bidirectionally — much more accurate than DPR's independent cosine
+3. With DPR enabled, Q-D3 dropped 2/3→1/3 and Q-D10 dropped 3/3→1/3 due to context dilution
+4. The 57/57 baseline was never using DPR — cross-encoder alone achieved it
+
+### Decision
+
+- **Default:** `ROUTE7_DPR_TOP_K=-1` (disabled)
+- **Rationale:** At small corpus scale (202 sentences), cross-encoder reranking over all passages is fast and more precise than DPR vector search
+- **Future:** DPR becomes relevant for large corpora where cross-encoder over all passages is too slow. Set `ROUTE7_DPR_TOP_K=50` (or `0` for all-passage seeding) to re-enable.
+
+### Commit: 890313e2
+
+## §54 — Section-Path Cross-Encoder Enrichment Experiment (2026-03-07)
+
+### Hypothesis
+
+The Q-D3 target passage (`sent_33`: "fee/commission of 25% for short term rentals of less than 180 days") is semantically about fees, not timeframes. However, its `section_path` is "PROPERTY MANAGEMENT AGREEMENT (Short Term and/or Vacation/Holiday Rentals)" — highly relevant context. Prepending section_path to passage text in the cross-encoder cache might help the reranker recognize relevance.
+
+### Implementation
+
+Modified `hipporag2_ppr.py` to prepend `[section_path]` to `_passage_full_texts`:
+```
+[PROPERTY MANAGEMENT AGREEMENT (Short Term...)] A fee/commission of 25%...
+```
+
+### Result: 55/57 (WORSE)
+
+| Question | Before | After | Delta |
+|----------|--------|-------|-------|
+| Q-D3 | 2/3 | 1/3 | -1 |
+| Q-D5 | 3/3 | 2/3 | -1 |
+
+**Root cause:** Section paths added noise to ALL 202 passage texts, changing cross-encoder rankings globally. Some passages ranked better, others worse — net negative effect.
+
+**Additional finding:** Entity seeds dropped from 7→4 for Q-D3 due to LLM non-determinism in triple linking (not caused by section-path change).
+
+### Decision
+
+**Reverted.** Section-path enrichment is too coarse — it changes all rankings, not just the target. Better approaches for future consideration:
+- **Targeted section expansion:** After PPR retrieval, if a PMA sentence is in top-30, pull sibling sentences from the same section
+- **Parent-text enrichment:** Use `parent_text` (contains section header + surrounding sentences) instead of bare `section_path` — more natural for the cross-encoder
+- **Query decomposition:** For exhaustive "list all X" queries, decompose into sub-queries targeting each document
+
+## §55 — Q-D3 Retrieval Ceiling Root Cause Analysis (2026-03-07)
+
+### The Defect
+
+Q-D3 ("list all explicit day-based timeframes") consistently scores 2/3 because one passage is never retrieved:
+
+**Target:** `doc_3e8c1d7094b2481683742a3f287d987e_sent_33`
+> "(b) A fee/commission of 25% of gross revenues for management services for short term and/or vacation rentals (reservations of less than 180 days)"
+
+### Why All 3 Channels Miss It
+
+1. **PPR (Graph Traversal):** Entity "leases of more than 180 days" has **ZERO synonymy edges** — completely graph-isolated. Shortest bipartite path from nearest Q-D3 seed entity is 5 hops. At 0.5 damping, signal attenuates to ~3.1%.
+
+2. **DPR (Vector Search):** Now fixed but disabled. Even when enabled, the sentence embedding is dominated by "fee/commission" semantics, not "timeframes" — low vector similarity to query.
+
+3. **Cross-Encoder (Semantic Seeds):** Same semantic mismatch — the bare sentence text reads as being about pricing, not time periods. Ranks below top-20.
+
+### Why It's a Retrieval Ceiling
+
+- The entity "leases of more than 180 days" is too specific (no cosine > 0.65 with any other entity)
+- The passage text is genuinely about fees, with "180 days" as a qualifying clause
+- The section_path contains relevant context but adding it hurts global rankings
+- This is a fundamental semantic mismatch between query intent and passage content
+
+### Honest Score Assessment
+
+The 57/57 score achieved earlier was due to lenient LLM judge scoring. The honest, reproducible score for Route 7 is **56/57** (Q-D3=2/3). The 180-day passage represents a retrieval ceiling that would require architectural changes (query decomposition, section-level expansion, or entity extraction improvements) to overcome.

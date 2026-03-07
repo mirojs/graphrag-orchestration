@@ -92,6 +92,25 @@ export async function chatApi(request: ChatAppRequest, shouldStream: boolean, id
     });
 }
 
+export type SpeechTokenResponse = {
+    token: string;
+    region: string;
+    languages: string[];
+};
+
+export async function getSpeechTokenApi(): Promise<SpeechTokenResponse | null> {
+    try {
+        const response = await fetch("/speech/token", { method: "GET" });
+        if (response.ok) {
+            return (await response.json()) as SpeechTokenResponse;
+        }
+        console.warn("Speech token not available:", response.status);
+        return null;
+    } catch {
+        return null;
+    }
+}
+
 export async function getSpeechApi(text: string): Promise<string | null> {
     return await fetch("/speech", {
         method: "POST",

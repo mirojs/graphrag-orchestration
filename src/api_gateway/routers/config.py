@@ -65,6 +65,11 @@ async def get_config() -> Dict[str, Any]:
         "showSpeechInput": os.getenv("ENABLE_SPEECH_INPUT", "true").lower() == "true",
         "showSpeechOutputBrowser": os.getenv("ENABLE_SPEECH_OUTPUT_BROWSER", "true").lower() == "true",
         "showSpeechOutputAzure": os.getenv("ENABLE_SPEECH_OUTPUT_AZURE", "false").lower() == "true",
+        "showSpeechTranslation": (
+            os.getenv("ENABLE_SPEECH_TRANSLATION", "false").lower() == "true"
+            and bool(os.getenv("AZURE_SPEECH_SERVICE_ID"))
+            and bool(os.getenv("AZURE_SPEECH_SERVICE_LOCATION"))
+        ),
         "showChatHistoryBrowser": os.getenv("ENABLE_CHAT_HISTORY_BROWSER", "true").lower() == "true",
         "showChatHistoryCosmos": (
             os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "").lower() == "true"

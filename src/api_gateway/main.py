@@ -230,6 +230,10 @@ async def lifespan(app: FastAPI):
             from src.core.services.redis_service import get_redis_service
             await get_redis_service()
             logger.info("redis_connected")
+            # Also warm QuotaEnforcer to avoid lock contention on first dashboard load
+            from src.core.services.quota_enforcer import get_quota_enforcer
+            await get_quota_enforcer()
+            logger.info("quota_enforcer_warmed")
         except Exception as e:
             logger.warning("redis_init_failed", error=str(e))
 

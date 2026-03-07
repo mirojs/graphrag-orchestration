@@ -3,7 +3,8 @@ import {
     fetchUserProfile,
     fetchUsageStats,
     fetchSystemMetrics,
-    fetchPlanInfo
+    fetchPlanInfo,
+    fetchDashboardAll
 } from "../api/dashboard";
 
 vi.mock("../api/api", () => ({
@@ -71,5 +72,28 @@ describe("fetchPlanInfo", () => {
         mockFetchOnce(plans);
         const result = await fetchPlanInfo("token");
         expect(result.current_plan).toBe("pro");
+    });
+});
+
+describe("fetchDashboardAll", () => {
+    it("fetches /dashboard/all in a single request", async () => {
+        const combined = {
+            profile: { user_id: "u1", display_name: "Test", is_admin: false, plan: "free" },
+            usage: { queries_today: 5, queries_this_month: 100 },
+            plans: { current_plan: "free", billing_type: "b2c", plans: {} }
+        };
+        mockFetchOnce(combined);
+        const result = await fetchDashboardAll("token");
+        expect(result.profile.user_id).toBe("u1");
+        expect(result.usage.queries_today).toBe(5);
+        expect(result.plans.current_plan).toBe("free");
+        expect(globalThis.fetch).toHaveBeenCalledWith("/dashboard/all", expect.any(Object));
+    });
+
+    it("throws with detail on error", async () => {
+        vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+            new Response(JSON.stringify({ detail: "Session expired" }), { status: 401, statusText: "Unauthorized" })
+        );
+        await expect(fetchDashboardAll("token")).rejects.toThrow("Failed to fetch dashboard (401): Session expired");
     });
 });

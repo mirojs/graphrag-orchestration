@@ -4,7 +4,7 @@ import { useMsal } from "@azure/msal-react";
 import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
-import { fetchUserProfile, fetchUsageStats, fetchPlanInfo, UserProfileResponse, UsageStats, PlanInfo } from "../../api/dashboard";
+import { fetchDashboardAll, UserProfileResponse, UsageStats, PlanInfo } from "../../api/dashboard";
 
 const PLAN_BADGE_CLASS: Record<string, string> = {
     free: styles.planFree,
@@ -53,14 +53,10 @@ const Dashboard = () => {
     const loadDashboard = useCallback(async () => {
         try {
             const token = client ? await getToken(client) : undefined;
-            const [profileData, usageData, planData] = await Promise.all([
-                fetchUserProfile(token),
-                fetchUsageStats(token),
-                fetchPlanInfo(token)
-            ]);
-            setProfile(profileData);
-            setUsage(usageData);
-            setPlans(planData);
+            const data = await fetchDashboardAll(token);
+            setProfile(data.profile);
+            setUsage(data.usage);
+            setPlans(data.plans);
         } catch (e: any) {
             const msg = e.message || "Failed to load dashboard";
             if (msg.includes("401") || msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("unauthorized")) {

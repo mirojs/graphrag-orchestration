@@ -89,9 +89,34 @@ export interface PlanInfo {
     plans: Record<string, Record<string, any>>;
 }
 
+export interface DashboardAllData {
+    profile: UserProfileResponse;
+    usage: UsageStats;
+    plans: PlanInfo;
+}
+
 // ============================================================================
 // API calls
 // ============================================================================
+
+export async function fetchDashboardAll(idToken: string | undefined): Promise<DashboardAllData> {
+    const headers = await getHeaders(idToken);
+    const response = await fetchWithAuthRetry("/dashboard/all", {
+        method: "GET",
+        headers: { ...headers, "Content-Type": "application/json" }
+    });
+    if (!response.ok) {
+        let detail = "";
+        try {
+            const body = await response.json();
+            detail = body.detail || body.message || "";
+        } catch {
+            detail = response.statusText || "";
+        }
+        throw new Error(`Failed to fetch dashboard (${response.status}): ${detail}`);
+    }
+    return response.json();
+}
 
 export async function fetchUserProfile(idToken: string | undefined): Promise<UserProfileResponse> {
     const headers = await getHeaders(idToken);

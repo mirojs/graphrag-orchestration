@@ -119,6 +119,13 @@ class PlanInfoResponse(BaseModel):
     plans: Dict[str, Dict[str, Any]] = {}
 
 
+class DashboardAllResponse(BaseModel):
+    """Combined response for profile + usage + plans in a single request."""
+    profile: UserProfileResponse
+    usage: UsageStatsResponse
+    plans: PlanInfoResponse
+
+
 # ============================================================================
 # Personal Dashboard Endpoints
 # ============================================================================
@@ -404,6 +411,234 @@ async def get_available_plans(
         current_plan=current_plan.value,
         billing_type="b2c",
         plans=plans,
+    )
+
+
+# ============================================================================
+# Consolidated Dashboard Endpoint
+# ============================================================================
+
+@router.get("/all", response_model=DashboardAllResponse)
+async def get_dashboard_all(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+    group_id: str = Depends(get_group_id),
+):
+    """
+    Fetch profile, usage stats, and plan info in a single request.
+
+    This avoids 3 separate HTTP round-trips through the EasyAuth sidecar,
+    and performs only ONE Redis init + ONE set of plan/usage lookups shared
+    across all three response sections.
+    """
+    try:
+        async with asyncio.timeout(15):
+            return await _fetch_dashboard_all(request, user, group_id)
+    except TimeoutError:
+        logger.warning("dashboard_all_timeout", user_id=user.get("oid", ""))
+        raise HTTPException(status_code=504, detail="Dashboard fetch timed out")
+
+
+async def _fetch_dashboard_all(
+    request: Request,
+    user: Dict[str, Any],
+    group_id: str,
+) -> DashboardAllResponse:
+    user_id = user.get("oid", "")
+
+    # ── Phase 1: Single Redis init + parallel plan/usage fetch ───────────
+    try:
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        plan_tier, redis_usage = await asyncio.gather(
+            asyncio.wait_for(enforcer.get_plan(user_id), timeout=2),
+            asyncio.wait_for(enforcer.get_usage(user_id), timeout=2),
+        )
+    except Exception:
+        enforcer = None
+        plan_tier = PlanTier.FREE
+        redis_usage = {"queries_today": 0, "queries_this_month": 0}
+
+    is_admin = any(r.lower() == "admin" for r in user.get("roles", []))
+    if is_admin and plan_tier == PlanTier.FREE:
+        plan_tier = PlanTier.ENTERPRISE
+
+    limits = PLAN_DEFINITIONS[plan_tier]
+
+    # ── Phase 2: Build profile (pure computation, no I/O) ────────────────
+    auth_type = getattr(request.app.state, "auth_type", "B2B")
+    billing_type = "b2b" if auth_type == "B2B" else "b2c"
+
+    profile_obj = resolve_user_profile(user, plan_tier=plan_tier, billing_type=billing_type)
+    profile_limits = profile_obj.plan_limits or limits
+
+    features = {
+        "graphrag": profile_limits.graphrag_enabled,
+        "advanced_analytics": profile_limits.advanced_analytics,
+        "custom_models": profile_limits.custom_models,
+        "api_access": profile_limits.api_access,
+        "priority_support": profile_limits.priority_support,
+        "sso": profile_limits.sso_enabled,
+        "custom_branding": profile_limits.custom_branding,
+    }
+
+    profile_resp = UserProfileResponse(
+        user_id=profile_obj.user_id,
+        display_name=profile_obj.display_name,
+        email=profile_obj.email,
+        tenant_id=profile_obj.tenant_id,
+        roles=profile_obj.roles,
+        is_admin=profile_obj.is_admin,
+        plan=profile_obj.plan.value,
+        plan_limits=profile_obj.plan_limits,
+        billing_type=billing_type,
+        queries_today=redis_usage["queries_today"],
+        queries_this_month=redis_usage["queries_this_month"],
+        documents_count=0,
+        storage_used_gb=0.0,
+        features=features,
+    )
+
+    # ── Phase 3: Blob + Cosmos + credits in parallel ─────────────────────
+    async def _blob_stats() -> tuple[int, float, int]:
+        blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+        personal_count, storage_gb = 0, 0.0
+        if blob_mgr:
+            try:
+                async with asyncio.timeout(5):
+                    count, size_bytes = await blob_mgr.get_blob_stats(group_id)
+                    personal_count = count
+                    storage_gb = round(size_bytes / (1024 ** 3), 4)
+            except (TimeoutError, Exception):
+                logger.warning("usage_blob_count_failed", group_id=group_id)
+
+        global_count = 0
+        global_mgr = getattr(request.app.state, "global_blob_manager", None)
+        if global_mgr:
+            try:
+                async with asyncio.timeout(5):
+                    container_client = global_mgr.blob_service_client.get_container_client(
+                        global_mgr.container
+                    )
+                    async for blob in container_client.list_blobs():
+                        if "/" not in blob.name:
+                            global_count += 1
+            except (TimeoutError, Exception):
+                logger.warning("usage_global_blob_count_failed")
+
+        return personal_count, storage_gb, global_count
+
+    async def _recent_queries() -> tuple[list, int, float]:
+        queries: list = []
+        doc_count = 0
+        doc_storage = 0.0
+        try:
+            cosmos = get_cosmos_client()
+            records = await cosmos.query_usage(
+                partition_id=user_id,
+                usage_type="llm_completion",
+            )
+            sorted_records = sorted(
+                records, key=lambda r: r.get("timestamp", ""), reverse=True
+            )[:20]
+            queries = [
+                {
+                    "query_id": r.get("query_id", ""),
+                    "timestamp": r.get("timestamp", ""),
+                    "model": r.get("model", ""),
+                    "route": r.get("route", ""),
+                    "total_tokens": r.get("total_tokens", 0),
+                    "credits_used": r.get("credits_used") or r.get("total_tokens", 0),
+                    "detected_language": r.get("detected_language"),
+                    "was_translated": r.get("was_translated", False),
+                    "speech_detected_language": r.get("speech_detected_language"),
+                    "was_speech_input": r.get("was_speech_input", False),
+                }
+                for r in sorted_records
+            ]
+            doc_records = await cosmos.query_usage(
+                partition_id=user_id,
+                usage_type="doc_intel",
+            )
+            doc_ids = {r.get("document_id") for r in doc_records if r.get("document_id")}
+            doc_count = len(doc_ids)
+            total_pages = sum(r.get("pages_analyzed", 0) for r in doc_records)
+            doc_storage = round(total_pages * 0.0001, 4)
+        except Exception:
+            logger.warning("dashboard_usage_fetch_failed", user_id=user_id)
+        return queries, doc_count, doc_storage
+
+    async def _credits() -> dict:
+        if not enforcer:
+            return {}
+        try:
+            return await enforcer.check_credit_limits(user_id)
+        except Exception:
+            logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
+            return {}
+
+    (documents_count, storage_used_gb, global_documents_count), \
+        (recent_queries, cosmos_doc_count, cosmos_doc_storage), \
+        credit_info = await asyncio.gather(
+            _blob_stats(), _recent_queries(), _credits()
+        )
+
+    if documents_count == 0:
+        documents_count = cosmos_doc_count
+        storage_used_gb = cosmos_doc_storage
+
+    personal_documents_count = documents_count
+    total_documents = personal_documents_count + global_documents_count
+
+    translated_queries_month = sum(1 for q in recent_queries if q.get("was_translated"))
+    speech_queries_month = sum(1 for q in recent_queries if q.get("was_speech_input"))
+
+    usage_resp = UsageStatsResponse(
+        queries_today=redis_usage["queries_today"],
+        queries_this_month=redis_usage["queries_this_month"],
+        queries_limit_day=limits.queries_per_day,
+        queries_limit_month=limits.queries_per_month,
+        documents_count=total_documents,
+        documents_limit=limits.max_documents,
+        storage_used_gb=storage_used_gb,
+        storage_limit_gb=limits.max_storage_gb,
+        personal_documents_count=personal_documents_count,
+        global_documents_count=global_documents_count,
+        credits_used_month=credit_info.get("credits_used", 0),
+        credits_limit_month=credit_info.get("credits_limit"),
+        credits_remaining=credit_info.get("credits_remaining"),
+        translated_queries_month=translated_queries_month,
+        speech_queries_month=speech_queries_month,
+        recent_queries=recent_queries,
+        top_topics=[],
+    )
+
+    # ── Phase 4: Plans (pure computation, no I/O — reuses plan_tier) ─────
+    plans_dict = {}
+    for tier, tier_limits in PLAN_DEFINITIONS.items():
+        plans_dict[tier.value] = {
+            "name": tier.value.title(),
+            "queries_per_day": tier_limits.queries_per_day,
+            "queries_per_month": tier_limits.queries_per_month,
+            "max_documents": tier_limits.max_documents,
+            "max_storage_gb": tier_limits.max_storage_gb,
+            "monthly_credits": tier_limits.monthly_credits,
+            "graphrag_enabled": tier_limits.graphrag_enabled,
+            "advanced_analytics": tier_limits.advanced_analytics,
+            "custom_models": tier_limits.custom_models,
+            "api_access": tier_limits.api_access,
+            "sso_enabled": tier_limits.sso_enabled,
+        }
+
+    plans_resp = PlanInfoResponse(
+        current_plan=plan_tier.value,
+        billing_type=billing_type,
+        plans=plans_dict,
+    )
+
+    return DashboardAllResponse(
+        profile=profile_resp,
+        usage=usage_resp,
+        plans=plans_resp,
     )
 
 

@@ -257,10 +257,10 @@ async def list_uploaded(
     """List the uploaded documents for the current group."""
     blob_manager = _get_blob_manager(request)
     try:
-        async with asyncio.timeout(10):
+        async with asyncio.timeout(30):
             files = await blob_manager.list_blobs(group_id)
     except TimeoutError:
-        logger.error("list_uploaded_timeout", group_id=group_id)
+        logger.error("list_uploaded_timeout for group_id=%s", group_id)
         raise HTTPException(status_code=504, detail="File listing timed out")
     except Exception as e:
         logger.exception("Failed to list files for group %s: %s", group_id, e)

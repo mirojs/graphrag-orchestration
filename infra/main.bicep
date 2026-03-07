@@ -255,6 +255,10 @@ module graphragApi './core/host/container-app.bicep' = {
         value: 'true'
       }
       {
+        name: 'RUNNING_IN_PRODUCTION'
+        value: 'true'
+      }
+      {
         name: 'AUTH_CLIENT_ID'
         value: authClientId
       }
@@ -708,6 +712,10 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
       }
       {
         name: 'REQUIRE_AUTH'
+        value: 'true'
+      }
+      {
+        name: 'RUNNING_IN_PRODUCTION'
         value: 'true'
       }
       {

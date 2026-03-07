@@ -3,7 +3,7 @@ import { Tab, TabList, SelectTabData, SelectTabEvent } from "@fluentui/react-com
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ChatAppResponse, getHeaders } from "../../api";
+import { ChatAppResponse, fetchWithAuthRetry, getHeaders } from "../../api";
 import { StructuredCitation } from "../../api/models";
 import { getToken, useLogin } from "../../authConfig";
 import { PdfHighlightViewer, ImageHighlightViewer, SentenceHighlight } from "../DocumentViewer";
@@ -104,10 +104,16 @@ export const AnalysisPanel = ({
             // Strip hash from URL for fetching
             const urlNoHash = activeCitation.split("#")[0];
             const originalHash = activeCitation.includes("#") ? activeCitation.split("#")[1] : "";
-            const response = await fetch(urlNoHash, {
+            const response = await fetchWithAuthRetry(urlNoHash, {
                 method: "GET",
                 headers: await getHeaders(token),
             });
+            if (!response.ok) {
+                console.error(`Citation fetch failed: ${response.status} ${response.statusText}`);
+                setCitationBlob("");
+                setCitation("");
+                return;
+            }
             const citationContent = await response.blob();
             const blobUrl = URL.createObjectURL(citationContent);
             setCitationBlob(blobUrl);

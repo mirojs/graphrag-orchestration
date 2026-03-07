@@ -39,6 +39,12 @@ param voyageApiKey string = ''
 @description('Azure Document Intelligence Endpoint')
 param azureDocumentIntelligenceEndpoint string = 'https://doc-intel-graphrag.cognitiveservices.azure.com/'
 
+@description('Azure Translator endpoint for multilingual query translation')
+param azureTranslatorEndpoint string = ''
+
+@description('Azure Translator region (defaults to swedencentral)')
+param azureTranslatorRegion string = 'swedencentral'
+
 // Easy Auth parameters
 @description('Enable Easy Auth (Microsoft Entra ID authentication)')
 param enableAuth bool = false
@@ -317,6 +323,14 @@ module graphragApi './core/host/container-app.bicep' = {
         value: azureDocumentIntelligenceEndpoint
       }
       {
+        name: 'AZURE_TRANSLATOR_ENDPOINT'
+        value: azureTranslatorEndpoint
+      }
+      {
+        name: 'AZURE_TRANSLATOR_REGION'
+        value: azureTranslatorRegion
+      }
+      {
         name: 'NEO4J_URI'
         value: 'neo4j+s://a86dcf63.databases.neo4j.io'
       }
@@ -514,6 +528,14 @@ var sharedEnvVars = concat([
   {
     name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
     value: azureDocumentIntelligenceEndpoint
+  }
+  {
+    name: 'AZURE_TRANSLATOR_ENDPOINT'
+    value: azureTranslatorEndpoint
+  }
+  {
+    name: 'AZURE_TRANSLATOR_REGION'
+    value: azureTranslatorRegion
   }
   {
     name: 'NEO4J_URI'

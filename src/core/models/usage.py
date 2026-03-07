@@ -14,6 +14,7 @@ class UsageType(str, Enum):
     DOC_INTEL = "doc_intel"
     RERANK = "rerank"
     GDS_SESSION = "gds_session"
+    TRANSLATION = "translation"
 
 
 class UsageRecord(BaseModel):
@@ -49,6 +50,11 @@ class UsageRecord(BaseModel):
     gds_algorithms_run: Optional[list[str]] = Field(None, description="GDS algorithms executed")
     gds_nodes_processed: Optional[int] = Field(None, description="Nodes in GDS projection")
     
+    # Translation-specific fields
+    characters_translated: Optional[int] = Field(None, description="Characters sent to Azure Translator")
+    detected_language: Optional[str] = Field(None, description="Auto-detected source language code (e.g., 'ja')")
+    was_translated: Optional[bool] = Field(None, description="Whether query was translated before retrieval")
+
     # Common fields
     route: Optional[str] = Field(None, description="Route used (route_2, route_3, route_4)")
     query_id: Optional[str] = Field(None, description="Associated query ID")

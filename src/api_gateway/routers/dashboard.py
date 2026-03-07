@@ -79,6 +79,8 @@ class UsageStatsResponse(BaseModel):
     credits_used_month: int = 0
     credits_limit_month: Optional[int] = None
     credits_remaining: Optional[int] = None
+    # Translation stats
+    translated_queries_month: int = 0
     # Recent activity
     recent_queries: List[Dict[str, Any]] = []
     top_topics: List[Dict[str, Any]] = []
@@ -292,6 +294,8 @@ async def _fetch_user_usage(
                     "route": r.get("route", ""),
                     "total_tokens": r.get("total_tokens", 0),
                     "credits_used": r.get("credits_used", 0),
+                    "detected_language": r.get("detected_language"),
+                    "was_translated": r.get("was_translated", False),
                 }
                 for r in sorted_records
             ]
@@ -331,6 +335,9 @@ async def _fetch_user_usage(
     personal_documents_count = documents_count
     total_documents = personal_documents_count + global_documents_count
 
+    # Count translated queries from recent activity
+    translated_queries_month = sum(1 for q in recent_queries if q.get("was_translated"))
+
     return UsageStatsResponse(
         queries_today=usage["queries_today"],
         queries_this_month=usage["queries_this_month"],
@@ -345,6 +352,7 @@ async def _fetch_user_usage(
         credits_used_month=credit_info.get("credits_used", 0),
         credits_limit_month=credit_info.get("credits_limit"),
         credits_remaining=credit_info.get("credits_remaining"),
+        translated_queries_month=translated_queries_month,
         recent_queries=recent_queries,
         top_topics=[],
     )

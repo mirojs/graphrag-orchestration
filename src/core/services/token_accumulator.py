@@ -37,6 +37,13 @@ class _EmbedRecord:
     total_tokens: int
 
 
+@dataclass
+class _TranslationRecord:
+    """One translation call's usage."""
+    characters: int
+    detected_language: str
+
+
 class TokenAccumulator:
     """Thread-safe accumulator for all API usage within a single request.
 
@@ -52,11 +59,15 @@ class TokenAccumulator:
         self._calls: List[_CallRecord] = []
         self._rerank_calls: List[_RerankRecord] = []
         self._embed_calls: List[_EmbedRecord] = []
+        self._translation_calls: List[_TranslationRecord] = []
         self._prompt_tokens: int = 0
         self._completion_tokens: int = 0
         self._total_tokens: int = 0
         self._rerank_tokens: int = 0
         self._embed_tokens: int = 0
+        self._translation_chars: int = 0
+        self._detected_language: Optional[str] = None
+        self._was_translated: bool = False
         self._model: Optional[str] = None
 
     def add(
@@ -109,12 +120,29 @@ class TokenAccumulator:
             ))
             self._embed_tokens += total_tokens
 
+    def add_translation(
+        self,
+        characters: int,
+        detected_language: str,
+        was_translated: bool,
+    ) -> None:
+        """Record usage from one translation call."""
+        with self._lock:
+            self._translation_calls.append(_TranslationRecord(
+                characters=characters,
+                detected_language=detected_language,
+            ))
+            self._translation_chars += characters
+            self._detected_language = detected_language
+            self._was_translated = was_translated
+
     def compute_credits(self) -> int:
         """Compute total credits consumed from all tracked API calls."""
         from src.core.services.credit_schedule import (
             compute_llm_credits,
             compute_rerank_credits,
             compute_embedding_credits,
+            compute_translation_credits,
         )
         credits = 0
         with self._lock:
@@ -126,6 +154,8 @@ class TokenAccumulator:
                 credits += compute_rerank_credits(rr.model, rr.total_tokens)
             for em in self._embed_calls:
                 credits += compute_embedding_credits(em.model, em.total_tokens)
+            if self._translation_chars > 0:
+                credits += compute_translation_credits(self._translation_chars)
         return credits
 
     def snapshot(self) -> Dict[str, Any]:
@@ -138,6 +168,9 @@ class TokenAccumulator:
                 "total_tokens": self._total_tokens,
                 "rerank_tokens": self._rerank_tokens,
                 "embed_tokens": self._embed_tokens,
+                "translation_chars": self._translation_chars,
+                "detected_language": self._detected_language,
+                "was_translated": self._was_translated,
                 "model": self._model,
                 "llm_calls": len(self._calls),
                 "rerank_calls": len(self._rerank_calls),

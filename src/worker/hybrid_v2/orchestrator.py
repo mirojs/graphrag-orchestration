@@ -350,6 +350,65 @@ class HybridPipeline:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit - cleans up resources."""
         await self.close()
+
+    async def _get_document_language(self) -> Optional[str]:
+        """Get the primary language of documents in this group from Neo4j.
+
+        Returns the most common primary_language across Document nodes,
+        or None if unavailable.  Cached after first call.
+        """
+        if hasattr(self, "_doc_language_cache"):
+            return self._doc_language_cache
+
+        lang: Optional[str] = None
+        if self._async_neo4j:
+            try:
+                cypher = (
+                    "MATCH (d:Document {group_id: $gid}) "
+                    "WHERE d.primary_language IS NOT NULL "
+                    "RETURN d.primary_language AS lang, count(*) AS cnt "
+                    "ORDER BY cnt DESC LIMIT 1"
+                )
+                records = await self._async_neo4j.run_query(
+                    cypher, {"gid": self.group_id}
+                )
+                if records:
+                    lang = records[0].get("lang")
+            except Exception as e:
+                logger.warning("doc_language_fetch_failed", error=str(e))
+
+        self._doc_language_cache = lang
+        return lang
+
+    async def _maybe_translate_query(
+        self,
+        query: str,
+        accumulator=None,
+    ) -> tuple:
+        """Detect query language and translate if it differs from document language.
+
+        Returns:
+            (translated_query, detected_language, was_translated)
+        """
+        from src.worker.services.translator_service import get_translator_service
+        translator = get_translator_service()
+
+        if not translator.is_available:
+            return query, None, False
+
+        doc_lang = await self._get_document_language()
+        target_lang = doc_lang or "en"
+
+        result = await translator.detect_and_translate(query, target_lang=target_lang)
+
+        if accumulator and result.was_translated:
+            accumulator.add_translation(
+                characters=result.characters,
+                detected_language=result.detected_language,
+                was_translated=result.was_translated,
+            )
+
+        return result.translated_text, result.detected_language, result.was_translated
     
     async def query(
         self,
@@ -384,12 +443,22 @@ class HybridPipeline:
             - evidence_path: Entity path (if Routes 2/3/4).
             - metadata: Additional execution metadata.
         """
-        # Step 0: Route the query and determine weight profile
-        route, weight_profile = await self.router.route_with_profile(query)
-        
-        # Step 0b: Create per-request TokenAccumulator and attach to TrackedLLM
+        # Step 0: Create per-request TokenAccumulator and attach to TrackedLLM
         from src.core.services.token_accumulator import TokenAccumulator
         accumulator = TokenAccumulator()
+
+        # Step 0a: Translate query if user language ≠ document language
+        translated_query, detected_lang, was_translated = await self._maybe_translate_query(
+            query, accumulator=accumulator,
+        )
+        if was_translated and detected_lang and not language:
+            # Respond in the user's original language
+            language = detected_lang
+        search_query = translated_query if was_translated else query
+
+        # Step 0b: Route the (translated) query and determine weight profile
+        route, weight_profile = await self.router.route_with_profile(search_query)
+
         if hasattr(self.llm, "set_accumulator"):
             self.llm.set_accumulator(accumulator)
             self.llm.set_route(route.value if hasattr(route, "value") else str(route))
@@ -415,7 +484,7 @@ class HybridPipeline:
             if route == QueryRoute.HIPPORAG2_SEARCH:
                 extra_kwargs["query_mode"] = original_route.value
             result = await handler.execute(
-                query, response_type,
+                search_query, response_type,
                 knn_config=knn_config,
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
@@ -457,11 +526,11 @@ class HybridPipeline:
         # Route 1 (Vector RAG) was removed - now handled by Route 2 (Local Search)
         # =======================================================================
         if route == QueryRoute.LOCAL_SEARCH:
-            return await self._execute_route_2_local_search(query, response_type)
+            return await self._execute_route_2_local_search(search_query, response_type)
         elif route == QueryRoute.GLOBAL_SEARCH:
-            return await self._execute_route_3_global_search(query, response_type)
+            return await self._execute_route_3_global_search(search_query, response_type)
         else:  # DRIFT_MULTI_HOP
-            return await self._execute_route_4_drift(query, response_type)
+            return await self._execute_route_4_drift(search_query, response_type)
     
     # Route 2: Local Search Equivalent (LazyGraphRAG Only)
     # =========================================================================
@@ -2264,6 +2333,12 @@ Sub-questions:"""
             query_mode: Optional query mode hint for Route 7 presets (e.g. "local_search").
             folder_id: Per-query folder scope (overrides pipeline default, None = all folders).
         """
+        # Translate query if needed
+        translated_query, detected_lang, was_translated = await self._maybe_translate_query(query)
+        if was_translated and detected_lang and not language:
+            language = detected_lang
+        search_query = translated_query if was_translated else query
+
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
@@ -2276,7 +2351,7 @@ Sub-questions:"""
             if route == QueryRoute.HIPPORAG2_SEARCH:
                 extra_kwargs["query_mode"] = query_mode or route.value
             result = await handler.execute(
-                query, response_type,
+                search_query, response_type,
                 knn_config=knn_config,
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
@@ -2289,11 +2364,11 @@ Sub-questions:"""
         
         # Legacy fallback
         if route == QueryRoute.LOCAL_SEARCH:
-            return await self._execute_route_2_local_search(query, response_type)
+            return await self._execute_route_2_local_search(search_query, response_type)
         elif route == QueryRoute.GLOBAL_SEARCH:
-            return await self._execute_route_3_global_search(query, response_type)
+            return await self._execute_route_3_global_search(search_query, response_type)
         else:  # DRIFT_MULTI_HOP
-            return await self._execute_route_4_drift(query, response_type)
+            return await self._execute_route_4_drift(search_query, response_type)
     
     async def health_check(self) -> Dict[str, Any]:
         """Check the health of all pipeline components."""

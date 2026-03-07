@@ -60,6 +60,7 @@ export interface UsageStats {
     credits_used_month: number;
     credits_limit_month: number | null;
     credits_remaining: number | null;
+    translated_queries_month: number;
     recent_queries: Array<Record<string, any>>;
     top_topics: Array<Record<string, any>>;
 }

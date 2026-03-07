@@ -182,6 +182,7 @@ const Dashboard = () => {
                     <span className={styles.statValue}>{usage.credits_used_month.toLocaleString()}</span>
                     <span className={styles.statSubtext}>
                         of {usage.credits_limit_month != null ? usage.credits_limit_month.toLocaleString() : "∞"} monthly credits
+                        {usage.translated_queries_month > 0 && ` · ${usage.translated_queries_month} translated`}
                     </span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${credits.color}`} style={{ width: `${credits.pct}%` }} />
@@ -221,6 +222,7 @@ const Dashboard = () => {
                                 <th>Time</th>
                                 <th>Tokens</th>
                                 <th>Credits</th>
+                                <th>Language</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -229,6 +231,11 @@ const Dashboard = () => {
                                     <td>{q.timestamp ? new Date(q.timestamp).toLocaleString() : "—"}</td>
                                     <td>{q.total_tokens ?? "—"}</td>
                                     <td>{q.credits_used ?? "—"}</td>
+                                    <td>
+                                        {q.detected_language
+                                            ? `${q.detected_language.toUpperCase()}${q.was_translated ? " 🌐" : ""}`
+                                            : "—"}
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

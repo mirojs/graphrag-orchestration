@@ -68,6 +68,12 @@ GDS_PRICE_PER_HOUR_PER_GB: float = 0.035  # ~$0.07/hr for a 2 GB session
 
 
 # ============================================================================
+# Azure Translator — per 1M characters (S1 pay-as-you-go)
+# ============================================================================
+TRANSLATOR_PRICE_PER_1M_CHARS: float = 10.00  # $10 per 1M characters
+
+
+# ============================================================================
 # Credit computation helpers
 # ============================================================================
 
@@ -118,6 +124,12 @@ def compute_gds_credits(memory_gb: int, duration_seconds: int) -> int:
     """Compute credits for a GDS session (billed by memory-hours)."""
     hours = duration_seconds / 3600
     cost = memory_gb * hours * GDS_PRICE_PER_HOUR_PER_GB
+    return _usd_to_credits(cost)
+
+
+def compute_translation_credits(characters: int) -> int:
+    """Compute credits for an Azure Translator call."""
+    cost = (characters / 1_000_000) * TRANSLATOR_PRICE_PER_1M_CHARS
     return _usd_to_credits(cost)
 
 

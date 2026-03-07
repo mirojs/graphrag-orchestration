@@ -212,6 +212,10 @@ class Settings(BaseSettings):
     # Multi-tenancy
     ENABLE_GROUP_ISOLATION: bool = True
     
+    # Azure Translator (query translation for multilingual chat)
+    AZURE_TRANSLATOR_ENDPOINT: Optional[str] = None
+    AZURE_TRANSLATOR_REGION: str = "swedencentral"
+
     # Azure Key Vault (optional — secrets auto-loaded at module import when set)
     AZURE_KEY_VAULT_URL: Optional[str] = None
 

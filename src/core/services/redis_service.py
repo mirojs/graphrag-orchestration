@@ -619,7 +619,7 @@ class RedisService:
         
         kwargs = {"decode_responses": True, "socket_timeout": 5, "socket_connect_timeout": 5}
         if url.startswith("rediss://"):
-            kwargs["ssl_cert_reqs"] = None  # Azure Redis uses managed certs
+            kwargs["ssl_cert_reqs"] = "required"
         
         client = aioredis.from_url(url, **kwargs)
         

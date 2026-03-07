@@ -242,7 +242,7 @@ async def recognition_memory_filter(
         llm_client: LLM client with ``acomplete(prompt)`` method.
         query: The user query.
         candidate_triples: List of (Triple, score) from TripleEmbeddingStore.search().
-        max_facts: Maximum facts to select. Defaults to env ROUTE7_RECOGNITION_MEMORY_MAX_FACTS (4).
+        max_facts: Maximum facts to select. Defaults to env ROUTE7_RECOGNITION_MEMORY_MAX_FACTS (7).
 
     Returns:
         List of (Triple, score) tuples that survived filtering. May be empty.
@@ -251,7 +251,7 @@ async def recognition_memory_filter(
         return []
 
     if max_facts is None:
-        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "4"))
+        max_facts = int(os.getenv("ROUTE7_RECOGNITION_MEMORY_MAX_FACTS", "7"))
 
     # Build fact list in upstream format: {"fact": [["s","p","o"], ...]}
     fact_list = []

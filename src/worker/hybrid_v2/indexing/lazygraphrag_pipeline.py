@@ -692,7 +692,40 @@ class LazyGraphRAGIndexingPipeline:
             if ingestion == "document-intelligence" and not str(content).strip() and str(source).startswith("http"):
                 url_inputs.append(str(source))
 
-        if ingestion != "document-intelligence" or not url_inputs:
+        # ── Pair .result.json sidecars with their parent PDFs ────────
+        # When both "X.pdf" and "X.pdf.result.json" are uploaded, use the
+        # pre-analyzed result for the PDF and drop the .result.json from
+        # standalone processing to avoid duplicate content.
+        result_json_urls = {u for u in url_inputs if u.endswith(".result.json")}
+        paired_redirects: Dict[str, str] = {}  # pdf_url -> result_json_url
+        for rj_url in result_json_urls:
+            # "X.pdf.result.json" → parent is "X.pdf"
+            parent_url = rj_url.removesuffix(".result.json")
+            if parent_url in url_inputs:
+                paired_redirects[parent_url] = rj_url
+                logger.info(f"Paired .result.json sidecar: {rj_url.split('/')[-1]} → {parent_url.split('/')[-1]}")
+
+        # Build effective URL list: replace paired PDFs with their .result.json,
+        # drop .result.json entries that were paired (they'll run via the PDF entry)
+        effective_urls: List[str] = []
+        for u in url_inputs:
+            if u in paired_redirects:
+                effective_urls.append(paired_redirects[u])  # use .result.json for this PDF
+            elif u in result_json_urls and u.removesuffix(".result.json") in paired_redirects:
+                continue  # skip — already consumed as sidecar
+            else:
+                effective_urls.append(u)
+
+        # Update normalized docs: rewrite source for paired PDFs so results map back
+        source_remap: Dict[str, str] = {}  # result_json_url -> original_pdf_url
+        for pdf_url, rj_url in paired_redirects.items():
+            source_remap[rj_url] = pdf_url
+        for doc in normalized:
+            if doc.get("source") in result_json_urls and doc["source"].removesuffix(".result.json") in paired_redirects:
+                # Mark paired .result.json docs as skip (they're sidecars, not standalone)
+                doc["_skip_sidecar"] = True
+
+        if ingestion != "document-intelligence" or not effective_urls:
             return normalized
 
         di_service = DocumentIntelligenceService()
@@ -703,7 +736,7 @@ class LazyGraphRAGIndexingPipeline:
         # constrained environments (codespace, small container).
         by_source: Dict[str, List[LlamaDocument]] = {}
 
-        for url in url_inputs:
+        for url in effective_urls:
             try:
                 extracted = await di_service.extract_documents(
                     group_id=group_id,
@@ -712,12 +745,16 @@ class LazyGraphRAGIndexingPipeline:
                     model_strategy="auto",
                 )
                 logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
-                by_source[url] = extracted
+                # If this result.json was a sidecar, map results back to the PDF's URL
+                target_url = source_remap.get(url, url)
+                by_source[target_url] = extracted
             except Exception as exc:
                 logger.warning(f"DI extraction failed for a URL: {exc}")
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:
+            if doc.get("_skip_sidecar"):
+                continue  # drop paired .result.json from output
             src = doc.get("source", "")
             if src and src in by_source:
                 # Keep the top-level document, but chunk from DI units.

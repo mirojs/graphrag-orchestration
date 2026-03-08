@@ -27,6 +27,7 @@ Model: prebuilt-layout (2024-11-30 API version)
 """
 
 import asyncio
+import json
 import logging
 import base64
 import io
@@ -2339,40 +2340,59 @@ class DocumentIntelligenceService:
             logger.info(f"Document Intelligence analyzing: {url[:80]}...")
             
             try:
-                # Decide model
-                selected_model = self._select_model(url, default_model=default_model, explicit=explicit_model)
+                # ── .result.json bypass ──────────────────────────────
+                # If the URL points to a pre-analyzed DI result (*.result.json),
+                # download and deserialize it directly instead of calling the API.
+                if url.endswith(".result.json"):
+                    logger.info(f"📂 Detected pre-analyzed DI result: {url[:80]}")
+                    try:
+                        credential = DefaultAzureCredential()
+                        async with BlobClient.from_blob_url(url, credential=credential) as blob:
+                            download = await blob.download_blob()
+                            raw = await download.readall()
+                        result_dict = json.loads(raw)
+                        result = AnalyzeResult(result_dict)
+                        logger.info(f"✅ Deserialized pre-analyzed result ({len(result.pages or [])} pages) from {url[:80]}")
+                    except Exception as e:
+                        error_msg = f"Failed to load pre-analyzed result {url}: {e}"
+                        logger.error(error_msg)
+                        return (url, [], error_msg)
+                else:
+                    # ── Standard DI API call ─────────────────────────────
+                    # Decide model
+                    selected_model = self._select_model(url, default_model=default_model, explicit=explicit_model)
 
-                # DI can access Azure blob storage directly using its own Managed Identity
-                # No need to download locally - just pass the URL (with SAS if present)
-                logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
-                # Enable add-on features for enhanced extraction (v4 API pricing)
-                # KEY_VALUE_PAIRS: FREE in v4 API - deterministic field lookups
-                # BARCODES: FREE - QR codes, UPC, tracking numbers
-                # LANGUAGES: FREE - per-span language detection
-                # Selection marks: Included in base prebuilt-layout (no add-on needed)
-                poller = await client.begin_analyze_document(
-                    selected_model,
-                    AnalyzeDocumentRequest(url_source=url),
-                    output_content_format=DocumentContentFormat.MARKDOWN,
-                    features=[
-                        DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # FREE in v4!
-                        DocumentAnalysisFeature.BARCODES,         # FREE!
-                        DocumentAnalysisFeature.LANGUAGES,        # FREE!
-                    ],
-                )
-
-                # Wait for completion with timeout (SDK handles polling automatically)
-                # Azure DI typically takes 2-10 seconds per document, can be slower under load
-                di_timeout = settings.AZURE_DI_TIMEOUT
-                try:
-                    result: AnalyzeResult = await asyncio.wait_for(
-                        poller.result(), 
-                        timeout=di_timeout
+                    # DI can access Azure blob storage directly using its own Managed Identity
+                    # No need to download locally - just pass the URL (with SAS if present)
+                    logger.info(f"⏳ Starting Document Intelligence analysis (URL source, model={selected_model})...")
+                    # Enable add-on features for enhanced extraction (v4 API pricing)
+                    # KEY_VALUE_PAIRS: FREE in v4 API - deterministic field lookups
+                    # BARCODES: FREE - QR codes, UPC, tracking numbers
+                    # LANGUAGES: FREE - per-span language detection
+                    # Selection marks: Included in base prebuilt-layout (no add-on needed)
+                    poller = await client.begin_analyze_document(
+                        selected_model,
+                        AnalyzeDocumentRequest(url_source=url),
+                        output_content_format=DocumentContentFormat.MARKDOWN,
+                        features=[
+                            DocumentAnalysisFeature.KEY_VALUE_PAIRS,  # FREE in v4!
+                            DocumentAnalysisFeature.BARCODES,         # FREE!
+                            DocumentAnalysisFeature.LANGUAGES,        # FREE!
+                        ],
                     )
-                    logger.info(f"✅ Document Intelligence analysis completed for {url[:80]}")
-                except asyncio.TimeoutError:
-                    logger.error(f"❌ Document Intelligence analysis timed out after {di_timeout}s for {url[:80]}")
-                    raise TimeoutError(f"Document Intelligence analysis timed out for {url}")
+
+                    # Wait for completion with timeout (SDK handles polling automatically)
+                    # Azure DI typically takes 2-10 seconds per document, can be slower under load
+                    di_timeout = settings.AZURE_DI_TIMEOUT
+                    try:
+                        result: AnalyzeResult = await asyncio.wait_for(
+                            poller.result(), 
+                            timeout=di_timeout
+                        )
+                        logger.info(f"✅ Document Intelligence analysis completed for {url[:80]}")
+                    except asyncio.TimeoutError:
+                        logger.error(f"❌ Document Intelligence analysis timed out after {di_timeout}s for {url[:80]}")
+                        raise TimeoutError(f"Document Intelligence analysis timed out for {url}")
 
                 if not getattr(result, "pages", None):
                     logger.warning(f"No pages extracted from {url}")

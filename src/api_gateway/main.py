@@ -453,7 +453,7 @@ if STATIC_DIR.exists() and (STATIC_DIR / "index.html").exists():
         # Don't catch API-like paths
         if path.startswith((
             "api/", "hybrid/", "lifecycle/", "maintenance/", "admin/",
-            "chat", "config", "health", "folders", "upload",
+            "chat", "config", "health", "dashboard", "folders", "upload",
             "delete_uploaded", "list_uploaded", "rename_uploaded",
             "move_uploaded", "copy_uploaded", "chat_history",
             "file_metadata", "speech", "auth_setup", "content/",

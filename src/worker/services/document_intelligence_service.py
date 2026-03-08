@@ -447,7 +447,7 @@ class DocumentIntelligenceService:
         # Build page dimension lookup for polygon normalization
         dim_by_page: Dict[int, Dict[str, Any]] = {}
         if page_dimensions_serial:
-            dim_by_page = {d["page_number"]: d for d in page_dimensions_serial if "page_number" in d}
+            dim_by_page = {d.get("page") or d.get("page_number") or 0: d for d in page_dimensions_serial}
 
         # Extract headers (row 0) — .strip() must match _extract_table_row_sentences()
         headers = [""] * (table.column_count or 0)

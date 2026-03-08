@@ -15,7 +15,7 @@
       "value": "${NEO4J_PASSWORD}"
     },
     "skipRoleAssignments": {
-      "value": true
+      "value": false
     },
     "enableAuth": {
       "value": "${ENABLE_AUTH=false}"

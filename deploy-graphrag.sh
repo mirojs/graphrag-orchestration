@@ -285,6 +285,51 @@ for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WOR
     fi
 done
 
+# ── RBAC role assignments for managed identity ──────────────────────────
+# The container apps need:
+#   - Storage Blob Data Contributor on the storage account (user-content + content)
+#   - Cosmos DB Built-in Data Contributor on Cosmos (for usage tracking)
+# These are idempotent — safe to re-run.
+echo ""
+echo "🔐 Ensuring RBAC role assignments..."
+STORAGE_RESOURCE_ID=$(az storage account show \
+    --name "$STORAGE_ACCOUNT" \
+    --resource-group "$AZURE_RESOURCE_GROUP" \
+    --query "id" -o tsv 2>/dev/null || echo "")
+
+for CA_NAME in "$CONTAINER_APP_API" "$CONTAINER_APP_API_B2C" "$CONTAINER_APP_WORKER"; do
+    if [ "$CA_NAME" = "$CONTAINER_APP_API_B2C" ] && [ "${SKIP_B2C:-}" = "true" ]; then continue; fi
+    # Get the principal ID of the container app's managed identity
+    PRINCIPAL_ID=$(az containerapp show \
+        --name "$CA_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "identity.principalId" -o tsv 2>/dev/null || echo "")
+    if [ -z "$PRINCIPAL_ID" ]; then
+        # Try user-assigned identity
+        PRINCIPAL_ID=$(az containerapp show \
+            --name "$CA_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --query "identity.userAssignedIdentities.*.principalId | [0]" -o tsv 2>/dev/null || echo "")
+    fi
+    if [ -z "$PRINCIPAL_ID" ]; then
+        echo "⚠️  No managed identity principal for $CA_NAME — skipping RBAC"
+        continue
+    fi
+
+    # Storage Blob Data Contributor (ba92f5b4-2d11-453d-a403-e96b0029c9fe)
+    if [ -n "$STORAGE_RESOURCE_ID" ]; then
+        az role assignment create \
+            --assignee-object-id "$PRINCIPAL_ID" \
+            --assignee-principal-type ServicePrincipal \
+            --role "Storage Blob Data Contributor" \
+            --scope "$STORAGE_RESOURCE_ID" \
+            --only-show-errors 2>/dev/null && \
+            echo "✅ Storage Blob Data Contributor on $CA_NAME" || \
+            echo "ℹ️  Storage Blob role already assigned or insufficient permissions for $CA_NAME"
+    fi
+done
+echo ""
+
 # Update container app with new image
 echo "⏳ Updating Container App with new image..."
 REFRESH_TIMESTAMP=$(date +%Y%m%d%H%M%S)

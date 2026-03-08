@@ -426,7 +426,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             },
             "matched_sections": [s.get("title", "?") for s in section_headings],
             "section_scores": {
-                s.get("title", "?"): round(s.get("score", 0), 4)
+                s.get("title", "?"): round(s.get("score") or 0, 4)
                 for s in section_headings
             },
             "sentence_evidence_count": len(sentence_evidence),
@@ -445,27 +445,27 @@ class ConceptSearchHandler(BaseRouteHandler):
             metadata["community_summaries"] = [
                 {
                     "title": c.get("title", ""),
-                    "summary": c.get("summary", "")[:300],
-                    "score": round(s, 4),
+                    "summary": (c.get("summary") or "")[:300],
+                    "score": round(s or 0, 4),
                 }
                 for c, s in zip(community_data, community_scores)
             ]
             metadata["section_headings"] = [
                 {
                     "title": s.get("title", ""),
-                    "summary": s.get("summary", "")[:300],
+                    "summary": (s.get("summary") or "")[:300],
                     "path_key": s.get("path_key", ""),
                     "document_title": s.get("document_title", ""),
-                    "score": round(s.get("score", 0), 4),
+                    "score": round(s.get("score") or 0, 4),
                 }
                 for s in section_headings
             ]
             metadata["sentence_evidence"] = [
                 {
-                    "text": s.get("text", "")[:200],
+                    "text": (s.get("text") or "")[:200],
                     "source": s.get("document_title", ""),
                     "section_path": s.get("section_path", ""),
-                    "score": round(s.get("score", 0), 4),
+                    "score": round(s.get("score") or 0, 4),
                     "expansion_source": s.get("expansion_source", ""),
                 }
                 for s in sentence_evidence[:10]
@@ -720,15 +720,19 @@ class ConceptSearchHandler(BaseRouteHandler):
                 summary=(community.get("summary", "") or "")[:500],
             )
             async with semaphore:
+                resp = None
                 try:
                     resp = await self.llm.acomplete(prompt)
                     text = resp.text.strip()
-                    # Parse JSON rating
+                    if text.startswith("```"):
+                        text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+                        text = re.sub(r'\n?```\s*$', '', text)
                     parsed = json.loads(text)
                     return int(parsed.get("rating", 0))
                 except (json.JSONDecodeError, ValueError, KeyError):
                     # Try extracting a bare number
-                    match = re.search(r"\b(\d+)\b", resp.text if 'resp' in dir() else "")
+                    raw = resp.text if resp else ""
+                    match = re.search(r"\b(\d+)\b", raw)
                     return int(match.group(1)) if match else 0
                 except Exception as e:
                     logger.warning("route6_community_rating_error", error=str(e))
@@ -893,8 +897,8 @@ class ConceptSearchHandler(BaseRouteHandler):
                 # Format source sentences grouped by document
                 by_doc: Dict[str, List[str]] = defaultdict(list)
                 for s in sentences:
-                    doc = s.get("document_title", "Unknown")
-                    text = s.get("text", "").strip()
+                    doc = s.get("document_title") or "Unknown"
+                    text = (s.get("text") or "").strip()
                     if text:
                         by_doc[doc].append(text)
 
@@ -908,7 +912,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 )
             else:
                 # Fallback: use the abstract summary if no source text
-                summary = c.get("summary", "").strip()
+                summary = (c.get("summary") or "").strip()
                 if summary:
                     community_blocks.append(
                         f"--- Community {i}: {title} ---\n  {summary}"
@@ -926,6 +930,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         try:
             resp = await self.llm.acomplete(prompt)
             text = resp.text.strip()
+            # Strip markdown code fences (LLMs often wrap JSON in ```json...```)
+            if text.startswith("```"):
+                text = re.sub(r'^```(?:json)?\s*\n?', '', text)
+                text = re.sub(r'\n?```\s*$', '', text)
             parsed = json.loads(text)
             points = parsed.get("points", [])
             if not points:
@@ -967,7 +975,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         lines = []
         for i, c in enumerate(communities, 1):
             title = c.get("title", f"Theme {i}")
-            summary = c.get("summary", "").strip()
+            summary = (c.get("summary") or "").strip()
             if summary:
                 lines.append(f"{i}. **{title}**: {summary}")
         return "\n".join(lines) if lines else "(No thematic context available)"
@@ -1094,7 +1102,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             summary_lines = []
             for i, c in enumerate(communities, 1):
                 title = c.get("title", f"Theme {i}")
-                summary = c.get("summary", "").strip()
+                summary = (c.get("summary") or "").strip()
                 if summary:
                     summary_lines.append(f"{i}. **{title}**: {summary}")
                 else:
@@ -1128,9 +1136,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         if sentence_evidence:
             evidence_lines = []
             for i, ev in enumerate(sentence_evidence, 1):
-                doc = ev.get("document_title", "Unknown")
-                section = ev.get("section_path", "")
-                text = ev.get("text", "")
+                doc = ev.get("document_title") or "Unknown"
+                section = ev.get("section_path") or ""
+                text = ev.get("text") or ""
                 if section:
                     evidence_lines.append(f"{i}. [{doc} > {section}] {text}")
                 else:
@@ -1143,7 +1151,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         if entity_doc_map:
             cov_lines = []
             for entity_name, doc_titles in entity_doc_map.items():
-                docs_str = ", ".join(sorted(doc_titles))
+                docs_str = ", ".join(sorted(t for t in doc_titles if t))
                 cov_lines.append(
                     f"- {entity_name}: {docs_str} ({len(doc_titles)} document{'s' if len(doc_titles) != 1 else ''})"
                 )
@@ -1321,7 +1329,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             parts = []
             if r.get("prev_text"):
                 parts.append(r["prev_text"].strip())
-            parts.append(r.get("text", "").strip())
+            parts.append((r.get("text") or "").strip())
             if r.get("next_text"):
                 parts.append(r["next_text"].strip())
             passage = " ".join(parts)
@@ -1335,7 +1343,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             chunk_text = (r.get("chunk_text") or "").strip()
             evidence.append({
                 "text": passage,
-                "sentence_text": r.get("text", ""),
+                "sentence_text": r.get("text") or "",
                 "chunk_text": chunk_text,
                 "score": r.get("score", 0),
                 "document_title": r.get("document_title", "Unknown"),
@@ -1491,7 +1499,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             parts = []
             if r.get("prev_text"):
                 parts.append(r["prev_text"].strip())
-            parts.append(r.get("text", "").strip())
+            parts.append((r.get("text") or "").strip())
             if r.get("next_text"):
                 parts.append(r["next_text"].strip())
             passage = " ".join(parts)
@@ -1504,7 +1512,7 @@ class ConceptSearchHandler(BaseRouteHandler):
                 ev_score = synthetic_score * 1.3
             evidence.append({
                 "text": passage,
-                "sentence_text": r.get("text", ""),
+                "sentence_text": r.get("text") or "",
                 "chunk_text": chunk_text,
                 "score": ev_score,
                 "document_title": r.get("document_title", "Unknown"),
@@ -1797,8 +1805,8 @@ class ConceptSearchHandler(BaseRouteHandler):
         cleaned: List[Dict[str, Any]] = []
 
         for ev in evidence:
-            text = (ev.get("sentence_text") or ev.get("text", "")).strip()
-            passage = (ev.get("text", "")).strip()
+            text = (ev.get("sentence_text") or ev.get("text") or "").strip()
+            passage = (ev.get("text") or "").strip()
 
             # Rule 1: HTML / markup-heavy
             tag_count = len(re.findall(r"<[^>]+>", text))
@@ -1854,7 +1862,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             from src.core.config import settings
 
             vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-            documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
+            documents = [ev.get("sentence_text") or ev.get("text") or "" for ev in evidence]
 
             loop = asyncio.get_running_loop()
             rr_result = await loop.run_in_executor(

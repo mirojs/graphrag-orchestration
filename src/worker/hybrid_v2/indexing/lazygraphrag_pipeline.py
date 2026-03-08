@@ -3615,8 +3615,10 @@ SUMMARY: <summary>"""
                     merged_desc = m.description
                 merged_type = m.type or merged_type
                 merged_meta.update(m.metadata or {})
-                # V2: Copy embedding_v2 property (Voyage embeddings)
-                if merged_emb_v2 is None and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:
+                # Only keep embedding from the member whose name matches the
+                # canonical name.  Inheriting an embedding computed for a
+                # different (pre-rename) surface form would be stale.
+                if m.name == canon_name and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:
                     merged_emb_v2 = m.embedding_v2
 
             canonical_entities[canon_id] = Entity(

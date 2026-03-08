@@ -32,7 +32,6 @@
         "fileDeleted": "檔案已刪除"
     },
     "developerSettings": "開發者設定",
-
     "chatEmptyStateTitle": "詢問您的文件，信賴每一個答案。",
     "chatEmptyStateSubtitle": "每個答案都可追溯至原文句子——點擊即可在原始 PDF 上驗證。您可以使用範例文件或上傳自己的文件來體驗。",
     "defaultExamples": {
@@ -51,7 +50,6 @@
     "generatingAnswer": "正在產生答案",
     "citationWithColon": "引用來源：",
     "followupQuestions": "後續問題：",
-
     "tooltips": {
         "submitQuestion": "提交問題",
         "stopStreaming": "停止串流",
@@ -64,12 +62,10 @@
         "copy": "複製",
         "copied": "已複製！"
     },
-
     "headerTexts": {
         "supportingContent": "輔助內容",
         "citation": "引用來源"
     },
-
     "labels": {
         "toggleMenu": "切換選單",
         "languagePicker": "選擇您的語言",
@@ -131,7 +127,6 @@
         "useGroupsSecurityFilter": "使用群組安全篩選器",
         "shouldStream": "串流聊天完成回應"
     },
-
     "helpTexts": {
         "promptTemplate": "覆寫用於根據問題和搜尋結果產生答案的提示詞。若要附加到現有提示詞而非完全取代，請在提示詞開頭加上「>>>」。",
         "temperature": "設定向 LLM 發送請求以產生答案時的溫度。較高的溫度會產生更具創意的回應，但可能較不精確。",
@@ -159,11 +154,9 @@
         "useWebSource": "使用網頁搜尋結果來補充您已索引的資料集進行檢索。",
         "useSharePointSource": "使用 SharePoint 內容來補充您已索引的資料集進行檢索。"
     },
-
     "overallSettings": "一般設定",
     "searchSettings": "搜尋設定",
     "llmSettings": "LLM 設定",
-
     "fileToolbar": {
         "searchPlaceholder": "搜尋檔案...",
         "fileCount_one": "{{count}} 個檔案",
@@ -178,14 +171,12 @@
         "selectAll": "全選",
         "refresh": "重新整理"
     },
-
     "nav": {
         "chat": "聊天",
         "files": "檔案",
         "dashboard": "儀表板",
         "toggleNavigation": "切換導覽"
     },
-
     "files": {
         "signInRequired": "需要登入",
         "signInToManage": "請登入以管理您的檔案。",
@@ -225,9 +216,9 @@
         "folderActions": "資料夾操作",
         "newSubfolder": "新增子資料夾",
         "renameFile": "重新命名檔案",
-        "cancel": "取消"
+        "cancel": "取消",
+        "confirm": "Confirm"
     },
-
     "viewer": {
         "loadingFile": "正在載入檔案",
         "failedLoadingMarkdown": "載入 Markdown 檔案失敗。",
@@ -237,13 +228,11 @@
         "highlightCount": "此頁有 {{count}} 處標記",
         "failedLoadPdf": "無法載入 PDF 文件"
     },
-
     "analysis": {
         "citedSentences": "引用句子",
         "page": "第 {{number}} 頁",
         "citationImage": "引用圖片"
     },
-
     "agentPlan": {
         "source": "來源：",
         "search": "搜尋：",
@@ -255,7 +244,6 @@
         "noResults": "未找到任何結果",
         "azureAiSearchNote": "此步驟使用 Azure AI Search 模型，因此 Token 容量不會影響已部署的模型。"
     },
-
     "tokenUsage": {
         "title": "Token 使用量",
         "total": "總計",
@@ -263,7 +251,6 @@
         "reasoning": "推理",
         "output": "輸出"
     },
-
     "dashboard": {
         "signInRequired": "需要登入",
         "signInToView": "請登入以檢視您的儀表板。",
@@ -308,7 +295,6 @@
         "featureSso": "SSO 整合",
         "featureCustomBranding": "自訂品牌"
     },
-
     "admin": {
         "signInRequired": "需要登入",
         "goToDashboard": "前往儀表板",
@@ -336,7 +322,6 @@
         "lastActive": "最後活躍時間",
         "noUserActivity": "尚無使用者活動資料。資料將在分析服務連線後顯示。"
     },
-
     "errors": {
         "retry": "重試",
         "networkError": "無法連線至伺服器。請檢查您的網路連線並重試。",

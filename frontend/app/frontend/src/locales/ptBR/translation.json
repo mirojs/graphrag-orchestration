@@ -224,7 +224,8 @@
         "folderActions": "Ações da pasta",
         "newSubfolder": "Nova subpasta",
         "renameFile": "Renomear arquivo",
-        "cancel": "Cancelar"
+        "cancel": "Cancelar",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Carregando arquivo",

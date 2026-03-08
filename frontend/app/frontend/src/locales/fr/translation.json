@@ -224,7 +224,8 @@
         "folderActions": "Actions du dossier",
         "newSubfolder": "Nouveau sous-dossier",
         "renameFile": "Renommer le fichier",
-        "cancel": "Annuler"
+        "cancel": "Annuler",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Chargement du fichier",

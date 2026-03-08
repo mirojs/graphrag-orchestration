@@ -224,7 +224,8 @@
         "folderActions": "Mapacties",
         "newSubfolder": "Nieuwe submap",
         "renameFile": "Bestand hernoemen",
-        "cancel": "Annuleren"
+        "cancel": "Annuleren",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Bestand laden",

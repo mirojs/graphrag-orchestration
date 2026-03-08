@@ -88,6 +88,11 @@ export const FolderSidebar = ({
         setContextMenu({ folderId, x: e.clientX, y: e.clientY });
     };
 
+    const handleCreateCancel = useCallback(() => {
+        setCreating(null);
+        setNewFolderName("");
+    }, []);
+
     const renderCreateInput = () => (
         <div className={styles.createRow}>
             <span className={styles.folderIcon}>📁</span>
@@ -98,11 +103,24 @@ export const FolderSidebar = ({
                 onChange={e => setNewFolderName(e.target.value)}
                 onKeyDown={e => {
                     if (e.key === "Enter") handleCreateSubmit();
-                    if (e.key === "Escape") { setCreating(null); setNewFolderName(""); }
+                    if (e.key === "Escape") handleCreateCancel();
                 }}
-                onBlur={handleCreateSubmit}
                 placeholder={t("files.folderNamePlaceholder")}
             />
+            <button
+                className={styles.inlineConfirmBtn}
+                onClick={handleCreateSubmit}
+                title={t("files.confirm")}
+            >
+                ✓
+            </button>
+            <button
+                className={styles.inlineCancelBtn}
+                onClick={handleCreateCancel}
+                title={t("files.cancel")}
+            >
+                ✕
+            </button>
         </div>
     );
 
@@ -121,18 +139,33 @@ export const FolderSidebar = ({
                 >
                     <span className={styles.folderIcon}>{children.length > 0 ? "📂" : "📁"}</span>
                     {isRenaming ? (
-                        <input
-                            ref={renameInputRef}
-                            className={styles.inlineInput}
-                            value={renameValue}
-                            onChange={e => setRenameValue(e.target.value)}
-                            onKeyDown={e => {
-                                if (e.key === "Enter") handleRenameSubmit();
-                                if (e.key === "Escape") { setRenamingId(null); setRenameValue(""); }
-                            }}
-                            onBlur={handleRenameSubmit}
-                            onClick={e => e.stopPropagation()}
-                        />
+                        <>
+                            <input
+                                ref={renameInputRef}
+                                className={styles.inlineInput}
+                                value={renameValue}
+                                onChange={e => setRenameValue(e.target.value)}
+                                onKeyDown={e => {
+                                    if (e.key === "Enter") handleRenameSubmit();
+                                    if (e.key === "Escape") { setRenamingId(null); setRenameValue(""); }
+                                }}
+                                onClick={e => e.stopPropagation()}
+                            />
+                            <button
+                                className={styles.inlineConfirmBtn}
+                                onClick={e => { e.stopPropagation(); handleRenameSubmit(); }}
+                                title={t("files.confirm")}
+                            >
+                                ✓
+                            </button>
+                            <button
+                                className={styles.inlineCancelBtn}
+                                onClick={e => { e.stopPropagation(); setRenamingId(null); setRenameValue(""); }}
+                                title={t("files.cancel")}
+                            >
+                                ✕
+                            </button>
+                        </>
                     ) : (
                         <span className={styles.folderName}>{folder.name}</span>
                     )}

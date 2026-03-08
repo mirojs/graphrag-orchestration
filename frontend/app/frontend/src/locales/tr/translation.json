@@ -224,7 +224,8 @@
         "folderActions": "Klasör işlemleri",
         "newSubfolder": "Yeni alt klasör",
         "renameFile": "Dosyayı yeniden adlandır",
-        "cancel": "İptal"
+        "cancel": "İptal",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Dosya yükleniyor",

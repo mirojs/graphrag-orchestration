@@ -123,6 +123,39 @@
     min-width: 0;
 }
 
+/* Inline confirm / cancel buttons */
+.inlineConfirmBtn,
+.inlineCancelBtn {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    border: 1px solid #d0d0d0;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: background 0.15s, border-color 0.15s;
+}
+.inlineConfirmBtn {
+    color: #2ecc71;
+}
+.inlineConfirmBtn:hover {
+    background: #eafaf1;
+    border-color: #2ecc71;
+}
+.inlineCancelBtn {
+    color: #e74c3c;
+}
+.inlineCancelBtn:hover {
+    background: #fdecea;
+    border-color: #e74c3c;
+}
+
 /* Context menu */
 .contextMenu {
     position: fixed;

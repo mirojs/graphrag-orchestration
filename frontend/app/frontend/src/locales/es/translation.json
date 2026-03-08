@@ -224,7 +224,8 @@
         "folderActions": "Acciones de carpeta",
         "newSubfolder": "Nueva subcarpeta",
         "renameFile": "Renombrar archivo",
-        "cancel": "Cancelar"
+        "cancel": "Cancelar",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Cargando archivo",

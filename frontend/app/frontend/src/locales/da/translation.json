@@ -224,7 +224,8 @@
         "folderActions": "Mappehandlinger",
         "newSubfolder": "Ny undermappe",
         "renameFile": "Omdøb fil",
-        "cancel": "Annullér"
+        "cancel": "Annullér",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Indlæser fil",

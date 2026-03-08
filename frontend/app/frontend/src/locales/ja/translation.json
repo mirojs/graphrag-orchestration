@@ -224,7 +224,8 @@
         "folderActions": "フォルダ操作",
         "newSubfolder": "新しいサブフォルダ",
         "renameFile": "ファイル名を変更",
-        "cancel": "キャンセル"
+        "cancel": "キャンセル",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "ファイルを読み込み中",

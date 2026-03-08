@@ -56,7 +56,7 @@ export async function createFolderApi(
             const body = await response.json();
             detail = body.detail || detail;
         } catch { /* ignore */ }
-        throw new Error(`Create folder failed: ${detail}`);
+        throw new Error(detail);
     }
     return response.json();
 }
@@ -73,7 +73,12 @@ export async function renameFolderApi(
         body: JSON.stringify({ name: newName }),
     });
     if (!response.ok) {
-        throw new Error(`Rename folder failed: ${response.statusText}`);
+        let detail = response.statusText;
+        try {
+            const body = await response.json();
+            detail = body.detail || detail;
+        } catch { /* ignore */ }
+        throw new Error(detail);
     }
     return response.json();
 }
@@ -94,7 +99,7 @@ export async function deleteFolderApi(
             const body = await response.json();
             detail = body.detail || detail;
         } catch { /* ignore */ }
-        throw new Error(`Delete folder failed: ${detail}`);
+        throw new Error(detail);
     }
     return response.json();
 }

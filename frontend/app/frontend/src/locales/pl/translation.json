@@ -227,7 +227,8 @@
         "folderActions": "Akcje folderu",
         "newSubfolder": "Nowy podfolder",
         "renameFile": "Zmień nazwę pliku",
-        "cancel": "Anuluj"
+        "cancel": "Anuluj",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Ładowanie pliku",

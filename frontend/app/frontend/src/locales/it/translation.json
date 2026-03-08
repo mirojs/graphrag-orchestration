@@ -224,7 +224,8 @@
         "folderActions": "Azioni cartella",
         "newSubfolder": "Nuova sottocartella",
         "renameFile": "Rinomina file",
-        "cancel": "Annulla"
+        "cancel": "Annulla",
+        "confirm": "Confirm"
     },
     "viewer": {
         "loadingFile": "Caricamento file",

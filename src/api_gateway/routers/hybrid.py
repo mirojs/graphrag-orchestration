@@ -538,8 +538,10 @@ async def hybrid_query(request: Request, body: HybridQueryRequest, group_id: str
                force_route=body.force_route.value if body.force_route else None)
     
     try:
-        
-        pipeline = await _get_or_create_pipeline(group_id)
+        from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+
+        neo4j_gid = await resolve_neo4j_group_id(group_id, body.folder_id)
+        pipeline = await _get_or_create_pipeline(neo4j_gid)
         
         # Handle forced routing (Routes 2, 3, 4, 5, 6, 7)
         if body.force_route:
@@ -645,9 +647,12 @@ async def hybrid_query_audit(request: Request, body: HybridQueryRequest, group_i
                query_preview=body.query[:50])
     
     try:
+        from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+
+        neo4j_gid = await resolve_neo4j_group_id(group_id, body.folder_id)
         # Use High-Assurance profile for audit queries (Routes 2, 3, 4 only)
         pipeline = await _get_or_create_pipeline(
-            group_id,
+            neo4j_gid,
             profile=DeploymentProfile.HIGH_ASSURANCE,
             relevance_budget=0.95  # Maximum thoroughness
         )
@@ -739,8 +744,11 @@ async def hybrid_query_drift(request: Request, body: HybridQueryRequest, group_i
                query_preview=body.query[:50])
     
     try:
+        from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+
+        neo4j_gid = await resolve_neo4j_group_id(group_id, body.folder_id)
         pipeline = await _get_or_create_pipeline(
-            group_id,
+            neo4j_gid,
             relevance_budget=0.9  # Thoroughness for complex queries
         )
         
@@ -1092,6 +1100,11 @@ class HybridIndexDocumentsRequest(BaseModel):
         default=None,
         description="Optional tag for KNN edges (e.g., 'knn-1', 'knn-2') to enable A/B testing of KNN parameters",
     )
+    folder_id: Optional[str] = Field(
+        default=None,
+        description="Folder ID to scope indexing. When provided, documents are indexed "
+                    "into the folder's root folder partition (isolated knowledge graph).",
+    )
 
 
 class HybridIndexDocumentsResponse(BaseModel):
@@ -1219,9 +1232,16 @@ async def hybrid_index_documents(
     """
 
     group_id = request.state.group_id
+
+    # Resolve folder_id → root_folder_id for Neo4j partition
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+    neo4j_gid = await resolve_neo4j_group_id(group_id, body.folder_id)
+
     logger.info(
         "hybrid_index_documents_start",
         group_id=group_id,
+        neo4j_group_id=neo4j_gid,
+        folder_id=body.folder_id,
         num_documents=len(body.documents),
         ingestion=body.ingestion,
         run_community_detection=body.run_community_detection,
@@ -1259,14 +1279,14 @@ async def hybrid_index_documents(
             raise HTTPException(status_code=400, detail=f"Unsupported document type: {type(doc)}")
 
     # Create job ID and track it in Redis
-    job_id = f"{group_id}_{int(time.time() * 1000)}"
-    await _indexing_jobs.create(job_id, group_id, len(docs_for_pipeline))
+    job_id = f"{neo4j_gid}_{int(time.time() * 1000)}"
+    await _indexing_jobs.create(job_id, neo4j_gid, len(docs_for_pipeline))
     
     # Start background indexing
     background_tasks.add_task(
         _run_indexing_job,
         job_id,
-        group_id,
+        neo4j_gid,
         docs_for_pipeline,
         body.reindex,
         body.reextract_entities,
@@ -1282,13 +1302,14 @@ async def hybrid_index_documents(
     logger.info(
         "hybrid_index_documents_accepted",
         group_id=group_id,
+        neo4j_group_id=neo4j_gid,
         job_id=job_id,
         num_documents=len(docs_for_pipeline),
     )
     
     return HybridIndexDocumentsResponse(
         status="accepted",
-        group_id=group_id,
+        group_id=neo4j_gid,
         job_id=job_id,
         documents_received=len(docs_for_pipeline),
         message=(
@@ -1370,6 +1391,10 @@ class SyncIndexRequest(BaseModel):
         default=False,
         description="If true, only report what would be indexed"
     )
+    folder_id: Optional[str] = Field(
+        default=None,
+        description="Folder ID to scope sync to a specific folder partition.",
+    )
 
 
 class SyncIndexResponse(BaseModel):
@@ -1397,9 +1422,14 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
     - LazyGraphRAG text units for Iterative Deepening
     """
     group_id = request.state.group_id
+
+    # Resolve folder_id → root_folder_id for Neo4j partition
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+    neo4j_gid = await resolve_neo4j_group_id(group_id, body.folder_id)
     
     logger.info("sync_hipporag_index_request",
                group_id=group_id,
+               neo4j_group_id=neo4j_gid,
                output_dir=body.output_dir,
                dry_run=body.dry_run)
     
@@ -1419,22 +1449,22 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
             with graph_service.driver.session() as session:
                 entity_count = session.run(
                     "MATCH (e) WHERE e.group_id = $gid AND NOT e:__Community__ AND NOT e:__Chunk__ RETURN count(e) as cnt",
-                    gid=group_id
+                    gid=neo4j_gid
                 ).single()["cnt"]
                 
                 rel_count = session.run(
                     "MATCH (s)-[r]->(o) WHERE s.group_id = $gid RETURN count(r) as cnt",
-                    gid=group_id
+                    gid=neo4j_gid
                 ).single()["cnt"]
                 
                 chunk_count = session.run(
                     "MATCH (c:__Chunk__) WHERE c.group_id = $gid RETURN count(c) as cnt",
-                    gid=group_id
+                    gid=neo4j_gid
                 ).single()["cnt"]
             
             return SyncIndexResponse(
                 status="dry_run",
-                group_id=group_id,
+                group_id=neo4j_gid,
                 would_index={
                     "entities": entity_count,
                     "relationships": rel_count,
@@ -1446,17 +1476,17 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
         dual_index = DualIndexService(
             neo4j_driver=graph_service.driver,
             hipporag_save_dir=body.output_dir,
-            group_id=group_id
+            group_id=neo4j_gid
         )
         
         result = await dual_index.sync_from_neo4j()
         
         if result["status"] == "success":
             # Invalidate cached pipelines so next query loads fresh graph data
-            await _invalidate_pipeline_cache(group_id)
+            await _invalidate_pipeline_cache(neo4j_gid)
             return SyncIndexResponse(
                 status="success",
-                group_id=group_id,
+                group_id=neo4j_gid,
                 entities_indexed=result.get("entities_indexed"),
                 triples_indexed=result.get("triples_indexed"),
                 text_units_indexed=result.get("text_units_indexed"),
@@ -1465,7 +1495,7 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
         else:
             return SyncIndexResponse(
                 status="error",
-                group_id=group_id,
+                group_id=neo4j_gid,
                 error=result.get("error", "Unknown error")
             )
             
@@ -1474,6 +1504,7 @@ async def sync_hipporag_index(request: Request, body: SyncIndexRequest):
     except Exception as e:
         logger.error("sync_hipporag_index_failed",
                     group_id=group_id,
+                    neo4j_group_id=neo4j_gid,
                     error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -1542,7 +1573,7 @@ async def get_index_status(request: Request, index_dir: str = "./hipporag_index"
 
 
 @router.post("/index/initialize-hipporag")
-async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_index"):
+async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_index", folder_id: Optional[str] = None):
     """
     Initialize the HippoRAG instance for this group.
     
@@ -1550,24 +1581,27 @@ async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_ind
     Call this after sync_hipporag_index before querying.
     """
     group_id = request.state.group_id
+
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+    neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
     
     try:
-        hipporag_service = get_hipporag_service(group_id, index_dir)
+        hipporag_service = get_hipporag_service(neo4j_gid, index_dir)
         
         success = await hipporag_service.initialize()
         
         if success:
             # Invalidate cached pipelines so next query loads fresh graph data
-            await _invalidate_pipeline_cache(group_id)
+            await _invalidate_pipeline_cache(neo4j_gid)
             return {
                 "status": "initialized",
-                "group_id": group_id,
+                "group_id": neo4j_gid,
                 "hipporag_available": True
             }
         else:
             return {
                 "status": "not_initialized",
-                "group_id": group_id,
+                "group_id": neo4j_gid,
                 "hipporag_available": hipporag_service.is_available,
                 "reason": "HippoRAG not installed or index not found"
             }
@@ -1575,6 +1609,7 @@ async def initialize_hipporag(request: Request, index_dir: str = "./hipporag_ind
     except Exception as e:
         logger.error("initialize_hipporag_failed",
                     group_id=group_id,
+                    neo4j_group_id=neo4j_gid,
                     error=str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
 

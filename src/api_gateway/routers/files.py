@@ -11,7 +11,7 @@ import mimetypes
 import asyncio
 from typing import List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request, UploadFile, File as FastAPIFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -122,20 +122,29 @@ async def upload_files(
     request: Request,
     background_tasks: BackgroundTasks,
     file: List[UploadFile] = FastAPIFile(...),
+    folder_id: Optional[str] = Form(None),
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
-    """Upload one or more files. Supports multi-file upload."""
+    """Upload one or more files. Supports multi-file upload.
+    
+    If folder_id is provided, documents are indexed into that folder's
+    root folder partition (isolated knowledge graph). Blob storage path
+    remains {auth_group_id}/{filename}.
+    """
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
     doc_sync = _get_doc_sync(request)
+    neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
 
     results = []
     for f in file:
         try:
             _validate_upload(f)
             safe_filename = _sanitize_filename(f.filename)
-            # Use group_id as blob directory so B2B group members share files
+            # Blob storage uses auth_group_id (security boundary)
             file_url = await blob_manager.upload_blob(f, safe_filename, group_id)
             if ingester:
                 from prepdocslib.listfilestrategy import File as IngesterFile
@@ -149,13 +158,13 @@ async def upload_files(
             logger.error("Error uploading file %s: %s", f.filename, e)
             results.append({"filename": f.filename, "status": "failed", "error": str(e)})
 
-    # Trigger background indexing for successful uploads
+    # Trigger background indexing with neo4j_gid (folder partition)
     indexing_queued = False
     if doc_sync:
         for r in results:
             if r["status"] == "success":
                 background_tasks.add_task(
-                    doc_sync.on_file_uploaded, group_id, r["filename"], r["url"], user_id
+                    doc_sync.on_file_uploaded, neo4j_gid, r["filename"], r["url"], user_id
                 )
                 indexing_queued = True
 

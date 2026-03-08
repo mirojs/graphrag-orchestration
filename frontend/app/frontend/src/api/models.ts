@@ -31,6 +31,7 @@ export type ChatAppRequestOverrides = {
     use_web_source?: boolean;
     use_sharepoint_source?: boolean;
     speech_detected_language?: string;
+    folder_id?: string;
 };
 
 export type ResponseMessage = {

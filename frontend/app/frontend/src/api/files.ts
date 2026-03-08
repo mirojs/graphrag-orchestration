@@ -54,11 +54,15 @@ export interface FileMetadataListResponse {
 export async function uploadFilesApi(
     files: File[],
     idToken: string,
-    onProgress?: (loaded: number, total: number) => void
+    onProgress?: (loaded: number, total: number) => void,
+    folderId?: string
 ): Promise<FileOperationResponse> {
     const formData = new FormData();
     for (const file of files) {
         formData.append("file", file);
+    }
+    if (folderId) {
+        formData.append("folder_id", folderId);
     }
 
     // Use XMLHttpRequest for progress tracking if callback provided

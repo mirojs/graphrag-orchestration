@@ -5,7 +5,7 @@ Provides hierarchical folder organization for documents.
 Supports multi-tenant isolation via group_id or user_id.
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from typing import List, Optional
 from pydantic import BaseModel
 import structlog
@@ -316,6 +316,8 @@ class BulkDocumentFolderAssignment(BaseModel):
 async def assign_document_to_folder(
     folder_id: str,
     assignment: DocumentFolderAssignment,
+    request: Request,
+    background_tasks: BackgroundTasks,
     partition_id: str = Depends(get_partition_id)
 ):
     """
@@ -324,14 +326,21 @@ async def assign_document_to_folder(
     Creates an IN_FOLDER relationship between the document and folder.
     Removes any existing folder assignment first (document can only be in one folder).
     
+    When the document moves between root folders (different Neo4j partitions),
+    triggers a background delete + re-index to migrate the graph data.
+    
     Args:
         folder_id: Target folder ID
         assignment: Document ID to assign
+        request: FastAPI request (for doc_sync access)
+        background_tasks: FastAPI background tasks
         partition_id: Group/user ID from auth middleware
     
     Returns:
-        Assignment result
+        Assignment result with optional reindex status
     """
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+
     driver = get_graph_driver()
     
     # Verify folder exists and belongs to this partition
@@ -344,9 +353,39 @@ async def assign_document_to_folder(
         if not result.single():
             raise HTTPException(status_code=404, detail="Folder not found")
     
+    # Determine old and new root folder IDs to detect cross-partition moves
+    # Documents may have group_id = auth_group_id (unfiled) or root_folder_id (filed)
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id, get_valid_partition_ids
+
+    valid_ids = await get_valid_partition_ids(partition_id)
+
+    old_folder_query = """
+    MATCH (d:Document {id: $document_id})
+    WHERE d.group_id IN $valid_ids
+    OPTIONAL MATCH (d)-[:IN_FOLDER]->(old_f:Folder)
+    RETURN d.title as doc_title, d.source as doc_source, d.group_id as doc_group_id, old_f.id as old_folder_id
+    """
+    with driver.session() as session:
+        doc_record = session.run(old_folder_query,
+                                document_id=assignment.document_id,
+                                valid_ids=valid_ids).single()
+        if not doc_record:
+            raise HTTPException(status_code=404, detail="Document not found")
+    
+    old_folder_id = doc_record["old_folder_id"]
+    doc_title = doc_record["doc_title"]
+    doc_source = doc_record["doc_source"]
+    doc_current_gid = doc_record["doc_group_id"]
+
+    old_neo4j_gid = await resolve_neo4j_group_id(partition_id, old_folder_id)
+    new_neo4j_gid = await resolve_neo4j_group_id(partition_id, folder_id)
+    cross_partition_move = old_neo4j_gid != new_neo4j_gid
+    
     # Assign document to folder (remove existing assignment first)
+    # Match document by its actual group_id (may be auth_group_id or root_folder_id)
     assign_query = """
-    MATCH (d:Document {id: $document_id, group_id: $partition_id})
+    MATCH (d:Document {id: $document_id})
+    WHERE d.group_id IN $valid_ids
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     
     // Remove existing folder assignment if any
@@ -364,22 +403,46 @@ async def assign_document_to_folder(
         result = session.run(assign_query,
                            document_id=assignment.document_id,
                            folder_id=folder_id,
-                           partition_id=partition_id)
+                           partition_id=partition_id,
+                           valid_ids=valid_ids)
         record = result.single()
         
         if not record:
             raise HTTPException(status_code=404, detail="Document not found")
     
+    reindex_triggered = False
+    if cross_partition_move and doc_title:
+        # Document moves between root folders → delete from old partition, re-index into new
+        try:
+            from src.api_gateway.routers.files import _get_doc_sync
+            doc_sync = _get_doc_sync(request)
+            if doc_sync:
+                background_tasks.add_task(doc_sync.on_file_deleted, old_neo4j_gid, doc_title)
+                background_tasks.add_task(
+                    doc_sync.on_file_uploaded, new_neo4j_gid, doc_title, doc_source or "", ""
+                )
+                reindex_triggered = True
+                logger.info("folder_move_cross_partition_reindex",
+                           document_id=assignment.document_id,
+                           old_partition=old_neo4j_gid,
+                           new_partition=new_neo4j_gid)
+        except Exception as e:
+            logger.warning("folder_move_reindex_skipped",
+                          error=str(e),
+                          document_id=assignment.document_id)
+
     logger.info("document_assigned_to_folder",
                 document_id=assignment.document_id,
                 folder_id=folder_id,
-                partition_id=partition_id)
+                partition_id=partition_id,
+                cross_partition_move=cross_partition_move)
     
     return {
         "status": "assigned",
         "document_id": record["document_id"],
         "folder_id": record["folder_id"],
-        "folder_name": record["folder_name"]
+        "folder_name": record["folder_name"],
+        "reindex_triggered": reindex_triggered,
     }
 
 
@@ -403,7 +466,7 @@ async def unassign_document_from_folder(
     driver = get_graph_driver()
     
     unassign_query = """
-    MATCH (d:Document {id: $document_id, group_id: $partition_id})-[r:IN_FOLDER]->(f:Folder {id: $folder_id})
+    MATCH (d:Document {id: $document_id})-[r:IN_FOLDER]->(f:Folder {id: $folder_id, group_id: $partition_id})
     DELETE r
     SET d.folder_id = null
     RETURN d.id as document_id
@@ -457,9 +520,11 @@ async def bulk_assign_documents_to_folder(
             raise HTTPException(status_code=404, detail="Folder not found")
     
     # Bulk assign documents
+    # Documents may have different group_ids (auth_group_id or root_folder_id)
+    # so we traverse through folder ownership for security instead
     bulk_query = """
     UNWIND $document_ids AS doc_id
-    MATCH (d:Document {id: doc_id, group_id: $partition_id})
+    MATCH (d:Document {id: doc_id})
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     
     // Remove existing folder assignment
@@ -524,14 +589,14 @@ async def list_documents_in_folder(
         OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
         WITH collect(f) + collect(sub) AS folders
         UNWIND folders AS folder
-        MATCH (d:Document {group_id: $partition_id})-[:IN_FOLDER]->(folder)
+        MATCH (d:Document)-[:IN_FOLDER]->(folder)
         RETURN DISTINCT d.id as id, d.title as title, d.source as source,
                d.folder_id as folder_id, d.created_at as created_at
         ORDER BY d.title
         """
     else:
         query = """
-        MATCH (d:Document {group_id: $partition_id})-[:IN_FOLDER]->(f:Folder {id: $folder_id})
+        MATCH (d:Document)-[:IN_FOLDER]->(f:Folder {id: $folder_id, group_id: $partition_id})
         RETURN d.id as id, d.title as title, d.source as source,
                d.folder_id as folder_id, d.created_at as created_at
         ORDER BY d.title
@@ -559,6 +624,8 @@ async def list_unfiled_documents(
 ):
     """
     List all documents not assigned to any folder (unfiled/root documents).
+    
+    Unfiled documents have group_id = auth_group_id (the fallback partition).
     
     Args:
         partition_id: Group/user ID from auth middleware

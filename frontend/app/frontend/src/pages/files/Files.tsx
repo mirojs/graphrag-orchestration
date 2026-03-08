@@ -150,7 +150,7 @@ const Files = () => {
                 if (useLogin && !token) throw new Error("Not authenticated");
                 const result = await uploadFilesApi(fileList, token as string, (loaded, total) => {
                     setUploadProgress(Math.round((loaded / total) * 100));
-                });
+                }, activeFolderId ?? undefined);
                 addToast("success", result.message || `${fileList.length} file(s) uploaded`);
                 await loadFiles();
                 setSelected(new Set());
@@ -161,7 +161,7 @@ const Files = () => {
                 setUploadProgress(0);
             }
         },
-        [client, addToast, loadFiles]
+        [client, addToast, loadFiles, activeFolderId]
     );
 
     // Delete handler

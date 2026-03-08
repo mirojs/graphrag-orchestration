@@ -1,5 +1,6 @@
 import { useRef, useState, useEffect, useContext } from "react";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import readNDJSONStream from "ndjson-readablestream";
 
@@ -45,6 +46,9 @@ function getUserFriendlyError(error: unknown, t: (key: string) => string): strin
 
 
 const Chat = () => {
+    const [searchParams] = useSearchParams();
+    const folderId = searchParams.get("folder") || undefined;
+
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
     const [promptTemplate, setPromptTemplate] = useState<string>("");
     const [temperature, setTemperature] = useState<number>(0.3);
@@ -310,7 +314,8 @@ const Chat = () => {
                         use_web_source: webSourceSupported ? webSourceEnabled : false,
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
                         ...(seed !== null ? { seed: seed } : {}),
-                        ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {})
+                        ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {}),
+                        ...(folderId ? { folder_id: folderId } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server

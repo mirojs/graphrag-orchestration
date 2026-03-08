@@ -340,8 +340,9 @@ async def _execute_query(
     Args:
         query: User question
         approach: Query approach (hybrid, local, global, drift)
-        group_id: Tenant group ID
-        folder_id: Optional folder scope
+        group_id: Auth group ID (security boundary)
+        folder_id: Optional folder scope — when provided, the pipeline is
+                   created against the folder's root_folder_id as Neo4j partition.
         response_type: Response format
         force_route: Direct route string (e.g. "local_search", "unified_search").
                      When provided, bypasses approach→route mapping and uses
@@ -350,8 +351,10 @@ async def _execute_query(
     Returns dict with: answer, route_used, usage, thoughts
     """
     from src.worker.hybrid_v2.router.main import QueryRoute
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
 
-    pipeline = await _get_hybrid_pipeline(group_id, folder_id)
+    neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
+    pipeline = await _get_hybrid_pipeline(neo4j_gid, folder_id)
 
     # Resolve route: direct force_route string takes priority over approach mapping
     route = None

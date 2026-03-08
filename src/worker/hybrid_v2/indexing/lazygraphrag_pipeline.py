@@ -100,10 +100,13 @@ def extract_document_date(content: str) -> Optional[str]:
         except (ValueError, OverflowError):
             continue
     
-    # Pattern 3: Month DD, YYYY (e.g., "June 15, 2024")
+    # Pattern 3: Month DD, YYYY (e.g., "June 15, 2024") — English + German month names
     months = {
         'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5, 'june': 6,
-        'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12
+        'july': 7, 'august': 8, 'september': 9, 'october': 10, 'november': 11, 'december': 12,
+        # German month names
+        'januar': 1, 'februar': 2, 'märz': 3, 'april': 4, 'mai': 5, 'juni': 6,
+        'juli': 7, 'august': 8, 'september': 9, 'oktober': 10, 'november': 11, 'dezember': 12,
     }
     for match in re.finditer(r'\b([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})\b', content):
         try:
@@ -116,8 +119,8 @@ def extract_document_date(content: str) -> Optional[str]:
         except (ValueError, OverflowError):
             continue
     
-    # Pattern 4: DD Month YYYY (e.g., "15 June 2024")
-    for match in re.finditer(r'\b(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b', content):
+    # Pattern 4: DD Month YYYY (e.g., "15 June 2024", "15. Juni 2024")
+    for match in re.finditer(r'\b(\d{1,2})\.?\s+([A-Za-zÄäÖöÜüß]+)\s+(\d{4})\b', content):
         try:
             month_name = match.group(2).lower()
             if month_name in months:
@@ -125,6 +128,15 @@ def extract_document_date(content: str) -> Optional[str]:
                 day, year = int(match.group(1)), int(match.group(3))
                 if 1 <= day <= 31 and 1900 <= year <= 2100:
                     dates_found.append(datetime(year, month, day))
+        except (ValueError, OverflowError):
+            continue
+    
+    # Pattern 5: DD.MM.YYYY (German/European format — uses dots as separator)
+    for match in re.finditer(r'\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b', content):
+        try:
+            day, month, year = int(match.group(1)), int(match.group(2)), int(match.group(3))
+            if 1 <= month <= 12 and 1 <= day <= 31 and 1900 <= year <= 2100:
+                dates_found.append(datetime(year, month, day))
         except (ValueError, OverflowError):
             continue
     
@@ -1585,15 +1597,21 @@ Return ONLY valid JSON (no markdown fences):
         r'Director|Manager|Officer|Partner|Attorney|Counsel|'
         r'Secretary|Treasurer|Representative|Agent|Broker|'
         r'Supervisor|Superintendent|Inspector|Engineer|Architect|'
-        r'Authorized\s+(?:Signatory|Representative|Agent))\b',
+        r'Authorized\s+(?:Signatory|Representative|Agent)|'
+        # German titles
+        r'Geschäftsführer(?:in)?|Vorstand(?:svorsitzende[r]?)?|Prokurist(?:in)?|'
+        r'Bevollmächtigte[r]?|Handlungsbevollmächtigte[r]?|'
+        r'Aufsichtsratsvorsitzende[r]?|Gesellschafter(?:in)?)\b',
         re.IGNORECASE,
     )
     _DATE_PATTERN = re.compile(
         r'\b(?:'
-        r'(?:January|February|March|April|May|June|July|August|September|October|November|December)'
+        r'(?:January|February|March|April|May|June|July|August|September|October|November|December'
+        r'|Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)'
         r'\s+\d{1,2},?\s+\d{4}'
         r'|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}'
         r'|\d{4}[/-]\d{1,2}[/-]\d{1,2}'
+        r'|\d{1,2}\.\d{1,2}\.\d{4}'
         r')\b',
         re.IGNORECASE,
     )
@@ -1672,7 +1690,8 @@ Return ONLY valid JSON (no markdown fences):
 
     # Regex for organization suffixes in signature blocks
     _ORG_SUFFIX_RE = re.compile(
-        r'\b(?:Inc|LLC|Ltd|Corp|Co|LP|LLP|Association|Foundation|Group|Partners)'
+        r'\b(?:Inc|LLC|Ltd|Corp|Co|LP|LLP|Association|Foundation|Group|Partners'
+        r'|GmbH|AG|KG|OHG|GbR|eG|e\.V|SE|UG|KGaA)'
         r'\.?\s*$',
         re.IGNORECASE,
     )
@@ -1970,13 +1989,15 @@ Return ONLY valid JSON (no markdown fences):
         import re as _re
 
         def _text_processing(text: str) -> str:
-            """Upstream HippoRAG 2 text normalization (with multi-space collapse)."""
-            cleaned = _re.sub(r'[^A-Za-z0-9 ]', ' ', text.lower())
+            """Upstream HippoRAG 2 text normalization (with multi-space collapse).
+            Uses Unicode-aware \\w to preserve extended Latin chars (ä, ö, ü, ß, etc.)."""
+            cleaned = _re.sub(r'[^\w ]', ' ', text.lower())
             return _re.sub(r' +', ' ', cleaned).strip()
 
         def _is_valid_entity(name: str) -> bool:
-            """Filter garbage entities (upstream: len(alphanumeric) > 2)."""
-            return len(_re.sub(r'[^A-Za-z0-9]', '', name)) > 2
+            """Filter garbage entities (upstream: len(alphanumeric) > 2).
+            Uses Unicode-aware matching so 'Müller' counts all letters."""
+            return len(_re.sub(r'[^\w]', '', name)) > 2
 
         entity_map: Dict[str, Entity] = {}       # canonical_key → Entity
         entity_sids: Dict[str, set] = {}          # canonical_key → set of sentence IDs

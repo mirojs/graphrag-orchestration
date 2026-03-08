@@ -73,7 +73,7 @@ _speech_token_lock = asyncio.Lock()
 # Supported source languages for TranslationRecognizer auto-detect (max 10)
 _SPEECH_TRANSLATION_LANGUAGES = [
     "en-US", "ja-JP", "fr-FR", "es-ES", "da-DK",
-    "nl-NL", "pt-BR", "tr-TR", "it-IT", "pl-PL",
+    "nl-NL", "pt-BR", "tr-TR", "it-IT", "de-DE",
 ]
 
 

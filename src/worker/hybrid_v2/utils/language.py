@@ -265,9 +265,10 @@ def canonical_key_for_entity(name: str, locale: Optional[str] = None) -> str:
         s = re.sub(r"[^\w&\s]", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
     else:
-        # For Latin scripts: Original ASCII-only approach
+        # For Latin scripts: Use Unicode-aware \w to preserve extended Latin
+        # characters (ä, ö, ü, ß, à, é, ñ, etc.) while stripping punctuation
         s = s.lower()
-        s = re.sub(r"[^a-z0-9_&\s]", " ", s)
+        s = re.sub(r"[^\w&\s]", " ", s)
         s = re.sub(r"\s+", " ", s).strip()
     
     return s

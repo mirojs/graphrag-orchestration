@@ -49,16 +49,27 @@ _ENTITY_TYPE_KEYWORDS: Dict[str, List[str]] = {
         "company", "companies", "firm", "firms",
         "entity", "entities", "contractor", "contractors",
         "vendor", "vendors", "principal", "principals",
+        # German
+        "partei", "parteien", "organisation", "organisationen",
+        "unternehmen", "firma", "firmen",
+        "auftragnehmer", "lieferant", "lieferanten",
     ],
     "PERSON": [
         "party", "parties", "people", "individual", "individuals",
         "person", "persons", "signatory", "signatories",
         "representative", "representatives", "personnel",
+        # German
+        "partei", "parteien", "leute", "einzelperson", "einzelpersonen",
+        "personen", "unterzeichner", "vertreter",
     ],
     "LOCATION": [
         "location", "locations", "place", "places",
         "address", "addresses", "jurisdiction", "jurisdictions",
         "city", "cities", "state", "states", "country", "countries",
+        # German
+        "ort", "orte", "standort", "standorte",
+        "adresse", "adressen", "gerichtsstand",
+        "stadt", "städte", "land", "länder",
     ],
 }
 
@@ -71,6 +82,11 @@ _EXHAUSTIVE_INTENT_RE = re.compile(
     r"|"
     # Entity comparison: "across the set, which entity appears in the most documents"
     r"\b(?:across)\b.{0,60}\b(?:which|what|compare)\b"
+    r"|"
+    # German: "liste/nenne/finde alle/jede/sämtliche"
+    r"\b(?:liste|nenne|finde|identifiziere|zähle\s+auf|welche\s+sind)\b"
+    r".{0,40}"
+    r"\b(?:alle|jede[rsmn]?|sämtliche[rn]?)\b"
     r")",
     re.IGNORECASE,
 )
@@ -613,7 +629,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         if rerank_enabled and passage_scores:
             t0_rerank = time.perf_counter()
             # Take PPR's top passages as the candidate pool
-            candidate_ids = [cid for cid, _ in passage_scores[:rerank_top_k]]
+            candidate_ids = [cid for cid, _ in passage_scores[:ppr_passage_top_k]]
             if len(candidate_ids) >= 2:
                 try:
                     reranked_ids = await self._rerank_passages(

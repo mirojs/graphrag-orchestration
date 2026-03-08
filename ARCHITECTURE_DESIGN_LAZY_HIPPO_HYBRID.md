@@ -12641,3 +12641,109 @@ Q-D3 ("list all explicit day-based timeframes") consistently scores 2/3 because 
 ### Honest Score Assessment
 
 The 57/57 score achieved earlier was due to lenient LLM judge scoring. The honest, reproducible score for Route 7 is **56/57** (Q-D3=2/3). The 180-day passage represents a retrieval ceiling that would require architectural changes (query decomposition, section-level expansion, or entity extraction improvements) to overcome.
+
+## §56 — Folder-as-Neo4j-Group Partition Architecture (2026-03-08)
+
+### Problem
+
+The system originally used `auth_group_id` (B2B tenant / B2C user identity) as the universal Neo4j partition key (`group_id`). Every document, entity, chunk, and triple within a tenant shared one flat knowledge graph. This created two issues:
+
+1. **No intra-tenant isolation:** Users who wanted separate knowledge domains (e.g., "Legal contracts" vs. "HR policies") had all documents co-mingled in one graph, causing cross-domain retrieval noise.
+2. **No folder-scoped querying:** The folder system (introduced earlier) was purely organizational — queries always searched the entire tenant graph regardless of which folder the user was working in.
+
+### Architecture Decision
+
+Decouple the **security boundary** from the **knowledge graph partition key**:
+
+| Concept | Role | Value |
+|---------|------|-------|
+| `auth_group_id` | Security boundary (B2B group / B2C user_id) | From EasyAuth JWT |
+| `root_folder_id` | Neo4j partition key (`group_id` for pipeline) | Resolved from folder hierarchy |
+| Unfiled documents | Backward-compatible fallback | Use `auth_group_id` as partition |
+
+Each **root folder** becomes an isolated knowledge graph. Subfolders inherit their root folder's partition. Documents not in any folder fall back to `auth_group_id`, preserving backward compatibility.
+
+```
+┌──────────────────────────────────────────────────────┐
+│                  auth_group_id                        │
+│                (security boundary)                    │
+│                                                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │
+│  │ Root Folder A │  │ Root Folder B │  │  Unfiled   │ │
+│  │  (group_id=   │  │  (group_id=   │  │ (group_id= │ │
+│  │   folder-A)   │  │   folder-B)   │  │  auth_gid) │ │
+│  │              │  │              │  │            │ │
+│  │ ┌──────────┐│  │ Docs, entities│  │ Legacy docs│ │
+│  │ │Subfolder ││  │ triples, PPR │  │ no folder  │ │
+│  │ │ (inherits││  └──────────────┘  └────────────┘ │
+│  │ │folder-A) ││                                    │
+│  │ └──────────┘│                                    │
+│  │ Docs, ents, │                                    │
+│  │ triples, PPR│                                    │
+│  └──────────────┘                                    │
+└──────────────────────────────────────────────────────┘
+```
+
+### Implementation
+
+#### New service: `folder_resolver.py`
+
+Two functions handle all partition resolution:
+
+- **`resolve_neo4j_group_id(auth_group_id, folder_id)`** — Given a folder ID (root or subfolder), walks `SUBFOLDER_OF` edges to find the root folder and returns its ID as the Neo4j partition key. If `folder_id` is None, returns `auth_group_id` (backward compat). Verifies folder ownership via `group_id` match on the Folder node.
+
+- **`get_valid_partition_ids(auth_group_id)`** — Returns `[auth_group_id] + [all root folder IDs]` for the tenant. Used by document queries that need to match documents across all of a user's partitions (e.g., the folder assignment endpoint where a document's `group_id` could be any root folder ID or the auth group).
+
+#### Endpoints updated (hybrid.py)
+
+All six pipeline-touching endpoints now resolve `folder_id → neo4j_gid` before creating or fetching pipelines:
+
+| Endpoint | Change |
+|----------|--------|
+| `POST /query` | `resolve_neo4j_group_id()` before `_get_or_create_pipeline()` |
+| `POST /query/audit` | Same — High-Assurance profile now folder-scoped |
+| `POST /query/drift` | Same — drift queries folder-scoped |
+| `POST /index/documents` | Indexes into folder partition; job ID uses `neo4j_gid` |
+| `POST /index/sync` | Syncs folder-scoped Neo4j→HippoRAG |
+| `POST /index/initialize-hipporag` | Initializes HippoRAG for folder partition |
+
+Request models `HybridIndexDocumentsRequest` and `SyncIndexRequest` gained `folder_id: Optional[str]` fields. The `initialize-hipporag` endpoint accepts `folder_id` as a query parameter.
+
+#### Chat endpoint (chat.py)
+
+`_execute_query()` resolves `folder_id` before creating the hybrid pipeline, so chat queries from the folder-scoped UI only search that folder's knowledge graph.
+
+#### File upload (files.py)
+
+Upload now accepts `folder_id` as a `Form` field. Blob storage path remains `{auth_group_id}/{filename}` (security boundary unchanged), but background indexing triggers with `neo4j_gid` (the resolved folder partition).
+
+#### Folder operations (folders.py)
+
+- **`assign_document_to_folder`**: Detects cross-partition moves (old root ≠ new root) and triggers background delete + re-index to migrate graph data between partitions.
+- **Document queries** (`list_documents_in_folder`, `bulk_assign`): Use `valid_partition_ids` (via `get_valid_partition_ids()`) instead of matching on `auth_group_id` alone, since documents may have `group_id` set to any root folder ID.
+- **`unassign_document_from_folder`**: Security check uses folder's `group_id` instead of document's `group_id`.
+
+#### Frontend changes
+
+- `Chat.tsx`: Reads `?folder=` URL parameter, passes `folder_id` in `ChatAppRequestOverrides`
+- `Files.tsx`: Passes `activeFolderId` to `uploadFilesApi()`
+- `files.ts`: `uploadFilesApi()` appends `folder_id` form field when present
+- `models.ts`: `ChatAppRequestOverrides` type gains `folder_id?: string`
+
+### Key Design Decisions
+
+1. **Zero pipeline code changes.** The indexing pipeline (`lazygraphrag_pipeline.py`, HippoRAG, etc.) already uses `group_id` as universal partition key throughout. The resolver only changes *what value* is passed as `group_id` — the pipeline is unaware of folders.
+
+2. **Blob storage uses auth_group_id, not folder partition.** Files are stored under the security boundary (`{auth_group_id}/{filename}`), not the folder ID. This ensures B2B group members share blob access regardless of folder structure.
+
+3. **Cross-partition moves trigger re-index.** When `assign_document_to_folder` detects the document's old and new root folders differ, it queues `on_file_deleted(old_gid)` + `on_file_uploaded(new_gid)` as background tasks. This migrates the document's graph entities between partitions.
+
+4. **Unfiled = backward compatible.** Documents without a folder retain `auth_group_id` as their partition key, so existing deployments with no folders continue working unchanged.
+
+### Tests
+
+Unit tests in `tests/unit/test_folder_resolver.py` cover:
+- `resolve_neo4j_group_id`: None/empty folder → returns auth_group_id; root folder → returns itself; subfolder → returns root; missing folder → raises ValueError; no driver → raises ValueError
+- `get_valid_partition_ids`: Returns auth_group_id + root folder IDs; no driver → returns auth_group_id only; no folders → returns auth_group_id only
+
+### Commit: e3a3fb3d

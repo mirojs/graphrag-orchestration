@@ -69,6 +69,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# File extensions that are already plain text — bypass DI and read directly.
+# HTML/HTM excluded: DI provides useful layout extraction for rich HTML.
+_PLAINTEXT_BYPASS_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml"}
+
 
 def extract_document_date(content: str) -> Optional[str]:
     """Extract the most prominent date from document content.
@@ -641,6 +645,7 @@ class LazyGraphRAGIndexingPipeline:
         # Assign stable IDs and normalize fields.
         normalized: List[Dict[str, Any]] = []
         url_inputs: List[str] = []
+        plaintext_urls: List[tuple] = []  # (index_in_normalized, url)
 
         for doc in documents:
             meta = doc.get("metadata") or {}
@@ -690,7 +695,31 @@ class LazyGraphRAGIndexingPipeline:
             )
 
             if ingestion == "document-intelligence" and not str(content).strip() and str(source).startswith("http"):
-                url_inputs.append(str(source))
+                # Plaintext formats bypass DI — download and read directly
+                ext = os.path.splitext(source.split("?")[0])[1].lower()
+                if ext in _PLAINTEXT_BYPASS_EXTENSIONS:
+                    plaintext_urls.append((len(normalized) - 1, str(source)))
+                else:
+                    url_inputs.append(str(source))
+
+        # ── Download plaintext files directly (skip DI) ──────────────
+        if plaintext_urls:
+            from azure.storage.blob.aio import BlobClient
+            from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
+            credential = AsyncDefaultAzureCredential()
+            try:
+                for idx, pt_url in plaintext_urls:
+                    try:
+                        async with BlobClient.from_blob_url(pt_url, credential=credential) as blob:
+                            download = await blob.download_blob()
+                            raw = await download.readall()
+                        text = raw.decode("utf-8", errors="replace")
+                        normalized[idx]["content"] = text
+                        logger.info(f"📄 Direct-read plaintext ({len(text)} chars): {pt_url.split('/')[-1].split('?')[0]}")
+                    except Exception as exc:
+                        logger.warning(f"Failed to download plaintext {pt_url}: {exc}")
+            finally:
+                await credential.close()
 
         # ── Pair .result.json sidecars with their parent PDFs ────────
         # When both "X.pdf" and "X.pdf.result.json" are uploaded, use the

@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
 import json from "react-syntax-highlighter/dist/esm/languages/hljs/json";
 import { a11yLight } from "react-syntax-highlighter/dist/esm/styles/hljs";
@@ -10,95 +11,6 @@ import { TokenUsage, TokenUsageGraph } from "./TokenUsageGraph";
 
 SyntaxHighlighter.registerLanguage("json", json);
 
-const renderDetail = (step: QueryPlanStep) => {
-    switch (step.type) {
-        case "modelQueryPlanning": {
-            const usage: TokenUsage = {
-                prompt_tokens: step.input_tokens ?? 0,
-                completion_tokens: step.output_tokens ?? 0,
-                reasoning_tokens: 0,
-                total_tokens: (step.input_tokens ?? 0) + (step.output_tokens ?? 0)
-            };
-
-            return <TokenUsageGraph tokenUsage={usage} labels={{ prompt: "Input", output: "Output", total: "Total tokens" }} title="" />;
-        }
-        case "searchIndex": {
-            const search = step.search_index_arguments?.search ?? "—";
-            return (
-                <>
-                    <div>
-                        <strong>Source:</strong> {step.knowledge_source_name ?? "search index"}
-                    </div>
-                    <div>
-                        <strong>Search:</strong> {search}
-                    </div>
-                </>
-            );
-        }
-        case "web": {
-            const webSearch = step.web_arguments?.search ?? "—";
-            return (
-                <>
-                    <div>
-                        <strong>Source:</strong> {step.knowledge_source_name ?? "web"}
-                    </div>
-                    <div>
-                        <strong>Search:</strong>
-                        {webSearch}
-                    </div>
-                </>
-            );
-        }
-        case "remoteSharePoint": {
-            const sharepointSearch = step.remote_share_point_arguments?.search ?? "—";
-            return (
-                <>
-                    <div>
-                        <strong>Source:</strong> {step.knowledge_source_name ?? "SharePoint"}
-                    </div>
-                    <div>
-                        <strong>Search: </strong>
-                        {sharepointSearch}
-                    </div>
-                </>
-            );
-        }
-        case "agenticReasoning": {
-            const usage: TokenUsage = {
-                prompt_tokens: 0,
-                completion_tokens: step.reasoning_tokens ?? 0,
-                reasoning_tokens: step.reasoning_tokens ?? 0,
-                total_tokens: step.reasoning_tokens ?? 0
-            };
-
-            return (
-                <>
-                    <TokenUsageGraph tokenUsage={usage} labels={{ total: "Total tokens" }} variant="totalOnly" title="" />
-                    <div style={{ fontSize: "0.85em", color: "#666", paddingLeft: "6px" }}>
-                        This step uses Azure AI Search models, so the token capacity does not affect the deployed model.
-                    </div>
-                </>
-            );
-        }
-        case "modelAnswerSynthesis": {
-            const usage: TokenUsage = {
-                prompt_tokens: step.input_tokens ?? 0,
-                completion_tokens: step.output_tokens ?? 0,
-                reasoning_tokens: 0,
-                total_tokens: (step.input_tokens ?? 0) + (step.output_tokens ?? 0)
-            };
-
-            return <TokenUsageGraph tokenUsage={usage} labels={{ prompt: "Input", output: "Output", total: "Total tokens" }} title="" />;
-        }
-        default:
-            return (
-                <SyntaxHighlighter language="json" wrapLines wrapLongLines className={styles.tCodeBlock} style={a11yLight}>
-                    {JSON.stringify(step, null, 2)}
-                </SyntaxHighlighter>
-            );
-    }
-};
-
 interface Props {
     queryPlan: QueryPlanStep[];
     onEffortExtracted?: (effort: string | undefined) => void;
@@ -107,6 +19,97 @@ interface Props {
 }
 
 export const AgentPlan: React.FC<Props> = ({ queryPlan, onEffortExtracted, onCitationClicked, results }) => {
+    const { t } = useTranslation();
+
+    const renderDetail = (step: QueryPlanStep) => {
+        switch (step.type) {
+            case "modelQueryPlanning": {
+                const usage: TokenUsage = {
+                    prompt_tokens: step.input_tokens ?? 0,
+                    completion_tokens: step.output_tokens ?? 0,
+                    reasoning_tokens: 0,
+                    total_tokens: (step.input_tokens ?? 0) + (step.output_tokens ?? 0)
+                };
+
+                return <TokenUsageGraph tokenUsage={usage} labels={{ prompt: "Input", output: "Output", total: "Total tokens" }} title="" />;
+            }
+            case "searchIndex": {
+                const search = step.search_index_arguments?.search ?? "—";
+                return (
+                    <>
+                        <div>
+                            <strong>{t("agentPlan.source")}</strong> {step.knowledge_source_name ?? "search index"}
+                        </div>
+                        <div>
+                            <strong>{t("agentPlan.search")}</strong> {search}
+                        </div>
+                    </>
+                );
+            }
+            case "web": {
+                const webSearch = step.web_arguments?.search ?? "—";
+                return (
+                    <>
+                        <div>
+                            <strong>{t("agentPlan.source")}</strong> {step.knowledge_source_name ?? "web"}
+                        </div>
+                        <div>
+                            <strong>{t("agentPlan.search")}</strong>
+                            {webSearch}
+                        </div>
+                    </>
+                );
+            }
+            case "remoteSharePoint": {
+                const sharepointSearch = step.remote_share_point_arguments?.search ?? "—";
+                return (
+                    <>
+                        <div>
+                            <strong>{t("agentPlan.source")}</strong> {step.knowledge_source_name ?? "SharePoint"}
+                        </div>
+                        <div>
+                            <strong>{t("agentPlan.search")}</strong>
+                            {sharepointSearch}
+                        </div>
+                    </>
+                );
+            }
+            case "agenticReasoning": {
+                const usage: TokenUsage = {
+                    prompt_tokens: 0,
+                    completion_tokens: step.reasoning_tokens ?? 0,
+                    reasoning_tokens: step.reasoning_tokens ?? 0,
+                    total_tokens: step.reasoning_tokens ?? 0
+                };
+
+                return (
+                    <>
+                        <TokenUsageGraph tokenUsage={usage} labels={{ total: "Total tokens" }} variant="totalOnly" title="" />
+                        <div style={{ fontSize: "0.85em", color: "#666", paddingLeft: "6px" }}>
+                            {t("agentPlan.azureAiSearchNote")}
+                        </div>
+                    </>
+                );
+            }
+            case "modelAnswerSynthesis": {
+                const usage: TokenUsage = {
+                    prompt_tokens: step.input_tokens ?? 0,
+                    completion_tokens: step.output_tokens ?? 0,
+                    reasoning_tokens: 0,
+                    total_tokens: (step.input_tokens ?? 0) + (step.output_tokens ?? 0)
+                };
+
+                return <TokenUsageGraph tokenUsage={usage} labels={{ prompt: "Input", output: "Output", total: "Total tokens" }} title="" />;
+            }
+            default:
+                return (
+                    <SyntaxHighlighter language="json" wrapLines wrapLongLines className={styles.tCodeBlock} style={a11yLight}>
+                        {JSON.stringify(step, null, 2)}
+                    </SyntaxHighlighter>
+                );
+        }
+    };
+
     // Helper to get search query for a step
     const getStepQuery = (step: QueryPlanStep): string | undefined => {
         if (step.search_index_arguments?.search) return step.search_index_arguments.search;
@@ -187,7 +190,7 @@ export const AgentPlan: React.FC<Props> = ({ queryPlan, onEffortExtracted, onCit
         <div>
             {iterations.map((iterationSteps, iterationIndex) => {
                 const hasMultipleIterations = iterations.length > 1;
-                const headerLabel = hasMultipleIterations ? `Iteration ${iterationIndex + 1} Execution steps` : "Execution steps";
+                const headerLabel = hasMultipleIterations ? t("agentPlan.iterationSteps", { number: iterationIndex + 1 }) : t("agentPlan.executionSteps");
 
                 return (
                     <div className={styles.iterationSection} key={`iteration-${iterationIndex}`}>
@@ -195,9 +198,9 @@ export const AgentPlan: React.FC<Props> = ({ queryPlan, onEffortExtracted, onCit
                         <table className={styles.subqueriesTable}>
                             <thead>
                                 <tr>
-                                    <th>Step</th>
-                                    <th>Details</th>
-                                    <th>Elapsed MS</th>
+                                    <th>{t("agentPlan.step")}</th>
+                                    <th>{t("agentPlan.details")}</th>
+                                    <th>{t("agentPlan.elapsedMs")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -261,7 +264,7 @@ export const AgentPlan: React.FC<Props> = ({ queryPlan, onEffortExtracted, onCit
                                                             })}
                                                         </div>
                                                     ) : (
-                                                        <div className={styles.noResults}>No results found</div>
+                                                        <div className={styles.noResults}>{t("agentPlan.noResults")}</div>
                                                     ))}
                                             </td>
                                             <td title={step.query_time ?? undefined}>{step.elapsed_ms ?? "—"}</td>

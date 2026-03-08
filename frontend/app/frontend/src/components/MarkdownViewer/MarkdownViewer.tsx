@@ -32,7 +32,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ src }) => {
                 const response = await fetch(src);
 
                 if (!response.ok) {
-                    throw new Error("Failed loading markdown file.");
+                    throw new Error(t("viewer.failedLoadingMarkdown"));
                 }
 
                 let markdownText = await response.text();
@@ -52,7 +52,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ src }) => {
         <div>
             {isLoading ? (
                 <div className={`${styles.loading} ${styles.markdownViewer}`}>
-                    <Spinner size="large" label="Loading file" />
+                    <Spinner size="large" label={t("viewer.loadingFile")} />
                 </div>
             ) : error ? (
                 <div className={`${styles.error} ${styles.markdownViewer}`}>
@@ -60,7 +60,7 @@ export const MarkdownViewer: React.FC<MarkdownViewerProps> = ({ src }) => {
                         <MessageBarBody>
                             {error.message}
                             <Link href={src} download>
-                                Download the file
+                                {t("viewer.downloadFile")}
                             </Link>
                         </MessageBarBody>
                     </MessageBar>

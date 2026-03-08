@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, DragEvent, ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "../../pages/files/Files.module.css";
 
 interface UploadZoneProps {
@@ -9,6 +10,7 @@ interface UploadZoneProps {
 }
 
 export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes }: UploadZoneProps) => {
+    const { t } = useTranslation();
     const [dragOver, setDragOver] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -66,7 +68,7 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes }: Upl
             <span className={styles.uploadIcon}>{uploading ? "⏳" : "📤"}</span>
             {uploading ? (
                 <>
-                    <p className={styles.uploadText}>Uploading...</p>
+                    <p className={styles.uploadText}>{t("files.uploading")}</p>
                     <div className={styles.progressBarOuter}>
                         <div className={styles.progressBarInner} style={{ width: `${progress}%` }} />
                     </div>
@@ -74,10 +76,10 @@ export const UploadZone = ({ onUpload, uploading, progress, acceptedTypes }: Upl
                 </>
             ) : (
                 <>
-                    <p className={styles.uploadText}>Drag & drop files here</p>
-                    <p className={styles.uploadTextSub}>or click to browse</p>
+                    <p className={styles.uploadText}>{t("files.dragDropFiles")}</p>
+                    <p className={styles.uploadTextSub}>{t("files.orClickBrowse")}</p>
                     <button className={styles.uploadBrowseBtn} onClick={(e) => { e.stopPropagation(); handleBrowse(); }}>
-                        Choose Files
+                        {t("files.chooseFiles")}
                     </button>
                 </>
             )}

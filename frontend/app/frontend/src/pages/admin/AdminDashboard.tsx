@@ -1,6 +1,7 @@
 import { useEffect, useState, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
+import { useTranslation } from "react-i18next";
 import styles from "./AdminDashboard.module.css";
 import { useLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -21,6 +22,7 @@ const FILL_CLASS: Record<string, string> = {
 
 const AdminDashboard = () => {
     const { loggedIn } = useContext(LoginContext);
+    const { t } = useTranslation();
     const client = useLogin ? useMsal().instance : undefined;
 
     const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
@@ -69,8 +71,8 @@ const AdminDashboard = () => {
         return (
             <div className={styles.forbiddenContainer}>
                 <span style={{ fontSize: "2.5rem" }}>🔒</span>
-                <h2>Sign in Required</h2>
-                <Link to="/dashboard" className={styles.backLink}>Go to Dashboard</Link>
+                <h2>{t("admin.signInRequired")}</h2>
+                <Link to="/dashboard" className={styles.backLink}>{t("admin.goToDashboard")}</Link>
             </div>
         );
     }
@@ -89,9 +91,9 @@ const AdminDashboard = () => {
         return (
             <div className={styles.forbiddenContainer}>
                 <span style={{ fontSize: "2.5rem" }}>🚫</span>
-                <h2>Admin Access Required</h2>
-                <p>You need the Admin role to view this dashboard.</p>
-                <Link to="/dashboard" className={styles.backLink}>← Back to Dashboard</Link>
+                <h2>{t("admin.adminAccessRequired")}</h2>
+                <p>{t("admin.adminRoleNeeded")}</p>
+                <Link to="/dashboard" className={styles.backLink}>{t("admin.backToDashboard")}</Link>
             </div>
         );
     }
@@ -102,7 +104,7 @@ const AdminDashboard = () => {
             <div className={styles.forbiddenContainer}>
                 <span style={{ fontSize: "2.5rem" }}>⚠️</span>
                 <p>{error}</p>
-                <Link to="/dashboard" className={styles.backLink}>← Back to Dashboard</Link>
+                <Link to="/dashboard" className={styles.backLink}>{t("admin.backToDashboard")}</Link>
             </div>
         );
     }
@@ -116,8 +118,8 @@ const AdminDashboard = () => {
             {/* Header */}
             <div className={styles.adminHeader}>
                 <div>
-                    <h1 className={styles.adminTitle}>Management Dashboard</h1>
-                    <Link to="/dashboard" className={styles.backLink}>← Personal Dashboard</Link>
+                    <h1 className={styles.adminTitle}>{t("admin.managementDashboard")}</h1>
+                    <Link to="/dashboard" className={styles.backLink}>{t("admin.personalDashboard")}</Link>
                 </div>
                 <span className={`${styles.statusBadge} ${STATUS_CLASS[metrics.system_status] || styles.statusHealthy}`}>
                     {metrics.system_status === "healthy" ? "●" : "⚠"} {metrics.system_status}
@@ -127,38 +129,38 @@ const AdminDashboard = () => {
             {/* Key Metrics */}
             <div className={styles.metricsGrid}>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Total Users</span>
+                    <span className={styles.metricLabel}>{t("admin.totalUsers")}</span>
                     <span className={styles.metricValue}>{metrics.total_users}</span>
                 </div>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Active Today</span>
+                    <span className={styles.metricLabel}>{t("admin.activeToday")}</span>
                     <span className={styles.metricValue}>{metrics.active_users_today}</span>
                 </div>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Queries Today</span>
+                    <span className={styles.metricLabel}>{t("admin.queriesToday")}</span>
                     <span className={styles.metricValue}>{metrics.total_queries_today}</span>
                 </div>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Queries This Month</span>
+                    <span className={styles.metricLabel}>{t("admin.queriesThisMonth")}</span>
                     <span className={styles.metricValue}>{metrics.total_queries_month}</span>
                 </div>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Total Documents</span>
+                    <span className={styles.metricLabel}>{t("admin.totalDocuments")}</span>
                     <span className={styles.metricValue}>{metrics.total_documents}</span>
                 </div>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Storage Used</span>
+                    <span className={styles.metricLabel}>{t("admin.storageUsed")}</span>
                     <span className={styles.metricValue}>{metrics.total_storage_gb.toFixed(1)} GB</span>
                 </div>
                 <div className={styles.metricCard}>
-                    <span className={styles.metricLabel}>Error Rate</span>
+                    <span className={styles.metricLabel}>{t("admin.errorRate")}</span>
                     <span className={styles.metricValue}>{(metrics.error_rate * 100).toFixed(1)}%</span>
                 </div>
             </div>
 
             {/* Algorithm versions */}
             <div className={styles.section}>
-                <h2 className={styles.sectionTitle}>Algorithm Versions</h2>
+                <h2 className={styles.sectionTitle}>{t("admin.algorithmVersions")}</h2>
                 <div className={styles.versionRow}>
                     {metrics.enabled_versions.map(v => (
                         <span
@@ -166,18 +168,18 @@ const AdminDashboard = () => {
                             className={`${styles.versionPill} ${v === metrics.algorithm_version ? styles.versionDefault : ""}`}
                         >
                             {v}
-                            {v === metrics.algorithm_version && " (default)"}
+                            {v === metrics.algorithm_version && ` ${t("admin.default")}`}
                         </span>
                     ))}
                 </div>
                 <span className={styles.metricSub}>
-                    Default: {metrics.algorithm_version} · {metrics.enabled_versions.length} enabled
+                    {t("admin.defaultVersion", { version: metrics.algorithm_version, count: metrics.enabled_versions.length })}
                 </span>
             </div>
 
             {/* Plan distribution */}
             <div className={styles.section}>
-                <h2 className={styles.sectionTitle}>Plan Distribution</h2>
+                <h2 className={styles.sectionTitle}>{t("admin.planDistribution")}</h2>
                 {Object.entries(metrics.plan_distribution).map(([plan, count]) => {
                     const pct = totalPlanUsers > 0 ? Math.round((count / totalPlanUsers) * 100) : 0;
                     return (
@@ -198,7 +200,7 @@ const AdminDashboard = () => {
             {/* Queries per hour */}
             {metrics.queries_per_hour.length > 0 && (
                 <div className={styles.section}>
-                    <h2 className={styles.sectionTitle}>Queries Per Hour (Last 24h)</h2>
+                    <h2 className={styles.sectionTitle}>{t("admin.queriesPerHour")}</h2>
                     <div className={styles.hourChart}>
                         {(() => {
                             const maxCount = Math.max(...metrics.queries_per_hour.map(h => h.count || 0), 1);
@@ -218,21 +220,21 @@ const AdminDashboard = () => {
 
             {/* Top users */}
             <div className={styles.section}>
-                <h2 className={styles.sectionTitle}>Top Users</h2>
+                <h2 className={styles.sectionTitle}>{t("admin.topUsers")}</h2>
                 <table className={styles.userList}>
                     <thead>
                         <tr>
-                            <th>User</th>
-                            <th>Queries</th>
-                            <th>Plan</th>
-                            <th>Last Active</th>
+                            <th>{t("admin.user")}</th>
+                            <th>{t("admin.queries")}</th>
+                            <th>{t("admin.plan")}</th>
+                            <th>{t("admin.lastActive")}</th>
                         </tr>
                     </thead>
                     <tbody>
                         {metrics.top_users.length === 0 ? (
                             <tr>
                                 <td colSpan={4} className={styles.emptyRow}>
-                                    No user activity data yet. Data will appear once analytics are connected.
+                                    {t("admin.noUserActivity")}
                                 </td>
                             </tr>
                         ) : (

@@ -1,6 +1,7 @@
 import { useEffect, useCallback, useState, useContext } from "react";
 import { Link } from "react-router-dom";
 import { useMsal } from "@azure/msal-react";
+import { useTranslation } from "react-i18next";
 import styles from "./Dashboard.module.css";
 import { useLogin, getToken, isUsingAppServicesLogin } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -13,16 +14,6 @@ const PLAN_BADGE_CLASS: Record<string, string> = {
     enterprise: styles.planEnterprise
 };
 
-const FEATURE_LABELS: Record<string, string> = {
-    graphrag: "Evidoc Search",
-    advanced_analytics: "Advanced Analytics",
-    custom_models: "Custom Models",
-    api_access: "API Access",
-    priority_support: "Priority Support",
-    sso: "SSO Integration",
-    custom_branding: "Custom Branding"
-};
-
 function usePct(used: number, limit: number): { pct: number; color: string } {
     if (limit <= 0) return { pct: 0, color: styles.barGreen };
     const pct = Math.min(100, Math.round((used / limit) * 100));
@@ -32,6 +23,7 @@ function usePct(used: number, limit: number): { pct: number; color: string } {
 
 const Dashboard = () => {
     const { loggedIn } = useContext(LoginContext);
+    const { t } = useTranslation();
     const client = useLogin ? useMsal().instance : undefined;
 
     const [profile, setProfile] = useState<UserProfileResponse | null>(null);
@@ -92,8 +84,8 @@ const Dashboard = () => {
         return (
             <div className={styles.loginRequired}>
                 <span>🔒</span>
-                <h2>Sign in Required</h2>
-                <p>Please sign in to view your dashboard.</p>
+                <h2>{t("dashboard.signInRequired")}</h2>
+                <p>{t("dashboard.signInToView")}</p>
             </div>
         );
     }
@@ -112,10 +104,10 @@ const Dashboard = () => {
         return (
             <div className={styles.loginRequired}>
                 <span>🔑</span>
-                <h2>Session Expired</h2>
-                <p>Your authentication session has expired. Please sign in again to continue.</p>
+                <h2>{t("dashboard.sessionExpired")}</h2>
+                <p>{t("dashboard.sessionExpiredMessage")}</p>
                 <button className={styles.upgradeButton} onClick={handleReLogin}>
-                    Sign In
+                    {t("dashboard.signIn")}
                 </button>
             </div>
         );
@@ -145,7 +137,7 @@ const Dashboard = () => {
             <div className={styles.dashboardHeader}>
                 <div>
                     <h1 className={styles.greeting}>
-                        {profile.display_name ? `Hello, ${profile.display_name}` : "Dashboard"}
+                        {profile.display_name ? t("dashboard.hello", { name: profile.display_name }) : t("dashboard.title")}
                     </h1>
                     {profile.email && (
                         <span className={styles.statSubtext}>{profile.email}</span>
@@ -157,7 +149,7 @@ const Dashboard = () => {
                     </span>
                     {profile.is_admin && (
                         <Link to="/admin" className={styles.adminLink}>
-                            ⚙️ Admin Dashboard
+                            ⚙️ {t("dashboard.adminDashboard")}
                         </Link>
                     )}
                 </div>
@@ -166,30 +158,30 @@ const Dashboard = () => {
             {/* Stats */}
             <div className={styles.statsGrid}>
                 <div className={styles.statCard}>
-                    <span className={styles.statLabel}>Queries Today</span>
+                    <span className={styles.statLabel}>{t("dashboard.queriesToday")}</span>
                     <span className={styles.statValue}>{usage.queries_today}</span>
-                    <span className={styles.statSubtext}>of {usage.queries_limit_day} daily limit</span>
+                    <span className={styles.statSubtext}>{t("dashboard.dailyLimit", { limit: usage.queries_limit_day })}</span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${queryDay.color}`} style={{ width: `${queryDay.pct}%` }} />
                     </div>
                 </div>
 
                 <div className={styles.statCard}>
-                    <span className={styles.statLabel}>Queries This Month</span>
+                    <span className={styles.statLabel}>{t("dashboard.queriesThisMonth")}</span>
                     <span className={styles.statValue}>{usage.queries_this_month}</span>
-                    <span className={styles.statSubtext}>of {usage.queries_limit_month} monthly limit</span>
+                    <span className={styles.statSubtext}>{t("dashboard.monthlyLimit", { limit: usage.queries_limit_month })}</span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${queryMonth.color}`} style={{ width: `${queryMonth.pct}%` }} />
                     </div>
                 </div>
 
                 <div className={styles.statCard}>
-                    <span className={styles.statLabel}>Credits Used</span>
+                    <span className={styles.statLabel}>{t("dashboard.creditsUsed")}</span>
                     <span className={styles.statValue}>{usage.credits_used_month.toLocaleString()}</span>
                     <span className={styles.statSubtext}>
-                        of {usage.credits_limit_month != null ? usage.credits_limit_month.toLocaleString() : "∞"} monthly credits
-                        {usage.translated_queries_month > 0 && ` · ${usage.translated_queries_month} translated`}
-                        {usage.speech_queries_month > 0 && ` · ${usage.speech_queries_month} voice`}
+                        {usage.credits_limit_month != null ? t("dashboard.monthlyCredits", { limit: usage.credits_limit_month.toLocaleString() }) : t("dashboard.unlimitedCredits")}
+                        {usage.translated_queries_month > 0 && ` · ${t("dashboard.translated", { count: usage.translated_queries_month })}`}
+                        {usage.speech_queries_month > 0 && ` · ${t("dashboard.voice", { count: usage.speech_queries_month })}`}
                     </span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${credits.color}`} style={{ width: `${credits.pct}%` }} />
@@ -197,12 +189,12 @@ const Dashboard = () => {
                 </div>
 
                 <div className={styles.statCard}>
-                    <span className={styles.statLabel}>Documents</span>
+                    <span className={styles.statLabel}>{t("dashboard.documents")}</span>
                     <span className={styles.statValue}>{usage.documents_count}</span>
                     <span className={styles.statSubtext}>
                         {usage.personal_documents_count != null && usage.global_documents_count != null
-                            ? `(${usage.personal_documents_count} personal + ${usage.global_documents_count} shared) of ${usage.documents_limit} limit`
-                            : `of ${usage.documents_limit} limit`}
+                            ? t("dashboard.personalShared", { personal: usage.personal_documents_count, shared: usage.global_documents_count, limit: usage.documents_limit })
+                            : t("dashboard.ofLimit", { limit: usage.documents_limit })}
                     </span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${docs.color}`} style={{ width: `${docs.pct}%` }} />
@@ -210,9 +202,9 @@ const Dashboard = () => {
                 </div>
 
                 <div className={styles.statCard}>
-                    <span className={styles.statLabel}>Storage Used</span>
+                    <span className={styles.statLabel}>{t("dashboard.storageUsed")}</span>
                     <span className={styles.statValue}>{usage.storage_used_gb.toFixed(1)} GB</span>
-                    <span className={styles.statSubtext}>of {usage.storage_limit_gb} GB limit</span>
+                    <span className={styles.statSubtext}>{t("dashboard.gbLimit", { limit: usage.storage_limit_gb })}</span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${storage.color}`} style={{ width: `${storage.pct}%` }} />
                     </div>
@@ -222,14 +214,14 @@ const Dashboard = () => {
             {/* Recent Activity */}
             {usage.recent_queries.length > 0 && (
                 <div className={styles.section}>
-                    <h2 className={styles.sectionTitle}>Recent Activity</h2>
+                    <h2 className={styles.sectionTitle}>{t("dashboard.recentActivity")}</h2>
                     <table className={styles.recentTable}>
                         <thead>
                             <tr>
-                                <th>Time</th>
-                                <th>Tokens</th>
-                                <th>Credits</th>
-                                <th>Language</th>
+                                <th>{t("dashboard.time")}</th>
+                                <th>{t("dashboard.tokens")}</th>
+                                <th>{t("dashboard.credits")}</th>
+                                <th>{t("dashboard.language")}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -252,9 +244,17 @@ const Dashboard = () => {
 
             {/* Features */}
             <div className={styles.section}>
-                <h2 className={styles.sectionTitle}>Your Features</h2>
+                <h2 className={styles.sectionTitle}>{t("dashboard.yourFeatures")}</h2>
                 <div className={styles.featuresGrid}>
-                    {Object.entries(FEATURE_LABELS).map(([key, label]) => {
+                    {Object.entries({
+                        graphrag: t("dashboard.featureGraphrag"),
+                        advanced_analytics: t("dashboard.featureAdvancedAnalytics"),
+                        custom_models: t("dashboard.featureCustomModels"),
+                        api_access: t("dashboard.featureApiAccess"),
+                        priority_support: t("dashboard.featurePrioritySupport"),
+                        sso: t("dashboard.featureSso"),
+                        custom_branding: t("dashboard.featureCustomBranding")
+                    } as Record<string, string>).map(([key, label]) => {
                         const enabled = profile.features[key] ?? false;
                         return (
                             <div
@@ -272,7 +272,7 @@ const Dashboard = () => {
             {/* Plans comparison */}
             {plans && (
                 <div className={styles.section}>
-                    <h2 className={styles.sectionTitle}>Plans</h2>
+                    <h2 className={styles.sectionTitle}>{t("dashboard.plans")}</h2>
                     <div className={styles.planGrid}>
                         {Object.entries(plans.plans).map(([tier, info]) => {
                             const isCurrent = tier === plans.current_plan;
@@ -282,13 +282,13 @@ const Dashboard = () => {
                                     className={`${styles.planCard} ${isCurrent ? styles.planCardCurrent : ""}`}
                                 >
                                     <div className={styles.planCardName}>{info.name}</div>
-                                    <p className={styles.planCardDetail}>{info.queries_per_day} queries/day</p>
-                                    <p className={styles.planCardDetail}>{info.max_documents} documents</p>
-                                    <p className={styles.planCardDetail}>{info.max_storage_gb} GB storage</p>
+                                    <p className={styles.planCardDetail}>{t("dashboard.queriesPerDay", { count: info.queries_per_day })}</p>
+                                    <p className={styles.planCardDetail}>{t("dashboard.maxDocuments", { count: info.max_documents })}</p>
+                                    <p className={styles.planCardDetail}>{t("dashboard.maxStorage", { count: info.max_storage_gb })}</p>
                                     <p className={styles.planCardDetail}>
                                         {info.monthly_credits != null
-                                            ? `${info.monthly_credits.toLocaleString()} credits/mo`
-                                            : "Unlimited credits"}
+                                            ? t("dashboard.creditsPerMonth", { count: info.monthly_credits.toLocaleString() })
+                                            : t("dashboard.unlimitedCredits")}
                                     </p>
                                     <p className={styles.planCardDetail}>
                                         {info.graphrag_enabled ? "✅ Evidoc" : "❌ Evidoc"}
@@ -298,7 +298,7 @@ const Dashboard = () => {
                                         disabled={isCurrent}
                                         onClick={() => { if (!isCurrent) window.location.hash = "#/dashboard#plans"; }}
                                     >
-                                        {isCurrent ? "Current Plan" : "Contact Sales"}
+                                        {isCurrent ? t("dashboard.currentPlan") : t("dashboard.contactSales")}
                                     </button>
                                 </div>
                             );

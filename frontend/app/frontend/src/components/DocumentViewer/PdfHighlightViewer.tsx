@@ -6,6 +6,7 @@
  * pixel-accurate sentence highlighting.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import * as pdfjsLib from "pdfjs-dist";
 import { HighlightOverlay, SentenceHighlight } from "./HighlightOverlay";
 
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export const PdfHighlightViewer = ({ src, targetPage, highlights = [], height = "810px" }: Props) => {
+    const { t } = useTranslation();
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const [pageNum, setPageNum] = useState(targetPage ?? 1);
@@ -60,7 +62,7 @@ export const PdfHighlightViewer = ({ src, targetPage, highlights = [], height = 
             } catch (e) {
                 if (!cancelled) {
                     console.error("Failed to load PDF:", e);
-                    setError("Failed to load PDF document");
+                    setError(t("viewer.failedLoadPdf"));
                     setLoading(false);
                 }
             }
@@ -144,21 +146,21 @@ export const PdfHighlightViewer = ({ src, targetPage, highlights = [], height = 
                         ◀
                     </button>
                     <span>
-                        Page {pageNum} / {numPages}
+                        {t("viewer.pageInfo", { current: pageNum, total: numPages })}
                     </span>
                     <button onClick={goToNext} disabled={pageNum >= numPages} style={navBtnStyle}>
                         ▶
                     </button>
                     {highlights.length > 0 && (
                         <span style={{ marginLeft: 12, opacity: 0.7, fontSize: 11 }}>
-                            {highlights.filter(h => h.page === pageNum).length} highlight(s) on this page
+                            {t("viewer.highlightCount", { count: highlights.filter(h => h.page === pageNum).length })}
                         </span>
                     )}
                 </div>
             )}
 
             {loading && (
-                <div style={{ padding: 32, color: "#aaa", textAlign: "center" }}>Loading PDF…</div>
+                <div style={{ padding: 32, color: "#aaa", textAlign: "center" }}>{t("viewer.loadingPdf")}</div>
             )}
 
             {/* Canvas + highlight overlay */}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import styles from "../../pages/files/Files.module.css";
 
 interface RenameDialogProps {
@@ -8,6 +9,7 @@ interface RenameDialogProps {
 }
 
 export const RenameDialog = ({ currentName, onRename, onDismiss }: RenameDialogProps) => {
+    const { t } = useTranslation();
     const [value, setValue] = useState(currentName);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -34,7 +36,7 @@ export const RenameDialog = ({ currentName, onRename, onDismiss }: RenameDialogP
     return (
         <div className={styles.overlay} onClick={onDismiss}>
             <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
-                <h3>Rename File</h3>
+                <h3>{t("files.renameFile")}</h3>
                 <input
                     ref={inputRef}
                     className={styles.dialogInput}
@@ -48,10 +50,10 @@ export const RenameDialog = ({ currentName, onRename, onDismiss }: RenameDialogP
                 />
                 <div className={styles.dialogActions}>
                     <button className={styles.dialogBtn} onClick={onDismiss}>
-                        Cancel
+                        {t("files.cancel")}
                     </button>
                     <button className={styles.dialogBtnPrimary} onClick={handleSubmit}>
-                        Rename
+                        {t("files.rename")}
                     </button>
                 </div>
             </div>

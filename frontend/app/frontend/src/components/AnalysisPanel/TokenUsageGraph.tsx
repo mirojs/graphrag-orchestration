@@ -1,4 +1,5 @@
 import React from "react";
+import { useTranslation } from "react-i18next";
 import styles from "./AnalysisPanel.module.css";
 
 export interface TokenUsage {
@@ -47,6 +48,7 @@ interface TokenUsageStackedBarProps {
 }
 
 export const TokenUsageStackedBar: React.FC<TokenUsageStackedBarProps> = ({ tokenUsage, labels, includeReasoning = false }) => {
+    const { t } = useTranslation();
     const base = tokenUsage.total_tokens || 1;
     const reasoningValue = includeReasoning ? tokenUsage.reasoning_tokens : 0;
     const outputValue = tokenUsage.completion_tokens - reasoningValue;
@@ -71,7 +73,7 @@ export const TokenUsageStackedBar: React.FC<TokenUsageStackedBarProps> = ({ toke
             {includeReasoning && (
                 <div className={`${styles.tokenBar} ${styles.reasoningBar}`} style={{ flexGrow: reasoningFlex, flexBasis: reasoningPercent, minWidth: 0 }}>
                     <span className={styles.tokenLabel}>
-                        {labels.reasoning ?? "Reasoning"}: {reasoningValue}
+                        {labels.reasoning ?? t("tokenUsage.reasoning")}: {reasoningValue}
                     </span>
                 </div>
             )}
@@ -128,18 +130,21 @@ interface TokenUsageGraphProps {
 export const TokenUsageGraph: React.FC<TokenUsageGraphProps> = ({
     tokenUsage,
     reasoningEffort,
-    title = "Token usage",
+    title: titleProp,
     variant = "full",
-    totalLabel = "Total",
+    totalLabel: totalLabelProp,
     labels,
     additionalTotals,
     supplementaryUsages
 }) => {
+    const { t } = useTranslation();
+    const title = titleProp ?? t("tokenUsage.title");
+    const totalLabel = totalLabelProp ?? t("tokenUsage.total");
     const { total_tokens } = tokenUsage;
     const showPrimaryBars = variant !== "totalOnly";
-    const promptLabel = labels?.prompt ?? "Prompt";
-    const reasoningLabel = labels?.reasoning ?? "Reasoning";
-    const outputLabel = labels?.output ?? "Output";
+    const promptLabel = labels?.prompt ?? t("tokenUsage.prompt");
+    const reasoningLabel = labels?.reasoning ?? t("tokenUsage.reasoning");
+    const outputLabel = labels?.output ?? t("tokenUsage.output");
     const resolvedTotalLabel = labels?.total ?? totalLabel;
     const supplementary = supplementaryUsages ?? [];
     const includeReasoning = showPrimaryBars && Boolean(reasoningEffort) && tokenUsage.reasoning_tokens > 0;
@@ -175,9 +180,9 @@ export const TokenUsageGraph: React.FC<TokenUsageGraphProps> = ({
                         <TokenUsageStackedBar
                             tokenUsage={segment.tokenUsage}
                             labels={{
-                                prompt: segment.labels?.prompt ?? "Prompt",
-                                output: segment.labels?.output ?? "Output",
-                                reasoning: segment.labels?.reasoning ?? "Reasoning"
+                                prompt: segment.labels?.prompt ?? t("tokenUsage.prompt"),
+                                output: segment.labels?.output ?? t("tokenUsage.output"),
+                                reasoning: segment.labels?.reasoning ?? t("tokenUsage.reasoning")
                             }}
                             includeReasoning={false}
                         />

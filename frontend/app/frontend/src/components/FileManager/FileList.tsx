@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { getFileIcon } from "../../api/files";
 import styles from "../../pages/files/Files.module.css";
 
@@ -11,11 +12,13 @@ interface FileListProps {
 }
 
 export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, onRename }: FileListProps) => {
+    const { t } = useTranslation();
+
     if (loading) {
         return (
             <div className={styles.loading}>
                 <span className={styles.spinner} />
-                Loading files...
+                {t("files.loadingFiles")}
             </div>
         );
     }
@@ -24,8 +27,8 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
         return (
             <div className={styles.emptyState}>
                 <span className={styles.emptyIcon}>📂</span>
-                <h2>No files yet</h2>
-                <p>Upload files using the drop zone above.</p>
+                <h2>{t("files.noFilesYet")}</h2>
+                <p>{t("files.uploadFilesHint")}</p>
             </div>
         );
     }
@@ -42,9 +45,9 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                     <tr>
                         <th style={{ width: 40 }}></th>
                         <th></th>
-                        <th>Name</th>
-                        <th style={{ width: 80 }}>Type</th>
-                        <th style={{ width: 160 }}>Actions</th>
+                        <th>{t("files.nameColumn")}</th>
+                        <th style={{ width: 80 }}>{t("files.typeColumn")}</th>
+                        <th style={{ width: 160 }}>{t("files.actionsColumn")}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -75,14 +78,14 @@ export const FileList = ({ files, selected, loading, onToggleSelect, onDelete, o
                                         <button
                                             className={styles.actionBtn}
                                             onClick={() => onRename(f)}
-                                            title="Rename"
+                                            title={t("files.rename")}
                                         >
                                             ✏️
                                         </button>
                                         <button
                                             className={`${styles.actionBtn} ${styles.actionBtnDanger}`}
                                             onClick={() => onDelete(f)}
-                                            title="Delete"
+                                            title={t("files.delete")}
                                         >
                                             🗑️
                                         </button>

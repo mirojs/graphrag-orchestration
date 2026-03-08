@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef, useContext } from "react";
+import { useTranslation } from "react-i18next";
 import { useMsal } from "@azure/msal-react";
 import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
@@ -50,8 +51,7 @@ const Files = () => {
     // Auth
     const client = useLogin ? useMsal().instance : null;
     const { loggedIn } = useContext(LoginContext);
-
-    // State
+    const { t } = useTranslation();
     const [activeTab, setActiveTab] = useState<"my" | "shared">("my");
     const [files, setFiles] = useState<string[]>([]);
     const [globalFiles, setGlobalFiles] = useState<string[]>([]);
@@ -73,11 +73,11 @@ const Files = () => {
     const addToast = useCallback((type: ToastMessage["type"], text: string) => {
         const id = ++toastIdRef.current;
         setToasts(prev => [...prev, { id, type, text }]);
-        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
+        setTimeout(() => setToasts(prev => prev.filter(toast => toast.id !== id)), 4000);
     }, []);
 
     const dismissToast = useCallback((id: number) => {
-        setToasts(prev => prev.filter(t => t.id !== id));
+        setToasts(prev => prev.filter(toast => toast.id !== id));
     }, []);
 
     // Load files
@@ -151,11 +151,11 @@ const Files = () => {
                 const result = await uploadFilesApi(fileList, token as string, (loaded, total) => {
                     setUploadProgress(Math.round((loaded / total) * 100));
                 }, activeFolderId ?? undefined);
-                addToast("success", result.message || `${fileList.length} file(s) uploaded`);
+                addToast("success", result.message || t("files.filesUploaded", { count: fileList.length }));
                 await loadFiles();
                 setSelected(new Set());
             } catch (err: any) {
-                addToast("error", `Upload failed: ${err.message}`);
+                addToast("error", t("files.uploadFailed", { message: err.message }));
             } finally {
                 setUploading(false);
                 setUploadProgress(0);
@@ -167,7 +167,7 @@ const Files = () => {
     // Delete handler
     const handleDelete = useCallback(
         async (filenames: string[]) => {
-            const confirmMsg = filenames.length === 1 ? `Delete "${filenames[0]}"?` : `Delete ${filenames.length} files?`;
+            const confirmMsg = filenames.length === 1 ? t("files.deleteConfirmSingle", { filename: filenames[0] }) : t("files.deleteConfirmMultiple", { count: filenames.length });
             if (!window.confirm(confirmMsg)) return;
 
             try {
@@ -178,7 +178,7 @@ const Files = () => {
                 } else {
                     await bulkDeleteFilesApi(filenames, token as string);
                 }
-                addToast("success", `${filenames.length} file(s) deleted`);
+                addToast("success", t("files.filesDeleted", { count: filenames.length }));
                 await loadFiles();
                 setSelected(prev => {
                     const next = new Set(prev);
@@ -186,7 +186,7 @@ const Files = () => {
                     return next;
                 });
             } catch (err: any) {
-                addToast("error", `Delete failed: ${err.message}`);
+                addToast("error", t("files.deleteFailed", { message: err.message }));
             }
         },
         [client, addToast, loadFiles]
@@ -199,11 +199,11 @@ const Files = () => {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
                 await renameFileApi(oldName, newName, token as string);
-                addToast("success", `Renamed to "${newName}"`);
+                addToast("success", t("files.renamedTo", { name: newName }));
                 setRenameFile(null);
                 await loadFiles();
             } catch (err: any) {
-                addToast("error", `Rename failed: ${err.message}`);
+                addToast("error", t("files.renameFailed", { message: err.message }));
             }
         },
         [client, addToast, loadFiles]
@@ -216,10 +216,10 @@ const Files = () => {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
                 await createFolderApi({ name, parent_folder_id: parentId }, token as string);
-                addToast("success", `Folder "${name}" created`);
+                addToast("success", t("files.folderCreated", { name }));
                 await loadFolders();
             } catch (err: any) {
-                addToast("error", `Create folder failed: ${err.message}`);
+                addToast("error", t("files.createFolderFailed", { message: err.message }));
             }
         },
         [client, addToast, loadFolders]
@@ -231,10 +231,10 @@ const Files = () => {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
                 await renameFolderApi(folderId, newName, token as string);
-                addToast("success", `Folder renamed to "${newName}"`);
+                addToast("success", t("files.folderRenamed", { name: newName }));
                 await loadFolders();
             } catch (err: any) {
-                addToast("error", `Rename folder failed: ${err.message}`);
+                addToast("error", t("files.renameFolderFailed", { message: err.message }));
             }
         },
         [client, addToast, loadFolders]
@@ -242,16 +242,16 @@ const Files = () => {
 
     const handleDeleteFolder = useCallback(
         async (folderId: string) => {
-            if (!window.confirm("Delete this folder? Files inside will be moved to All Files.")) return;
+            if (!window.confirm(t("files.deleteFolderConfirm"))) return;
             try {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
                 await deleteFolderApi(folderId, token as string, true);
-                addToast("success", "Folder deleted");
+                addToast("success", t("files.folderDeleted"));
                 if (activeFolderId === folderId) setActiveFolderId(null);
                 await loadFolders();
             } catch (err: any) {
-                addToast("error", `Delete folder failed: ${err.message}`);
+                addToast("error", t("files.deleteFolderFailed", { message: err.message }));
             }
         },
         [client, addToast, loadFolders, activeFolderId]
@@ -299,8 +299,8 @@ const Files = () => {
             <div className={styles.container}>
                 <div className={styles.emptyState}>
                     <span className={styles.emptyIcon}>🔒</span>
-                    <h2>Sign in Required</h2>
-                    <p>Please sign in to manage your files.</p>
+                    <h2>{t("files.signInRequired")}</h2>
+                    <p>{t("files.signInToManage")}</p>
                 </div>
             </div>
         );
@@ -316,14 +316,14 @@ const Files = () => {
                     className={`${styles.tab} ${activeTab === "my" ? styles.tabActive : ""}`}
                     onClick={() => setActiveTab("my")}
                 >
-                    My Files
+                    {t("files.myFiles")}
                 </button>
                 {sharedAvailable && (
                     <button
                         className={`${styles.tab} ${activeTab === "shared" ? styles.tabActive : ""}`}
                         onClick={() => setActiveTab("shared")}
                     >
-                        Shared Library
+                        {t("files.sharedLibrary")}
                     </button>
                 )}
             </div>
@@ -356,7 +356,7 @@ const Files = () => {
                     {!isShared && activeFolderId && (
                         <div className={styles.breadcrumb}>
                             <button className={styles.breadcrumbLink} onClick={() => setActiveFolderId(null)}>
-                                All Files
+                                {t("files.allFiles")}
                             </button>
                             <span className={styles.breadcrumbSep}>›</span>
                             {parentFolder && (
@@ -415,8 +415,8 @@ const Files = () => {
 
             {/* Toast notifications */}
             <div className={styles.toastContainer}>
-                {toasts.map(t => (
-                    <Toast key={t.id} type={t.type} text={t.text} onDismiss={() => dismissToast(t.id)} />
+                {toasts.map(toast => (
+                    <Toast key={toast.id} type={toast.type} text={toast.text} onDismiss={() => dismissToast(toast.id)} />
                 ))}
             </div>
         </div>

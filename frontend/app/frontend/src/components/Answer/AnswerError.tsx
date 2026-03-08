@@ -1,5 +1,6 @@
 import { Button } from "@fluentui/react-components";
 import { ErrorCircle24Regular } from "@fluentui/react-icons";
+import { useTranslation } from "react-i18next";
 
 import styles from "./Answer.module.css";
 
@@ -9,6 +10,8 @@ interface Props {
 }
 
 export const AnswerError = ({ error, onRetry }: Props) => {
+    const { t } = useTranslation();
+
     return (
         <div className={styles.answerContainer} style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
             <ErrorCircle24Regular aria-hidden="true" aria-label="Error icon" primaryFill="red" />
@@ -18,7 +21,7 @@ export const AnswerError = ({ error, onRetry }: Props) => {
             </div>
 
             <Button appearance="primary" className={styles.retryButton} onClick={onRetry}>
-                Retry
+                {t("errors.retry")}
             </Button>
         </div>
     );

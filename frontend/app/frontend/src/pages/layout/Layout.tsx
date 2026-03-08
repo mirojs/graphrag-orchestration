@@ -33,7 +33,7 @@ const Layout = () => {
                             <button
                                 className={styles.menuToggle}
                                 onClick={toggleSidebar}
-                                aria-label="Toggle navigation"
+                                aria-label={t("nav.toggleNavigation")}
                                 aria-expanded={sidebarOpen}
                             >
                                 <span className={styles.hamburger} />
@@ -65,7 +65,7 @@ const Layout = () => {
                             onClick={closeSidebar}
                         >
                             <span className={styles.navIcon}>💬</span>
-                            <span className={styles.navLabel}>Chat</span>
+                            <span className={styles.navLabel}>{t("nav.chat")}</span>
                         </NavLink>
                         <NavLink
                             to="/files"
@@ -73,7 +73,7 @@ const Layout = () => {
                             onClick={closeSidebar}
                         >
                             <span className={styles.navIcon}>📁</span>
-                            <span className={styles.navLabel}>Files</span>
+                            <span className={styles.navLabel}>{t("nav.files")}</span>
                         </NavLink>
                         <div className={styles.navDivider} />
                         <NavLink
@@ -82,7 +82,7 @@ const Layout = () => {
                             onClick={closeSidebar}
                         >
                             <span className={styles.navIcon}>📊</span>
-                            <span className={styles.navLabel}>Dashboard</span>
+                            <span className={styles.navLabel}>{t("nav.dashboard")}</span>
                         </NavLink>
 
                         {/* Bottom spacer pushes version to bottom */}

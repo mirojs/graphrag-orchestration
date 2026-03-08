@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import type { Folder } from "../../api/folders";
 import styles from "./FolderSidebar.module.css";
 
@@ -29,6 +30,7 @@ export const FolderSidebar = ({
     onRenameFolder,
     onDeleteFolder,
 }: FolderSidebarProps) => {
+    const { t } = useTranslation();
     const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
     const [newFolderName, setNewFolderName] = useState("");
     const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -99,7 +101,7 @@ export const FolderSidebar = ({
                     if (e.key === "Escape") { setCreating(null); setNewFolderName(""); }
                 }}
                 onBlur={handleCreateSubmit}
-                placeholder="Folder name…"
+                placeholder={t("files.folderNamePlaceholder")}
             />
         </div>
     );
@@ -138,7 +140,7 @@ export const FolderSidebar = ({
                         <button
                             className={styles.moreBtn}
                             onClick={e => { e.stopPropagation(); handleContextMenu(e, folder.id); }}
-                            title="Folder actions"
+                            title={t("files.folderActions")}
                         >
                             ⋯
                         </button>
@@ -153,11 +155,11 @@ export const FolderSidebar = ({
     return (
         <div className={styles.sidebar}>
             <div className={styles.sidebarHeader}>
-                <span className={styles.sidebarTitle}>Folders</span>
+                <span className={styles.sidebarTitle}>{t("files.folders")}</span>
                 <button
                     className={styles.newFolderBtn}
                     onClick={() => { setCreating({ parentId: null }); setNewFolderName(""); }}
-                    title="New folder"
+                    title={t("files.newFolder")}
                 >
                     +
                 </button>
@@ -169,7 +171,7 @@ export const FolderSidebar = ({
                 onClick={() => onSelectFolder(null)}
             >
                 <span className={styles.folderIcon}>🏠</span>
-                <span className={styles.folderName}>All Files</span>
+                <span className={styles.folderName}>{t("files.allFiles")}</span>
             </div>
 
             {rootFolders.map(f => renderFolder(f, 0))}
@@ -186,19 +188,19 @@ export const FolderSidebar = ({
                         const isRoot = folder && !folder.parent_folder_id;
                         return (
                             <>
-                                <button onClick={() => startRename(folder!)}>✏️ Rename</button>
+                                <button onClick={() => startRename(folder!)}>✏️ {t("files.rename")}</button>
                                 {isRoot && (
                                     <button onClick={() => {
                                         setCreating({ parentId: contextMenu.folderId });
                                         setNewFolderName("");
                                         setContextMenu(null);
-                                    }}>📁 New Subfolder</button>
+                                    }}>📁 {t("files.newSubfolder")}</button>
                                 )}
                                 <button
                                     className={styles.contextMenuDanger}
                                     onClick={() => { onDeleteFolder(contextMenu.folderId); setContextMenu(null); }}
                                 >
-                                    🗑️ Delete
+                                    🗑️ {t("files.delete")}
                                 </button>
                             </>
                         );

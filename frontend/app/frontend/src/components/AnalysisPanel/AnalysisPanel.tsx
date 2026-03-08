@@ -163,7 +163,7 @@ export const AnalysisPanel = ({
 
         // PNG without highlights → simple image
         if (fileExtension === "png") {
-            return <img src={citation} className={styles.citationImg} alt="Citation Image" />;
+            return <img src={citation} className={styles.citationImg} alt={t("analysis.citationImage")} />;
         }
 
         // Markdown
@@ -183,11 +183,11 @@ export const AnalysisPanel = ({
 
         return (
             <div className={styles.sentencePanel}>
-                <div className={styles.sentencePanelHeader}>Cited Sentences</div>
+                <div className={styles.sentencePanelHeader}>{t("analysis.citedSentences")}</div>
                 {activeCitationObj.map((sc, idx) => (
                     <div key={idx} className={styles.sentenceItem}>
                         {sc.page_number != null && (
-                            <span className={styles.sentencePageBadge}>Page {sc.page_number}</span>
+                            <span className={styles.sentencePageBadge}>{t("analysis.page", { number: sc.page_number })}</span>
                         )}
                         <span className={styles.sentenceText}>
                             {sc.sentence_text || sc.text_preview || ""}

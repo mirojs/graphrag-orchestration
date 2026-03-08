@@ -181,6 +181,7 @@ class TestCommunityMatcherLoading:
         matcher = CommunityMatcher.__new__(CommunityMatcher)
         matcher.neo4j_service = neo4j_service
         matcher.group_id = group_id
+        matcher.group_ids = [group_id, "__global__"]
         matcher.folder_id = None
         matcher.communities_path = communities_path
         matcher.embedding_client = embedding_client

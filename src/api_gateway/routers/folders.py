@@ -121,7 +121,7 @@ async def list_folders(
     
     Args:
         partition_id: Group/user ID from auth middleware
-        parent_folder_id: Filter by parent folder (None = root level)
+        parent_folder_id: Filter by parent folder. If omitted, returns all folders.
     
     Returns:
         List of folders
@@ -140,7 +140,6 @@ async def list_folders(
     else:
         query = """
         MATCH (f:Folder {group_id: $partition_id})
-        WHERE f.parent_folder_id IS NULL
         RETURN f.id as id, f.name as name, f.group_id as group_id,
                f.parent_folder_id as parent_folder_id,
                f.created_at as created_at, f.updated_at as updated_at

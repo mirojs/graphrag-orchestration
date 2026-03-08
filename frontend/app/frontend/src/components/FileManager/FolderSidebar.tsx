@@ -167,7 +167,7 @@ export const FolderSidebar = ({
                             </button>
                         </>
                     ) : (
-                        <span className={styles.folderName}>{folder.name}</span>
+                        <span className={styles.folderName} title={folder.name}>{folder.name}</span>
                     )}
                     {!isRenaming && (
                         <button
@@ -204,7 +204,7 @@ export const FolderSidebar = ({
                 onClick={() => onSelectFolder(null)}
             >
                 <span className={styles.folderIcon}>🏠</span>
-                <span className={styles.folderName}>{t("files.allFiles")}</span>
+                <span className={styles.folderName} title={t("files.allFiles")}>{t("files.allFiles")}</span>
             </div>
 
             {rootFolders.map(f => renderFolder(f, 0))}

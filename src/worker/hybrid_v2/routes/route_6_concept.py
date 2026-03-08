@@ -187,19 +187,24 @@ class ConceptSearchHandler(BaseRouteHandler):
         if community_children_enabled and community_data:
             t_cc = time.perf_counter()
             try:
-                children = await self._fetch_community_children(community_data)
+                children = await self._fetch_community_children(
+                    community_data, parent_scores=community_scores,
+                )
                 if children:
                     # Dedup: skip children already in community_data
                     existing_ids = {c.get("id") for c in community_data}
+                    added_count = 0
+                    parent_count = len(community_data)
                     for child, child_score in children:
                         if child.get("id") not in existing_ids:
                             community_data.append(child)
                             community_scores.append(child_score)
                             existing_ids.add(child.get("id"))
+                            added_count += 1
                     logger.info(
                         "route6_community_children_merged",
-                        parent_count=len(community_data) - len(children),
-                        children_added=len([c for c, _ in children if c.get("id") not in existing_ids]) if children else 0,
+                        parent_count=parent_count,
+                        children_added=added_count,
                         total=len(community_data),
                     )
             except Exception as e:
@@ -512,137 +517,11 @@ class ConceptSearchHandler(BaseRouteHandler):
         Returns:
             Synthesized response text.
         """
-        # Format community summaries as thematic context
-        # Feature 1b: When ROUTE6_COMMUNITY_EXTRACT is enabled, fetch actual
-        # source sentences per community and extract query-relevant claims
-        # (Microsoft-aligned MAP phase).
-        community_extract = os.getenv(
-            "ROUTE6_COMMUNITY_EXTRACT", "1"
-        ).strip().lower() in {"1", "true", "yes"}
-
-        if community_extract and communities:
-            summaries_text = await self._extract_community_key_points(query, communities)
-        elif communities:
-            summary_lines = []
-            for i, c in enumerate(communities, 1):
-                title = c.get("title", f"Theme {i}")
-                summary = c.get("summary", "").strip()
-                if summary:
-                    summary_lines.append(f"{i}. **{title}**: {summary}")
-                else:
-                    # Include entity names as fallback context
-                    entities = ", ".join(c.get("entity_names", [])[:10])
-                    if entities:
-                        summary_lines.append(f"{i}. **{title}**: Entities: {entities}")
-            summaries_text = "\n".join(summary_lines) if summary_lines else "(No thematic context available)"
-        else:
-            summaries_text = "(No thematic context available)"
-
-        # Format section headings as compact document structure (titles only, no summaries)
-        if section_headings:
-            heading_lines = []
-            for i, sec in enumerate(section_headings, 1):
-                title = sec.get("title", f"Section {i}")
-                doc_title = sec.get("document_title", "")
-                path_key = sec.get("path_key", "").strip()
-                parts = []
-                if doc_title:
-                    parts.append(f"[{doc_title}]")
-                if path_key and path_key != title:
-                    parts.append(path_key)
-                else:
-                    parts.append(title)
-                heading_lines.append(f"- {' '.join(parts)}")
-            headings_text = "\n".join(heading_lines)
-        else:
-            headings_text = "(No document structure available)"
-
-        # Format sentence evidence (with section header labels)
-        if sentence_evidence:
-            evidence_lines = []
-            for i, ev in enumerate(sentence_evidence, 1):
-                doc = ev.get("document_title", "Unknown")
-                section = ev.get("section_path", "")
-
-                # Use the sentence-window passage (prev+sent+next ~200 chars).
-                # chunk_text is stored in the evidence dict for metadata/debug,
-                # but replacing passage with chunk[:700] risks cutting the retrieved
-                # sentence off mid-chunk and hiding the relevant fact.
-                text = ev.get("text", "")
-
-                if section:
-                    evidence_lines.append(
-                        f"{i}. [{doc} > {section}] {text}"
-                    )
-                else:
-                    evidence_lines.append(
-                        f"{i}. [{doc}] {text}"
-                    )
-            evidence_text = "\n".join(evidence_lines)
-        else:
-            evidence_text = "(No document evidence retrieved)"
-
-        # R6-XI: Format entity-document coverage for comparison queries.
-        # Emits a compact table: "Entity X → [Doc A, Doc B, ...] (N docs)"
-        # Only included when entity_doc_map is non-empty.
-        if entity_doc_map:
-            cov_lines = []
-            for entity_name, doc_titles in entity_doc_map.items():
-                docs_str = ", ".join(sorted(doc_titles))
-                cov_lines.append(
-                    f"- {entity_name}: {docs_str} ({len(doc_titles)} document{'s' if len(doc_titles) != 1 else ''})"
-                )
-            entity_coverage_text = "\n".join(cov_lines)
-        else:
-            entity_coverage_text = ""
-
-        # Feature 4: Token Budget Control — truncate context sections if over budget.
-        # Community summaries are never truncated (thematic backbone).
-        max_tokens = int(os.getenv("ROUTE6_MAX_CONTEXT_TOKENS", "0"))
-        if max_tokens > 0:
-            summaries_tokens = len(_tiktoken_enc.encode(summaries_text))
-            sections = [
-                ("evidence", evidence_text),
-                ("entity_coverage", entity_coverage_text),
-                ("headings", headings_text),
-            ]
-            other_tokens = sum(len(_tiktoken_enc.encode(t)) for _, t in sections)
-            total = summaries_tokens + other_tokens
-            if total > max_tokens:
-                budget = max_tokens - summaries_tokens
-                # Truncate in priority order: evidence first, then entity_coverage, then headings
-                truncated = {}
-                for name, text in sections:
-                    tokens = _tiktoken_enc.encode(text)
-                    if len(tokens) <= budget:
-                        truncated[name] = text
-                        budget -= len(tokens)
-                    else:
-                        truncated[name] = _tiktoken_enc.decode(tokens[:max(budget, 0)])
-                        budget = 0
-                evidence_text = truncated["evidence"]
-                entity_coverage_text = truncated["entity_coverage"]
-                headings_text = truncated["headings"]
-                logger.info(
-                    "route6_token_budget_applied",
-                    max_tokens=max_tokens,
-                    original_tokens=total,
-                    after_tokens=summaries_tokens + sum(
-                        len(_tiktoken_enc.encode(truncated[n])) for n, _ in sections
-                    ),
-                )
-
-        prompt = CONCEPT_SYNTHESIS_PROMPT.format(
-            query=query,
-            community_summaries=summaries_text,
-            section_headings=headings_text,
-            sentence_evidence=evidence_text,
-            entity_coverage=entity_coverage_text,
+        # Build the synthesis prompt (shared with _stream_synthesize)
+        prompt = await self._build_synthesis_prompt(
+            query, communities, section_headings, sentence_evidence,
+            entity_doc_map, language,
         )
-
-        # Inject language instruction if specified
-        if language:
-            prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
         try:
             response = await self.llm.acomplete(prompt)
@@ -748,7 +627,9 @@ class ConceptSearchHandler(BaseRouteHandler):
         ).strip().lower() in {"1", "true", "yes"}
         if community_children_enabled and community_data:
             try:
-                children = await self._fetch_community_children(community_data)
+                children = await self._fetch_community_children(
+                    community_data, parent_scores=community_scores,
+                )
                 if children:
                     existing_ids = {c.get("id") for c in community_data}
                     for child, child_score in children:
@@ -1098,6 +979,7 @@ class ConceptSearchHandler(BaseRouteHandler):
     async def _fetch_community_children(
         self,
         parent_communities: List[Dict[str, Any]],
+        parent_scores: Optional[List[float]] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Fetch child communities via PARENT_COMMUNITY edges in Neo4j.
 
@@ -1120,10 +1002,12 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         group_ids = self.group_ids
 
-        # Fetch children up to max_depth levels below parents
-        cypher = """
+        # Fetch children up to max_depth levels below parents.
+        # Neo4j doesn't support parameterised path lengths, so interpolate
+        # the int directly (safe — comes from int()).
+        cypher = f"""
         UNWIND $parent_ids AS pid
-        MATCH (child:Community)-[:PARENT_COMMUNITY*1..]->(parent:Community {id: pid})
+        MATCH (child:Community)-[:PARENT_COMMUNITY*1..{max_depth}]->(parent:Community {{id: pid}})
         WHERE child.group_id IN $group_ids AND parent.group_id IN $group_ids
               AND child.summary IS NOT NULL AND child.summary <> ''
         WITH DISTINCT child, parent
@@ -1158,11 +1042,10 @@ class ConceptSearchHandler(BaseRouteHandler):
             return []
 
         # Assign synthetic score (below parent minimum)
-        parent_scores = [
-            c.get("score", 0) for c in parent_communities
-            if isinstance(c.get("score"), (int, float))
-        ]
-        synthetic_score = min(parent_scores) * 0.8 if parent_scores else 0.3
+        if parent_scores:
+            synthetic_score = min(parent_scores) * 0.8
+        else:
+            synthetic_score = 0.3
 
         children: List[Tuple[Dict[str, Any], float]] = []
         for r in results:

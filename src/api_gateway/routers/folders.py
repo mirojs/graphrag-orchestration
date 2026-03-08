@@ -95,7 +95,10 @@ async def create_folder(
                            partition_id=partition_id,
                            parent_folder_id=folder.parent_folder_id)
         record = result.single()
-        
+
+    if not record:
+        raise HTTPException(status_code=500, detail="Folder creation failed: no record returned from database")
+
     logger.info("folder_created", folder_id=record["id"], partition_id=partition_id)
     
     return Folder(

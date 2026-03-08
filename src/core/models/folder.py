@@ -2,7 +2,7 @@
 
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import uuid
 
 
@@ -30,6 +30,14 @@ class Folder(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     created_by: Optional[str] = Field(None, description="User who created the folder")
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def coerce_neo4j_datetime(cls, v):
+        """Convert neo4j.time.DateTime to Python datetime."""
+        if hasattr(v, "to_native"):
+            return v.to_native()
+        return v
     
     class Config:
         json_schema_extra = {

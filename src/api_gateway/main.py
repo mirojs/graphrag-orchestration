@@ -361,9 +361,11 @@ if _require_auth and settings.GROUP_ID_OVERRIDE:
         "Unset GROUP_ID_OVERRIDE before deploying to production.",
         stacklevel=1,
     )
+_auth_type = settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B"
+app.state.auth_type = _auth_type
 app.add_middleware(
     JWTAuthMiddleware,
-    auth_type=settings.AUTH_TYPE if hasattr(settings, "AUTH_TYPE") else "B2B",
+    auth_type=_auth_type,
     require_auth=_require_auth,
 )
 

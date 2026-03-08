@@ -135,9 +135,11 @@ class QuotaEnforcer:
         daily = int(results[0])
         monthly = int(results[2])
 
-        logger.debug(
+        logger.info(
             "quota_recorded",
             user_id=user_id,
+            daily_key=dk,
+            monthly_key=mk,
             daily=daily,
             monthly=monthly,
         )
@@ -420,9 +422,20 @@ async def enforce_plan_limits(
         # Anonymous / unauthenticated — apply free tier limits with IP-based key
         user_id = f"anon:{request.client.host}" if request.client else "anon:unknown"
 
+    logger.info("enforce_plan_limits_start", user_id=user_id, path=request.url.path)
+
     try:
         enforcer = await get_quota_enforcer()
         result = await enforcer.check_and_consume(user_id)
+
+        logger.info(
+            "enforce_plan_limits_result",
+            user_id=user_id,
+            allowed=result["allowed"],
+            query_recorded=result.get("query_recorded"),
+            daily_used=result.get("daily_used"),
+            monthly_used=result.get("monthly_used"),
+        )
 
         if not result["allowed"]:
             raise HTTPException(

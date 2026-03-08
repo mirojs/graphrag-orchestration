@@ -1014,3 +1014,109 @@ async def dashboard_health(
         results["overall"] = "degraded"
 
     return results
+
+
+# =============================================================================
+# Diagnostic: test query recording write+read from the API gateway
+# =============================================================================
+
+@router.get("/diag/query-recording")
+async def diag_query_recording(
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+    group_id: str = Depends(get_group_id),
+):
+    """
+    Diagnostic endpoint: attempts record_query() and reads it back.
+
+    Returns detailed trace so we can see exactly where the recording pipeline
+    fails (or succeeds) in production.
+    """
+    from src.core.services.redis_service import get_redis_service
+
+    diag: Dict[str, Any] = {
+        "user_id_from_state": getattr(request.state, "user_id", "__MISSING__"),
+        "user_id_from_user_obj": user.get("oid", "__MISSING__"),
+        "group_id": group_id,
+    }
+
+    user_id = user.get("oid", "")
+    if not user_id:
+        diag["error"] = "No oid in user object"
+        return diag
+
+    # Step 1: test raw Redis connectivity
+    try:
+        redis_svc = await asyncio.wait_for(get_redis_service(), timeout=5)
+        pong = await asyncio.wait_for(redis_svc._redis.ping(), timeout=3)
+        diag["redis_ping"] = pong
+    except Exception as e:
+        diag["redis_ping"] = f"FAILED: {e!r}"
+        return diag
+
+    # Step 2: read current counters BEFORE
+    try:
+        enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=5)
+        before = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=5)
+        diag["before"] = before
+    except Exception as e:
+        diag["get_usage_before"] = f"FAILED: {e!r}"
+        return diag
+
+    # Step 3: call record_query (same code path as enforce_plan_limits)
+    try:
+        daily, monthly = await asyncio.wait_for(
+            enforcer.record_query(user_id), timeout=5
+        )
+        diag["record_query"] = {"daily": daily, "monthly": monthly}
+    except Exception as e:
+        diag["record_query"] = f"FAILED: {e!r}"
+        return diag
+
+    # Step 4: read counters AFTER
+    try:
+        after = await asyncio.wait_for(enforcer.get_usage(user_id), timeout=5)
+        diag["after"] = after
+    except Exception as e:
+        diag["get_usage_after"] = f"FAILED: {e!r}"
+        return diag
+
+    # Step 5: verify increment
+    diag["daily_incremented"] = (
+        after["queries_today"] == before["queries_today"] + 1
+    )
+    diag["monthly_incremented"] = (
+        after["queries_this_month"] == before["queries_this_month"] + 1
+    )
+
+    # Step 6: read credit counter for comparison
+    try:
+        credits = await asyncio.wait_for(
+            enforcer.get_credit_usage(user_id), timeout=5
+        )
+        diag["credits_used_month"] = credits
+    except Exception as e:
+        diag["credits_used_month"] = f"FAILED: {e!r}"
+
+    # Step 7: raw key inspection
+    try:
+        now = datetime.utcnow()
+        dk = enforcer._daily_key(user_id, now)
+        mk = enforcer._monthly_key(user_id, now)
+        ck = enforcer._credit_key(user_id, now)
+        raw_daily = await asyncio.wait_for(redis_svc._redis.get(dk), timeout=3)
+        raw_monthly = await asyncio.wait_for(redis_svc._redis.get(mk), timeout=3)
+        raw_credits = await asyncio.wait_for(redis_svc._redis.get(ck), timeout=3)
+        diag["raw_keys"] = {
+            "daily_key": dk,
+            "daily_val": raw_daily,
+            "monthly_key": mk,
+            "monthly_val": raw_monthly,
+            "credit_key": ck,
+            "credit_val": raw_credits,
+        }
+    except Exception as e:
+        diag["raw_keys"] = f"FAILED: {e!r}"
+
+    diag["status"] = "ok"
+    return diag

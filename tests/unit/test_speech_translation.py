@@ -169,7 +169,7 @@ class TestSpeechTranslationLanguages:
     def test_all_supported_locales_present(self):
         from src.api_gateway.routers.speech import _SPEECH_TRANSLATION_LANGUAGES
         expected = {"en-US", "ja-JP", "fr-FR", "es-ES", "da-DK",
-                    "nl-NL", "pt-BR", "tr-TR", "it-IT", "pl-PL"}
+                    "nl-NL", "pt-BR", "tr-TR", "it-IT", "de-DE"}
         assert set(_SPEECH_TRANSLATION_LANGUAGES) == expected
 
     def test_max_10_languages(self):

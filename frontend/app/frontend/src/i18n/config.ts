@@ -7,12 +7,15 @@ import daTranslation from "../locales/da/translation.json";
 import enTranslation from "../locales/en/translation.json";
 import esTranslation from "../locales/es/translation.json";
 import frTranslation from "../locales/fr/translation.json";
+import itTranslation from "../locales/it/translation.json";
 import jaTranslation from "../locales/ja/translation.json";
+import koTranslation from "../locales/ko/translation.json";
 import nlTranslation from "../locales/nl/translation.json";
+import plTranslation from "../locales/pl/translation.json";
 import ptBRTranslation from "../locales/ptBR/translation.json";
 import trTranslation from "../locales/tr/translation.json";
-import itTranslation from "../locales/it/translation.json";
-import plTranslation from "../locales/pl/translation.json";
+import zhHansTranslation from "../locales/zhHans/translation.json";
+import zhHantTranslation from "../locales/zhHant/translation.json";
 
 export const supportedLngs: { [key: string]: { name: string; locale: string } } = {
     da: {
@@ -51,9 +54,21 @@ export const supportedLngs: { [key: string]: { name: string; locale: string } } 
         name: "Italiano",
         locale: "it-IT"
     },
+    ko: {
+        name: "한국어",
+        locale: "ko-KR"
+    },
     pl: {
         name: "Polski",
         locale: "pl-PL"
+    },
+    zhHans: {
+        name: "简体中文",
+        locale: "zh-Hans"
+    },
+    zhHant: {
+        name: "繁體中文",
+        locale: "zh-Hant"
     }
 };
 
@@ -74,7 +89,10 @@ i18next
             ptBR: { translation: ptBRTranslation },
             tr: { translation: trTranslation },
             it: { translation: itTranslation },
-            pl: { translation: plTranslation }
+            ko: { translation: koTranslation },
+            pl: { translation: plTranslation },
+            zhHans: { translation: zhHansTranslation },
+            zhHant: { translation: zhHantTranslation }
         },
         fallbackLng: "en",
         supportedLngs: Object.keys(supportedLngs),

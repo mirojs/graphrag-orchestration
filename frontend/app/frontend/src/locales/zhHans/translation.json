@@ -1,0 +1,360 @@
+{
+    "pageTitle": "Evidoc | Document Intelligence by Hulkdesign AI",
+    "headerTitle": "Evidoc",
+    "chat": "聊天",
+    "login": "登录",
+    "logout": "退出登录",
+    "clearChat": "清除聊天",
+    "history": {
+        "chatHistory": "聊天记录",
+        "openChatHistory": "打开聊天记录",
+        "noHistory": "暂无聊天记录",
+        "deleteModalTitle": "删除聊天记录",
+        "deleteModalDescription": "此操作不可撤销。确定要删除这条聊天记录吗？",
+        "deleteLabel": "删除",
+        "cancelLabel": "取消",
+        "today": "今天",
+        "yesterday": "昨天",
+        "last7days": "最近 7 天",
+        "last30days": "最近 30 天"
+    },
+    "upload": {
+        "fileLabel": "上传文件：",
+        "uploadedFilesLabel": "已上传的文件：",
+        "noFilesUploaded": "暂无上传文件",
+        "loading": "加载中...",
+        "manageFileUploads": "管理文件上传",
+        "uploadingFiles": "正在上传文件...",
+        "uploadedFileError": "文件上传失败，请重试或联系管理员。",
+        "deleteFile": "删除文件",
+        "deletingFile": "正在删除文件...",
+        "errorDeleting": "删除失败。",
+        "fileDeleted": "文件已删除"
+    },
+    "developerSettings": "开发者设置",
+
+    "chatEmptyStateTitle": "询问您的文档，信赖每一个回答。",
+    "chatEmptyStateSubtitle": "每个回答都可追溯到原文语句——点击即可在原始 PDF 上验证。试试我们的示例文档或上传您自己的文件。",
+    "defaultExamples": {
+        "1": "采购合同总价与发票总额是否一致？",
+        "2": "比较所有协议中的终止和取消条款。",
+        "3": "180 天以内短期租赁的代理费是多少？",
+        "placeholder": "针对您的文档提问（例如：这张发票是否与合同条款一致？）"
+    },
+    "askTitle": "向您的文档提问",
+    "multimodalExamples": {
+        "1": "采购合同总价与发票总额是否一致？",
+        "2": "比较所有协议中的终止和取消条款。",
+        "3": "180 天以内短期租赁的代理费是多少？",
+        "placeholder": "针对您的文档提问（例如：这张发票是否与合同条款一致？）"
+    },
+    "generatingAnswer": "正在生成回答",
+    "citationWithColon": "引用：",
+    "followupQuestions": "追问：",
+
+    "tooltips": {
+        "submitQuestion": "提交问题",
+        "stopStreaming": "停止流式输出",
+        "askWithVoice": "使用语音提问",
+        "stopRecording": "停止录音",
+        "showSupportingContent": "显示支持内容",
+        "speakAnswer": "朗读回答",
+        "info": "信息",
+        "save": "保存",
+        "copy": "复制",
+        "copied": "已复制！"
+    },
+
+    "headerTexts":{
+        "supportingContent": "支持内容",
+        "citation": "引用"
+    },
+
+    "labels": {
+        "toggleMenu": "切换菜单",
+        "languagePicker": "选择语言",
+        "headerText": "配置回答生成",
+        "closeButton": "关闭",
+        "promptTemplate": "覆盖提示词模板",
+        "temperature": "温度",
+        "seed": "Seed",
+        "minimumSearchScore": "最低搜索分数",
+        "minimumRerankerScore": "最低重排分数",
+        "retrieveCount": "检索结果数量：",
+        "agenticReasoningEffort": "检索推理力度",
+        "agenticReasoningEffortOptions": {
+            "minimal": "最低",
+            "low": "低",
+            "medium": "中"
+        },
+        "includeCategory": "包含类别",
+        "includeCategoryOptions": {
+            "all": "全部"
+        },
+        "excludeCategory": "排除类别",
+        "useSemanticRanker": "使用语义排序器进行检索",
+        "useSemanticCaptions": "使用语义摘要",
+        "useQueryRewriting": "使用查询重写进行检索",
+        "reasoningEffort": "推理力度",
+        "reasoningEffortOptions": {
+            "minimal": "最低（仅 GPT-5）",
+            "low": "低",
+            "medium": "中",
+            "high": "高"
+        },
+        "useSuggestFollowupQuestions": "建议追问问题",
+        "useAgenticKnowledgeBase": "使用智能检索",
+        "useWebSource": "包含网络来源",
+        "useSharePointSource": "包含 SharePoint 来源",
+        "llmInputs": "LLM 输入来源",
+        "llmInputsOptions": {
+            "texts": "文本来源",
+            "images": "图像来源",
+            "textAndImages": "文本和图像来源"
+        },
+        "retrievalMode": {
+            "label": "检索模式",
+            "options": {
+                "hybrid": "向量 + 文本（混合）",
+                "vectors": "向量",
+                "texts": "文本"
+            }
+        },
+        "vector": {
+            "label": "包含的向量字段",
+            "options": {
+                "embedding": "文本嵌入",
+                "imageEmbedding": "图像嵌入"
+            }
+        },
+        "useOidSecurityFilter": "使用 OID 安全过滤",
+        "useGroupsSecurityFilter": "使用用户组安全过滤",
+        "shouldStream": "流式传输聊天回复"
+    },
+
+    "helpTexts": {
+        "promptTemplate":
+            "覆盖根据问题和搜索结果生成回答时使用的提示词。若要在现有提示词后追加而非替换整个提示词，请在开头加上 '>>>'。",
+        "temperature":
+            "设置生成回答时向 LLM 发送请求的温度参数。较高的温度会产生更有创意的回答，但可能不够准确。",
+        "seed": "设置 Seed 值以提高模型回答的可重复性。Seed 可以是任意整数。",
+        "searchScore":
+             "设置 Azure AI Search 返回搜索结果的最低分数。分数范围取决于您使用的是混合模式（默认）、仅向量还是仅文本。",
+        "rerankerScore":
+             "设置语义重排器返回搜索结果的最低分数。分数始终在 0 到 4 之间。分数越高，结果与问题的语义相关性越强。",
+        "retrieveNumber":
+             "设置从 Azure AI Search 检索的搜索结果数量。更多结果可能增加找到正确答案的概率，但也可能导致模型\u201c迷失在中间信息中\u201d。",
+        "agenticReasoningEffort":
+            "控制智能体在规划检索子查询时的推理力度。更高的力度可以提高召回率，但会增加延迟和 Token 消耗。",
+        "includeCategory":
+            "指定要包含在搜索结果中的类别。默认数据集中没有使用类别。",
+         "excludeCategory":
+            "指定要从搜索结果中排除的类别。默认数据集中没有使用类别。",
+         "useSemanticReranker":
+            "启用 Azure AI Search 语义排序器，该模型根据与用户查询的语义相似度对搜索结果重新排序。",
+        "useQueryRewriting":
+            "启用 Azure AI Search 查询重写功能，该功能会修改用户的查询以改善搜索结果。需要先启用语义排序器。",
+        "reasoningEffort":
+            "设置 LLM 的推理力度。较高的值会产生更多推理，但生成回答可能需要更长时间。默认值为中等。",
+        "useSemanticCaptions":
+             "向 LLM 发送语义摘要而非完整搜索结果。语义摘要是在语义排序过程中从搜索结果中提取的。",
+        "suggestFollowupQuestions": "要求 LLM 根据用户的查询建议追问问题。",
+        "textEmbeddings": "选中后，搜索将使用从提取的文本块生成的纯文本嵌入模型的嵌入向量。",
+        "imageEmbeddings": "选中后，搜索将使用从提取的图像生成的多模态嵌入模型的嵌入向量。",
+        "llmTextInputs": "选中后，搜索结果中的文本内容将作为上下文发送给 LLM。",
+        "llmImageInputs": "选中后，搜索结果中的图像将作为上下文发送给 LLM。",
+        "retrievalMode":
+            "设置 Azure AI Search 查询的检索模式。\u201c向量 + 文本（混合）\u201d结合向量搜索和全文搜索，\u201c向量\u201d仅使用向量搜索，\u201c文本\u201d仅使用全文搜索。混合模式通常是最优选择。",
+        "streamChat": "在生成回答时持续将响应流式传输到聊天界面。",
+        "useOidSecurityFilter": "根据已认证用户的 OID 过滤搜索结果。",
+        "useGroupsSecurityFilter": "根据已认证用户的用户组过滤搜索结果。",
+        "useAgenticKnowledgeBase": "使用 Azure AI Search 的智能检索进行多查询规划。始终使用语义排序器。",
+        "useWebSource": "使用网络搜索结果来补充已索引的数据集。",
+        "useSharePointSource": "使用 SharePoint 内容来补充已索引的数据集。"
+    },
+
+    "overallSettings": "总体设置",
+    "searchSettings": "搜索设置",
+    "llmSettings": "LLM 设置",
+
+    "fileToolbar": {
+        "searchPlaceholder": "搜索文件...",
+        "fileCount_one": "{{count}} 个文件",
+        "fileCount_other": "{{count}} 个文件",
+        "selected": "已选 {{count}} 项",
+        "sortByName": "按名称排序",
+        "name": "名称",
+        "sortByType": "按类型排序",
+        "type": "类型",
+        "deselect": "取消选择",
+        "delete": "删除 ({{count}})",
+        "selectAll": "全选",
+        "refresh": "刷新"
+    },
+
+    "nav": {
+        "chat": "聊天",
+        "files": "文件",
+        "dashboard": "仪表板",
+        "toggleNavigation": "切换导航"
+    },
+
+    "files": {
+        "signInRequired": "需要登录",
+        "signInToManage": "请登录以管理您的文件。",
+        "myFiles": "我的文件",
+        "sharedLibrary": "共享文件库",
+        "allFiles": "所有文件",
+        "deleteConfirmSingle": "删除\u201c{{filename}}\u201d？",
+        "deleteConfirmMultiple": "删除 {{count}} 个文件？",
+        "filesUploaded": "已上传 {{count}} 个文件",
+        "filesDeleted": "已删除 {{count}} 个文件",
+        "uploadFailed": "上传失败：{{message}}",
+        "deleteFailed": "删除失败：{{message}}",
+        "renamedTo": "已重命名为\u201c{{name}}\u201d",
+        "renameFailed": "重命名失败：{{message}}",
+        "folderCreated": "文件夹\u201c{{name}}\u201d已创建",
+        "folderRenamed": "文件夹已重命名为\u201c{{name}}\u201d",
+        "folderDeleted": "文件夹已删除",
+        "deleteFolderConfirm": "删除此文件夹？文件夹内的文件将移至\u201c所有文件\u201d。",
+        "createFolderFailed": "创建文件夹失败：{{message}}",
+        "deleteFolderFailed": "删除文件夹失败：{{message}}",
+        "renameFolderFailed": "重命名文件夹失败：{{message}}",
+        "loadingFiles": "正在加载文件...",
+        "noFilesYet": "暂无文件",
+        "uploadFilesHint": "使用上方的拖放区域上传文件。",
+        "nameColumn": "名称",
+        "typeColumn": "类型",
+        "actionsColumn": "操作",
+        "rename": "重命名",
+        "delete": "删除",
+        "uploading": "正在上传...",
+        "dragDropFiles": "将文件拖放到此处",
+        "orClickBrowse": "或点击浏览",
+        "chooseFiles": "选择文件",
+        "folders": "文件夹",
+        "newFolder": "新建文件夹",
+        "folderNamePlaceholder": "文件夹名称…",
+        "folderActions": "文件夹操作",
+        "newSubfolder": "新建子文件夹",
+        "renameFile": "重命名文件",
+        "cancel": "取消"
+    },
+
+    "viewer": {
+        "loadingFile": "正在加载文件",
+        "failedLoadingMarkdown": "加载 Markdown 文件失败。",
+        "downloadFile": "下载文件",
+        "loadingPdf": "正在加载 PDF…",
+        "pageInfo": "第 {{current}} 页 / 共 {{total}} 页",
+        "highlightCount": "本页有 {{count}} 处高亮",
+        "failedLoadPdf": "加载 PDF 文档失败"
+    },
+
+    "analysis": {
+        "citedSentences": "引用的语句",
+        "page": "第 {{number}} 页",
+        "citationImage": "引用图片"
+    },
+
+    "agentPlan": {
+        "source": "来源：",
+        "search": "搜索：",
+        "executionSteps": "执行步骤",
+        "iterationSteps": "第 {{number}} 次迭代执行步骤",
+        "step": "步骤",
+        "details": "详情",
+        "elapsedMs": "耗时（毫秒）",
+        "noResults": "未找到结果",
+        "azureAiSearchNote": "此步骤使用 Azure AI Search 模型，因此不占用已部署模型的 Token 容量。"
+    },
+
+    "tokenUsage": {
+        "title": "Token 用量",
+        "total": "总计",
+        "prompt": "提示词",
+        "reasoning": "推理",
+        "output": "输出"
+    },
+
+    "dashboard": {
+        "signInRequired": "需要登录",
+        "signInToView": "请登录以查看您的仪表板。",
+        "sessionExpired": "会话已过期",
+        "sessionExpiredMessage": "您的认证会话已过期，请重新登录以继续。",
+        "signIn": "登录",
+        "hello": "您好，{{name}}",
+        "title": "仪表板",
+        "adminDashboard": "管理员仪表板",
+        "queriesToday": "今日查询",
+        "queriesThisMonth": "本月查询",
+        "creditsUsed": "已用额度",
+        "documents": "文档",
+        "storageUsed": "已用存储",
+        "dailyLimit": "每日限额 {{limit}}",
+        "monthlyLimit": "每月限额 {{limit}}",
+        "monthlyCredits": "每月额度 {{limit}}",
+        "unlimitedCredits": "无限额度",
+        "translated": "{{count}} 次翻译",
+        "voice": "{{count}} 次语音",
+        "personalShared": "（{{personal}} 个人 + {{shared}} 共享）限额 {{limit}}",
+        "ofLimit": "限额 {{limit}}",
+        "gbLimit": "限额 {{limit}} GB",
+        "recentActivity": "最近活动",
+        "time": "时间",
+        "tokens": "Token",
+        "credits": "额度",
+        "language": "语言",
+        "yourFeatures": "您的功能",
+        "plans": "方案",
+        "currentPlan": "当前方案",
+        "contactSales": "联系销售",
+        "queriesPerDay": "每天 {{count}} 次查询",
+        "maxDocuments": "{{count}} 个文档",
+        "maxStorage": "{{count}} GB 存储空间",
+        "creditsPerMonth": "每月 {{count}} 额度",
+        "featureGraphrag": "Evidoc 搜索",
+        "featureAdvancedAnalytics": "高级分析",
+        "featureCustomModels": "自定义模型",
+        "featureApiAccess": "API 访问",
+        "featurePrioritySupport": "优先支持",
+        "featureSso": "SSO 集成",
+        "featureCustomBranding": "自定义品牌"
+    },
+
+    "admin": {
+        "signInRequired": "需要登录",
+        "goToDashboard": "前往仪表板",
+        "adminAccessRequired": "需要管理员权限",
+        "adminRoleNeeded": "您需要管理员角色才能查看此仪表板。",
+        "backToDashboard": "← 返回仪表板",
+        "personalDashboard": "← 个人仪表板",
+        "managementDashboard": "管理仪表板",
+        "totalUsers": "总用户数",
+        "activeToday": "今日活跃",
+        "queriesToday": "今日查询",
+        "queriesThisMonth": "本月查询",
+        "totalDocuments": "总文档数",
+        "storageUsed": "已用存储",
+        "errorRate": "错误率",
+        "algorithmVersions": "算法版本",
+        "default": "（默认）",
+        "defaultVersion": "默认：{{version}} · {{count}} 个已启用",
+        "planDistribution": "方案分布",
+        "queriesPerHour": "每小时查询量（最近 24 小时）",
+        "topUsers": "活跃用户排行",
+        "user": "用户",
+        "queries": "查询次数",
+        "plan": "方案",
+        "lastActive": "最后活跃",
+        "noUserActivity": "暂无用户活动数据。连接分析服务后数据将会显示。"
+    },
+
+    "errors": {
+        "retry": "重试",
+        "networkError": "无法连接到服务器，请检查您的网络连接后重试。",
+        "timeoutError": "请求超时，请重试。",
+        "serverError": "服务器出现问题，请稍后重试。",
+        "unknownError": "发生了意外错误，请重试。"
+    }
+}

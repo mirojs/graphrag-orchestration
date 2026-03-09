@@ -1676,7 +1676,7 @@ class AsyncNeo4jService:
         using `vector.similarity.cosine(entity.embedding, $query_embedding)`.
         This avoids the classic "enumerate all paths then filter" trap.
 
-        Requires entities to have embeddings stored in `.embedding` property.
+        Requires entities to have embeddings stored in `.entity_embedding` property.
 
         Args:
             group_id: Tenant isolation key.

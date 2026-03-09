@@ -596,7 +596,7 @@ def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
     text = re.sub(r"<table>.*?</table>", "", text, flags=re.DOTALL)
     text = re.sub(r"<table\b[^>]*>.*?$", "", text, flags=re.MULTILINE | re.DOTALL)
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
-    text = re.sub(r"^#+\s+.*$", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^#+\s+.*$", "\n\n", text, flags=re.MULTILINE)
     text = re.sub(r"<figure>.*?</figure>", "", text, flags=re.DOTALL)
     text = re.sub(r"^\d+\\\.\s*", "", text, flags=re.MULTILINE)
     text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
@@ -610,6 +610,9 @@ def _clean_chunk_text_for_spacy(chunk_text: str) -> str:
     text = re.sub(r"\n\n+", ". ", text)
     # Clean up double periods from paragraph-break normalization
     text = re.sub(r"\.{2,}", ".", text)
+    # Clean up colon-period artifacts from headings that followed
+    # colon-terminated preambles (e.g. "shall:\n\n## Heading\n\n" → "shall:. ")
+    text = re.sub(r":\.\s+", ". ", text)
     return text.strip()
 
 
@@ -647,8 +650,6 @@ def extract_sentences_from_chunk(
     if clean_text:
         for sent_text in _split_sentences(clean_text):
             if not sent_text:
-                continue
-            if _is_noise_sentence(sent_text):
                 continue
             sentences.append({
                 "id": f"{chunk_id}_sent_{idx}",
@@ -1094,7 +1095,7 @@ def extract_sentences_from_di_units(
         clean_text = _clean_chunk_text_for_spacy(unit_text)
         if clean_text:
             for sent_text in _split_sentences(clean_text):
-                if not sent_text or _is_noise_sentence(sent_text):
+                if not sent_text:
                     continue
                 # Strip leading sentence-boundary artifacts from \n\n→". " conversion
                 sent_text = re.sub(r'^[\.\s]+', '', sent_text).strip()

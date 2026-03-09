@@ -797,6 +797,7 @@ class LazyGraphRAGIndexingPipeline:
         from src.worker.services.sentence_extraction_service import (
             extract_sentences_from_di_units,
             extract_sentences_from_raw_text,
+            _is_noise_sentence,
         )
         from src.worker.hybrid_v2.services.neo4j_store import Sentence
 
@@ -896,6 +897,21 @@ class LazyGraphRAGIndexingPipeline:
             "index_sentences_direct: extracted %d sentences from %d documents",
             len(all_raw_sentences), stats["documents_processed"],
         )
+
+        # ── Post-LLM noise filter (paragraph sentences only) ──────────
+        pre_filter_count = len(all_raw_sentences)
+        all_raw_sentences = [
+            s for s in all_raw_sentences
+            if s.get("source") != "paragraph" or not _is_noise_sentence(s["text"])
+        ]
+        if len(all_raw_sentences) < pre_filter_count:
+            # Re-index after filtering
+            for i, s in enumerate(all_raw_sentences):
+                s["index_in_doc"] = i
+            logger.info(
+                "index_sentences_direct: noise filter removed %d sentences (post-LLM)",
+                pre_filter_count - len(all_raw_sentences),
+            )
 
         # ── Embed with Voyage contextualized (per-document grouping) ──
         sentence_embeddings: List[Optional[List[float]]] = [None] * len(all_raw_sentences)

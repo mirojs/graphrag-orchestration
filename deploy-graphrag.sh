@@ -126,8 +126,8 @@ ACR_SERVER="${CONTAINER_REGISTRY_NAME}.azurecr.io"
 azd env set SERVICE_GRAPHRAG_API_IMAGE_NAME "${ACR_SERVER}/${API_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}"
 azd env set SERVICE_GRAPHRAG_WORKER_IMAGE_NAME "${ACR_SERVER}/${WORKER_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}"
 
-echo "🚀 Deploying via azd up (Bicep)..."
-azd up --no-prompt
+echo "🚀 Deploying infrastructure via azd provision (Bicep)..."
+azd provision --no-prompt
 
 # ── Summary ──────────────────────────────────────────────────────────────
 

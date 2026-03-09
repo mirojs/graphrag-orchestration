@@ -94,6 +94,9 @@ param b2cCustomDomain string = ''
 param skipRoleAssignments bool = false
 
 // APIM parameters
+@description('Deploy OpenAI models (set false if models already exist to speed up deployment)')
+param deployOpenAiModels bool = false
+
 @description('Enable Azure API Management for external API access')
 param enableApim bool = false
 
@@ -261,7 +264,7 @@ module keyVault './core/security/key-vault.bicep' = {
   name: 'key-vault'
   scope: rg
   params: {
-    name: 'graphrag-kv-${uniqueString(rg.id)}'
+    name: 'grkv${uniqueString(rg.id)}'
     location: location
     tags: tags
     secretReaderPrincipalIds: [
@@ -774,7 +777,8 @@ module graphragWorker './core/host/container-app-worker.bicep' = {
 }
 
 // Deploy Azure OpenAI Models (Lean Engine Architecture)
-module openAiModels './core/ai/openai-models.bicep' = {
+// Skipped by default — only needed on first deploy or when adding/changing models
+module openAiModels './core/ai/openai-models.bicep' = if (deployOpenAiModels) {
   name: 'openai-models'
   scope: rg
   params: {

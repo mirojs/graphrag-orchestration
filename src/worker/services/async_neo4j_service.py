@@ -401,7 +401,7 @@ class AsyncNeo4jService:
         seed_text: str,
         seed_embedding: List[float],
         top_k: int = 3,
-        index_name: str = "entity_embedding_v2",
+        index_name: str = "entity_embedding",
     ) -> List[Dict[str, Any]]:
         """
         Strategy 6: Find entities using vector similarity on entity embeddings.
@@ -409,7 +409,7 @@ class AsyncNeo4jService:
         Uses Neo4j's native vector index to find semantically similar entities
         when lexical matching (strategies 1-5) fails.
         
-        Uses 'entity_embedding_v2' index (Voyage 2048-dim) on Entity nodes.
+        Uses 'entity_embedding' index (Voyage 2048-dim) on Entity nodes.
         
         This is the last-resort fallback for cases like:
         - "elevator equipment" → matches "Vertical Platform Lift" 
@@ -420,7 +420,7 @@ class AsyncNeo4jService:
             seed_text: The seed phrase (for logging)
             seed_embedding: Vector embedding of the seed phrase
             top_k: Number of similar entities to return
-            index_name: Vector index to query (default: 'entity_embedding_v2')
+            index_name: Vector index to query (default: 'entity_embedding')
             
         Returns:
             List of entity records with id, name, degree, importance_score, similarity
@@ -1714,9 +1714,9 @@ class AsyncNeo4jService:
               AND neighbor.group_id = $group_id
               AND type(r) <> 'MENTIONS'
               AND type(r) <> 'SEMANTICALLY_SIMILAR'
-              AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
+              AND (neighbor.entity_embedding IS NOT NULL)
             WITH DISTINCT neighbor,
-                 vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
+                 vector.similarity.cosine(neighbor.entity_embedding, $query_embedding) AS sim
             ORDER BY sim DESC
             LIMIT $beam_width
             RETURN neighbor.id AS id,
@@ -1737,9 +1737,9 @@ class AsyncNeo4jService:
                   type(r) <> 'SEMANTICALLY_SIMILAR' 
                   OR r.knn_config = $knn_config
               )
-              AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
+              AND (neighbor.entity_embedding IS NOT NULL)
             WITH DISTINCT neighbor,
-                 vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
+                 vector.similarity.cosine(neighbor.entity_embedding, $query_embedding) AS sim
             ORDER BY sim DESC
             LIMIT $beam_width
             RETURN neighbor.id AS id,
@@ -1757,9 +1757,9 @@ class AsyncNeo4jService:
               AND src.id = eid
               AND neighbor.group_id = $group_id
               AND type(r) <> 'MENTIONS'
-              AND (neighbor.embedding_v2 IS NOT NULL OR neighbor.embedding IS NOT NULL)
+              AND (neighbor.entity_embedding IS NOT NULL)
             WITH DISTINCT neighbor,
-                 vector.similarity.cosine(COALESCE(neighbor.embedding_v2, neighbor.embedding), $query_embedding) AS sim
+                 vector.similarity.cosine(neighbor.entity_embedding, $query_embedding) AS sim
             ORDER BY sim DESC
             LIMIT $beam_width
             RETURN neighbor.id AS id,
@@ -1773,7 +1773,7 @@ class AsyncNeo4jService:
         # SEARCH clause with in-index group_id filtering (no oversampling needed).
         vector_expansion_query = cypher25_query("""
         MATCH (node:Entity)
-        SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $query_embedding WHERE node.group_id = $group_id LIMIT $beam_width)
+        SEARCH node IN (VECTOR INDEX entity_embedding FOR $query_embedding WHERE node.group_id = $group_id LIMIT $beam_width)
         SCORE AS score
         RETURN node.id AS id,
                node.name AS name,
@@ -1933,18 +1933,18 @@ class AsyncNeo4jService:
         """
         Detect which embedding version a group uses (V1 OpenAI or V2 Voyage).
         
-        Checks if entities in the group have embedding_v2 property (V2 Voyage 2048D)
+        Checks if entities in the group have entity_embedding property (Voyage 2048D)
         or only embedding property (V1 OpenAI 3072D).
         
         Args:
             group_id: The group ID to check
             
         Returns:
-            "v2" if group has embedding_v2 properties, "v1" otherwise
+            "v2" if group has entity_embedding properties, "v1" otherwise
         """
         query = """
         MATCH (e:Entity {group_id: $group_id})
-        WHERE e.embedding_v2 IS NOT NULL
+        WHERE e.entity_embedding IS NOT NULL
         RETURN count(e) AS v2_count
         LIMIT 1
         """

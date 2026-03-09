@@ -61,7 +61,7 @@ class LocalSearchHandler(BaseRouteHandler):
     
     V2 Mode (when VOYAGE_V2_ENABLED=True):
     - Uses Voyage embeddings (2048 dim) for query embedding
-    - Searches embedding_v2 property on Sentence nodes
+    - Searches sentence_embedding property on Sentence nodes
     - Section-aware chunks for better semantic coherence
     """
 
@@ -425,7 +425,7 @@ class LocalSearchHandler(BaseRouteHandler):
             logger.warning("skeleton_no_query_embedding")
             return []
         
-        # 2. Vector search against sentence_embeddings_v2 index
+        # 2. Vector search against sentence_embedding index
         top_k = settings.SKELETON_SENTENCE_TOP_K
         threshold = settings.SKELETON_SIMILARITY_THRESHOLD
         group_id = self.group_id
@@ -434,12 +434,12 @@ class LocalSearchHandler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             RETURN sent, score
             UNION ALL
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             RETURN sent, score
         }
@@ -577,12 +577,12 @@ class LocalSearchHandler(BaseRouteHandler):
         // ANCHOR: Vector search for seed sentences (multi-group)
         CALL () {
             MATCH (seed:Sentence)
-            SEARCH seed IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE seed.group_id = $group_id LIMIT $top_k)
+            SEARCH seed IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE seed.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             RETURN seed, score
             UNION ALL
             MATCH (seed:Sentence)
-            SEARCH seed IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE seed.group_id = $global_group_id LIMIT $top_k)
+            SEARCH seed IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE seed.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             RETURN seed, score
         }

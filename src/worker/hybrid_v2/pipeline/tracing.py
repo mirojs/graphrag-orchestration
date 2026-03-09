@@ -208,7 +208,7 @@ class DeterministicTracer:
                            unmatched_seeds=unmatched_seeds[:5])
                 
                 # Determine which vector index to use based on embedding dimensions
-                # V2 Voyage: 2048-dim → entity_embedding_v2
+                # V2 Voyage: 2048-dim → entity_embedding
                 # V1 OpenAI: 3072-dim → entity_embedding
                 for seed in unmatched_seeds:
                     try:
@@ -224,9 +224,9 @@ class DeterministicTracer:
                             continue
                         
                         # Select index based on embedding dimension
-                        # V2 Voyage: 2048 dims → entity_embedding_v2
+                        # V2 Voyage: 2048 dims → entity_embedding
                         # V1 OpenAI: 3072 dims → entity_embedding
-                        index_name = "entity_embedding_v2"
+                        index_name = "entity_embedding"
                         
                         # Search for similar entities
                         vector_records = await self.async_neo4j.get_entities_by_vector_similarity(
@@ -337,7 +337,7 @@ class DeterministicTracer:
         This is ideal for Route 4 deep reasoning where semantic alignment matters.
 
         Requires:
-            - Entities have embeddings (`.embedding` property in Neo4j)
+            - Entities have embeddings (`.entity_embedding` property in Neo4j)
             - async_neo4j service configured
 
         Args:

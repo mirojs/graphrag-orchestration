@@ -147,7 +147,7 @@ class TripleEmbeddingStore:
     ) -> List[Triple]:
         """Fetch all RELATED_TO triples from Neo4j (synchronous).
 
-        If triples have pre-computed embeddings (embedding_v2 property stored
+        If triples have pre-computed embeddings (triple_embedding property stored
         during indexing), those are loaded directly — avoiding a Voyage API
         call at query time.
         """
@@ -158,7 +158,7 @@ class TripleEmbeddingStore:
         RETURN e1.id AS subj_id, e1.name AS subj_name,
                r.description AS predicate,
                e2.id AS obj_id, e2.name AS obj_name,
-               r.embedding_v2 AS embedding
+               r.triple_embedding AS embedding
         """
         triples: List[Triple] = []
         with retry_session(neo4j_driver) as session:

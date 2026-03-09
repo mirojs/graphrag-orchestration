@@ -152,19 +152,19 @@ class TestVectorCompatibility:
 class TestNeo4jIndexDimensions:
     """Test Neo4j vector index dimension requirements."""
     
-    def test_entity_embedding_v2_index_dimensions(self):
-        """Test that entity_embedding_v2 index expects 2048 dims."""
+    def test_entity_embedding_index_dimensions(self):
+        """Test that entity_embedding index expects 2048 dims."""
         expected_index_config = {
-            "name": "entity_embedding_v2",
+            "name": "entity_embedding",
             "dimensions": EXPECTED_DIMENSIONS,
             "similarity": "cosine",
         }
         assert expected_index_config["dimensions"] == EXPECTED_DIMENSIONS
     
-    def test_sentence_embeddings_v2_index_dimensions(self):
-        """Test that sentence_embeddings_v2 index expects 2048 dims."""
+    def test_sentence_embedding_index_dimensions(self):
+        """Test that sentence_embedding index expects 2048 dims."""
         expected_index_config = {
-            "name": "sentence_embeddings_v2",
+            "name": "sentence_embedding",
             "dimensions": EXPECTED_DIMENSIONS,
             "similarity": "cosine",
         }

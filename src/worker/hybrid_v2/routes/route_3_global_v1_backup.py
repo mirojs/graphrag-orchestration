@@ -543,7 +543,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             raise RuntimeError(
                 f"Stage 3.3.5 Hybrid RRF failed: {e}. "
                 f"Check: (1) _search_chunks_cypher25_hybrid_rrf exists on handler, "
-                f"(2) vector index matches embedding property (embedding vs embedding_v2), "
+                f"(2) vector index matches embedding property (embedding property names match), "
                 f"(3) fulltext index exists."
             ) from e
 

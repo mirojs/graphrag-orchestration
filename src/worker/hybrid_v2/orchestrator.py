@@ -122,9 +122,9 @@ def get_vector_index_name() -> str:
     Get the vector index name for Sentence embedding search.
     
     Returns:
-        'sentence_embeddings_v2'
+        'sentence_embedding'
     """
-    return "sentence_embeddings_v2"
+    return "sentence_embedding"
 
 logger = structlog.get_logger(__name__)
 

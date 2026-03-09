@@ -665,7 +665,7 @@ class UnifiedSearchHandler(BaseRouteHandler):
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
-        Uses the same ``sentence_embeddings_v2`` Neo4j vector index as
+        Uses the same ``sentence_embedding`` Neo4j vector index as
         Routes 3 and 4 — provides a direct query→source evidence path
         that bypasses entity resolution and graph traversal.
         """
@@ -690,13 +690,13 @@ class UnifiedSearchHandler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
             UNION ALL
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score

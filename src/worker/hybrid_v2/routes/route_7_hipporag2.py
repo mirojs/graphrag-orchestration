@@ -170,7 +170,7 @@ class HippoRAG2Handler(BaseRouteHandler):
       1. Embed query (Voyage)
       2. asyncio.gather(
            - Query-to-triple linking (top 5) -> LLM recognition memory -> entity seeds
-           - DPR passage search (sentence_embeddings_v2 vector index) -> passage seeds
+           - DPR passage search (sentence_embedding vector index) -> passage seeds
            - [Phase 2] Sentence vector search (optional)
          )
       3. [Phase 2] Structural seeds & community seeds (optional)
@@ -382,7 +382,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         # ------------------------------------------------------------------
         # Step 2: Parallel — Triple linking + DPR passage search
         #
-        # DPR (dense passage retrieval via sentence_embeddings_v2 cosine)
+        # DPR (dense passage retrieval via sentence_embedding cosine)
         # is the original HippoRAG2 passage seeding method.  Seeds feed
         # into PPR which performs graph-based ranking (the final authority).
         # After PPR, the cross-encoder reranker refines the top passages
@@ -1392,7 +1392,7 @@ class HippoRAG2Handler(BaseRouteHandler):
     ) -> List[Tuple[str, float]]:
         """Dense Passage Retrieval via sentence-level vector search.
 
-        Searches sentence_embeddings_v2 for sharp single-sentence matches.
+        Searches sentence_embedding for sharp single-sentence matches.
         Returns sentence IDs as passage nodes for PPR.
 
         When top_k=-1, DPR is disabled (cross-encoder seeds outperform at small scale).
@@ -1430,12 +1430,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         sentence_cypher = """CYPHER 25
         CALL {
             MATCH (s:Sentence)
-            SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
+            SEARCH s IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE s.group_id = $group_id LIMIT $sentence_top_k)
             SCORE AS score
             RETURN s, score
             UNION ALL
             MATCH (s:Sentence)
-            SEARCH s IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE s.group_id = $global_group_id LIMIT $sentence_top_k)
+            SEARCH s IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE s.group_id = $global_group_id LIMIT $sentence_top_k)
             SCORE AS score
             RETURN s, score
         }
@@ -1769,7 +1769,7 @@ class HippoRAG2Handler(BaseRouteHandler):
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
-        Uses the sentence_embeddings_v2 Neo4j vector index —
+        Uses the sentence_embedding Neo4j vector index —
         same pattern as Route 5.
         """
         voyage_service = _get_voyage_service()
@@ -1788,13 +1788,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
             UNION ALL
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
@@ -1987,7 +1987,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         query: str,
         top_k: int = 30,
     ) -> List[Tuple[str, float]]:
-        """Search sentences via sentence_embeddings_v2 vector index.
+        """Search sentences via sentence_embedding vector index.
 
         Uses contextual embeddings (voyage-context-3) which handle short
         metadata sentences (names, addresses) much better than the cross-
@@ -2011,13 +2011,13 @@ class HippoRAG2Handler(BaseRouteHandler):
         cypher = """CYPHER 25
         CALL {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
             UNION ALL
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score

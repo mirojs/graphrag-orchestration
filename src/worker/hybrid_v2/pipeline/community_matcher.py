@@ -139,7 +139,7 @@ class CommunityMatcher:
                coalesce(c.summary, '') AS summary,
                coalesce(c.rank, 0.0) AS rank,
                coalesce(c.level, 0) AS level,
-               c.embedding AS embedding,
+               c.community_embedding AS embedding,
                c.embedding_text_hash AS embedding_text_hash,
                entity_names
         ORDER BY c.rank DESC
@@ -573,7 +573,7 @@ class CommunityMatcher:
         UNWIND $rows AS row
         MATCH (c:Community)
         WHERE c.group_id IN $group_ids AND c.id = row.id
-        SET c.embedding = row.embedding,
+        SET c.community_embedding = row.community_embedding,
             c.embedding_text_hash = row.text_hash
         """
         rows = []
@@ -589,7 +589,7 @@ class CommunityMatcher:
             text_hash = self._compute_text_hash(community) if community else ""
             rows.append({
                 "id": cid,
-                "embedding": self._community_embeddings[cid],
+                "community_embedding": self._community_embeddings[cid],
                 "text_hash": text_hash,
             })
         if not rows:

@@ -327,17 +327,17 @@ class HippoRAGRetriever(BaseRetriever):
             if driver is None:
                 return []
             
-            # Query vector index - use entity_embedding_v2 for V2 data
+            # Query vector index - use entity_embedding for V2 data
             # UNION ALL of primary group + __global__ group for cross-tenant entities
             query = """CYPHER 25
             CALL () {
                 MATCH (node:Entity)
-                SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+                SEARCH node IN (VECTOR INDEX entity_embedding FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
                 SCORE AS score
                 RETURN node, score
                 UNION ALL
                 MATCH (node:Entity)
-                SEARCH node IN (VECTOR INDEX entity_embedding_v2 FOR $embedding WHERE node.group_id = $global_group_id LIMIT $top_k)
+                SEARCH node IN (VECTOR INDEX entity_embedding FOR $embedding WHERE node.group_id = $global_group_id LIMIT $top_k)
                 SCORE AS score
                 RETURN node, score
             }

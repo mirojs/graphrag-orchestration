@@ -459,7 +459,7 @@ class BaseRouteHandler:
     ) -> List[Tuple[Dict[str, Any], float, bool]]:
         """Cypher 25 hybrid search with native BM25 + Vector RRF fusion.
 
-        Uses the sentence_embeddings_v2 vector index via ``get_vector_index_name()``.
+        Uses the sentence_embedding vector index via ``get_vector_index_name()``.
 
         Returns:
             List of (chunk_dict, rrf_score, is_anchor) tuples.

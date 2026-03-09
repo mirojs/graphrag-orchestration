@@ -80,7 +80,7 @@ def get_lazygraphrag_indexing_pipeline_v2():
     - voyage-context-3 (2048 dimensions) instead of text-embedding-3-large (3072)
     - Contextual embeddings with tuples (chunk, context) per Voyage API
     - Section-aware chunking from cu_standard_ingestion_service_v2.py
-    - Stores embeddings in `embedding_v2` property for parallel operation
+    - Stores embeddings in type-specific properties (entity_embedding, sentence_embedding, etc.)
     
     Docs: https://docs.voyageai.com/docs/contextualized-chunk-embeddings
     Ref: VOYAGE_V2_IMPLEMENTATION_PLAN_2026-01-25.md

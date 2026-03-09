@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
                     )
                     hybrid_store_v2.initialize_schema()
                     logger.info("hybrid_v2_neo4j_schema_initialized",
-                               message="V2 vector indexes (entity_embedding_v2) created")
+                               message="V2 vector indexes (entity_embedding) created")
 
                     # Initialize DocumentSyncService for file→graph sync
                     try:

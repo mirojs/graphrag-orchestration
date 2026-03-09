@@ -61,8 +61,8 @@ async def get_entity_embeddings(session, group_id: str) -> List[dict]:
     """Get all entities with embeddings from the baseline group."""
     result = await session.run("""
         MATCH (e:Entity {group_id: $group_id})
-        WHERE e.embedding_v2 IS NOT NULL
-        RETURN e.id AS id, e.name AS name, e.embedding_v2 AS embedding
+        WHERE e.entity_embedding IS NOT NULL
+        RETURN e.id AS id, e.name AS name, e.entity_embedding AS embedding
     """, group_id=group_id)
     records = await result.data()
     return records

@@ -1260,7 +1260,7 @@ class ConceptSearchHandler(BaseRouteHandler):
     ) -> List[Dict[str, Any]]:
         """Retrieve sentence-level evidence via Voyage vector search.
 
-        Reuses the same sentence index that Route 3 uses (sentence_embeddings_v2).
+        Reuses the same sentence index that Route 3 uses (sentence_embedding).
         Document diversity ensures minority documents get representation.
 
         Args:
@@ -1306,13 +1306,13 @@ class ConceptSearchHandler(BaseRouteHandler):
         cypher = f"""CYPHER 25
         CALL () {{
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
             UNION ALL
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score

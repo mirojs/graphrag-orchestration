@@ -392,7 +392,7 @@ class MaintenanceService:
                     MATCH (n {group_id: $group_id})
                     WHERE n:Deprecated
                       AND (n:Sentence OR n:Entity)
-                      AND n.embedding_v2 IS NOT NULL
+                      AND (n.entity_embedding IS NOT NULL OR n.sentence_embedding IS NOT NULL)
                     RETURN count(n) AS vector_count
                     """,
                     group_id=group_id,
@@ -405,8 +405,8 @@ class MaintenanceService:
                     MATCH (n {group_id: $group_id})
                     WHERE n:Deprecated
                       AND (n:Sentence OR n:Entity)
-                      AND n.embedding_v2 IS NOT NULL
-                    SET n.embedding_v2 = null,
+                      AND (n.entity_embedding IS NOT NULL OR n.sentence_embedding IS NOT NULL)
+                    SET n.entity_embedding = null, n.sentence_embedding = null,
                         n.embedding_archived_at = datetime()
                     RETURN count(n) AS cleared_count
                     """,

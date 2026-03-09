@@ -514,7 +514,7 @@ class LazyGraphRAGIndexingPipeline:
 
         # 7.5) Pre-compute triple embeddings for HippoRAG 2 Route 7.
         # Embeds all RELATED_TO triples via Voyage and stores on edges as
-        # embedding_v2, eliminating cold-start latency at query time.
+        # triple_embedding, eliminating cold-start latency at query time.
         try:
             triple_embed_stats = await self._precompute_triple_embeddings(group_id)
             stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
@@ -999,7 +999,7 @@ class LazyGraphRAGIndexingPipeline:
                 section_path=raw.get("section_path", ""),
                 page=raw.get("page"),
                 confidence=raw.get("confidence", 1.0),
-                embedding_v2=emb,
+                sentence_embedding=emb,
                 tokens=raw.get("tokens", 0),
                 parent_text=raw.get("parent_text"),
                 index_in_section=raw.get("index_in_section", 0),
@@ -1288,11 +1288,11 @@ class LazyGraphRAGIndexingPipeline:
         result = await self.neo4j_store.arun_query(
             """
                 MATCH (s:Sentence {group_id: $group_id})
-                WHERE s.embedding_v2 IS NOT NULL
+                WHERE s.sentence_embedding IS NOT NULL
                 RETURN s.id AS id,
                        s.document_id AS document_id,
                        s.index_in_doc AS index_in_doc,
-                       s.embedding_v2 AS embedding
+                       s.sentence_embedding AS embedding
                 """,
             read_only=True,
             group_id=group_id,
@@ -1485,7 +1485,7 @@ class LazyGraphRAGIndexingPipeline:
             try:
                 embs = await self.voyage_service.aembed_independent_texts(texts)
                 for ent, emb in zip(entities, embs):
-                    ent.embedding_v2 = emb
+                    ent.entity_embedding = emb
                 logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
             except Exception as e:
                 logger.warning("openie_entity_embedding_failed", extra={"error": str(e)})
@@ -2323,7 +2323,7 @@ Return ONLY valid JSON (no markdown fences):
                     name=name,
                     type=node_labels[0] if node_labels else "CONCEPT",
                     description=str(props.get("description", "") or ""),
-                    embedding_v2=None,
+                    entity_embedding=None,
                     metadata=props,
                     text_unit_ids=[],
                     aliases=aliases_list,
@@ -2434,7 +2434,7 @@ Return ONLY valid JSON (no markdown fences):
             try:
                 embs = await self.voyage_service.aembed_independent_texts(texts)
                 for ent, emb in zip(entities, embs):
-                    ent.embedding_v2 = emb
+                    ent.entity_embedding = emb
             except Exception as e:
                 logger.warning("sentence_entity_embedding_failed", extra={"error": str(e)})
 
@@ -2502,7 +2502,7 @@ Return ONLY valid JSON (no markdown fences):
                         name=name,
                         type=getattr(kn, "label", None) or (kn.get("label") if isinstance(kn, dict) else None) or "CONCEPT",
                         description="",
-                        embedding_v2=None,
+                        entity_embedding=None,
                         metadata={},
                         text_unit_ids=[],
                     )
@@ -2547,7 +2547,7 @@ Return ONLY valid JSON (no markdown fences):
             try:
                 embs = await self.voyage_service.aembed_independent_texts(texts)
                 for ent, emb in zip(entities, embs):
-                    ent.embedding_v2 = emb
+                    ent.entity_embedding = emb
             except Exception as e:
                 logger.warning("llamaindex_sentence_embedding_failed", extra={"error": str(e)})
 
@@ -3078,15 +3078,15 @@ Output:
                     MATCH (n:Entity)
                     WHERE n.group_id = "{escaped_group_id}"
                       AND NOT n:Deprecated
-                      AND n.embedding_v2 IS NOT NULL
+                      AND n.entity_embedding IS NOT NULL
                     OPTIONAL MATCH (n)-[r]->(m:Entity)
                     WHERE m.group_id = "{escaped_group_id}"
                       AND NOT m:Deprecated
-                      AND m.embedding_v2 IS NOT NULL
+                      AND m.entity_embedding IS NOT NULL
                     RETURN 
                       n AS source, r AS rel, m AS target,
-                      n {{ .embedding_v2 }} AS sourceNodeProperties,
-                      m {{ .embedding_v2 }} AS targetNodeProperties
+                      n {{ .entity_embedding }} AS sourceNodeProperties,
+                      m {{ .entity_embedding }} AS targetNodeProperties
                 }}
                 RETURN gds.graph.project.remote(source, target, {{
                     sourceNodeProperties: sourceNodeProperties,
@@ -3136,7 +3136,7 @@ Output:
                 raise RuntimeError("GDS projection failed after all retries")
             
             if G.node_count() == 0:
-                logger.warning(f"⚠️  No nodes in projection - skipping algorithms (check embedding_v2 exists)")
+                logger.warning(f"⚠️  No nodes in projection - skipping algorithms (check entity_embedding exists)")
                 gds.graph.drop(projection_name)
                 return stats
             
@@ -3167,7 +3167,7 @@ Output:
                 knn_df = await _run_gds_algo(
                     "KNN", gds.knn.stream,
                     G,
-                    nodeProperties=["embedding_v2"],
+                    nodeProperties=["entity_embedding"],
                     topK=knn_top_k,
                     similarityCutoff=knn_similarity_cutoff,
                     concurrency=4
@@ -3466,7 +3466,7 @@ Output:
             try:
                 embeddings = await self.section_embed_model.aget_text_embedding_batch(summary_texts)
                 embed_updates = [
-                    {"id": cid, "embedding": emb}
+                    {"id": cid, "community_embedding": emb}
                     for cid, emb in zip(community_ids_ordered, embeddings)
                     if emb is not None
                 ]
@@ -3475,7 +3475,7 @@ Output:
                         """
                         UNWIND $updates AS u
                         MATCH (c:Community {id: u.id, group_id: $group_id})
-                        SET c.embedding = u.embedding
+                        SET c.community_embedding = u.community_embedding
                         """,
                         updates=embed_updates, group_id=group_id,
                     )
@@ -3584,10 +3584,10 @@ SUMMARY: <summary>"""
             min_entities_for_dedup=10,
         )
 
-        # Use embedding_v2 (V2/Voyage) if available, otherwise embedding (V1/OpenAI)
+        # Use entity_embedding (Voyage) for entity deduplication
         entity_dicts = []
         for e in entities:
-            emb = e.embedding_v2 if hasattr(e, 'embedding_v2') else None
+            emb = e.entity_embedding if hasattr(e, 'entity_embedding') else None
             if emb is None:
                 continue  # Skip entities without embeddings
             entity_dicts.append({
@@ -3657,15 +3657,15 @@ SUMMARY: <summary>"""
                 # Only keep embedding from the member whose name matches the
                 # canonical name.  Inheriting an embedding computed for a
                 # different (pre-rename) surface form would be stale.
-                if m.name == canon_name and hasattr(m, 'embedding_v2') and m.embedding_v2 is not None:
-                    merged_emb_v2 = m.embedding_v2
+                if m.name == canon_name and hasattr(m, 'entity_embedding') and m.entity_embedding is not None:
+                    merged_emb = m.entity_embedding
 
             canonical_entities[canon_id] = Entity(
                 id=canon_id,
                 name=canon_name,
                 type=merged_type,
                 description=merged_desc,
-                embedding_v2=merged_emb_v2,
+                entity_embedding=merged_emb,
                 metadata=merged_meta,
                 text_unit_ids=sorted(merged_text_units),
                 aliases=sorted(merged_aliases),  # Include merged aliases
@@ -3902,7 +3902,7 @@ SUMMARY: <summary>"""
         These embeddings capture what the section *contains* and are used for
         SEMANTICALLY_SIMILAR edge creation ("soft" thematic hops in PPR).
         
-        Stored in: Section.embedding (2048-dim Voyage via self.section_embed_model)
+        Stored in: Section.section_embedding (2048-dim Voyage via self.section_embed_model)
         
         NOTE: This is distinct from structural_embedding (title + path only)
         which is used for Source 2 header matching. See _embed_section_structural().
@@ -3921,7 +3921,7 @@ SUMMARY: <summary>"""
         result = await self.neo4j_store.arun_query(
             """
                 MATCH (s:Section {group_id: $group_id})
-                WHERE s.embedding IS NULL
+                WHERE s.section_embedding IS NULL
                 OPTIONAL MATCH (t:Sentence)-[:IN_SECTION]->(s)
                 WITH s, collect(t.text)[0..5] AS sent_texts
                 RETURN s.id AS section_id, s.title AS title, s.path_key AS path_key, sent_texts AS chunk_texts
@@ -3962,7 +3962,7 @@ SUMMARY: <summary>"""
         
         # Update Section nodes with embeddings
         updates = [
-            {"id": sec["id"], "embedding": emb}
+            {"id": sec["id"], "section_embedding": emb}
             for sec, emb in zip(sections_to_embed, embeddings)
             if emb is not None
         ]
@@ -3971,7 +3971,7 @@ SUMMARY: <summary>"""
             """
             UNWIND $updates AS u
             MATCH (s:Section {id: u.id, group_id: $group_id})
-            SET s.embedding = u.embedding
+            SET s.section_embedding = u.section_embedding
             """,
             updates=updates,
             group_id=group_id,
@@ -4114,8 +4114,8 @@ SUMMARY: <summary>"""
         This enables Source 2 (structural seed) to match queries against document
         structure independently of Source 1 (content sentence search).
         
-        Why separate from Section.embedding:
-        - Section.embedding includes raw chunk text → behaves like content search.
+        Why separate from Section.section_embedding:
+        - Section.section_embedding includes raw chunk text → behaves like content search.
           Using it for Source 2 would return the same sections as Source 1 sentence
           search, providing no additive signal.
         - structural_embedding uses title + path_key + *summary* → captures the
@@ -4247,8 +4247,8 @@ SUMMARY: <summary>"""
         result = await self.neo4j_store.arun_query(
             """
             MATCH (s:Section {group_id: $group_id})
-            WHERE s.embedding IS NOT NULL
-            RETURN s.id AS id, s.doc_id AS doc_id, s.embedding AS embedding
+            WHERE s.section_embedding IS NOT NULL
+            RETURN s.id AS id, s.doc_id AS doc_id, s.section_embedding AS embedding
             """,
             read_only=True,
             group_id=group_id,
@@ -4437,7 +4437,7 @@ SUMMARY: <summary>"""
 
         Builds the text ``source | description | target`` for each triple,
         embeds them in batch via Voyage, and stores the vectors on the edges
-        as ``embedding_v2``.  This eliminates cold-start Voyage calls in the
+        as ``triple_embedding``.  This eliminates cold-start Voyage calls in the
         TripleEmbeddingStore at Route 7 query time.
         """
         import asyncio
@@ -4497,9 +4497,9 @@ SUMMARY: <summary>"""
             # Load entity embeddings
             result = session.run(
                 "MATCH (e:Entity {group_id: $gid}) "
-                "WHERE e.embedding_v2 IS NOT NULL "
+                "WHERE e.entity_embedding IS NOT NULL "
                 "RETURN e.id AS id, e.name AS name, "
-                "e.embedding_v2 AS emb, e.community_id AS comm",
+                "e.entity_embedding AS emb, e.community_id AS comm",
                 gid=group_id,
             )
             entities = [(r["id"], r["name"], np.array(r["emb"]), r["comm"])

@@ -191,7 +191,7 @@ class DeterministicTracer:
                            unmatched_seeds=unmatched_seeds[:5])
                 
                 # Determine which vector index to use based on embedding dimensions
-                # V2 Voyage: 2048-dim → entity_embedding_v2
+                # V2 Voyage: 2048-dim → entity_embedding
                 # V1 OpenAI: 3072-dim → entity_embedding
                 for seed in unmatched_seeds:
                     try:
@@ -207,9 +207,9 @@ class DeterministicTracer:
                             continue
                         
                         # Select index based on embedding dimension
-                        # V2 Voyage: 2048 dims → entity_embedding_v2
+                        # V2 Voyage: 2048 dims → entity_embedding
                         # V1 OpenAI: 3072 dims → entity_embedding
-                        index_name = "entity_embedding_v2" if len(embedding) <= 2048 else "entity_embedding"
+                        index_name = "entity_embedding" if len(embedding) <= 2048 else "entity_embedding"
                         
                         # Search for similar entities
                         vector_records = await self.async_neo4j.get_entities_by_vector_similarity(

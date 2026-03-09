@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # V2 Index Configuration
 V2_INDEX_NAME = "chunk_embeddings_v2"
 V2_EMBEDDING_DIM = 2048  # voyage-context-3 with output_dimension=2048
-V2_EMBEDDING_PROPERTY = "embedding_v2"
+V2_EMBEDDING_PROPERTY = "sentence_embedding"
 
 
 async def create_v2_index(

@@ -251,7 +251,7 @@ def get_sentence_evidence(query_embedding: List[float], top_k: int = 30, thresho
     sentences = []
     with driver.session() as session:
         result = session.run("""
-            CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+            CALL db.index.vector.queryNodes('sentence_embedding', $top_k, $embedding)
             YIELD node, score
             WHERE node.group_id = $gid AND score >= $threshold
             OPTIONAL MATCH (node)-[:IN_DOCUMENT]->(d:Document)

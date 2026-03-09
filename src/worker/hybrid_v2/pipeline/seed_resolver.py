@@ -777,7 +777,7 @@ async def resolve_all_tiers(
                         if not embedding:
                             continue
 
-                        index_name = "entity_embedding_v2"
+                        index_name = "entity_embedding"
                         vector_records = await async_neo4j.get_entities_by_vector_similarity(
                             group_id=group_id,
                             seed_text=seed,
@@ -1022,7 +1022,7 @@ async def resolve_flat_seed_pool(
                             continue
                         if not embedding:
                             continue
-                        index_name = "entity_embedding_v2"
+                        index_name = "entity_embedding"
                         vector_records = await async_neo4j.get_entities_by_vector_similarity(
                             group_id=group_id,
                             seed_text=seed,

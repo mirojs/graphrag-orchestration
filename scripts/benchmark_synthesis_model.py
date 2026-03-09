@@ -87,7 +87,7 @@ def get_voyage_query_embedding(query: str) -> List[float]:
 # ─── Strategy B retrieval (reused from deep benchmark) ───────────
 def get_strategy_b_context(query_embedding: List[float], top_k: int = 8, threshold: float = 0.45) -> Dict:
     cypher = """
-    CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+    CALL db.index.vector.queryNodes('sentence_embedding', $top_k, $embedding)
     YIELD node AS seed, score
     WHERE seed.group_id = $group_id AND score >= $threshold
 

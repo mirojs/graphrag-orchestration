@@ -1179,7 +1179,7 @@ Sub-questions:"""
         resolution and graph traversal. This is the parallel path that
         compensates for DRIFT decomposition entity mutation.
 
-        Uses the same sentence_embeddings_v2 Neo4j index as Route 3.
+        Uses the same sentence_embedding Neo4j index as Route 3.
         """
         voyage_service = _get_voyage_service()
         if not voyage_service:
@@ -1207,13 +1207,13 @@ Sub-questions:"""
         cypher = """CYPHER 25
         CALL () {
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score
             UNION ALL
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embeddings_v2 FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
             SCORE AS score
             WHERE score >= $threshold
             RETURN sent, score

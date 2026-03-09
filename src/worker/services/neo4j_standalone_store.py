@@ -354,11 +354,11 @@ class StandaloneNeo4jStore:
         # Infer node label from index name for the MATCH clause.
         _label_map = {
             "entity_embedding": "Entity",
-            "entity_embedding_v2": "Entity",
-            "entity_embedding_v2_internal": "Entity",
+            "entity_embedding": "Entity",
+            # entity_embedding_v2_internal removed (legacy),
             "chunk_embedding": "TextChunk",
             "chunk_embeddings_v2": "TextChunk",
-            "sentence_embeddings_v2": "Sentence",
+            "sentence_embedding": "Sentence",
             "raptor_embedding": "RaptorNode",
         }
         node_label = _label_map.get(index_name, "Entity")

@@ -2174,9 +2174,9 @@ class EnhancedGraphRetriever:
         query = """
         MATCH (e:Entity)
         WHERE e.group_id = $group_id
-          AND e.embedding_v2 IS NOT NULL
+          AND e.entity_embedding IS NOT NULL
         WITH e, vector.similarity.cosine(
-            e.embedding_v2, $query_embedding
+            e.entity_embedding, $query_embedding
         ) as score
         ORDER BY score DESC
         LIMIT $top_k
@@ -2534,10 +2534,10 @@ class EnhancedGraphRetriever:
         MATCH (d:Document)<-[:IN_DOCUMENT]-(t:Sentence)
         WHERE d.group_id IN $group_ids
           AND t.group_id IN $group_ids
-          AND t.embedding_v2 IS NOT NULL
+          AND t.sentence_embedding IS NOT NULL
         {folder_filter}
         OPTIONAL MATCH (t)-[:IN_SECTION]->(s:Section)
-        WITH d, t, s, vector.similarity.cosine(t.embedding_v2, $query_embedding) AS score
+        WITH d, t, s, vector.similarity.cosine(t.sentence_embedding, $query_embedding) AS score
         ORDER BY d.id, score DESC
         WITH d, collect({{
             sentence_id: t.id,

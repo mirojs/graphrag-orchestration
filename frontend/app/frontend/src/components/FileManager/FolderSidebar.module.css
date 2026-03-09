@@ -225,6 +225,31 @@
     }
 }
 
+/* Inline primary action button (Analyze / Chat) on folder row */
+.inlineActionBtn {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid #4cc9f0;
+    background: #eaf9ff;
+    color: #0d8ab5;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+    line-height: 1.4;
+}
+.inlineActionBtn:hover {
+    background: #d0f0ff;
+    border-color: #0d8ab5;
+    box-shadow: 0 1px 4px rgba(76, 201, 240, 0.3);
+}
+.inlineActionChat {
+    padding: 2px 6px;
+    font-size: 12px;
+}
+
 /* Analysis status badges */
 .analysisBadge {
     font-size: 11px;

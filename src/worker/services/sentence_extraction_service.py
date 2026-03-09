@@ -298,12 +298,6 @@ SKIP_ROLES = {
 # ---------------------------------------------------------------------------
 # Noise detection patterns
 # ---------------------------------------------------------------------------
-# Bare form labels with no value (e.g. "Name:", "Date:", "Phone:")
-KVP_PATTERN_RE = re.compile(
-    r"^(name|date|address|phone|email|signature|title|page|total|amount|"
-    r"number|id|ref|no\.?|signed|owner|agent|customer)\s*[:_\-#]?\s*$",
-    re.IGNORECASE,
-)
 # ALL-CAPS text — catches DI heading-role misses (e.g. "EXHIBIT A")
 ALL_CAPS_RE = re.compile(r"^[A-Z\s\d.,!?:;\-()]+$")
 
@@ -562,15 +556,11 @@ def _is_noise_sentence(
     if len(text.split()) < min_words:
         return True
 
-    # Rule 2: Bare form labels without values ("Name:", "Date:")
-    if KVP_PATTERN_RE.match(text):
-        return True
-
-    # Rule 3: ALL-CAPS leaked headings that DI missed labelling
+    # Rule 2: ALL-CAPS leaked headings that DI missed labelling
     if ALL_CAPS_RE.match(text) and len(text.split()) <= 5:
         return True
 
-    # Rule 4: Numeric-only content (standalone table cells like "$12,450.00")
+    # Rule 3: Numeric-only content (standalone table cells like "$12,450.00")
     cleaned = re.sub(r"[\d,.$%\s\-/·•]", "", text)
     if len(cleaned) < 8:
         return True

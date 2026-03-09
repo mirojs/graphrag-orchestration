@@ -161,11 +161,13 @@ class AsyncNeo4jService:
         group_id: str,
         top_k: int = 50,
         min_importance: float = 0.0,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get top entities by importance score (native async)."""
+        effective_ids = group_ids or [group_id, "__global__"]
         query = cypher25_query("""
         MATCH (e)
-        WHERE e.group_id = $group_id
+        WHERE e.group_id IN $effective_ids
           AND (e:Entity)
         WITH e, coalesce(e.importance_score, e.degree, 0) AS score
         WHERE score >= $min_importance
@@ -182,7 +184,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 top_k=top_k,
                 min_importance=min_importance,
             )
@@ -196,6 +198,7 @@ class AsyncNeo4jService:
         entity_names: List[str],
         use_extended_matching: bool = True,
         return_unmatched: bool = False,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get specific entities by name using multi-strategy matching.
@@ -216,6 +219,7 @@ class AsyncNeo4jService:
             entity_names: List of seed names to resolve
             use_extended_matching: If True, use strategies 3-5 for unmatched seeds
             return_unmatched: If True, return tuple of (records, unmatched_seeds)
+            group_ids: Optional list of group IDs to query (defaults to [group_id, "__global__"])
             
         Returns:
             If return_unmatched=False: List of entity records with id, name, etc.
@@ -224,12 +228,14 @@ class AsyncNeo4jService:
         if not entity_names:
             return []
         
+        effective_ids = group_ids or [group_id, "__global__"]
+        
         # Strategy 1 & 2: Exact name match + Alias match
         query_exact = cypher25_query("""
         UNWIND $names AS name
         MATCH (e)
         WHERE (e:Entity)
-            AND e.group_id = $group_id
+            AND e.group_id IN $effective_ids
             AND (
                 toLower(e.name) = toLower(name)
                 OR ANY(alias IN coalesce(e.aliases, []) WHERE toLower(alias) = toLower(name))
@@ -245,7 +251,7 @@ class AsyncNeo4jService:
         """)
         
         async with self._get_session() as session:
-            result = await session.run(query_exact, group_id=group_id, names=entity_names)
+            result = await session.run(query_exact, effective_ids=effective_ids, names=entity_names)
             records = await result.data()
         
         # Track which seeds were matched
@@ -266,11 +272,12 @@ class AsyncNeo4jService:
         # Strategy 3: KVP key match for unmatched seeds
         query_kvp = cypher25_query("""
         UNWIND $names AS name
-        MATCH (k:KeyValuePair {group_id: $group_id})
-        WHERE toLower(k.key) = toLower(name)
+        MATCH (k:KeyValuePair)
+        WHERE k.group_id IN $effective_ids
+          AND toLower(k.key) = toLower(name)
         // KVP nodes link to entities via SIMILAR_TO
         OPTIONAL MATCH (k)-[:SIMILAR_TO]->(e)
-        WHERE (e:Entity) AND e.group_id = $group_id
+        WHERE (e:Entity) AND e.group_id IN $effective_ids
         WITH name, COALESCE(e, k) AS node
         WHERE node IS NOT NULL
         RETURN DISTINCT
@@ -284,7 +291,7 @@ class AsyncNeo4jService:
         """)
         
         async with self._get_session() as session:
-            result = await session.run(query_kvp, group_id=group_id, names=unmatched_seeds)
+            result = await session.run(query_kvp, effective_ids=effective_ids, names=unmatched_seeds)
             kvp_records = await result.data()
         
         records.extend(kvp_records)
@@ -307,7 +314,7 @@ class AsyncNeo4jService:
         UNWIND $names AS name
         MATCH (e)
         WHERE (e:Entity)
-            AND e.group_id = $group_id
+            AND e.group_id IN $effective_ids
             AND (
                 toLower(e.name) CONTAINS toLower(name)
                 OR toLower(name) CONTAINS toLower(e.name)
@@ -327,7 +334,7 @@ class AsyncNeo4jService:
         """)
         
         async with self._get_session() as session:
-            result = await session.run(query_substring, group_id=group_id, names=unmatched_seeds)
+            result = await session.run(query_substring, effective_ids=effective_ids, names=unmatched_seeds)
             substring_records = await result.data()
         
         records.extend(substring_records)
@@ -354,7 +361,7 @@ class AsyncNeo4jService:
         WHERE size(word) >= 3  // Skip short words like 'the', 'a'
         MATCH (e)
         WHERE (e:Entity)
-            AND e.group_id = $group_id
+            AND e.group_id IN $effective_ids
             AND toLower(e.name) CONTAINS word
         WITH name, e, count(DISTINCT word) AS word_matches
         WHERE word_matches >= 1
@@ -372,7 +379,7 @@ class AsyncNeo4jService:
         """)
         
         async with self._get_session() as session:
-            result = await session.run(query_token, group_id=group_id, names=unmatched_seeds)
+            result = await session.run(query_token, effective_ids=effective_ids, names=unmatched_seeds)
             token_records = await result.data()
         
         records.extend(token_records)
@@ -402,6 +409,7 @@ class AsyncNeo4jService:
         seed_embedding: List[float],
         top_k: int = 3,
         index_name: str = "entity_embedding",
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Strategy 6: Find entities using vector similarity on entity embeddings.
@@ -421,6 +429,7 @@ class AsyncNeo4jService:
             seed_embedding: Vector embedding of the seed phrase
             top_k: Number of similar entities to return
             index_name: Vector index to query (default: 'entity_embedding')
+            group_ids: Optional list of group IDs to query (defaults to [group_id, "__global__"])
             
         Returns:
             List of entity records with id, name, degree, importance_score, similarity
@@ -428,13 +437,26 @@ class AsyncNeo4jService:
         if not seed_embedding:
             return []
         
+        effective_ids = group_ids or [group_id, "__global__"]
+        
         # SEARCH clause with in-index group_id filtering (Neo4j 5.18+, Cypher 25)
-        # The WHERE inside SEARCH is pushed into the vector index scan via WITH [group_id],
-        # guaranteeing exact top_k results for the target group without oversampling.
+        # Vector index WHERE clause only supports single equality, so use UNION ALL
+        # to query each group_id separately and combine results.
         query = cypher25_query(f"""
-        MATCH (node:Entity)
-        SEARCH node IN (VECTOR INDEX {index_name} FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
-        SCORE AS score
+        CALL () {{
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX {index_name} FOR $embedding WHERE node.group_id = $group_id LIMIT $top_k)
+            SCORE AS score
+            RETURN node, score
+            UNION ALL
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX {index_name} FOR $embedding WHERE node.group_id = $global_group_id LIMIT $top_k)
+            SCORE AS score
+            RETURN node, score
+        }}
+        WITH node, score
+        ORDER BY score DESC
+        LIMIT $top_k
         RETURN
             node.id AS id,
             node.name AS name,
@@ -452,6 +474,7 @@ class AsyncNeo4jService:
                 result = await session.run(
                     query,
                     group_id=group_id,
+                    global_group_id="__global__",
                     embedding=seed_embedding,
                     top_k=top_k,
                     seed_text=seed_text,
@@ -487,21 +510,23 @@ class AsyncNeo4jService:
         entity_ids: List[str],
         depth: int = 2,
         limit_per_entity: int = 10,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Expand from seed entities to find neighbors (native async).
         
         Uses native Cypher path patterns - no GDS required.
         """
+        effective_ids = group_ids or [group_id, "__global__"]
         query = cypher25_query(f"""
         UNWIND $entity_ids AS eid
         MATCH (seed)
         WHERE (seed:Entity)
           AND seed.id = eid
-          AND seed.group_id = $group_id
+          AND seed.group_id IN $effective_ids
         MATCH path = (seed)-[r*1..{depth}]-(neighbor)
         WHERE (neighbor:Entity)
-          AND neighbor.group_id = $group_id
+          AND neighbor.group_id IN $effective_ids
           AND neighbor.id <> seed.id
           AND ALL(rel IN relationships(path) WHERE type(rel) <> 'MENTIONS')
         WITH neighbor, 
@@ -520,7 +545,7 @@ class AsyncNeo4jService:
             # Cast to str to satisfy Neo4j type checker
             result = await session.run(
                 str(query),  # type: ignore[arg-type]
-                group_id=group_id,
+                effective_ids=effective_ids,
                 entity_ids=entity_ids,
                 limit=limit_per_entity * len(entity_ids),
             )
@@ -536,17 +561,19 @@ class AsyncNeo4jService:
         group_id: str,
         entity_id: str,
         limit: int = 50,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get all relationships for a specific entity.
         """
+        effective_ids = group_ids or [group_id, "__global__"]
         query = cypher25_query("""
         MATCH (e)-[r]-(other)
         WHERE (e:Entity)
           AND (other:Entity)
           AND e.id = $entity_id
-          AND e.group_id = $group_id 
-          AND other.group_id = $group_id
+          AND e.group_id IN $effective_ids 
+          AND other.group_id IN $effective_ids
           AND type(r) <> 'MENTIONS'
         RETURN e.name AS source,
                type(r) AS relationship,
@@ -559,7 +586,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 entity_id=entity_id,
                 limit=limit,
             )
@@ -587,6 +614,7 @@ class AsyncNeo4jService:
         weight_similar: float = 1.0,
         weight_shares: float = 1.0,
         weight_hub: float = 1.0,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Tuple[str, float]]:
         """
         Native Cypher approximation of Personalized PageRank.
@@ -626,13 +654,15 @@ class AsyncNeo4jService:
         else:
             query = self._build_ppr_query_entity_only()
         
+        effective_ids = group_ids or [group_id, "__global__"]
+
         import time
 
         t0 = time.perf_counter()
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 seed_ids=seed_entity_ids,
                 damping=damping,
                 top_k=top_k,
@@ -674,6 +704,7 @@ class AsyncNeo4jService:
         weight_similar: float = 1.0,
         weight_shares: float = 1.0,
         weight_hub: float = 1.0,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Tuple[str, float]]:
         """PPR with per-seed teleportation weights (Route 5 — Unified Search).
 
@@ -747,13 +778,15 @@ class AsyncNeo4jService:
 
         query = self._build_ppr_query_weighted_section_graph()
 
+        effective_ids = group_ids or [group_id, "__global__"]
+
         import time
         t0 = time.perf_counter()
 
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 seed_weights=seed_weights_list,
                 damping=damping,
                 top_k=top_k,
@@ -786,13 +819,13 @@ class AsyncNeo4jService:
         return cypher25_query("""
             UNWIND $seed_weights AS sw
             MATCH (seed {id: sw.id})
-            WHERE seed.group_id = $group_id
+            WHERE seed.group_id IN $effective_ids
               AND (seed:Entity)
 
             WITH seed,
                  sw.id AS seed_id,
                  sw.weight AS seed_weight,
-                 $group_id AS group_id,
+                 $effective_ids AS effective_ids,
                  $per_seed_limit AS per_seed_limit,
                  $per_neighbor_limit AS per_neighbor_limit,
                  $damping AS damping,
@@ -803,9 +836,9 @@ class AsyncNeo4jService:
                  $weight_hub AS w_hub
 
             // Path 1: Standard Entity-to-Entity relationships
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[r1]-(n1)
-                WHERE n1.group_id = group_id
+                WHERE n1.group_id IN effective_ids
                     AND (n1:Entity)
                     AND NOT (type(r1) IN ['MENTIONS', 'SIMILAR_TO', 'SEMANTICALLY_SIMILAR', 'APPEARS_IN_SECTION'])
                 WITH n1
@@ -815,20 +848,20 @@ class AsyncNeo4jService:
             }
 
             // Path 2: Section-based thematic hops
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (chunk)-[:MENTIONS]->(seed)
-                WHERE chunk.group_id = group_id
+                WHERE chunk.group_id IN effective_ids
                     AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
                 MATCH (chunk)-[:IN_SECTION]->(s1:Section)
-                WHERE s1.group_id = group_id
+                WHERE s1.group_id IN effective_ids
                 MATCH (s1)-[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
-                WHERE s2.group_id = group_id
+                WHERE s2.group_id IN effective_ids
                   AND coalesce(sim.similarity, 0.5) >= 0.5
                 MATCH (chunk2)-[:IN_SECTION]->(s2)
-                WHERE chunk2.group_id = group_id
+                WHERE chunk2.group_id IN effective_ids
                     AND (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`)
                 MATCH (chunk2)-[:MENTIONS]->(neighbor)
-                WHERE neighbor.group_id = group_id
+                WHERE neighbor.group_id IN effective_ids
                     AND (neighbor:Entity)
                     AND neighbor.id <> seed.id
                 WITH neighbor, max(coalesce(sim.similarity, 0.5)) AS sim_weight
@@ -838,9 +871,9 @@ class AsyncNeo4jService:
             }
 
             // Path 3: SEMANTICALLY_SIMILAR entity edges (GDS KNN)
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[sim:SEMANTICALLY_SIMILAR|SIMILAR_TO]-(neighbor)
-                WHERE neighbor.group_id = group_id
+                WHERE neighbor.group_id IN effective_ids
                     AND (neighbor:Entity)
                     AND coalesce(sim.similarity, 0.60) >= 0.60
                 WITH neighbor, max(coalesce(sim.similarity, 0.60)) AS sim_weight
@@ -850,18 +883,18 @@ class AsyncNeo4jService:
             }
 
             // Path 4: SHARES_ENTITY edges (cross-document)
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[:APPEARS_IN_SECTION]->(s1:Section)
-                WHERE s1.group_id = group_id
+                WHERE s1.group_id IN effective_ids
                 MATCH (s1)-[se:SHARES_ENTITY]-(s2:Section)
-                WHERE s2.group_id = group_id
+                WHERE s2.group_id IN effective_ids
                   AND coalesce(se.shared_entities, 1) >= 2
                 OPTIONAL MATCH (s2)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
-                WHERE hub_entity.group_id = group_id
+                WHERE hub_entity.group_id IN effective_ids
                 OPTIONAL MATCH (chunk2)-[:IN_SECTION]->(s2)
-                WHERE chunk2.group_id = group_id
+                WHERE chunk2.group_id IN effective_ids
                 OPTIONAL MATCH (chunk2)-[:MENTIONS]->(chunk_entity)
-                WHERE chunk_entity.group_id = group_id
+                WHERE chunk_entity.group_id IN effective_ids
                     AND (chunk_entity:Entity)
                     AND chunk_entity.id <> seed.id
                 WITH coalesce(hub_entity, chunk_entity) AS neighbor,
@@ -875,11 +908,11 @@ class AsyncNeo4jService:
             }
 
             // Path 5: HAS_HUB_ENTITY direct traversal
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[:APPEARS_IN_SECTION]->(s:Section)
-                WHERE s.group_id = group_id
+                WHERE s.group_id IN effective_ids
                 MATCH (s)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
-                WHERE hub_entity.group_id = group_id
+                WHERE hub_entity.group_id IN effective_ids
                     AND hub_entity.id <> seed.id
                 WITH hub_entity, max(coalesce(hub.mention_count, 1) / 10.0) AS hub_weight
                 ORDER BY hub_weight * coalesce(hub_entity.degree, 0) DESC
@@ -890,18 +923,18 @@ class AsyncNeo4jService:
             // Aggregate all paths with 2-hop entity expansion
             WITH seed, seed_weight, entity_hop1, section_hop1, similar_entities,
                  shares_entity_hop, hub_entities,
-                 group_id, per_neighbor_limit, damping,
+                 effective_ids, per_neighbor_limit, damping,
                  w_entity, w_section, w_similar, w_shares, w_hub
 
             UNWIND (entity_hop1 + [seed]) AS hop1_node
             WITH seed, seed_weight, hop1_node, entity_hop1, section_hop1,
                  similar_entities, shares_entity_hop, hub_entities,
-                 group_id, per_neighbor_limit, damping,
+                 effective_ids, per_neighbor_limit, damping,
                  w_entity, w_section, w_similar, w_shares, w_hub
 
-            CALL (seed, hop1_node, group_id, per_neighbor_limit) {
+            CALL (seed, hop1_node, effective_ids, per_neighbor_limit) {
                 MATCH (hop1_node)-[r2]-(n2)
-                WHERE n2.group_id = group_id
+                WHERE n2.group_id IN effective_ids
                     AND (n2:Entity)
                     AND NOT (type(r2) IN ['MENTIONS', 'SIMILAR_TO', 'SEMANTICALLY_SIMILAR', 'APPEARS_IN_SECTION'])
                 WITH n2
@@ -977,20 +1010,20 @@ class AsyncNeo4jService:
         return cypher25_query("""
             UNWIND $seed_ids AS seed_id
             MATCH (seed {id: seed_id})
-            WHERE seed.group_id = $group_id
+            WHERE seed.group_id IN $effective_ids
               AND (seed:Entity)
 
             // Always include the seed itself
             WITH seed,
                  seed_id,
-                 $group_id AS group_id,
+                 $effective_ids AS effective_ids,
                  $per_seed_limit AS per_seed_limit,
                  $per_neighbor_limit AS per_neighbor_limit,
                  $damping AS damping,
                  $weight_entity AS w_entity
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[r1]-(n1)
-                WHERE n1.group_id = group_id
+                WHERE n1.group_id IN effective_ids
                     AND (n1:Entity)
                     AND type(r1) <> 'MENTIONS'
                 WITH n1
@@ -999,14 +1032,14 @@ class AsyncNeo4jService:
                 RETURN collect(n1) AS hop1
             }
 
-            WITH seed, hop1, group_id, per_neighbor_limit, damping
+            WITH seed, hop1, effective_ids, per_neighbor_limit, damping
             UNWIND (hop1 + [seed]) AS hop1_node
-            WITH seed, hop1_node, group_id, per_neighbor_limit, damping
+            WITH seed, hop1_node, effective_ids, per_neighbor_limit, damping
 
             // Optional 2-hop expansion capped per hop1_node
-            CALL (seed, hop1_node, group_id, per_neighbor_limit) {
+            CALL (seed, hop1_node, effective_ids, per_neighbor_limit) {
                 MATCH (hop1_node)-[r2]-(n2)
-                WHERE n2.group_id = group_id
+                WHERE n2.group_id IN effective_ids
                     AND (n2:Entity)
                     AND type(r2) <> 'MENTIONS'
                 WITH n2
@@ -1061,12 +1094,12 @@ class AsyncNeo4jService:
         return cypher25_query("""
             UNWIND $seed_ids AS seed_id
             MATCH (seed {id: seed_id})
-            WHERE seed.group_id = $group_id
+            WHERE seed.group_id IN $effective_ids
               AND (seed:Entity)
 
             WITH seed,
                  seed_id,
-                 $group_id AS group_id,
+                 $effective_ids AS effective_ids,
                  $per_seed_limit AS per_seed_limit,
                  $per_neighbor_limit AS per_neighbor_limit,
                  $damping AS damping,
@@ -1079,9 +1112,9 @@ class AsyncNeo4jService:
             // =====================================================================
             // Path 1: Standard Entity-to-Entity relationships (original behavior)
             // =====================================================================
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[r1]-(n1)
-                WHERE n1.group_id = group_id
+                WHERE n1.group_id IN effective_ids
                     AND (n1:Entity)
                     AND NOT (type(r1) IN ['MENTIONS', 'SIMILAR_TO', 'SEMANTICALLY_SIMILAR', 'APPEARS_IN_SECTION'])
                 WITH n1
@@ -1093,24 +1126,24 @@ class AsyncNeo4jService:
             // =====================================================================
             // Path 2: Section-based thematic hops via SEMANTICALLY_SIMILAR edges
             // =====================================================================
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (chunk)-[:MENTIONS]->(seed)
-                WHERE chunk.group_id = group_id
+                WHERE chunk.group_id IN effective_ids
                     AND (chunk:Chunk OR chunk:TextChunk OR chunk:`__Node__`)
                 
                 MATCH (chunk)-[:IN_SECTION]->(s1:Section)
-                WHERE s1.group_id = group_id
+                WHERE s1.group_id IN effective_ids
                 
                 MATCH (s1)-[sim:SEMANTICALLY_SIMILAR]-(s2:Section)
-                WHERE s2.group_id = group_id
+                WHERE s2.group_id IN effective_ids
                   AND coalesce(sim.similarity, 0.5) >= 0.5
                 
                 MATCH (chunk2)-[:IN_SECTION]->(s2)
-                WHERE chunk2.group_id = group_id
+                WHERE chunk2.group_id IN effective_ids
                     AND (chunk2:Chunk OR chunk2:TextChunk OR chunk2:`__Node__`)
                 
                 MATCH (chunk2)-[:MENTIONS]->(neighbor)
-                WHERE neighbor.group_id = group_id
+                WHERE neighbor.group_id IN effective_ids
                     AND (neighbor:Entity)
                     AND neighbor.id <> seed.id
                 
@@ -1123,9 +1156,9 @@ class AsyncNeo4jService:
             // =====================================================================
             // Path 3: SEMANTICALLY_SIMILAR edges (GDS KNN - unified semantic similarity)
             // =====================================================================
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[sim:SEMANTICALLY_SIMILAR|SIMILAR_TO]-(neighbor)
-                WHERE neighbor.group_id = group_id
+                WHERE neighbor.group_id IN effective_ids
                     AND (neighbor:Entity)
                     AND coalesce(sim.similarity, 0.60) >= 0.60
                 WITH neighbor, max(coalesce(sim.similarity, 0.60)) AS sim_weight
@@ -1137,25 +1170,25 @@ class AsyncNeo4jService:
             // =====================================================================
             // Path 4: SHARES_ENTITY edges (Phase 2 - cross-document section links)
             // =====================================================================
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 // Use APPEARS_IN_SECTION for faster 1-hop to sections
                 MATCH (seed)-[:APPEARS_IN_SECTION]->(s1:Section)
-                WHERE s1.group_id = group_id
+                WHERE s1.group_id IN effective_ids
                 
                 // Traverse SHARES_ENTITY to cross-document sections
                 MATCH (s1)-[se:SHARES_ENTITY]-(s2:Section)
-                WHERE s2.group_id = group_id
+                WHERE s2.group_id IN effective_ids
                   AND coalesce(se.shared_entities, 1) >= 2
                 
                 // Get entities from the related section via HAS_HUB_ENTITY or chunk traversal
                 OPTIONAL MATCH (s2)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
-                WHERE hub_entity.group_id = group_id
+                WHERE hub_entity.group_id IN effective_ids
                 
                 // Also get entities via chunks for sections without hub entities
                 OPTIONAL MATCH (chunk2)-[:IN_SECTION]->(s2)
-                WHERE chunk2.group_id = group_id
+                WHERE chunk2.group_id IN effective_ids
                 OPTIONAL MATCH (chunk2)-[:MENTIONS]->(chunk_entity)
-                WHERE chunk_entity.group_id = group_id
+                WHERE chunk_entity.group_id IN effective_ids
                     AND (chunk_entity:Entity)
                     AND chunk_entity.id <> seed.id
                 
@@ -1173,12 +1206,12 @@ class AsyncNeo4jService:
             // =====================================================================
             // Path 5: HAS_HUB_ENTITY direct traversal (Phase 1 hub entities)
             // =====================================================================
-            CALL (seed, group_id, per_seed_limit) {
+            CALL (seed, effective_ids, per_seed_limit) {
                 MATCH (seed)-[:APPEARS_IN_SECTION]->(s:Section)
-                WHERE s.group_id = group_id
+                WHERE s.group_id IN effective_ids
                 
                 MATCH (s)-[hub:HAS_HUB_ENTITY]->(hub_entity:Entity)
-                WHERE hub_entity.group_id = group_id
+                WHERE hub_entity.group_id IN effective_ids
                     AND hub_entity.id <> seed.id
                 
                 WITH hub_entity, max(coalesce(hub.mention_count, 1) / 10.0) AS hub_weight
@@ -1191,19 +1224,19 @@ class AsyncNeo4jService:
             // Process entity-path with 2-hop expansion
             // =====================================================================
             WITH seed, entity_hop1, section_hop1, similar_entities, shares_entity_hop, hub_entities,
-                 group_id, per_neighbor_limit, damping,
+                 effective_ids, per_neighbor_limit, damping,
                  w_entity, w_section, w_similar, w_shares, w_hub
 
             // Process entity-path neighbors (standard decay)
             UNWIND (entity_hop1 + [seed]) AS hop1_node
             WITH seed, hop1_node, entity_hop1, section_hop1, similar_entities, shares_entity_hop, hub_entities,
-                 group_id, per_neighbor_limit, damping,
+                 effective_ids, per_neighbor_limit, damping,
                  w_entity, w_section, w_similar, w_shares, w_hub
 
             // 2-hop expansion from entity path
-            CALL (seed, hop1_node, group_id, per_neighbor_limit) {
+            CALL (seed, hop1_node, effective_ids, per_neighbor_limit) {
                 MATCH (hop1_node)-[r2]-(n2)
-                WHERE n2.group_id = group_id
+                WHERE n2.group_id IN effective_ids
                     AND (n2:Entity)
                     AND NOT (type(r2) IN ['MENTIONS', 'SIMILAR_TO', 'SEMANTICALLY_SIMILAR', 'APPEARS_IN_SECTION'])
                 WITH n2
@@ -1293,6 +1326,7 @@ class AsyncNeo4jService:
         group_id: str,
         seed_entity_ids: List[str],
         max_peers: int = 5,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Find high-degree entities in the same Louvain communities as the seeds.
 
@@ -1318,7 +1352,7 @@ class AsyncNeo4jService:
         // Collect distinct community_ids from the seed entities
         UNWIND $seed_ids AS sid
         MATCH (seed {id: sid})
-        WHERE seed.group_id = $group_id
+        WHERE seed.group_id IN $effective_ids
           AND (seed:Entity)
           AND seed.community_id IS NOT NULL
         WITH collect(DISTINCT seed.community_id) AS cids,
@@ -1327,7 +1361,7 @@ class AsyncNeo4jService:
         // Find top-degree peers in those communities (excluding seeds)
         UNWIND cids AS cid
         MATCH (peer)
-        WHERE peer.group_id = $group_id
+        WHERE peer.group_id IN $effective_ids
           AND (peer:Entity)
           AND peer.community_id = cid
           AND NOT peer.id IN seed_id_set
@@ -1339,12 +1373,13 @@ class AsyncNeo4jService:
                cid AS community_id,
                coalesce(peer.degree, 0) AS degree
         """)
+        effective_ids = group_ids or [group_id, "__global__"]
         import time
         t0 = time.perf_counter()
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 seed_ids=seed_entity_ids,
                 max_peers=max_peers,
             )
@@ -1370,6 +1405,7 @@ class AsyncNeo4jService:
         group_id: str,
         sentence_ids: List[str],
         max_entities_per_sentence: int = 5,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get entities mentioned by specific Sentence nodes.
 
@@ -1391,12 +1427,15 @@ class AsyncNeo4jService:
         if not sentence_ids:
             return []
 
+        effective_ids = group_ids or [group_id, "__global__"]
+
         query = cypher25_query("""
         UNWIND $sentence_ids AS sid
-        MATCH (s:Sentence {group_id: $group_id})
-        WHERE s.id = sid
+        MATCH (s:Sentence)
+        WHERE s.group_id IN $effective_ids
+          AND s.id = sid
         MATCH (s)-[:MENTIONS]->(e)
-        WHERE e.group_id = $group_id
+        WHERE e.group_id IN $effective_ids
           AND (e:Entity)
         WITH sid, e, coalesce(e.degree, 0) AS importance
         ORDER BY importance DESC
@@ -1410,7 +1449,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 sentence_ids=sentence_ids,
                 max_per_sentence=max_entities_per_sentence,
             )
@@ -1436,19 +1475,21 @@ class AsyncNeo4jService:
         group_id: str,
         entity_ids: List[str],
         limit: int = 20,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Get text chunks that mention the given entities.
         """
+        effective_ids = group_ids or [group_id, "__global__"]
         # Fetch text chunks mentioning given entities
         query = cypher25_query("""
         UNWIND $entity_ids AS eid
         MATCH (e)
         WHERE (e:Entity)
           AND e.id = eid
-          AND e.group_id = $group_id
+          AND e.group_id IN $effective_ids
         MATCH (c:TextChunk)-[:MENTIONS]->(e)
-        WHERE c.group_id = $group_id
+        WHERE c.group_id IN $effective_ids
         WITH DISTINCT c
         RETURN c.id AS chunk_id,
                c.text AS text,
@@ -1461,7 +1502,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 entity_ids=entity_ids,
                 limit=limit,
             )
@@ -1476,6 +1517,7 @@ class AsyncNeo4jService:
         group_id: str,
         doc_url: str,
         field_keywords: List[str],
+        group_ids: Optional[List[str]] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
         Check if a document contains chunks with field-related keywords.
@@ -1483,9 +1525,10 @@ class AsyncNeo4jService:
         Returns:
             (exists: bool, matched_section: Optional[str])
         """
+        effective_ids = group_ids or [group_id, "__global__"]
         query = cypher25_query("""
         MATCH (c)
-        WHERE c.group_id = $group_id 
+        WHERE c.group_id IN $effective_ids 
           AND (c.url = $doc_url OR c.document_id = $doc_url)
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
         WITH c, 
@@ -1503,7 +1546,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 doc_url=doc_url,
                 keywords=field_keywords,
             )
@@ -1528,6 +1571,7 @@ class AsyncNeo4jService:
         group_id: str,
         doc_url: str,
         pattern: str,
+        group_ids: Optional[List[str]] = None,
     ) -> bool:
         """
         Check if a document contains chunks matching a specific regex pattern.
@@ -1539,13 +1583,15 @@ class AsyncNeo4jService:
             group_id: The group ID for the chunks
             doc_url: Document URL or ID to check
             pattern: Regex pattern to match (e.g., r'(?i)(VAT|Tax ID).{0,50}\\d{5,}')
+            group_ids: Optional list of group IDs to query (defaults to [group_id, "__global__"])
             
         Returns:
             True if pattern found in any chunk, False otherwise
         """
+        effective_ids = group_ids or [group_id, "__global__"]
         query = cypher25_query("""
         MATCH (c)
-        WHERE c.group_id = $group_id 
+        WHERE c.group_id IN $effective_ids 
           AND (c.url = $doc_url OR c.document_id = $doc_url)
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
           AND c.text =~ $pattern
@@ -1555,7 +1601,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 doc_url=doc_url,
                 pattern=pattern,
             )
@@ -1577,6 +1623,7 @@ class AsyncNeo4jService:
         pattern: str,
         *,
         limit: int = 1,
+        group_ids: Optional[List[str]] = None,
     ) -> bool:
         """
         Check if any chunk in documents whose title/source contains doc_keyword matches pattern.
@@ -1595,10 +1642,12 @@ class AsyncNeo4jService:
         """
         # Prefer checking the parent Document node for title/source metadata
         # to avoid UnknownPropertyKey warnings when those properties are not set on chunks.
+        effective_ids = group_ids or [group_id, "__global__"]
         query = cypher25_query("""
         MATCH (c)
-        OPTIONAL MATCH (c)-[:PART_OF|IN_DOCUMENT]->(d:Document {group_id: $group_id})
-        WHERE c.group_id = $group_id
+        OPTIONAL MATCH (c)-[:PART_OF|IN_DOCUMENT]->(d:Document)
+        WHERE d.group_id IN $effective_ids
+          AND c.group_id IN $effective_ids
           AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
           AND (
             toLower(coalesce(d.title, '')) CONTAINS $doc_keyword OR
@@ -1613,7 +1662,7 @@ class AsyncNeo4jService:
         async with self._get_session() as session:
             result = await session.run(
                 query,
-                group_id=group_id,
+                effective_ids=effective_ids,
                 doc_keyword=(doc_keyword or "").lower(),
                 pattern=pattern,
                 limit=limit,
@@ -1626,7 +1675,7 @@ class AsyncNeo4jService:
             if not exists:
                 fallback_query = cypher25_query("""
                 MATCH (c)
-                WHERE c.group_id = $group_id
+                WHERE c.group_id IN $effective_ids
                   AND (c:Chunk OR c:TextChunk OR c:`__Node__`)
                   AND c.text =~ $pattern
                 RETURN count(c) > 0 AS exists
@@ -1635,7 +1684,7 @@ class AsyncNeo4jService:
                 async with self._get_session() as s2:
                     result2 = await s2.run(
                         fallback_query,
-                        group_id=group_id,
+                        effective_ids=effective_ids,
                         pattern=pattern,
                         limit=limit,
                     )
@@ -1668,6 +1717,7 @@ class AsyncNeo4jService:
         damping: float = 0.85,
         seed_names: Optional[Dict[str, str]] = None,
         knn_config: Optional[str] = None,
+        group_ids: Optional[List[str]] = None,
     ) -> List[Tuple[str, float]]:
         """
         Semantic-guided multi-hop expansion using beam search + vector similarity.
@@ -1711,7 +1761,7 @@ class AsyncNeo4jService:
             WHERE (src:Entity)
               AND (neighbor:Entity)
               AND src.id = eid
-              AND neighbor.group_id = $group_id
+              AND neighbor.group_id IN $effective_ids
               AND type(r) <> 'MENTIONS'
               AND type(r) <> 'SEMANTICALLY_SIMILAR'
               AND (neighbor.entity_embedding IS NOT NULL)
@@ -1731,7 +1781,7 @@ class AsyncNeo4jService:
             WHERE (src:Entity)
               AND (neighbor:Entity)
               AND src.id = eid
-              AND neighbor.group_id = $group_id
+              AND neighbor.group_id IN $effective_ids
               AND type(r) <> 'MENTIONS'
               AND (
                   type(r) <> 'SEMANTICALLY_SIMILAR' 
@@ -1755,7 +1805,7 @@ class AsyncNeo4jService:
             WHERE (src:Entity)
               AND (neighbor:Entity)
               AND src.id = eid
-              AND neighbor.group_id = $group_id
+              AND neighbor.group_id IN $effective_ids
               AND type(r) <> 'MENTIONS'
               AND (neighbor.entity_embedding IS NOT NULL)
             WITH DISTINCT neighbor,
@@ -1770,16 +1820,29 @@ class AsyncNeo4jService:
         # Vector expansion query (hop 0) - finds semantically similar entities
         # regardless of relationship edges. Critical for isolated entities like
         # Exhibit A details that may not have edges to other entities.
-        # SEARCH clause with in-index group_id filtering (no oversampling needed).
+        # SEARCH clause with in-index group_id filtering — UNION ALL for two-tier isolation.
         vector_expansion_query = cypher25_query("""
-        MATCH (node:Entity)
-        SEARCH node IN (VECTOR INDEX entity_embedding FOR $query_embedding WHERE node.group_id = $group_id LIMIT $beam_width)
-        SCORE AS score
+        CALL () {
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX entity_embedding FOR $query_embedding WHERE node.group_id = $group_id LIMIT $beam_width)
+            SCORE AS score
+            RETURN node, score
+            UNION ALL
+            MATCH (node:Entity)
+            SEARCH node IN (VECTOR INDEX entity_embedding FOR $query_embedding WHERE node.group_id = $global_group_id LIMIT $beam_width)
+            SCORE AS score
+            RETURN node, score
+        }
+        WITH node, score
+        ORDER BY score DESC
+        LIMIT $beam_width
         RETURN node.id AS id,
                node.name AS name,
                score AS similarity
         ORDER BY score DESC
         """)
+
+        effective_ids = group_ids or [group_id, "__global__"]
 
         import time
 
@@ -1799,6 +1862,7 @@ class AsyncNeo4jService:
                     vector_expansion_query,
                     query_embedding=query_embedding,
                     group_id=group_id,
+                    global_group_id="__global__",
                     beam_width=beam_width,
                 )
                 vector_records = await result.data()
@@ -1833,7 +1897,7 @@ class AsyncNeo4jService:
                 # Pass knn_config only if the query uses it (not baseline)
                 params = {
                     "current_ids": current_ids,
-                    "group_id": group_id,
+                    "effective_ids": effective_ids,
                     "query_embedding": query_embedding,
                     "beam_width": beam_width,
                 }
@@ -1969,6 +2033,7 @@ class AsyncNeo4jService:
         self,
         group_id: str,
         entity_names: List[str],
+        group_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         For each seed entity, find which documents it appears in via
@@ -1979,18 +2044,21 @@ class AsyncNeo4jService:
             [{doc_id, doc_title, matching_seeds: [str], seed_coverage: int,
               entity_doc_counts: {entity_name: num_docs_it_spans}}]
         """
+        effective_ids = group_ids or [group_id, "__global__"]
         query = """
         UNWIND $entity_names AS ename
-        MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document {group_id: $group_id})
-        WHERE (e:Entity) AND e.group_id = $group_id
+        MATCH (e)-[:APPEARS_IN_DOCUMENT]->(d:Document)
+        WHERE d.group_id IN $effective_ids
+          AND (e:Entity) AND e.group_id IN $effective_ids
           AND (toLower(e.name) = toLower(ename)
                OR ANY(alias IN coalesce(e.aliases, [])
                       WHERE toLower(alias) = toLower(ename)))
         WITH ename, d, count(DISTINCT d) AS _dummy
         // Per-entity: how many distinct docs does this entity span?
         WITH ename, d,
-             size([(e2)-[:APPEARS_IN_DOCUMENT]->(d2:Document {group_id: $group_id})
-                   WHERE (e2:Entity) AND e2.group_id = $group_id
+             size([(e2)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
+                   WHERE d2.group_id IN $effective_ids
+                     AND (e2:Entity) AND e2.group_id IN $effective_ids
                      AND (toLower(e2.name) = toLower(ename)
                           OR ANY(a IN coalesce(e2.aliases, []) WHERE toLower(a) = toLower(ename)))
                    | d2]) AS entity_doc_count
@@ -2006,7 +2074,7 @@ class AsyncNeo4jService:
             async with self._get_session() as session:
                 result = await session.run(
                     query,
-                    group_id=group_id,
+                    effective_ids=effective_ids,
                     entity_names=entity_names,
                 )
                 records = await result.data()

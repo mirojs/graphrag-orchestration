@@ -66,6 +66,7 @@ echo ""
 
 API_IMAGE_NAME="graphrag-api"
 WORKER_IMAGE_NAME="graphrag-worker"
+B2C_APP_NAME="graphrag-api-b2c"  # shares the API image with different auth config
 
 # Minimal staging dir to avoid sending node_modules to ACR
 STAGING_DIR=$(mktemp -d /tmp/graphrag-build-XXXXXX)
@@ -127,7 +128,34 @@ azd env set SERVICE_GRAPHRAG_API_IMAGE_NAME "${ACR_SERVER}/${API_IMAGE_NAME}:${A
 azd env set SERVICE_GRAPHRAG_WORKER_IMAGE_NAME "${ACR_SERVER}/${WORKER_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}"
 
 echo "🚀 Deploying infrastructure via azd provision (Bicep)..."
-azd provision --no-prompt
+if azd provision --no-prompt; then
+    echo "✅ azd provision succeeded"
+else
+    echo "⚠️  azd provision failed — falling back to direct container update..."
+    echo ""
+    echo "Updating ${API_IMAGE_NAME}..."
+    az containerapp update \
+        --name "$API_IMAGE_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --image "${ACR_SERVER}/${API_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}" \
+        --output none
+
+    echo "Updating ${WORKER_IMAGE_NAME}..."
+    az containerapp update \
+        --name "$WORKER_IMAGE_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --image "${ACR_SERVER}/${WORKER_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}" \
+        --output none
+
+    echo "Updating ${B2C_APP_NAME}..."
+    az containerapp update \
+        --name "$B2C_APP_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --image "${ACR_SERVER}/${API_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}" \
+        --output none
+
+    echo "✅ All container apps updated via direct deploy"
+fi
 
 # ── Summary ──────────────────────────────────────────────────────────────
 
@@ -141,6 +169,7 @@ echo ""
 echo "📋 Summary:"
 echo "  • API Image:    ${ACR_SERVER}/${API_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}"
 echo "  • Worker Image: ${ACR_SERVER}/${WORKER_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}"
+echo "  • B2C Image:    ${ACR_SERVER}/${API_IMAGE_NAME}:${AZURE_ENV_IMAGETAG}"
 echo "  • API URL:      ${API_FQDN}"
 echo ""
 echo "🔧 Next steps:"

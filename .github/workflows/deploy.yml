@@ -56,6 +56,7 @@ env:
   ACR_NAME: ${{ vars.ACR_NAME || 'graphragacr12153' }}
   API_APP_NAME: graphrag-api
   WORKER_APP_NAME: graphrag-worker
+  B2C_APP_NAME: graphrag-api-b2c
 
 jobs:
   # ============================================================================
@@ -213,6 +214,17 @@ jobs:
             --image "$IMAGE" \
             --revision-suffix "r${{ github.run_id }}" \
             --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO" "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key"
+      
+      - name: Deploy B2C API
+        run: |
+          IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ needs.build.outputs.image_tag }}"
+          echo "Deploying B2C API: $IMAGE"
+
+          az containerapp update \
+            --name ${{ env.B2C_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image "$IMAGE" \
+            --revision-suffix "r${{ github.run_id }}"
       
       - name: Wait for startup
         run: sleep 60

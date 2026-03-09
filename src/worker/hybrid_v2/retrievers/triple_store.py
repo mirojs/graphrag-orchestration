@@ -49,6 +49,7 @@ class Triple:
     object_name: str
     triple_text: str  # "{subject_name} {predicate} {object_name}"
     embedding: Optional[List[float]] = None
+    document_title: Optional[str] = None
 
 
 class TripleEmbeddingStore:
@@ -119,13 +120,52 @@ class TripleEmbeddingStore:
                 triple_count=len(triples),
             )
         else:
-            # Batch-embed triple texts with Voyage (legacy / first-time path)
-            triple_texts = [t.triple_text for t in triples]
-            embeddings = await asyncio.to_thread(
-                voyage_service.embed_documents, triple_texts
-            )
+            # Batch-embed triple texts with Voyage (fallback when no precomputed)
+            contextualize = os.getenv("ROUTE7_TRIPLE_CONTEXTUALIZE", "true").lower() in ("true", "1", "yes")
+
+            if contextualize:
+                # Group by document and embed with contextual awareness
+                from collections import defaultdict
+                doc_groups: Dict[str, List[int]] = defaultdict(list)
+                for i, t in enumerate(triples):
+                    doc_groups[t.document_title or ""].append(i)
+
+                document_chunks: List[List[str]] = []
+                index_map: List[List[int]] = []
+                for doc_title, indices in doc_groups.items():
+                    chunks = []
+                    for idx in indices:
+                        t = triples[idx]
+                        text = t.triple_text
+                        if doc_title:
+                            text = f"[Document: {doc_title}] {text}"
+                        chunks.append(text)
+                    document_chunks.append(chunks)
+                    index_map.append(indices)
+
+                logger.info(
+                    "triple_store_fallback_contextualized",
+                    documents=len(document_chunks),
+                    triples_with_doc=sum(1 for t in triples if t.document_title),
+                )
+                nested_embeddings = await asyncio.to_thread(
+                    voyage_service.embed_documents_contextualized, document_chunks
+                )
+                flat_embeddings: list = [None] * len(triples)
+                for doc_idx, indices in enumerate(index_map):
+                    doc_embeds = nested_embeddings[doc_idx]
+                    for chunk_idx, orig_idx in enumerate(indices):
+                        flat_embeddings[orig_idx] = doc_embeds[chunk_idx]
+                self._embeddings_matrix = np.array(flat_embeddings, dtype=np.float32)
+            else:
+                # Legacy: flat list, no document context
+                triple_texts = [t.triple_text for t in triples]
+                embeddings = await asyncio.to_thread(
+                    voyage_service.embed_documents, triple_texts
+                )
+                self._embeddings_matrix = np.array(embeddings, dtype=np.float32)
+
             self._triples = triples
-            self._embeddings_matrix = np.array(embeddings, dtype=np.float32)
 
         # Normalize for cosine similarity via dot product
         norms = np.linalg.norm(self._embeddings_matrix, axis=1, keepdims=True)
@@ -150,15 +190,24 @@ class TripleEmbeddingStore:
         If triples have pre-computed embeddings (triple_embedding property stored
         during indexing), those are loaded directly — avoiding a Voyage API
         call at query time.
+
+        Also resolves each triple's source document via APPEARS_IN_DOCUMENT
+        for document-aware embedding context.
         """
         cypher = """
         MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
         WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
               AND r.description IS NOT NULL AND r.description <> ''
+        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d:Document)<-[:APPEARS_IN_DOCUMENT]-(e2)
+        WITH e1, r, e2, head(collect(d.title)) AS shared_title
+        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
+        WHERE shared_title IS NULL
+        WITH e1, r, e2, COALESCE(shared_title, head(collect(d2.title))) AS doc_title
         RETURN e1.id AS subj_id, e1.name AS subj_name,
                r.description AS predicate,
                e2.id AS obj_id, e2.name AS obj_name,
-               r.triple_embedding AS embedding
+               r.triple_embedding AS embedding,
+               doc_title AS document_title
         """
         triples: List[Triple] = []
         with retry_session(neo4j_driver) as session:
@@ -178,6 +227,7 @@ class TripleEmbeddingStore:
                         object_name=obj_name,
                         triple_text=triple_text,
                         embedding=list(embedding) if embedding else None,
+                        document_title=record["document_title"] or None,
                     )
                 )
         logger.debug(
@@ -185,6 +235,7 @@ class TripleEmbeddingStore:
             group_ids=group_ids,
             count=len(triples),
             precomputed=sum(1 for t in triples if t.embedding is not None),
+            with_doc_title=sum(1 for t in triples if t.document_title),
         )
         return triples
 

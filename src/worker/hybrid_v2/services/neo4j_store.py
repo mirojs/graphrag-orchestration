@@ -841,16 +841,27 @@ class Neo4jStoreV3:
     # ==================== Triple Embedding Operations ====================
 
     def fetch_all_triples(self, group_id: str, group_ids: List[str] = None) -> List[Dict[str, Any]]:
-        """Fetch all RELATED_TO triples for pre-computing embeddings."""
+        """Fetch all RELATED_TO triples for pre-computing embeddings.
+
+        Resolves each triple's source document by finding the document shared
+        by both entities (via APPEARS_IN_DOCUMENT). Falls back to the source
+        entity's first document if no shared document exists.
+        """
         if group_ids is None:
             group_ids = [group_id, "__global__"]
         cypher = """
         MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
         WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
           AND r.description IS NOT NULL AND r.description <> ''
+        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d:Document)<-[:APPEARS_IN_DOCUMENT]-(e2)
+        WITH e1, r, e2, head(collect(d.title)) AS shared_title
+        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
+        WHERE shared_title IS NULL
+        WITH e1, r, e2, COALESCE(shared_title, head(collect(d2.title))) AS doc_title
         RETURN e1.id AS source_id, e1.name AS source_name,
                r.description AS description,
-               e2.id AS target_id, e2.name AS target_name
+               e2.id AS target_id, e2.name AS target_name,
+               doc_title AS document_title
         """
         triples: List[Dict[str, Any]] = []
         with self.get_retry_session() as session:
@@ -862,6 +873,7 @@ class Neo4jStoreV3:
                     "description": record["description"] or "",
                     "target_id": record["target_id"],
                     "target_name": record["target_name"] or "",
+                    "document_title": record["document_title"] or "",
                 })
         return triples
 

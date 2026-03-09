@@ -4436,12 +4436,18 @@ SUMMARY: <summary>"""
         """Pre-compute Voyage embeddings for all RELATED_TO triples (Step 7.5).
 
         Builds the text ``source | description | target`` for each triple,
-        embeds them in batch via Voyage, and stores the vectors on the edges
-        as ``triple_embedding``.  This eliminates cold-start Voyage calls in the
-        TripleEmbeddingStore at Route 7 query time.
+        optionally prefixed with ``[Document: title]`` and grouped per-document
+        via ``embed_documents_contextualized()`` for proper Voyage contextual
+        awareness — matching the sentence embedding architecture.
+
+        Controlled by ROUTE7_TRIPLE_CONTEXTUALIZE (default: true).
+        When true, triples are grouped by document and embedded contextually.
+        When false, all triples are embedded as a flat list (legacy behavior).
         """
         import asyncio
         from src.worker.hybrid_v2.embeddings.voyage_embed import get_voyage_embed_service
+
+        contextualize = os.getenv("ROUTE7_TRIPLE_CONTEXTUALIZE", "true").lower() in ("true", "1", "yes")
 
         triples = await asyncio.get_event_loop().run_in_executor(
             None, lambda: self.neo4j_store.fetch_all_triples(group_id)
@@ -4450,19 +4456,56 @@ SUMMARY: <summary>"""
             logger.info("No RELATED_TO triples found — skipping triple embedding.")
             return {"stored": 0}
 
-        # Build the same text representation used by TripleEmbeddingStore
-        texts = [
-            f"{t['source_name']} {t['description']} {t['target_name']}"
-            for t in triples
-        ]
-
         voyage_svc = get_voyage_embed_service()
-        # Embed all triples in a single call so bin-packing groups ~600
-        # triples per context window, matching the TripleEmbeddingStore
-        # fallback behaviour that produced the best retrieval diversity.
-        embeddings: list[list[float]] = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: voyage_svc.embed_documents(texts)
-        )
+
+        if contextualize:
+            # Group triples by document title for per-document contextual embedding
+            from collections import defaultdict
+            doc_groups: Dict[str, List[int]] = defaultdict(list)
+            for i, t in enumerate(triples):
+                doc_key = t.get("document_title") or ""
+                doc_groups[doc_key].append(i)
+
+            # Build per-document chunk lists with [Document: title] prefix
+            document_chunks: List[List[str]] = []
+            index_map: List[List[int]] = []  # maps doc_idx → list of original indices
+            for doc_title, indices in doc_groups.items():
+                chunks = []
+                for idx in indices:
+                    t = triples[idx]
+                    text = f"{t['source_name']} {t['description']} {t['target_name']}"
+                    if doc_title:
+                        text = f"[Document: {doc_title}] {text}"
+                    chunks.append(text)
+                document_chunks.append(chunks)
+                index_map.append(indices)
+
+            logger.info(
+                "triple_embedding_contextualized",
+                total=len(triples),
+                documents=len(document_chunks),
+                triples_with_doc=sum(1 for t in triples if t.get("document_title")),
+            )
+
+            nested_embeddings = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: voyage_svc.embed_documents_contextualized(document_chunks)
+            )
+
+            # Flatten back to original triple order
+            embeddings: list[list[float]] = [None] * len(triples)  # type: ignore
+            for doc_idx, indices in enumerate(index_map):
+                doc_embeds = nested_embeddings[doc_idx]
+                for chunk_idx, orig_idx in enumerate(indices):
+                    embeddings[orig_idx] = doc_embeds[chunk_idx]
+        else:
+            # Legacy: flat list, no document context
+            texts = [
+                f"{t['source_name']} {t['description']} {t['target_name']}"
+                for t in triples
+            ]
+            embeddings = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: voyage_svc.embed_documents(texts)
+            )
 
         stored = await asyncio.get_event_loop().run_in_executor(
             None,
@@ -4472,8 +4515,9 @@ SUMMARY: <summary>"""
         )
         logger.info(
             f"Pre-computed {stored}/{len(triples)} triple embeddings for group {group_id}"
+            + (" (contextualized)" if contextualize else " (flat)")
         )
-        return {"stored": stored, "total": len(triples)}
+        return {"stored": stored, "total": len(triples), "contextualized": contextualize}
 
     async def _compute_entity_synonymy_edges(
         self,

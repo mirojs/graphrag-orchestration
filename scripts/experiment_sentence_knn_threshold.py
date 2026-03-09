@@ -61,7 +61,7 @@ with driver.session(database=NEO4J_DATABASE) as session:
     records = session.run(
         """
         MATCH (s:Sentence {group_id: $group_id})
-        WHERE s.embedding_v2 IS NOT NULL
+        WHERE s.sentence_embedding IS NOT NULL
         OPTIONAL MATCH (s)-[:PART_OF]->(c:TextChunk)
         OPTIONAL MATCH (s)-[:IN_DOCUMENT]->(d:Document)
         RETURN s.id AS id,
@@ -72,7 +72,7 @@ with driver.session(database=NEO4J_DATABASE) as session:
                s.section_path AS section_path,
                s.page AS page,
                d.title AS doc_title,
-               s.embedding_v2 AS embedding
+               s.sentence_embedding AS embedding
         ORDER BY s.document_id, s.chunk_id, s.index_in_chunk
         """,
         group_id=GROUP_ID,
@@ -115,7 +115,7 @@ with driver.session(database=NEO4J_DATABASE) as session:
     for i, sent in enumerate(sentences):
         results = session.run(
             """
-            CALL db.index.vector.queryNodes('sentence_embeddings_v2', $top_k, $embedding)
+            CALL db.index.vector.queryNodes('sentence_embedding', $top_k, $embedding)
             YIELD node AS n, score
             WHERE n.group_id = $group_id AND n.id <> $self_id
             RETURN n.id AS id,

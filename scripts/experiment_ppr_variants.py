@@ -314,7 +314,7 @@ async def resolve_entities(
     for name in unresolved_names:
         emb = embedder.embed_one(name, input_type="query")
         records = await neo4j.run("""
-            CALL db.index.vector.queryNodes('entity_embedding_v2', 3, $embedding)
+            CALL db.index.vector.queryNodes('entity_embedding', 3, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
               AND (node:Entity)
@@ -419,11 +419,11 @@ async def ppr_query_biased(
         MATCH (seed {id: seed_id})
         WHERE seed.group_id = $group_id
           AND (seed:Entity)
-          AND (seed.embedding_v2 IS NOT NULL OR seed.embedding IS NOT NULL)
+          AND (seed.entity_embedding IS NOT NULL OR seed.embedding IS NOT NULL)
         RETURN seed.id AS id,
                seed.name AS name,
                vector.similarity.cosine(
-                   COALESCE(seed.embedding_v2, seed.embedding),
+                   COALESCE(seed.entity_embedding, seed.embedding),
                    $query_embedding
                ) AS query_sim
     """, seed_ids=seed_ids, group_id=group_id, query_embedding=query_embedding)
@@ -546,10 +546,10 @@ async def ppr_epic_rerank(
         WHERE (e:Entity)
           AND e.group_id = $group_id
           AND e.name = entity_name
-          AND (e.embedding_v2 IS NOT NULL OR e.embedding IS NOT NULL)
+          AND (e.entity_embedding IS NOT NULL OR e.embedding IS NOT NULL)
         RETURN e.name AS name,
                vector.similarity.cosine(
-                   COALESCE(e.embedding_v2, e.embedding),
+                   COALESCE(e.entity_embedding, e.embedding),
                    $query_embedding
                ) AS query_sim
     """, names=entity_names, group_id=group_id, query_embedding=query_embedding)
@@ -595,10 +595,10 @@ async def ppr_biased_plus_epic(
         WHERE (e:Entity)
           AND e.group_id = $group_id
           AND e.name = entity_name
-          AND (e.embedding_v2 IS NOT NULL OR e.embedding IS NOT NULL)
+          AND (e.entity_embedding IS NOT NULL OR e.embedding IS NOT NULL)
         RETURN e.name AS name,
                vector.similarity.cosine(
-                   COALESCE(e.embedding_v2, e.embedding),
+                   COALESCE(e.entity_embedding, e.embedding),
                    $query_embedding
                ) AS query_sim
     """, names=entity_names, group_id=group_id, query_embedding=query_embedding)

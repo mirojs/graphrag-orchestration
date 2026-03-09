@@ -46,7 +46,7 @@ async def get_seed_ids(session, group_id: str, seed_names: List[str]) -> List[di
         UNWIND $names AS name
         MATCH (e:Entity {group_id: $gid})
         WHERE toLower(e.name) CONTAINS toLower(name)
-        RETURN e.id AS id, e.name AS name, e.embedding_v2 AS embedding
+        RETURN e.id AS id, e.name AS name, e.entity_embedding AS embedding
         LIMIT 10
     """, names=seed_names, gid=group_id)
     return await result.data()
@@ -77,7 +77,7 @@ async def trace_with_knn_config(
               type(r) <> 'SEMANTICALLY_SIMILAR' 
               OR r.knn_config = $knn_config
           )
-          AND neighbor.embedding_v2 IS NOT NULL
+          AND neighbor.entity_embedding IS NOT NULL
         WITH DISTINCT neighbor
         RETURN neighbor.id AS id, neighbor.name AS name
         LIMIT $beam_width
@@ -90,7 +90,7 @@ async def trace_with_knn_config(
         WHERE neighbor.group_id = $gid
           AND type(r) <> 'MENTIONS'
           AND type(r) <> 'SEMANTICALLY_SIMILAR'
-          AND neighbor.embedding_v2 IS NOT NULL
+          AND neighbor.entity_embedding IS NOT NULL
         WITH DISTINCT neighbor
         RETURN neighbor.id AS id, neighbor.name AS name
         LIMIT $beam_width

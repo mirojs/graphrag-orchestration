@@ -50,7 +50,7 @@ llm_client = LlamaIndexAzureOpenAI(
 
 # Test groups
 V1_GROUP = "test-5pdfs-1769071711867955961"
-V2_GROUP = "test-5pdfs-v2-enhanced-ex"  # VERIFIED: Re-indexed 2026-01-30 with embedding_v2 fix
+V2_GROUP = "test-5pdfs-v2-enhanced-ex"  # VERIFIED: Re-indexed 2026-01-30 with embedding property rename
 
 print(f"\n{'='*80}")
 print(f"🔍 CONFIGURATION VERIFICATION")

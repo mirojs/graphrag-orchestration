@@ -103,7 +103,7 @@ def main():
         rows = session.run(
             """
             MATCH (sent:Sentence {group_id: $gid})
-            RETURN sent.id AS id, sent.text AS text, sent.embedding_v2 AS emb
+            RETURN sent.id AS id, sent.text AS text, sent.sentence_embedding AS emb
             """,
             gid=GROUP_ID,
         ).data()

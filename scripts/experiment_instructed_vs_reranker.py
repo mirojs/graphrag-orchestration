@@ -115,7 +115,7 @@ def load_triples_from_neo4j() -> List[Triple]:
     WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
           AND r.description IS NOT NULL AND r.description <> ''
     RETURN e1.name AS subj_name, r.description AS predicate,
-           e2.name AS obj_name, r.embedding_v2 AS embedding
+           e2.name AS obj_name, r.triple_embedding AS embedding
     """
     triples = []
     with driver.session(database=NEO4J_DATABASE) as session:

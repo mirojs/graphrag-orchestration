@@ -150,7 +150,7 @@ def phase2_embed_sentences(sentences):
 
     # Attach embeddings to sentence dicts
     for sent, emb in zip(sentences, all_embeddings):
-        sent["embedding_v2"] = emb
+        sent["sentence_embedding"] = emb
 
     return sentences
 
@@ -186,7 +186,7 @@ def phase3_persist_sentences(sentences):
                 section_path=s.get("section_path", ""),
                 page=s.get("page"),
                 confidence=s.get("confidence", 1.0),
-                embedding_v2=s.get("embedding_v2"),
+                sentence_embedding=s.get("sentence_embedding"),
                 tokens=s.get("tokens", 0),
                 parent_text=s.get("parent_text"),
             )

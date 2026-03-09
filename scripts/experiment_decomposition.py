@@ -276,7 +276,7 @@ async def resolve_entities(
     for name in unresolved_names:
         emb = embedder.embed_one(name, input_type="query")
         records = await neo4j.run("""
-            CALL db.index.vector.queryNodes('entity_embedding_v2', 3, $embedding)
+            CALL db.index.vector.queryNodes('entity_embedding', 3, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
               AND (node:Entity)
@@ -303,7 +303,7 @@ async def resolve_entities_semantic(
          - Fixes transformations: "Insurance Contract" → "insurance policy" not "contract"
          - Filters fabrications below threshold
       3. Substring fallback ONLY if vector returns nothing
-         (some entities lack embedding_v2 in the index)
+         (some entities lack entity_embedding in the index)
     """
     resolved = []
     
@@ -324,7 +324,7 @@ async def resolve_entities_semantic(
         # Strategy 2: Vector similarity with threshold
         emb = embedder.embed_one(name, input_type="query")
         records = await neo4j.run("""
-            CALL db.index.vector.queryNodes('entity_embedding_v2', 3, $embedding)
+            CALL db.index.vector.queryNodes('entity_embedding', 3, $embedding)
             YIELD node, score
             WHERE node.group_id = $group_id
               AND (node:Entity)
@@ -338,7 +338,7 @@ async def resolve_entities_semantic(
             continue
         
         # Strategy 3: Substring fallback (only if vector returned nothing)
-        # This catches entities that lack embedding_v2 in the graph
+        # This catches entities that lack entity_embedding in the graph
         if not records:  # vector returned 0 results
             records = await neo4j.run("""
                 MATCH (e)

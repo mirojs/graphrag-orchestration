@@ -346,7 +346,7 @@ def extract_chunks_from_neo4j(group_id: str) -> List[Dict[str, Any]]:
                    c.text AS text,
                    c.metadata AS metadata,
                    c.tokens AS tokens,
-                   c.embedding_v2 AS embedding_v2,
+                   c.embedding_v2 AS embedding_v2,  # V1 legacy: TextChunk embedding property
                    d.id AS doc_id,
                    d.title AS doc_title,
                    s.path_key AS section_path,
@@ -361,7 +361,7 @@ def extract_chunks_from_neo4j(group_id: str) -> List[Dict[str, Any]]:
                 "text": record["text"],
                 "metadata": json.loads(record["metadata"]) if isinstance(record["metadata"], str) else (record["metadata"] or {}),
                 "tokens": record["tokens"],
-                "embedding_v2": record["embedding_v2"],
+                "embedding_v2": record["embedding_v2"],  # V1 legacy: TextChunk embedding
                 "doc_id": record["doc_id"],
                 "doc_title": record["doc_title"],
                 "section_path": record["section_path"] or "[Document Root]",
@@ -1218,7 +1218,7 @@ def baseline_chunk_retrieval(
     """Baseline: cosine similarity against TextChunk embeddings."""
     results = []
     for chunk in chunks:
-        emb = chunk.get("embedding_v2")
+        emb = chunk.get("embedding_v2")  # V1 legacy: TextChunk embedding
         if emb is None:
             continue
         emb = np.array(emb, dtype=np.float32)

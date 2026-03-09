@@ -82,14 +82,14 @@ async def test_server_version(session) -> str:
     return "unknown"
 
 
-async def test_entity_distribution(session, index_name: str = "entity_embedding_v2") -> Dict[str, int]:
+async def test_entity_distribution(session, index_name: str = "entity_embedding") -> Dict[str, int]:
     """Show how many entities exist per group in the vector index."""
     print(f"\n── Entity Distribution in Vector Index ──")
     
     # Count entities per group (only those with embeddings = those in the index)
     query = """
     MATCH (e:Entity)
-    WHERE e.embedding_v2 IS NOT NULL
+    WHERE e.entity_embedding IS NOT NULL
     RETURN e.group_id AS group_id, count(*) AS count
     ORDER BY count DESC
     """
@@ -131,7 +131,7 @@ async def test_post_filter_approach(
     for oversample_factor in [3, 10, 50, 100]:
         top_k_oversample = top_k * oversample_factor
         query = f"""
-        CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k_oversample, $embedding)
+        CALL db.index.vector.queryNodes('entity_embedding', $top_k_oversample, $embedding)
         YIELD node, score
         WHERE node.group_id = $group_id
         RETURN node.name AS name, node.group_id AS gid, score
@@ -164,7 +164,7 @@ async def test_post_filter_ranking(
     print(f"\n── Test 2: Where does our group first appear in global ranking? ──")
     
     query = """
-    CALL db.index.vector.queryNodes('entity_embedding_v2', 500, $embedding)
+    CALL db.index.vector.queryNodes('entity_embedding', 500, $embedding)
     YIELD node, score
     WITH node, score, 
          CASE WHEN node.group_id = $group_id THEN true ELSE false END AS is_ours
@@ -240,7 +240,7 @@ async def test_prefiltered_vector_search(
     
     # Standard approach — but with Cypher 25 the planner may optimize this
     query_standard = """
-    CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $embedding)
+    CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
     YIELD node, score
     WHERE node.group_id = $group_id
     RETURN node.name AS name, score
@@ -251,7 +251,7 @@ async def test_prefiltered_vector_search(
     # Cypher 25 variant with explicit runtime
     query_cypher25 = """
     CYPHER 25
-    CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $embedding)
+    CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
     YIELD node, score
     WHERE node.group_id = $group_id
     RETURN node.name AS name, score
@@ -313,9 +313,7 @@ async def test_explain_plan(
     # vs a separate "Filter" operator after the scan.
     query = """
     EXPLAIN
-    CALL db.index.vector.queryNodes('entity_embedding_v2', $top_k, $embedding)
-    YIELD node, score
-    WHERE node.group_id = $group_id
+    CALL db.index.vector.queryNodes('entity_embedding', $top_k, $embedding)
     RETURN node.name AS name, score
     ORDER BY score DESC
     LIMIT $top_k
@@ -348,7 +346,7 @@ async def test_explain_plan(
     print(f"\n  PROFILE (actual row counts):")
     profile_query = """
     PROFILE
-    CALL db.index.vector.queryNodes('entity_embedding_v2', 100, $embedding)
+    CALL db.index.vector.queryNodes('entity_embedding', 100, $embedding)
     YIELD node, score
     WHERE node.group_id = $group_id
     RETURN node.name AS name, score
@@ -472,7 +470,7 @@ async def suggest_fixes(session, group_id: str, distribution: Dict[str, int]):
     print(f"  │   → Works but wastes compute scanning entities you'll discard")
     print(f"  │")
     print(f"  │ Fix 3 (nuclear): Per-group vector indexes")
-    print(f"  │   Create entity_embedding_v2_<group_id> per group")
+    print(f"  │   Create entity_embedding_<group_id> per group")
     print(f"  │   Perfect isolation but O(n) indexes to manage")
     print(f"  │   → Only if Fix 1 is not supported by your Neo4j version")
     print(f"  └─────────────────────────────────────────────────────────────")
@@ -480,8 +478,7 @@ async def suggest_fixes(session, group_id: str, distribution: Dict[str, int]):
     # Also check sentence index which has the same problem
     sentence_query = """
     MATCH (s:Sentence)
-    WHERE s.embedding_v2 IS NOT NULL
-    RETURN s.group_id AS group_id, count(*) AS count
+    WHERE s.sentence_embedding IS NOT NULL
     ORDER BY count DESC
     """
     try:
@@ -504,8 +501,8 @@ async def get_sample_embedding(session, group_id: str) -> Optional[List[float]]:
     """Get an embedding from an existing entity in the group (for testing)."""
     query = """
     MATCH (e:Entity {group_id: $group_id})
-    WHERE e.embedding_v2 IS NOT NULL
-    RETURN e.name AS name, e.embedding_v2 AS embedding
+    WHERE e.entity_embedding IS NOT NULL
+    RETURN e.name AS name, e.entity_embedding AS embedding
     LIMIT 1
     """
     records = await run_query(session, query, {"group_id": group_id})
@@ -516,8 +513,8 @@ async def get_sample_embedding(session, group_id: str) -> Optional[List[float]]:
     # Try EntityArchived if Entity label was stripped
     query_archived = """
     MATCH (e:EntityArchived {group_id: $group_id})
-    WHERE e.embedding_v2 IS NOT NULL
-    RETURN e.name AS name, e.embedding_v2 AS embedding
+    WHERE e.entity_embedding IS NOT NULL
+    RETURN e.name AS name, e.entity_embedding AS embedding
     LIMIT 1
     """
     records = await run_query(session, query_archived, {"group_id": group_id})
@@ -551,7 +548,7 @@ async def main(group_id: Optional[str] = None):
             distribution = await test_entity_distribution(session)
             
             if not distribution:
-                print("\nNo entities with embedding_v2 found. Nothing to test.")
+                print("\nNo entities with entity_embedding found. Nothing to test.")
                 return
             
             # Auto-detect group_id if not specified
@@ -561,7 +558,7 @@ async def main(group_id: Optional[str] = None):
                 print(f"\n  Auto-selected group: '{group_id}' (smallest = most affected)")
             
             if group_id not in distribution:
-                print(f"\n  WARNING: Group '{group_id}' has no entities with embedding_v2")
+                print(f"\n  WARNING: Group '{group_id}' has no entities with entity_embedding")
                 print(f"  Available groups: {list(distribution.keys())}")
                 return
             
@@ -569,7 +566,7 @@ async def main(group_id: Optional[str] = None):
             print(f"\n── Getting sample embedding from group '{group_id}' ──")
             embedding = await get_sample_embedding(session, group_id)
             if not embedding:
-                print("  Could not find any entity with embedding_v2 in this group")
+                print("  Could not find any entity with entity_embedding in this group")
                 return
             
             # 3. Run tests

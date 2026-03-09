@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Check if V2 group chunks have embedding_v2 property populated.
+Check if V2 group chunks have embedding_v2 property populated.  # V1 legacy: TextChunk property
 """
 
 import requests
@@ -10,7 +10,7 @@ API_URL = "https://graphrag-orchestration-sweden.proudplant-e9a97bea.swedencentr
 V2_GROUP_ID = "test-5pdfs-v2-1769440005"
 
 def check_v2_chunks():
-    """Query chunks to inspect embedding_v2 property."""
+    """Query chunks to inspect embedding_v2 property (V1 legacy: TextChunk)."""
     
     # Try a simple query that will return chunk details
     query_payload = {

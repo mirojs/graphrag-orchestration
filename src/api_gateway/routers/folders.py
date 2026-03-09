@@ -850,17 +850,8 @@ async def delete_folder_analysis(
                              partition_id=partition_id)
         reset_record = result.single()
 
-    # 4) Delete associated "Analysis Results" child folder if it exists
-    cleanup_result_folder_query = """
-    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
-    OPTIONAL MATCH (rf:Folder {folder_type: 'analysis_result', source_folder_id: $folder_id, group_id: $partition_id})
-    DETACH DELETE rf
-    RETURN count(rf) as result_folders_deleted
-    """
-    with driver.session() as session:
-        session.run(cleanup_result_folder_query,
-                    folder_id=folder_id,
-                    partition_id=partition_id)
+    # Note: we intentionally keep the "Analysis Results" subfolder and blobs.
+    # Blob storage is cheap; the user can delete those files manually if desired.
 
     logger.info("folder_analysis_deleted",
                 folder_id=folder_id,

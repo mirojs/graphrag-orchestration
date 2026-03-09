@@ -224,3 +224,24 @@
         flex-shrink: 0;
     }
 }
+
+/* Analysis status badges */
+.analysisBadge {
+    font-size: 11px;
+    flex-shrink: 0;
+    margin-left: 2px;
+}
+.badgeAnalyzing {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+.badgeAnalyzed {
+    opacity: 0.8;
+}
+.badgeStale {
+    opacity: 0.9;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}

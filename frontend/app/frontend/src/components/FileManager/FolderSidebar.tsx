@@ -1,16 +1,18 @@
 /**
  * FolderSidebar — hierarchical folder navigation panel
  *
- * Shows a tree of folders (max 2 levels) with:
+ * Shows a tree of folders (unlimited depth) with:
  * - "All Files" root node
  * - Create folder button
  * - Inline rename on double-click
  * - Delete via context action
+ * - Analyze folder action (triggers Neo4j indexing)
+ * - Analysis status badges (analyzing / analyzed / stale)
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import type { Folder } from "../../api/folders";
+import type { Folder, AnalysisStatus } from "../../api/folders";
 import styles from "./FolderSidebar.module.css";
 
 interface FolderSidebarProps {
@@ -20,6 +22,7 @@ interface FolderSidebarProps {
     onCreateFolder: (name: string, parentId: string | null) => void;
     onRenameFolder: (folderId: string, newName: string) => void;
     onDeleteFolder: (folderId: string) => void;
+    onAnalyzeFolder?: (folderId: string) => void;
 }
 
 export const FolderSidebar = ({
@@ -29,6 +32,7 @@ export const FolderSidebar = ({
     onCreateFolder,
     onRenameFolder,
     onDeleteFolder,
+    onAnalyzeFolder,
 }: FolderSidebarProps) => {
     const { t } = useTranslation();
     const [creating, setCreating] = useState<{ parentId: string | null } | null>(null);
@@ -124,6 +128,18 @@ export const FolderSidebar = ({
         </div>
     );
 
+    const renderAnalysisBadge = (status: AnalysisStatus | null | undefined) => {
+        if (!status || status === "not_analyzed") return null;
+        const badgeMap: Record<string, { emoji: string; cls: string; label: string }> = {
+            analyzing: { emoji: "⏳", cls: styles.badgeAnalyzing ?? "", label: "Analyzing…" },
+            analyzed: { emoji: "✅", cls: styles.badgeAnalyzed ?? "", label: "Analyzed" },
+            stale: { emoji: "⚠️", cls: styles.badgeStale ?? "", label: "Stale" },
+        };
+        const badge = badgeMap[status];
+        if (!badge) return null;
+        return <span className={`${styles.analysisBadge ?? ""} ${badge.cls}`} title={badge.label}>{badge.emoji}</span>;
+    };
+
     const renderFolder = (folder: Folder, depth: number) => {
         const isActive = activeFolderId === folder.id;
         const isRenaming = renamingId === folder.id;
@@ -167,7 +183,10 @@ export const FolderSidebar = ({
                             </button>
                         </>
                     ) : (
-                        <span className={styles.folderName} title={folder.name}>{folder.name}</span>
+                        <>
+                            <span className={styles.folderName} title={folder.name}>{folder.name}</span>
+                            {renderAnalysisBadge(folder.analysis_status)}
+                        </>
                     )}
                     {!isRenaming && (
                         <button
@@ -218,16 +237,21 @@ export const FolderSidebar = ({
                 >
                     {(() => {
                         const folder = folders.find(f => f.id === contextMenu.folderId);
-                        const isRoot = folder && !folder.parent_folder_id;
+                        const isUserFolder = !folder?.folder_type || folder.folder_type === "user";
+                        const canAnalyze = isUserFolder && folder?.analysis_status !== "analyzing";
                         return (
                             <>
                                 <button onClick={() => startRename(folder!)}>✏️ {t("files.rename")}</button>
-                                {isRoot && (
+                                <button onClick={() => {
+                                    setCreating({ parentId: contextMenu.folderId });
+                                    setNewFolderName("");
+                                    setContextMenu(null);
+                                }}>📁 {t("files.newSubfolder")}</button>
+                                {canAnalyze && onAnalyzeFolder && (
                                     <button onClick={() => {
-                                        setCreating({ parentId: contextMenu.folderId });
-                                        setNewFolderName("");
+                                        onAnalyzeFolder(contextMenu.folderId);
                                         setContextMenu(null);
-                                    }}>📁 {t("files.newSubfolder")}</button>
+                                    }}>🔍 {t("files.analyze", "Analyze")}</button>
                                 )}
                                 <button
                                     className={styles.contextMenuDanger}

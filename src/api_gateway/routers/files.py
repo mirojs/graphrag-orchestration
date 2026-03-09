@@ -144,6 +144,57 @@ async def _resolve_folder_name(group_id: str, folder_id: str) -> str | None:
         return None
 
 
+async def _folder_is_analyzed(group_id: str, folder_id: str | None) -> bool:
+    """Check whether a folder (or any of its ancestors) has been analyzed.
+
+    If folder_id is None (root / unfiled upload), returns False so that
+    uploads to the root area are never auto-indexed.
+    """
+    if not folder_id:
+        return False
+    try:
+        from src.worker.services import GraphService
+        driver = GraphService().driver
+        if not driver:
+            return False
+        with driver.session() as session:
+            # Walk up the folder tree looking for an analyzed ancestor
+            result = session.run(
+                """
+                MATCH (f:Folder {id: $fid, group_id: $gid})
+                OPTIONAL MATCH path = (f)-[:SUBFOLDER_OF*0..]->(ancestor:Folder)
+                WHERE ancestor.analysis_status IN ['analyzed', 'stale']
+                RETURN count(ancestor) > 0 AS has_analyzed
+                """,
+                fid=folder_id, gid=group_id,
+            )
+            record = result.single()
+            return bool(record and record["has_analyzed"])
+    except Exception as e:
+        logger.warning("_folder_is_analyzed check failed for %s: %s", folder_id, e)
+        return False
+
+
+async def _mark_folder_stale(group_id: str, folder_id: str) -> None:
+    """Mark a folder as 'stale' (files changed since last analysis)."""
+    try:
+        from src.worker.services import GraphService
+        driver = GraphService().driver
+        if not driver:
+            return
+        with driver.session() as session:
+            session.run(
+                """
+                MATCH (f:Folder {id: $fid, group_id: $gid})
+                WHERE f.analysis_status = 'analyzed'
+                SET f.analysis_status = 'stale', f.updated_at = datetime()
+                """,
+                fid=folder_id, gid=group_id,
+            )
+    except Exception as e:
+        logger.warning("_mark_folder_stale failed for %s: %s", folder_id, e)
+
+
 # ==================== Endpoints ====================
 
 @router.post("/upload")
@@ -193,15 +244,21 @@ async def upload_files(
             logger.error("Error uploading file %s: %s", f.filename, e)
             results.append({"filename": f.filename, "status": "failed", "error": str(e)})
 
-    # Trigger background indexing with neo4j_gid (folder partition)
+    # Trigger background indexing ONLY if the target folder is already analyzed.
+    # For un-analyzed folders, files are just stored in blob — no graph indexing.
     indexing_queued = False
     if doc_sync:
-        for r in results:
-            if r["status"] == "success":
-                background_tasks.add_task(
-                    doc_sync.on_file_uploaded, neo4j_gid, r["filename"], r["url"], user_id
-                )
-                indexing_queued = True
+        should_index = await _folder_is_analyzed(group_id, folder_id)
+        if should_index:
+            for r in results:
+                if r["status"] == "success":
+                    background_tasks.add_task(
+                        doc_sync.on_file_uploaded, neo4j_gid, r["filename"], r["url"], user_id
+                    )
+                    indexing_queued = True
+            # Mark folder stale since new files were added after analysis
+            if indexing_queued and folder_id:
+                background_tasks.add_task(_mark_folder_stale, group_id, folder_id)
 
     success_count = sum(1 for r in results if r["status"] == "success")
     if success_count == len(results):

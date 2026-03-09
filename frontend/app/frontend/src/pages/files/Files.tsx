@@ -32,6 +32,7 @@ import {
     createFolderApi,
     renameFolderApi,
     deleteFolderApi,
+    analyzeFolderApi,
     Folder,
 } from "../../api/folders";
 import { UploadZone } from "../../components/FileManager/UploadZone";
@@ -320,6 +321,22 @@ const Files = () => {
         [client, addToast, loadFolders, activeFolderId]
     );
 
+    // Analyze a folder (trigger Neo4j indexing)
+    const handleAnalyzeFolder = useCallback(
+        async (folderId: string) => {
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                const result = await analyzeFolderApi(folderId, token as string);
+                addToast("info", result.message || "Analysis started");
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", err.message || "Analysis failed");
+            }
+        },
+        [client, addToast, loadFolders]
+    );
+
     // Move file to folder
     const handleMoveFile = useCallback(
         async (filename: string, destFolderId: string | null) => {
@@ -433,6 +450,7 @@ const Files = () => {
                         onCreateFolder={handleCreateFolder}
                         onRenameFolder={handleRenameFolder}
                         onDeleteFolder={handleDeleteFolder}
+                        onAnalyzeFolder={handleAnalyzeFolder}
                     />
                 )}
 

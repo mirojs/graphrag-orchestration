@@ -18,6 +18,42 @@ router = APIRouter(prefix="/folders", tags=["folders"])
 logger = structlog.get_logger()
 
 
+def _folder_from_record(record) -> Folder:
+    """Build a Folder model from a Neo4j result record."""
+    return Folder(
+        id=record["id"],
+        name=record["name"],
+        group_id=record["group_id"],
+        parent_folder_id=record["parent_folder_id"],
+        folder_type=record.get("folder_type") or "user",
+        analysis_status=record.get("analysis_status"),
+        analysis_group_id=record.get("analysis_group_id"),
+        source_folder_id=record.get("source_folder_id"),
+        analyzed_at=record.get("analyzed_at"),
+        file_count=record.get("file_count"),
+        entity_count=record.get("entity_count"),
+        community_count=record.get("community_count"),
+        created_at=record["created_at"],
+        updated_at=record["updated_at"],
+    )
+
+
+# Standard RETURN clause for folder queries
+_FOLDER_RETURN = """
+    f.id as id, f.name as name, f.group_id as group_id,
+    f.parent_folder_id as parent_folder_id,
+    f.folder_type as folder_type,
+    f.analysis_status as analysis_status,
+    f.analysis_group_id as analysis_group_id,
+    f.source_folder_id as source_folder_id,
+    f.analyzed_at as analyzed_at,
+    f.file_count as file_count,
+    f.entity_count as entity_count,
+    f.community_count as community_count,
+    f.created_at as created_at, f.updated_at as updated_at
+"""
+
+
 def get_partition_id(request: Request) -> str:
     """Extract partition ID from request state (set by middleware)."""
     return request.state.group_id
@@ -48,26 +84,18 @@ async def create_folder(
     """
     driver = get_graph_driver()
     
-    # Validate max depth (2 levels max)
+    # Validate parent exists (unlimited depth allowed)
     if folder.parent_folder_id:
-        # Check parent exists and get its depth
         parent_query = """
         MATCH (f:Folder {id: $parent_id, group_id: $partition_id})
-        OPTIONAL MATCH path = (f)-[:SUBFOLDER_OF*]->(root:Folder)
-        RETURN f, length(path) as depth
+        RETURN f.id as id
         """
         with driver.session() as session:
             result = session.run(parent_query, 
                                parent_id=folder.parent_folder_id,
                                partition_id=partition_id)
-            parent = result.single()
-            
-            if not parent:
+            if not result.single():
                 raise HTTPException(status_code=404, detail="Parent folder not found")
-            
-            depth = parent["depth"] if parent["depth"] is not None else 0
-            if depth >= 1:  # Parent is already at depth 1, can't add child
-                raise HTTPException(status_code=400, detail="Maximum folder depth (2) exceeded")
     
     # Create folder
     create_query = """
@@ -76,6 +104,8 @@ async def create_folder(
         name: $name,
         group_id: $partition_id,
         parent_folder_id: $parent_folder_id,
+        folder_type: $folder_type,
+        analysis_status: CASE WHEN $folder_type = 'user' THEN 'not_analyzed' ELSE null END,
         created_at: datetime(),
         updated_at: datetime()
     })
@@ -86,6 +116,14 @@ async def create_folder(
     )
     RETURN f.id as id, f.name as name, f.group_id as group_id, 
            f.parent_folder_id as parent_folder_id,
+           f.folder_type as folder_type,
+           f.analysis_status as analysis_status,
+           f.analysis_group_id as analysis_group_id,
+           f.source_folder_id as source_folder_id,
+           f.analyzed_at as analyzed_at,
+           f.file_count as file_count,
+           f.entity_count as entity_count,
+           f.community_count as community_count,
            f.created_at as created_at, f.updated_at as updated_at
     """
     
@@ -93,7 +131,8 @@ async def create_folder(
         result = session.run(create_query,
                            name=folder.name,
                            partition_id=partition_id,
-                           parent_folder_id=folder.parent_folder_id)
+                           parent_folder_id=folder.parent_folder_id,
+                           folder_type=folder.folder_type)
         record = result.single()
 
     if not record:
@@ -101,14 +140,7 @@ async def create_folder(
 
     logger.info("folder_created", folder_id=record["id"], partition_id=partition_id)
     
-    return Folder(
-        id=record["id"],
-        name=record["name"],
-        group_id=record["group_id"],
-        parent_folder_id=record["parent_folder_id"],
-        created_at=record["created_at"],
-        updated_at=record["updated_at"]
-    )
+    return _folder_from_record(record)
 
 
 @router.get("", response_model=List[Folder])
@@ -129,20 +161,16 @@ async def list_folders(
     driver = get_graph_driver()
     
     if parent_folder_id:
-        query = """
-        MATCH (f:Folder {group_id: $partition_id})
+        query = f"""
+        MATCH (f:Folder {{group_id: $partition_id}})
         WHERE f.parent_folder_id = $parent_folder_id
-        RETURN f.id as id, f.name as name, f.group_id as group_id,
-               f.parent_folder_id as parent_folder_id,
-               f.created_at as created_at, f.updated_at as updated_at
+        RETURN {_FOLDER_RETURN}
         ORDER BY f.name
         """
     else:
-        query = """
-        MATCH (f:Folder {group_id: $partition_id})
-        RETURN f.id as id, f.name as name, f.group_id as group_id,
-               f.parent_folder_id as parent_folder_id,
-               f.created_at as created_at, f.updated_at as updated_at
+        query = f"""
+        MATCH (f:Folder {{group_id: $partition_id}})
+        RETURN {_FOLDER_RETURN}
         ORDER BY f.name
         """
     
@@ -150,17 +178,7 @@ async def list_folders(
         result = session.run(query, 
                            partition_id=partition_id,
                            parent_folder_id=parent_folder_id)
-        folders = [
-            Folder(
-                id=record["id"],
-                name=record["name"],
-                group_id=record["group_id"],
-                parent_folder_id=record["parent_folder_id"],
-                created_at=record["created_at"],
-                updated_at=record["updated_at"]
-            )
-            for record in result
-        ]
+        folders = [_folder_from_record(record) for record in result]
     
     return folders
 
@@ -173,11 +191,9 @@ async def get_folder(
     """Get a specific folder."""
     driver = get_graph_driver()
     
-    query = """
-    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
-    RETURN f.id as id, f.name as name, f.group_id as group_id,
-           f.parent_folder_id as parent_folder_id,
-           f.created_at as created_at, f.updated_at as updated_at
+    query = f"""
+    MATCH (f:Folder {{id: $folder_id, group_id: $partition_id}})
+    RETURN {_FOLDER_RETURN}
     """
     
     with driver.session() as session:
@@ -187,14 +203,7 @@ async def get_folder(
         if not record:
             raise HTTPException(status_code=404, detail="Folder not found")
         
-        return Folder(
-            id=record["id"],
-            name=record["name"],
-            group_id=record["group_id"],
-            parent_folder_id=record["parent_folder_id"],
-            created_at=record["created_at"],
-            updated_at=record["updated_at"]
-        )
+        return _folder_from_record(record)
 
 
 @router.put("/{folder_id}", response_model=Folder)
@@ -206,12 +215,10 @@ async def update_folder(
     """Update a folder."""
     driver = get_graph_driver()
     
-    query = """
-    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    query = f"""
+    MATCH (f:Folder {{id: $folder_id, group_id: $partition_id}})
     SET f.name = $name, f.updated_at = datetime()
-    RETURN f.id as id, f.name as name, f.group_id as group_id,
-           f.parent_folder_id as parent_folder_id,
-           f.created_at as created_at, f.updated_at as updated_at
+    RETURN {_FOLDER_RETURN}
     """
     
     with driver.session() as session:
@@ -226,14 +233,7 @@ async def update_folder(
         
         logger.info("folder_updated", folder_id=folder_id, partition_id=partition_id)
         
-        return Folder(
-            id=record["id"],
-            name=record["name"],
-            group_id=record["group_id"],
-            parent_folder_id=record["parent_folder_id"],
-            created_at=record["created_at"],
-            updated_at=record["updated_at"]
-        )
+        return _folder_from_record(record)
 
 
 @router.delete("/{folder_id}")
@@ -659,4 +659,312 @@ async def list_unfiled_documents(
         ]
     
     return {"folder_id": None, "documents": documents, "count": len(documents)}
+
+
+# =============================================================================
+# Folder Analysis Endpoint
+# =============================================================================
+
+class AnalysisStatusResponse(BaseModel):
+    """Lightweight status response for polling."""
+    folder_id: str
+    analysis_status: Optional[str]
+    file_count: Optional[int]
+    entity_count: Optional[int]
+    community_count: Optional[int]
+
+
+@router.post("/{folder_id}/analyze")
+async def analyze_folder(
+    folder_id: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    partition_id: str = Depends(get_partition_id)
+):
+    """
+    Trigger analysis (indexing) for a folder and all its contents.
+
+    1. Marks the folder + descendants as 'analyzing'.
+    2. Recursively lists all blobs under the folder.
+    3. Indexes every file via DocumentSyncService.
+    4. On completion, marks the folder as 'analyzed' and stores stats.
+    5. Creates a result folder under "Analysis Results".
+    """
+    driver = get_graph_driver()
+
+    # 1) Verify folder exists and is eligible for analysis
+    verify_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.id as id, f.name as name, f.analysis_status as analysis_status,
+           f.folder_type as folder_type
+    """
+    with driver.session() as session:
+        record = session.run(verify_query,
+                             folder_id=folder_id,
+                             partition_id=partition_id).single()
+        if not record:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if record.get("folder_type") == "analysis_result":
+            raise HTTPException(status_code=400, detail="Cannot analyze a result folder")
+        if record.get("analysis_status") == "analyzing":
+            raise HTTPException(status_code=409, detail="Analysis already in progress")
+
+    folder_name = record["name"]
+
+    # 2) Mark folder + subfolders as 'analyzing'
+    mark_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+    WITH collect(f) + collect(sub) AS folders
+    UNWIND folders AS fld
+    SET fld.analysis_status = 'analyzing', fld.updated_at = datetime()
+    RETURN count(fld) as marked
+    """
+    with driver.session() as session:
+        session.run(mark_query, folder_id=folder_id, partition_id=partition_id)
+
+    # 3) Resolve the neo4j group_id for this folder tree
+    from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
+    neo4j_gid = await resolve_neo4j_group_id(partition_id, folder_id)
+
+    # 4) List all blobs recursively
+    blob_manager = getattr(request.app.state, "user_blob_manager", None)
+    if not blob_manager:
+        raise HTTPException(status_code=400, detail="File storage not configured")
+
+    blobs = await blob_manager.list_blobs_recursive(partition_id, folder_name)
+    if not blobs:
+        # Revert status since there's nothing to analyze
+        revert_query = """
+        MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+        OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+        WITH collect(f) + collect(sub) AS folders
+        UNWIND folders AS fld
+        SET fld.analysis_status = 'not_analyzed', fld.updated_at = datetime()
+        """
+        with driver.session() as session:
+            session.run(revert_query, folder_id=folder_id, partition_id=partition_id)
+        raise HTTPException(status_code=400, detail="No files found in folder to analyze")
+
+    # 5) Kick off indexing in background
+    doc_sync = getattr(request.app.state, "document_sync_service", None)
+    if not doc_sync:
+        raise HTTPException(status_code=503, detail="Indexing service unavailable")
+
+    # Store analysis_group_id on the folder node
+    set_gid_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    SET f.analysis_group_id = $neo4j_gid
+    """
+    with driver.session() as session:
+        session.run(set_gid_query,
+                    folder_id=folder_id,
+                    partition_id=partition_id,
+                    neo4j_gid=neo4j_gid)
+
+    background_tasks.add_task(
+        _run_folder_analysis,
+        driver=driver,
+        doc_sync=doc_sync,
+        blobs=blobs,
+        neo4j_gid=neo4j_gid,
+        folder_id=folder_id,
+        folder_name=folder_name,
+        partition_id=partition_id,
+    )
+
+    logger.info("folder_analysis_started",
+                folder_id=folder_id,
+                file_count=len(blobs),
+                neo4j_gid=neo4j_gid)
+
+    return {
+        "status": "analyzing",
+        "folder_id": folder_id,
+        "analysis_group_id": neo4j_gid,
+        "file_count": len(blobs),
+        "message": f"Analysis started for {len(blobs)} file(s) in '{folder_name}'",
+    }
+
+
+async def _run_folder_analysis(
+    *,
+    driver,
+    doc_sync,
+    blobs: list[dict],
+    neo4j_gid: str,
+    folder_id: str,
+    folder_name: str,
+    partition_id: str,
+):
+    """Background task: index all blobs and update folder status on completion."""
+    import traceback
+    file_count = len(blobs)
+    try:
+        for blob in blobs:
+            await doc_sync.on_file_uploaded(
+                group_id=neo4j_gid,
+                filename=blob["name"],
+                blob_url=blob["url"],
+                user_id=partition_id,
+            )
+
+        # Count entities and communities for the stats
+        stats_query = """
+        MATCH (e:Entity {group_id: $gid})
+        WITH count(e) as entity_count
+        OPTIONAL MATCH (c:Community {group_id: $gid})
+        RETURN entity_count, count(c) as community_count
+        """
+        entity_count = 0
+        community_count = 0
+        with driver.session() as session:
+            record = session.run(stats_query, gid=neo4j_gid).single()
+            if record:
+                entity_count = record["entity_count"]
+                community_count = record["community_count"]
+
+        # Mark folder + subfolders as 'analyzed'
+        complete_query = """
+        MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+        OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+        WITH collect(f) + collect(sub) AS folders
+        UNWIND folders AS fld
+        SET fld.analysis_status = 'analyzed',
+            fld.analyzed_at = datetime(),
+            fld.file_count = $file_count,
+            fld.entity_count = $entity_count,
+            fld.community_count = $community_count,
+            fld.updated_at = datetime()
+        """
+        with driver.session() as session:
+            session.run(complete_query,
+                        folder_id=folder_id,
+                        partition_id=partition_id,
+                        file_count=file_count,
+                        entity_count=entity_count,
+                        community_count=community_count)
+
+        # Auto-create result folder under "Analysis Results"
+        await _create_analysis_result_folder(
+            driver=driver,
+            partition_id=partition_id,
+            source_folder_id=folder_id,
+            source_folder_name=folder_name,
+            neo4j_gid=neo4j_gid,
+            file_count=file_count,
+            entity_count=entity_count,
+            community_count=community_count,
+        )
+
+        logger.info("folder_analysis_complete",
+                     folder_id=folder_id,
+                     file_count=file_count,
+                     entity_count=entity_count,
+                     community_count=community_count)
+
+    except Exception as e:
+        logger.error("folder_analysis_failed",
+                     folder_id=folder_id,
+                     error=str(e),
+                     traceback=traceback.format_exc())
+        # Mark folder as stale (not 'analyzed') so user can retry
+        try:
+            fail_query = """
+            MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+            OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+            WITH collect(f) + collect(sub) AS folders
+            UNWIND folders AS fld
+            SET fld.analysis_status = 'stale', fld.updated_at = datetime()
+            """
+            with driver.session() as session:
+                session.run(fail_query,
+                            folder_id=folder_id,
+                            partition_id=partition_id)
+        except Exception:
+            pass
+
+
+async def _create_analysis_result_folder(
+    *,
+    driver,
+    partition_id: str,
+    source_folder_id: str,
+    source_folder_name: str,
+    neo4j_gid: str,
+    file_count: int,
+    entity_count: int,
+    community_count: int,
+):
+    """Auto-create an 'Analysis Results' root folder (if missing) and a result subfolder."""
+    # Ensure "Analysis Results" root exists
+    root_query = """
+    MERGE (r:Folder {name: 'Analysis Results', group_id: $pid, folder_type: 'analysis_result', parent_folder_id: null_value})
+    ON CREATE SET r.id = randomUUID(),
+                  r.created_at = datetime(),
+                  r.updated_at = datetime()
+    RETURN r.id as root_id
+    """
+    # Neo4j doesn't support null in MERGE, use a sentinel approach
+    root_find_query = """
+    MATCH (r:Folder {name: 'Analysis Results', group_id: $pid, folder_type: 'analysis_result'})
+    WHERE r.parent_folder_id IS NULL
+    RETURN r.id as root_id
+    """
+    root_create_query = """
+    CREATE (r:Folder {
+        id: randomUUID(),
+        name: 'Analysis Results',
+        group_id: $pid,
+        folder_type: 'analysis_result',
+        parent_folder_id: null,
+        created_at: datetime(),
+        updated_at: datetime()
+    })
+    RETURN r.id as root_id
+    """
+    with driver.session() as session:
+        record = session.run(root_find_query, pid=partition_id).single()
+        if not record:
+            record = session.run(root_create_query, pid=partition_id).single()
+        root_id = record["root_id"]
+
+    # Create result subfolder
+    result_name = f"{source_folder_name} — {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
+    result_query = """
+    CREATE (f:Folder {
+        id: randomUUID(),
+        name: $name,
+        group_id: $pid,
+        parent_folder_id: $root_id,
+        folder_type: 'analysis_result',
+        analysis_status: 'analyzed',
+        analysis_group_id: $neo4j_gid,
+        source_folder_id: $source_folder_id,
+        analyzed_at: datetime(),
+        file_count: $file_count,
+        entity_count: $entity_count,
+        community_count: $community_count,
+        created_at: datetime(),
+        updated_at: datetime()
+    })
+    WITH f
+    MATCH (root:Folder {id: $root_id, group_id: $pid})
+    CREATE (f)-[:SUBFOLDER_OF]->(root)
+    RETURN f.id as result_id
+    """
+    with driver.session() as session:
+        session.run(result_query,
+                    name=result_name,
+                    pid=partition_id,
+                    root_id=root_id,
+                    neo4j_gid=neo4j_gid,
+                    source_folder_id=source_folder_id,
+                    file_count=file_count,
+                    entity_count=entity_count,
+                    community_count=community_count)
+
+    logger.info("analysis_result_folder_created",
+                source_folder=source_folder_name,
+                result_name=result_name)
 

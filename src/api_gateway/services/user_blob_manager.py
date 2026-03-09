@@ -107,6 +107,26 @@ class UserBlobManager:
         _blob_list_cache[cache_key] = (now, files)
         return list(files)
 
+    async def list_blobs_recursive(self, group_id: str, folder: str) -> list[dict]:
+        """List all blobs recursively under a folder prefix.
+
+        Returns a list of dicts with 'name' (relative path) and 'url' (full blob URL).
+        Unlike list_blobs(), this includes blobs in subdirectories.
+        """
+        folder = sanitize_folder_name(folder)
+        prefix = f"{group_id}/{folder}/"
+        container_client = self.blob_service_client.get_container_client(self.container)
+        blobs = []
+        async for blob in container_client.list_blobs(name_starts_with=prefix, include=["metadata"]):
+            if _is_directory_blob(blob):
+                continue
+            rel = blob.name[len(prefix):]
+            if not rel:
+                continue
+            blob_url = f"{container_client.url}/{blob.name}"
+            blobs.append({"name": rel, "url": blob_url, "full_path": blob.name})
+        return blobs
+
     async def get_blob_stats(self, group_id: str) -> Tuple[int, int]:
         """Single-pass: count blobs and sum all sizes, with TTL cache."""
         now = time.monotonic()

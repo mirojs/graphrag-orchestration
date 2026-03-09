@@ -9,11 +9,22 @@ import { getHeaders, fetchWithAuthRetry } from "./api";
 
 // ======================== Types ========================
 
+export type FolderType = "user" | "analysis_result";
+export type AnalysisStatus = "not_analyzed" | "analyzing" | "analyzed" | "stale";
+
 export interface Folder {
     id: string;
     name: string;
     group_id: string;
     parent_folder_id: string | null;
+    folder_type: FolderType;
+    analysis_status: AnalysisStatus | null;
+    analysis_group_id: string | null;
+    source_folder_id: string | null;
+    analyzed_at: string | null;
+    file_count: number | null;
+    entity_count: number | null;
+    community_count: number | null;
     created_at: string;
     updated_at: string;
 }
@@ -21,6 +32,7 @@ export interface Folder {
 export interface FolderCreate {
     name: string;
     parent_folder_id?: string | null;
+    folder_type?: FolderType;
 }
 
 // ======================== CRUD ========================
@@ -139,4 +151,62 @@ export async function unassignDocumentFromFolderApi(
         throw new Error(`Unassign from folder failed: ${response.statusText}`);
     }
     return response.json();
+}
+
+// ======================== Analysis ========================
+
+export interface AnalyzeResult {
+    status: string;
+    folder_id: string;
+    analysis_group_id: string;
+    file_count: number;
+    message: string;
+}
+
+export async function analyzeFolderApi(
+    folderId: string,
+    idToken: string
+): Promise<AnalyzeResult> {
+    const headers = await getHeaders(idToken);
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}/analyze`,
+        {
+            method: "POST",
+            headers,
+        }
+    );
+    if (!response.ok) {
+        let detail = response.statusText;
+        try {
+            const body = await response.json();
+            detail = body.detail || detail;
+        } catch {
+            /* ignore */
+        }
+        throw new Error(detail);
+    }
+    return response.json();
+}
+
+export async function getFolderAnalysisStatusApi(
+    folderId: string,
+    idToken: string
+): Promise<{ analysis_status: AnalysisStatus | null; file_count: number | null; entity_count: number | null; community_count: number | null }> {
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}`,
+        {
+            method: "GET",
+            headers: await getHeaders(idToken),
+        }
+    );
+    if (!response.ok) {
+        throw new Error(`Get folder status failed: ${response.statusText}`);
+    }
+    const folder: Folder = await response.json();
+    return {
+        analysis_status: folder.analysis_status,
+        file_count: folder.file_count,
+        entity_count: folder.entity_count,
+        community_count: folder.community_count,
+    };
 }

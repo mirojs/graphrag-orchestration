@@ -7,7 +7,7 @@
  * - File list with selection, sorting, context actions
  * - Bulk operations toolbar
  * - Rename dialog
- * - Shared Library tab (graceful when unconfigured)
+ * - Analysis CTA + toolbar analyze button
  * - Responsive design
  */
 
@@ -19,7 +19,6 @@ import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import {
     listFilesApi,
-    listGlobalFilesApi,
     uploadFilesApi,
     deleteFileApi,
     bulkDeleteFilesApi,
@@ -58,10 +57,7 @@ const Files = () => {
     const { loggedIn } = useContext(LoginContext);
     const { t } = useTranslation();
     const navigate = useNavigate();
-    const [activeTab, setActiveTab] = useState<"my" | "shared">("my");
     const [files, setFiles] = useState<string[]>([]);
-    const [globalFiles, setGlobalFiles] = useState<string[]>([]);
-    const [sharedAvailable, setSharedAvailable] = useState(true);
     const [folders, setFolders] = useState<Folder[]>([]);
     const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -110,20 +106,6 @@ const Files = () => {
         }
     }, [client, addToast]);
 
-    const loadGlobalFiles = useCallback(async () => {
-        try {
-            setLoading(true);
-            const result = await listGlobalFilesApi();
-            setGlobalFiles(result);
-            setSharedAvailable(true);
-        } catch (err: any) {
-            setGlobalFiles([]);
-            setSharedAvailable(false);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
     // Load folders
     const loadFolders = useCallback(async () => {
         try {
@@ -153,12 +135,6 @@ const Files = () => {
         loadFiles();
         setSelected(new Set());
     }, [activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    useEffect(() => {
-        if (activeTab === "shared") {
-            loadGlobalFiles();
-        }
-    }, [activeTab, loadGlobalFiles]);
 
     // Poll folders while any folder is "analyzing" (every 5s)
     useEffect(() => {
@@ -414,8 +390,7 @@ const Files = () => {
     const selectNone = useCallback(() => setSelected(new Set()), []);
 
     // Filter & sort
-    const activeFiles = activeTab === "my" ? files : globalFiles;
-    const filteredFiles = activeFiles
+    const filteredFiles = files
         .filter(f => !searchQuery || f.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
             let cmp = 0;
@@ -446,31 +421,10 @@ const Files = () => {
         );
     }
 
-    const isShared = activeTab === "shared";
-
     return (
         <div className={styles.container}>
-            {/* Tab bar */}
-            <div className={styles.tabBar}>
-                <button
-                    className={`${styles.tab} ${activeTab === "my" ? styles.tabActive : ""}`}
-                    onClick={() => setActiveTab("my")}
-                >
-                    {t("files.myFiles")}
-                </button>
-                {sharedAvailable && (
-                    <button
-                        className={`${styles.tab} ${activeTab === "shared" ? styles.tabActive : ""}`}
-                        onClick={() => setActiveTab("shared")}
-                    >
-                        {t("files.sharedLibrary")}
-                    </button>
-                )}
-            </div>
-
-            {/* Upload zone (drag & drop) — only for My Files */}
-            {!isShared && (
-                <UploadZone
+            {/* Upload zone (drag & drop) */}
+            <UploadZone
                     onUpload={handleUpload}
                     uploading={uploading}
                     progress={uploadProgress}
@@ -478,27 +432,23 @@ const Files = () => {
                     uploadedCount={uploadedCount}
                     uploadTotal={uploadTotal}
                 />
-            )}
 
             <div className={styles.mainArea}>
-                {/* Folder sidebar — only for My Files */}
-                {!isShared && (
-                    <FolderSidebar
-                        folders={folders}
-                        activeFolderId={activeFolderId}
-                        onSelectFolder={setActiveFolderId}
-                        onCreateFolder={handleCreateFolder}
-                        onRenameFolder={handleRenameFolder}
-                        onDeleteFolder={handleDeleteFolder}
-                        onAnalyzeFolder={handleAnalyzeFolder}
-                        onChatWithAnalysis={handleChatWithAnalysis}
-                        onDeleteAnalysis={handleDeleteAnalysis}
-                    />
-                )}
+                <FolderSidebar
+                    folders={folders}
+                    activeFolderId={activeFolderId}
+                    onSelectFolder={setActiveFolderId}
+                    onCreateFolder={handleCreateFolder}
+                    onRenameFolder={handleRenameFolder}
+                    onDeleteFolder={handleDeleteFolder}
+                    onAnalyzeFolder={handleAnalyzeFolder}
+                    onChatWithAnalysis={handleChatWithAnalysis}
+                    onDeleteAnalysis={handleDeleteAnalysis}
+                />
 
                 <div className={styles.contentArea}>
                     {/* Breadcrumb */}
-                    {!isShared && activeFolderId && (
+                    {activeFolderId && (
                         <div className={styles.breadcrumb}>
                             <button className={styles.breadcrumbLink} onClick={() => setActiveFolderId(null)}>
                                 {t("files.allFiles")}
@@ -520,7 +470,7 @@ const Files = () => {
                     )}
 
                     {/* Hero CTA — shown when folder is selected, has files, and is not yet analyzed */}
-                    {!isShared && activeFolder
+                    {activeFolder
                         && (!activeFolder.analysis_status || activeFolder.analysis_status === "not_analyzed")
                         && (!activeFolder.folder_type || activeFolder.folder_type === "user")
                         && filteredFiles.length > 0 && (
@@ -542,7 +492,7 @@ const Files = () => {
                     )}
 
                     {/* Analysis result summary — shown for analyzed/result folders */}
-                    {!isShared && activeFolder && (activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.analysis_status === "analyzing" || activeFolder.folder_type === "analysis_result") && (
+                    {activeFolder && (activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.analysis_status === "analyzing" || activeFolder.folder_type === "analysis_result") && (
                         <div className={styles.analysisSummary}>
                             <div className={styles.analysisSummaryHeader}>
                                 <span className={styles.analysisSummaryIcon}>
@@ -602,7 +552,7 @@ const Files = () => {
                     {/* Toolbar: search, sort, bulk actions, analyze */}
                     <FileToolbar
                         fileCount={filteredFiles.length}
-                        selectedCount={isShared ? 0 : selected.size}
+                        selectedCount={selected.size}
                         searchQuery={searchQuery}
                         onSearchChange={setSearchQuery}
                         sortBy={sortBy}
@@ -611,11 +561,11 @@ const Files = () => {
                             if (by === sortBy) setSortAsc(!sortAsc);
                             else { setSortBy(by); setSortAsc(true); }
                         }}
-                        onSelectAll={isShared ? () => {} : selectAll}
-                        onSelectNone={isShared ? () => {} : selectNone}
-                        onDeleteSelected={isShared ? () => {} : () => handleDelete(Array.from(selected))}
-                        onRefresh={isShared ? loadGlobalFiles : () => { loadFiles(); loadFolders(); }}
-                        activeFolderId={isShared ? null : activeFolderId}
+                        onSelectAll={selectAll}
+                        onSelectNone={selectNone}
+                        onDeleteSelected={() => handleDelete(Array.from(selected))}
+                        onRefresh={() => { loadFiles(); loadFolders(); }}
+                        activeFolderId={activeFolderId}
                         analysisStatus={activeFolder?.analysis_status}
                         isUserFolder={!activeFolder?.folder_type || activeFolder.folder_type === "user"}
                         onAnalyzeFolder={activeFolderId ? () => handleAnalyzeFolder(activeFolderId) : undefined}
@@ -624,18 +574,18 @@ const Files = () => {
                     {/* File list */}
                     <FileList
                         files={filteredFiles}
-                        selected={isShared ? new Set<string>() : selected}
+                        selected={selected}
                         loading={loading}
-                        onToggleSelect={isShared ? () => {} : toggleSelect}
-                        onDelete={isShared ? () => {} : (f) => handleDelete([f])}
-                        onRename={isShared ? () => {} : (f) => setRenameFile(f)}
-                        onMove={isShared ? undefined : (f) => setMoveFile(f)}
+                        onToggleSelect={toggleSelect}
+                        onDelete={(f) => handleDelete([f])}
+                        onRename={(f) => setRenameFile(f)}
+                        onMove={(f) => setMoveFile(f)}
                     />
                 </div>
             </div>
 
-            {/* Rename dialog — only for My Files */}
-            {!isShared && renameFile && (
+            {/* Rename dialog */}
+            {renameFile && (
                 <RenameDialog
                     currentName={renameFile}
                     onRename={(newName) => handleRename(renameFile, newName)}
@@ -643,8 +593,8 @@ const Files = () => {
                 />
             )}
 
-            {/* Move to folder dialog — only for My Files */}
-            {!isShared && moveFile && (
+            {/* Move to folder dialog */}
+            {moveFile && (
                 <MoveToFolderDialog
                     filename={moveFile}
                     folders={folders}

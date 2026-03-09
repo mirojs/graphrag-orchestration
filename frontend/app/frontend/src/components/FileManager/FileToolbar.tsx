@@ -91,17 +91,15 @@ export const FileToolbar = ({
                 🔄
             </button>
 
-            {/* Primary Analyze action — visible when a user folder is selected */}
+            {/* Analyze action — stale: re-analyze toolbar button; analyzing: disabled status */}
             {activeFolderId && isUserFolder && onAnalyzeFolder && (
                 analysisStatus === "analyzing" ? (
                     <button className={styles.toolbarBtnAnalyzing} disabled>
                         ⏳ {t("files.analyzing", "Analyzing…")}
                     </button>
-                ) : analysisStatus !== "analyzed" ? (
+                ) : analysisStatus === "stale" ? (
                     <button className={styles.toolbarBtnAnalyze} onClick={onAnalyzeFolder}>
-                        🔍 {analysisStatus === "stale"
-                            ? t("files.reanalyze", "Re-analyze")
-                            : t("files.analyzeFiles", { count: fileCount, defaultValue: `Analyze (${fileCount} files)` })}
+                        🔍 {t("files.reanalyze", "Re-analyze")}
                     </button>
                 ) : null
             )}

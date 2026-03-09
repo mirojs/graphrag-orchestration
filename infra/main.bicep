@@ -45,6 +45,12 @@ param azureTranslatorEndpoint string = ''
 @description('Azure Translator region (defaults to swedencentral)')
 param azureTranslatorRegion string = 'swedencentral'
 
+@description('Azure Content Understanding endpoint (alternative to Document Intelligence)')
+param azureContentUnderstandingEndpoint string = ''
+
+@description('Enable speech translation for voice input')
+param enableSpeechTranslation string = 'false'
+
 // Easy Auth parameters
 @description('Enable Easy Auth (Microsoft Entra ID authentication)')
 param enableAuth bool = false
@@ -108,6 +114,58 @@ param userStorageContainerName string = 'user-content'
 @description('Name of the storage account (ADLS Gen2 / HNS-enabled)')
 param storageAccountName string = 'neo4jstorage21224'
 
+// ── Additional secret parameters (previously managed by deploy script) ──
+
+@secure()
+@description('Mistral AI API key for OCR fallback')
+param mistralApiKey string = ''
+
+@secure()
+@description('LLMWhisperer API key for OCR fallback')
+param llmwhispererApiKey string = ''
+
+@secure()
+@description('Neo4j Aura DS client secret for GDS operations')
+param auraDsClientSecret string = ''
+
+@description('Neo4j Aura DS client ID for GDS operations')
+param auraDsClientId string = ''
+
+// ── Parameterized resource names (previously hardcoded) ─────────────────
+
+@description('Name of the existing resource group')
+param resourceGroupName string = 'rg-graphrag-feature'
+
+@description('Name of the existing Azure Container Registry')
+param containerRegistryName string = 'graphragacr12153'
+
+@description('Name of the Container Apps Environment')
+param containerAppsEnvironmentName string = 'graphrag-env'
+
+@description('Azure OpenAI endpoint URL')
+param azureOpenAiEndpoint string = 'https://graphrag-openai-8476.openai.azure.com/'
+
+@description('Azure OpenAI resource name (for RBAC scoping)')
+param azureOpenAiResourceName string = 'graphrag-openai-8476'
+
+@description('Document Intelligence resource name')
+param documentIntelligenceName string = 'doc-intel-graphrag'
+
+@description('Neo4j connection URI')
+param neo4jUri string = 'neo4j+s://a86dcf63.databases.neo4j.io'
+
+@description('Neo4j username')
+param neo4jUsername string = 'neo4j'
+
+@description('Neo4j database name')
+param neo4jDatabase string = 'neo4j'
+
+@description('Group ID override for shared demo tenant (empty = per-user isolation)')
+param groupIdOverride string = ''
+
+@description('Deployment timestamp for cache busting — auto-generated on each deploy')
+param deployTimestamp string = utcNow()
+
 // Tags for all resources
 var tags = {
   azd_env_name: environmentName
@@ -116,7 +174,7 @@ var tags = {
 
 // Reference existing Resource Group in Sweden Central
 resource rg 'Microsoft.Resources/resourceGroups@2021-04-01' existing = {
-  name: 'rg-graphrag-feature'
+  name: resourceGroupName
 }
 
 // Container Apps Environment - Create with consistent name
@@ -124,7 +182,7 @@ module containerAppsEnvironment './core/host/container-apps-environment.bicep' =
   name: 'container-apps-environment'
   scope: rg
   params: {
-    name: 'graphrag-env'  // Use fixed name instead of random token
+    name: containerAppsEnvironmentName
     location: location
     tags: tags
   }
@@ -132,7 +190,7 @@ module containerAppsEnvironment './core/host/container-apps-environment.bicep' =
 
 // Reference existing Container Registry
 resource containerRegistry 'Microsoft.ContainerRegistry/registries@2023-01-01-preview' existing = {
-  name: 'graphragacr12153'
+  name: containerRegistryName
   scope: rg
 }
 
@@ -182,6 +240,44 @@ module redis './core/cache/redis.bicep' = {
 }
 
 // ============================================================================
+// Managed Identity — shared by all container apps for Key Vault access
+// Created before Key Vault so RBAC can be assigned before container apps deploy.
+// ============================================================================
+module managedIdentity './core/security/identity.bicep' = {
+  name: 'managed-identity'
+  scope: rg
+  params: {
+    name: 'graphrag-identity-${uniqueString(rg.id)}'
+    location: location
+    tags: tags
+  }
+}
+
+// ============================================================================
+// Key Vault — single source of truth for all secrets
+// ============================================================================
+module keyVault './core/security/key-vault.bicep' = {
+  name: 'key-vault'
+  scope: rg
+  params: {
+    name: 'graphrag-kv-${uniqueString(rg.id)}'
+    location: location
+    tags: tags
+    secretReaderPrincipalIds: [
+      managedIdentity.outputs.principalId
+    ]
+    neo4jPassword: neo4jPassword
+    voyageApiKey: voyageApiKey
+    mistralApiKey: mistralApiKey
+    llmwhispererApiKey: llmwhispererApiKey
+    auraDsClientSecret: auraDsClientSecret
+    authClientSecret: authClientSecret
+    b2cClientSecret: b2cClientSecret
+    adminApiKey: adminApiKey
+  }
+}
+
+// ============================================================================
 // Custom Domain Managed Certificates (Optional)
 // Prerequisites: CNAME DNS records must be configured BEFORE deploying with
 // custom domains. See DNS setup instructions in docs/.
@@ -192,7 +288,7 @@ module b2bManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2bCu
   name: 'b2b-managed-cert'
   scope: rg
   params: {
-    environmentName: 'graphrag-env'
+    environmentName: containerAppsEnvironmentName
     location: location
     domainName: b2bCustomDomain
     existingCertName: 'mc-rg-graphrag-fe-evidoc-enterpris-4005'
@@ -205,7 +301,7 @@ module b2cManagedCert './core/host/managed-certificate.bicep' = if (!empty(b2cCu
   name: 'b2c-managed-cert'
   scope: rg
   params: {
-    environmentName: 'graphrag-env'
+    environmentName: containerAppsEnvironmentName
     location: location
     domainName: b2cCustomDomain
     existingCertName: 'mc-rg-graphrag-fe-evidoc-hulkdesig-2553'
@@ -228,8 +324,8 @@ module graphragApi './core/host/container-app.bicep' = {
     registryUsername: useAcrPassword ? acrUsername : ''
     registryPasswordSecretName: useAcrPassword ? 'acr-password' : ''
     containerName: 'graphrag-api'
-    // API Gateway image - handles HTTP requests
     containerImage: apiImageName
+    userAssignedIdentityId: managedIdentity.outputs.id
     targetPort: 8000
     // Custom domain configuration
     customDomainName: b2bCustomDomain
@@ -241,283 +337,128 @@ module graphragApi './core/host/container-app.bicep' = {
     authType: authType
     clientSecretSettingName: !empty(authClientSecret) ? 'aad-client-secret' : ''
     tokenStoreSasSecretName: ''
-    env: concat([
-      {
-        name: 'SERVICE_ROLE'
-        value: 'api'
-      }
-      {
-        name: 'AUTH_TYPE'
-        value: authType
-      }
-      {
-        name: 'REQUIRE_AUTH'
-        value: 'true'
-      }
-      {
-        name: 'RUNNING_IN_PRODUCTION'
-        value: 'true'
-      }
-      {
-        name: 'AUTH_CLIENT_ID'
-        value: authClientId
-      }
-      {
-        name: 'GROUP_ID_OVERRIDE'
-        value: 'test-5pdfs-v2-fix2'
-      }
-      {
-        name: 'ALLOW_LEGACY_GROUP_HEADER'
-        value: 'false'
-      }
-      {
-        name: 'AZURE_OPENAI_ENDPOINT'
-        value: 'https://graphrag-openai-8476.openai.azure.com/'
-      }
-      {
-        name: 'AZURE_OPENAI_EMBEDDING_ENDPOINT'
-        value: 'https://graphrag-openai-8476.openai.azure.com/'
-      }
-      {
-        name: 'AZURE_TENANT_ID'
-        value: subscription().tenantId
-      }
-    ], [
-      {
-        name: 'PORT'
-        value: '8000'
-      }
-      {
-        name: 'AZURE_OPENAI_DEPLOYMENT_NAME'
-        value: 'gpt-5.1'
-      }
-      {
-        name: 'AZURE_OPENAI_ROUTING_DEPLOYMENT'
-        value: 'gpt-4o-mini'
-      }
-      {
-        name: 'AZURE_OPENAI_INDEXING_DEPLOYMENT'
-        value: 'gpt-4.1'
-      }
-      // DEPRECATED: V1 legacy OpenAI embedding settings (V2 uses Voyage voyage-context-3 / 2048 dims)
-      {
-        name: 'AZURE_OPENAI_EMBEDDING_DEPLOYMENT'
-        value: 'text-embedding-3-large'
-      }
-      {
-        name: 'AZURE_OPENAI_EMBEDDING_DIMENSIONS'
-        value: '3072'
-      }
-      {
-        name: 'AZURE_OPENAI_REASONING_EFFORT'
-        value: 'high'
-      }
-      {
-        name: 'AZURE_OPENAI_ROUTING_REASONING_EFFORT'
-        value: 'medium'
-      }
-      {
-        name: 'AZURE_OPENAI_API_VERSION'
-        value: '2024-10-21'
-      }
-      {
-        name: 'AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT'
-        value: azureDocumentIntelligenceEndpoint
-      }
-      {
-        name: 'AZURE_TRANSLATOR_ENDPOINT'
-        value: azureTranslatorEndpoint
-      }
-      {
-        name: 'AZURE_TRANSLATOR_REGION'
-        value: azureTranslatorRegion
-      }
-      {
-        name: 'NEO4J_URI'
-        value: 'neo4j+s://a86dcf63.databases.neo4j.io'
-      }
-      {
-        name: 'NEO4J_USERNAME'
-        value: 'neo4j'
-      }
-      {
-        name: 'NEO4J_PASSWORD'
-        secretRef: 'neo4j-password'
-      }
-      {
-        name: 'NEO4J_DATABASE'
-        value: 'neo4j'
-      }
-      {
-        name: 'COSMOS_DB_ENDPOINT'
-        value: cosmosDb.outputs.cosmosAccountEndpoint
-      }
-      {
-        name: 'COSMOS_DB_DATABASE_NAME'
-        value: cosmosDb.outputs.databaseName
-      }
-      {
-        name: 'COSMOS_DB_CHAT_HISTORY_CONTAINER'
-        value: cosmosDb.outputs.chatHistoryContainerName
-      }
-      {
-        name: 'COSMOS_DB_USAGE_CONTAINER'
-        value: cosmosDb.outputs.usageContainerName
-      }
-      {
-        name: 'REDIS_HOST'
-        value: redis.outputs.redisHostName
-      }
-      {
-        name: 'REDIS_PORT'
-        value: string(redis.outputs.redisPort)
-      }
-      {
-        name: 'REDIS_PASSWORD'
-        secretRef: 'redis-password'
-      }
-      {
-        name: 'REDIS_QUEUE_NAME'
-        value: '{graphrag}:jobs:pending'
-      }
-      {
-        name: 'ENABLE_GROUP_ISOLATION'
-        value: 'true'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_SELECTION'
-        value: 'true'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_MAX_DEPTH'
-        value: '2'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_CANDIDATE_BUDGET'
-        value: '30'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_KEEP_PER_LEVEL'
-        value: '12'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_SCORE_THRESHOLD'
-        value: '25'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_RATING_BATCH_SIZE'
-        value: '8'
-      }
-      {
-        name: 'V3_GLOBAL_DYNAMIC_BUILD_HIERARCHY_ON_QUERY'
-        value: 'true'
-      }
-      {
-        name: 'USE_SECTION_CHUNKING'
-        value: '1'
-      }
-      {
-        name: 'VOYAGE_V2_ENABLED'
-        value: 'true'
-      }
-      {
-        name: 'VOYAGE_EMBEDDING_MODEL'
-        value: 'voyage-context-3'
-      }
-      {
-        name: 'VOYAGE_EMBEDDING_DIM'
-        value: '2048'
-      }
-      {
-        name: 'DEFAULT_ALGORITHM_VERSION'
-        value: 'v2'
-      }
-      {
-        name: 'ALGORITHM_V1_ENABLED'
-        value: 'true'
-      }
-      {
-        name: 'ALGORITHM_V2_ENABLED'
-        value: 'true'
-      }
-      {
-        name: 'ALGORITHM_V3_PREVIEW_ENABLED'
-        value: 'false'
-      }
-    ], !empty(voyageApiKey) ? [
-      {
-        name: 'VOYAGE_API_KEY'
-        secretRef: 'voyage-api-key'
-      }
-    ] : [], !empty(adminApiKey) ? [
+    env: concat(apiSpecificEnvVars, sharedEnvVars, conditionalSecretEnvVars, !empty(adminApiKey) ? [
       {
         name: 'ADMIN_API_KEY'
         secretRef: 'admin-api-key'
       }
-    ] : [], useUserUpload ? [
-      {
-        name: 'USE_USER_UPLOAD'
-        value: 'true'
-      }
-      {
-        name: 'AZURE_STORAGE_ACCOUNT'
-        value: storageAccountName
-      }
-      {
-        name: 'AZURE_STORAGE_CONTAINER'
-        value: 'content'
-      }
-      {
-        name: 'AZURE_USERSTORAGE_ACCOUNT'
-        value: storageAccountName
-      }
-      {
-        name: 'AZURE_USERSTORAGE_CONTAINER'
-        value: userStorageContainerName
-      }
     ] : [])
-    secrets: concat([
-      {
-        name: 'neo4j-password'
-        value: neo4jPassword
-      }
-      {
-        name: 'redis-password'
-        value: redis.outputs.redisPrimaryKey
-      }
-    ], useAcrPassword ? [
-      {
-        name: 'acr-password'
-        value: acrPassword
-      }
-    ] : [], !empty(voyageApiKey) ? [
-      {
-        name: 'voyage-api-key'
-        value: voyageApiKey
-      }
-    ] : [], !empty(adminApiKey) ? [
+    secrets: concat(sharedSecrets, !empty(adminApiKey) ? [
       {
         name: 'admin-api-key'
-        value: adminApiKey
+        keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/admin-api-key'
+        identity: managedIdentity.outputs.id
       }
     ] : [], !empty(authClientSecret) ? [
       {
         name: 'aad-client-secret'
-        value: authClientSecret
+        keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/aad-client-secret'
+        identity: managedIdentity.outputs.id
       }
     ] : [])
   }
 }
 
+// ── API-specific env vars (not shared with worker) ──────────────────────
+var apiSpecificEnvVars = [
+  {
+    name: 'SERVICE_ROLE'
+    value: 'api'
+  }
+  {
+    name: 'AUTH_TYPE'
+    value: authType
+  }
+  {
+    name: 'REQUIRE_AUTH'
+    value: 'true'
+  }
+  {
+    name: 'AUTH_CLIENT_ID'
+    value: authClientId
+  }
+  {
+    name: 'GROUP_ID_OVERRIDE'
+    value: groupIdOverride
+  }
+  {
+    name: 'ALLOW_LEGACY_GROUP_HEADER'
+    value: 'false'
+  }
+  {
+    name: 'PORT'
+    value: '8000'
+  }
+  {
+    name: 'DEFAULT_ALGORITHM_VERSION'
+    value: 'v2'
+  }
+  {
+    name: 'ALGORITHM_V1_ENABLED'
+    value: 'true'
+  }
+  {
+    name: 'ALGORITHM_V2_ENABLED'
+    value: 'true'
+  }
+  {
+    name: 'ALGORITHM_V3_PREVIEW_ENABLED'
+    value: 'false'
+  }
+]
+
+// ── User upload env vars (shared by API and B2C) ────────────────────────
+var userUploadEnvVars = [
+  {
+    name: 'USE_USER_UPLOAD'
+    value: 'true'
+  }
+  {
+    name: 'AZURE_STORAGE_ACCOUNT'
+    value: storageAccountName
+  }
+  {
+    name: 'AZURE_STORAGE_CONTAINER'
+    value: 'documents'
+  }
+  {
+    name: 'AZURE_USERSTORAGE_ACCOUNT'
+    value: storageAccountName
+  }
+  {
+    name: 'AZURE_USERSTORAGE_CONTAINER'
+    value: userStorageContainerName
+  }
+]
+
+// ── Conditional secret-ref env vars (added when secrets are provided) ───
+var conditionalSecretEnvVars = concat(
+  !empty(voyageApiKey) ? [{ name: 'VOYAGE_API_KEY', secretRef: 'voyage-api-key' }] : [],
+  !empty(mistralApiKey) ? [{ name: 'MISTRAL_API_KEY', secretRef: 'mistral-api-key' }] : [],
+  !empty(llmwhispererApiKey) ? [{ name: 'LLMWHISPERER_API_KEY', secretRef: 'llmwhisperer-api-key' }] : [],
+  !empty(auraDsClientSecret) ? [
+      { name: 'AURA_DS_CLIENT_ID', value: auraDsClientId }
+      { name: 'AURA_DS_CLIENT_SECRET', secretRef: 'aura-ds-client-secret' }
+    ] : []
+)
+
 // Shared environment variables for both API and Worker
 var sharedEnvVars = concat([
   {
+    name: 'RUNNING_IN_PRODUCTION'
+    value: 'true'
+  }
+  {
+    name: 'REFRESH_TIMESTAMP'
+    value: deployTimestamp
+  }
+  {
     name: 'AZURE_OPENAI_ENDPOINT'
-    value: 'https://graphrag-openai-8476.openai.azure.com/'
+    value: azureOpenAiEndpoint
   }
   {
     name: 'AZURE_OPENAI_EMBEDDING_ENDPOINT'
-    value: 'https://graphrag-openai-8476.openai.azure.com/'
+    value: azureOpenAiEndpoint
   }
   {
     name: 'AZURE_TENANT_ID'
@@ -553,6 +494,10 @@ var sharedEnvVars = concat([
     value: azureDocumentIntelligenceEndpoint
   }
   {
+    name: 'AZURE_CONTENT_UNDERSTANDING_ENDPOINT'
+    value: azureContentUnderstandingEndpoint
+  }
+  {
     name: 'AZURE_TRANSLATOR_ENDPOINT'
     value: azureTranslatorEndpoint
   }
@@ -561,12 +506,16 @@ var sharedEnvVars = concat([
     value: azureTranslatorRegion
   }
   {
+    name: 'ENABLE_SPEECH_TRANSLATION'
+    value: enableSpeechTranslation
+  }
+  {
     name: 'NEO4J_URI'
-    value: 'neo4j+s://a86dcf63.databases.neo4j.io'
+    value: neo4jUri
   }
   {
     name: 'NEO4J_USERNAME'
-    value: 'neo4j'
+    value: neo4jUsername
   }
   {
     name: 'NEO4J_PASSWORD'
@@ -574,7 +523,7 @@ var sharedEnvVars = concat([
   }
   {
     name: 'NEO4J_DATABASE'
-    value: 'neo4j'
+    value: neo4jDatabase
   }
   {
     name: 'COSMOS_DB_ENDPOINT'
@@ -624,33 +573,14 @@ var sharedEnvVars = concat([
     name: 'VOYAGE_EMBEDDING_DIM'
     value: '2048'
   }
-], useUserUpload ? [
-  {
-    name: 'USE_USER_UPLOAD'
-    value: 'true'
-  }
-  {
-    name: 'AZURE_STORAGE_ACCOUNT'
-    value: storageAccountName
-  }
-  {
-    name: 'AZURE_STORAGE_CONTAINER'
-    value: 'content'
-  }
-  {
-    name: 'AZURE_USERSTORAGE_ACCOUNT'
-    value: storageAccountName
-  }
-  {
-    name: 'AZURE_USERSTORAGE_CONTAINER'
-    value: userStorageContainerName
-  }
-] : [])
+], useUserUpload ? userUploadEnvVars : [])
 
+// Shared secrets — Key Vault references + runtime-generated values
 var sharedSecrets = concat([
   {
     name: 'neo4j-password'
-    value: neo4jPassword
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/neo4j-password'
+    identity: managedIdentity.outputs.id
   }
   {
     name: 'redis-password'
@@ -664,7 +594,26 @@ var sharedSecrets = concat([
 ] : [], !empty(voyageApiKey) ? [
   {
     name: 'voyage-api-key'
-    value: voyageApiKey
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/voyage-api-key'
+    identity: managedIdentity.outputs.id
+  }
+] : [], !empty(mistralApiKey) ? [
+  {
+    name: 'mistral-api-key'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/mistral-api-key'
+    identity: managedIdentity.outputs.id
+  }
+] : [], !empty(llmwhispererApiKey) ? [
+  {
+    name: 'llmwhisperer-api-key'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/llmwhisperer-api-key'
+    identity: managedIdentity.outputs.id
+  }
+] : [], !empty(auraDsClientSecret) ? [
+  {
+    name: 'aura-ds-client-secret'
+    keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/aura-ds-client-secret'
+    identity: managedIdentity.outputs.id
   }
 ] : [])
 
@@ -688,6 +637,7 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     registryPasswordSecretName: useAcrPassword ? 'acr-password' : ''
     containerName: 'graphrag-api-b2c'
     containerImage: apiImageName
+    userAssignedIdentityId: managedIdentity.outputs.id
     targetPort: 8000
     // Custom domain configuration
     customDomainName: b2cCustomDomain
@@ -715,10 +665,6 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
         value: 'true'
       }
       {
-        name: 'RUNNING_IN_PRODUCTION'
-        value: 'true'
-      }
-      {
         name: 'AUTH_CLIENT_ID'
         value: b2cClientId
       }
@@ -726,12 +672,7 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
         name: 'ALLOW_LEGACY_GROUP_HEADER'
         value: 'false'
       }
-    ], sharedEnvVars, !empty(voyageApiKey) ? [
-      {
-        name: 'VOYAGE_API_KEY'
-        secretRef: 'voyage-api-key'
-      }
-    ] : [], !empty(adminApiKey) ? [
+    ], sharedEnvVars, conditionalSecretEnvVars, !empty(adminApiKey) ? [
       {
         name: 'ADMIN_API_KEY'
         secretRef: 'admin-api-key'
@@ -745,12 +686,14 @@ module graphragApiB2C './core/host/container-app.bicep' = if (enableB2C && !empt
     ], !empty(adminApiKey) ? [
       {
         name: 'admin-api-key'
-        value: adminApiKey
+        keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/admin-api-key'
+        identity: managedIdentity.outputs.id
       }
     ] : [], !empty(b2cClientSecret) ? [
       {
         name: 'b2c-client-secret'
-        value: b2cClientSecret
+        keyVaultUrl: '${keyVault.outputs.vaultUri}secrets/b2c-client-secret'
+        identity: managedIdentity.outputs.id
       }
     ] : [])
   }
@@ -772,6 +715,7 @@ module graphragWorker './core/host/container-app-worker.bicep' = {
     registryPasswordSecretName: useAcrPassword ? 'acr-password' : ''
     containerName: 'graphrag-worker'
     containerImage: workerImageName
+    userAssignedIdentityId: managedIdentity.outputs.id
     cpuCores: '1.0'
     memory: '2Gi'
     minReplicas: 1
@@ -823,12 +767,7 @@ module graphragWorker './core/host/container-app-worker.bicep' = {
         name: 'USE_SECTION_CHUNKING'
         value: '1'
       }
-    ], sharedEnvVars, !empty(voyageApiKey) ? [
-      {
-        name: 'VOYAGE_API_KEY'
-        secretRef: 'voyage-api-key'
-      }
-    ] : [])
+    ], sharedEnvVars, conditionalSecretEnvVars)
     secrets: sharedSecrets
   }
 }
@@ -838,28 +777,26 @@ module openAiModels './core/ai/openai-models.bicep' = {
   name: 'openai-models'
   scope: rg
   params: {
-    openAiResourceName: 'graphrag-openai-8476'
+    openAiResourceName: azureOpenAiResourceName
     location: location
   }
 }
 
-// Role Assignments for Container App Managed Identities (API + Worker)
+// Role Assignments — all container apps share the same user-assigned managed identity
 module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleAssignments) {
   name: 'role-assignments'
   scope: rg
   params: {
-    documentIntelligenceName: 'doc-intel-graphrag'
+    documentIntelligenceName: documentIntelligenceName
     storageAccountName: storageAccountName
     containerRegistryName: containerRegistry.name
-    containerAppPrincipalIds: concat([
-      graphragApi.outputs.identityPrincipalId
-      graphragWorker.outputs.identityPrincipalId
-    ], (enableB2C && !empty(b2cClientId)) ? [graphragApiB2C.outputs.identityPrincipalId] : [])
-    azureOpenAiName: 'graphrag-openai-8476'
+    containerAppPrincipalIds: [
+      managedIdentity.outputs.principalId
+    ]
+    azureOpenAiName: azureOpenAiResourceName
     cosmosAccountName: cosmosDb.outputs.cosmosAccountName
     userStorageAccountName: useUserUpload ? storageAccountName : ''
   }
-  dependsOn: [openAiModels, cosmosDb, graphragApi, graphragWorker, graphragApiB2C] // Ensure resources exist before assigning permissions
 }
 
 // ============================================================================
@@ -878,7 +815,6 @@ module apim './core/gateway/apim.bicep' = if (enableApim) {
     backendUrl: graphragApi.outputs.uri
     enableDevPortal: false
   }
-  dependsOn: [graphragApi]
 }
 
 // Outputs
@@ -898,3 +834,6 @@ output GRAPHRAG_API_CUSTOM_DOMAIN string = !empty(b2bCustomDomain) ? 'https://${
 output GRAPHRAG_API_B2C_CUSTOM_DOMAIN string = !empty(b2cCustomDomain) ? 'https://${b2cCustomDomain}' : ''
 output AZURE_USERSTORAGE_ACCOUNT string = useUserUpload ? storageAccountName : ''
 output AZURE_USERSTORAGE_CONTAINER string = useUserUpload ? userStorageContainerName : ''
+output KEY_VAULT_NAME string = keyVault.outputs.vaultName
+output KEY_VAULT_URI string = keyVault.outputs.vaultUri
+output MANAGED_IDENTITY_ID string = managedIdentity.outputs.id

@@ -44,12 +44,13 @@ resource cognitiveServicesUserRole 'Microsoft.Authorization/roleAssignments@2022
   }
 }]
 
-// Storage Blob Data Reader role on Storage Account (for each principal)
-resource storageBlobDataReaderRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (principalId, i) in containerAppPrincipalIds: {
-  name: guid(storageAccount.id, principalId, 'storageBlobReader-v3-${i}')
+// Storage Blob Data Contributor role on Storage Account (for each principal)
+// Apps need write access for user uploads and content management
+resource storageBlobDataContributorRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (principalId, i) in containerAppPrincipalIds: {
+  name: guid(storageAccount.id, principalId, 'storageBlobContributor-v4-${i}')
   scope: storageAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1')
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')
     principalId: principalId
     principalType: 'ServicePrincipal'
   }

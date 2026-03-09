@@ -2581,6 +2581,7 @@ Instructions:
    If the question asks for N items (e.g. "list the three"), return exactly N bullets.
 9. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
 10. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
 {document_guidance}
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
@@ -2619,6 +2620,7 @@ Instructions:
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested.
 10. When the specific information requested is absent from the evidence, always **lead with** an explicit statement that it was not found (e.g. "The documents do not provide X") before mentioning any related information.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
 {document_guidance}
 
 Respond using this format:

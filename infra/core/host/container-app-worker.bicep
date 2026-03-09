@@ -114,7 +114,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
     }
   }
   identity: {
-    type: empty(userAssignedIdentityId) ? 'SystemAssigned' : 'UserAssigned'
+    type: empty(userAssignedIdentityId) ? 'SystemAssigned' : 'SystemAssigned,UserAssigned'
     userAssignedIdentities: empty(userAssignedIdentityId) ? null : {
       '${userAssignedIdentityId}': {}
     }

@@ -240,8 +240,9 @@ module redis './core/cache/redis.bicep' = {
 }
 
 // ============================================================================
-// Managed Identity — shared by all container apps for Key Vault access
-// Created before Key Vault so RBAC can be assigned before container apps deploy.
+// User-Assigned Managed Identity — used only for Key Vault secret resolution
+// and ACR image pull at deployment time. Runtime resource access (Storage,
+// OpenAI, Cosmos, DI) uses each container app's system-assigned identity.
 // ============================================================================
 module managedIdentity './core/security/identity.bicep' = {
   name: 'managed-identity'
@@ -782,7 +783,8 @@ module openAiModels './core/ai/openai-models.bicep' = {
   }
 }
 
-// Role Assignments — all container apps share the same user-assigned managed identity
+// Role Assignments — system-assigned identities for runtime access + user-assigned for ACR pull
+// First deployment: brief transient auth failures while system identity RBAC propagates (~60s)
 module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleAssignments) {
   name: 'role-assignments'
   scope: rg
@@ -790,9 +792,13 @@ module roleAssignments './core/security/role-assignments.bicep' = if (!skipRoleA
     documentIntelligenceName: documentIntelligenceName
     storageAccountName: storageAccountName
     containerRegistryName: containerRegistry.name
-    containerAppPrincipalIds: [
+    containerAppPrincipalIds: concat([
       managedIdentity.outputs.principalId
-    ]
+      graphragApi.outputs.identityPrincipalId
+      graphragWorker.outputs.identityPrincipalId
+    ], enableB2C && !empty(b2cClientId) ? [
+      graphragApiB2C.outputs.identityPrincipalId
+    ] : [])
     azureOpenAiName: azureOpenAiResourceName
     cosmosAccountName: cosmosDb.outputs.cosmosAccountName
     userStorageAccountName: useUserUpload ? storageAccountName : ''

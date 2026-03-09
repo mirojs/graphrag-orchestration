@@ -69,10 +69,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# File extensions that are already plain text — bypass DI and read directly.
-# HTML/HTM excluded: DI provides useful layout extraction for rich HTML.
-_PLAINTEXT_BYPASS_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".xml"}
-
 
 def extract_document_date(content: str) -> Optional[str]:
     """Extract the most prominent date from document content.
@@ -645,7 +641,6 @@ class LazyGraphRAGIndexingPipeline:
         # Assign stable IDs and normalize fields.
         normalized: List[Dict[str, Any]] = []
         url_inputs: List[str] = []
-        plaintext_urls: List[tuple] = []  # (index_in_normalized, url)
 
         for doc in documents:
             meta = doc.get("metadata") or {}
@@ -695,38 +690,13 @@ class LazyGraphRAGIndexingPipeline:
             )
 
             if ingestion == "document-intelligence" and not str(content).strip() and str(source).startswith("http"):
-                # Plaintext formats bypass DI — download and read directly
-                ext = os.path.splitext(source.split("?")[0])[1].lower()
-                if ext in _PLAINTEXT_BYPASS_EXTENSIONS:
-                    plaintext_urls.append((len(normalized) - 1, str(source)))
-                else:
-                    url_inputs.append(str(source))
+                url_inputs.append(str(source))
 
-        # ── Download plaintext files directly (skip DI) ──────────────
-        if plaintext_urls:
-            from azure.storage.blob.aio import BlobClient
-            from azure.identity.aio import DefaultAzureCredential as AsyncDefaultAzureCredential
-            credential = AsyncDefaultAzureCredential()
-            try:
-                for idx, pt_url in plaintext_urls:
-                    try:
-                        async with BlobClient.from_blob_url(pt_url, credential=credential) as blob:
-                            download = await blob.download_blob()
-                            raw = await download.readall()
-                        text = raw.decode("utf-8", errors="replace")
-                        normalized[idx]["content"] = text
-                        logger.info(f"📄 Direct-read plaintext ({len(text)} chars): {pt_url.split('/')[-1].split('?')[0]}")
-                    except Exception as exc:
-                        logger.warning(f"Failed to download plaintext {pt_url}: {exc}")
-            finally:
-                await credential.close()
-
-        # ── Pair sidecar files with their parent documents ────────────
-        # Sidecars are pre-extracted content that bypasses DI for the parent:
-        #   "X.pdf.result.json" → full AnalyzeResult (routed through DI deserializer)
-        #   "X.pdf.md"          → pre-extracted markdown text (set as content directly)
+        # ── Pair .result.json sidecars with their parent documents ────
+        # When both "X.pdf" and "X.pdf.result.json" are uploaded, use the
+        # pre-analyzed result for the PDF and drop the .result.json from
+        # standalone processing to avoid duplicate content.
         all_url_set = set(url_inputs)
-        all_sources = {d["source"] for d in normalized if d.get("source")}
 
         # Detect .result.json sidecars (processed via DI deserializer)
         result_json_urls = {u for u in url_inputs if u.endswith(".result.json")}
@@ -736,52 +706,6 @@ class LazyGraphRAGIndexingPipeline:
             if parent_url in all_url_set:
                 paired_redirects[parent_url] = rj_url
                 logger.info(f"Paired .result.json sidecar: {rj_url.split('/')[-1]} → {parent_url.split('/')[-1]}")
-
-        # Detect .md sidecars (pre-extracted markdown text)
-        # Look in both url_inputs AND plaintext_urls for .md files
-        md_sidecar_pairs: Dict[str, str] = {}  # parent_url -> md_url
-        all_plaintext_urls = {u for _, u in plaintext_urls}
-        for md_url in (all_plaintext_urls | all_url_set):
-            if not md_url.endswith(".md"):
-                continue
-            # "X.pdf.md" → parent is "X.pdf"
-            parent_url = md_url.removesuffix(".md")
-            if parent_url in all_url_set:
-                md_sidecar_pairs[parent_url] = md_url
-                logger.info(f"Paired .md sidecar: {md_url.split('/')[-1]} → {parent_url.split('/')[-1]}")
-
-        # Download .md sidecar content and inject into parent PDF entries
-        if md_sidecar_pairs:
-            from azure.storage.blob.aio import BlobClient as _BlobClient
-            from azure.identity.aio import DefaultAzureCredential as _ADC
-            _cred = _ADC()
-            try:
-                for parent_url, md_url in md_sidecar_pairs.items():
-                    try:
-                        async with _BlobClient.from_blob_url(md_url, credential=_cred) as blob:
-                            download = await blob.download_blob()
-                            raw = await download.readall()
-                        md_text = raw.decode("utf-8", errors="replace")
-                        # Set content on the parent PDF entry so it skips DI
-                        for doc in normalized:
-                            if doc.get("source") == parent_url:
-                                doc["content"] = md_text
-                                break
-                        # Remove parent from DI url_inputs since it now has content
-                        if parent_url in all_url_set:
-                            url_inputs = [u for u in url_inputs if u != parent_url]
-                            all_url_set.discard(parent_url)
-                        logger.info(f"📄 Loaded .md sidecar ({len(md_text)} chars) for {parent_url.split('/')[-1]}")
-                    except Exception as exc:
-                        logger.warning(f"Failed to load .md sidecar {md_url}: {exc}")
-            finally:
-                await _cred.close()
-
-        # Mark .md sidecar docs as skip (they're consumed, not standalone)
-        for doc in normalized:
-            src = doc.get("source", "")
-            if src in md_sidecar_pairs.values():
-                doc["_skip_sidecar"] = True
 
         # Build effective URL list: replace paired PDFs with their .result.json,
         # drop .result.json entries that were paired (they'll run via the PDF entry)

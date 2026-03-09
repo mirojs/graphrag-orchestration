@@ -83,10 +83,22 @@ MAX_UPLOAD_SIZE_MB = 50
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
-    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt",
-    ".txt", ".csv", ".md", ".html", ".htm",
+    # Azure DI native support
+    ".pdf", ".docx", ".xlsx", ".xls", ".pptx", ".html", ".htm",
+    # Images — Azure DI OCR
     ".jpg", ".jpeg", ".png", ".tiff", ".tif", ".bmp",
-    ".json", ".xml",
+    # Converted at upload: .txt→.pdf, .csv→.xlsx, .htm→.html
+    ".txt", ".csv",
+    # Sidecars (.result.json for pre-analyzed DI content)
+    ".json",
+}
+
+# Extensions that are converted to DI-compatible formats at upload time.
+# The original file is replaced with the converted version in blob storage.
+_UPLOAD_CONVERSIONS = {
+    ".txt": ".pdf",
+    ".csv": ".xlsx",
+    ".htm": ".html",
 }
 
 
@@ -116,6 +128,85 @@ def _validate_upload(f: UploadFile) -> None:
             status_code=413,
             detail=f"File too large ({f.size / 1024 / 1024:.1f} MB). Maximum: {MAX_UPLOAD_SIZE_MB} MB"
         )
+
+
+# ==================== Upload-time Format Conversion ====================
+
+def _convert_txt_to_pdf(raw_bytes: bytes, original_filename: str) -> bytes:
+    """Convert plain text content to a PDF document."""
+    from fpdf import FPDF
+
+    text = raw_bytes.decode("utf-8", errors="replace")
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=10)
+    # multi_cell moves x; reset to left margin for each line
+    for line in text.split("\n"):
+        if line.strip():
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(0, 5, line)
+        else:
+            pdf.ln(5)
+    return bytes(pdf.output())
+
+
+def _convert_csv_to_xlsx(raw_bytes: bytes, original_filename: str) -> bytes:
+    """Convert CSV content to an Excel XLSX file."""
+    import csv as csv_mod
+    import io
+    from openpyxl import Workbook
+
+    text = raw_bytes.decode("utf-8", errors="replace")
+    reader = csv_mod.reader(io.StringIO(text))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Data"
+    for row in reader:
+        ws.append(row)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+async def _maybe_convert_upload(f: UploadFile) -> tuple:
+    """Convert the upload if its extension requires conversion.
+
+    Returns (new_filename, content_bytes, was_converted).
+    If no conversion is needed, returns (original_filename, original_bytes, False).
+    """
+    import os
+    safe_name = _sanitize_filename(f.filename)
+    ext = os.path.splitext(safe_name)[1].lower()
+    raw = await f.read()
+
+    target_ext = _UPLOAD_CONVERSIONS.get(ext)
+    if not target_ext:
+        # Reset file position for downstream consumers
+        await f.seek(0)
+        return safe_name, raw, False
+
+    base = os.path.splitext(safe_name)[0]
+    new_name = base + target_ext
+
+    if ext == ".txt":
+        converted = _convert_txt_to_pdf(raw, safe_name)
+    elif ext == ".csv":
+        converted = _convert_csv_to_xlsx(raw, safe_name)
+    elif ext == ".htm":
+        # Same content, just rename extension
+        converted = raw
+    else:
+        await f.seek(0)
+        return safe_name, raw, False
+
+    logger.info(
+        "Converted upload %s → %s (%d → %d bytes)",
+        safe_name, new_name, len(raw), len(converted),
+    )
+    return new_name, converted, True
 
 
 # ==================== Folder Helpers ====================
@@ -230,8 +321,16 @@ async def upload_files(
     for f in file:
         try:
             _validate_upload(f)
-            safe_filename = _sanitize_filename(f.filename)
-            file_url = await blob_manager.upload_blob(f, safe_filename, group_id, folder=folder_name)
+            # Convert format if needed (.txt→.pdf, .csv→.xlsx, .htm→.html)
+            converted_name, converted_bytes, was_converted = await _maybe_convert_upload(f)
+
+            if was_converted:
+                import io
+                blob_file = io.BytesIO(converted_bytes)
+                file_url = await blob_manager.upload_blob(blob_file, converted_name, group_id, folder=folder_name)
+            else:
+                file_url = await blob_manager.upload_blob(f, converted_name, group_id, folder=folder_name)
+
             if ingester:
                 from prepdocslib.listfilestrategy import File as IngesterFile
 
@@ -239,7 +338,7 @@ async def upload_files(
                     IngesterFile(content=f, url=file_url, acls={"oids": [user_id]}),
                     user_oid=group_id,
                 )
-            results.append({"filename": safe_filename, "status": "success", "url": file_url})
+            results.append({"filename": converted_name, "status": "success", "url": file_url})
         except Exception as e:
             logger.error("Error uploading file %s: %s", f.filename, e)
             results.append({"filename": f.filename, "status": "failed", "error": str(e)})

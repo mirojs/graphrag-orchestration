@@ -342,4 +342,4 @@ export function getFileExtension(filename: string): string {
     return filename.split(".").pop()?.toLowerCase() || "";
 }
 
-export const ACCEPTED_FILE_TYPES = ".txt,.md,.json,.png,.jpg,.jpeg,.bmp,.heic,.tiff,.pdf,.docx,.xlsx,.pptx,.html";
+export const ACCEPTED_FILE_TYPES = ".txt,.csv,.png,.jpg,.jpeg,.bmp,.tiff,.pdf,.docx,.xlsx,.pptx,.html,.htm";

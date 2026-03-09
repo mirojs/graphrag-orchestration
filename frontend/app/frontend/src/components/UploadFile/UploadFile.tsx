@@ -120,7 +120,7 @@ export const UploadFile: React.FC<Props> = ({ className, disabled }: Props) => {
                         <div>
                             <Label>{t("upload.fileLabel")}</Label>
                             <input
-                                accept=".txt, .md, .json, .png, .jpg, .jpeg, .bmp, .heic, .tiff, .pdf, .docx, .xlsx, .pptx, .html"
+                                accept=".txt, .csv, .png, .jpg, .jpeg, .bmp, .tiff, .pdf, .docx, .xlsx, .pptx, .html, .htm"
                                 className={styles.chooseFiles}
                                 type="file"
                                 onChange={handleUploadFile}

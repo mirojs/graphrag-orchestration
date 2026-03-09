@@ -168,12 +168,13 @@ class InstrumentationHooks:
             # --- Redis: increment daily/monthly query counters ---
             # Skip if caller indicates the query was already recorded (e.g. by
             # enforce_plan_limits) to avoid double-counting.
-            user_id = kwargs.get("user_id") or kwargs.get("group_id", "")
-            if user_id and not kwargs.get("skip_record_query"):
+            user_id = kwargs.get("user_id") or ""
+            effective_id = user_id or kwargs.get("group_id", "")
+            if effective_id and not kwargs.get("skip_record_query"):
                 try:
                     from src.core.services.quota_enforcer import get_quota_enforcer
                     enforcer = await asyncio.wait_for(get_quota_enforcer(), timeout=15)
-                    await asyncio.wait_for(enforcer.record_query(user_id), timeout=10)
+                    await asyncio.wait_for(enforcer.record_query(effective_id), timeout=10)
                 except Exception as rq_err:
                     logger.warning("redis_record_query_skipped", error=repr(rq_err))
 
@@ -185,8 +186,8 @@ class InstrumentationHooks:
                 if cosmos.endpoint and not cosmos._usage_container:
                     await asyncio.wait_for(cosmos.initialize(), timeout=10)
                 record = UsageRecord(
-                    partition_id=user_id or kwargs.get("group_id", ""),
-                    user_id=user_id if user_id != kwargs.get("group_id") else None,
+                    partition_id=user_id if user_id else kwargs.get("group_id", ""),
+                    user_id=user_id or None,
                     usage_type="llm_completion",
                     model=kwargs.get("metadata", {}).get("model", ""),
                     total_tokens=kwargs.get("tokens_used", 0),

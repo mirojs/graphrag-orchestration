@@ -34,6 +34,7 @@ import {
     deleteFolderApi,
     analyzeFolderApi,
     deleteFolderAnalysisApi,
+    cancelFolderAnalysisApi,
     getFolderFileCountApi,
     Folder,
     SubfolderCount,
@@ -409,6 +410,22 @@ const Files = () => {
         [client, addToast, loadFolders, t]
     );
 
+    const handleCancelAnalysis = useCallback(
+        async (folderId: string) => {
+            if (!window.confirm("Cancel the in-progress analysis? You can re-analyze later.")) return;
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await cancelFolderAnalysisApi(folderId, token as string);
+                addToast("info", "Analysis cancelled");
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", err.message || "Failed to cancel analysis");
+            }
+        },
+        [client, addToast, loadFolders]
+    );
+
     // Move file to folder
     const handleMoveFile = useCallback(
         async (filename: string, destFolderId: string | null) => {
@@ -641,6 +658,14 @@ const Files = () => {
                                             <div className={styles.analysisProgressFill} />
                                         </div>
                                     )}
+                                    <div className={styles.analysisActions}>
+                                        <button
+                                            className={styles.cancelAnalysisBtn}
+                                            onClick={() => handleCancelAnalysis(activeFolder.id)}
+                                        >
+                                            ✖ {t("files.cancelAnalysis", "Cancel Analysis")}
+                                        </button>
+                                    </div>
                                 </>
                             )}
                         </div>

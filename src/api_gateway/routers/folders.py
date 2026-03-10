@@ -889,8 +889,6 @@ async def delete_folder_analysis(
                              partition_id=partition_id).single()
         if not record:
             raise HTTPException(status_code=404, detail="Folder not found")
-        if record.get("analysis_status") == "analyzing":
-            raise HTTPException(status_code=409, detail="Cannot delete while analysis is in progress")
 
     analysis_group_id = record.get("analysis_group_id")
     if not analysis_group_id:
@@ -942,6 +940,57 @@ async def delete_folder_analysis(
         "analysis_group_id": analysis_group_id,
         "deleted": deleted,
         "message": f"Analysis data removed. Original files are kept.",
+    }
+
+
+@router.post("/{folder_id}/cancel-analysis")
+async def cancel_folder_analysis(
+    folder_id: str,
+    partition_id: str = Depends(get_partition_id),
+):
+    """Cancel a stuck or in-progress analysis, resetting status to not_analyzed.
+
+    This only resets the folder metadata — any partially-indexed graph data
+    remains (use DELETE /analysis to clean it up afterwards if needed).
+    """
+    driver = get_graph_driver()
+
+    verify_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.id as id, f.analysis_status as analysis_status
+    """
+    with driver.session() as session:
+        record = session.run(verify_query,
+                             folder_id=folder_id,
+                             partition_id=partition_id).single()
+        if not record:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        if record.get("analysis_status") != "analyzing":
+            raise HTTPException(status_code=400, detail="Folder is not currently analyzing")
+
+    cancel_query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+    WITH collect(f) + collect(sub) AS folders
+    UNWIND folders AS fld
+    SET fld.analysis_status = 'not_analyzed',
+        fld.analysis_files_total = null,
+        fld.analysis_files_processed = null,
+        fld.analysis_error = 'Analysis was cancelled by user',
+        fld.updated_at = datetime()
+    RETURN count(fld) as reset_count
+    """
+    with driver.session() as session:
+        session.run(cancel_query,
+                    folder_id=folder_id,
+                    partition_id=partition_id)
+
+    logger.info("folder_analysis_cancelled", folder_id=folder_id)
+
+    return {
+        "status": "cancelled",
+        "folder_id": folder_id,
+        "message": "Analysis cancelled. You can re-analyze or delete partial data.",
     }
 
 

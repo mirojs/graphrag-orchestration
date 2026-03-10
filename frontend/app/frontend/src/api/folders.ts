@@ -219,6 +219,31 @@ export async function deleteFolderAnalysisApi(
     return response.json();
 }
 
+export async function cancelFolderAnalysisApi(
+    folderId: string,
+    idToken: string
+): Promise<{ status: string; folder_id: string; message: string }> {
+    const headers = await getHeaders(idToken);
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}/cancel-analysis`,
+        {
+            method: "POST",
+            headers,
+        }
+    );
+    if (!response.ok) {
+        let detail = response.statusText;
+        try {
+            const body = await response.json();
+            detail = body.detail || detail;
+        } catch {
+            /* ignore */
+        }
+        throw new Error(detail);
+    }
+    return response.json();
+}
+
 export async function getFolderAnalysisStatusApi(
     folderId: string,
     idToken: string

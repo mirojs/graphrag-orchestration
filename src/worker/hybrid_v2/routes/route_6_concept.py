@@ -311,19 +311,20 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             # R6-6: Diversity BEFORE reranking but AFTER denoising (correct order).
             #
-            #   Previously diversity ran inside _retrieve_sentence_evidence on the raw
-            #   fetch, then reranking nullified it by cutting the diverse set to top_k.
-            #
-            #   Correct pipeline:
+            #   Pipeline:
             #     1. Denoise  (removes junk sentences)
             #     2. Diversity → pool of 2×rerank_top_k (guarantees document coverage)
             #     3. Rerank   → final rerank_top_k from the diverse pool
             #
             #   The reranker picks the BEST sentences from a pool that already covers
             #   all qualifying documents, so both relevance and coverage are preserved.
+            #
+            #   Diversity activates whenever we have more evidence than rerank_top_k
+            #   (previously required > 2×rerank_top_k, which was never met when
+            #   the shared vector index limited raw results).
             if diversity_enabled and sentence_evidence:
                 diversity_pool_k = rerank_top_k * 2
-                if len(sentence_evidence) > diversity_pool_k:
+                if len(sentence_evidence) > rerank_top_k:
                     sentence_evidence = self._diversify_by_document(
                         sentence_evidence,
                         top_k=diversity_pool_k,

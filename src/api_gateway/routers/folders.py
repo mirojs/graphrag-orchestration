@@ -9,8 +9,6 @@ from contextlib import contextmanager
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from typing import List, Optional
 from pydantic import BaseModel
-import asyncio
-import threading
 import structlog
 from datetime import datetime
 
@@ -767,6 +765,7 @@ async def get_folder_file_count(
 async def analyze_folder(
     folder_id: str,
     request: Request,
+    background_tasks: BackgroundTasks,
     partition_id: str = Depends(get_partition_id)
 ):
     """
@@ -857,29 +856,20 @@ async def analyze_folder(
               partition_id=partition_id,
               neo4j_gid=neo4j_gid)
 
-    # Run analysis in a SEPARATE THREAD with its own event loop.
-    # This prevents CPU-heavy pipeline work (entity dedup: 310K comparisons)
-    # from blocking the main API event loop, which would cause:
-    #   - liveness probe failures (health endpoint unresponsive)
-    #   - Neo4j connection pool staleness (no keepalive maintenance)
-    #   - stale driver errors when pipeline resumes after CPU work
-    def _run_in_thread():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(_run_folder_analysis(
-                doc_sync=doc_sync,
-                blobs=blobs,
-                neo4j_gid=neo4j_gid,
-                folder_id=folder_id,
-                folder_name=folder_name,
-                partition_id=partition_id,
-            ))
-        finally:
-            loop.close()
-
-    thread = threading.Thread(target=_run_in_thread, daemon=True)
-    thread.start()
+    # Run analysis as a background task on the main event loop.
+    # This keeps async compatibility (doc_sync uses async HTTP clients).
+    # The tolerant liveness probe (failureThreshold=30, ~15 min) prevents
+    # the container from being killed during CPU-heavy entity dedup.
+    # _get_session() ensures fresh Neo4j drivers after any blocking.
+    background_tasks.add_task(
+        _run_folder_analysis,
+        doc_sync=doc_sync,
+        blobs=blobs,
+        neo4j_gid=neo4j_gid,
+        folder_id=folder_id,
+        folder_name=folder_name,
+        partition_id=partition_id,
+    )
 
     logger.info("folder_analysis_started",
                 folder_id=folder_id,
@@ -1049,6 +1039,13 @@ async def _run_folder_analysis(
     avoiding "Driver closed" errors when reconnect() replaces the driver mid-task.
     """
     import traceback
+    import sys
+
+    logger.info("folder_analysis_task_started",
+                folder_id=folder_id,
+                file_count=len(blobs),
+                neo4j_gid=neo4j_gid)
+    print(f"[ANALYSIS TASK STARTED] folder_id={folder_id} files={len(blobs)}", file=sys.stderr, flush=True)
 
     def _get_session():
         """Get a fresh Neo4j session from the current (possibly reconnected) driver."""
@@ -1172,6 +1169,9 @@ async def _run_folder_analysis(
                      folder_id=folder_id,
                      error=str(e),
                      traceback=traceback.format_exc())
+        # Also print to ensure visibility in container logs
+        import sys
+        print(f"[ANALYSIS FAILED] folder_id={folder_id} error={e}", file=sys.stderr, flush=True)
         # Store error detail and mark folder as stale so user can retry
         try:
             error_msg = str(e)[:500]

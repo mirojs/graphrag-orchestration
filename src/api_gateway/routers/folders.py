@@ -682,30 +682,38 @@ async def get_folder_file_count(
 ):
     """Return the recursive file count for a folder (including all subfolders).
 
-    ADLS Gen2 hierarchical namespace means list_blobs with a folder prefix
-    naturally includes blobs in all subdirectories.
+    Blob storage is flat ({group_id}/{folder_name}/), so we traverse the
+    Neo4j SUBFOLDER_OF hierarchy to collect all descendant folder names,
+    then count blobs in each.
     """
     driver = get_graph_driver()
 
     query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
-    RETURN f.name as name
+    OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*1..]-(sub:Folder)
+    WITH f, collect(sub) AS subs
+    WITH [x IN [f] + subs | x.name] AS names
+    RETURN [n IN names WHERE n IS NOT NULL] AS folder_names
     """
     with driver.session() as session:
         result = session.run(query, folder_id=folder_id, partition_id=partition_id)
         record = result.single()
-        if not record:
+        if not record or not record["folder_names"]:
             raise HTTPException(status_code=404, detail="Folder not found")
-        folder_name = record["name"]
+        folder_names = record["folder_names"]
 
     blob_manager = getattr(request.app.state, "user_blob_manager", None)
     if not blob_manager:
         raise HTTPException(status_code=400, detail="File storage not configured")
 
-    blobs = await blob_manager.list_blobs_recursive(partition_id, folder_name)
-    logger.info("folder_file_count", folder_id=folder_id, folder_name=folder_name,
-                partition_id=partition_id, count=len(blobs))
-    return {"folder_id": folder_id, "folder_name": folder_name, "count": len(blobs)}
+    total = 0
+    for name in folder_names:
+        blobs = await blob_manager.list_blobs_recursive(partition_id, name)
+        total += len(blobs)
+
+    logger.info("folder_file_count", folder_id=folder_id, folder_names=folder_names,
+                partition_id=partition_id, count=total)
+    return {"folder_id": folder_id, "folder_names": folder_names, "count": total}
 
 
 @router.post("/{folder_id}/analyze")

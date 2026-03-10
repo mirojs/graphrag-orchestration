@@ -18,7 +18,7 @@ _blob_list_cache: dict[str, Tuple[float, list[str]]] = {}
 _BLOB_CACHE_TTL = 60  # seconds
 
 # Pattern for safe folder names: alphanumeric, spaces, hyphens, underscores, dots
-_SAFE_FOLDER_RE = re.compile(r'^[\w\s.\-]+$')
+_SAFE_FOLDER_RE = re.compile(r'^[\w\s.\-\u2014:]+$')  # includes em-dash and colon for analysis result timestamps
 
 
 def sanitize_folder_name(folder: str | None) -> str | None:

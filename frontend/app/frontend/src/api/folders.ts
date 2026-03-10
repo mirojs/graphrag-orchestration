@@ -235,3 +235,20 @@ export async function getFolderAnalysisStatusApi(
         community_count: folder.community_count,
     };
 }
+
+export async function getFolderFileCountApi(
+    folderId: string,
+    idToken: string
+): Promise<{ folder_id: string; count: number }> {
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}/file-count`,
+        {
+            method: "GET",
+            headers: await getHeaders(idToken),
+        }
+    );
+    if (!response.ok) {
+        throw new Error(`Get folder file count failed: ${response.statusText}`);
+    }
+    return response.json();
+}

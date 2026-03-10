@@ -34,6 +34,7 @@ import {
     deleteFolderApi,
     analyzeFolderApi,
     deleteFolderAnalysisApi,
+    getFolderFileCountApi,
     Folder,
 } from "../../api/folders";
 import { UploadZone } from "../../components/FileManager/UploadZone";
@@ -74,6 +75,7 @@ const Files = () => {
     const [moveFile, setMoveFile] = useState<string | null>(null);
     const [previewFile, setPreviewFile] = useState<string | null>(null);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
+    const [recursiveFileCount, setRecursiveFileCount] = useState<number | null>(null);
     const toastIdRef = useRef(0);
 
     // Track active folder name via ref (avoids callback dependency on `folders` state)
@@ -136,6 +138,21 @@ const Files = () => {
             : undefined;
         loadFiles();
         setSelected(new Set());
+        // Fetch recursive file count for the selected folder
+        setRecursiveFileCount(null);
+        if (activeFolderId) {
+            (async () => {
+                try {
+                    const token = client ? await getToken(client) : undefined;
+                    if (!useLogin || token) {
+                        const result = await getFolderFileCountApi(activeFolderId, token as string);
+                        setRecursiveFileCount(result.count);
+                    }
+                } catch {
+                    // Fall back to direct file count via filteredFiles
+                }
+            })();
+        }
     }, [activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Poll folders while any folder is "analyzing" (every 5s)
@@ -471,16 +488,16 @@ const Files = () => {
                         </div>
                     )}
 
-                    {/* Hero CTA — shown when folder is selected, has files, and is not yet analyzed */}
+                    {/* Hero CTA — shown when folder is selected, has files (including in subfolders), and is not yet analyzed */}
                     {activeFolder
                         && (!activeFolder.analysis_status || activeFolder.analysis_status === "not_analyzed")
                         && (!activeFolder.folder_type || activeFolder.folder_type === "user")
-                        && filteredFiles.length > 0 && (
+                        && (recursiveFileCount != null ? recursiveFileCount > 0 : filteredFiles.length > 0) && (
                         <div className={styles.analysisCta}>
                             <div className={styles.analysisCtaContent}>
                                 <span className={styles.analysisCtaIcon}>📊</span>
                                 <div className={styles.analysisCtaText}>
-                                    <strong>{t("files.readyToAnalyze", { count: filteredFiles.length, defaultValue: `Ready to analyze all documents in this folder` })}</strong>
+                                    <strong>{t("files.readyToAnalyze", { count: recursiveFileCount ?? filteredFiles.length, defaultValue: `Ready to analyze all documents in this folder` })}</strong>
                                     <span>{t("files.analysisExplainer", "Build a knowledge graph from your files to enable AI-powered question answering.")}</span>
                                 </div>
                             </div>

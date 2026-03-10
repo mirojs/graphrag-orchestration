@@ -674,6 +674,34 @@ class AnalysisStatusResponse(BaseModel):
     community_count: Optional[int]
 
 
+@router.get("/{folder_id}/file-count")
+async def get_folder_file_count(
+    folder_id: str,
+    request: Request,
+    partition_id: str = Depends(get_partition_id)
+):
+    """Return the recursive file count for a folder (including all subfolders)."""
+    driver = get_graph_driver()
+
+    query = """
+    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+    RETURN f.name as name
+    """
+    with driver.session() as session:
+        result = session.run(query, folder_id=folder_id, partition_id=partition_id)
+        record = result.single()
+        if not record:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        folder_name = record["name"]
+
+    blob_manager = getattr(request.app.state, "user_blob_manager", None)
+    if not blob_manager:
+        raise HTTPException(status_code=400, detail="File storage not configured")
+
+    blobs = await blob_manager.list_blobs_recursive(partition_id, folder_name)
+    return {"folder_id": folder_id, "count": len(blobs)}
+
+
 @router.post("/{folder_id}/analyze")
 async def analyze_folder(
     folder_id: str,

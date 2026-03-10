@@ -148,11 +148,10 @@ const ContentRenderer = ({ category, blobUrl, rawBytes, contentType, filename }:
         case "xlsx":
             return <XlsxRenderer rawBytes={rawBytes} />;
         case "pptx":
-            return <FallbackRenderer />;
         case "text":
             return <TextRenderer rawBytes={rawBytes} />;
         default:
-            return <FallbackRenderer />;
+            return null;
     }
 };
 
@@ -246,13 +245,3 @@ const XlsxRenderer = ({ rawBytes }: { rawBytes: ArrayBuffer | null }) => {
     return <div className={styles.xlsxWrapper} dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(tableHtml) }} />;
 };
 
-/* Fallback for unsupported formats */
-const FallbackRenderer = () => {
-    const { t } = useTranslation();
-    return (
-        <div className={styles.stateCard}>
-            <p><strong>{t("preview.noPreview")}</strong></p>
-            <p>{t("preview.noPreviewHint")}</p>
-        </div>
-    );
-};

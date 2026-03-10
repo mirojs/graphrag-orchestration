@@ -480,7 +480,7 @@ const Files = () => {
                             <div className={styles.analysisCtaContent}>
                                 <span className={styles.analysisCtaIcon}>📊</span>
                                 <div className={styles.analysisCtaText}>
-                                    <strong>{t("files.readyToAnalyze", { count: filteredFiles.length, defaultValue: `Ready to analyze ${filteredFiles.length} document(s)` })}</strong>
+                                    <strong>{t("files.readyToAnalyze", { count: filteredFiles.length, defaultValue: `Ready to analyze all documents in this folder` })}</strong>
                                     <span>{t("files.analysisExplainer", "Build a knowledge graph from your files to enable AI-powered question answering.")}</span>
                                 </div>
                             </div>

@@ -2663,12 +2663,15 @@ Output:
             await self.neo4j_store.aupsert_entities_batch(group_id, entities)
             details["entities_committed"] = len(entities)
         if relationships:
-            self.neo4j_store.upsert_relationships_batch(group_id, relationships)
+            # Offload sync Neo4j writes to thread pool to keep event loop responsive
+            await asyncio.to_thread(
+                self.neo4j_store.upsert_relationships_batch, group_id, relationships
+            )
             details["relationships_committed"] = len(relationships)
 
         # Best-effort: compute ranking fields so query-time Cypher can use them
         # without property-key warnings (importance_score/degree/chunk_count).
-        self.neo4j_store.compute_entity_importance(group_id)
+        await asyncio.to_thread(self.neo4j_store.compute_entity_importance, group_id)
         
         # Create foundation edges for graph schema enhancement (Phase 1 Week 1-2)
         # These edges enable O(1) retrieval and provide LazyGraphRAG→HippoRAG bridge

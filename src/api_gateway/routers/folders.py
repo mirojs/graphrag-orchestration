@@ -682,49 +682,47 @@ async def get_folder_file_count(
 ):
     """Return the recursive file count for a folder (including all subfolders).
 
-    Uses _resolve_folder_path to build the full hierarchical path for each
-    folder in the tree, then counts blobs via ADLS Gen2 recursive listing.
+    Tries hierarchical paths first (new layout), falls back to flat folder
+    names (legacy layout) for backward compatibility with pre-migration data.
     """
     driver = get_graph_driver()
     from src.api_gateway.routers.files import _resolve_folder_path
 
-    # Verify the folder exists
-    verify_query = """
-    MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
-    RETURN f.id AS id
-    """
-    with driver.session() as session:
-        record = session.run(verify_query, folder_id=folder_id, partition_id=partition_id).single()
-        if not record:
-            raise HTTPException(status_code=404, detail="Folder not found")
-
-    # Collect the root folder + all descendant folder IDs
-    sub_query = """
+    # Verify folder exists and collect all folder IDs + names in the tree
+    tree_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
     OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*1..]-(sub:Folder)
     WITH f, collect(sub) AS subs
-    WITH [x IN [f] + subs | x.id] AS ids
-    RETURN [i IN ids WHERE i IS NOT NULL] AS folder_ids
+    WITH [x IN [f] + subs | {id: x.id, name: x.name}] AS items
+    RETURN items
     """
     with driver.session() as session:
-        result = session.run(sub_query, folder_id=folder_id, partition_id=partition_id)
-        rec = result.single()
-        folder_ids = rec["folder_ids"] if rec else [folder_id]
+        record = session.run(tree_query, folder_id=folder_id, partition_id=partition_id).single()
+        if not record or not record["items"]:
+            raise HTTPException(status_code=404, detail="Folder not found")
+        folder_items = record["items"]
 
     blob_manager = getattr(request.app.state, "user_blob_manager", None)
     if not blob_manager:
         raise HTTPException(status_code=400, detail="File storage not configured")
 
     total = 0
-    folder_paths = []
-    for fid in folder_ids:
+    for item in folder_items:
+        fid, fname = item["id"], item["name"]
+        if not fid or not fname:
+            continue
+        # Try hierarchical path first (new layout)
         path = await _resolve_folder_path(partition_id, fid)
         if path:
-            folder_paths.append(path)
             blobs = await blob_manager.list_blobs_recursive(partition_id, path)
-            total += len(blobs)
+            if blobs:
+                total += len(blobs)
+                continue
+        # Fall back to flat folder name (legacy layout)
+        blobs = await blob_manager.list_blobs_recursive(partition_id, fname)
+        total += len(blobs)
 
-    logger.info("folder_file_count", folder_id=folder_id, folder_paths=folder_paths,
+    logger.info("folder_file_count", folder_id=folder_id,
                 partition_id=partition_id, count=total)
     return {"folder_id": folder_id, "count": total}
 
@@ -787,24 +785,33 @@ async def analyze_folder(
     if not blob_manager:
         raise HTTPException(status_code=400, detail="File storage not configured")
 
-    # Resolve full path for the root folder
+    # Resolve full path for the root folder; try hierarchical, fall back to flat name
     from src.api_gateway.routers.files import _resolve_folder_path
     folder_path = await _resolve_folder_path(partition_id, folder_id)
     blobs = await blob_manager.list_blobs_recursive(partition_id, folder_path or folder_name)
+    if not blobs:
+        # Legacy fallback: try flat folder name
+        blobs = await blob_manager.list_blobs_recursive(partition_id, folder_name)
 
     # Also collect blobs from subfolder paths
     sub_query = """
     MATCH (f:Folder {id: $folder_id, group_id: $partition_id})<-[:SUBFOLDER_OF*1..]-(sub:Folder)
-    RETURN sub.id AS sub_id
+    RETURN sub.id AS sub_id, sub.name AS sub_name
     """
     with driver.session() as session:
         sub_result = session.run(sub_query, folder_id=folder_id, partition_id=partition_id)
-        sub_ids = [r["sub_id"] for r in sub_result]
+        sub_items = [(r["sub_id"], r["sub_name"]) for r in sub_result]
 
-    for sub_id in sub_ids:
+    for sub_id, sub_name in sub_items:
         sub_path = await _resolve_folder_path(partition_id, sub_id)
         if sub_path:
             sub_blobs = await blob_manager.list_blobs_recursive(partition_id, sub_path)
+            if sub_blobs:
+                blobs.extend(sub_blobs)
+                continue
+        # Legacy fallback: try flat folder name
+        if sub_name:
+            sub_blobs = await blob_manager.list_blobs_recursive(partition_id, sub_name)
             blobs.extend(sub_blobs)
 
     if not blobs:

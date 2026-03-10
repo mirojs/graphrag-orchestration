@@ -901,7 +901,7 @@ async def delete_folder_analysis(
         uri=settings.NEO4J_URI,
         username=settings.NEO4J_USERNAME,
         password=settings.NEO4J_PASSWORD,
-        database=getattr(settings, "NEO4J_DATABASE", "neo4j"),
+        database=settings.NEO4J_DATABASE or "neo4j",
     )
     deleted = store.delete_group_data(analysis_group_id)
 
@@ -1015,15 +1015,25 @@ async def _run_folder_analysis(
     file_count = len(blobs)
     try:
         # Clean up any existing graph data for this group before re-indexing
-        from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
-        from src.core.config import settings
-        store = Neo4jStoreV3(
-            uri=settings.NEO4J_URI,
-            username=settings.NEO4J_USERNAME,
-            password=settings.NEO4J_PASSWORD,
-            database=getattr(settings, "NEO4J_DATABASE", "neo4j"),
-        )
-        store.delete_group_data(neo4j_gid)
+        # Use the existing driver (already connected) instead of creating a new
+        # Neo4jStoreV3 instance, to avoid extra connection overhead on Aura.
+        try:
+            cleanup_query = """
+            MATCH (n {group_id: $gid})
+            WHERE NOT n:Folder
+            DETACH DELETE n
+            RETURN count(*) AS deleted
+            """
+            with driver.session() as session:
+                result = session.run(cleanup_query, gid=neo4j_gid)
+                record = result.single()
+                logger.info("pre_analysis_cleanup",
+                            group_id=neo4j_gid,
+                            deleted=record["deleted"] if record else 0)
+        except Exception as cleanup_err:
+            logger.warning("pre_analysis_cleanup_failed",
+                           group_id=neo4j_gid,
+                           error=str(cleanup_err))
 
         # Set total file count so the UI can show determinate progress
         init_query = """

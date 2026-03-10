@@ -856,10 +856,8 @@ async def analyze_folder(
               partition_id=partition_id,
               neo4j_gid=neo4j_gid)
 
-    driver = get_graph_driver()
     background_tasks.add_task(
         _run_folder_analysis,
-        driver=driver,
         doc_sync=doc_sync,
         blobs=blobs,
         neo4j_gid=neo4j_gid,
@@ -1023,7 +1021,6 @@ async def cancel_folder_analysis(
 
 async def _run_folder_analysis(
     *,
-    driver,
     doc_sync,
     blobs: list[dict],
     neo4j_gid: str,
@@ -1031,8 +1028,16 @@ async def _run_folder_analysis(
     folder_name: str,
     partition_id: str,
 ):
-    """Background task: index all blobs and update folder status on completion."""
+    """Background task: index all blobs and update folder status on completion.
+    
+    Gets a fresh Neo4j driver from the singleton each time a session is needed,
+    avoiding "Driver closed" errors when reconnect() replaces the driver mid-task.
+    """
     import traceback
+
+    def _get_session():
+        """Get a fresh Neo4j session from the current (possibly reconnected) driver."""
+        return get_graph_driver().session()
     file_count = len(blobs)
     try:
         # NOTE: Group-wide cleanup removed — it overwhelms Neo4j Aura and kills
@@ -1045,7 +1050,7 @@ async def _run_folder_analysis(
         SET f.analysis_files_total = $total,
             f.analysis_files_processed = 0
         """
-        with driver.session() as session:
+        with _get_session() as session:
             session.run(init_query,
                         folder_id=folder_id,
                         partition_id=partition_id,
@@ -1063,7 +1068,7 @@ async def _run_folder_analysis(
             MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
             SET f.analysis_files_processed = $processed
             """
-            with driver.session() as session:
+            with _get_session() as session:
                 session.run(progress_query,
                             folder_id=folder_id,
                             partition_id=partition_id,
@@ -1088,7 +1093,7 @@ async def _run_folder_analysis(
         section_count = 0
         sentence_count = 0
         relationship_count = 0
-        with driver.session() as session:
+        with _get_session() as session:
             record = session.run(stats_query, gid=neo4j_gid).single()
             if record:
                 entity_count = record["entity_count"]
@@ -1116,7 +1121,7 @@ async def _run_folder_analysis(
             fld.analysis_error = null,
             fld.updated_at = datetime()
         """
-        with driver.session() as session:
+        with _get_session() as session:
             session.run(complete_query,
                         folder_id=folder_id,
                         partition_id=partition_id,
@@ -1129,7 +1134,6 @@ async def _run_folder_analysis(
 
         # Auto-create result folder under "Analysis Results"
         await _create_analysis_result_folder(
-            driver=driver,
             partition_id=partition_id,
             source_folder_id=folder_id,
             source_folder_name=folder_name,
@@ -1167,7 +1171,7 @@ async def _run_folder_analysis(
                 fld.analysis_files_processed = null,
                 fld.updated_at = datetime()
             """
-            with driver.session() as session:
+            with _get_session() as session:
                 session.run(fail_query,
                             folder_id=folder_id,
                             partition_id=partition_id,
@@ -1178,7 +1182,6 @@ async def _run_folder_analysis(
 
 async def _create_analysis_result_folder(
     *,
-    driver,
     partition_id: str,
     source_folder_id: str,
     source_folder_name: str,
@@ -1214,7 +1217,7 @@ async def _create_analysis_result_folder(
     })
     RETURN r.id as root_id
     """
-    with driver.session() as session:
+    with _get_session() as session:
         record = session.run(root_find_query, pid=partition_id).single()
         if not record:
             record = session.run(root_create_query, pid=partition_id).single()
@@ -1244,7 +1247,7 @@ async def _create_analysis_result_folder(
     CREATE (f)-[:SUBFOLDER_OF]->(root)
     RETURN f.id as result_id
     """
-    with driver.session() as session:
+    with _get_session() as session:
         session.run(result_query,
                     name=result_name,
                     pid=partition_id,

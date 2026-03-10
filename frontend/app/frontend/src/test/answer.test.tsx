@@ -148,4 +148,37 @@ describe("Answer component", () => {
         );
         expect(screen.getByTestId("speech-browser")).toBeInTheDocument();
     });
+
+    it("renders bullet points with citations as separate list items", () => {
+        const resp = makeResponse({
+            message: {
+                content: "- First point [1]\n- Second point [2]\n- Third point [1]",
+                role: "assistant",
+            },
+            context: {
+                data_points: {
+                    text: [],
+                    images: [],
+                    citations: [],
+                    structured_citations: [
+                        { citation: "[1]", document_title: "doc1.pdf", document_url: "https://store/doc1.pdf" },
+                        { citation: "[2]", document_title: "doc2.pdf", document_url: "https://store/doc2.pdf" },
+                    ],
+                },
+                followup_questions: null,
+                thoughts: [],
+            },
+        });
+        const { container } = renderWithProviders(
+            <Answer
+                answer={resp}
+                index={0}
+                speechConfig={makeSpeechConfig()}
+                isStreaming={false}
+                onCitationClicked={onCitation}
+            />
+        );
+        const listItems = container.querySelectorAll("ul > li");
+        expect(listItems.length).toBe(3);
+    });
 });

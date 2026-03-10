@@ -680,7 +680,11 @@ async def get_folder_file_count(
     request: Request,
     partition_id: str = Depends(get_partition_id)
 ):
-    """Return the recursive file count for a folder (including all subfolders)."""
+    """Return the recursive file count for a folder (including all subfolders).
+
+    ADLS Gen2 hierarchical namespace means list_blobs with a folder prefix
+    naturally includes blobs in all subdirectories.
+    """
     driver = get_graph_driver()
 
     query = """
@@ -699,7 +703,9 @@ async def get_folder_file_count(
         raise HTTPException(status_code=400, detail="File storage not configured")
 
     blobs = await blob_manager.list_blobs_recursive(partition_id, folder_name)
-    return {"folder_id": folder_id, "count": len(blobs)}
+    logger.info("folder_file_count", folder_id=folder_id, folder_name=folder_name,
+                partition_id=partition_id, count=len(blobs))
+    return {"folder_id": folder_id, "folder_name": folder_name, "count": len(blobs)}
 
 
 @router.post("/{folder_id}/analyze")

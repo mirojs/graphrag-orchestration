@@ -44,18 +44,16 @@ GRAPH_SERVICE_PATH = "src.api_gateway.routers.folders.GraphService"
 
 @patch(GRAPH_SERVICE_PATH)
 def test_file_count_returns_recursive_count(mock_graph_cls):
-    """Endpoint returns recursive blob count for a folder with nested files."""
-    # Mock Neo4j: folder lookup returns folder name
+    """ADLS Gen2 hierarchy: list_blobs_recursive on parent finds nested files."""
     mock_driver = MagicMock()
     mock_driver.session.return_value = _mock_neo4j_session({"name": "Contracts"})
     mock_graph_cls.return_value.driver = mock_driver
 
-    # Mock blob manager: 3 recursive blobs
     blob_manager = MagicMock()
     blob_manager.list_blobs_recursive = AsyncMock(return_value=[
-        {"name": "file1.pdf", "url": "https://x/file1.pdf", "full_path": "g/Contracts/file1.pdf"},
-        {"name": "sub/file2.pdf", "url": "https://x/sub/file2.pdf", "full_path": "g/Contracts/sub/file2.pdf"},
-        {"name": "sub/deep/file3.pdf", "url": "https://x/sub/deep/file3.pdf", "full_path": "g/Contracts/sub/deep/file3.pdf"},
+        {"name": "file1.pdf", "url": "u", "full_path": "g/Contracts/file1.pdf"},
+        {"name": "Sub/file2.pdf", "url": "u", "full_path": "g/Contracts/Sub/file2.pdf"},
+        {"name": "Sub/Deep/file3.pdf", "url": "u", "full_path": "g/Contracts/Sub/Deep/file3.pdf"},
     ])
 
     app = _build_app(blob_manager)
@@ -67,13 +65,14 @@ def test_file_count_returns_recursive_count(mock_graph_cls):
     assert resp.status_code == 200
     body = resp.json()
     assert body["folder_id"] == "folder-123"
+    assert body["folder_name"] == "Contracts"
     assert body["count"] == 3
     blob_manager.list_blobs_recursive.assert_awaited_once_with("test-group", "Contracts")
 
 
 @patch(GRAPH_SERVICE_PATH)
 def test_file_count_returns_zero_for_empty_folder(mock_graph_cls):
-    """Endpoint returns count=0 when folder has no blobs at all."""
+    """Endpoint returns count=0 when folder has no blobs."""
     mock_driver = MagicMock()
     mock_driver.session.return_value = _mock_neo4j_session({"name": "Empty"})
     mock_graph_cls.return_value.driver = mock_driver
@@ -95,7 +94,7 @@ def test_file_count_returns_zero_for_empty_folder(mock_graph_cls):
 def test_file_count_404_when_folder_not_found(mock_graph_cls):
     """Endpoint returns 404 when folder doesn't exist in Neo4j."""
     mock_driver = MagicMock()
-    mock_driver.session.return_value = _mock_neo4j_session(None)  # no record
+    mock_driver.session.return_value = _mock_neo4j_session(None)
     mock_graph_cls.return_value.driver = mock_driver
 
     app = _build_app(MagicMock())

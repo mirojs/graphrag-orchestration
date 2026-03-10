@@ -127,8 +127,8 @@ const Files = () => {
             const result = await listFoldersApi(token as string);
             setFolders(result);
         } catch (err: any) {
-            // Folders API may not be available — degrade silently
-            setFolders([]);
+            // Keep existing folders on poll failure — don't wipe UI state
+            console.warn("[folders] poll failed, keeping stale data", err?.message);
         }
     }, [client]);
 

@@ -943,6 +943,28 @@ class HippoRAG2Handler(BaseRouteHandler):
             )
         self._enrich_citations_with_geometry(citations)
 
+        # Diagnostic: log citation geometry state for debugging highlight issues
+        for _ci, _cit in enumerate(citations):
+            _poly_count = len(_cit.sentences) if _cit.sentences else 0
+            _total_polys = sum(
+                len(sp.get("polygons", [])) if isinstance(sp, dict) else 0
+                for sp in (_cit.sentences or [])
+            )
+            logger.info(
+                "citation_geometry_debug",
+                query_mode=query_mode,
+                sentence_window=sentence_window_enabled,
+                citation_index=_cit.index,
+                sentence_id=_cit.sentence_id,
+                text_preview_len=len(_cit.text_preview or ""),
+                text_preview_snippet=(_cit.text_preview or "")[:80],
+                has_sentences=bool(_cit.sentences),
+                sentence_spans=_poly_count,
+                total_polygons=_total_polys,
+                has_page_dimensions=bool(_cit.page_dimensions),
+                page_number=_cit.page_number,
+            )
+
         # ------------------------------------------------------------------
         # Assemble metadata
         # ------------------------------------------------------------------
@@ -1012,6 +1034,34 @@ class HippoRAG2Handler(BaseRouteHandler):
 
         if enable_timings:
             metadata["timings_ms"] = timings_ms
+
+        # Debug: citation geometry summary in response metadata
+        metadata["_citation_debug"] = {
+            "query_mode": query_mode,
+            "sentence_window_enabled": sentence_window_enabled,
+            "citations": [
+                {
+                    "idx": ct.index,
+                    "sid": ct.sentence_id,
+                    "text_len": len(ct.text_preview or ""),
+                    "text_snippet": (ct.text_preview or "")[:60],
+                    "has_sentences": bool(ct.sentences),
+                    "polygon_count": sum(
+                        len(sp.get("polygons", []))
+                        if isinstance(sp, dict) else 0
+                        for sp in (ct.sentences or [])
+                    ),
+                    "sentence_texts": [
+                        (sp.get("text", "") or "")[:60]
+                        for sp in (ct.sentences or [])
+                        if isinstance(sp, dict)
+                    ][:3],
+                    "has_page_dims": bool(ct.page_dimensions),
+                    "page": ct.page_number,
+                }
+                for ct in citations
+            ],
+        }
 
         return RouteResult(
             response=synthesis_result.get("response", ""),

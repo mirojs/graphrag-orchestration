@@ -55,7 +55,6 @@
         "stopStreaming": "스트리밍 중지",
         "askWithVoice": "음성으로 질문하기",
         "stopRecording": "녹음 중지",
-        "showSupportingContent": "근거 자료 보기",
         "speakAnswer": "답변 읽어주기",
         "info": "정보",
         "save": "저장",
@@ -63,7 +62,6 @@
         "copied": "복사됨!"
     },
     "headerTexts": {
-        "supportingContent": "근거 자료",
         "citation": "인용"
     },
     "labels": {

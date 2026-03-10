@@ -55,7 +55,6 @@
         "stopStreaming": "ストリーミングを停止",
         "askWithVoice": "音声で質問",
         "stopRecording": "質問の記録を停止",
-        "showSupportingContent": "サポート内容の表示",
         "speakAnswer": "音声による回答",
         "info": "情報",
         "save": "保存",
@@ -63,7 +62,6 @@
         "copied": "コピーしました！"
     },
     "headerTexts": {
-        "supportingContent": "サポート内容",
         "citation": "引用"
     },
     "labels": {

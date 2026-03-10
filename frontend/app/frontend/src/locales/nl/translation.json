@@ -55,7 +55,6 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Vraag stellen met stem",
         "stopRecording": "Opname stoppen",
-        "showSupportingContent": "Ondersteunende inhoud tonen",
         "speakAnswer": "Antwoord uitspreken",
         "info": "Info",
         "save": "Opslaan",
@@ -63,7 +62,6 @@
         "copied": "Gekopieerd!"
     },
     "headerTexts": {
-        "supportingContent": "Ondersteunende Inhoud",
         "citation": "Citaat"
     },
     "labels": {

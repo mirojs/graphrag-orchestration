@@ -55,7 +55,6 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Indtal spørgsmål",
         "stopRecording": "Stop optagelse af spørgsmål",
-        "showSupportingContent": "Vis understøttende indhold",
         "speakAnswer": "Afspil svar",
         "info": "Info",
         "save": "Gem",
@@ -63,7 +62,6 @@
         "copied": "Kopieret!"
     },
     "headerTexts": {
-        "supportingContent": "Understøttende indhold",
         "citation": "Kilde"
     },
     "labels": {

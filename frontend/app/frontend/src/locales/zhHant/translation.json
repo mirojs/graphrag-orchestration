@@ -55,7 +55,6 @@
         "stopStreaming": "停止串流",
         "askWithVoice": "使用語音提問",
         "stopRecording": "停止錄音",
-        "showSupportingContent": "顯示輔助內容",
         "speakAnswer": "朗讀答案",
         "info": "資訊",
         "save": "儲存",
@@ -63,7 +62,6 @@
         "copied": "已複製！"
     },
     "headerTexts": {
-        "supportingContent": "輔助內容",
         "citation": "引用來源"
     },
     "labels": {

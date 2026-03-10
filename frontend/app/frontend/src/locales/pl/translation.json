@@ -55,7 +55,6 @@
         "stopStreaming": "Zatrzymaj przesyłanie strumieniowe",
         "askWithVoice": "Zadaj pytanie głosem",
         "stopRecording": "Zatrzymaj nagrywanie pytania",
-        "showSupportingContent": "Pokaż treść pomocniczą",
         "speakAnswer": "Odczytaj odpowiedź",
         "info": "Informacje",
         "save": "Zapisz",
@@ -63,7 +62,6 @@
         "copied": "Skopiowano!"
     },
     "headerTexts": {
-        "supportingContent": "Treść pomocnicza",
         "citation": "Cytat"
     },
     "labels": {

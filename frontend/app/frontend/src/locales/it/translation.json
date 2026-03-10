@@ -55,7 +55,6 @@
         "stopStreaming": "Interrompi lo streaming",
         "askWithVoice": "Fai una domanda usando la voce",
         "stopRecording": "Interrompi la registrazione della domanda",
-        "showSupportingContent": "Mostra contenuto di supporto",
         "speakAnswer": "Parla risposta",
         "info": "Info",
         "save": "Salva",
@@ -63,7 +62,6 @@
         "copied": "Copiato!"
     },
     "headerTexts": {
-        "supportingContent": "Contenuto di Supporto",
         "citation": "Citazione"
     },
     "labels": {

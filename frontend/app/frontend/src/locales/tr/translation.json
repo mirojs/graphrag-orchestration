@@ -55,7 +55,6 @@
         "stopStreaming": "Akışı durdur",
         "askWithVoice": "Sesle soru sor",
         "stopRecording": "Kaydı durdur",
-        "showSupportingContent": "Destekleyici içeriği göster",
         "speakAnswer": "Cevabı seslendir",
         "info": "Bilgi",
         "save": "Kaydet",
@@ -63,7 +62,6 @@
         "copied": "Kopyalandı!"
     },
     "headerTexts": {
-        "supportingContent": "Destekleyici İçerik",
         "citation": "Alıntı"
     },
     "labels": {

@@ -8,7 +8,6 @@ import { StructuredCitation } from "../../api/models";
 import { getToken, useLogin } from "../../authConfig";
 import { PdfHighlightViewer, ImageHighlightViewer, SentenceHighlight } from "../DocumentViewer";
 import { MarkdownViewer } from "../MarkdownViewer";
-import { SupportingContent } from "../SupportingContent";
 import styles from "./AnalysisPanel.module.css";
 import { AnalysisPanelTabs } from "./AnalysisPanelTabs";
 
@@ -115,14 +114,6 @@ export const AnalysisPanel = ({
     onActiveTabChanged,
     onCitationClicked,
 }: Props) => {
-    const dataPoints = answer.context.data_points;
-    const hasSupportingContent = Boolean(
-        dataPoints &&
-            ((dataPoints.text && dataPoints.text.length > 0) ||
-                (dataPoints.images && dataPoints.images.length > 0) ||
-                (dataPoints.external_results_metadata && dataPoints.external_results_metadata.length > 0))
-    );
-    const isDisabledSupportingContentTab: boolean = !hasSupportingContent;
     const isDisabledCitationTab: boolean = !activeCitation;
     const [citation, setCitation] = useState("");
     const [citationBlob, setCitationBlob] = useState<string>(""); // raw blob URL (no hash)
@@ -254,15 +245,11 @@ export const AnalysisPanel = ({
     return (
         <div className={className}>
             <TabList selectedValue={activeTab} onTabSelect={(_ev: SelectTabEvent, data: SelectTabData) => onActiveTabChanged(data.value as AnalysisPanelTabs)}>
-                <Tab value={AnalysisPanelTabs.SupportingContentTab} disabled={isDisabledSupportingContentTab}>
-                    {t("headerTexts.supportingContent")}
-                </Tab>
                 <Tab value={AnalysisPanelTabs.CitationTab} disabled={isDisabledCitationTab}>
                     {t("headerTexts.citation")}
                 </Tab>
             </TabList>
             <div>
-                {activeTab === AnalysisPanelTabs.SupportingContentTab && <SupportingContent supportingContent={answer.context.data_points} />}
                 {activeTab === AnalysisPanelTabs.CitationTab && (
                     <>
                         {renderSentenceTextPanel()}

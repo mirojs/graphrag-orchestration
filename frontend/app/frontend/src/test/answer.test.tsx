@@ -38,11 +38,9 @@ function makeResponse(overrides: Partial<ChatAppResponse> = {}): ChatAppResponse
 
 describe("Answer component", () => {
     let onCitation: (filePath: string) => void;
-    let onSupporting: () => void;
 
     beforeEach(() => {
         onCitation = vi.fn();
-        onSupporting = vi.fn();
     });
 
     it("renders answer text via markdown", () => {
@@ -53,24 +51,9 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
             />
         );
         expect(screen.getByText("Test answer")).toBeInTheDocument();
-    });
-
-    it("does not render supporting content button (hidden for end users)", () => {
-        renderWithProviders(
-            <Answer
-                answer={makeResponse()}
-                index={0}
-                speechConfig={makeSpeechConfig()}
-                isStreaming={false}
-                onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
-            />
-        );
-        expect(screen.queryByTitle("Show supporting content")).not.toBeInTheDocument();
     });
 
     it("copies answer text to clipboard on copy button click", async () => {
@@ -84,7 +67,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
             />
         );
         fireEvent.click(screen.getByTitle("Copy"));
@@ -107,7 +89,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 onFollowupQuestionClicked={onFollowup}
                 showFollowupQuestions={true}
             />
@@ -132,7 +113,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 onFollowupQuestionClicked={onFollowup}
                 showFollowupQuestions={true}
             />
@@ -149,7 +129,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 showSpeechOutputAzure={true}
             />
         );
@@ -164,7 +143,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 showSpeechOutputBrowser={true}
             />
         );

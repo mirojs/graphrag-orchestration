@@ -33,8 +33,6 @@ i18nInstance.use(initReactI18next).init({
                 "tooltips.submitQuestion": "Submit question",
                 "tooltips.copy": "Copy",
                 "tooltips.copied": "Copied!",
-                "tooltips.showSupportingContent": "Show supporting content",
-                "headerTexts.supportingContent": "Supporting content",
                 "headerTexts.citation": "Citation",
                 "errors.networkError": "Unable to reach the server. Please check your internet connection and try again.",
                 "errors.timeoutError": "The request took too long. Please try again.",

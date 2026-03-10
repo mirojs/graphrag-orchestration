@@ -896,7 +896,13 @@ async def delete_folder_analysis(
 
     # 2) Delete all graph data for this analysis group
     from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
-    store = Neo4jStoreV3()
+    from src.core.config import settings
+    store = Neo4jStoreV3(
+        uri=settings.NEO4J_URI,
+        username=settings.NEO4J_USERNAME,
+        password=settings.NEO4J_PASSWORD,
+        database=getattr(settings, "NEO4J_DATABASE", "neo4j"),
+    )
     deleted = store.delete_group_data(analysis_group_id)
 
     # 3) Reset folder analysis status
@@ -1008,6 +1014,17 @@ async def _run_folder_analysis(
     import traceback
     file_count = len(blobs)
     try:
+        # Clean up any existing graph data for this group before re-indexing
+        from src.worker.hybrid_v2.services.neo4j_store import Neo4jStoreV3
+        from src.core.config import settings
+        store = Neo4jStoreV3(
+            uri=settings.NEO4J_URI,
+            username=settings.NEO4J_USERNAME,
+            password=settings.NEO4J_PASSWORD,
+            database=getattr(settings, "NEO4J_DATABASE", "neo4j"),
+        )
+        store.delete_group_data(neo4j_gid)
+
         # Set total file count so the UI can show determinate progress
         init_query = """
         MATCH (f:Folder {id: $folder_id, group_id: $partition_id})

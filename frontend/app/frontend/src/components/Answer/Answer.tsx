@@ -42,15 +42,13 @@ export const Answer = ({
     const followupQuestions = answer.context?.followup_questions;
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
-    // DOMPurify's internal HTML parser collapses \n to spaces between inline
-    // elements (e.g. <span>citation</span>\n- next bullet). Protect newlines
-    // with a text placeholder that survives HTML parsing, then restore them.
-    const NL = "{{NL}}";
-    const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml.replace(/\n/g, NL)).replace(/\{\{NL\}\}/g, "\n");
-    // Normalize markdown so ReactMarkdown renders lists/headers correctly:
-    // 1) Convert Unicode bullets (•) to markdown list syntax (- )
-    // 2) Ensure blank lines before block elements (headers, list items)
-    const markdownReady = sanitizedAnswerHtml
+    // DOMPurify sanitized copy — used only for clipboard copy and speech output.
+    // NOT used for ReactMarkdown because DOMPurify's HTML parser collapses \n
+    // to spaces between inline elements, breaking markdown list rendering.
+    const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
+    // For ReactMarkdown: use raw answerHtml (newlines preserved).
+    // Only HTML present is our own citation <span>s from renderToStaticMarkup().
+    const markdownReady = parsedAnswer.answerHtml
         .replace(/^• /gm, "- ")
         .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
         .replace(/([^\n])\n([-*] |\d+[.)]\s)/g, "$1\n\n$2");

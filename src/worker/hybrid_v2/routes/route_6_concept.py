@@ -116,12 +116,10 @@ class ConceptSearchHandler(BaseRouteHandler):
         timings_ms: Dict[str, int] = {}
         t_route_start = time.perf_counter()
 
-        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "5"))
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
         section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
-        logger.info(
-            "route_6_start",
             query=query[:80],
             response_type=response_type,
             community_top_k=community_top_k,
@@ -167,7 +165,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Feature 1: Dynamic Community Selection — LLM-rate matched communities
         dynamic_community = os.getenv(
-            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+            "ROUTE6_DYNAMIC_COMMUNITY", "1"
         ).strip().lower() in {"1", "true", "yes"}
         if dynamic_community and community_data:
             t_dc = time.perf_counter()
@@ -589,7 +587,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         Gated by ROUTE6_STREAM_SYNTHESIS env var — caller should check before invoking.
         """
-        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "5"))
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
         section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
@@ -612,7 +610,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Feature 1: Dynamic Community Selection (if enabled)
         dynamic_community = os.getenv(
-            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+            "ROUTE6_DYNAMIC_COMMUNITY", "1"
         ).strip().lower() in {"1", "true", "yes"}
         if dynamic_community and community_data:
             try:
@@ -1303,19 +1301,14 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         # 2. Vector search on Sentence nodes + collect parent context
-        # UNION ALL of two branches for multi-group (user + __global__)
+        # sentence_embedding index does NOT have group_id as additional
+        # filterable property, so filter group_id OUTSIDE the SEARCH clause.
         cypher = f"""CYPHER 25
         CALL () {{
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold
-            RETURN sent, score
-            UNION ALL
-            MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
-            SCORE AS score
-            WHERE score >= $threshold
+            WHERE score >= $threshold AND sent.group_id IN $group_ids
             RETURN sent, score
         }}
 

@@ -308,7 +308,10 @@ class LazyGraphRAGIndexingPipeline:
 
             # Steps 6-7: dedup + validate + commit
             if entities:
-                entities, relationships, dedup_stats = self._deduplicate_entities(
+                # Offload CPU-heavy dedup (O(n²) pairwise cosine) to thread
+                # pool so the main event loop stays responsive for health probes.
+                entities, relationships, dedup_stats = await asyncio.to_thread(
+                    self._deduplicate_entities,
                     group_id=group_id,
                     entities=entities,
                     relationships=relationships,
@@ -486,7 +489,10 @@ class LazyGraphRAGIndexingPipeline:
 
         # 6) Entity deduplication (optional; only if we have enough entities).
         if entities:
-            entities, relationships, dedup_stats = self._deduplicate_entities(
+            # Offload CPU-heavy dedup (O(n²) pairwise cosine) to thread
+            # pool so the main event loop stays responsive for health probes.
+            entities, relationships, dedup_stats = await asyncio.to_thread(
+                self._deduplicate_entities,
                 group_id=group_id,
                 entities=entities,
                 relationships=relationships,
@@ -4293,50 +4299,46 @@ SUMMARY: <summary>"""
         if len(sections) < 2:
             return {"edges_created": 0, "reason": "insufficient_sections"}
         
-        # Compute pairwise similarities for cross-document sections
-        import numpy as np
-        
-        edges_to_create = []
-        edge_count_per_section: Dict[str, int] = {}
-        
-        for i, s1 in enumerate(sections):
-            if s1["embedding"] is None:
-                continue
-            emb1 = np.array(s1["embedding"])
-            norm1 = np.linalg.norm(emb1)
-            if norm1 == 0:
-                continue
-            
-            for j, s2 in enumerate(sections):
-                if j <= i:  # Avoid duplicates and self-comparison
+        # Offload O(n²) pairwise cosine computation to thread pool
+        # so the main event loop stays responsive for health probes.
+        def _compute_edges():
+            import numpy as np
+            edges = []
+            edge_count_per_section: Dict[str, int] = {}
+            for i, s1 in enumerate(sections):
+                if s1["embedding"] is None:
                     continue
-                if s1["doc_id"] == s2["doc_id"]:  # Only cross-document
+                emb1 = np.array(s1["embedding"])
+                norm1 = np.linalg.norm(emb1)
+                if norm1 == 0:
                     continue
-                if s2["embedding"] is None:
-                    continue
-                
-                # Check edge count limits
-                if edge_count_per_section.get(s1["id"], 0) >= max_edges_per_section:
-                    continue
-                if edge_count_per_section.get(s2["id"], 0) >= max_edges_per_section:
-                    continue
-                
-                emb2 = np.array(s2["embedding"])
-                norm2 = np.linalg.norm(emb2)
-                if norm2 == 0:
-                    continue
-                
-                # Cosine similarity
-                similarity = float(np.dot(emb1, emb2) / (norm1 * norm2))
-                
-                if similarity >= similarity_threshold:
-                    edges_to_create.append({
-                        "source_id": s1["id"],
-                        "target_id": s2["id"],
-                        "similarity": round(similarity, 4),
-                    })
-                    edge_count_per_section[s1["id"]] = edge_count_per_section.get(s1["id"], 0) + 1
-                    edge_count_per_section[s2["id"]] = edge_count_per_section.get(s2["id"], 0) + 1
+                for j, s2 in enumerate(sections):
+                    if j <= i:
+                        continue
+                    if s1["doc_id"] == s2["doc_id"]:
+                        continue
+                    if s2["embedding"] is None:
+                        continue
+                    if edge_count_per_section.get(s1["id"], 0) >= max_edges_per_section:
+                        continue
+                    if edge_count_per_section.get(s2["id"], 0) >= max_edges_per_section:
+                        continue
+                    emb2 = np.array(s2["embedding"])
+                    norm2 = np.linalg.norm(emb2)
+                    if norm2 == 0:
+                        continue
+                    similarity = float(np.dot(emb1, emb2) / (norm1 * norm2))
+                    if similarity >= similarity_threshold:
+                        edges.append({
+                            "source_id": s1["id"],
+                            "target_id": s2["id"],
+                            "similarity": round(similarity, 4),
+                        })
+                        edge_count_per_section[s1["id"]] = edge_count_per_section.get(s1["id"], 0) + 1
+                        edge_count_per_section[s2["id"]] = edge_count_per_section.get(s2["id"], 0) + 1
+            return edges
+
+        edges_to_create = await asyncio.to_thread(_compute_edges)
         
         if not edges_to_create:
             return {"edges_created": 0}

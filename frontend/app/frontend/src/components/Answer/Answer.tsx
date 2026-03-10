@@ -52,10 +52,6 @@ export const Answer = ({
         .replace(/^• /gm, "- ")
         .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
         .replace(/([^\n])\n([-*] |\d+[.)]\s)/g, "$1\n\n$2");
-    // DEBUG: remove after confirming fix
-    console.log("[Answer debug] raw content:", JSON.stringify(answer.message.content.substring(0, 300)));
-    console.log("[Answer debug] answerHtml:", JSON.stringify(parsedAnswer.answerHtml.substring(0, 300)));
-    console.log("[Answer debug] markdownReady:", JSON.stringify(markdownReady.substring(0, 300)));
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {

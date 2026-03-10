@@ -838,7 +838,8 @@ async def _stream_chat_response(
             route_used = result.get("route_used", approach)
             
             # For better UX, stream answer in chunks (simulate word-by-word)
-            words = answer.split()
+            # Split on space only (not all whitespace) to preserve \n for markdown lists
+            words = [w for w in answer.split(' ') if w]
             buffer = ""
             chunk_size = 5  # Words per chunk
             
@@ -846,7 +847,7 @@ async def _stream_chat_response(
                 buffer += word + " "
                 if (i + 1) % chunk_size == 0 or i == len(words) - 1:
                     yield _format_stream_chunk(
-                        response_id, created, route_used, buffer.strip() + " ", thoughts
+                        response_id, created, route_used, buffer, thoughts
                     )
                     buffer = ""
                     await asyncio.sleep(0.02)  # Natural typing feel
@@ -1436,7 +1437,8 @@ async def _frontend_stream_response(
         
         # Keep inline [N] citation markers for frontend rendering
         answer = result.get("answer", "")
-        words = answer.split()
+        # Split on space only (not all whitespace) to preserve \n for markdown lists
+        words = [w for w in answer.split(' ') if w]
         chunk_size = 3  # Words per chunk for natural feel
         
         for i in range(0, len(words), chunk_size):

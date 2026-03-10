@@ -634,6 +634,10 @@ var sharedEnvVars = concat([
     name: 'ROUTE7_SENTENCE_WINDOW'
     value: '1'
   }
+  {
+    name: 'ROUTE7_MAX_MERGE_RUN'
+    value: '3'
+  }
 ], useUserUpload ? userUploadEnvVars : [])
 
 // Shared secrets — Key Vault references + runtime-generated values

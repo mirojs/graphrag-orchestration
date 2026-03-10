@@ -186,11 +186,14 @@ async def list_folders(
         ORDER BY f.name
         """
     
-    with driver.session() as session:
-        result = session.run(query, 
-                           partition_id=partition_id,
-                           parent_folder_id=parent_folder_id)
-        folders = [_folder_from_record(record) for record in result]
+    try:
+        with driver.session() as session:
+            result = session.run(query, 
+                               partition_id=partition_id,
+                               parent_folder_id=parent_folder_id)
+            folders = [_folder_from_record(record) for record in result]
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Database temporarily busy: {str(e)[:200]}")
     
     return folders
 

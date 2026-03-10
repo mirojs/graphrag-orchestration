@@ -1659,6 +1659,18 @@ class HippoRAG2Handler(BaseRouteHandler):
                         current_run = [r]
                 runs.append(current_run)
 
+                # Cap run length to prevent merging entire tables into one
+                # citation.  The ±1 window still provides context at the
+                # edges of each sub-run.  Default 3 matches the original
+                # _MAX_MERGE=2 spirit but accommodates the window overlap.
+                max_run = int(os.getenv("ROUTE7_MAX_MERGE_RUN", "3"))
+                if max_run > 0:
+                    capped: list[list[dict]] = []
+                    for run in runs:
+                        for i in range(0, len(run), max_run):
+                            capped.append(run[i:i + max_run])
+                    runs = capped
+
             for run in runs:
                 first, last = run[0], run[-1]
                 all_ids = [r.get("sentence_id", "") for r in run]

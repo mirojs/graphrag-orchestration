@@ -941,12 +941,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             self._narrow_citations_to_sentences(
                 citations, synthesis_result.get("response", ""), sentence_map
             )
-        # Skip geometry enrichment for local_search: the Sentence node
-        # metadata may contain table-level polygons (from DI fallback
-        # fuzzy matching) that widen individual row citations to the
-        # whole table.  Normal Route 7 still enriches as usual.
-        if sentence_window_enabled:
-            self._enrich_citations_with_geometry(citations)
+        self._enrich_citations_with_geometry(citations)
 
         # ------------------------------------------------------------------
         # Assemble metadata

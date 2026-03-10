@@ -95,7 +95,8 @@ cp -r graphrag-orchestration/third_party/ "$STAGING_DIR/graphrag-orchestration/t
 echo "✅ Build context: $(du -sh "$STAGING_DIR" | cut -f1)"
 echo ""
 
-echo "⏳ Building API image..."
+echo "⏳ Building API + Worker images in parallel..."
+
 az acr build \
     --registry "$CONTAINER_REGISTRY_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
@@ -104,18 +105,30 @@ az acr build \
     --build-arg BUILD_DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
     --build-arg VERSION="$AZURE_ENV_IMAGETAG" \
     --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
-    "$STAGING_DIR"
+    "$STAGING_DIR" &
+API_BUILD_PID=$!
 
-echo "⏳ Building Worker image..."
 az acr build \
     --registry "$CONTAINER_REGISTRY_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
     --file Dockerfile.worker \
     --image "$WORKER_IMAGE_NAME:$AZURE_ENV_IMAGETAG" \
     --build-arg CACHE_BUST="$AZURE_ENV_IMAGETAG" \
-    "$STAGING_DIR"
+    "$STAGING_DIR" &
+WORKER_BUILD_PID=$!
 
-echo "✅ Images built and pushed"
+API_BUILD_OK=0
+WORKER_BUILD_OK=0
+wait $API_BUILD_PID || API_BUILD_OK=1
+wait $WORKER_BUILD_PID || WORKER_BUILD_OK=1
+
+if [ $API_BUILD_OK -ne 0 ] || [ $WORKER_BUILD_OK -ne 0 ]; then
+    [ $API_BUILD_OK -ne 0 ] && echo "❌ API image build failed"
+    [ $WORKER_BUILD_OK -ne 0 ] && echo "❌ Worker image build failed"
+    exit 1
+fi
+
+echo "✅ Both images built and pushed"
 echo ""
 
 # ── Deploy Infrastructure + Apps via azd ─────────────────────────────────

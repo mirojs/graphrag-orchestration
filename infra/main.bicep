@@ -169,6 +169,9 @@ param groupIdOverride string = ''
 @description('Deployment timestamp for cache busting — auto-generated on each deploy')
 param deployTimestamp string = utcNow()
 
+@description('Name of the existing Log Analytics workspace for container app logs')
+param logAnalyticsWorkspaceName string = 'workspace-rggraphragfeatureeZiR'
+
 // Tags for all resources
 var tags = {
   azd_env_name: environmentName
@@ -188,6 +191,7 @@ module containerAppsEnvironment './core/host/container-apps-environment.bicep' =
     name: containerAppsEnvironmentName
     location: location
     tags: tags
+    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
   }
 }
 

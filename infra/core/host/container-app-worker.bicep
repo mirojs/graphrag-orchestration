@@ -84,6 +84,28 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
             cpu: json(cpuCores)
             memory: memory
           }
+          probes: [
+            {
+              type: 'Liveness'
+              tcpSocket: {
+                port: 8000
+              }
+              initialDelaySeconds: 30
+              periodSeconds: 60
+              failureThreshold: 3
+              timeoutSeconds: 5
+            }
+            {
+              type: 'Startup'
+              tcpSocket: {
+                port: 8000
+              }
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              failureThreshold: 12
+              timeoutSeconds: 5
+            }
+          ]
         }
       ]
       scale: {

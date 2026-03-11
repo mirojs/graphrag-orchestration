@@ -32,8 +32,11 @@
         "fileDeleted": "File deleted"
     },
     "folderSelector": {
+        "label": "Knowledge base:",
         "placeholder": "Select a knowledge base…",
-        "allDocuments": "All documents"
+        "allDocuments": "All documents",
+        "noFolders": "No analyzed folders yet",
+        "loadError": "Could not load folders"
     },
     "developerSettings": "Developer settings",
     "chatEmptyStateTitle": "Ask your documents. Trust every answer.",

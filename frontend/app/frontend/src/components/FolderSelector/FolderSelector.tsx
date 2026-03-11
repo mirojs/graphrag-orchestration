@@ -21,19 +21,25 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
     const client = useLogin ? useMsal().instance : undefined;
     const [folders, setFolders] = useState<Folder[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
+    // Include both user folders that are analyzed AND analysis_result folders
     const analyzedFolders = folders.filter(
-        f => f.folder_type === "user" && (f.analysis_status === "analyzed" || f.analysis_status === "stale")
+        f =>
+            (f.analysis_status === "analyzed" || f.analysis_status === "stale") &&
+            (f.folder_type === "user" || f.folder_type === "analysis_result")
     );
 
     const loadFolders = useCallback(async () => {
         try {
             setLoading(true);
+            setError(null);
             const token = client ? await getToken(client) : undefined;
             const result = await listFoldersApi(token as string);
             setFolders(result);
         } catch (e) {
             console.error("Failed to load folders:", e);
+            setError(String(e));
         } finally {
             setLoading(false);
         }
@@ -63,13 +69,28 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
     if (loading) {
         return (
             <div className={styles.container}>
+                <label className={styles.label}>{t("folderSelector.label")}</label>
                 <Spinner size="tiny" />
             </div>
         );
     }
 
+    if (error) {
+        return (
+            <div className={styles.container}>
+                <label className={styles.label}>{t("folderSelector.label")}</label>
+                <span className={styles.errorText}>⚠ {t("folderSelector.loadError")}</span>
+            </div>
+        );
+    }
+
     if (analyzedFolders.length === 0) {
-        return null;
+        return (
+            <div className={styles.container}>
+                <label className={styles.label}>{t("folderSelector.label")}</label>
+                <span className={styles.emptyText}>{t("folderSelector.noFolders")}</span>
+            </div>
+        );
     }
 
     const selectedFolder = analyzedFolders.find(
@@ -80,6 +101,7 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
 
     return (
         <div className={styles.container}>
+            <label className={styles.label}>{t("folderSelector.label")}</label>
             <Dropdown
                 className={styles.dropdown}
                 placeholder={t("folderSelector.placeholder")}

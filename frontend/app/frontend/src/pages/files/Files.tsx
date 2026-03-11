@@ -644,19 +644,30 @@ const Files = () => {
                                     {activeFolder.analysis_files_total != null && activeFolder.analysis_files_total > 0 ? (
                                         <>
                                             <div className={styles.analysisProgressText}>
-                                                Processing file {activeFolder.analysis_files_processed ?? 0} of {activeFolder.analysis_files_total}
+                                                {(activeFolder.analysis_files_processed ?? 0) === 0
+                                                    ? `Analyzing ${activeFolder.analysis_files_total} files in parallel…`
+                                                    : (activeFolder.analysis_files_processed ?? 0) >= activeFolder.analysis_files_total
+                                                        ? "Building knowledge graph…"
+                                                        : `Analyzed ${activeFolder.analysis_files_processed} of ${activeFolder.analysis_files_total} files…`}
                                             </div>
                                             <div className={styles.analysisProgressBar}>
                                                 <div
-                                                    className={styles.analysisProgressFillDeterminate}
-                                                    style={{ width: `${Math.round(((activeFolder.analysis_files_processed ?? 0) / activeFolder.analysis_files_total) * 100)}%` }}
+                                                    className={(activeFolder.analysis_files_processed ?? 0) === 0
+                                                        ? styles.analysisProgressFill
+                                                        : styles.analysisProgressFillDeterminate}
+                                                    style={(activeFolder.analysis_files_processed ?? 0) > 0
+                                                        ? { width: `${Math.min(95, Math.round(((activeFolder.analysis_files_processed ?? 0) / activeFolder.analysis_files_total) * 100))}%` }
+                                                        : undefined}
                                                 />
                                             </div>
                                         </>
                                     ) : (
-                                        <div className={styles.analysisProgressBar}>
-                                            <div className={styles.analysisProgressFill} />
-                                        </div>
+                                        <>
+                                            <div className={styles.analysisProgressText}>Analyzing…</div>
+                                            <div className={styles.analysisProgressBar}>
+                                                <div className={styles.analysisProgressFill} />
+                                            </div>
+                                        </>
                                     )}
                                     <div className={styles.analysisActions}>
                                         <button

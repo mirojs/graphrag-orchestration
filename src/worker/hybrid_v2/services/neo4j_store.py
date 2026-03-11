@@ -361,7 +361,8 @@ class Neo4jStoreV3:
         # V2 indexes include WITH [group_id] for in-index pre-filtering.
         vector_indexes = [
             # Entity embeddings with Voyage (2048-dim)
-            """
+            # CYPHER 25 prefix required for WITH [group_id] filterable property syntax
+            """CYPHER 25
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
             FOR (e:Entity) ON (e.entity_embedding)
             WITH [e.group_id]
@@ -371,7 +372,7 @@ class Neo4jStoreV3:
             }}
             """,
             # Sentence-level embeddings with Voyage (2048-dim)
-            """
+            """CYPHER 25
             CREATE VECTOR INDEX sentence_embedding IF NOT EXISTS
             FOR (s:Sentence) ON (s.sentence_embedding)
             WITH [s.group_id]

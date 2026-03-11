@@ -186,7 +186,7 @@ class Settings(BaseSettings):
     # run KNN/Louvain/PageRank in-process (numpy + networkx) instead of
     # provisioning an Aura GDS session. Eliminates 60-120s GDS overhead for
     # small graphs. Set to 0 to always use GDS sessions.
-    GDS_LOCAL_THRESHOLD: int = 500
+    GDS_LOCAL_THRESHOLD: int = 2000
     
     # Cosmos DB (Schema Vault)
     COSMOS_ENDPOINT: Optional[str] = None

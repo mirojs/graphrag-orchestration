@@ -4846,10 +4846,9 @@ SUMMARY: <summary>"""
                 index_map.append(indices)
 
             logger.info(
-                "triple_embedding_contextualized",
-                total=len(triples),
-                documents=len(document_chunks),
-                triples_with_doc=sum(1 for t in triples if t.get("document_title")),
+                f"triple_embedding_contextualized total={len(triples)} "
+                f"documents={len(document_chunks)} "
+                f"triples_with_doc={sum(1 for t in triples if t.get('document_title'))}"
             )
 
             nested_embeddings = await asyncio.get_event_loop().run_in_executor(

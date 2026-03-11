@@ -581,11 +581,11 @@ class LazyGraphRAGIndexingPipeline:
                 logger.info(
                     f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings"
                 )
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "triple_embeddings")
             except Exception as e:
                 logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
                 stats["triple_embeddings_stored"] = 0
-
-            self.neo4j_store.set_pipeline_checkpoint(group_id, "triple_embeddings")
+                # Do NOT set checkpoint on failure — allows retry on next run
         else:
             logger.info("pipeline_skip_triple_embeddings (checkpoint >= triple_embeddings)")
 
@@ -604,11 +604,11 @@ class LazyGraphRAGIndexingPipeline:
                     stats["entity_synonymy_cross_community"],
                     entity_synonymy_threshold,
                 )
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "synonymy_edges")
             except Exception as e:
                 logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
                 stats["entity_synonymy_edges"] = 0
-
-            self.neo4j_store.set_pipeline_checkpoint(group_id, "synonymy_edges")
+                # Do NOT set checkpoint on failure — allows retry on next run
         else:
             logger.info("pipeline_skip_synonymy_edges (checkpoint >= synonymy_edges)")
 
@@ -691,13 +691,16 @@ class LazyGraphRAGIndexingPipeline:
                         stats["summaries_generated"],
                         stats["embeddings_stored"],
                     )
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
                 except Exception as e:
                     logger.warning(f"⚠️  Community materialization failed: {e}")
                     stats["communities_created"] = 0
                     stats["summaries_generated"] = 0
                     stats["embeddings_stored"] = 0
-
-            self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
+                    # Do NOT set checkpoint on failure — allows retry on next run
+            else:
+                # No communities to materialize (GDS produced 0) — mark done
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
         else:
             logger.info("pipeline_skip_communities (checkpoint >= communities)")
 

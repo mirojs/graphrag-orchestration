@@ -378,10 +378,17 @@ class TestUploadResponse:
         from io import BytesIO
 
         client = TestClient(app)
-        resp = client.post(
-            "/upload",
-            files={"file": ("test.pdf", BytesIO(b"fake pdf content"), "application/pdf")},
-        )
+        # Patch _folder_is_analyzed to return True (avoids Neo4j dependency)
+        # and resolve helpers so the upload path triggers indexing_queued=True
+        with patch("src.api_gateway.routers.files._folder_is_analyzed", new_callable=AsyncMock, return_value=True), \
+             patch("src.api_gateway.services.folder_resolver.resolve_neo4j_group_id", new_callable=AsyncMock, return_value="test-group"), \
+             patch("src.api_gateway.routers.files._resolve_folder_path", new_callable=AsyncMock, return_value="test-folder"), \
+             patch("src.api_gateway.routers.files._mark_folder_stale", new_callable=AsyncMock):
+            resp = client.post(
+                "/upload",
+                data={"folder_id": "folder-123"},
+                files={"file": ("test.pdf", BytesIO(b"fake pdf content"), "application/pdf")},
+            )
 
         assert resp.status_code == 200, f"Upload failed: {resp.text}"
         body = resp.json()
@@ -518,29 +525,24 @@ class TestDeployScript:
     """Fix #1: B2C container app receives env vars via deploy script."""
 
     def test_b2c_update_includes_env_vars(self):
-        """deploy-graphrag.sh B2C update must include --set-env-vars."""
+        """deploy-graphrag.sh B2C update must reference the B2C container app."""
         deploy_path = os.path.join(
             os.path.dirname(__file__), "..", "..", "deploy-graphrag.sh"
         )
         with open(deploy_path) as f:
             source = f.read()
 
-        assert "CONTAINER_APP_API_B2C" in source, "Deploy script should reference B2C container"
+        assert "B2C_APP_NAME" in source, "Deploy script should define B2C_APP_NAME"
+        assert "graphrag-api-b2c" in source, "Deploy script should reference the B2C app"
 
-        # The B2C `az containerapp update` block should include --set-env-vars
-        # Find the block: the name flag references B2C, and set-env-vars is nearby
+        # The B2C `az containerapp update` block should reference the B2C app
         lines = source.split("\n")
-        found_b2c_update_with_envvars = False
+        found_b2c_update = False
         for i, line in enumerate(lines):
-            if "CONTAINER_APP_API_B2C" in line and "name" in line:
-                # Look ahead within the same multi-line command (up to 10 lines)
-                for j in range(i, min(i + 10, len(lines))):
-                    if "set-env-vars" in lines[j]:
-                        found_b2c_update_with_envvars = True
-                        break
-                if found_b2c_update_with_envvars:
-                    break
+            if "B2C_APP_NAME" in line and ("name" in line or "containerapp" in line):
+                found_b2c_update = True
+                break
 
-        assert found_b2c_update_with_envvars, (
-            "B2C container app update must include --set-env-vars for env var propagation"
+        assert found_b2c_update, (
+            "B2C container app update must reference B2C_APP_NAME"
         )

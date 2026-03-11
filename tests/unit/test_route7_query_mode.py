@@ -164,6 +164,7 @@ class TestBackwardCompatibility:
         sig = inspect.signature(Handler.execute)
         expected = ["self", "query", "response_type", "knn_config",
                     "prompt_variant", "synthesis_model", "include_context",
-                    "weight_profile", "language", "query_mode", "folder_id"]
+                    "weight_profile", "language", "query_mode", "folder_id",
+                    "config_overrides"]
         actual = list(sig.parameters.keys())
         assert actual == expected

@@ -31,6 +31,10 @@
         "errorDeleting": "Error deleting.",
         "fileDeleted": "File deleted"
     },
+    "folderSelector": {
+        "placeholder": "Select a knowledge base…",
+        "allDocuments": "All documents"
+    },
     "developerSettings": "Developer settings",
     "chatEmptyStateTitle": "Ask your documents. Trust every answer.",
     "chatEmptyStateSubtitle": "Every answer is traced to the exact sentence — click to verify on the original PDF. Try with our sample documents or upload your own.",

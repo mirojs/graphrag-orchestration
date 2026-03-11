@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect, useContext } from "react";
+import { useRef, useState, useEffect, useContext, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
@@ -18,6 +18,7 @@ import { HistoryPanel } from "../../components/HistoryPanel";
 import { HistoryProviderOptions, useHistoryManager } from "../../components/HistoryProviders";
 import { HistoryButton } from "../../components/HistoryButton";
 import { ClearChatButton } from "../../components/ClearChatButton";
+import { FolderSelector } from "../../components/FolderSelector";
 import { useLogin, getToken, requireAccessControl } from "../../authConfig";
 import { useMsal } from "@azure/msal-react";
 import { LoginContext } from "../../loginContext";
@@ -48,6 +49,7 @@ function getUserFriendlyError(error: unknown, t: (key: string) => string): strin
 const Chat = () => {
     const [searchParams] = useSearchParams();
     const folderId = searchParams.get("folder") || undefined;
+    const [selectedFolderId, setSelectedFolderId] = useState<string | undefined>(folderId);
 
     const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
     const [promptTemplate, setPromptTemplate] = useState<string>("");
@@ -315,7 +317,7 @@ const Chat = () => {
                         use_sharepoint_source: sharePointSourceSupported ? sharePointSourceEnabled : false,
                         ...(seed !== null ? { seed: seed } : {}),
                         ...(speechDetectedLanguage ? { speech_detected_language: speechDetectedLanguage } : {}),
-                        ...(folderId ? { folder_id: folderId } : {})
+                        ...(selectedFolderId ? { folder_id: selectedFolderId } : {})
                     }
                 },
                 // AI Chat Protocol: Client must pass on any session state received from the server
@@ -395,6 +397,16 @@ const Chat = () => {
         setIsStreaming(false);
         setRestoredQuestion("");
     };
+
+    const handleFolderChange = useCallback(
+        (newFolderId: string | undefined) => {
+            if (newFolderId !== selectedFolderId) {
+                setSelectedFolderId(newFolderId);
+                clearChat();
+            }
+        },
+        [selectedFolderId]
+    );
 
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "smooth" }), [isLoading]);
     useEffect(() => chatMessageStreamEnd.current?.scrollIntoView({ behavior: "auto" }), [streamedAnswers]);
@@ -515,6 +527,10 @@ const Chat = () => {
                         <HistoryButton className={styles.commandButton} onClick={() => setIsHistoryPanelOpen(!isHistoryPanelOpen)} />
                     )}
                 </div>
+                <FolderSelector
+                    selectedFolderId={selectedFolderId}
+                    onFolderChange={handleFolderChange}
+                />
                 <div className={styles.commandsContainer}>
                     <ClearChatButton className={styles.commandButton} onClick={clearChat} disabled={!lastQuestionRef.current || isLoading} />
                 </div>

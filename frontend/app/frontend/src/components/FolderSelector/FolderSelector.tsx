@@ -23,11 +23,11 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // Include both user folders that are analyzed AND analysis_result folders
+    // Only show user-created folders that have been successfully analyzed
     const analyzedFolders = folders.filter(
         f =>
-            (f.analysis_status === "analyzed" || f.analysis_status === "stale") &&
-            (f.folder_type === "user" || f.folder_type === "analysis_result")
+            f.folder_type === "user" &&
+            (f.analysis_status === "analyzed" || f.analysis_status === "stale")
     );
 
     const loadFolders = useCallback(async () => {

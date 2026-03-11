@@ -455,10 +455,12 @@ class LazyGraphRAGIndexingPipeline:
             stats["section_totals_backfilled"] = total_stats.get("updated", 0)
             
             # 4.6–4.8) Section enrichment + KVP embedding.
-            # Run section enrichment sequentially to avoid overwhelming Neo4j Aura.
-            section_embed_stats = await self._embed_section_nodes(group_id)
-            section_summary_stats = await self._generate_section_summaries(group_id)
-            kvp_embed_stats = await self._embed_keyvalue_keys(group_id)
+            # Wave 1: Run 4.6, 4.7, 4.8 concurrently — no data deps between them.
+            section_embed_stats, section_summary_stats, kvp_embed_stats = await asyncio.gather(
+                self._embed_section_nodes(group_id),
+                self._generate_section_summaries(group_id),
+                self._embed_keyvalue_keys(group_id),
+            )
             stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
             stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
             stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
@@ -766,9 +768,9 @@ class LazyGraphRAGIndexingPipeline:
 
         di_service = DocumentIntelligenceService()
 
-        # Process URLs with bounded parallelism (3 concurrent) to reduce
-        # total DI extraction time while keeping memory bounded.
-        DI_CONCURRENCY = 3
+        # Process URLs with bounded parallelism (5 concurrent, matching DI service
+        # DEFAULT_CONCURRENCY) to process all 5 PDFs in a single batch.
+        DI_CONCURRENCY = 5
         di_semaphore = asyncio.Semaphore(DI_CONCURRENCY)
         by_source: Dict[str, List[LlamaDocument]] = {}
 
@@ -1982,7 +1984,7 @@ Return ONLY valid JSON (no markdown fences):
             },
         )
 
-        sem = asyncio.Semaphore(4)  # max 4 concurrent LLM calls
+        sem = asyncio.Semaphore(8)  # max 8 concurrent LLM calls (gpt-4.1 50K TPM headroom)
 
         def _strip_json_fences(text: str) -> str:
             """Remove markdown code fences from LLM JSON response."""
@@ -2018,15 +2020,17 @@ Return ONLY valid JSON (no markdown fences):
 
             Step 1: NER — extract named entities from the sentence batch.
             Step 2: Triple extraction — conditioned on the NER entity list.
+
+            Both steps share a single semaphore slot to avoid double-booking.
             """
             sentence_block = context + "\n".join(
                 f"[{s['id']}]: {s['text']}" for s in batch
             )
 
-            # Step 1: NER (scope-dependent prompt)
-            ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
-            ner_prompt = ner_template.format(sentences=sentence_block)
             async with sem:
+                # Step 1: NER (scope-dependent prompt)
+                ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
+                ner_prompt = ner_template.format(sentences=sentence_block)
                 try:
                     ner_response = await self.llm.achat(
                         [ChatMessage(role="user", content=ner_prompt)]
@@ -2038,26 +2042,30 @@ Return ONLY valid JSON (no markdown fences):
                     logger.debug(f"NER step failed: {e}, falling back to single-step")
                     named_entities = []
 
-            if not named_entities:
-                # Fallback to single-step if NER produces nothing
-                return await _extract_batch(batch, context)
-
-            # Step 2: NER-conditioned triple extraction
-            entities_str = json_mod.dumps(named_entities)
-            triple_prompt = self._TRIPLE_PROMPT.format(
-                named_entities=entities_str, sentences=sentence_block
-            )
-            async with sem:
-                try:
-                    triple_response = await self.llm.achat(
-                        [ChatMessage(role="user", content=triple_prompt)]
+                if not named_entities:
+                    # Fallback to single-step if NER produces nothing
+                    # (release this slot, _extract_batch will re-acquire)
+                    pass
+                else:
+                    # Step 2: NER-conditioned triple extraction (same semaphore slot)
+                    entities_str = json_mod.dumps(named_entities)
+                    triple_prompt = self._TRIPLE_PROMPT.format(
+                        named_entities=entities_str, sentences=sentence_block
                     )
-                    triple_text = _strip_json_fences(triple_response.message.content)
-                    parsed = json_mod.loads(triple_text)
-                    return parsed.get("triples", [])
-                except Exception as e:
-                    logger.debug(f"Triple extraction step failed: {e}")
-                    return []
+                    try:
+                        triple_response = await self.llm.achat(
+                            [ChatMessage(role="user", content=triple_prompt)]
+                        )
+                        triple_text = _strip_json_fences(triple_response.message.content)
+                        parsed = json_mod.loads(triple_text)
+                        return parsed.get("triples", [])
+                    except Exception as e:
+                        logger.debug(f"Triple extraction step failed: {e}")
+                        return []
+
+            # NER produced nothing — fall back to single-step (outside the sem block)
+            if not named_entities:
+                return await _extract_batch(batch, context)
 
         # Choose extraction function based on two-step flag
         extract_fn = _extract_batch_two_step if self._openie_two_step else _extract_batch
@@ -4954,13 +4962,10 @@ SUMMARY: <summary>"""
     async def _create_foundation_edges(self, group_id: str) -> Dict[str, int]:
         """Create foundation edges for graph schema enhancement.
         
-        Creates three types of pre-computed edges:
+        Creates three types of pre-computed edges in parallel:
         1. APPEARS_IN_SECTION: Entity → Section (replaces 2-hop Entity-Chunk-Section)
         2. APPEARS_IN_DOCUMENT: Entity → Document (replaces 3-hop Entity-Chunk-Section-Doc)
         3. HAS_HUB_ENTITY: Section → Entity (top-3 most connected entities per section)
-        
-        Each edge type runs in its own session for resilience — if Neo4j hiccups
-        during one query, the others can still succeed on retry.
         """
         logger.info("creating_foundation_edges", extra={"group_id": group_id})
         
@@ -4970,75 +4975,79 @@ SUMMARY: <summary>"""
             "has_hub_entity": 0,
         }
         
-        # 1. APPEARS_IN_SECTION — separate session for resilience
-        try:
-            result = await self.neo4j_store.arun_query(
-                """
-                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id
-                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
-                WITH e, s
-                WHERE s IS NOT NULL
-                MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
-                SET r.group_id = $group_id
-                RETURN count(DISTINCT r) AS count
-                """,
-                group_id=group_id,
-            )
-            stats["appears_in_section"] = result.single()["count"]
-        except Exception as e:
-            logger.warning(f"APPEARS_IN_SECTION failed (continuing): {e}")
+        async def _create_appears_in_section():
+            try:
+                result = await self.neo4j_store.arun_query(
+                    """
+                    MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
+                    WHERE e.group_id = $group_id AND src.group_id = $group_id
+                    MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                    WITH e, s
+                    WHERE s IS NOT NULL
+                    MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
+                    SET r.group_id = $group_id
+                    RETURN count(DISTINCT r) AS count
+                    """,
+                    group_id=group_id,
+                )
+                stats["appears_in_section"] = result.single()["count"]
+            except Exception as e:
+                logger.warning(f"APPEARS_IN_SECTION failed (continuing): {e}")
 
-        await asyncio.sleep(1)  # Inter-phase pacing
+        async def _create_appears_in_document():
+            try:
+                result = await self.neo4j_store.arun_query(
+                    """
+                    MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
+                    WHERE e.group_id = $group_id AND src.group_id = $group_id
+                    MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                    With e, s
+                    WHERE s IS NOT NULL
+                    WITH e, s.doc_id AS doc_id
+                    MATCH (d:Document {id: doc_id})
+                    WHERE d.group_id = $group_id
+                    WITH e, d
+                    MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
+                    SET r.group_id = $group_id
+                    RETURN count(DISTINCT r) AS count
+                    """,
+                    group_id=group_id,
+                )
+                stats["appears_in_document"] = result.single()["count"]
+            except Exception as e:
+                logger.warning(f"APPEARS_IN_DOCUMENT failed (continuing): {e}")
 
-        # 2. APPEARS_IN_DOCUMENT — separate session
-        try:
-            result = await self.neo4j_store.arun_query(
-                """
-                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id
-                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
-                With e, s
-                WHERE s IS NOT NULL
-                WITH e, s.doc_id AS doc_id
-                MATCH (d:Document {id: doc_id})
-                WHERE d.group_id = $group_id
-                WITH e, d
-                MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
-                SET r.group_id = $group_id
-                RETURN count(DISTINCT r) AS count
-                """,
-                group_id=group_id,
-            )
-            stats["appears_in_document"] = result.single()["count"]
-        except Exception as e:
-            logger.warning(f"APPEARS_IN_DOCUMENT failed (continuing): {e}")
+        async def _create_has_hub_entity():
+            try:
+                result = await self.neo4j_store.arun_query(
+                    """
+                    MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
+                    WHERE e.group_id = $group_id AND src.group_id = $group_id
+                    MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                    WITH e, s, src
+                    WHERE s IS NOT NULL
+                    WITH s, e, count(DISTINCT src) AS mention_count
+                    ORDER BY s.id, mention_count DESC
+                    WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
+                    UNWIND top_entities AS te
+                    WITH s, te.entity AS e, te.count AS mention_count
+                    MERGE (s)-[r:HAS_HUB_ENTITY]->(e)
+                    SET r.group_id = $group_id, r.mention_count = mention_count
+                    RETURN count(r) AS count
+                    """,
+                    group_id=group_id,
+                )
+                stats["has_hub_entity"] = result.single()["count"]
+            except Exception as e:
+                logger.warning(f"HAS_HUB_ENTITY failed (continuing): {e}")
 
-        await asyncio.sleep(1)  # Inter-phase pacing
-
-        # 3. HAS_HUB_ENTITY — separate session
-        try:
-            result = await self.neo4j_store.arun_query(
-                """
-                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id
-                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
-                WITH e, s, src
-                WHERE s IS NOT NULL
-                WITH s, e, count(DISTINCT src) AS mention_count
-                ORDER BY s.id, mention_count DESC
-                WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
-                UNWIND top_entities AS te
-                WITH s, te.entity AS e, te.count AS mention_count
-                MERGE (s)-[r:HAS_HUB_ENTITY]->(e)
-                SET r.group_id = $group_id, r.mention_count = mention_count
-                RETURN count(r) AS count
-                """,
-                group_id=group_id,
-            )
-            stats["has_hub_entity"] = result.single()["count"]
-        except Exception as e:
-            logger.warning(f"HAS_HUB_ENTITY failed (continuing): {e}")
+        # Run all 3 edge types concurrently — they operate on different
+        # relationship types and don't conflict.
+        await asyncio.gather(
+            _create_appears_in_section(),
+            _create_appears_in_document(),
+            _create_has_hub_entity(),
+        )
         
         logger.info(
             "foundation_edges_created",

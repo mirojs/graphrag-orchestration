@@ -1052,23 +1052,45 @@ async def _run_folder_analysis(
         return get_graph_driver().session()
     file_count = len(blobs)
     try:
-        # NOTE: Group-wide cleanup removed — it overwhelms Neo4j Aura and kills
-        # the driver connection pool. Per-document cleanup in on_file_uploaded()
-        # handles individual files. For full cleanup, use "Delete Analysis" first.
+        # ── File-level resume: skip already-processed files ────────────
+        resume_from = 0
+        resume_query = """
+        MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
+        RETURN f.analysis_files_processed AS processed,
+               f.analysis_status AS status
+        """
+        with _get_session() as session:
+            rec = session.run(resume_query,
+                              folder_id=folder_id,
+                              partition_id=partition_id).single()
+            if rec and rec["status"] == "analyzing" and rec["processed"]:
+                resume_from = int(rec["processed"])
+                if resume_from > 0:
+                    logger.info(
+                        "folder_analysis_resuming",
+                        folder_id=folder_id,
+                        resume_from=resume_from,
+                        total=file_count,
+                    )
 
         # Set total file count so the UI can show determinate progress
         init_query = """
         MATCH (f:Folder {id: $folder_id, group_id: $partition_id})
         SET f.analysis_files_total = $total,
-            f.analysis_files_processed = 0
+            f.analysis_files_processed = $processed
         """
         with _get_session() as session:
             session.run(init_query,
                         folder_id=folder_id,
                         partition_id=partition_id,
-                        total=file_count)
+                        total=file_count,
+                        processed=resume_from)
 
         for idx, blob in enumerate(blobs):
+            if idx < resume_from:
+                logger.info(f"folder_analysis_skip_file: {blob['name']} ({idx+1}/{file_count}, already processed)")
+                continue
+
             await doc_sync.on_file_uploaded(
                 group_id=neo4j_gid,
                 filename=blob["name"],

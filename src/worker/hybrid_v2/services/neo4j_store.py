@@ -167,7 +167,7 @@ class Neo4jStoreV3:
                     self.uri,
                     auth=(self.username, self.password),
                     max_connection_lifetime=300,
-                    max_transaction_retry_time=120,
+                    max_transaction_retry_time=300,
                     connection_acquisition_timeout=120,
                 )
                 # Verify connectivity
@@ -191,7 +191,7 @@ class Neo4jStoreV3:
         Use ``read_only=True`` for pure-read queries to enable read-replica routing.
         """
         def _sync():
-            with self.get_retry_session(read_only=read_only) as session:
+            with self._resilient_session(read_only=read_only) as session:
                 return session.run(query, **params)
         return await asyncio.to_thread(_sync)
 
@@ -202,7 +202,7 @@ class Neo4jStoreV3:
         ``func`` receives a ``RetrySession`` and should return any result.
         """
         def _sync():
-            with self.get_retry_session(read_only=read_only) as session:
+            with self._resilient_session(read_only=read_only) as session:
                 return func(session)
         return await asyncio.to_thread(_sync)
 
@@ -211,6 +211,48 @@ class Neo4jStoreV3:
         if self._driver:
             self._driver.close()
             self._driver = None
+
+    def _resilient_session(self, read_only: bool = False, max_retries: int = 5):
+        """Get a retry-enabled session, retrying session creation on pool failures.
+
+        The Neo4j driver's ``execute_write()`` handles transient *transaction*
+        errors (deadlocks, leader switches) automatically.  But if the entire
+        connection pool is stale (e.g. after a 60-second network outage) even
+        *creating* a session can fail with ServiceUnavailable.
+
+        This helper retries session creation with exponential backoff
+        (5→10→20→40→80 s, ~2.5 min total) so transient network outages
+        don't crash the pipeline.
+        """
+        import time as _time
+        from neo4j.exceptions import ServiceUnavailable, SessionExpired
+
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                return self.get_retry_session(read_only=read_only)
+            except (ServiceUnavailable, SessionExpired, OSError) as exc:
+                last_err = exc
+                delay = 5 * (2 ** attempt)  # 5, 10, 20, 40, 80
+                logger.warning(
+                    "neo4j_session_creation_retry",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "delay_s": delay,
+                        "error": str(exc)[:120],
+                    },
+                )
+                _time.sleep(delay)
+                # Force driver recreation on next access
+                with self._driver_lock:
+                    if self._driver is not None:
+                        try:
+                            self._driver.close()
+                        except Exception:
+                            pass
+                        self._driver = None
+        raise last_err  # type: ignore[misc]
 
     def _batched_write(
         self,
@@ -225,7 +267,11 @@ class Neo4jStoreV3:
         """Run an UNWIND write in batches with a pause between each.
 
         Prevents Neo4j Aura from being overwhelmed by large single-transaction
-        writes. Returns the sum of ``count`` from each batch (expects the query
+        writes.  Uses ``_resilient_session()`` so that transient network outages
+        don't crash mid-batch — each batch is retried independently (all writes
+        use MERGE, so replaying a batch is idempotent).
+
+        Returns the sum of ``count`` from each batch (expects the query
         to ``RETURN count(...) AS count``).
         """
         import time
@@ -234,7 +280,7 @@ class Neo4jStoreV3:
         total = 0
         for start in range(0, len(items), batch_size):
             chunk = items[start : start + batch_size]
-            with self.get_retry_session() as session:
+            with self._resilient_session() as session:
                 result = session.run(query, **{param_name: chunk}, **extra_params)
                 rec = result.single()
                 if rec:
@@ -1598,6 +1644,63 @@ class Neo4jStoreV3:
         
         with self.get_retry_session() as session:
             session.run(query, group_id=group_id)
+
+    # ── Pipeline checkpoint for resume-after-crash ──────────────────────────
+
+    # Ordered list of checkpoint names. A checkpoint means "everything up to
+    # and including this step has been persisted to Neo4j".
+    PIPELINE_STEPS = [
+        "sentences",            # Steps 1-3: DI extraction + sentence upsert
+        "section_graph",        # Steps 4.2-4.9: sections, embeddings, KVP
+        "entities_committed",   # Steps 5-7: OpenIE + dedup + entity/rel commit
+        "triple_embeddings",    # Step 7.5
+        "synonymy_edges",       # Step 7.6
+        "gds_complete",         # Step 8
+        "communities",          # Step 9
+        "done",                 # Pipeline complete
+    ]
+
+    def set_pipeline_checkpoint(self, group_id: str, step: str, doc_id: str | None = None) -> None:
+        """Record the last completed pipeline step on GroupMeta."""
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        SET g.pipeline_checkpoint = $step,
+            g.pipeline_checkpoint_doc_id = $doc_id,
+            g.pipeline_checkpoint_at = datetime()
+        """
+        with self._resilient_session() as session:
+            session.run(query, group_id=group_id, step=step, doc_id=doc_id)
+        logger.info("pipeline_checkpoint_set", extra={"group_id": group_id, "step": step})
+
+    def get_pipeline_checkpoint(self, group_id: str) -> str | None:
+        """Read the last completed pipeline step (or None if fresh run)."""
+        query = """
+        MATCH (g:GroupMeta {group_id: $group_id})
+        RETURN g.pipeline_checkpoint AS step
+        """
+        with self._resilient_session(read_only=True) as session:
+            rec = session.run(query, group_id=group_id).single()
+            return rec["step"] if rec else None
+
+    def clear_pipeline_checkpoint(self, group_id: str) -> None:
+        """Clear the checkpoint (e.g. after full reindex or pipeline completion)."""
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        SET g.pipeline_checkpoint = null,
+            g.pipeline_checkpoint_doc_id = null,
+            g.pipeline_checkpoint_at = null
+        """
+        with self._resilient_session() as session:
+            session.run(query, group_id=group_id)
+
+    def _step_done(self, checkpoint: str | None, step: str) -> bool:
+        """Return True if *step* was already completed according to *checkpoint*."""
+        if checkpoint is None:
+            return False
+        try:
+            return self.PIPELINE_STEPS.index(checkpoint) >= self.PIPELINE_STEPS.index(step)
+        except ValueError:
+            return False
     
     # ==================== Cleanup Operations ====================
 

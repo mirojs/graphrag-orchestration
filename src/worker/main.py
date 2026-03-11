@@ -384,6 +384,22 @@ class Worker:
         await self.redis_service.results.store(job_id, result)
         logger.debug(f"Stored result for job {job_id}")
         
+    async def _redis_op_with_retry(self, coro_fn, description: str, retries: int = 3):
+        """Execute a Redis operation with retry on transient errors."""
+        for attempt in range(1, retries + 1):
+            try:
+                return await coro_fn()
+            except (Exception) as e:
+                is_redis_err = isinstance(e, (
+                    aioredis.ConnectionError, aioredis.TimeoutError,
+                    OSError, ConnectionResetError, TimeoutError,
+                ))
+                if is_redis_err and attempt < retries:
+                    logger.warning(f"{description} failed (attempt {attempt}/{retries}): {e}")
+                    await asyncio.sleep(min(2 ** attempt, 10))
+                else:
+                    raise
+
     async def run(self):
         """Main worker loop - consume and process jobs with DLQ support."""
         logger.info(f"Worker {self.worker_id} started, listening for jobs...")
@@ -400,7 +416,7 @@ class Worker:
                 job = await queue.dequeue(timeout=5)
                 
                 if job is None:
-                    # Timeout - no jobs available, continue loop
+                    # Timeout or transient Redis error - continue loop
                     continue
                 
                 logger.info(f"Processing job {job.id} (type={job.job_type}, tenant={job.tenant_id})")
@@ -422,16 +438,25 @@ class Worker:
                     # Query jobs don't need locks
                     job_result = await self.process_job(job.__dict__)
                 
-                # Store result for retrieval by API
-                await self.store_result(job.id, job_result)
+                # Store result for retrieval by API (with retry)
+                await self._redis_op_with_retry(
+                    lambda: self.store_result(job.id, job_result),
+                    f"store_result({job.id})"
+                )
                 
-                # Acknowledge job completion
-                await queue.ack(job)
+                # Acknowledge job completion (with retry)
+                await self._redis_op_with_retry(
+                    lambda: queue.ack(job),
+                    f"ack({job.id})"
+                )
                 
             except Exception as e:
                 logger.exception(f"Error processing job: {e}")
                 if 'job' in locals() and job:
-                    await queue.nack(job, requeue=True)
+                    try:
+                        await queue.nack(job, requeue=True)
+                    except Exception as nack_err:
+                        logger.error(f"Failed to nack job {job.id}: {nack_err}")
                 await asyncio.sleep(1)
                 
         logger.info(f"Worker {self.worker_id} stopped")
@@ -450,8 +475,21 @@ async def main():
     signal.signal(signal.SIGTERM, worker.handle_signal)
     signal.signal(signal.SIGINT, worker.handle_signal)
     
+    # Retry connection with backoff — don't crash-loop on transient Redis issues
+    max_retries = 10
+    for attempt in range(1, max_retries + 1):
+        try:
+            await worker.connect()
+            break
+        except Exception as e:
+            if attempt == max_retries:
+                logger.error(f"Failed to connect after {max_retries} attempts: {e}")
+                return
+            wait = min(2 ** attempt, 30)
+            logger.warning(f"Connection attempt {attempt}/{max_retries} failed: {e}. Retrying in {wait}s...")
+            await asyncio.sleep(wait)
+    
     try:
-        await worker.connect()
         await worker.run()
     finally:
         await worker.disconnect()

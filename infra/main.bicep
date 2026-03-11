@@ -155,7 +155,7 @@ param azureOpenAiResourceName string = 'graphrag-openai-8476'
 param documentIntelligenceName string = 'doc-intel-graphrag'
 
 @description('Neo4j connection URI')
-param neo4jUri string = 'neo4j+s://a86dcf63.databases.neo4j.io'
+param neo4jUri string = 'neo4j+s://501bc8d1.databases.neo4j.io'
 
 @description('Neo4j username')
 param neo4jUsername string = 'neo4j'

@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Request
 from typing import List, Optional
 from pydantic import BaseModel
+import os
 import structlog
 from datetime import datetime
 

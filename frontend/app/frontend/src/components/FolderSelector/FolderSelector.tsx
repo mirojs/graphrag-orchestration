@@ -23,10 +23,12 @@ export const FolderSelector = ({ selectedFolderId, onFolderChange }: FolderSelec
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // Only show user-created folders that have been successfully analyzed
+    // Only show top-level user folders that have been analyzed
+    // (subfolders inherit analysis_status but are part of the parent's knowledge base)
     const analyzedFolders = folders.filter(
         f =>
             f.folder_type === "user" &&
+            !f.parent_folder_id &&
             (f.analysis_status === "analyzed" || f.analysis_status === "stale")
     );
 

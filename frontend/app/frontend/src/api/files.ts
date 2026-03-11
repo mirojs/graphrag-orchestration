@@ -329,4 +329,4 @@ export function getFileExtension(filename: string): string {
     return filename.split(".").pop()?.toLowerCase() || "";
 }
 
-export const ACCEPTED_FILE_TYPES = ".txt,.csv,.png,.jpg,.jpeg,.bmp,.tiff,.pdf,.docx,.xlsx,.pptx,.html,.htm";
+export const ACCEPTED_FILE_TYPES = ".txt,.csv,.png,.jpg,.jpeg,.bmp,.tiff,.pdf,.docx,.xlsx,.pptx,.html,.htm,.json";

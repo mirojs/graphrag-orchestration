@@ -162,6 +162,17 @@ class Worker:
                     'result': {'document_id': document_id, 'indexed': True, **index_result},
                     'duration_ms': (datetime.utcnow() - start_time).total_seconds() * 1000
                 }
+
+            elif job_type == 'index_folder':
+                # Folder analysis job — runs the full indexing pipeline for all
+                # files in a folder, with per-file progress and resume support.
+                # This decouples the heavy pipeline from the API process.
+                return await self._process_index_folder(
+                    job_id=job_id,
+                    group_id=group_id,
+                    payload=payload,
+                    start_time=start_time,
+                )
                 
             else:
                 logger.warning(f"Unknown job type: {job_type}")
@@ -179,6 +190,190 @@ class Worker:
                 'error': str(e),
                 'duration_ms': (datetime.utcnow() - start_time).total_seconds() * 1000
             }
+
+    async def _process_index_folder(
+        self, *, job_id: str, group_id: str, payload: dict, start_time
+    ) -> dict:
+        """Process an index_folder job: run full pipeline for all files in a folder.
+
+        Payload keys:
+            folder_id, folder_name, neo4j_gid, partition_id,
+            blobs: [{name, url}, ...]
+        """
+        import traceback
+        from neo4j import GraphDatabase
+        from src.core.config import settings
+        from src.api_gateway.services.document_sync import DocumentSyncService
+
+        folder_id = payload["folder_id"]
+        folder_name = payload["folder_name"]
+        neo4j_gid = payload["neo4j_gid"]
+        partition_id = payload["partition_id"]
+        blobs = payload["blobs"]
+        file_count = len(blobs)
+
+        logger.info(f"index_folder_start folder_id={folder_id} files={file_count}")
+
+        # Worker-local Neo4j session helper
+        _driver_cache = {}
+
+        def _get_driver():
+            if "d" not in _driver_cache or _driver_cache["d"] is None:
+                _driver_cache["d"] = GraphDatabase.driver(
+                    settings.NEO4J_URI,
+                    auth=(settings.NEO4J_USERNAME, settings.NEO4J_PASSWORD),
+                    max_connection_lifetime=300,
+                    max_connection_pool_size=10,
+                )
+            return _driver_cache["d"]
+
+        def _neo4j_session():
+            db = getattr(settings, "NEO4J_DATABASE", None) or "neo4j"
+            return _get_driver().session(database=db)
+
+        doc_sync = DocumentSyncService()
+
+        try:
+            # ── File-level resume ──
+            resume_from = 0
+            with _neo4j_session() as session:
+                rec = session.run(
+                    "MATCH (f:Folder {id: $fid, group_id: $pid}) "
+                    "RETURN f.analysis_files_processed AS processed, f.analysis_status AS status",
+                    fid=folder_id, pid=partition_id,
+                ).single()
+                if rec and rec["status"] == "analyzing" and rec["processed"]:
+                    resume_from = int(rec["processed"])
+                    logger.info(f"index_folder_resume from={resume_from}/{file_count}")
+
+            # Set total count
+            with _neo4j_session() as session:
+                session.run(
+                    "MATCH (f:Folder {id: $fid, group_id: $pid}) "
+                    "SET f.analysis_files_total = $total, f.analysis_files_processed = $processed",
+                    fid=folder_id, pid=partition_id, total=file_count, processed=resume_from,
+                )
+
+            # ── Per-file indexing loop ──
+            for idx, blob in enumerate(blobs):
+                if idx < resume_from:
+                    continue
+                await doc_sync.on_file_uploaded(
+                    group_id=neo4j_gid,
+                    filename=blob["name"],
+                    blob_url=blob["url"],
+                    user_id=partition_id,
+                )
+                with _neo4j_session() as session:
+                    session.run(
+                        "MATCH (f:Folder {id: $fid, group_id: $pid}) "
+                        "SET f.analysis_files_processed = $processed",
+                        fid=folder_id, pid=partition_id, processed=idx + 1,
+                    )
+
+            # ── Collect stats ──
+            stats_query = """
+            OPTIONAL MATCH (e:Entity {group_id: $gid})
+            WITH count(e) as entity_count
+            OPTIONAL MATCH (c:Community {group_id: $gid})
+            WITH entity_count, count(c) as community_count
+            OPTIONAL MATCH (sec:Section {group_id: $gid})
+            WITH entity_count, community_count, count(sec) as section_count
+            OPTIONAL MATCH (sent:Sentence {group_id: $gid})
+            WITH entity_count, community_count, section_count, count(sent) as sentence_count
+            OPTIONAL MATCH (:Entity {group_id: $gid})-[r:RELATED_TO]->()
+            RETURN entity_count, community_count, section_count, sentence_count,
+                   count(r) as relationship_count
+            """
+            entity_count = community_count = section_count = sentence_count = relationship_count = 0
+            with _neo4j_session() as session:
+                record = session.run(stats_query, gid=neo4j_gid).single()
+                if record:
+                    entity_count = record["entity_count"]
+                    community_count = record["community_count"]
+                    section_count = record["section_count"]
+                    sentence_count = record["sentence_count"]
+                    relationship_count = record["relationship_count"]
+
+            # ── Mark complete ──
+            with _neo4j_session() as session:
+                session.run(
+                    """
+                    MATCH (f:Folder {id: $fid, group_id: $pid})
+                    OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+                    WITH collect(f) + collect(sub) AS folders
+                    UNWIND folders AS fld
+                    SET fld.analysis_status = 'analyzed',
+                        fld.analyzed_at = datetime(),
+                        fld.file_count = $file_count,
+                        fld.entity_count = $entity_count,
+                        fld.community_count = $community_count,
+                        fld.section_count = $section_count,
+                        fld.sentence_count = $sentence_count,
+                        fld.relationship_count = $relationship_count,
+                        fld.analysis_files_total = null,
+                        fld.analysis_files_processed = null,
+                        fld.analysis_error = null,
+                        fld.updated_at = datetime()
+                    """,
+                    fid=folder_id, pid=partition_id, file_count=file_count,
+                    entity_count=entity_count, community_count=community_count,
+                    section_count=section_count, sentence_count=sentence_count,
+                    relationship_count=relationship_count,
+                )
+
+            logger.info(
+                f"index_folder_complete folder_id={folder_id} entities={entity_count} "
+                f"sentences={sentence_count} communities={community_count}"
+            )
+            return {
+                'job_id': job_id,
+                'status': 'completed',
+                'result': {
+                    'folder_id': folder_id,
+                    'entity_count': entity_count,
+                    'community_count': community_count,
+                    'section_count': section_count,
+                    'sentence_count': sentence_count,
+                    'relationship_count': relationship_count,
+                },
+                'duration_ms': (datetime.utcnow() - start_time).total_seconds() * 1000,
+            }
+
+        except Exception as e:
+            logger.exception(f"index_folder_failed folder_id={folder_id}: {e}")
+            # Mark folder as stale with error
+            try:
+                with _neo4j_session() as session:
+                    session.run(
+                        """
+                        MATCH (f:Folder {id: $fid, group_id: $pid})
+                        OPTIONAL MATCH (f)<-[:SUBFOLDER_OF*0..]-(sub:Folder)
+                        WITH collect(f) + collect(sub) AS folders
+                        UNWIND folders AS fld
+                        SET fld.analysis_status = 'stale',
+                            fld.analysis_error = $err,
+                            fld.analysis_files_total = null,
+                            fld.analysis_files_processed = null,
+                            fld.updated_at = datetime()
+                        """,
+                        fid=folder_id, pid=partition_id, err=str(e)[:500],
+                    )
+            except Exception:
+                pass
+            return {
+                'job_id': job_id,
+                'status': 'failed',
+                'error': str(e),
+                'duration_ms': (datetime.utcnow() - start_time).total_seconds() * 1000,
+            }
+        finally:
+            try:
+                drv = _driver_cache.get("d")
+                if drv:
+                    drv.close()
+            except Exception:
+                pass
             
     async def store_result(self, job_id: str, result: dict):
         """Store job result in Redis for retrieval by API."""

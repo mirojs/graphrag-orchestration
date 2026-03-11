@@ -362,6 +362,10 @@ class DocumentIntelligenceService:
         logger.info(f"Document Intelligence Service Init - Using API key: {bool(self.api_key)}")
         logger.info(f"Document Intelligence Service Init - Max concurrency: {self.max_concurrency}")
 
+        # Cache credential for reuse — avoids per-file IMDS token acquisition
+        # latency (1-5s) when using Managed Identity.
+        self._cached_credential = None
+
     @asynccontextmanager
     async def _create_client(self) -> AsyncIterator[DocumentIntelligenceClient]:
         """Create an async Document Intelligence client and ensure resources are closed.
@@ -380,13 +384,15 @@ class DocumentIntelligenceService:
                 yield client
         else:
             logger.info("Document Intelligence: Using managed identity authentication")
-            async with DefaultAzureCredential() as credential:
-                async with DocumentIntelligenceClient(
-                    endpoint=self.endpoint,
-                    credential=credential,
-                    api_version=self.api_version,
-                ) as client:
-                    yield client
+            # Reuse cached credential to avoid per-call IMDS token acquisition
+            if self._cached_credential is None:
+                self._cached_credential = DefaultAzureCredential()
+            async with DocumentIntelligenceClient(
+                endpoint=self.endpoint,
+                credential=self._cached_credential,
+                api_version=self.api_version,
+            ) as client:
+                yield client
 
     def _build_section_hierarchy(self, paragraphs: List[DocumentParagraph]) -> List[str]:
         """Extract section hierarchy from paragraph roles."""

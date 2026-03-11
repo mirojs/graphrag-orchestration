@@ -122,18 +122,47 @@ async def _auto_resume_zombie_analyses(app: FastAPI):
                         """, fid=folder_id, pid=partition_id)
                     continue
 
-                from src.api_gateway.routers.folders import _run_folder_analysis
-                asyncio.create_task(
-                    _run_folder_analysis(
-                        doc_sync=doc_sync,
-                        blobs=blobs,
-                        neo4j_gid=neo4j_gid,
-                        folder_id=folder_id,
-                        folder_name=folder_name,
-                        partition_id=partition_id,
+                # Try Redis worker first, fall back to in-process
+                dispatched = False
+                try:
+                    from src.core.services.redis_service import get_redis_service, Job
+                    import uuid as _uuid
+                    from datetime import datetime as _dt
+
+                    redis_svc = await get_redis_service()
+                    job = Job(
+                        id=str(_uuid.uuid4()),
+                        tenant_id=partition_id,
+                        job_type="index_folder",
+                        payload={
+                            "folder_id": folder_id,
+                            "folder_name": folder_name,
+                            "neo4j_gid": neo4j_gid,
+                            "partition_id": partition_id,
+                            "blobs": blobs,
+                        },
+                        created_at=_dt.utcnow().isoformat(),
+                        idempotency_key=f"index_folder:{folder_id}:{neo4j_gid}",
                     )
-                )
-                logger.info(f"auto_resume: kicked off analysis for folder {folder_id}")
+                    dispatched = await redis_svc.queue.enqueue(job)
+                    if dispatched:
+                        logger.info(f"auto_resume: dispatched to worker for folder {folder_id}")
+                except Exception as redis_err:
+                    logger.warning(f"auto_resume: Redis dispatch failed: {redis_err}")
+
+                if not dispatched:
+                    from src.api_gateway.routers.folders import _run_folder_analysis
+                    asyncio.create_task(
+                        _run_folder_analysis(
+                            doc_sync=doc_sync,
+                            blobs=blobs,
+                            neo4j_gid=neo4j_gid,
+                            folder_id=folder_id,
+                            folder_name=folder_name,
+                            partition_id=partition_id,
+                        )
+                    )
+                    logger.info(f"auto_resume: kicked off in-process for folder {folder_id}")
 
             except Exception as e:
                 logger.error(f"auto_resume: failed for folder {folder_id}: {e}")

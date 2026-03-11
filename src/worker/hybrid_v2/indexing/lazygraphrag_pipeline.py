@@ -766,26 +766,28 @@ class LazyGraphRAGIndexingPipeline:
 
         di_service = DocumentIntelligenceService()
 
-        # Process URLs sequentially to keep memory bounded (each DI result is
-        # stored before the next URL is processed).  Previous parallel version
-        # held all results in memory simultaneously which caused OOM on
-        # constrained environments (codespace, small container).
+        # Process URLs with bounded parallelism (3 concurrent) to reduce
+        # total DI extraction time while keeping memory bounded.
+        DI_CONCURRENCY = 3
+        di_semaphore = asyncio.Semaphore(DI_CONCURRENCY)
         by_source: Dict[str, List[LlamaDocument]] = {}
 
-        for url in effective_urls:
-            try:
-                extracted = await di_service.extract_documents(
-                    group_id=group_id,
-                    input_items=cast(List[str | Dict[str, Any]], [url]),
-                    fail_fast=True,
-                    model_strategy="auto",
-                )
-                logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
-                # If this result.json was a sidecar, map results back to the PDF's URL
-                target_url = source_remap.get(url, url)
-                by_source[target_url] = extracted
-            except Exception as exc:
-                logger.warning(f"DI extraction failed for a URL: {exc}")
+        async def _extract_one(url: str) -> None:
+            async with di_semaphore:
+                try:
+                    extracted = await di_service.extract_documents(
+                        group_id=group_id,
+                        input_items=cast(List[str | Dict[str, Any]], [url]),
+                        fail_fast=True,
+                        model_strategy="auto",
+                    )
+                    logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
+                    target_url = source_remap.get(url, url)
+                    by_source[target_url] = extracted
+                except Exception as exc:
+                    logger.warning(f"DI extraction failed for a URL: {exc}")
+
+        await asyncio.gather(*[_extract_one(url) for url in effective_urls])
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:
@@ -4030,22 +4032,28 @@ SUMMARY: <summary>"""
             logger.warning("section_embedding_failed", extra={"error": str(e)})
             return {"sections_embedded": 0, "error": str(e)}
         
-        # Update Section nodes with embeddings
+        # Update Section nodes with embeddings — batched to avoid overwhelming Neo4j
+        # with a single transaction containing many 2048-dim vectors
         updates = [
             {"id": sec["id"], "section_embedding": emb}
             for sec, emb in zip(sections_to_embed, embeddings)
             if emb is not None
         ]
         
-        await self.neo4j_store.arun_query(
-            """
-            UNWIND $updates AS u
-            MATCH (s:Section {id: u.id, group_id: $group_id})
-            SET s.section_embedding = u.section_embedding
-            """,
-            updates=updates,
-            group_id=group_id,
-        )
+        BATCH = 20  # ~20 × 2048 floats ≈ 320 KB per batch
+        for start in range(0, len(updates), BATCH):
+            chunk = updates[start : start + BATCH]
+            await self.neo4j_store.arun_query(
+                """
+                UNWIND $updates AS u
+                MATCH (s:Section {id: u.id, group_id: $group_id})
+                SET s.section_embedding = u.section_embedding
+                """,
+                updates=chunk,
+                group_id=group_id,
+            )
+            if start + BATCH < len(updates):
+                await asyncio.sleep(0.3)
         
         logger.info(
             "section_nodes_embedded",
@@ -4688,14 +4696,8 @@ SUMMARY: <summary>"""
         2. APPEARS_IN_DOCUMENT: Entity → Document (replaces 3-hop Entity-Chunk-Section-Doc)
         3. HAS_HUB_ENTITY: Section → Entity (top-3 most connected entities per section)
         
-        These edges enable O(1) retrieval for Route 2 (Local Search) and provide
-        the LazyGraphRAG→HippoRAG bridge for Route 4 (DRIFT).
-        
-        Args:
-            group_id: Group identifier for multi-tenancy
-            
-        Returns:
-            Dictionary with edge counts: {"appears_in_section": N, "appears_in_document": M, "has_hub_entity": K}
+        Each edge type runs in its own session for resilience — if Neo4j hiccups
+        during one query, the others can still succeed on retry.
         """
         logger.info("creating_foundation_edges", extra={"group_id": group_id})
         
@@ -4705,10 +4707,9 @@ SUMMARY: <summary>"""
             "has_hub_entity": 0,
         }
         
-        def _write_foundation(session):
-            # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
-            # Phase B: Sentences reach Section via IN_SECTION
-            result = session.run(
+        # 1. APPEARS_IN_SECTION — separate session for resilience
+        try:
+            result = await self.neo4j_store.arun_query(
                 """
                 MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
                 WHERE e.group_id = $group_id AND src.group_id = $group_id
@@ -4721,10 +4722,15 @@ SUMMARY: <summary>"""
                 """,
                 group_id=group_id,
             )
-            s = {"appears_in_section": result.single()["count"]}
+            stats["appears_in_section"] = result.single()["count"]
+        except Exception as e:
+            logger.warning(f"APPEARS_IN_SECTION failed (continuing): {e}")
 
-            # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
-            result = session.run(
+        await asyncio.sleep(1)  # Inter-phase pacing
+
+        # 2. APPEARS_IN_DOCUMENT — separate session
+        try:
+            result = await self.neo4j_store.arun_query(
                 """
                 MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
                 WHERE e.group_id = $group_id AND src.group_id = $group_id
@@ -4741,12 +4747,16 @@ SUMMARY: <summary>"""
                 """,
                 group_id=group_id,
             )
-            s["appears_in_document"] = result.single()["count"]
+            stats["appears_in_document"] = result.single()["count"]
+        except Exception as e:
+            logger.warning(f"APPEARS_IN_DOCUMENT failed (continuing): {e}")
 
-            # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
-            result = session.run(
+        await asyncio.sleep(1)  # Inter-phase pacing
+
+        # 3. HAS_HUB_ENTITY — separate session
+        try:
+            result = await self.neo4j_store.arun_query(
                 """
-                // Collect entity mentions per section, resolving Sentence→IN_SECTION
                 MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
                 WHERE e.group_id = $group_id AND src.group_id = $group_id
                 MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
@@ -4763,10 +4773,9 @@ SUMMARY: <summary>"""
                 """,
                 group_id=group_id,
             )
-            s["has_hub_entity"] = result.single()["count"]
-            return s
-
-        stats = await self.neo4j_store.arun_in_session(_write_foundation)
+            stats["has_hub_entity"] = result.single()["count"]
+        except Exception as e:
+            logger.warning(f"HAS_HUB_ENTITY failed (continuing): {e}")
         
         logger.info(
             "foundation_edges_created",

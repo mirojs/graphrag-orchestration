@@ -169,6 +169,7 @@ class Neo4jStoreV3:
                     max_connection_lifetime=300,
                     max_transaction_retry_time=300,
                     connection_acquisition_timeout=120,
+                    max_connection_pool_size=25,
                 )
                 # Verify connectivity
                 self._driver.verify_connectivity()
@@ -223,6 +224,11 @@ class Neo4jStoreV3:
         This helper retries session creation with exponential backoff
         (5→10→20→40→80 s, ~2.5 min total) so transient network outages
         don't crash the pipeline.
+
+        Key improvement: we do NOT destroy the driver pool on the first failure.
+        Attempts 1-2 retry with the existing pool (connections may self-heal).
+        Only attempt 3+ forces a driver recreation to avoid thundering-herd
+        reconnection storms across high-latency links.
         """
         import time as _time
         from neo4j.exceptions import ServiceUnavailable, SessionExpired
@@ -244,14 +250,16 @@ class Neo4jStoreV3:
                     },
                 )
                 _time.sleep(delay)
-                # Force driver recreation on next access
-                with self._driver_lock:
-                    if self._driver is not None:
-                        try:
-                            self._driver.close()
-                        except Exception:
-                            pass
-                        self._driver = None
+                # Only recreate driver after 2 failed attempts with existing pool
+                if attempt >= 2:
+                    with self._driver_lock:
+                        if self._driver is not None:
+                            try:
+                                self._driver.close()
+                            except Exception:
+                                pass
+                            self._driver = None
+                            logger.info("neo4j_driver_pool_recreated_after_repeated_failures")
         raise last_err  # type: ignore[misc]
 
     def _batched_write(
@@ -288,6 +296,11 @@ class Neo4jStoreV3:
             if start + batch_size < len(items):
                 time.sleep(pause)
         return total
+
+    # ── Pipeline checkpoint helpers ──────────────────────────────────────
+    # NOTE: The full checkpoint system (set/get/clear/step_done + PIPELINE_STEPS)
+    # is defined further below (line ~1724).  See those methods for the canonical
+    # implementation used by the indexing pipeline.
     
     # ==================== Schema Management ====================
     
@@ -486,27 +499,47 @@ class Neo4jStoreV3:
         - `chunk_count`: number of Sentences that mention the entity
         - `importance_score`: weighted score used for ranking
 
-        Note: This is best-effort and should not fail indexing.
+        Uses batched execution to avoid overwhelming Neo4j Aura with a single
+        graph-wide transaction.
         """
-
-        query = """
-        MATCH (e)
-        WHERE e.group_id = $group_id AND (e:Entity)
-        WITH e, COUNT { (e)-[]-() } AS degree
-        SET e.degree = degree
-        WITH e
-        // Count MENTIONS from Sentence nodes
-        WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id } AS chunk_count
-        SET e.chunk_count = chunk_count
-        SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
-        RETURN count(e) AS updated
-        """
-
+        # Step 1: Get all entity IDs for this group
         try:
-            with self.get_retry_session() as session:
-                session.run(query, group_id=group_id).consume()
+            with self.get_retry_session(read_only=True) as session:
+                result = session.run(
+                    "MATCH (e:Entity) WHERE e.group_id = $group_id RETURN e.id AS eid",
+                    group_id=group_id,
+                )
+                entity_ids = [r["eid"] for r in result]
         except Exception as e:
-            logger.warning(f"Failed to compute entity importance (continuing): {e}")
+            logger.warning(f"Failed to fetch entity IDs for importance (continuing): {e}")
+            return
+
+        if not entity_ids:
+            return
+
+        # Step 2: Update importance in batches
+        import time
+        BATCH = 50
+        for start in range(0, len(entity_ids), BATCH):
+            batch = entity_ids[start : start + BATCH]
+            query = """
+            UNWIND $eids AS eid
+            MATCH (e:Entity {id: eid, group_id: $group_id})
+            WITH e, COUNT { (e)-[]-() } AS degree
+            SET e.degree = degree
+            WITH e
+            WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id } AS chunk_count
+            SET e.chunk_count = chunk_count
+            SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
+            RETURN count(e) AS updated
+            """
+            try:
+                with self.get_retry_session() as session:
+                    session.run(query, eids=batch, group_id=group_id).consume()
+            except Exception as e:
+                logger.warning(f"Failed to compute entity importance batch (continuing): {e}")
+            if start + BATCH < len(entity_ids):
+                time.sleep(0.3)
     
     async def aupsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
         """Async batch insert/update entities with native vector support."""

@@ -840,7 +840,7 @@ async def analyze_folder(
             write(revert_query, folder_id=folder_id, partition_id=partition_id)
         raise HTTPException(status_code=400, detail="No files found in folder to analyze")
 
-    # 5) Kick off indexing in background
+    # 5) Kick off indexing — prefer Redis worker (separate process), fallback to in-process
     doc_sync = getattr(request.app.state, "document_sync_service", None)
     if not doc_sync:
         raise HTTPException(status_code=503, detail="Indexing service unavailable")
@@ -856,20 +856,47 @@ async def analyze_folder(
               partition_id=partition_id,
               neo4j_gid=neo4j_gid)
 
-    # Run analysis as a background task on the main event loop.
-    # This keeps async compatibility (doc_sync uses async HTTP clients).
-    # The tolerant liveness probe (failureThreshold=30, ~15 min) prevents
-    # the container from being killed during CPU-heavy entity dedup.
-    # _get_session() ensures fresh Neo4j drivers after any blocking.
-    background_tasks.add_task(
-        _run_folder_analysis,
-        doc_sync=doc_sync,
-        blobs=blobs,
-        neo4j_gid=neo4j_gid,
-        folder_id=folder_id,
-        folder_name=folder_name,
-        partition_id=partition_id,
-    )
+    # Try to dispatch to the Redis worker (runs in a separate container,
+    # survives API restarts, doesn't block health probes).
+    dispatched_to_worker = False
+    try:
+        from src.core.services.redis_service import get_redis_service, Job
+        import uuid as _uuid
+
+        redis_svc = await get_redis_service()
+        job = Job(
+            id=str(_uuid.uuid4()),
+            tenant_id=partition_id,
+            job_type="index_folder",
+            payload={
+                "folder_id": folder_id,
+                "folder_name": folder_name,
+                "neo4j_gid": neo4j_gid,
+                "partition_id": partition_id,
+                "blobs": blobs,
+            },
+            created_at=datetime.utcnow().isoformat(),
+            idempotency_key=f"index_folder:{folder_id}:{neo4j_gid}",
+        )
+        dispatched_to_worker = await redis_svc.queue.enqueue(job)
+        if dispatched_to_worker:
+            logger.info("folder_analysis_dispatched_to_worker",
+                        folder_id=folder_id, job_id=job.id)
+    except Exception as redis_err:
+        logger.warning(f"Redis dispatch failed, falling back to in-process: {redis_err}")
+
+    # Fallback: run in-process as BackgroundTask if Redis unavailable
+    if not dispatched_to_worker:
+        background_tasks.add_task(
+            _run_folder_analysis,
+            doc_sync=doc_sync,
+            blobs=blobs,
+            neo4j_gid=neo4j_gid,
+            folder_id=folder_id,
+            folder_name=folder_name,
+            partition_id=partition_id,
+        )
+        logger.info("folder_analysis_started_in_process", folder_id=folder_id)
 
     logger.info("folder_analysis_started",
                 folder_id=folder_id,

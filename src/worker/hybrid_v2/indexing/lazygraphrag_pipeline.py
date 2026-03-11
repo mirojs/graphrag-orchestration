@@ -212,6 +212,13 @@ class LazyGraphRAGIndexingPipeline:
         self.voyage_service = voyage_service  # VoyageEmbedService for entity + passage embedding
         self.config = config or LazyGraphRAGIndexingConfig()
 
+        # Limit concurrent Neo4j write operations to prevent Aura write storms.
+        # Parallel steps (section enrichment, foundation edges) each acquire
+        # this semaphore before writing, keeping max concurrent writes bounded.
+        self._neo4j_write_sem = asyncio.Semaphore(
+            int(os.getenv("NEO4J_WRITE_CONCURRENCY", "3"))
+        )
+
         self._splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
             chunk_overlap=self.config.chunk_overlap,
@@ -456,10 +463,23 @@ class LazyGraphRAGIndexingPipeline:
             
             # 4.6–4.8) Section enrichment + KVP embedding.
             # Wave 1: Run 4.6, 4.7, 4.8 concurrently — no data deps between them.
+            # Each task acquires _neo4j_write_sem before writing back to Neo4j.
+            async def _gated_embed_sections():
+                async with self._neo4j_write_sem:
+                    return await self._embed_section_nodes(group_id)
+
+            async def _gated_section_summaries():
+                async with self._neo4j_write_sem:
+                    return await self._generate_section_summaries(group_id)
+
+            async def _gated_embed_kvp():
+                async with self._neo4j_write_sem:
+                    return await self._embed_keyvalue_keys(group_id)
+
             section_embed_stats, section_summary_stats, kvp_embed_stats = await asyncio.gather(
-                self._embed_section_nodes(group_id),
-                self._generate_section_summaries(group_id),
-                self._embed_keyvalue_keys(group_id),
+                _gated_embed_sections(),
+                _gated_section_summaries(),
+                _gated_embed_kvp(),
             )
             stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
             stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
@@ -5041,12 +5061,16 @@ SUMMARY: <summary>"""
             except Exception as e:
                 logger.warning(f"HAS_HUB_ENTITY failed (continuing): {e}")
 
-        # Run all 3 edge types concurrently — they operate on different
-        # relationship types and don't conflict.
+        # Run all 3 edge types concurrently — gated by _neo4j_write_sem
+        # to prevent write storms on Aura Professional tier.
+        async def _gated(fn):
+            async with self._neo4j_write_sem:
+                return await fn()
+
         await asyncio.gather(
-            _create_appears_in_section(),
-            _create_appears_in_document(),
-            _create_has_hub_entity(),
+            _gated(_create_appears_in_section),
+            _gated(_create_appears_in_document),
+            _gated(_create_has_hub_entity),
         )
         
         logger.info(

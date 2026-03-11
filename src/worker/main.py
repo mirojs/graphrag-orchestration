@@ -296,6 +296,16 @@ class Worker:
                 group_id=neo4j_gid,
             )
 
+            # ── Check for critical failures ──
+            graph_errors = graph_stats.get("errors", [])
+            graph_success = graph_stats.get("success", True)
+            if not graph_success:
+                failed_steps = ", ".join(e["step"] for e in graph_errors if e["step"] in ("triple_embeddings", "gds"))
+                error_details = "; ".join(f'{e["step"]}: {e["error"]}' for e in graph_errors)
+                raise RuntimeError(
+                    f"Graph algorithms failed on critical steps ({failed_steps}): {error_details}"
+                )
+
             # ── Collect stats ──
             stats_query = """
             OPTIONAL MATCH (e:Entity {group_id: $gid})
@@ -319,6 +329,15 @@ class Worker:
                     section_count = record["section_count"]
                     sentence_count = record["sentence_count"]
                     relationship_count = record["relationship_count"]
+
+            # Log non-critical warnings (synonymy, communities) without failing
+            if graph_errors:
+                non_critical = [e for e in graph_errors if e["step"] not in ("triple_embeddings", "gds")]
+                if non_critical:
+                    logger.warning(
+                        f"index_folder_non_critical_warnings: "
+                        + "; ".join(f'{e["step"]}: {e["error"][:100]}' for e in non_critical)
+                    )
 
             # ── Mark complete ──
             with _neo4j_session() as session:

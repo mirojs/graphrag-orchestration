@@ -725,14 +725,21 @@ class LazyGraphRAGIndexingPipeline:
         This is the second phase of a two-phase folder indexing:
         Phase 1: index_documents(extraction_only=True) per doc
         Phase 2: run_graph_algorithms_only() once on the full graph
+
+        Returns a dict with step stats plus:
+          - ``errors``: list of ``{"step": ..., "error": ...}`` for failed steps
+          - ``success``: True only if no critical step failed
+        Critical steps: triple_embeddings, gds (KNN/Louvain/PageRank).
+        Non-critical: synonymy_edges, communities (degrade quality but not fatal).
         """
         import time
         start_time = time.time()
         stats: Dict[str, Any] = {}
+        errors: list[Dict[str, str]] = []
 
         logger.info(f"🔬 Running graph algorithms on full graph for group {group_id}")
 
-        # Step 7.5: Triple embeddings
+        # Step 7.5: Triple embeddings (CRITICAL — needed for Route 7 retrieval)
         try:
             triple_embed_stats = await self._precompute_triple_embeddings(group_id)
             stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
@@ -740,8 +747,9 @@ class LazyGraphRAGIndexingPipeline:
         except Exception as e:
             logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
             stats["triple_embeddings_stored"] = 0
+            errors.append({"step": "triple_embeddings", "error": str(e)[:500]})
 
-        # Step 7.6: Entity synonymy edges
+        # Step 7.6: Entity synonymy edges (non-critical)
         try:
             synonymy_stats = await self._compute_entity_synonymy_edges(
                 group_id=group_id,
@@ -755,25 +763,50 @@ class LazyGraphRAGIndexingPipeline:
         except Exception as e:
             logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
             stats["entity_synonymy_edges"] = 0
+            errors.append({"step": "synonymy_edges", "error": str(e)[:500]})
 
-        # Step 8: GDS algorithms (KNN, Louvain, PageRank)
+        # Step 8: GDS algorithms with retry (CRITICAL — needed for communities)
+        gds_max_retries = 3
+        gds_base_delay = 15
         gds_stats: Dict[str, int] = {}
-        try:
-            if knn_enabled:
-                logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, Louvain, PageRank)...")
-                gds_stats = await self._run_gds_graph_algorithms(
-                    group_id=group_id,
-                    knn_top_k=knn_top_k,
-                    knn_similarity_cutoff=knn_similarity_cutoff,
-                    knn_config=knn_config,
-                )
-            else:
-                gds_stats = await self._run_gds_graph_algorithms(
-                    group_id=group_id, knn_top_k=0,
-                    knn_similarity_cutoff=1.0, knn_config=None,
-                )
-        except Exception as e:
-            logger.warning(f"⚠️  GDS algorithms failed: {e}")
+        for gds_attempt in range(gds_max_retries):
+            try:
+                if knn_enabled:
+                    logger.info(
+                        f"🔬 Running GDS algorithms (KNN k={knn_top_k}, "
+                        f"cutoff={knn_similarity_cutoff}, Louvain, PageRank)..."
+                    )
+                    gds_stats = await self._run_gds_graph_algorithms(
+                        group_id=group_id,
+                        knn_top_k=knn_top_k,
+                        knn_similarity_cutoff=knn_similarity_cutoff,
+                        knn_config=knn_config,
+                    )
+                else:
+                    gds_stats = await self._run_gds_graph_algorithms(
+                        group_id=group_id, knn_top_k=0,
+                        knn_similarity_cutoff=1.0, knn_config=None,
+                    )
+                break
+            except Exception as e:
+                err_msg = str(e).lower()
+                is_transient = any(k in err_msg for k in (
+                    "no data", "connection closed", "defunct connection",
+                    "service unavailable", "timed out", "reset by peer",
+                    "incomplete handshake",
+                ))
+                if is_transient and gds_attempt < gds_max_retries - 1:
+                    delay = gds_base_delay * (2 ** gds_attempt)
+                    logger.warning(
+                        f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
+                        f"retrying in {delay}s: {e}"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
+                errors.append({"step": "gds", "error": str(e)[:500]})
+                gds_stats = {}
+                break
 
         stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
         stats["gds_communities"] = gds_stats.get("communities", 0)
@@ -781,7 +814,7 @@ class LazyGraphRAGIndexingPipeline:
         if gds_stats:
             logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities")
 
-        # Step 9: Materialize Louvain communities
+        # Step 9: Materialize Louvain communities (non-critical)
         if stats.get("gds_communities", 0) > 0:
             try:
                 logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
@@ -797,9 +830,35 @@ class LazyGraphRAGIndexingPipeline:
                 )
             except Exception as e:
                 logger.warning(f"⚠️  Community materialization failed: {e}")
+                errors.append({"step": "communities", "error": str(e)[:500]})
 
+        # ── Integrity validation ──
+        try:
+            validation = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self._validate_graph_integrity(group_id)
+            )
+            stats["validation"] = validation
+            if validation.get("warnings"):
+                for w in validation["warnings"]:
+                    logger.warning(f"⚠️  Integrity: {w}")
+                    errors.append({"step": "validation", "error": w})
+        except Exception as e:
+            logger.warning(f"⚠️  Integrity validation failed: {e}")
+
+        # Determine overall success: critical steps must not have failed
+        critical_failures = [e for e in errors if e["step"] in ("triple_embeddings", "gds")]
+        stats["errors"] = errors
+        stats["success"] = len(critical_failures) == 0
         stats["elapsed_s"] = round(time.time() - start_time, 2)
-        logger.info(f"✅ Graph algorithms complete in {stats['elapsed_s']}s")
+
+        if critical_failures:
+            failed_steps = ", ".join(e["step"] for e in critical_failures)
+            logger.error(
+                f"❌ Graph algorithms finished with critical failures: {failed_steps} "
+                f"({stats['elapsed_s']}s)"
+            )
+        else:
+            logger.info(f"✅ Graph algorithms complete in {stats['elapsed_s']}s")
         return stats
 
     async def _prepare_documents(
@@ -4910,6 +4969,57 @@ SUMMARY: <summary>"""
             "unique_keys": len(unique_keys),
             "keys_embedded": len(updates),
         }
+
+    def _validate_graph_integrity(self, group_id: str) -> Dict[str, Any]:
+        """Post-pipeline integrity check: verify critical data was written.
+
+        Returns dict with counts and a ``warnings`` list for gaps.
+        This runs synchronously (called via run_in_executor).
+        """
+        warnings: list[str] = []
+        counts: Dict[str, int] = {}
+
+        with self.neo4j_store.driver.session() as session:
+            row = session.run("""
+                MATCH (e:Entity) WHERE e.group_id = $gid
+                WITH count(e) AS total_entities,
+                     sum(CASE WHEN e.entity_embedding IS NOT NULL THEN 1 ELSE 0 END) AS entities_with_emb
+                OPTIONAL MATCH ()-[r:RELATED_TO]->()
+                    WHERE r.group_id = $gid AND r.description IS NOT NULL AND r.description <> ''
+                WITH total_entities, entities_with_emb,
+                     count(r) AS triples_with_desc,
+                     sum(CASE WHEN r.triple_embedding IS NOT NULL THEN 1 ELSE 0 END) AS triples_with_emb
+                OPTIONAL MATCH (c:Community {group_id: $gid})
+                RETURN total_entities, entities_with_emb,
+                       triples_with_desc, triples_with_emb,
+                       count(c) AS community_count
+            """, gid=group_id).single()
+
+            if row:
+                counts = dict(row)
+                ent_total = row["total_entities"]
+                ent_emb = row["entities_with_emb"]
+                tri_desc = row["triples_with_desc"]
+                tri_emb = row["triples_with_emb"]
+                comm = row["community_count"]
+
+                if ent_total > 0 and ent_emb < ent_total * 0.8:
+                    warnings.append(
+                        f"Only {ent_emb}/{ent_total} entities have embeddings "
+                        f"({ent_emb * 100 // max(ent_total, 1)}%)"
+                    )
+                if tri_desc > 0 and tri_emb < tri_desc * 0.8:
+                    warnings.append(
+                        f"Only {tri_emb}/{tri_desc} triples have embeddings "
+                        f"({tri_emb * 100 // max(tri_desc, 1)}%)"
+                    )
+                if ent_total >= 10 and comm == 0:
+                    warnings.append(
+                        f"{ent_total} entities but 0 communities — "
+                        f"GDS/Louvain may have failed"
+                    )
+
+        return {"counts": counts, "warnings": warnings}
 
     async def _precompute_triple_embeddings(self, group_id: str) -> Dict[str, Any]:
         """Pre-compute Voyage embeddings for all RELATED_TO triples (Step 7.5).

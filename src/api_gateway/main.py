@@ -61,9 +61,9 @@ async def _auto_resume_zombie_analyses(app: FastAPI):
     await asyncio.sleep(10)  # let all services finish initializing
 
     try:
-        from src.worker.services.graph_service import get_graph_driver
+        from src.worker.services.graph_service import GraphService
 
-        driver = get_graph_driver()
+        driver = GraphService().driver
         if driver is None:
             return
 

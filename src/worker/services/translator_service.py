@@ -69,7 +69,14 @@ class TranslatorService:
     async def _get_token(self) -> str:
         """Obtain a bearer token via Managed Identity."""
         if self._credential is None:
-            self._credential = DefaultAzureCredential()
+            import os
+            client_id = os.getenv("AZURE_CLIENT_ID")
+            if client_id:
+                from azure.identity.aio import ManagedIdentityCredential
+                self._credential = ManagedIdentityCredential(client_id=client_id)
+                logger.info("translator_using_user_assigned_identity", client_id=client_id[:8])
+            else:
+                self._credential = DefaultAzureCredential()
         token = await self._credential.get_token(_TRANSLATOR_SCOPE)
         return token.token
 
@@ -106,6 +113,8 @@ class TranslatorService:
                 characters=0,
             )
 
+        logger.info("translator_attempt", target_lang=target_lang, source_lang=source_lang,
+                     text_len=len(text), has_resource_id=bool(self.resource_id))
         url = f"{self.endpoint}/translate"
         params: dict = {"api-version": _API_VERSION, "to": target_lang}
         if source_lang:

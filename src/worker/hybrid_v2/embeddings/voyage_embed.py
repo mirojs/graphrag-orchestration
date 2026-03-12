@@ -122,6 +122,10 @@ class VoyageEmbedService:
         # Initialize native Voyage client for contextual embeddings
         self._client = voyageai.Client(api_key=self.api_key)  # type: ignore[union-attr]
         
+        # Retry configuration for transient API failures
+        self._max_retries = 3
+        self._base_delay = 1.0  # seconds, exponential backoff base
+        
         # LlamaIndex wrapper kept for legacy pipeline compatibility only
         self._embed_model = None
         if LLAMAINDEX_VOYAGE_AVAILABLE and VoyageEmbedding is not None:
@@ -132,6 +136,35 @@ class VoyageEmbedService:
             )
         
         logger.info(f"VoyageEmbedService initialized with model: {self.model_name}")
+
+    def _call_with_retry(self, **kwargs):
+        """Call Voyage contextualized_embed with retry + exponential backoff.
+
+        Retries on transient errors (rate limits, server errors, timeouts).
+        Non-retryable errors (e.g., invalid API key) are raised immediately.
+        """
+        import time as _time
+
+        last_exc = None
+        for attempt in range(self._max_retries):
+            try:
+                return self._client.contextualized_embed(**kwargs)
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e).lower()
+                is_retryable = any(k in err_msg for k in (
+                    "rate limit", "429", "500", "502", "503", "504",
+                    "timeout", "connection", "reset by peer", "server error",
+                ))
+                if not is_retryable or attempt >= self._max_retries - 1:
+                    raise
+                delay = self._base_delay * (2 ** attempt)
+                logger.warning(
+                    "Voyage API transient error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, self._max_retries, delay, e,
+                )
+                _time.sleep(delay)
+        raise last_exc  # pragma: no cover
     
     @property
     def embed_dim(self) -> int:
@@ -315,7 +348,7 @@ class VoyageEmbedService:
 
         for batch_idx, batch in enumerate(batches):
             inputs = [effective_inputs[i][1] for i in batch]
-            result = self._client.contextualized_embed(
+            result = self._call_with_retry(
                 inputs=inputs,
                 model=self.model_name,
                 input_type="document",
@@ -423,7 +456,7 @@ class VoyageEmbedService:
         Returns:
             Embedding vector (2048 dimensions)
         """
-        result = self._client.contextualized_embed(
+        result = self._call_with_retry(
             inputs=[[query]],  # Single document with single chunk
             model=self.model_name,
             input_type="query",
@@ -466,7 +499,7 @@ class VoyageEmbedService:
         """
         # Each query as a separate single-chunk document
         inputs = [[q] for q in queries]
-        result = self._client.contextualized_embed(
+        result = self._call_with_retry(
             inputs=inputs,
             model=self.model_name,
             input_type="query",
@@ -531,7 +564,7 @@ class VoyageEmbedService:
             
             # Each text as its own single-chunk document (no contextual bleed)
             inputs = [[t] for t in batch_texts]
-            result = self._client.contextualized_embed(
+            result = self._call_with_retry(
                 inputs=inputs,
                 model=self.model_name,
                 input_type="document",

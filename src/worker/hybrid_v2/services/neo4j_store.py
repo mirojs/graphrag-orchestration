@@ -1623,6 +1623,35 @@ class Neo4jStoreV3:
             )
             record = result.single()
             return cast(str, record["id"]) if record else document.id
+
+    def upsert_documents_batch(self, group_id: str, documents: list[Document]) -> int:
+        """Batch upsert documents in a single UNWIND query (1 round-trip instead of N)."""
+        if not documents:
+            return 0
+        query = """
+        UNWIND $docs AS d
+        MERGE (doc:Document {id: d.id, group_id: $group_id})
+        SET doc.title = d.title,
+            doc.source = d.source,
+            doc.group_id = $group_id,
+            doc.metadata = d.metadata,
+            doc.date = d.document_date,
+            doc.updated_at = datetime(),
+            doc.created_at = coalesce(doc.created_at, datetime())
+        """
+        doc_params = []
+        for doc in documents:
+            metadata_json = json.dumps(doc.metadata) if doc.metadata else "{}"
+            doc_params.append({
+                "id": doc.id,
+                "title": doc.title,
+                "source": doc.source,
+                "metadata": metadata_json,
+                "document_date": doc.document_date,
+            })
+        with self.get_retry_session() as session:
+            session.run(query, docs=doc_params, group_id=group_id)
+        return len(documents)
     
     def initialize_group_meta(self, group_id: str) -> None:
         """Initialize or update GroupMeta node for lifecycle tracking.

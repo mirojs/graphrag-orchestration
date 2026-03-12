@@ -452,7 +452,9 @@ class HippoRAG2Handler(BaseRouteHandler):
                             themes.append(snippet)
                     if themes:
                         community_instruction = (
-                            "Thematic focus: " + "; ".join(themes) + ". "
+                            "Prioritize passages related to: "
+                            + "; ".join(themes)
+                            + ". "
                         )
                         community_guided_query = community_instruction + query
                         logger.info(

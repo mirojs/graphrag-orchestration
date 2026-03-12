@@ -78,7 +78,8 @@
     font-weight: 600;
 }
 
-/* Analysis status left-border accents */
+/* Analysis status left-border accents — disabled, zones handle this now */
+/*
 .folderRowAnalyzing {
     border-left: 3px solid #4cc9f0;
 }
@@ -88,6 +89,7 @@
 .folderRowStale {
     border-left: 3px solid #f0ad4e;
 }
+*/
 
 .folderIcon {
     font-size: 16px;

@@ -375,17 +375,21 @@ class LazyGraphRAGIndexingPipeline:
                     extra={"group_id": group_id, "checkpoint": checkpoint},
                 )
 
-        # Pre-load wtpsplit model BEFORE DI extraction so its ~1.4GB allocation
-        # happens while memory is still plentiful (DI results add ~1GB for 5 PDFs).
+        # Pre-load wtpsplit model in background thread while DI extraction runs.
+        # Previously this was synchronous (blocking 1-5s). Now it overlaps with
+        # _prepare_documents() so the model is ready by the time we need it.
         from src.worker.services.sentence_extraction_service import _get_sat
-        _get_sat()
+        sat_task = asyncio.ensure_future(asyncio.to_thread(_get_sat))
 
         # ── Steps 1-3: DI extraction → sentences ──────────────────────────
         if not self.neo4j_store._step_done(checkpoint, "sentences"):
             # 1) Normalize + (optional) extract with Document Intelligence.
+            t_step = time.perf_counter()
             expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
+            logger.info("⏱️ Step 1 (_prepare_documents): %.2fs", time.perf_counter() - t_step)
 
             # 2) Upsert Document nodes + clean stale children.
+            t_step = time.perf_counter()
             chunk_to_doc_id: Dict[str, str] = {}  # kept for _process_di_metadata_to_graph compat
             for doc in expanded_docs:
                 doc_id = doc["id"]
@@ -418,12 +422,19 @@ class LazyGraphRAGIndexingPipeline:
                 if not reindex:
                     self.neo4j_store.delete_document_chunks(group_id, doc_id)
 
+            logger.info("⏱️ Step 2 (doc upsert): %.2fs", time.perf_counter() - t_step)
+
+            # Ensure wtpsplit model is loaded before sentence splitting.
+            await sat_task
+
             # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
             #    Bypasses the old TextChunk pipeline.
+            t_step = time.perf_counter()
             sentence_stats = await self._index_sentences_direct(
                 group_id=group_id,
                 expanded_docs=expanded_docs,
             )
+            logger.info("⏱️ Step 3 (_index_sentences_direct): %.2fs", time.perf_counter() - t_step)
             stats["sentences"] = sentence_stats.get("sentences_created", 0)
             stats["sentences_embedded"] = sentence_stats.get("sentences_embedded", 0)
 
@@ -446,6 +457,7 @@ class LazyGraphRAGIndexingPipeline:
 
         # ── Steps 4.2-4.9: Section graph + enrichment ────────────────────
         if not self.neo4j_store._step_done(checkpoint, "section_graph"):
+            t_section_start = time.perf_counter()
             # 4.2) Sparse sentence-to-sentence RELATED_TO edges.
             if stats["sentences"] > 1:
                 try:
@@ -514,11 +526,13 @@ class LazyGraphRAGIndexingPipeline:
 
             if not extraction_only:
                 self.neo4j_store.set_pipeline_checkpoint(group_id, "section_graph")
+            logger.info("⏱️ Steps 4.2-4.9 (section graph): %.2fs", time.perf_counter() - t_section_start)
         else:
             logger.info("pipeline_skip_section_graph (checkpoint >= section_graph)")
 
         # ── Steps 5-7: Entity extraction + dedup + commit ─────────────────
         if not self.neo4j_store._step_done(checkpoint, "entities_committed"):
+            t_entity_start = time.perf_counter()
             entities: List[Entity] = []
             relationships: List[Relationship] = []
             if self.llm is None:
@@ -564,6 +578,7 @@ class LazyGraphRAGIndexingPipeline:
 
             if not extraction_only:
                 self.neo4j_store.set_pipeline_checkpoint(group_id, "entities_committed")
+            logger.info("⏱️ Steps 5-7 (entity extraction+commit): %.2fs", time.perf_counter() - t_entity_start)
         else:
             logger.info("pipeline_skip_entities (checkpoint >= entities_committed)")
 
@@ -574,6 +589,7 @@ class LazyGraphRAGIndexingPipeline:
             return stats
 
         # ── Step 7.5: Triple embeddings ────────────────────────────────────
+        t_post_entity_start = time.perf_counter()
         if not self.neo4j_store._step_done(checkpoint, "triple_embeddings"):
             try:
                 triple_embed_stats = await self._precompute_triple_embeddings(group_id)
@@ -703,6 +719,7 @@ class LazyGraphRAGIndexingPipeline:
                 self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
         else:
             logger.info("pipeline_skip_communities (checkpoint >= communities)")
+        logger.info("⏱️ Steps 7.5-9 (triples+synonymy+GDS+communities): %.2fs", time.perf_counter() - t_post_entity_start)
 
         # Clear checkpoint — pipeline complete
         self.neo4j_store.clear_pipeline_checkpoint(group_id)
@@ -961,28 +978,29 @@ class LazyGraphRAGIndexingPipeline:
 
         di_service = DocumentIntelligenceService()
 
-        # Process URLs with bounded parallelism (5 concurrent, matching DI service
-        # DEFAULT_CONCURRENCY) to process all 5 PDFs in a single batch.
-        DI_CONCURRENCY = 5
-        di_semaphore = asyncio.Semaphore(DI_CONCURRENCY)
+        # F1: Share a single DI client across all URLs instead of creating
+        # one client per URL via extract_documents(). Saves ~0.5-1s per doc
+        # in HTTP client setup and Managed Identity token acquisition.
         by_source: Dict[str, List[LlamaDocument]] = {}
 
-        async def _extract_one(url: str) -> None:
-            async with di_semaphore:
+        t_di_start = time.perf_counter()
+        async with di_service._create_client() as client:
+            async def _analyze_one(url: str) -> None:
                 try:
-                    extracted = await di_service.extract_documents(
-                        group_id=group_id,
-                        input_items=cast(List[str | Dict[str, Any]], [url]),
-                        fail_fast=True,
-                        model_strategy="auto",
+                    _result_url, docs, error = await di_service._analyze_single_document(
+                        client, url, group_id, default_model="prebuilt-layout",
                     )
-                    logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
-                    target_url = source_remap.get(url, url)
-                    by_source[target_url] = extracted
+                    if error:
+                        logger.warning("DI extraction failed for %s: %s", url.split("/")[-1], error)
+                    else:
+                        target_url = source_remap.get(url, url)
+                        by_source[target_url] = docs
+                        logger.info("DI extracted %d units for %s", len(docs), url.split("/")[-1])
                 except Exception as exc:
-                    logger.warning(f"DI extraction failed for a URL: {exc}")
+                    logger.warning("DI extraction failed for a URL: %s", exc)
 
-        await asyncio.gather(*[_extract_one(url) for url in effective_urls])
+            await asyncio.gather(*[_analyze_one(url) for url in effective_urls])
+        logger.info("⏱️ DI extraction: %.2fs for %d documents", time.perf_counter() - t_di_start, len(effective_urls))
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:

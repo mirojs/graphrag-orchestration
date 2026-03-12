@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Evidoc — Hulkdesign AI | NIA Corporate Spark 2026</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --cyan: #2ae3fc;
+    --blue: #5b97de;
+    --teal: #75f8d2;
+    --bg-dark: #0f172a;
+    --bg-slate: #1e293b;
+    --text: #f1f5f9;
+    --text-muted: #94a3b8;
+    --accent-gradient: linear-gradient(135deg, #2ae3fc, #5b97de, #75f8d2);
+    --card-bg: rgba(30, 41, 59, 0.7);
+  }
+
+  html, body {
+    height: 100%; width: 100%;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg-dark);
+    color: var(--text);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Slide container */
+  .deck { position: relative; width: 100vw; height: 100vh; }
+
+  .slide {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 4vh 6vw;
+    opacity: 0;
+    transform: translateX(60px);
+    pointer-events: none;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+    background: radial-gradient(ellipse at 30% 20%, rgba(42,227,252,0.06) 0%, transparent 60%),
+                radial-gradient(ellipse at 70% 80%, rgba(117,248,210,0.04) 0%, transparent 60%),
+                linear-gradient(180deg, var(--bg-dark) 0%, var(--bg-slate) 100%);
+  }
+
+  .slide.active {
+    opacity: 1; transform: translateX(0); pointer-events: auto;
+  }
+
+  .slide.exit-left {
+    opacity: 0; transform: translateX(-60px);
+  }
+
+  /* Typography */
+  h1 { font-size: clamp(2rem, 4.5vw, 4rem); font-weight: 800; line-height: 1.15; }
+  h2 { font-size: clamp(1.6rem, 3.2vw, 2.8rem); font-weight: 700; line-height: 1.2; margin-bottom: 1.5rem; }
+  h3 { font-size: clamp(1.1rem, 1.8vw, 1.5rem); font-weight: 600; line-height: 1.3; margin-bottom: 0.75rem; }
+  p, li { font-size: clamp(0.9rem, 1.4vw, 1.2rem); line-height: 1.6; color: var(--text-muted); }
+  li { margin-bottom: 0.6rem; }
+  ul { list-style: none; padding: 0; }
+  ul li::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent-gradient); margin-right: 12px; vertical-align: middle; }
+
+  .gradient-text {
+    background: var(--accent-gradient);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .subtitle {
+    font-size: clamp(1rem, 1.8vw, 1.5rem);
+    font-weight: 400; color: var(--text-muted);
+    margin-top: 0.5rem;
+  }
+
+  .tagline {
+    font-size: clamp(1.2rem, 2.2vw, 1.8rem);
+    font-weight: 500; color: var(--text);
+    margin-top: 1.5rem;
+    letter-spacing: -0.02em;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.4em 1.2em;
+    border-radius: 9999px;
+    font-size: clamp(0.7rem, 1vw, 0.9rem);
+    font-weight: 600;
+    background: rgba(42,227,252,0.12);
+    border: 1px solid rgba(42,227,252,0.3);
+    color: var(--cyan);
+    margin-top: 1.5rem;
+    letter-spacing: 0.03em;
+  }
+
+  /* Cards & layout */
+  .content { width: 100%; max-width: 1100px; text-align: left; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1.5rem; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid rgba(148,163,184,0.1);
+    border-radius: 16px;
+    padding: 1.8rem;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.3s;
+  }
+
+  .card:hover { border-color: rgba(42,227,252,0.3); }
+
+  .card .icon { font-size: 2rem; margin-bottom: 0.75rem; display: block; }
+
+  .step-number {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 12px;
+    background: var(--accent-gradient);
+    color: var(--bg-dark); font-weight: 800; font-size: 1.2rem;
+    margin-bottom: 0.75rem; flex-shrink: 0;
+  }
+
+  .stat {
+    text-align: center; padding: 1.5rem;
+  }
+
+  .stat .number {
+    font-size: clamp(2rem, 3.5vw, 3rem);
+    font-weight: 800;
+    background: var(--accent-gradient);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+
+  .stat .label { font-size: 0.9rem; color: var(--text-muted); margin-top: 0.3rem; }
+
+  /* Highlight box */
+  .highlight-box {
+    background: linear-gradient(135deg, rgba(42,227,252,0.08), rgba(117,248,210,0.08));
+    border: 1px solid rgba(42,227,252,0.2);
+    border-radius: 12px;
+    padding: 1.2rem 1.5rem;
+    margin-top: 1.5rem;
+  }
+
+  .highlight-box p { color: var(--text); font-weight: 500; }
+
+  /* Navigation dots */
+  .nav-dots {
+    position: fixed; bottom: 2vh; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 10px; z-index: 100;
+    background: rgba(15,23,42,0.8);
+    backdrop-filter: blur(10px);
+    padding: 10px 20px;
+    border-radius: 9999px;
+    border: 1px solid rgba(148,163,184,0.15);
+  }
+
+  .nav-dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: rgba(148,163,184,0.3);
+    cursor: pointer; transition: all 0.3s;
+    border: none; outline: none;
+  }
+
+  .nav-dot.active {
+    background: var(--cyan);
+    box-shadow: 0 0 10px rgba(42,227,252,0.5);
+    transform: scale(1.3);
+  }
+
+  .nav-dot:hover { background: rgba(42,227,252,0.6); }
+
+  /* Arrow nav */
+  .nav-arrow {
+    position: fixed; top: 50%; z-index: 100;
+    background: rgba(30,41,59,0.7);
+    border: 1px solid rgba(148,163,184,0.15);
+    color: var(--text-muted);
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 1.2rem;
+    transition: all 0.3s;
+    backdrop-filter: blur(10px);
+  }
+
+  .nav-arrow:hover { background: rgba(42,227,252,0.15); color: var(--cyan); border-color: rgba(42,227,252,0.3); }
+  .nav-arrow.left { left: 1.5vw; transform: translateY(-50%); }
+  .nav-arrow.right { right: 1.5vw; transform: translateY(-50%); }
+
+  /* Slide counter */
+  .slide-counter {
+    position: fixed; top: 2vh; right: 3vw; z-index: 100;
+    font-size: 0.85rem; color: var(--text-muted);
+    font-weight: 500; font-variant-numeric: tabular-nums;
+  }
+
+  /* Logo */
+  .logo-img { height: 80px; margin-bottom: 1rem; }
+  .logo-sm { height: 32px; position: fixed; top: 2vh; left: 3vw; z-index: 100; opacity: 0.7; }
+
+  /* Problem icons */
+  .problem-item { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1.2rem; }
+  .problem-icon { font-size: 1.5rem; flex-shrink: 0; margin-top: 2px; }
+  .problem-text h3 { margin-bottom: 0.25rem; }
+  .problem-text p { font-size: 0.95rem; }
+
+  /* Center layout for title/thank-you */
+  .center-content { text-align: center; display: flex; flex-direction: column; align-items: center; }
+
+  /* Two-column with visual */
+  .split { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 3rem; align-items: center; }
+  .split-equal { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem; align-items: start; }
+
+  /* Diagram box */
+  .diagram {
+    background: rgba(30,41,59,0.6);
+    border: 1px solid rgba(148,163,184,0.12);
+    border-radius: 16px; padding: 2rem; text-align: center;
+  }
+
+  .diagram .flow-step {
+    padding: 0.8rem 1.2rem; border-radius: 10px;
+    background: rgba(42,227,252,0.08); border: 1px solid rgba(42,227,252,0.2);
+    margin-bottom: 0.5rem; font-weight: 500; font-size: 0.95rem; color: var(--text);
+  }
+
+  .diagram .flow-arrow { color: var(--cyan); font-size: 1.3rem; margin: 0.3rem 0; }
+
+  /* CTA button style */
+  .cta-btn {
+    display: inline-block; margin-top: 2rem;
+    padding: 0.8em 2.5em; border-radius: 12px;
+    background: var(--accent-gradient);
+    color: var(--bg-dark); font-weight: 700; font-size: 1.1rem;
+    text-decoration: none; border: none; cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+  }
+
+  .cta-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 30px rgba(42,227,252,0.3); }
+
+  /* Timeline */
+  .timeline { display: flex; gap: 0; margin-top: 1.5rem; width: 100%; }
+
+  .timeline-item {
+    flex: 1; padding: 1.2rem; text-align: center;
+    border-top: 3px solid rgba(42,227,252,0.3);
+    position: relative;
+  }
+
+  .timeline-item::before {
+    content: ''; position: absolute; top: -7px; left: 50%; transform: translateX(-50%);
+    width: 12px; height: 12px; border-radius: 50%; background: var(--cyan);
+  }
+
+  .timeline-item h3 { font-size: 0.95rem; color: var(--cyan); margin-bottom: 0.3rem; }
+  .timeline-item p { font-size: 0.85rem; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .grid-2, .grid-3, .split, .split-equal { grid-template-columns: 1fr; }
+    .slide { padding: 3vh 5vw; }
+    .timeline { flex-direction: column; }
+    .timeline-item { border-top: none; border-left: 3px solid rgba(42,227,252,0.3); text-align: left; }
+    .timeline-item::before { top: 50%; left: -7px; transform: translateY(-50%); }
+  }
+
+  /* Emphasis colors */
+  .text-cyan { color: var(--cyan); }
+  .text-teal { color: var(--teal); }
+  .fw-600 { font-weight: 600; }
+  .mt-1 { margin-top: 1rem; }
+  .mt-2 { margin-top: 2rem; }
+  .mb-1 { margin-bottom: 1rem; }
+
+  /* Check list */
+  .check-list li::before {
+    content: '✓'; background: none; width: auto; height: auto;
+    color: var(--teal); font-weight: 700; margin-right: 10px;
+  }
+
+  /* X list (problems) */
+  .x-list li::before {
+    content: '✗'; background: none; width: auto; height: auto;
+    color: #f87171; font-weight: 700; margin-right: 10px;
+  }
+
+  .divider {
+    width: 60px; height: 4px; border-radius: 2px;
+    background: var(--accent-gradient);
+    margin: 1rem 0;
+  }
+</style>
+</head>
+<body>
+
+<img class="logo-sm" id="logo-sm" alt="Hulkdesign AI">
+<div class="slide-counter" id="counter"></div>
+<button class="nav-arrow left" onclick="prevSlide()">◂</button>
+<button class="nav-arrow right" onclick="nextSlide()">▸</button>
+
+<div class="deck" id="deck">
+
+  <!-- SLIDE 1: Title -->
+  <div class="slide active" data-slide="0">
+    <div class="content center-content">
+      <img class="logo-img" id="logo-main" alt="Hulkdesign AI">
+      <h1 style="margin-top:0.5rem;">
+        <span class="gradient-text">Hulkdesign AI</span>
+      </h1>
+      <p class="subtitle" style="font-size:clamp(0.9rem,1.2vw,1.1rem); letter-spacing:0.15em; text-transform:uppercase; margin-top:0.3rem;">presents</p>
+      <h1 style="margin-top:1rem;">
+        Evidoc
+      </h1>
+      <p class="tagline">"Ask Your Documents. Trust Every Answer."</p>
+      <div class="badge">NIA Corporate Spark 2026 — Track 5: AI &amp; Digital Platforms</div>
+    </div>
+  </div>
+
+  <!-- SLIDE 2: The Problem -->
+  <div class="slide" data-slide="1">
+    <div class="content">
+      <h2>⚠️ The Problem</h2>
+      <div class="divider"></div>
+      <div class="grid-2">
+        <div>
+          <div class="problem-item">
+            <span class="problem-icon">📚</span>
+            <div class="problem-text">
+              <h3>Document Overload</h3>
+              <p>Thai law firms manage thousands of contracts, regulations, and policy documents. Finding specific clauses or cross-references takes <strong style="color:var(--text)">hours of manual work</strong>.</p>
+            </div>
+          </div>
+          <div class="problem-item">
+            <span class="problem-icon">⏱️</span>
+            <div class="problem-text">
+              <h3>Slow & Expensive Reviews</h3>
+              <p>Contract review, due diligence, and compliance checking are labor-intensive — junior lawyers spend <strong style="color:var(--text)">60-70% of time on document review</strong>.</p>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="problem-item">
+            <span class="problem-icon">🤖</span>
+            <div class="problem-text">
+              <h3>AI Hallucination Risk</h3>
+              <p>Standard AI chatbots <strong style="color:#f87171">fabricate answers</strong>. For legal work, a single hallucinated clause reference can lead to catastrophic outcomes.</p>
+            </div>
+          </div>
+          <div class="problem-item">
+            <span class="problem-icon">🔍</span>
+            <div class="problem-text">
+              <h3>No Traceability</h3>
+              <p>Existing AI tools provide answers with <strong style="color:#f87171">no way to verify</strong> against source documents. Lawyers cannot trust what they cannot trace.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="highlight-box" style="border-color:rgba(248,113,113,0.3); background:rgba(248,113,113,0.06);">
+        <p>⚖️ In legal work, <strong>wrong answers are worse than no answers</strong>. AI must be verifiable.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 3: Our Solution -->
+  <div class="slide" data-slide="2">
+    <div class="content">
+      <h2>💡 Our Solution — <span class="gradient-text">Evidoc</span></h2>
+      <div class="divider"></div>
+      <p class="mb-1" style="font-size:clamp(1rem,1.5vw,1.25rem); color:var(--text);">AI document intelligence that <strong>NEVER hallucinates</strong>.</p>
+      <div class="grid-2 mt-1">
+        <div class="card">
+          <span class="icon">🎯</span>
+          <h3>Deterministic Answers</h3>
+          <p>Every answer is extracted directly from your documents — not generated. Knowledge Graph technology ensures <strong style="color:var(--text)">factual, traceable responses</strong>.</p>
+        </div>
+        <div class="card">
+          <span class="icon">🔗</span>
+          <h3>Click-to-Verify Citations</h3>
+          <p>Every evidence sentence links back to the exact location in the original PDF. <strong style="color:var(--text)">One click</strong> → highlighted text on the source page.</p>
+        </div>
+        <div class="card">
+          <span class="icon">🧠</span>
+          <h3>Knowledge Graph Intelligence</h3>
+          <p>Automatically maps entities, relationships, and communities <strong style="color:var(--text)">across all documents</strong> — finds connections humans miss.</p>
+        </div>
+        <div class="card">
+          <span class="icon">🔒</span>
+          <h3>Private & Secure</h3>
+          <p>Your documents stay private. Enterprise-grade security with <strong style="color:var(--text)">Azure AD, RBAC, and tenant-level data isolation</strong>.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 4: How It Works -->
+  <div class="slide" data-slide="3">
+    <div class="content">
+      <h2>⚙️ How It Works</h2>
+      <div class="divider"></div>
+      <div class="grid-3 mt-2">
+        <div class="card" style="text-align:center;">
+          <div class="step-number">1</div>
+          <h3>Upload Documents</h3>
+          <p style="font-size:2.5rem; margin:0.5rem 0;">📄</p>
+          <p>Upload private documents — PDF, DOCX, XLSX, PPTX, images and more. <strong style="color:var(--text)">15+ formats supported</strong>.</p>
+        </div>
+        <div class="card" style="text-align:center;">
+          <div class="step-number">2</div>
+          <h3>AI Builds Knowledge Graph</h3>
+          <p style="font-size:2.5rem; margin:0.5rem 0;">🧠</p>
+          <p>Entities, relationships, and communities are <strong style="color:var(--text)">auto-extracted</strong>. OCR with word-level polygon extraction ensures precision.</p>
+        </div>
+        <div class="card" style="text-align:center;">
+          <div class="step-number">3</div>
+          <h3>Ask & Verify</h3>
+          <p style="font-size:2.5rem; margin:0.5rem 0;">✅</p>
+          <p>Ask questions in natural language → get <strong style="color:var(--text)">verified answers</strong> with click-to-trace citations to exact source sentences.</p>
+        </div>
+      </div>
+      <div class="highlight-box mt-2" style="text-align:center;">
+        <p>🗣️ Supports <strong>13 languages</strong> including Thai — with auto-translation and speech input</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 5: Technology Differentiator -->
+  <div class="slide" data-slide="4">
+    <div class="content">
+      <h2>🚀 Technology Differentiator</h2>
+      <div class="divider"></div>
+      <div class="split">
+        <div>
+          <ul class="check-list">
+            <li><strong style="color:var(--text)">Proprietary Knowledge Graph</strong> with multiple specialized retrieval algorithms that automatically adapt to each query type</li>
+            <li><strong style="color:var(--text)">Smart Auto-Routing</strong> — AI classifies each query and picks the optimal retrieval strategy automatically</li>
+            <li><strong style="color:var(--text)">Deterministic Retrieval</strong> — answers traced through the knowledge graph, not hallucinated</li>
+            <li><strong style="color:var(--text)">Sentence-Level Polygon Tracing</strong> — pixel-accurate PDF highlighting from OCR word-level geometry</li>
+          </ul>
+        </div>
+        <div class="diagram">
+          <div class="flow-step">📄 Document Upload</div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">🔍 OCR + Entity Extraction</div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">🧠 Knowledge Graph Engine</div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step">🤖 Smart Auto-Router</div>
+          <div class="flow-arrow">↓</div>
+          <div class="flow-step" style="background:rgba(42,227,252,0.15); border-color:var(--cyan);">✅ Verified Answer + Citations</div>
+          <div style="margin-top:1.5rem;">
+            <div class="stat">
+              <div class="number">93.8%</div>
+              <div class="label">Accuracy on cross-document<br>inconsistency detection</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 6: Thai Market Opportunity -->
+  <div class="slide" data-slide="5">
+    <div class="content">
+      <h2>🇹🇭 Thai Market Opportunity — Legal Sector</h2>
+      <div class="divider"></div>
+      <div class="grid-2">
+        <div>
+          <div class="grid-2" style="gap:1rem;">
+            <div class="card stat">
+              <div class="number">80K+</div>
+              <div class="label">Registered lawyers<br>in Thailand</div>
+            </div>
+            <div class="card stat">
+              <div class="number">2K+</div>
+              <div class="label">Law firms<br>nationwide</div>
+            </div>
+          </div>
+          <div class="highlight-box mt-1">
+            <p>📈 Legal tech adoption is <strong>growing fast</strong> but document AI remains <strong>nascent</strong> — first-mover advantage available.</p>
+          </div>
+        </div>
+        <div>
+          <h3 style="color:var(--text);">Key Pain Points We Solve</h3>
+          <ul>
+            <li><strong style="color:var(--text)">Contract Review</strong> — cross-reference clauses across hundreds of agreements in seconds</li>
+            <li><strong style="color:var(--text)">Due Diligence</strong> — find inconsistencies, missing clauses, and risks automatically</li>
+            <li><strong style="color:var(--text)">Compliance Checking</strong> — verify documents against regulations with traceable evidence</li>
+            <li><strong style="color:var(--text)">Hours → Minutes</strong> — reduce manual review time by 10x or more</li>
+          </ul>
+          <div class="highlight-box mt-1" style="background:rgba(117,248,210,0.06); border-color:rgba(117,248,210,0.2);">
+            <p>🗣️ <strong>Thai language</strong> fully supported — 13 UI languages with auto-translation</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 7: Business Model -->
+  <div class="slide" data-slide="6">
+    <div class="content">
+      <h2>�� Business Model</h2>
+      <div class="divider"></div>
+      <div class="split">
+        <div>
+          <h3 style="color:var(--cyan);">B2B SaaS — Enterprise Subscriptions</h3>
+          <ul>
+            <li><strong style="color:var(--text)">Per-seat or per-document</strong> pricing — flexible for firms of all sizes</li>
+            <li><strong style="color:var(--text)">Tiered plans</strong>: Free → Starter → Professional → Enterprise</li>
+            <li><strong style="color:var(--text)">Usage-based credits</strong> for high-volume query processing</li>
+            <li><strong style="color:var(--text)">Enterprise custom</strong> — dedicated deployment, SLA, onboarding support</li>
+          </ul>
+        </div>
+        <div>
+          <div class="card" style="text-align:center; border-color:rgba(42,227,252,0.25);">
+            <h3 class="gradient-text" style="font-size:1.3rem;">Year 1 Target</h3>
+            <div class="stat">
+              <div class="number">5–10</div>
+              <div class="label">Thai law firm pilots</div>
+            </div>
+            <div style="margin-top:1rem; text-align:left;">
+              <p style="font-size:0.9rem;"><span class="text-teal fw-600">B2C:</span> evidoc.hulkdesign.com</p>
+              <p style="font-size:0.9rem; margin-top:0.3rem;"><span class="text-teal fw-600">B2B:</span> evidoc-enterprise.hulkdesign.com</p>
+            </div>
+          </div>
+          <div class="card mt-1" style="text-align:center;">
+            <h3>Revenue Streams</h3>
+            <p><span style="color:var(--cyan);">①</span> Subscription fees &nbsp;&nbsp; <span style="color:var(--teal);">②</span> Per-query credits &nbsp;&nbsp; <span style="color:var(--blue);">③</span> Enterprise custom</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 8: Traction & Readiness -->
+  <div class="slide" data-slide="7">
+    <div class="content">
+      <h2>📊 Traction &amp; Readiness</h2>
+      <div class="divider"></div>
+      <div class="grid-3">
+        <div class="card stat" style="border-color:rgba(42,227,252,0.25);">
+          <div class="number">TRL 9</div>
+          <div class="label">Fully deployed<br>production system</div>
+        </div>
+        <div class="card stat" style="border-color:rgba(91,151,222,0.25);">
+          <div class="number">6</div>
+          <div class="label">Advanced retrieval<br>algorithms</div>
+        </div>
+        <div class="card stat" style="border-color:rgba(117,248,210,0.25);">
+          <div class="number">93.8%</div>
+          <div class="label">Benchmark accuracy<br>inconsistency detection</div>
+        </div>
+      </div>
+      <div class="grid-2 mt-1">
+        <div class="card">
+          <h3>🌐 Platform Capabilities</h3>
+          <ul class="check-list">
+            <li>Live on Azure Container Apps — production-ready</li>
+            <li>15+ document formats (PDF, DOCX, XLSX, PPTX, images…)</li>
+            <li>13 UI languages with auto-translation &amp; speech input</li>
+            <li>6 retrieval routes, benchmarked &amp; optimized</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>🔒 Enterprise-Grade Security</h3>
+          <ul class="check-list">
+            <li>Azure Active Directory integration</li>
+            <li>Role-Based Access Control (RBAC)</li>
+            <li>Multi-tenancy with group-based data isolation</li>
+            <li>Plan-based quota system</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 9: What We're Looking For -->
+  <div class="slide" data-slide="8">
+    <div class="content">
+      <h2>🎯 What We're Looking For</h2>
+      <div class="divider"></div>
+      <div class="split">
+        <div>
+          <h3 style="color:var(--cyan);">Thai Corporate Partner</h3>
+          <ul>
+            <li><strong style="color:var(--text)">Law firm</strong> with high-volume contract operations</li>
+            <li><strong style="color:var(--text)">Bank or financial institution</strong> with legal/compliance needs</li>
+            <li><strong style="color:var(--text)">Enterprise</strong> with large document corpus requiring analysis</li>
+          </ul>
+          <h3 style="color:var(--cyan); margin-top:1.5rem;">6-Month Pilot Plan</h3>
+          <ul>
+            <li>Onboard partner's document corpus into Evidoc</li>
+            <li>Customize for Thai legal document types</li>
+            <li>Measure time savings &amp; accuracy improvement</li>
+          </ul>
+        </div>
+        <div>
+          <div class="card" style="text-align:center; border-color:rgba(117,248,210,0.25);">
+            <span class="icon" style="font-size:3rem;">🏆</span>
+            <h3 class="gradient-text" style="font-size:1.5rem; margin-top:0.5rem;">Pilot Success Metric</h3>
+            <div class="stat">
+              <div class="number">10×</div>
+              <div class="label">Faster document review<br>vs. manual process</div>
+            </div>
+          </div>
+          <div class="timeline mt-2">
+            <div class="timeline-item">
+              <h3>Month 1–2</h3>
+              <p>Onboarding &amp; corpus ingestion</p>
+            </div>
+            <div class="timeline-item">
+              <h3>Month 3–4</h3>
+              <p>Pilot testing &amp; feedback</p>
+            </div>
+            <div class="timeline-item">
+              <h3>Month 5–6</h3>
+              <p>Measure ROI &amp; scale plan</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 10: Team -->
+  <div class="slide" data-slide="9">
+    <div class="content center-content">
+      <h2>👥 The Team</h2>
+      <div class="divider" style="margin:1rem auto;"></div>
+      <div class="grid-2" style="max-width:700px; margin-top:2rem;">
+        <div class="card" style="text-align:center;">
+          <span style="font-size:4rem;">👨‍💻</span>
+          <h3 style="margin-top:1rem;">Co-Founder / CTO</h3>
+          <p style="color:var(--text); font-weight:500;">AI &amp; Engineering Lead</p>
+          <p class="mt-1">Deep expertise in knowledge graphs, NLP, and enterprise-grade AI systems</p>
+        </div>
+        <div class="card" style="text-align:center;">
+          <span style="font-size:4rem;">👨‍💼</span>
+          <h3 style="margin-top:1rem;">Co-Founder / CEO</h3>
+          <p style="color:var(--text); font-weight:500;">Product &amp; Strategy Lead</p>
+          <p class="mt-1">Enterprise SaaS experience, product-market fit, and go-to-market strategy</p>
+        </div>
+      </div>
+      <div class="highlight-box mt-2" style="max-width:700px;">
+        <p style="text-align:center;">🛠️ 2-person founding team that built <strong>the entire Evidoc platform end-to-end</strong> — from AI algorithms to production deployment.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 11: Ask -->
+  <div class="slide" data-slide="10">
+    <div class="content center-content">
+      <h2>🤝 The Ask</h2>
+      <div class="divider" style="margin:1rem auto;"></div>
+      <div class="grid-3 mt-2" style="max-width:900px;">
+        <div class="card" style="text-align:center; border-color:rgba(42,227,252,0.3);">
+          <span class="icon" style="font-size:2.5rem;">🏢</span>
+          <h3 class="text-cyan">Corporate Partner</h3>
+          <p>Thai law firm or enterprise to co-apply for NIA Corporate Spark program</p>
+        </div>
+        <div class="card" style="text-align:center; border-color:rgba(91,151,222,0.3);">
+          <span class="icon" style="font-size:2.5rem;">💰</span>
+          <h3 style="color:var(--blue);">NIA Grant</h3>
+          <p>Up to <strong style="color:var(--text)">5M THB</strong> matching grant for pilot market validation in Thailand</p>
+        </div>
+        <div class="card" style="text-align:center; border-color:rgba(117,248,210,0.3);">
+          <span class="icon" style="font-size:2.5rem;">📅</span>
+          <h3 class="text-teal">6 Months</h3>
+          <p>To validated product-market fit in Thai legal sector</p>
+        </div>
+      </div>
+      <div class="highlight-box mt-2" style="max-width:700px; text-align:center;">
+        <p style="font-size:clamp(1rem,1.5vw,1.2rem);">Together, we can <strong>transform how Thai law firms work with documents</strong> — faster, more accurate, and fully verifiable.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- SLIDE 12: Thank You -->
+  <div class="slide" data-slide="11">
+    <div class="content center-content">
+      <img class="logo-img" id="logo-end" alt="Hulkdesign AI">
+      <h1 style="margin-top:1rem;">
+        <span class="gradient-text">Thank You</span>
+      </h1>
+      <p class="tagline" style="margin-top:0.5rem;">Let's build the future of document intelligence in Thailand.</p>
+      <div class="divider" style="margin:1.5rem auto;"></div>
+      <div class="grid-3 mt-1" style="max-width:750px;">
+        <div style="text-align:center;">
+          <p style="font-size:1.5rem;">🌐</p>
+          <p class="text-cyan fw-600">Website</p>
+          <p>hulkdesign.com</p>
+        </div>
+        <div style="text-align:center;">
+          <p style="font-size:1.5rem;">📄</p>
+          <p class="text-cyan fw-600">Product</p>
+          <p>evidoc.hulkdesign.com</p>
+        </div>
+        <div style="text-align:center;">
+          <p style="font-size:1.5rem;">✉️</p>
+          <p class="text-cyan fw-600">Contact</p>
+          <p>j.liu@hulkdesign.com</p>
+        </div>
+      </div>
+      <div class="badge mt-2">NIA Corporate Spark 2026 — Track 5: AI &amp; Digital Platforms</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Navigation Dots -->
+<div class="nav-dots" id="nav-dots"></div>
+
+<script>
+(function() {
+  const slides = document.querySelectorAll('.slide');
+  const totalSlides = slides.length;
+  let currentSlide = 0;
+
+  // Build nav dots
+  const dotsContainer = document.getElementById('nav-dots');
+  for (let i = 0; i < totalSlides; i++) {
+    const dot = document.createElement('button');
+    dot.className = 'nav-dot' + (i === 0 ? ' active' : '');
+    dot.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+    dot.addEventListener('click', () => goToSlide(i));
+    dotsContainer.appendChild(dot);
+  }
+
+  function updateCounter() {
+    document.getElementById('counter').textContent = (currentSlide + 1) + ' / ' + totalSlides;
+  }
+
+  function goToSlide(n) {
+    if (n < 0 || n >= totalSlides || n === currentSlide) return;
+    const direction = n > currentSlide ? 1 : -1;
+
+    slides[currentSlide].classList.remove('active');
+    slides[currentSlide].classList.add(direction > 0 ? 'exit-left' : '');
+    slides[currentSlide].style.transform = direction > 0 ? 'translateX(-60px)' : 'translateX(60px)';
+
+    currentSlide = n;
+
+    slides[currentSlide].style.transform = direction > 0 ? 'translateX(60px)' : 'translateX(-60px)';
+    // Force reflow
+    void slides[currentSlide].offsetWidth;
+    slides[currentSlide].classList.add('active');
+    slides[currentSlide].classList.remove('exit-left');
+
+    // Clean up old slides
+    slides.forEach((s, i) => {
+      if (i !== currentSlide) {
+        s.classList.remove('active', 'exit-left');
+      }
+    });
+
+    // Update dots
+    document.querySelectorAll('.nav-dot').forEach((d, i) => {
+      d.classList.toggle('active', i === currentSlide);
+    });
+
+    updateCounter();
+  }
+
+  window.nextSlide = function() { goToSlide(currentSlide + 1); };
+  window.prevSlide = function() { goToSlide(currentSlide - 1); };
+
+  // Keyboard navigation
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+      e.preventDefault();
+      goToSlide(currentSlide + 1);
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      goToSlide(currentSlide - 1);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      goToSlide(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      goToSlide(totalSlides - 1);
+    }
+  });
+
+  // Touch/swipe support
+  let touchStartX = 0;
+  document.addEventListener('touchstart', function(e) { touchStartX = e.touches[0].clientX; });
+  document.addEventListener('touchend', function(e) {
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) {
+      if (dx < 0) goToSlide(currentSlide + 1);
+      else goToSlide(currentSlide - 1);
+    }
+  });
+
+  updateCounter();
+})();
+</script>
+
+
+<script>
+(function() {
+  var logoSrc = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAgAAAAIACAYAAAD0eNT6AAAy9klEQVR42u3dv6s23V7f8TVwTIKY4piojUcCYpEIQRsDHjAI6UK0SuVfEAOmOoFYpsjPxjIEAmkCgo2FpDiNIBiwTw7WWlkELdQYFCZF4Jzn3ntm/Z6ZtWa93pWe57n33s++r1nfz3uua76fEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAaGXzK/iS7/+Zb4a//hM/6RexEH/83/6zX8Ji/LUf/Tvhb37zH50fgHvi4Nwz/8XUv7IfHcJ79GtshT/r2b/33a+zp7/AFvs+Gb+Lbc//3WzJf2+v+vN/9ge/H/74O7/nxS8AHPO3f+VXww9/61//XAjhb/ltLMVvfecbX/tLv4Y1+MFf/KXwY//+v/z9EMKPb2cD5uNg3hMBYP84VD//2e3Dv/spAHz4mtseCQD7fvD1j77vfvozHQWA8++55/3c+/HvYNs//64Og8G+R/583s/76Wf93r/3v7/9T37od1wBAsAhf+8P/yqEEH43hPCzfhtL8fXvfONrf+LXsAY//ft/EUIIvxZC+BdHw//zUDoz4T3yzxKD/3CI7sd3BRKD9HjAlw3+7GG6n/8ein/mhp93O/33okHlf3z7F37om66A7/E1vwIAS9LT+g9Dw376z6aw/o9vDXSw/pKft5P1fw5YEAAAGPy3Wv9hwHiJ9R8O387WfxqkUm9P7F/+ziAAAJAEnrP+nPfdK6w/asFzWn80ZGVY/0b+BQAA+OoEiVr/yeDvaf1n3387uDvQy/rPv2eb9WcHpYus/+x2v+EvAABAcgjWWn/xh/yiBv7hf4gM0rOfqcn6T8NGR+vP+Hmzrf8kYJ39eQgAAJA9+B+3/sxH5XpYf/ngr7f+rKBSY/2xIAYBAIDBfzzcEx/yG9H6vxhwqSGZsP7cpxJarP/k5616tC/3++xuAQgAAJBh/U0LfWJGWvMhv1br777QJxE0Wq0/8nuusn7DXwAAgOPh/rD1R99q6GP92R/y62D96YDUaP2xD/nlPvIIAQDAgljjO731n38mI/F9IAAAkAAusf7ChT5n1j/XGt+cgNS8xrfY+lNPe0AAALDsHYDYQh/W3/JEwhVrfOPWn/k2CAQAAFDe02L9t5T3dLJ+2wAFAAAIJ+8Jj1Dek/lJ9pXKe7pZv+EvAABACJmDomKhzzTWP0t5D+sXAADgmuHfsbwne6HP+fdV3nON9XsSQAAAAOU9YaLynlbrtwZYAACA7w6Pt5b37B/+Y64o7/kUkK4t7+lm/bYBCgAAEFJlMcp7xinv6WH9Xw0pEAAA4DHrV94TSst7Wq3fBwIFAAD4/B59zEiV96St/8Lynq26jGk3+AUAAPiSs8FfatBXWr/yntr9AR9u95/8biAAAFj4DkDWEM21fuU9Ueu/ZKFPgfV7DFAAAIDw8f175T2JoHKT9Wd/+LHQ+jf6LwAAQGoIz239Ly3vabJ+q4AFAABImGZ0kE5v/fOX91Rb/9GHPiEAAFgY5T1TWP/RZxdKrd/TAAIAAOQX4Yxk/QOt8Z3S+g1/AQAADgd/pfUr7xnT+o8HvxQgAAAw+HMMupNFv8H6HyvvqbX+D4PfY4ACAACE8cp79sjdgHnKe4oXHWXcnehh/Ya/AAAAn4fOzdavvKchpBTdvdmjT3tAAACwMMp7JirvKfqQ3x4PKRAAACw6+I9MUHlPf+vvvsa33voNfwEAAMoHv/KeNuu/5dG+/eT7f/5vggAAYNmh/5WhwfrHX+Pbav27wS8AAMBXh1Nvu1XeM7T1expAAACAduu/Y6FPT+t/1RrfMuu3BlgAAICJrF95T3IdM+sXAACgNggo75nb+o8+U3B+N8VLXgAAsDRng7Sr9Svv6bTGt8z64y2NEoAAAAATW/8Va3yftv7qhT4Z1r8Z/AIAAOTZ7YvLe+5c41tt/Tkf8quwfjlAAACAbOsfeI1vq/XfVt7Te41vqfXbBigAAECp9Q9X3lN0u/4d5T3Zj/ZFrN/wFwCAz7gt6O8+KO9pWeM7gvVHNwe6zgUA4GwAsIOFB7/ynqzvM5v1H+9gkAIEAMDgX5qzAXeV9SvvybD+ioU++da/u94FAOBs+DODVe8AvMX6hyrvuXqN79GjfRHr9zaAAACH/okFOBW8JsLC5T03rvF9yvpd4gIAHPSH1u9w8Hqwxjd6F2NI6z+6plm/AABkW7/DYUmSg79q+Cvvuaq8p4f1uxMgAID1G/z4ZKdDrvENynuqrP80QLjwBQCw/j1ihFjrRaK8Z57ynmbrN/wFALD+EDsksOTrRHnPuOU9Pa3fdS4AYLHBH7N+B8KSKO/pbf03rfHN+JDfmfVvrnUBAKzfp4ORbbijlvfkLvTJuDtx9rMOV97TYP3e4hMAwPpZP+IDY+byntiAnLm8h/ULAEB88Ddav4PC4A/Ke8Yt7+lk/a5zAQAvtf6aD/l9vF2KtV5Io67xLbT+N5f3dLH+o+8JAQAvt/499TV37w8u/Ho6N+Hx1vi2Wv9b1viePtoXsX4BXwAA62f9OB+UT1u/8p609Z8808/6BQCw/qzB/8n6nQ8Gv/Keidb4pj/k9+l7utYFALD+zVIQnA3UVuu3xjdu/Z3X+J5b/x65GwABAKzf8F/8dZZjyKw/Zf3xoT2O9Rv+AgBY//nXEQiWIt76lzBp1v+M9Zd+yM/gFwDA+qPD3yGx9GuuxsaV94Tby3uKP+S3n5wngr4AgLdbv8GPgrsBynsWsP7dXT4BAFMM/out/9gmnA7LDv1K6x+ivCdl4m9b43tm/ZHBL+wLAJjY+vPW+FZav8Hvxai8553Wv1vyJQDg9dZ/tGCE9SP+WuwxkButX3kP6xcAsObgH8f6NQSui/KefOvv8Wjf09bvcwACAEax/p5rfCut34Gw6ODfE68r5T1J63+kvKfyQ36ucwEAM1h/aXkP60eH16ryngnKeyKP9uVbv4teAADrP/keWOs12mT9K5X35HzIL+dOxWPW7wIXADCX9bcu9MmxfufCkmwfDLKX9SvviVt/nzW+ces/veMQfDBQAMC81p+7xnfPN44vDA4LvV73+OvIGt9By3vqrd/wFwDA+j8fpFaELv8aVt6zgPW7xgUAjG79ea19KevfIqHB4Mds1m+Nb6P1u84FALD+7/1zJ4LBP5H1F3/IL2H9E5X3bAa/AIDFrf9w8HeyflvDFn89s/63WH/sHPFZHwEAVwz+i60/69G+Wus3/Bd9PeeU/wTlPVdZf+Ua31rrN/wFANxk/Y+v8c35kN8esj5rgHcSvwUfXlfek/yQ3wjWX7TGl/ULAJjS+u9Y6HN2kBv+CFE7Dtb4sn4BAA7Hqcp7mq3fQbHqa32K8p5DY1+tvIf1CwB4zvoHX+N7av2Jg9bnALzOWX+IB5tHy3v6WL9CIAEAva3/yfKeDtbvUFgT5T39Fvr0LO85CkSt1q/4SwDAq61/Pw0H2dbvgFjsNV/3IT/lPbWDn/ULAHi39Y+yxrfU+h0S694JUN5TZf0jrPFl/QIARrb+q8t7WD+6Dn7lPfNY/57/dxtOxAQCgMHP+tmCa0J5zwusf4//JRv+AoCDLrysvKfR+s/sB2tcC1dZvzW+rF8AAOu/srynxfr3vACEd18UynsiAzTyaN/peXLzQh/WLwBgROu/s7yn1foN/+XYoqEwlC3ZYf3hifIe1i8AoGbwX2z9rY/21Vn/fnCI5w9+B8aa10dsICvvyRv8rF8AwMTW/4o1vpF/fngA7hmhB++/E6C8p976H1jj22L9goEAwPorrH/c8p5660+GHqwz+BPWr7xnZOvfs4a74S8ALDb4Wf8XB+Ce//NgpWtHeQ/rFwDwRutfpbynxfrP/nux7uAPs5f35C70KbP+cdb4pq1/ix1uEACWtf5lFvrkWf/mSYAlOX2NKe/5/D8OVd5Ta/0ucAGA9edbf+5Cnyrrv2GhT4n1OxuWvYZOh7HynuGsv8fg95aAAMD6V7V+gx8h9tpW3lNu/XeU97QPf4NfAGD9vax/kPKereTRvsi+99hhh3ejvOcu67/zQ36sXwBg/aw/Zf0G/+KDv7/1D7PGt7f1D7jQh/ULAKy/ePi/rLynh/XvsV8aXn1xWePL+gUATDP4L7b+rA/55Vj/jeU9TdZv+C99jR2/nt9X3vOWNb6sXwBg/VdYf+3t/kzrv6K8p/jRvr3sw1p4L6VB9HXW/4qFPuXWLyAIAKy/xvpHLO/pYP0GvzsA+davvGdW6zf4BYDXWL81vhdYvyCw9AWovGcV63ehCwAvt/6h1vh2sv7ihT651u88WPriU94zU3lPq/W72AWAYQc/63/S+r0VsBbJwd/D+h8v79mTj7ouZf3eBxAAhrZ+5T39rD/zrsPpZxew7jWpvOd267/uQ36GvwAws/Vb6NNm/bG7Dns6fOHd1+PngbdSeU9kwA5U3pM7u3OsXw4QAN5p/W8q79kT/729rd/wXxblPddZ/3OP9n3+yzH4BQDW/7bynk7W73BYefCPaf3Ke/oMfte3AMD6X7/Gt976N3cAFr0+88Kw8h7WLwCA9XdZ49to/SULfXKt3/B3J0B5T571D7nQh/ULAK+2fuU9x9af+2hfhvXrA1hz8N9t/Q+X9yQ3gq5g/ZKBAHDr4L/Y+lcu74k+y51r/fvuTFj4mq21fgt9JrN+F7kAMIL1P77QJ9P6pyrvqbL+PR3EsMw1rLxnBuuvvN2/yQACwGrWv0p5T47175HD1PB3/bL+V1u/LgABoPvBMZX1L7HGt8H6d3awGmebM1n/W63f4BcABrV+5T2hqryn6NG+M+s3/KG854I1voNav4tdAOgz+Fn/MNYffashx/p3grDoNX18rSrveaX1G/4CQFfrV97Tz/p7L/TZIwa3R343WILtdGYp7xmtvKfuQ36sXwB4wvqt8W2z/oryniPrLx386oBXvxOgvKeX9T/xaF+u9csCAkDmgaC8J9v6Hyrv6WH9Br/rXHlPn8E/svUb/AJAFtEXOesfq7ynp/ULAssmAOU9i1i/FCAAVB0Synsyrf+B8p7s75v+YCEWDPrKe9awfsNfAOg1/Ncp77l/oc8T1r95CmDlGwBjWL+FPqxfAHiD9SvvObb+/uU9W/Tnz7P+zVMACMp7rrf+PTHQc62/4EN+hr8A0MMMelq/8p4QGfANa3xzP+R3Zv1ywJqDv8T6rfEdx/q3yB/Ziv7jBAC/gozXofKez/YzSHlPk/Xvzoa1jf8i67fGN9y10CfL+hUCCQBtdnCx9SvvecT6lQKtDuufprynwfp1AggAZcb/pPUr74lbf2SNb7H17w6G1Qc/61/B+t3qEwAKz4XzUKu8Z4jynpzb/VnW7ymAZQO/8p6prL/udr/hLwB0CQbW+Hax/tY1vhnWf/Yhvy0VmLDu4C+2fuU9rF8AWOKOgPKeMPYa30rr9xkA1Fq/8p7jIfvIQh/WLwBcMfhZf8L6RyjvKbX+PfOzHljoboDyntbBn/xareU9kV961uAXBgSA/MGvvGcq69/3RGCJW7+3Ada8zpX3LGL9HgMUAEpOBuU9YYrynh7Wf2qAeK/1n/19K+8Zx/oNfgHg/oMhlFu/Nb6PlPf0sf746mesk/uV98xm/XtZUJACBIDCGwFzWP/q5T051p/5+4Lhn2X9FvrMZf2GvwBQPfhZf3rwV1p/c3lPB+vfhIBlr3PlPWf/zoSP9m0FgQICQA7PlPfkWvcz1j9SeU+r9Rv+i17XZ0OT9YfRynu6Wb8wIACUGILynhbrv6G8J/ephJywIgQsfr1b4/tq6zf8BYBq4z8a/sp7HrH+ukf7UsN/dz6snPQnWuM7ovXfUt7Ty/pd6AJAqRkkrV95T9z6Lyzvabf+3dsAC1/XrH8d698MfwGgafhfscY3KO/pucZ32zOCRuznxRLUDP6nrP/O8p4pF/pkWL86YAGgauhfaf3Ke0J7eU+F9Z8FJKC39Y+w0Gd06y9d47vlDv4vrF83gADQfCB0sn7lPUNZvzXAUN7zLus3+AWAtgPhrdb/svKeVuvfInd+sNp1rrwnad0PWH/po32GvwDQ1/g/vZYGWugzq/XfsdAn8vOePYqIVa9z5T1DW3/Rh/z27LAAASDOLOU9hwFkgfKenEf7coKKV7oLPCjvmWKNb431u8AFgNqzQXnPRGt8C63fI4AGf97wV94zRHlPo/V7FFAAKDoXyhf6ZFj/S8t7Hl/j2/rzYkms8U1Y/6BrfIuG/+YmgABQfCg8v8ZXec8N1i8IrDv0X2P9Ky70Yf0CwGU2oLxnujW+lT9vansbXgzrn8f6c54eiFm/ICAApA+E8tv9ry7v+fTfNlJ5z569djgassx+gz9Y4/tq6zf8BYDag2Ka8p7Dr7+O9Ze8PXH6Fg+WRHnPJNbfOvgFAQGgbfCnrV95z7jWfzj4d+eCwc/6X2X9Br8AUDv4v3i9KO9JfM+B1vgmrX+P/3ksNvivsX7lPQNZvyAgANQdDEF5T2qYDrjGt8r697gF4sVJ/+j6f0N5zyBrfKPW32GhT7b1b+a/AFB1LijvebX173kHOxYI/8p7xi3v6WD9mwQgAJSmAeU977d+2wAXH/wDWL/ynszhvxV8/ZzNghAADi885T1TlPdsmY/2bRkfJvwH//a3jsNFSP/Zzwa5n8vgyWvr7HMnsddhTpD59EG30++3h8y5kbTm7extlf1k2O25w7F0d/8xf/kXfxq+72/8gDW+V1n/3Y/2ZVu/pC8AxK6jPX5N9yzvOfuQn/KeB6x/D//s63/3Z/5PNGCUBIB9j/zdfBjKuX+Pp/9uIgDsZQFgOwsAB0GhZwDYsgy9a3nPTy9t/bOu8a2yfo/6CACVNwOarV95z+VrfGut/ys/17/J/vBj7OeM/ayh4G2bk7efTpcynb7O9vh82T8MvT0WivfEID/4nsnzd48+iRG7q6K8p3LwZw//Act7aqzfoz4CQMvwH3aNb6tFz17e0279Bb+XC60/9uHHGuvfy2/7N1t/bKVyjfVXD/6I9Vvju7b1uwMgAFxt/c8s9GH9sYAVsf7wlPWfvt/P+k+Hf/QzOZHBP6b1W+hzq/Ub/gJACcp7BlzjG7H+o9v98T9faf0nAznLxE//Hvf4ayF78Odb/xabH63WHxn8rH8h6+9d3rNlDP6Y9QsBAkD+4B/d+pX3lFp/8Ycfc0PK6fdi/YfBj/Wz/rut3yIgASCP40ehlPckrL9iD8EVC32qrT82IAusP/8tI9Z/v/Ur75m6vKfB+u0CEACK5/8j1p8YpGnr77jGN0xS3tPT+nM/Q/Gw9fd4tI/1s/5pyntard/gFwBKGKq8xxrfqPWnH7Us/z6zWX/0dv8D1n/No33XWL+FPm3Wv22JF8VVC31yrN9nAASA5sH/sPUr7wnNj/a1Wn/zQp+PQzHyaN/ZQLtyoU8f69+T+1Z6W7/ynvTwf0V5z5YZMAx/AaCJ2Pvl0WHz4fB9nfXnPQr3mPV3eLSv3PrrF/qUW3/hh/xy7lS82Pqt8b3L+m9e49ti/UKAAFAaBpT3zGv9M63xfcL6J1/j+6j1K+/JHP53LPTZTu5aGP4CQP0dgNw1voNa/wLlPSMs9Cmx/mEe7YtavzW+S1r/yOU9vaxfCBAA0tflSSOa8p7Rynumt37lPQXWv8pCn9jXs8a33voNfwGg7A5Aeih1t37lPVNYvzW+rF95z4XWX/NoX+b/LQcIAEVhQHlP35/3feU9OR/yS1i/8p61rV95T9r6Y+El4//eTH4BoHr4z1LeExsayntY/83Wb6FPsMZ3JOsXAgSA5PV6YpPV1q+8R3lPB+u3xpf1r1re08X6DX8BoPQOgPIe5T1XWH/yQ34jWL81vqx/UuvffBBQAGgb/BlDdHbrf0l5jzW+ynuU93S0/pHKe3JDRmr4CwECQEUCWLK8Jz1QG8t7clv3Ri7vOTR25T2sf2Drv3ON76jWH98gJQDg3L6/9/pR3tNq/cp7Wtb4XmP9ynuOB6HynsEX+px9DuFs8LsDIABU3AxQ3pNj0sp7ult/6UKfnuU9R4Go1fqV96SHv/Kei6zf8BcASob+3NavvOd0GL+2vGeEhT511m+N713W/4I1vtlbAPf0zw4BIH4IKu+xxnds61fe02fwX2r9ifc0rPHtaf17+r8LAkD0Glfekx9UgvIe5T05X5P1d7P+1cp7GqzfPgABIJ+szXpBec+C1q+8p8D6lfdY4zuS9Rv8AkBZEMiwaOU9U1i/Nb6sf7ryHgt9+lu/ECAAFA3+Vot+aXnP6UKfUa3/zeU9e2TgWeMblPc8ZP1XrfHd4oM/KzRAAEhe+28p78kdqCOX95Qs2WH9QXlP5eBn/e+wfquABYDWOwB3WL/yHuU9tdavvIf1J9f49rL+p8t7Wq1fCBAAyoNAnzW+UetX3qO8xxpf1r+49bcs9CmyfsNfACga/DXW//I1vtXWr7xnAet/d3nPCAt91izv6Wj9QoAAkHWwKO/5PPh7WL/yHtbP+tPWr7znePjXPk5o8AsAeXcA6u32rdYf/5Af6w85P3Nn61feczwIrfF9cXnP0fAv+P6bECAAlAQB5T2tj/Yp70kOUOU9ZXfmaq1feU+3hT5DW3/O94YAkLoD8OrynocW+ijvqR3841m/Nb6sv8r6K8p7ulm/ECAAZB841vhWWr/yntQAVd7TZ/Bfav3KeyoGeK31Vy70ybV+IUAAyL8DkB78//9/V96TY/3Ke0a0fuU9ynvGtf6t9lP9Kes3/AWAorsBvaw/d3PdDWt8ly/veWKNb2/rt9DnXutX3vMe6xcCBIDsoT+B9SvvGcT6lfcMaP0W+hwb/ITlPYl/vtkAKAB0R3lPmfXHPuRXYv0vL++xxvdm61fek7b+kct7tsygYheAANBr6B9av/KePOtX3mOhT/Hwt8Z3WeuvXOjTetcAAkDkXFHe02z9Ay70OQtw1vjOaf25H/IbwvqV9+SFhpIPJVZ+VgACwMkBGelbH6y8J/khv9zvo7yH9bN+1t9r8A9s/RYCCQD5KO9R3qO8R3nPldY/SnlPZuB4qrxnqzX97eRuCgSAlNQo71He08/644Of9U9u/Q+s8Z3C+juU93Sz/viGKwEA57aovEd5T4v1K+85HoTW+Frje4v1b9ELVADAsZkq71Hec5X1Z63xLbR+5T3p4a+8ZyDrb3qrodD6DX8BoCgJtDza19P6lffEh7DynqT1W+PbYP3W+L7H+oUAASA+9/eogSnvCcp7rrZ+5T3Kexqt/9VrfLP+/J4OVhAAogeZ8h7lPdb4sn7WHx2sl5f3FH9IcNcFIADU3gFIGKDyHuU9pdZvoc+91q+8Zwrr77HQJ2r9Br8A0HQ3QHmPNb4XWf+WCp3Keyz0OfsLX628p8X6hQABoHzof7jIlfcMXd5joc/LrF95T9r6VyvvabF+IUAAyOdk6BSv8Q3Ke95q/db4Bmt8F7b+IRb6VFi/4S8AlOYA5T29rF95D+tX3pMc4ndb/x1rfFut/+jRvkrr1wUgAFQO/pyBqrynxvqV97B+1h+C8p6U9e/1IcTgFwByODZF5T3Ke0aw/to1vnNY/+vKe+56tG9E679ioU+F9W/eAhAAWu4GvLG85/Y1vjXWr7yH9V9p/UOs8R3Q+kct7+myH0AIEACyh/8o5T13rfGdzPqV91w8+I8PX+U91vjeav01Txr4EKAAUMu278dnqPIe5T0n37vF+q3xTQ//Ycp7blroc6317xmDt3yId/uswNXWLwQIAHl3ABqsX3lPfAgr70lavzW+DdZvjW+29T+yxvcJ6zf4BYDSwa+8R3mP8p6LrF95T8UAb7T+Wct7ivcDCAECQCPKexLDU3lPZPgr7+n2Ib/Zrf8ta3xbrb+1vCf35xACBIDLBz/rTwz+ya3fQp97rV95T1/rf9Ma3xrr9yFAAaAZ5T3Ke15b3rMnBnrhoO5t/Rb6jGH9I5X39LJ+IUAAyBn8JdavvMca36WtX3lP2vqV9/Rb4+vWvwBwFWfD9ND6a9b4Ku+xxvdJ67fG1xrfu62/5xrfxhAgBwgAiTsAjdavvIf1v8j6X1XeE/33C6z/7eU9lYHh0vKeDiFgcydAACgJAsp7lPewftbP+m+y/pqfo3jPAASAjDsAynuC8p5m61feo7wn//sMbf1Pl/f0sn4hQACIn4GJgay8J/H9yh/tU97D+pPWr7xHeU+L9Rv8AkDJHYCY9Q+1xncW61fec/HgPz58lfco77nV+q9e49ti/UKAAFASBJT3XGf9w6zxLbR+a3zTw99Cn/CeNb4jW39NGBICBIDouVjw6fxW679zjW+59SvvKbF+a3wbrF95T7b1L1nek/G/baX/PRAAUncAlPcE5T2s/7rBz/rHtP4Ry3t6Wb8QIACkB/87rN8a39zhr7zn0g/5zWT9q6zxrRnYV1h/w8+2Vf73QABIJoBhrf8gQExX3rNHjFt5D+sP1vj2sP7XlPf0tH5BQACInpfR98+V9yjvecL6LfRh/eGZR/tS1n9XeU/NEw8GvwDQejNAeY+FPq+zfuU9rL+n9V9d3rNlBjCFQAJAj6H/6aC7srzn5jW+yntYP+sPwRrfwsF/hfW3LvRp/T4QAKJnk/Iea3wns37lPYkhrrwnY9AOWt7T+DU3w18ASN8B2ONDonChzwjWn/9oH+tn/RNYf0ZQmML6rfG9zfq39EUvACBz8E9u/cp76q3/zvKeN67xVd7TMOhKrP9t5T3Nn2cw+AWAHsPfGt9py3tGWOgzuvWXDP6o9Svvabf+prcaXmj91Y8L7mUXqABg8Pe3/ofW+NZav/Ke7MHP+nMHufIe5T0XW//Z7X7DXwAo4u41vsp7lPdkfhHlPcEa3xmt/4qFPodfc/cEgADQMviV9+RZv/KeJa1feU+29SvvOf7fbrV+IUAAyOXwdv9V1q+8R3nPVdZvoc861v9kec8Ta3xrrd/wFwBy7wA8Yf3W+OYOf+U9yntO/sKV97yvvKen9QsBAkD23QDlPeffs8X6rfGtt35rfNPWb43veGt8r7D+sw/5WQMsAHQZ+pXWr7yn3PqV9wRrfN9g/U8v9ElZ/4zlPT2tXxAQALK5rbzHGl/WP5n15zw9wPrLPpQ42xrfpKG3D/xi6zf4BYAeQ/90ICvvOfydWePL+me0fuU9k67xVQksAFyJ8p7ZrF95z1RrfHOHuPKesaz/ifKeHtbvswACQPbgf9j6lfew/ldZv/KeMax/5vKe1tBk+AsAWSjveZX1F5T3/KcQwv9tsX7lPYMv9Pk8+P5hCOGnlPdcYP09y3s6Wf8mBAgAJUFAeU/+4L/C+m9e6POv/usv/8SfeOGvwT//ze+EEMKvhS38VDfrV97TFAKutH7DXwDI4sz4r7V+5T3XW3/57X68+UKf1PpXLO/paf0ufAEgqf5JCw/W+Ib3rvHFgolfeU+Bofe2/r39A30lPysEgJz5X2L9wzzaF0Yv7xn7Q35YbPDXDswLbVt5T0EIKLV+h4AAkHU+NFp/fGiz/tGs37mw6gX+gPUr7ymz/totjga/ANBl8Fvj+2rrdzYsfs0r72m3/jvX+HZ8KgQCQGx+KO8JK63xxWpJX3lPGGeNb631G/wCwBVJgPUvttAHq81/5T2zlPf0sH4hQABIHgz7fjpfrPF9o/XvDoelE0DhwO0+aJX3FNl7rfW7vgWAyhsBynvebP0OBkHgbutX3lP/397hzgEEgKzBz/qvtP7xyntg8CvvCR1+tpsX+rgDIABcNvgzhn+PR/tY/3PW72wQBIa0fuU98eEvBAgAV54HbynvWXGNb5fyHix7B0B5z8us38UuAJTcAVDeU279o6zxZf0oToisf5jynq1XkBACBICGBNDvQ35Hg3Sh8p7nFvqwfuS/cF5X3vPEGt9Rrd+FLwAUnQnW+E5j/bkf8tvKfxAscgdAeU8Yt7yn0/+9ucYFgJrBr7yn4Hc1o/U7GNa93kcu77lrjW+r9d9V3mP4CwDPBALWnzf457V+54PBX2quynvCPeU9PQe/C10AyEJ5zxLWv4XILwILJIGGgZ2y/hvX+BZb/4zlPS3D3+AXAPKN/2brV97zsPUb/gZ/B+tX3pNn/U8OfkFAAEiq/wut30If1o/MwaC8Z7zynpy/r5D51g4EgNwcYI3vAtbvcBAGsgft5NaftPMBy3t6Wr9rXQAoGvwjWL81vtdZvwPBHYCU9Svvqf9v72X9W+S6tgdAALjkXGD9n77+bNa/nYUQBwJGtH7lPe3W7w6AANB6B+DT0GP9r7V+Z4LB38X6lffEh3/r9r5W63ehCwAlSSC9xvca61fec3z4lg/+uPVvDgco71nL+l3nAkDOLYAeC316lvdsJ3cnWqz/NeU9OY/2Gf4IL7P+hcp7ttoBb/gLAFXnQnN5zwgLfeqsf+6FPqwf+S8+5T2sXwBA3KCV93S1/tsW+px9PQeC+R8GsH7lPfdav+teACg6JJT3rGP9DodFE8CE5T13LvR5i/W7vgWA0nPhNda/0hrfUuvfnA9rorxnuvKeHu/7u9AFgJxzQXnPZOU9DdafejwSb076QXlPzh2P2a3f4BcAChPA+QCNPNp3OvCs8Q13rfEtt37Df+kAkDEolfc8MPgvsH45QADIzgHKe3pZ/wMLfUqs36kgCNxg/cOV99y1xrfV+mtv8X88H1znAkDyPNhTgUB5z6us36Fg8CvvaRv8M1i/61wAaLsbYI0v68cKQUB5Twfrv3KNb4v1b97uEwCKBv+s1v/u8p7ywZ8Y/gKBOwBBec8j1t9p2KefJjD8BQDWz/oNfsRMcaE1vtHhP1J5D+sXAG45F06ewVfeU279Ty70KbF+GWDh6115z9jWn3qOv8T6XegCQJb6Z1m/8p5q67+qvGcrv91vPbDBXzXwb1voE5T3pAb/4T/fCw4kAQAns1F5zwLW73BYOAm0hwDlPRNZv2tdAKgf/sp7HrH+xHsaBj+6DP5hrH+h8p6ej/Ztidv9rncBIHkuxIatNb7vsH6HA3IGjzW+rF8AcCvAQp+BrL/37X6HgyBQbOhhnvKeOwf/DNbvehcASoY/6+9l/c882sf6UXQHIPfRPtZ/a3nPVvohP4NfAKg2/g+BnPV3tP6r1/hWWr894YLAcOU9FcP59Wt8cx7tM/wFgOrzYC/55xb6zG79WyyxYa3Bn7L+Vcp7ct9/f3qhT431CwMCQHswYP1J6x7d+j8+PeBgWDcA9LR+5T33W7+7AALAE8Of9b/E+h0OwkBP61few/oFANZfOvhzXqvKe1g/rrkDoLwnjFve08v6XfMCAOt/ufVHP+S35x8WWCIIKO9ZwPpd3wLAjNZvoU+b9Rv8SL7ulPf0s/67F/qwfgGgL3v89aO8p6v1dyvvYf0on//W+EaH8TVBoKq8p0MYcLkLAPUHhfKeMay/x4f8UrcgsdCFHa4t76kdyqy/q/VvEoAAcMvgH8D6lynvabX+zZngAr/Z+ksW+oxo/aOt8c2xfhe5AFB1Lljju471OyRc8Nb4jmn9ue/rG/4CQDN77JxQ3jNieU+T9TsgDH7lPfNYf+vgd70LAOVnhfKeKRf6lFi/g2HtIMD6uwaB2xb65A5/17cAUHc2KO85/SNvsX6HgzsAOdavvKfc+nuU97B+AeD+c8FCH9aPJQLAVdavvIf1CwCzUTP457T+15X31Fq/g0IQuMP6lffU3wXoZf2udQGg6pxg/e+0/s25YPCfBMen1vg2WP8qa3yLrd8FLgD0Hvyp19WWcZdBeU+D9fca/A4HQSBY41tk/SMu9DH8BQDWP6H1d1jjW3rLc3M4GPwjWb/ynrwzifULAM8M/Rbrt9An+0K/63b/x41PDos1r3flPdmDmPULAAuzyEKfxEU1THlPxYf8Pv8sBv/yg195T3rwH/5z1i8AGPysP/XvjvQhv5j1OzgWSwAnA0x5D+sXALCU9c9a3tPD+h0aiweBetOfwvrfVN5j8AsAdwz9nNfUWtafd+EPb/2x25YOEYO/MhCw/orBXzL86x61ggDQdi4saf0zr/GttX61wC74Wut/80KfHtbvdr8A8O5w0OnRvmbrt9Cn1vrtAjD4p7X+Fdf4ulYFgNGGv/KeiazfLgBUvp9ujW/FXQDWLwCw/sbBz/qvtX6Hi4tcec+Y1u/aFABY/8vKe1Lvw+daf+6jfTHrd8C4uFcq7/FoHwSA0tcb63+19TtoXPDKeyz0EQAwo/WvW96z97t1C3cAlPewfgEArH+C8p6e1u/QEQRmLe8pDtqsHwJA1tDvaf3Kewa0foeOwW+hD+sXAHDV4E9+rUHKe1610Kd1zSqWuciV97B+AQCsPzfhv8n6bQFc+gJn/axfAMBc1m+hT3/rdxiteZ0r72m3foNfAFg3IAxc3pMbFFZ4tC/V3oZ1L+TZrD/rWlPeAwHg1sHP+sOza3x7HsxY64JW3tM++Fm/APD+s8JCn1dZv4MJyntYvwCAR6xfec/z1r8dBDK4AzCD9fuQHwQA1s/6W4zM8HexB+U9vazf4BcAWL/ynuQQv9v6zwa/A8uFrryH9QsAYP2h3xrfGax/c3AJAvkDWXmPwS8ArDD4zwZqJ+tX3tNh8PeyfsuA3AFQ3sP6BQBEb8/fbP0lgz+a3F9e3tNi/fYBuN5vt37lPRAApswC01v/a9f4lgx+wx+Zr2trfA1/AcD5kLZu5T1jrPE9uuNgHwAK7wAo7zH4BQCDf3zrX7m8p9D6k58RgDsAq1u/hT4CADpbv4U+41u/w811rbzH4BcAcL/1K+95zPodbu4ABOU9rF8AQKn1W+Obtv471/jWWr9Dbt1LfOQ1vp3CAOuHANBs/db4Tmf9Jd/Tgbfu4L9g2CvvgQDA+u+x/pynB1i/9/9RZtjKeyAArHwesP47rb96oU8H698cfgb/qtbvtS8A4CPvKu/ZSg6bmcp7Gq3f4IfyHggAWMP6X1TeUxU2chvdsO4dgNGt30IfCAD3HhDKe/oO/u7WX/D9DX403wFg/RAAFjCDsGp5z173NsEo1l/7VgOWvc6V90AAwFDWb43vxdYvBID1QwDA1dZvjW/q3++40Kf2CQEY/qnBf/jPb7J+gx8CwMTWr7wn2/q32mf5a6zfQWnwz2j9FvpAALgqAXQc/Kx/TOt3SLree1i/8h4IAO8/KJT3DGj9xVsEhQDXc/71o7wHAoDBv4b1z1becxRU3PpHhyCgvAcCgMPBGt/By3u63jWAOwBBeQ8EgOUPhunLe55c49vD+ks+lFh56z+50hnrXfPKeyAAOBNYf+Pgn8H6Px7wWPMOQFDeAwHAuXCX9SvvaS/v6WL9u0N19WveQh8IAMgd/Ldav/Kea63fgWr4X2391vhCAJjuFkCz9W8xGy+1fuU91XcNktbvcDX4WT8EAFRZv/Ke58p7Wq1fCADrhwCAvtavvGc469cFgKPgzPohAODU+K+wfmt8+5T39LJ+B+5iWOMLCACp61B5T7b1P1LeE/3Zd10AyA78t1i/hT4QACY5D1j/eNaf9ecLrd/Ba/CzfggAyL1IrfFtsP6O5T3b0c/Yul8A7gJUBAbWDwFggUCgvCcMUd4Ttf7aJw1g+Pca/KwfAsB7DgfWfzR4O1l/05/f+24VhMHP+iEAOBg+W7zynlLDvq68p4P1O4zB+iEA4PCaVd4zlvXXPtq3Zf4cWDfoX2X9Xl8QAOY7IIYt78kNGSuU9/R60sAhLRCwfggAjP+LgVxq/cp7xrD+2p8Dhr81vhAAVmd/z0KfHtY/annPdsHPgTWNn/VDADD4u1q/8p6xrd9hDdYPAQDFg39k61+hvOeKdcIw/Fk/BABY41to/Q+v8d0q+wMc4Ia+wQ8BAInNf++y/qfLe7IX+tRYv/f/UXrZW+gDAQCsf0LrFwLQc/CzfggACx8MynvmKe9p3C7oTF908LN+QADIHvw9rF95z30LfTL++eZQXzwBsH4IAEhd9Mp7Ot41eN76o088QCAw/CEAOAiyh7jynoxBO6j1O+Bd8wY/BABEDwDlPeV//urynuo9A0KAa9vgBwSA1CGgvOf2Nb5V1p96+yQnDMF1DwgADoCprH/F8p5e1u/Qh9cABABcYv3Ke7K+ZvMa31zrZ/8w/AEBIDr4v/g/9sqnAgax/jeW92yhPgwJAa5zAALA4bmgvKfc+p8o79ky/x5Kvg8ACACrm4E1vuk/f9Ea3zut3/AHIABgZOtX3tPB+oUAABAAju8ARD7dz/rzP+RXY/01C31aB77BD0AAwOcwMKn1r7bGt0MIkAMACACG/uH/r7xngjW+TV9z99oHIABgEOtX3nP+u+z6FIPhD0AAwHbwfyrvud76W9f4Vn3N/fifA4AAsHgOUN5znfX3LO+pelzQ8AcAASCcDNKj4aC859k1vs13JPZ0wAIAAcBtgMusX3lPvfVXPy64G/wAIABkDP0cSy0d/CWD7k7rf3KNb8r6m59i2PP/PAAIAFDec5H1X73Q57tfc7cBEAAEgD53AFh/J+vvWd6TerRPCAAAAaA2DCjvGbC8p9X6hQAAAgBidwCU9/Qz9GLrr13oU/NYJQAIAHjS+h9Z41tj/U+X9/S0fiEAgADgDsAX80B5z9jlPa3Wb/ADEADwaR4o7+lj6FeX9zS+1SIIABAAkLEHYPQ1voNa/1XlPZ2+vvkPQABA9uBX3tPZ+mvLexoC2Gb6AxAAcH4HQHnPMOU9te/vpwIYAAgAuNT6VyvvuXONb631CwEABAB88T56ynBnsv43lvf0sH5PAwAQAHA4+EsG3Z3Wr7ynn/Ub/gAEADy2xndk6x+1vCc3pJSGBwAQABbOAU+s8R3Z+kct7+lh/YY/AAEAWwfzVN4Tnlvj2/h2DQAIAMsngZusX3lP/bAu+ZCf4Q8AAkDW4K8dOsp70l8z9SG/WutvGfxCAAABQABIBoLVynueXuN7tfUb/gAEABwOf+U911t/xdDuOviFAAACgKGfCgHW+IYxyns6LggCAAEAZQO3ZOAsUt4zxEIfdwAAQABoHfyPW/+Ta3wLv88Qa3xLrd/wByAAoNj6lfe8wvo3IQCAAGDwL2/9s5X31NziVwkMAALAF3Oh8DHAZct7Uh/ym836hQAAAgBaLFZ5T7i/vKf1dr/hD0AAQPUHypT3PFPe08v6hQAAAgBKzVV5T3i2vKfV+g1/AAIALlnjW2P9yntYPwAIAA8GAeU945f31HzITxAAAAHgq/yv//4b4Sf/8T/9dyGEH1He83Lr/3Lw/7lX/zr89r/8j+Hn/8O3fj2E8D/9Npbij/wKAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC4mP8H9qwiBDWayCcAAAAASUVORK5CYII=";
+  var imgs = document.querySelectorAll(".logo-img, .logo-sm");
+  imgs.forEach(function(img) { img.src = logoSrc; });
+})();
+</script>
+</body>
+</html>

@@ -65,7 +65,9 @@
         "info": "Info",
         "save": "Save",
         "copy": "Copy",
-        "copied": "Copied!"
+        "copied": "Copied!",
+        "showOriginal": "Show original",
+        "showTranslated": "Show translated"
     },
     "headerTexts": {
         "citation": "Citation"

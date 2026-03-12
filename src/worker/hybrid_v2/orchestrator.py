@@ -352,6 +352,25 @@ class HybridPipeline:
         """Async context manager exit - cleans up resources."""
         await self.close()
 
+    # Mapping from i18n frontend language codes to Azure Translator codes.
+    # Most codes are identical; only variants need explicit mapping.
+    _I18N_TO_AZURE_LANG = {
+        "ptBR": "pt",
+        "zhHans": "zh-Hans",
+        "zhHant": "zh-Hant",
+    }
+
+    @classmethod
+    def _to_azure_lang(cls, i18n_code: Optional[str]) -> Optional[str]:
+        """Convert an i18n language code to an Azure Translator language code.
+
+        Returns *None* when the code is ``"en"`` or unrecognised (let
+        auto-detect handle it).
+        """
+        if not i18n_code:
+            return None
+        return cls._I18N_TO_AZURE_LANG.get(i18n_code, i18n_code)
+
     async def _get_document_language(self) -> Optional[str]:
         """Get the primary language of documents in this group from Neo4j.
 
@@ -385,8 +404,16 @@ class HybridPipeline:
         self,
         query: str,
         accumulator=None,
+        hint_language: Optional[str] = None,
     ) -> tuple:
         """Detect query language and translate if it differs from document language.
+
+        Args:
+            query: User's raw query text.
+            accumulator: Optional TokenAccumulator for usage tracking.
+            hint_language: Optional i18n language code from the UI dropdown.
+                When provided and it maps to a known Azure Translator code,
+                it is passed as ``source_lang`` to skip auto-detection.
 
         Returns:
             (translated_query, detected_language, was_translated)
@@ -400,7 +427,15 @@ class HybridPipeline:
         doc_lang = await self._get_document_language()
         target_lang = doc_lang or "en"
 
-        result = await translator.detect_and_translate(query, target_lang=target_lang)
+        # Use the UI language as a source hint when available
+        source_hint = self._to_azure_lang(hint_language)
+        # Don't hint if the hint matches the target (no translation needed)
+        if source_hint and source_hint.split("-")[0].lower() == target_lang.split("-")[0].lower():
+            source_hint = None
+
+        result = await translator.detect_and_translate(
+            query, target_lang=target_lang, source_lang=source_hint,
+        )
 
         if accumulator and result.was_translated:
             accumulator.add_translation(
@@ -451,11 +486,16 @@ class HybridPipeline:
 
         # Step 0a: Translate query if user language ≠ document language
         translated_query, detected_lang, was_translated = await self._maybe_translate_query(
-            query, accumulator=accumulator,
+            query, accumulator=accumulator, hint_language=language,
         )
-        if was_translated and detected_lang and not language:
-            # Respond in the user's original language
-            language = detected_lang
+        # Determine the user's target language for response translation
+        user_language = language or detected_lang  # UI dropdown or auto-detected
+        doc_lang = await self._get_document_language() or "en"
+        user_azure_lang = self._to_azure_lang(user_language)
+        needs_response_translation = bool(
+            user_azure_lang
+            and user_azure_lang.split("-")[0].lower() != doc_lang.split("-")[0].lower()
+        )
         search_query = translated_query if was_translated else query
 
         # Step 0b: Route the (translated) query and determine weight profile
@@ -493,10 +533,34 @@ class HybridPipeline:
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
                 include_context=include_context,
-                language=language,
+                language=None,  # Generate in document language; we translate after
                 folder_id=folder_id,
                 **extra_kwargs,
             )
+
+            # Translate the response to the user's language if needed
+            if needs_response_translation and result.response:
+                result.original_answer = result.response
+                try:
+                    from src.worker.services.translator_service import get_translator_service
+                    translator = get_translator_service()
+                    if translator.is_available:
+                        tr = await translator.detect_and_translate(
+                            result.response,
+                            target_lang=user_azure_lang,
+                            source_lang=doc_lang,
+                        )
+                        if tr.was_translated:
+                            result.response = tr.translated_text
+                            if accumulator:
+                                accumulator.add_translation(
+                                    characters=tr.characters,
+                                    detected_language=tr.detected_language,
+                                    was_translated=True,
+                                )
+                except Exception as e:
+                    logger.warning("response_translation_failed", error=str(e))
+
             # Attach accumulated token usage to the result
             if result.usage is None and accumulator.call_count > 0:
                 result.usage = accumulator.snapshot()
@@ -2339,9 +2403,16 @@ Sub-questions:"""
             folder_id: Per-query folder scope (overrides pipeline default, None = all folders).
         """
         # Translate query if needed
-        translated_query, detected_lang, was_translated = await self._maybe_translate_query(query)
-        if was_translated and detected_lang and not language:
-            language = detected_lang
+        translated_query, detected_lang, was_translated = await self._maybe_translate_query(
+            query, hint_language=language,
+        )
+        user_language = language or detected_lang
+        doc_lang = await self._get_document_language() or "en"
+        user_azure_lang = self._to_azure_lang(user_language)
+        needs_response_translation = bool(
+            user_azure_lang
+            and user_azure_lang.split("-")[0].lower() != doc_lang.split("-")[0].lower()
+        )
         search_query = translated_query if was_translated else query
 
         # Use modular handlers if available and requested
@@ -2363,10 +2434,28 @@ Sub-questions:"""
                 prompt_variant=prompt_variant,
                 synthesis_model=synthesis_model,
                 include_context=include_context,
-                language=language,
+                language=None,  # Generate in document language; we translate after
                 folder_id=folder_id,
                 **extra_kwargs,
             )
+
+            # Translate the response to the user's language if needed
+            if needs_response_translation and result.response:
+                result.original_answer = result.response
+                try:
+                    from src.worker.services.translator_service import get_translator_service
+                    translator = get_translator_service()
+                    if translator.is_available:
+                        tr = await translator.detect_and_translate(
+                            result.response,
+                            target_lang=user_azure_lang,
+                            source_lang=doc_lang,
+                        )
+                        if tr.was_translated:
+                            result.response = tr.translated_text
+                except Exception as e:
+                    logger.warning("force_route_response_translation_failed", error=str(e))
+
             return result.to_dict()
         
         # Legacy fallback

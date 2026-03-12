@@ -80,24 +80,34 @@ class TranslatorService:
         self,
         text: str,
         target_lang: str = "en",
+        source_lang: Optional[str] = None,
     ) -> TranslationResult:
-        """Auto-detect source language and translate to target_lang.
+        """Detect source language and translate to target_lang.
 
-        If the detected language prefix matches target_lang, returns the
+        Args:
+            text: Text to translate.
+            target_lang: Target language code (e.g. ``"en"``, ``"ja"``).
+            source_lang: Optional source language hint.  When provided the
+                Azure Translator ``from`` parameter is set explicitly,
+                skipping auto-detection (saves ~50 ms per call).
+
+        If the source language prefix matches target_lang, returns the
         original text with was_translated=False.
         """
         if not self.endpoint:
             return TranslationResult(
                 original_text=text,
                 translated_text=text,
-                detected_language="unknown",
+                detected_language=source_lang or "unknown",
                 target_language=target_lang,
                 was_translated=False,
                 characters=0,
             )
 
         url = f"{self.endpoint}/translate"
-        params = {"api-version": _API_VERSION, "to": target_lang}
+        params: dict = {"api-version": _API_VERSION, "to": target_lang}
+        if source_lang:
+            params["from"] = source_lang
         token = await self._get_token()
         headers = {
             "Authorization": f"Bearer {token}",
@@ -128,7 +138,7 @@ class TranslatorService:
 
         result = data[0]
         detected = result.get("detectedLanguage", {})
-        detected_lang = detected.get("language", "unknown")
+        detected_lang = detected.get("language") or source_lang or "unknown"
         translations = result.get("translations", [])
         translated_text = translations[0]["text"] if translations else text
 

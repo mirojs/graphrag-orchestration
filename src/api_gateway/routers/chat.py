@@ -419,6 +419,7 @@ async def _execute_query(
         usage_raw = result.get("usage") or {}
         return {
             "answer": result.get("response", ""),
+            "original_answer": result.get("original_answer"),
             "route_used": result.get("route_used", approach),
             "usage": {
                 "prompt_tokens": usage_raw.get("prompt_tokens", 0),
@@ -1064,6 +1065,7 @@ class FrontendResponseContext(BaseModel):
     data_points: FrontendDataPoints = Field(default_factory=FrontendDataPoints)
     followup_questions: Optional[List[str]] = None
     thoughts: List[FrontendThought] = Field(default_factory=list)
+    original_answer: Optional[str] = None
 
 
 class FrontendChatResponse(BaseModel):
@@ -1272,6 +1274,7 @@ async def frontend_chat(
                 ),
                 followup_questions=followup_questions,
                 thoughts=thoughts,
+                original_answer=result.get("original_answer"),
             ),
             session_state=body.session_state,
         )
@@ -1433,6 +1436,7 @@ async def _frontend_stream_response(
                 "Can you elaborate on the key findings?",
                 "What are the supporting documents for this answer?",
             ] if overrides and overrides.suggest_followup_questions else None,
+            "original_answer": result.get("original_answer"),
         }
         
         # Keep inline [N] citation markers for frontend rendering

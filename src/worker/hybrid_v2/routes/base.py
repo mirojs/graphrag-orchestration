@@ -133,6 +133,8 @@ class RouteResult:
     # Top-level API fields for telemetry
     usage: Optional[Dict[str, Any]] = None  # {prompt_tokens, completion_tokens, total_tokens, model}
     timing: Optional[Dict[str, Any]] = None  # {retrieval_ms, synthesis_ms, total_ms}
+    # Original (document-language) answer before translation to user language
+    original_answer: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API response."""
@@ -151,6 +153,8 @@ class RouteResult:
             result["usage"] = self.usage
         if self.timing:
             result["timing"] = self.timing
+        if self.original_answer:
+            result["original_answer"] = self.original_answer
         return result
 
 

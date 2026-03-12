@@ -106,6 +106,7 @@ export type ResponseContext = {
     followup_questions: string[] | null;
     thoughts: Thoughts[];
     answer?: string;
+    original_answer?: string;
 };
 
 export type ChatAppResponseOrError = {

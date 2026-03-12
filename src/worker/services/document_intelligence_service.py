@@ -31,7 +31,6 @@ import json
 import logging
 import base64
 import io
-import os
 import re
 from bisect import bisect_left, bisect_right
 from contextlib import asynccontextmanager
@@ -387,10 +386,7 @@ class DocumentIntelligenceService:
             logger.info("Document Intelligence: Using managed identity authentication")
             # Reuse cached credential to avoid per-call IMDS token acquisition
             if self._cached_credential is None:
-                client_id = os.environ.get("AZURE_CLIENT_ID")
-                self._cached_credential = DefaultAzureCredential(
-                    managed_identity_client_id=client_id,
-                )
+                self._cached_credential = DefaultAzureCredential()
             async with DocumentIntelligenceClient(
                 endpoint=self.endpoint,
                 credential=self._cached_credential,
@@ -2356,9 +2352,7 @@ class DocumentIntelligenceService:
                 if url.endswith(".result.json"):
                     logger.info(f"📂 Detected pre-analyzed DI result: {url[:80]}")
                     try:
-                        credential = DefaultAzureCredential(
-                            managed_identity_client_id=os.environ.get("AZURE_CLIENT_ID"),
-                        )
+                        credential = DefaultAzureCredential()
                         async with BlobClient.from_blob_url(url, credential=credential) as blob:
                             download = await blob.download_blob()
                             raw = await download.readall()

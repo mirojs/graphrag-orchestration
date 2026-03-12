@@ -215,9 +215,7 @@ class LazyGraphRAGIndexingPipeline:
         # Limit concurrent Neo4j write operations to prevent Aura write storms.
         # Parallel steps (section enrichment, foundation edges) each acquire
         # this semaphore before writing, keeping max concurrent writes bounded.
-        self._neo4j_write_sem = asyncio.Semaphore(
-            int(os.getenv("NEO4J_WRITE_CONCURRENCY", "3"))
-        )
+        self._neo4j_write_sem = asyncio.Semaphore(settings.NEO4J_WRITE_CONCURRENCY)
 
         self._splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
@@ -236,6 +234,42 @@ class LazyGraphRAGIndexingPipeline:
         self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
         # NER scope: "broad" (includes abstract concepts) or "narrow" (proper nouns only, HippoRAG 2 style)
         self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
+
+    async def _achat_with_retry(self, messages, *, timeout: Optional[int] = None) -> Any:
+        """Call self.llm.achat() with retry + timeout.
+
+        Retries on transient LLM errors (rate limits, server errors).
+        Wraps with asyncio.wait_for to prevent indefinite hangs.
+        """
+        if timeout is None:
+            timeout = settings.LLM_TIMEOUT_SECONDS
+        max_retries = settings.LLM_MAX_RETRIES
+        last_exc = None
+        for attempt in range(max_retries):
+            try:
+                return await asyncio.wait_for(
+                    self.llm.achat(messages), timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                last_exc = TimeoutError(f"LLM achat timed out after {timeout}s")
+                if attempt >= max_retries - 1:
+                    raise last_exc
+                delay = 2 ** attempt
+                logger.warning("LLM timeout (attempt %d/%d), retrying in %ds", attempt + 1, max_retries, delay)
+                await asyncio.sleep(delay)
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e).lower()
+                is_retryable = any(k in err_msg for k in (
+                    "rate limit", "429", "500", "502", "503", "504",
+                    "timeout", "connection", "server error", "throttl",
+                ))
+                if not is_retryable or attempt >= max_retries - 1:
+                    raise
+                delay = 2 ** attempt
+                logger.warning("LLM transient error (attempt %d/%d), retrying in %ds: %s", attempt + 1, max_retries, delay, e)
+                await asyncio.sleep(delay)
+        raise last_exc  # pragma: no cover
 
     async def index_documents(
         self,
@@ -1053,18 +1087,29 @@ class LazyGraphRAGIndexingPipeline:
         t_di_start = time.perf_counter()
         async with di_service._create_client() as client:
             async def _analyze_one(url: str) -> None:
-                try:
-                    _result_url, docs, error = await di_service._analyze_single_document(
-                        client, url, group_id, default_model="prebuilt-layout",
-                    )
-                    if error:
-                        logger.warning("DI extraction failed for %s: %s", url.split("/")[-1], error)
-                    else:
-                        target_url = source_remap.get(url, url)
-                        by_source[target_url] = docs
-                        logger.info("DI extracted %d units for %s", len(docs), url.split("/")[-1])
-                except Exception as exc:
-                    logger.warning("DI extraction failed for a URL: %s", exc)
+                max_di_retries = 2
+                for attempt in range(max_di_retries):
+                    try:
+                        _result_url, docs, error = await di_service._analyze_single_document(
+                            client, url, group_id, default_model="prebuilt-layout",
+                        )
+                        if error:
+                            if attempt < max_di_retries - 1:
+                                logger.warning("DI extraction error for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, error)
+                                await asyncio.sleep(2 ** attempt)
+                                continue
+                            logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, error)
+                        else:
+                            target_url = source_remap.get(url, url)
+                            by_source[target_url] = docs
+                            logger.info("DI extracted %d units for %s", len(docs), url.split("/")[-1])
+                        return
+                    except Exception as exc:
+                        if attempt < max_di_retries - 1:
+                            logger.warning("DI extraction exception for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, exc)
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, exc)
 
             await asyncio.gather(*[_analyze_one(url) for url in effective_urls])
         logger.info("⏱️ DI extraction: %.2fs for %d documents", time.perf_counter() - t_di_start, len(effective_urls))
@@ -1814,13 +1859,19 @@ class LazyGraphRAGIndexingPipeline:
         # pairwise similarity (e.g., cos drops from 0.93→0.54 with 252 entities).
         if entities and self.voyage_service:
             texts = [e.name for e in entities]
-            try:
-                embs = await self.voyage_service.aembed_independent_texts(texts)
-                for ent, emb in zip(entities, embs):
-                    ent.entity_embedding = emb
-                logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
-            except Exception as e:
-                logger.warning("openie_entity_embedding_failed", extra={"error": str(e)})
+            for attempt in range(3):
+                try:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                    for ent, emb in zip(entities, embs):
+                        ent.entity_embedding = emb
+                    logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("openie_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("openie_entity_embedding_failed after 3 attempts — entities committed without embeddings: %s", e)
 
         # Build a lookup of entities by canonical key for co-occurrence step
         entities_by_key: Dict[str, Entity] = {}
@@ -2262,7 +2313,7 @@ Return ONLY valid JSON (no markdown fences):
             },
         )
 
-        sem = asyncio.Semaphore(8)  # max 8 concurrent LLM calls (gpt-4.1 50K TPM headroom)
+        sem = asyncio.Semaphore(settings.OPENIE_LLM_CONCURRENCY)
 
         def _strip_json_fences(text: str) -> str:
             """Remove markdown code fences from LLM JSON response."""
@@ -2283,14 +2334,14 @@ Return ONLY valid JSON (no markdown fences):
             prompt = self._OPENIE_PROMPT.format(sentences=sentence_block)
             async with sem:
                 try:
-                    response = await self.llm.achat(
+                    response = await self._achat_with_retry(
                         [ChatMessage(role="user", content=prompt)]
                     )
                     text = _strip_json_fences(response.message.content)
                     parsed = json_mod.loads(text)
                     return parsed.get("triples", [])
                 except Exception as e:
-                    logger.debug(f"OpenIE batch failed: {e}")
+                    logger.warning("OpenIE batch failed (triples lost): %s", e)
                     return []
 
         async def _extract_batch_two_step(batch: List[Dict[str, Any]], context: str) -> List[Dict[str, str]]:
@@ -2310,14 +2361,14 @@ Return ONLY valid JSON (no markdown fences):
                 ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
                 ner_prompt = ner_template.format(sentences=sentence_block)
                 try:
-                    ner_response = await self.llm.achat(
+                    ner_response = await self._achat_with_retry(
                         [ChatMessage(role="user", content=ner_prompt)]
                     )
                     ner_text = _strip_json_fences(ner_response.message.content)
                     ner_parsed = json_mod.loads(ner_text)
                     named_entities = ner_parsed.get("named_entities", [])
                 except Exception as e:
-                    logger.debug(f"NER step failed: {e}, falling back to single-step")
+                    logger.warning("NER step failed (falling back to single-step): %s", e)
                     named_entities = []
 
                 if not named_entities:
@@ -2331,14 +2382,14 @@ Return ONLY valid JSON (no markdown fences):
                         named_entities=entities_str, sentences=sentence_block
                     )
                     try:
-                        triple_response = await self.llm.achat(
+                        triple_response = await self._achat_with_retry(
                             [ChatMessage(role="user", content=triple_prompt)]
                         )
                         triple_text = _strip_json_fences(triple_response.message.content)
                         parsed = json_mod.loads(triple_text)
                         return parsed.get("triples", [])
                     except Exception as e:
-                        logger.debug(f"Triple extraction step failed: {e}")
+                        logger.warning("Triple extraction step failed (triples lost): %s", e)
                         return []
 
             # NER produced nothing — fall back to single-step (outside the sem block)
@@ -2769,12 +2820,18 @@ Return ONLY valid JSON (no markdown fences):
         # Embeddings for entities — name-only, independently embedded (HippoRAG 2)
         if entities and self.voyage_service:
             texts = [e.name for e in entities]
-            try:
-                embs = await self.voyage_service.aembed_independent_texts(texts)
-                for ent, emb in zip(entities, embs):
-                    ent.entity_embedding = emb
-            except Exception as e:
-                logger.warning("sentence_entity_embedding_failed", extra={"error": str(e)})
+            for attempt in range(3):
+                try:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                    for ent, emb in zip(entities, embs):
+                        ent.entity_embedding = emb
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("sentence_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("sentence_entity_embedding_failed after 3 attempts: %s", e)
 
         logger.info(f"Sentence-based native extraction: {len(entities)} entities, {len(relationships)} relationships, {mentions_total} mention links")
         return entities, relationships
@@ -2882,12 +2939,18 @@ Return ONLY valid JSON (no markdown fences):
         entities = list(entities_by_key.values())
         if entities and self.voyage_service:
             texts = [e.name for e in entities]  # name-only, independently embedded
-            try:
-                embs = await self.voyage_service.aembed_independent_texts(texts)
-                for ent, emb in zip(entities, embs):
-                    ent.entity_embedding = emb
-            except Exception as e:
-                logger.warning("llamaindex_sentence_embedding_failed", extra={"error": str(e)})
+            for attempt in range(3):
+                try:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                    for ent, emb in zip(entities, embs):
+                        ent.entity_embedding = emb
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("llamaindex_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("llamaindex_sentence_embedding_failed after 3 attempts: %s", e)
 
         return entities, relationships
 
@@ -3596,9 +3659,9 @@ Output:
                             sessions.delete(session_name=stale.name)
                             logger.info(f"🧹 Cleaned up idle GDS session: {stale.name} ({stale.status})")
                         except Exception as idle_err:
-                            logger.debug(f"Could not delete idle session {stale.name}: {idle_err}")
+                            logger.warning("Could not delete idle GDS session %s: %s", stale.name, idle_err)
             except Exception as cleanup_err:
-                logger.debug(f"Pre-cleanup check: {cleanup_err}")
+                logger.warning("GDS pre-cleanup check failed: %s", cleanup_err)
             
             # Extract Aura instance ID from URI (e.g., neo4j+s://abc123.databases.neo4j.io -> abc123)
             import re
@@ -3663,7 +3726,7 @@ Output:
                             except Exception as force_err:
                                 logger.warning(f"Could not force-drop projection: {force_err}")
             except Exception as e:
-                logger.debug(f"Graph list/drop check: {e}")
+                logger.warning("GDS graph list/drop check failed: %s", e)
             
             # Escape group_id for Cypher (handle both backslash and double quotes)
             escaped_group_id = group_id.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
@@ -4073,7 +4136,7 @@ Output:
 
         # Generate LLM summaries (bounded parallelism)
         logger.info("📝 Step 9c: Generating LLM summaries for %d communities...", len(community_groups))
-        sem = asyncio.Semaphore(5)  # Bound parallel LLM calls to avoid 429s
+        sem = asyncio.Semaphore(settings.COMMUNITY_LLM_CONCURRENCY)
 
         async def _summarize_one(cid: int, members: List[Dict]) -> Optional[Tuple[str, str]]:
             async with sem:
@@ -4204,7 +4267,7 @@ SUMMARY: <summary>"""
 
         try:
             from llama_index.core.llms import ChatMessage
-            response = await self.llm.achat([ChatMessage(role="user", content=prompt)])
+            response = await self._achat_with_retry([ChatMessage(role="user", content=prompt)])
             text = response.message.content.strip()
             return self._parse_community_summary(text)
         except Exception as e:
@@ -4709,7 +4772,7 @@ SUMMARY: <summary>"""
 
         from llama_index.core.llms import ChatMessage
 
-        _summary_sem = asyncio.Semaphore(5)
+        _summary_sem = asyncio.Semaphore(settings.SECTION_LLM_CONCURRENCY)
 
         async def _summarize_section(sec: dict) -> Optional[dict]:
             content_sample = "\n---\n".join(
@@ -4728,7 +4791,7 @@ SUMMARY: <summary>"""
             )
             try:
                 async with _summary_sem:
-                    response = await self.llm.achat(
+                    response = await self._achat_with_retry(
                         [ChatMessage(role="user", content=prompt)]
                     )
                 summary = response.message.content.strip()
@@ -5104,7 +5167,7 @@ SUMMARY: <summary>"""
         warnings: list[str] = []
         counts: Dict[str, int] = {}
 
-        with self.neo4j_store.driver.session() as session:
+        with self.neo4j_store._resilient_session(read_only=True) as session:
             row = session.run("""
                 MATCH (e:Entity) WHERE e.group_id = $gid
                 WITH count(e) AS total_entities,

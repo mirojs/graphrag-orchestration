@@ -107,6 +107,7 @@ class TestSummarizeCommunity:
         mock_llm_response.message.content = "TITLE: Test Title\nSUMMARY: Test summary."
         pipeline.llm = AsyncMock()
         pipeline.llm.achat = AsyncMock(return_value=mock_llm_response)
+        pipeline._achat_with_retry = AsyncMock(return_value=mock_llm_response)
 
         return pipeline
 
@@ -131,7 +132,7 @@ class TestSummarizeCommunity:
 
         assert result is not None
         assert result == ("Test Title", "Test summary.")
-        mock_pipeline.llm.achat.assert_called_once()
+        mock_pipeline._achat_with_retry.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_summarize_handles_llm_failure(self):
@@ -149,6 +150,7 @@ class TestSummarizeCommunity:
         # Make LLM raise
         pipeline.llm = AsyncMock()
         pipeline.llm.achat = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
+        pipeline._achat_with_retry = AsyncMock(side_effect=RuntimeError("LLM unavailable"))
 
         members = [{"name": "X", "id": "e1", "description": "", "degree": 1, "pagerank": 0.01}]
 

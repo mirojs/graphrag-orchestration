@@ -59,7 +59,9 @@
         "info": "信息",
         "save": "保存",
         "copy": "复制",
-        "copied": "已复制！"
+        "copied": "已复制！",
+        "showOriginal": "显示原文回答",
+        "showTranslated": "显示翻译回答"
     },
     "headerTexts": {
         "citation": "引用"
@@ -332,5 +334,11 @@
         "timeoutError": "请求超时，请重试。",
         "serverError": "服务器出现问题，请稍后重试。",
         "unknownError": "发生了意外错误，请重试。"
+    },
+    "folderSelector": {
+        "label": "知识库：",
+        "placeholder": "选择知识库…",
+        "noFolders": "尚无已分析的文件夹",
+        "loadError": "无法加载文件夹"
     }
 }

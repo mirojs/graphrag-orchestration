@@ -59,7 +59,9 @@
         "info": "Info",
         "save": "Salvar",
         "copy": "Copiar",
-        "copied": "Copiado!"
+        "copied": "Copiado!",
+        "showOriginal": "Mostrar resposta original",
+        "showTranslated": "Mostrar resposta traduzida"
     },
     "headerTexts": {
         "citation": "Citação"
@@ -333,5 +335,11 @@
         "plan": "Plano",
         "lastActive": "Última atividade",
         "noUserActivity": "Ainda não há dados de atividade de usuários. Os dados aparecerão quando as análises estiverem conectadas."
+    },
+    "folderSelector": {
+        "label": "Base de conhecimento:",
+        "placeholder": "Selecionar uma base de conhecimento…",
+        "noFolders": "Nenhuma pasta analisada ainda",
+        "loadError": "Não foi possível carregar as pastas"
     }
 }

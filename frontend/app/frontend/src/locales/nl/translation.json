@@ -59,7 +59,9 @@
         "info": "Info",
         "save": "Opslaan",
         "copy": "Kopieer",
-        "copied": "Gekopieerd!"
+        "copied": "Gekopieerd!",
+        "showOriginal": "Origineel antwoord tonen",
+        "showTranslated": "Vertaald antwoord tonen"
     },
     "headerTexts": {
         "citation": "Citaat"
@@ -333,5 +335,11 @@
         "plan": "Abonnement",
         "lastActive": "Laatst actief",
         "noUserActivity": "Nog geen gebruikersactiviteit. Gegevens verschijnen zodra analyses zijn verbonden."
+    },
+    "folderSelector": {
+        "label": "Kennisbank:",
+        "placeholder": "Selecteer een kennisbank…",
+        "noFolders": "Nog geen geanalyseerde mappen",
+        "loadError": "Kan mappen niet laden"
     }
 }

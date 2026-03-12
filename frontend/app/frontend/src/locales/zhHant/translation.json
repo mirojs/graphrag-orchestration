@@ -59,7 +59,9 @@
         "info": "資訊",
         "save": "儲存",
         "copy": "複製",
-        "copied": "已複製！"
+        "copied": "已複製！",
+        "showOriginal": "顯示原文回答",
+        "showTranslated": "顯示翻譯回答"
     },
     "headerTexts": {
         "citation": "引用來源"
@@ -332,5 +334,11 @@
         "timeoutError": "請求時間過長，請重試。",
         "serverError": "伺服器端發生問題，請稍後重試。",
         "unknownError": "發生未預期的錯誤，請重試。"
+    },
+    "folderSelector": {
+        "label": "知識庫：",
+        "placeholder": "選擇知識庫…",
+        "noFolders": "尚無已分析的資料夾",
+        "loadError": "無法載入資料夾"
     }
 }

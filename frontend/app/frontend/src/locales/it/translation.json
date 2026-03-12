@@ -59,7 +59,9 @@
         "info": "Info",
         "save": "Salva",
         "copy": "Copia",
-        "copied": "Copiato!"
+        "copied": "Copiato!",
+        "showOriginal": "Mostra risposta originale",
+        "showTranslated": "Mostra risposta tradotta"
     },
     "headerTexts": {
         "citation": "Citazione"
@@ -333,5 +335,11 @@
         "plan": "Piano",
         "lastActive": "Ultima attività",
         "noUserActivity": "Nessun dato di attività utente ancora disponibile. I dati appariranno una volta connessa l'analisi."
+    },
+    "folderSelector": {
+        "label": "Base di conoscenza:",
+        "placeholder": "Seleziona una base di conoscenza…",
+        "noFolders": "Nessuna cartella analizzata ancora",
+        "loadError": "Impossibile caricare le cartelle"
     }
 }

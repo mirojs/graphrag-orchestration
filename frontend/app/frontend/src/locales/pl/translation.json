@@ -59,7 +59,9 @@
         "info": "Informacje",
         "save": "Zapisz",
         "copy": "Kopiuj",
-        "copied": "Skopiowano!"
+        "copied": "Skopiowano!",
+        "showOriginal": "Pokaż oryginalną odpowiedź",
+        "showTranslated": "Pokaż przetłumaczoną odpowiedź"
     },
     "headerTexts": {
         "citation": "Cytat"
@@ -336,5 +338,11 @@
         "plan": "Plan",
         "lastActive": "Ostatnia aktywność",
         "noUserActivity": "Brak danych o aktywności użytkowników. Dane pojawią się po podłączeniu analityki."
+    },
+    "folderSelector": {
+        "label": "Baza wiedzy:",
+        "placeholder": "Wybierz bazę wiedzy…",
+        "noFolders": "Brak przeanalizowanych folderów",
+        "loadError": "Nie można załadować folderów"
     }
 }

@@ -59,7 +59,9 @@
         "info": "정보",
         "save": "저장",
         "copy": "복사",
-        "copied": "복사됨!"
+        "copied": "복사됨!",
+        "showOriginal": "원본 답변 표시",
+        "showTranslated": "번역된 답변 표시"
     },
     "headerTexts": {
         "citation": "인용"
@@ -332,5 +334,11 @@
         "timeoutError": "요청 시간이 초과되었습니다. 다시 시도하세요.",
         "serverError": "서버에 문제가 발생했습니다. 잠시 후 다시 시도하세요.",
         "unknownError": "예기치 않은 오류가 발생했습니다. 다시 시도하세요."
+    },
+    "folderSelector": {
+        "label": "지식 베이스:",
+        "placeholder": "지식 베이스 선택…",
+        "noFolders": "아직 분석된 폴더가 없습니다",
+        "loadError": "폴더를 불러올 수 없습니다"
     }
 }

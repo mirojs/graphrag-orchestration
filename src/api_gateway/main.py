@@ -196,7 +196,6 @@ async def lifespan(app: FastAPI):
         graph_service = GraphService()
         if graph_service.driver:
             # Verify Neo4j connectivity (async-safe: run in thread to avoid blocking event loop)
-            import asyncio
             loop = asyncio.get_running_loop()
             def _ping():
                 with graph_service.driver.session() as session:
@@ -412,7 +411,10 @@ async def lifespan(app: FastAPI):
         manager = getattr(app.state, attr, None)
         if manager:
             try:
-                await manager.close()
+                if hasattr(manager, "close"):
+                    await manager.close()
+                elif hasattr(manager, "close_clients"):
+                    await manager.close_clients()
             except Exception as e:
                 logger.error("%s_close_failed", attr, error=str(e))
 

@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Dit verwijdert permanent alle analysegegevens (grafiek, entiteiten, embeddings) voor deze map. Originele bestanden blijven behouden. Doorgaan?",
         "analysisDeleted": "Analysegegevens succesvol verwijderd",
         "deleteAnalysisFailed": "Verwijderen van analyse mislukt: {{message}}",
-        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen."
+        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen.",
+        "zoneAnalysisResults": "Analyseresultaten",
+        "zoneAnalyzed": "Geanalyseerd",
+        "zoneFolders": "Mappen",
+        "expandZone": "Uitvouwen",
+        "collapseZone": "Invouwen"
     },
     "viewer": {
         "loadingFile": "Bestand laden",

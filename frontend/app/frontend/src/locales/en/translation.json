@@ -239,7 +239,12 @@
         "analysisDeleted": "Analysis data deleted successfully",
         "deleteAnalysisFailed": "Failed to delete analysis: {{message}}",
         "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs.",
-        "preview": "Preview"
+        "preview": "Preview",
+        "zoneAnalysisResults": "Analysis Results",
+        "zoneAnalyzed": "Analyzed",
+        "zoneFolders": "Folders",
+        "expandZone": "Expand",
+        "collapseZone": "Collapse"
     },
     "nav": {
         "chat": "Chat",

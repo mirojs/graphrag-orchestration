@@ -223,7 +223,12 @@
         "deleteAnalysisConfirm": "此操作将永久删除该文件夹的所有分析数据（图谱、实体、嵌入向量）。原始文件将保留。是否继续？",
         "analysisDeleted": "分析数据已成功删除",
         "deleteAnalysisFailed": "删除分析数据失败：{{message}}",
-        "storageReminder": "💡 分析数据会占用存储空间。不再需要时请删除分析数据以节省成本。"
+        "storageReminder": "💡 分析数据会占用存储空间。不再需要时请删除分析数据以节省成本。",
+        "zoneAnalysisResults": "分析结果",
+        "zoneAnalyzed": "已分析",
+        "zoneFolders": "文件夹",
+        "expandZone": "展开",
+        "collapseZone": "折叠"
     },
     "viewer": {
         "loadingFile": "正在加载文件",

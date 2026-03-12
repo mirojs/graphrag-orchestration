@@ -234,7 +234,12 @@
         "deleteAnalysisConfirm": "Spowoduje to trwałe usunięcie wszystkich danych analizy (graf, encje, embeddingi) dla tego folderu. Oryginalne pliki zostaną zachowane. Kontynuować?",
         "analysisDeleted": "Dane analizy zostały pomyślnie usunięte",
         "deleteAnalysisFailed": "Nie udało się usunąć analizy: {{message}}",
-        "storageReminder": "💡 Dane analizy zajmują miejsce. Usuń analizę, gdy nie jest już potrzebna, aby zaoszczędzić na kosztach."
+        "storageReminder": "💡 Dane analizy zajmują miejsce. Usuń analizę, gdy nie jest już potrzebna, aby zaoszczędzić na kosztach.",
+        "zoneAnalysisResults": "Wyniki analizy",
+        "zoneAnalyzed": "Przeanalizowane",
+        "zoneFolders": "Foldery",
+        "expandZone": "Rozwiń",
+        "collapseZone": "Zwiń"
     },
     "viewer": {
         "loadingFile": "Ładowanie pliku",

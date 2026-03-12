@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Esto eliminará permanentemente todos los datos de análisis (grafo, entidades, embeddings) de esta carpeta. Los archivos originales se conservarán. ¿Continuar?",
         "analysisDeleted": "Datos de análisis eliminados correctamente",
         "deleteAnalysisFailed": "Error al eliminar el análisis: {{message}}",
-        "storageReminder": "💡 Los datos de análisis utilizan almacenamiento. Elimine el análisis cuando ya no lo necesite para ahorrar costos."
+        "storageReminder": "💡 Los datos de análisis utilizan almacenamiento. Elimine el análisis cuando ya no lo necesite para ahorrar costos.",
+        "zoneAnalysisResults": "Resultados del análisis",
+        "zoneAnalyzed": "Analizados",
+        "zoneFolders": "Carpetas",
+        "expandZone": "Expandir",
+        "collapseZone": "Contraer"
     },
     "viewer": {
         "loadingFile": "Cargando archivo",

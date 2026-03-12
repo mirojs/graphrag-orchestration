@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Dette vil permanent fjerne alle analysedata (graf, entiteter, embeddings) for denne mappe. Originale filer beholdes. Fortsæt?",
         "analysisDeleted": "Analysedata slettet",
         "deleteAnalysisFailed": "Sletning af analyse mislykkedes: {{message}}",
-        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger."
+        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger.",
+        "zoneAnalysisResults": "Analyseresultater",
+        "zoneAnalyzed": "Analyseret",
+        "zoneFolders": "Mapper",
+        "expandZone": "Udvid",
+        "collapseZone": "Fold sammen"
     },
     "viewer": {
         "loadingFile": "Indlæser fil",

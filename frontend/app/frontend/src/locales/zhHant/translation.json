@@ -223,7 +223,12 @@
         "deleteAnalysisConfirm": "此操作將永久移除該資料夾的所有分析資料（圖譜、實體、嵌入向量）。原始檔案將保留。是否繼續？",
         "analysisDeleted": "分析資料已成功刪除",
         "deleteAnalysisFailed": "刪除分析資料失敗：{{message}}",
-        "storageReminder": "💡 分析資料會佔用儲存空間。不再需要時請刪除分析資料以節省費用。"
+        "storageReminder": "💡 分析資料會佔用儲存空間。不再需要時請刪除分析資料以節省費用。",
+        "zoneAnalysisResults": "分析結果",
+        "zoneAnalyzed": "已分析",
+        "zoneFolders": "資料夾",
+        "expandZone": "展開",
+        "collapseZone": "摺疊"
     },
     "viewer": {
         "loadingFile": "正在載入檔案",

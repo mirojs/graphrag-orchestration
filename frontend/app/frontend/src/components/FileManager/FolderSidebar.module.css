@@ -300,3 +300,56 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
 }
+
+/* Zone grouping */
+.zone {
+    border-top: 1px solid #f0f0f0;
+    margin-top: 2px;
+}
+.zone:first-of-type {
+    margin-top: 4px;
+}
+
+.zoneHeader {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.1s;
+}
+.zoneHeader:hover {
+    background: #f8f9fa;
+}
+
+.zoneChevron {
+    font-size: 10px;
+    color: #999;
+    width: 12px;
+    flex-shrink: 0;
+}
+
+.zoneIcon {
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.zoneLabel {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #999;
+    flex: 1;
+}
+
+.zoneCount {
+    font-size: 10px;
+    font-weight: 600;
+    color: #bbb;
+    background: #f4f4f4;
+    border-radius: 8px;
+    padding: 1px 6px;
+    flex-shrink: 0;
+}

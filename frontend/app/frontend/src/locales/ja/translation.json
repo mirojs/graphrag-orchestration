@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "このフォルダのすべての分析データ（グラフ、エンティティ、埋め込み）が完全に削除されます。元のファイルは保持されます。続行しますか？",
         "analysisDeleted": "分析データが正常に削除されました",
         "deleteAnalysisFailed": "分析データの削除に失敗しました：{{message}}",
-        "storageReminder": "💡 分析データはストレージを使用します。不要になったら分析を削除してコストを節約してください。"
+        "storageReminder": "💡 分析データはストレージを使用します。不要になったら分析を削除してコストを節約してください。",
+        "zoneAnalysisResults": "分析結果",
+        "zoneAnalyzed": "分析済み",
+        "zoneFolders": "フォルダ",
+        "expandZone": "展開",
+        "collapseZone": "折りたたむ"
     },
     "viewer": {
         "loadingFile": "ファイルを読み込み中",

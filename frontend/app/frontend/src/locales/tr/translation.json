@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Bu, klasörün tüm analiz verilerini (grafik, varlıklar, gömülmeler) kalıcı olarak silecektir. Orijinal dosyalar korunacaktır. Devam edilsin mi?",
         "analysisDeleted": "Analiz verileri başarıyla silindi",
         "deleteAnalysisFailed": "Analiz silme başarısız: {{message}}",
-        "storageReminder": "💡 Analiz verileri depolama alanı kullanır. Maliyetlerden tasarruf etmek için artık gerekli olmayan analizleri silin."
+        "storageReminder": "💡 Analiz verileri depolama alanı kullanır. Maliyetlerden tasarruf etmek için artık gerekli olmayan analizleri silin.",
+        "zoneAnalysisResults": "Analiz Sonuçları",
+        "zoneAnalyzed": "Analiz Edildi",
+        "zoneFolders": "Klasörler",
+        "expandZone": "Genişlet",
+        "collapseZone": "Daralt"
     },
     "viewer": {
         "loadingFile": "Dosya yükleniyor",

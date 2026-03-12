@@ -1,6 +1,9 @@
 # Architecture Design: Hybrid LazyGraphRAG + HippoRAG 2 System
 
-**Last Updated:** March 11, 2026
+**Last Updated:** March 12, 2026
+
+**Recent Updates (March 12, 2026):**
+- ✅ **Mega-Block Parallelization + Tier 2 + Stability:** Steps 4.x (section graph) now runs in parallel with Steps 5-7 (entity extraction) — ~30-60s saving. Steps 7.5 (triples) ‖ 7.6 (synonymy) parallelized. Batch document upsert (1 vs N queries). Batch community queries (1 vs N+1). GDS checkpoint bug fix. Voyage retry (3× backoff). Neo4j transaction timeouts. Combined: ~75-115s total pipeline (was 250-450s). See [§58b-c](#58b--tier-1-sleep-removal--parallelization-2026-03-12).
 
 **Recent Updates (March 11, 2026):**
 - ✅ **Indexing Pipeline Optimization — 5 Targeted Fixes Cutting Runtime ~50-60%:** Replaced remote GDS sessions with in-process numpy+networkx for small graphs (60-120s → ~3s). Fixed OpenIE double-semaphore-acquire + increased concurrency 4→8. Parallelized section enrichment wave 1 via asyncio.gather. Removed foundation edge sleep pacing + parallelized 3 edge types. Increased DI concurrency 3→5. Combined savings: ~115-210s. See [§58](#58--indexing-pipeline-optimization--5-targeted-fixes-2026-03-11).
@@ -13067,3 +13070,87 @@ Step 9:  _materialize_louvain    → LLM summaries + embed       ~15-30s   (unch
 |------|---------|
 | `src/core/config.py` | Added `GDS_LOCAL_THRESHOLD: int = 500` |
 | `src/worker/hybrid_v2/indexing/lazygraphrag_pipeline.py` | New `_run_local_graph_algorithms()` method; dispatch logic in `_run_gds_graph_algorithms()`; `DI_CONCURRENCY` 3→5; `Semaphore(4)` → `Semaphore(8)` + single-acquire two-step; `asyncio.gather()` for section enrichment wave 1; `asyncio.gather()` for foundation edges, removed `asyncio.sleep(1)` |
+
+### §58b — Tier 1 Sleep Removal + Parallelization (2026-03-12)
+
+Audit of all 7 `time.sleep()` / `asyncio.sleep()` pacing calls and 4 sequential-but-independent code blocks.
+
+**Sleep removals (7 locations, ~2s saved):**
+- `upsert_sentences_batch`: removed `time.sleep(0.5)` between 50-item write batches
+- `_create_sentence_next_edges`: removed `time.sleep(0.3)` between NEXT + NEXT_IN_SECTION batches
+- `_embed_section_nodes`: removed `asyncio.sleep(0.3)` between 20-section write batches
+- GDS remote write-back: removed 3× `time.sleep(0.3)` in KNN/Louvain/PageRank functions
+
+**Parallelization (4 gather points, ~1.5s saved):**
+- Steps 4.2 (sentence KNN) ‖ 4.5 (section graph) — disjoint Sentence vs Section nodes
+- Steps 4.5.1 (hierarchical IDs) ‖ 4.5.2 (section totals) — different labels/properties
+- Wave 2: `_embed_section_structural` ‖ `_build_section_similarity_edges`
+- `compute_entity_importance` ‖ `_create_foundation_edges` ‖ `_create_connectivity_edges`
+
+**Race fix (GP-4):** Moved `compute_entity_importance` to run AFTER foundation + connectivity edges (it counts degree including APPEARS_IN_* edges created by those functions).
+
+### §58c — Mega-Block Parallelization + Tier 2 + Stability (2026-03-12)
+
+**Phase A: Steps 4.x ‖ Steps 5-7 mega-block parallelization (~30-60s saving)**
+
+Biggest remaining win. Steps 4.x (section graph, KNN edges, section embeddings, summaries, structural embeddings, similarity edges, KVP embeddings, DI metadata) and Steps 5-7 (entity extraction, dedup, commit) have **zero data dependencies**. Both blocks read Sentence nodes (committed in Steps 1-3) but never modify them. They write to entirely different node types (Section vs Entity).
+
+```
+BEFORE (sequential):
+  Steps 4.x → section_graph checkpoint → Steps 5-7 → entities_committed checkpoint
+
+AFTER (parallel, checkpoint-safe):
+  ┌── _run_section_block() → sets "section_graph" checkpoint ──┐
+  │                                                             │ asyncio.gather
+  └── _run_entity_block() → returns pass/fail ─────────────────┘
+  → sets "entities_committed" checkpoint (only after BOTH complete)
+
+RESUME BEHAVIOR:
+  checkpoint="sentences"           → run both in parallel
+  checkpoint="section_graph"       → run entities only
+  checkpoint="entities_committed"  → skip both
+```
+
+**Phase B: Steps 7.5 ‖ 7.6 parallelization (~5-10s saving)**
+
+Triple embeddings (reads RELATED_TO → writes `triple_embedding` property) and entity synonymy (reads `entity_embedding` → writes SEMANTICALLY_SIMILAR edges) are independent. Same checkpoint-safe pattern: triple_embeddings sets its own checkpoint; synonymy_edges set after both.
+
+**Phase C: Batch document upsert (1 round-trip vs N)**
+
+New `upsert_documents_batch()` method in neo4j_store.py using UNWIND. Replaces N individual `upsert_document()` calls in the pipeline.
+
+**Phase D: Batch community relationship queries (1 query vs N+1)**
+
+Replaced per-community `_summarize_community()` Neo4j query with a single batch UNWIND query that pre-fetches all intra-community relationships grouped by community_id. Also batched summary writes (single UNWIND instead of N `update_community_summary()` calls).
+
+**Phase E: GDS checkpoint bug fix**
+
+GDS checkpoint (`set_pipeline_checkpoint("gds_complete")`) was set **outside** the success path — executed even when GDS failed after all 3 retries. This permanently skipped GDS on resume. Moved inside `if gds_stats:` guard.
+
+**Phase F: Stability improvements**
+
+- **Voyage retry:** New `_call_with_retry()` wrapping all 4 `contextualized_embed()` call sites. 3 retries with exponential backoff (1s, 2s, 4s). Catches rate limits (429), server errors (500-504), timeouts, and connection resets.
+- **Neo4j transaction timeouts:** 60s for reads, 120s for writes, via managed transaction `timeout` parameter in `RetrySession`. Prevents indefinite hangs on slow queries.
+
+### Updated Pipeline Stage Map (After All Optimizations)
+
+```
+Steps 1-3: DI + sentences     → Azure DI (5 concurrent) + Voyage     ~20-35s
+┌── Steps 4.x: Section graph  → KNN + embed + LLM summaries          ~30-40s  ┐
+│                                                                     │ parallel
+└── Steps 5-7: Entity extract → gpt-4.1 Sem(8) + dedup + commit      ~20-40s  ┘
+                                                    Wall clock:       ~30-40s
+Steps 7.5‖7.6: Triples + Synonymy → Voyage + cosine (parallel)       ~5-10s
+Step 8:  Local graph algo      → numpy + networkx                     ~3s
+Step 9:  Communities           → Batch query + LLM + embed            ~15-25s
+                                                    TOTAL:           ~75-115s
+```
+
+### Files Changed (§58b+§58c)
+
+| File | Changes |
+|------|---------|
+| `lazygraphrag_pipeline.py` | Mega-block parallel (§58c-A), 7.5‖7.6 parallel (§58c-B), batch doc upsert (§58c-C), batch community queries (§58c-D), GDS checkpoint fix (§58c-E), Tier 1 sleep removal + parallelization (§58b) |
+| `neo4j_store.py` | `upsert_documents_batch()` UNWIND method, removed sleep pacing in sentence batches |
+| `neo4j_retry.py` | Transaction timeout support (60s read, 120s write) |
+| `voyage_embed.py` | `_call_with_retry()` with exponential backoff (3 retries) |

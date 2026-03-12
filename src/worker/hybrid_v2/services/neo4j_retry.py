@@ -221,12 +221,10 @@ class RetrySession:
 
         executor = self._session.execute_read if self._read_only else self._session.execute_write
         label = "execute_read" if self._read_only else "execute_write"
-        # Pass timeout to managed transaction if configured
-        tx_kwargs = {}
-        if self._timeout is not None:
-            tx_kwargs["timeout"] = self._timeout
+        # Note: neo4j-driver v6.x forwards all **kwargs to the work function,
+        # so timeout cannot be passed here. Use session-level config instead.
         try:
-            records, keys = executor(_tx_func, **tx_kwargs)
+            records, keys = executor(_tx_func)
             return _EagerResult(records, keys)
         except Exception as e:
             q_preview = str(query)[:80].replace("\n", " ")

@@ -524,8 +524,8 @@ def main():
     )
     parser.add_argument(
         "--query-mode", type=str, default=None,
-        choices=["local_search", "global_search", "drift_multi_hop"],
-        help="Route 7 query_mode preset. Use 'local_search' for fast factual (top_k=5, concise), 'global_search' for broad (top_k=15), 'drift_multi_hop' for full context (top_k=20). Only applies with force_route=hipporag2_search.",
+        choices=["local_search", "global_search", "drift_multi_hop", "community_search"],
+        help="Route 7 query_mode preset. Use 'local_search' for fast factual (top_k=5, concise), 'global_search' for broad (top_k=15), 'drift_multi_hop' for full context (top_k=20), 'community_search' for community-dominant thematic queries (top_k=20 + community passage seeds). Only applies with force_route=hipporag2_search.",
     )
     parser.add_argument(
         "--prompt-variant", type=str, default=None,
@@ -580,7 +580,7 @@ def main():
     print(f"Loaded {len(ground_truth)} ground truth answers")
 
     # Derive label from prefix: Q-D → r4questions, Q-L → r2questions, Q-G → r3questions, else use prefix
-    _prefix_to_label = {"Q-D": "r4questions", "Q-L": "r2questions", "Q-G": "r3questions"}
+    _prefix_to_label = {"Q-D": "r4questions", "Q-L": "r2questions", "Q-G": "r3questions", "Q-R": "r5questions"}
     qset_label = _prefix_to_label.get(args.positive_prefix, args.positive_prefix.lower().replace("-", ""))
     scenario_name = f"{ROUTE_LABEL}_{qset_label}_{args.response_type}"
     timestamp = _now_utc_stamp()

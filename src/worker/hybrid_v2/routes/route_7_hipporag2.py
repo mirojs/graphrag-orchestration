@@ -206,7 +206,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             "ppr_passage_top_k": 20,   # broader retrieval for thematic coverage
             "prompt_variant": None,
             "max_tokens": None,
-            "community_passage_seeds": True,  # inject Community→Entity→Sentence into passage seeds
+            "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
+            "community_guided_instruction": True,  # guide embed + reranker with community summaries
+            "rerank_dynamic_cutoff": True,  # relevance-score threshold instead of fixed top-K
         },
     }
 
@@ -349,6 +351,28 @@ class HippoRAG2Handler(BaseRouteHandler):
             _ov("community_sentence_weight", "ROUTE7_COMMUNITY_SENTENCE_WEIGHT", "0.03")
         )
 
+        # Community-guided instruction: use community summaries to steer
+        # embedding and reranker queries for thematic precision.
+        community_guided_enabled = (
+            preset.get("community_guided_instruction", False)
+            or _ov("community_guided_instruction", "ROUTE7_COMMUNITY_GUIDED_INSTRUCTION", "0"
+                   ).strip().lower() in {"1", "true", "yes"}
+        )
+
+        # Dynamic relevance cutoff: use reranker relevance_score instead
+        # of fixed top-K.  Keeps all passages above threshold, drops noise.
+        rerank_dynamic_cutoff = (
+            preset.get("rerank_dynamic_cutoff", False)
+            or _ov("rerank_dynamic_cutoff", "ROUTE7_RERANK_DYNAMIC_CUTOFF", "0"
+                   ).strip().lower() in {"1", "true", "yes"}
+        )
+        rerank_relevance_threshold = float(
+            _ov("rerank_relevance_threshold", "ROUTE7_RERANK_RELEVANCE_THRESHOLD", "0.15")
+        )
+        rerank_dynamic_max = int(
+            _ov("rerank_dynamic_max", "ROUTE7_RERANK_DYNAMIC_MAX", "80")
+        )
+
         # Cross-encoder passage seeding: rerank ALL passages and feed top results
         # into passage_seeds BEFORE PPR, so the graph walk starts from semantically
         # relevant passages (catches graph-isolated sentences that DPR misses).
@@ -406,11 +430,46 @@ class HippoRAG2Handler(BaseRouteHandler):
         await self._ensure_initialized()
 
         # ------------------------------------------------------------------
+        # Step 0.5: Early community matching for guided instruction
+        #
+        # When community_guided_instruction is enabled, resolve community
+        # summaries BEFORE embedding so we can steer both the query
+        # embedding (Voyage context-aware) and reranker instruction.
+        # ------------------------------------------------------------------
+        community_guided_query = query  # default: unchanged
+        if community_guided_enabled and self.pipeline.community_matcher:
+            try:
+                t0_cg = time.perf_counter()
+                _cm = self.pipeline.community_matcher
+                _matched_tuples = await _cm.match_communities(query, top_k=3)
+                if _matched_tuples:
+                    themes = []
+                    for cdict, _score in _matched_tuples:
+                        title = cdict.get("title", "")
+                        summary = cdict.get("summary", "")
+                        if title:
+                            snippet = f"{title}: {summary[:120]}" if summary else title
+                            themes.append(snippet)
+                    if themes:
+                        community_instruction = (
+                            "Thematic focus: " + "; ".join(themes) + ". "
+                        )
+                        community_guided_query = community_instruction + query
+                        logger.info(
+                            "step_0.5_community_guided_instruction",
+                            themes=len(themes),
+                            instruction_len=len(community_instruction),
+                            elapsed_ms=int((time.perf_counter() - t0_cg) * 1000),
+                        )
+            except Exception as e:
+                logger.warning("community_guided_instruction_failed", error=str(e))
+
+        # ------------------------------------------------------------------
         # Step 1: Embed query
         # ------------------------------------------------------------------
         t0 = time.perf_counter()
         voyage_service = _get_voyage_service()
-        query_embedding = voyage_service.embed_query(query)
+        query_embedding = voyage_service.embed_query(community_guided_query)
         timings_ms["step_1_embed_ms"] = int((time.perf_counter() - t0) * 1000)
 
         # ------------------------------------------------------------------
@@ -446,7 +505,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         semantic_seed_task = None
         if semantic_passage_seeds_enabled:
             semantic_seed_task = asyncio.create_task(
-                self._rerank_all_passages(query, top_k=semantic_seed_top_k)
+                self._rerank_all_passages(
+                    community_guided_query, top_k=semantic_seed_top_k,
+                    relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
+                    dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
+                )
             )
 
         # Await parallel tasks
@@ -692,19 +755,18 @@ class HippoRAG2Handler(BaseRouteHandler):
             candidate_ids = [cid for cid, _ in passage_scores[:ppr_passage_top_k]]
             if len(candidate_ids) >= 2:
                 try:
-                    reranked_ids = await self._rerank_passages(
-                        query, candidate_ids, top_k=rerank_top_k,
+                    reranked_scored = await self._rerank_passages(
+                        community_guided_query, candidate_ids, top_k=rerank_top_k,
+                        relevance_threshold=0.0,
+                        dynamic_max=0,
                     )
-                    if reranked_ids:
-                        reranked_list = [
-                            (cid, 1.0 - i * 0.01)
-                            for i, cid in enumerate(reranked_ids)
-                        ]
-                        passage_scores = reranked_list
+                    if reranked_scored:
+                        passage_scores = reranked_scored
                         logger.info(
                             "step_4.5_rerank_ppr_output",
                             candidates=len(candidate_ids),
-                            output=len(reranked_ids),
+                            output=len(reranked_scored),
+                            dynamic=rerank_dynamic_cutoff,
                             elapsed_ms=int((time.perf_counter() - t0_rerank) * 1000),
                         )
                 except Exception as e:
@@ -723,7 +785,9 @@ class HippoRAG2Handler(BaseRouteHandler):
             t0_ra = time.perf_counter()
             try:
                 rerank_all_results = await self._rerank_all_passages(
-                    query, top_k=rerank_all_top_k,
+                    community_guided_query, top_k=rerank_all_top_k,
+                    relevance_threshold=rerank_relevance_threshold if rerank_dynamic_cutoff else 0.0,
+                    dynamic_max=rerank_dynamic_max if rerank_dynamic_cutoff else 0,
                 )
                 if rerank_all_results:
                     # Only dedup against PPR TOP-K (not all PPR passages,
@@ -2076,25 +2140,33 @@ class HippoRAG2Handler(BaseRouteHandler):
         query: str,
         candidate_ids: List[str],
         top_k: int = 20,
-    ) -> List[str]:
+        relevance_threshold: float = 0.0,
+        dynamic_max: int = 0,
+    ) -> List[Tuple[str, float]]:
         """Rerank candidate sentence IDs using voyage-rerank-2.5.
 
         Fetches sentence text from Neo4j, calls the Voyage cross-encoder,
-        and returns reranked sentence IDs (best first).
+        and returns reranked sentence IDs with relevance scores (best first).
+
+        When relevance_threshold > 0, uses dynamic cutoff: keeps all passages
+        above the threshold instead of a fixed top-K.  dynamic_max caps
+        the total to avoid context overflow.
 
         Args:
             query: The user query.
             candidate_ids: Sentence node IDs to rerank.
-            top_k: Max passages to return after reranking.
+            top_k: Max passages to return (used when threshold is 0).
+            relevance_threshold: Min relevance_score to keep (0 = disabled).
+            dynamic_max: Hard cap when using dynamic cutoff (0 = top_k).
 
         Returns:
-            Reranked list of sentence IDs (up to top_k).
+            Reranked list of (sentence_id, relevance_score) tuples.
         """
         rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
 
         # Fetch sentence texts from Neo4j
         if not self.neo4j_driver:
-            return candidate_ids[:top_k]
+            return [(cid, 1.0 - i * 0.01) for i, cid in enumerate(candidate_ids[:top_k])]
 
         group_ids = self.group_ids
 
@@ -2122,7 +2194,12 @@ class HippoRAG2Handler(BaseRouteHandler):
                 valid_ids.append(cid)
 
         if not documents:
-            return candidate_ids[:top_k]
+            return [(cid, 1.0 - i * 0.01) for i, cid in enumerate(candidate_ids[:top_k])]
+
+        # Always request the same top_k from Voyage — dynamic cutoff only
+        # filters the returned results by relevance_score, never changes
+        # the number of candidates Voyage evaluates.
+        request_k = min(top_k, len(documents))
 
         # Call Voyage reranker
         import voyageai
@@ -2137,11 +2214,22 @@ class HippoRAG2Handler(BaseRouteHandler):
                 query=query,
                 documents=documents,
                 model=rerank_model,
-                top_k=min(top_k, len(documents)),
+                top_k=request_k,
             ),
         )
 
-        reranked_ids = [valid_ids[rr.index] for rr in rr_result.results]
+        # Apply dynamic relevance cutoff or fixed top-K
+        if relevance_threshold > 0:
+            scored = [
+                (valid_ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+                if rr.relevance_score >= relevance_threshold
+            ]
+        else:
+            scored = [
+                (valid_ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+            ]
 
         # Track reranker usage (fire-and-forget)
         try:
@@ -2161,17 +2249,19 @@ class HippoRAG2Handler(BaseRouteHandler):
         except Exception:
             pass
 
+        min_score = round(scored[-1][1], 4) if scored else 0
         logger.info(
             "route7_rerank_complete",
             model=rerank_model,
             input=len(documents),
-            output=len(reranked_ids),
-            top_score=round(rr_result.results[0].relevance_score, 4)
-            if rr_result.results
-            else 0,
+            output=len(scored),
+            top_score=round(scored[0][1], 4) if scored else 0,
+            min_score=min_score,
+            threshold=relevance_threshold,
+            dynamic=relevance_threshold > 0,
         )
 
-        return reranked_ids
+        return scored
 
     # ==================================================================
     # Step 2 helper: Semantic search via sentence vector index
@@ -2249,6 +2339,8 @@ class HippoRAG2Handler(BaseRouteHandler):
         self,
         query: str,
         top_k: int = 20,
+        relevance_threshold: float = 0.0,
+        dynamic_max: int = 0,
     ) -> List[Tuple[str, float]]:
         """Rerank ALL sentences using cached texts from the PPR engine.
 
@@ -2256,6 +2348,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         sentence and can match conceptual queries (e.g. "day-based
         timeframes" → "90 days labor warranty") that embedding similarity
         misses entirely.
+
+        When relevance_threshold > 0, returns all passages above threshold
+        (up to dynamic_max) instead of a fixed top-K.
 
         Returns list of (sentence_id, relevance_score) sorted best-first.
         """
@@ -2276,6 +2371,9 @@ class HippoRAG2Handler(BaseRouteHandler):
         if not documents:
             return []
 
+        # Always request the same top_k — dynamic cutoff only filters results
+        request_k = min(top_k, len(documents))
+
         import voyageai
         from src.core.config import settings
 
@@ -2292,7 +2390,7 @@ class HippoRAG2Handler(BaseRouteHandler):
                         query=query,
                         documents=documents,
                         model=rerank_model,
-                        top_k=min(top_k, len(documents)),
+                        top_k=request_k,
                     ),
                 )
                 break
@@ -2309,10 +2407,18 @@ class HippoRAG2Handler(BaseRouteHandler):
                     continue
                 raise
 
-        results = [
-            (ids[rr.index], rr.relevance_score)
-            for rr in rr_result.results
-        ]
+        # Apply dynamic relevance cutoff or return all
+        if relevance_threshold > 0:
+            results = [
+                (ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+                if rr.relevance_score >= relevance_threshold
+            ]
+        else:
+            results = [
+                (ids[rr.index], rr.relevance_score)
+                for rr in rr_result.results
+            ]
 
         # Track reranker usage (fire-and-forget)
         try:
@@ -2332,12 +2438,16 @@ class HippoRAG2Handler(BaseRouteHandler):
         except Exception:
             pass
 
+        min_score = round(results[-1][1], 4) if results else 0
         logger.info(
             "route7_rerank_all_complete",
             model=rerank_model,
             input=len(documents),
             output=len(results),
             top_score=round(results[0][1], 4) if results else 0,
+            min_score=min_score,
+            threshold=relevance_threshold,
+            dynamic=relevance_threshold > 0,
         )
 
         return results

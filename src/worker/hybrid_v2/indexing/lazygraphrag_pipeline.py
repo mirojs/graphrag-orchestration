@@ -1158,6 +1158,7 @@ class LazyGraphRAGIndexingPipeline:
                             logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, exc)
 
             await asyncio.gather(*[_analyze_one(url) for url in effective_urls])
+        await di_service.close()
         logger.info("⏱️ DI extraction: %.2fs for %d documents", time.perf_counter() - t_di_start, len(effective_urls))
 
         out: List[Dict[str, Any]] = []
@@ -5117,7 +5118,7 @@ SUMMARY: <summary>"""
         return {"edges_created": edges_created}
 
     async def _embed_keyvalue_keys(self, group_id: str) -> Dict[str, Any]:
-        """Embed KeyValue keys for semantic matching at query time.
+        """Embed KeyValuePair keys for semantic matching at query time.
         
         Creates embeddings for unique KVP keys to enable semantic key matching.
         Uses batch deduplication to avoid re-embedding identical keys.
@@ -5135,10 +5136,10 @@ SUMMARY: <summary>"""
             logger.warning("keyvalue_embedding_skipped_no_embedder")
             return {"kvps_total": 0, "unique_keys": 0, "keys_embedded": 0, "skipped": "no_embedder"}
         
-        # Fetch all KeyValue nodes without embeddings
+        # Fetch all KeyValuePair nodes without embeddings
         result = await self.neo4j_store.arun_query(
             """
-            MATCH (kv:KeyValue {group_id: $group_id})
+            MATCH (kv:KeyValuePair {group_id: $group_id})
             WHERE kv.key_embedding IS NULL
             RETURN kv.id AS id, kv.key AS key
             """,
@@ -5150,7 +5151,7 @@ SUMMARY: <summary>"""
         if not kvps_to_embed:
             # Count total KVPs for stats
             result = await self.neo4j_store.arun_query(
-                "MATCH (kv:KeyValue {group_id: $group_id}) RETURN count(kv) AS count",
+                "MATCH (kv:KeyValuePair {group_id: $group_id}) RETURN count(kv) AS count",
                 read_only=True,
                 group_id=group_id,
             )
@@ -5186,11 +5187,11 @@ SUMMARY: <summary>"""
         if not updates:
             return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0}
         
-        # Update KeyValue nodes with embeddings
+        # Update KeyValuePair nodes with embeddings
         await self.neo4j_store.arun_query(
             """
             UNWIND $updates AS u
-            MATCH (kv:KeyValue {id: u.id, group_id: $group_id})
+            MATCH (kv:KeyValuePair {id: u.id, group_id: $group_id})
             SET kv.key_embedding = u.key_embedding
             """,
             updates=updates,

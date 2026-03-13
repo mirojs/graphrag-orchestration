@@ -366,6 +366,12 @@ class DocumentIntelligenceService:
         # latency (1-5s) when using Managed Identity.
         self._cached_credential = None
 
+    async def close(self) -> None:
+        """Close cached credential to release aiohttp resources."""
+        if self._cached_credential is not None:
+            await self._cached_credential.close()
+            self._cached_credential = None
+
     @asynccontextmanager
     async def _create_client(self) -> AsyncIterator[DocumentIntelligenceClient]:
         """Create an async Document Intelligence client and ensure resources are closed.
@@ -2356,6 +2362,7 @@ class DocumentIntelligenceService:
                         async with BlobClient.from_blob_url(url, credential=credential) as blob:
                             download = await blob.download_blob()
                             raw = await download.readall()
+                        await credential.close()
                         result_dict = json.loads(raw)
                         result = AnalyzeResult(result_dict)
                         logger.info(f"✅ Deserialized pre-analyzed result ({len(result.pages or [])} pages) from {url[:80]}")

@@ -67,7 +67,7 @@ class TestQueryModePresets:
         """community_search preset enables community passage seeding."""
         Handler = _get_handler_class()
         preset = Handler.QUERY_MODE_PRESETS["community_search"]
-        assert preset["ppr_passage_top_k"] == 20
+        assert preset["ppr_passage_top_k"] == 50
         assert preset["community_passage_seeds"] is True
         assert preset["prompt_variant"] is None
 

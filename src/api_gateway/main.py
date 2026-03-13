@@ -415,8 +415,6 @@ async def lifespan(app: FastAPI):
             try:
                 if hasattr(manager, "close"):
                     await manager.close()
-                elif hasattr(manager, "close_clients"):
-                    await manager.close_clients()
             except Exception as e:
                 logger.error("%s_close_failed", attr, error=str(e))
 

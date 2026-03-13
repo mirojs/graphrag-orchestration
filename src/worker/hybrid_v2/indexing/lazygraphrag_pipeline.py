@@ -3357,6 +3357,7 @@ Output:
                                 k.section_id = kvp.section_id,
                                 k.section_path = kvp.section_path,
                                 k.searchable_text = kvp.searchable_text,
+                                k.key_embedding = coalesce(k.key_embedding, null),
                                 k.updated_at = datetime()
                             WITH k, kvp
                             MATCH (d:Document {id: kvp.doc_id, group_id: kvp.group_id})

@@ -192,23 +192,26 @@ class TripleEmbeddingStore:
         during indexing), those are loaded directly — avoiding a Voyage API
         call at query time.
 
-        Also resolves each triple's source document via APPEARS_IN_DOCUMENT
-        for document-aware embedding context.
+        Also resolves each triple's source document via
+        Entity<-MENTIONS<-Sentence->IN_SECTION->Section->BELONGS_TO->Document.
         """
         cypher = """
         MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
         WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
               AND r.description IS NOT NULL AND r.description <> ''
-        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d:Document)<-[:APPEARS_IN_DOCUMENT]-(e2)
-        WITH e1, r, e2, head(collect(d.title)) AS shared_title
-        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
-        WHERE shared_title IS NULL
-        WITH e1, r, e2, shared_title, head(collect(d2.title)) AS fallback_title
+        OPTIONAL MATCH (e1)<-[:MENTIONS]-(:Sentence)-[:IN_SECTION]->(:Section)
+                        -[:BELONGS_TO]->(d:Document)
+        WHERE d.group_id IN $group_ids
+        WITH e1, r, e2, collect(DISTINCT d.title) AS e1_docs
+        OPTIONAL MATCH (e2)<-[:MENTIONS]-(:Sentence)-[:IN_SECTION]->(:Section)
+                        -[:BELONGS_TO]->(d2:Document)
+        WHERE d2.group_id IN $group_ids AND d2.title IN e1_docs
+        WITH e1, r, e2, e1_docs, head(collect(DISTINCT d2.title)) AS shared_title
         RETURN e1.id AS subj_id, e1.name AS subj_name,
                r.description AS predicate,
                e2.id AS obj_id, e2.name AS obj_name,
                r.triple_embedding AS embedding,
-               COALESCE(shared_title, fallback_title) AS document_title
+               COALESCE(shared_title, head(e1_docs)) AS document_title
         """
         triples: List[Triple] = []
         with retry_session(neo4j_driver) as session:

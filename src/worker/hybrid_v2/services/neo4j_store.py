@@ -414,6 +414,7 @@ class Neo4jStoreV3:
             e.type = $type,
             e.description = $description,
             e.group_id = $group_id,
+            e.deprecated = coalesce(e.deprecated, false),
             e.updated_at = datetime()
         With e
         FOREACH (_ IN CASE WHEN $entity_embedding IS NOT NULL THEN [1] ELSE [] END |
@@ -450,6 +451,7 @@ class Neo4jStoreV3:
             entity.description = e.description,
             entity.aliases = coalesce(e.aliases, []),
             entity.group_id = $group_id,
+            entity.deprecated = coalesce(entity.deprecated, false),
             entity.updated_at = datetime()
         
         WITH entity, e
@@ -556,6 +558,7 @@ class Neo4jStoreV3:
             entity.type = e.type,
             entity.description = e.description,
             entity.aliases = coalesce(e.aliases, []),
+            entity.deprecated = coalesce(entity.deprecated, false),
             entity.updated_at = datetime()
         
         WITH entity, e
@@ -972,19 +975,24 @@ class Neo4jStoreV3:
         """
         if group_ids is None:
             group_ids = build_group_ids(group_id)
+        # Use MENTIONS→IN_SECTION→BELONGS_TO path (always exists after Step 4+7)
+        # instead of APPEARS_IN_DOCUMENT shortcut (created later in foundation edges).
         cypher = """
         MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
         WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
           AND r.description IS NOT NULL AND r.description <> ''
-        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d:Document)<-[:APPEARS_IN_DOCUMENT]-(e2)
-        WITH e1, r, e2, head(collect(d.title)) AS shared_title
-        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
-        WHERE shared_title IS NULL
-        WITH e1, r, e2, shared_title, head(collect(d2.title)) AS fallback_title
+        OPTIONAL MATCH (e1)<-[:MENTIONS]-(:Sentence)-[:IN_SECTION]->(:Section)
+                        -[:BELONGS_TO]->(d:Document)
+        WHERE d.group_id IN $group_ids
+        WITH e1, r, e2, collect(DISTINCT d.title) AS e1_docs
+        OPTIONAL MATCH (e2)<-[:MENTIONS]-(:Sentence)-[:IN_SECTION]->(:Section)
+                        -[:BELONGS_TO]->(d2:Document)
+        WHERE d2.group_id IN $group_ids AND d2.title IN e1_docs
+        WITH e1, r, e2, e1_docs, head(collect(DISTINCT d2.title)) AS shared_title
         RETURN e1.id AS source_id, e1.name AS source_name,
                r.description AS description,
                e2.id AS target_id, e2.name AS target_name,
-               COALESCE(shared_title, fallback_title) AS document_title
+               COALESCE(shared_title, head(e1_docs)) AS document_title
         """
         triples: List[Dict[str, Any]] = []
         with self.get_retry_session() as session:

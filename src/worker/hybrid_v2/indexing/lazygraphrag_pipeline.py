@@ -466,10 +466,18 @@ class LazyGraphRAGIndexingPipeline:
             # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
             #    Bypasses the old TextChunk pipeline.
             t_step = time.perf_counter()
-            sentence_stats = await self._index_sentences_direct(
-                group_id=group_id,
-                expanded_docs=expanded_docs,
-            )
+            import sys as _sys
+            logger.info("Step 3 starting — entering _index_sentences_direct")
+            _sys.stderr.flush(); _sys.stdout.flush()
+            try:
+                sentence_stats = await self._index_sentences_direct(
+                    group_id=group_id,
+                    expanded_docs=expanded_docs,
+                )
+            except BaseException as _exc:
+                logger.error("Step 3 CRASHED: %s: %s", type(_exc).__name__, _exc, exc_info=True)
+                _sys.stderr.flush(); _sys.stdout.flush()
+                raise
             logger.info("⏱️ Step 3 (_index_sentences_direct): %.2fs", time.perf_counter() - t_step)
             stats["sentences"] = sentence_stats.get("sentences_created", 0)
             stats["sentences_embedded"] = sentence_stats.get("sentences_embedded", 0)
@@ -1193,12 +1201,19 @@ class LazyGraphRAGIndexingPipeline:
 
         Returns stats dict with sentences_created, sentences_embedded, etc.
         """
+        import sys as _sys
+        logger.info("_index_sentences_direct: ENTERED (docs=%d)", len(expanded_docs))
+        _sys.stderr.flush(); _sys.stdout.flush()
+
         from src.worker.services.sentence_extraction_service import (
             extract_sentences_from_di_units,
             extract_sentences_from_raw_text,
             _is_noise_sentence,
         )
         from src.worker.hybrid_v2.services.neo4j_store import Sentence
+
+        logger.info("_index_sentences_direct: imports OK")
+        _sys.stderr.flush(); _sys.stdout.flush()
 
         stats: Dict[str, Any] = {
             "sentences_created": 0,
@@ -1217,6 +1232,8 @@ class LazyGraphRAGIndexingPipeline:
 
             di_units = doc.get("di_extracted_docs") or []
             if di_units:
+                logger.info("_index_sentences_direct: extracting sentences doc=%s units=%d", doc_title, len(di_units))
+                _sys.stderr.flush(); _sys.stdout.flush()
                 raw = extract_sentences_from_di_units(
                     di_units, doc_id=doc_id,
                     doc_title=doc_title, doc_source=doc_source,

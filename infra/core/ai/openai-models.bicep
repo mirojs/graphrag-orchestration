@@ -13,7 +13,7 @@ resource gpt41Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   name: 'gpt-4.1'
   sku: {
     name: 'DataZoneStandard'
-    capacity: 50
+    capacity: 600
   }
   properties: {
     model: {
@@ -31,7 +31,7 @@ resource gpt51Deployment 'Microsoft.CognitiveServices/accounts/deployments@2024-
   name: 'gpt-5.1'
   sku: {
     name: 'DataZoneStandard'
-    capacity: 100
+    capacity: 200
   }
   properties: {
     model: {
@@ -50,7 +50,7 @@ resource gpt4oMiniDeployment 'Microsoft.CognitiveServices/accounts/deployments@2
   name: 'gpt-4o-mini'
   sku: {
     name: 'Standard'
-    capacity: 50
+    capacity: 200
   }
   properties: {
     model: {

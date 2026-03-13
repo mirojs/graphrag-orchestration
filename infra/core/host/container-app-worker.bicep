@@ -35,10 +35,10 @@ param env array = []
 param secrets array = []
 
 @description('CPU allocation for worker container')
-param cpuCores string = '1.0'
+param cpuCores string = '2.0'
 
 @description('Memory allocation for worker container')
-param memory string = '2Gi'
+param memory string = '4Gi'
 
 @description('Minimum replicas (default 1)')
 param minReplicas int = 1

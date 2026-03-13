@@ -19,6 +19,9 @@ import threading
 
 # Suppress "None of PyTorch, TensorFlow..." warning from transformers (used by wtpsplit)
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
+# Suppress Neo4j advisory notifications (property/label/rel-type doesn't exist yet)
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 from datetime import datetime
 from typing import Optional
 

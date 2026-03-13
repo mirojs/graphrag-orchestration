@@ -8,6 +8,10 @@ faulthandler.enable()  # print traceback on SIGSEGV/SIGFPE/SIGABRT
 # Suppress "None of PyTorch, TensorFlow..." warning from transformers (used by wtpsplit)
 os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
 
+# Suppress Neo4j advisory notifications (property/label/rel-type doesn't exist yet)
+import logging
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
+
 from dotenv import load_dotenv
 load_dotenv()  # pick up .env for local development; no-op in containerized deployments
 

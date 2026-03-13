@@ -5174,7 +5174,7 @@ SUMMARY: <summary>"""
         result = await self.neo4j_store.arun_query(
             """
             MATCH (kv:KeyValuePair {group_id: $group_id})
-            WHERE NOT exists(kv.key_embedding)
+            WHERE kv.key_embedding IS NULL
             RETURN kv.id AS id, kv.key AS key
             """,
             read_only=True,

@@ -3431,7 +3431,7 @@ Output:
             result = session.run("""
                 MATCH (n:Entity)
                 WHERE n.group_id IN $group_ids
-                  AND n.deprecated IS NOT true
+                  AND NOT coalesce(n.deprecated, false)
                   AND n.entity_embedding IS NOT NULL
                 RETURN elementId(n) AS eid, n.entity_embedding AS emb
             """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
@@ -3534,7 +3534,7 @@ Output:
                 MATCH (n:Entity)-[r]->(m:Entity)
                 WHERE n.group_id IN $group_ids
                   AND m.group_id IN $group_ids
-                  AND n.deprecated IS NOT true AND m.deprecated IS NOT true
+                  AND NOT coalesce(n.deprecated, false) AND NOT coalesce(m.deprecated, false)
                   AND n.entity_embedding IS NOT NULL
                   AND m.entity_embedding IS NOT NULL
                 RETURN DISTINCT elementId(n) AS src, elementId(m) AS tgt
@@ -3679,7 +3679,7 @@ Output:
                 result = session.run("""
                     MATCH (n:Entity)
                     WHERE n.group_id IN $group_ids
-                      AND n.deprecated IS NOT true
+                      AND NOT coalesce(n.deprecated, false)
                       AND n.entity_embedding IS NOT NULL
                     RETURN count(n) AS cnt
                 """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
@@ -3834,11 +3834,11 @@ Output:
                     // Project Entity nodes only - KVP/Figure/Chunk add noise to KNN & communities
                     MATCH (n:Entity)
                     WHERE n.group_id = "{escaped_group_id}"
-                      AND n.deprecated IS NOT true
+                      AND NOT coalesce(n.deprecated, false)
                       AND n.entity_embedding IS NOT NULL
                     OPTIONAL MATCH (n)-[r]->(m:Entity)
                     WHERE m.group_id = "{escaped_group_id}"
-                      AND m.deprecated IS NOT true
+                      AND NOT coalesce(m.deprecated, false)
                       AND m.entity_embedding IS NOT NULL
                     RETURN 
                       n AS source, r AS rel, m AS target,

@@ -45,7 +45,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client
 from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -876,24 +876,19 @@ class UnifiedSearchHandler(BaseRouteHandler):
         rerank_model = os.getenv("ROUTE5_RERANK_MODEL", "rerank-2.5")
 
         try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            vc = make_voyage_client()
             documents = [
                 ev.get("sentence_text") or ev.get("text", "")
                 for ev in evidence
             ]
 
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                self._executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            rr_result = await rerank_with_retry(
+                vc,
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+                executor=self._executor,
             )
 
             # Track reranker usage (fire-and-forget)

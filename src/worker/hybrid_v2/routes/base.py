@@ -30,6 +30,126 @@ logger = structlog.get_logger(__name__)
 
 
 # =============================================================================
+# Shared Rate-Limit Retry Helpers
+# =============================================================================
+
+_RERANK_MAX_RETRIES = 2
+_RERANK_BASE_WAIT_SECS = 30  # 30s, 60s for successive attempts
+
+_LLM_RETRYABLE_KEYWORDS = (
+    "rate limit", "429", "500", "502", "503", "504",
+    "timeout", "connection", "server error", "throttl",
+)
+
+
+async def rerank_with_retry(
+    vc,
+    *,
+    query: str,
+    documents: List[str],
+    model: str,
+    top_k: int,
+    max_retries: int = _RERANK_MAX_RETRIES,
+    executor=None,
+) -> Any:
+    """Call Voyage rerank with retry on rate-limit / transient errors.
+
+    Args:
+        vc: voyageai.Client instance (should be created with max_retries>=3).
+        query: The rerank query.
+        documents: Texts to rerank.
+        model: Rerank model name (e.g. "rerank-2.5").
+        top_k: Number of results to return.
+        max_retries: Application-level retries on rate-limit errors.
+        executor: Optional ThreadPoolExecutor for run_in_executor.
+
+    Returns:
+        The RerankingObject from voyageai.
+    """
+    loop = asyncio.get_running_loop()
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await loop.run_in_executor(
+                executor,
+                lambda: vc.rerank(
+                    query=query,
+                    documents=documents,
+                    model=model,
+                    top_k=top_k,
+                ),
+            )
+        except Exception as e:
+            last_exc = e
+            err_msg = str(e).lower()
+            is_retryable = any(k in err_msg for k in (
+                "rate limit", "429", "500", "502", "503", "504",
+                "timeout", "service unavailable",
+            ))
+            if is_retryable and attempt < max_retries:
+                wait_secs = _RERANK_BASE_WAIT_SECS * (attempt + 1)
+                logger.warning(
+                    "rerank_rate_limited_retrying",
+                    model=model,
+                    attempt=attempt + 1,
+                    wait_secs=wait_secs,
+                )
+                await asyncio.sleep(wait_secs)
+                continue
+            raise
+    raise last_exc  # pragma: no cover
+
+
+def make_voyage_client(api_key: Optional[str] = None, max_retries: int = 3):
+    """Create a voyageai.Client with SDK-level retry enabled.
+
+    The voyageai SDK defaults to max_retries=0 (no retry). This helper
+    ensures all Voyage clients are created with proper retry for
+    RateLimitError, ServiceUnavailableError and Timeout.
+    """
+    import voyageai
+    return voyageai.Client(
+        api_key=api_key or settings.VOYAGE_API_KEY,
+        max_retries=max_retries,
+    )
+
+
+async def acomplete_with_retry(
+    llm,
+    prompt: str,
+    *,
+    max_retries: int = 2,
+    **kwargs: Any,
+) -> Any:
+    """Call llm.acomplete() with application-level retry on transient errors.
+
+    The OpenAI SDK already retries 3 times internally, but under sustained
+    load the SDK retries may exhaust. This wrapper adds a second retry layer
+    with longer back-off for rate-limit errors.
+    """
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_retries + 1):
+        try:
+            return await llm.acomplete(prompt, **kwargs)
+        except Exception as e:
+            last_exc = e
+            err_msg = str(e).lower()
+            is_retryable = any(k in err_msg for k in _LLM_RETRYABLE_KEYWORDS)
+            if is_retryable and attempt < max_retries:
+                delay = 2 ** (attempt + 1)  # 2s, 4s
+                logger.warning(
+                    "llm_acomplete_retrying",
+                    attempt=attempt + 1,
+                    delay=delay,
+                    error=str(e)[:200],
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise
+    raise last_exc  # pragma: no cover
+
+
+# =============================================================================
 # Response Data Classes
 # =============================================================================
 

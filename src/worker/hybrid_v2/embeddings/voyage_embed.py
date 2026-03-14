@@ -120,7 +120,7 @@ class VoyageEmbedService:
             )
         
         # Initialize native Voyage client for contextual embeddings
-        self._client = voyageai.Client(api_key=self.api_key)  # type: ignore[union-attr]
+        self._client = voyageai.Client(api_key=self.api_key, max_retries=3)  # type: ignore[union-attr]
         
         # Retry configuration for transient API failures
         self._max_retries = 3

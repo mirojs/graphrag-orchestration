@@ -14,6 +14,8 @@ import structlog
 
 import re
 
+from src.worker.hybrid_v2.routes.base import acomplete_with_retry
+
 logger = structlog.get_logger(__name__)
 
 
@@ -120,7 +122,7 @@ Do not include any explanation, just the list.
 """
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             # Parse markdown list response
             raw_text = response.text.strip()
             entities = []

@@ -35,7 +35,7 @@ import structlog
 import tiktoken
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client, acomplete_with_retry
 from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
 from ..services.neo4j_retry import retry_session
 
@@ -527,7 +527,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             return response.text.strip()
         except Exception as e:
             logger.error(
@@ -780,7 +780,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             async with semaphore:
                 resp = None
                 try:
-                    resp = await self.llm.acomplete(prompt)
+                    resp = await acomplete_with_retry(self.llm, prompt)
                     text = resp.text.strip()
                     if text.startswith("```"):
                         text = re.sub(r'^```(?:json)?\s*\n?', '', text)
@@ -986,7 +986,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         try:
-            resp = await self.llm.acomplete(prompt)
+            resp = await acomplete_with_retry(self.llm, prompt)
             text = resp.text.strip()
             # Strip markdown code fences (LLMs often wrap JSON in ```json...```)
             if text.startswith("```"):
@@ -1937,21 +1937,16 @@ class ConceptSearchHandler(BaseRouteHandler):
         rerank_model = os.getenv("ROUTE6_RERANK_MODEL", "rerank-2.5")
 
         try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            vc = make_voyage_client()
             documents = [ev.get("sentence_text") or ev.get("text") or "" for ev in evidence]
 
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                self._executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            rr_result = await rerank_with_retry(
+                vc,
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+                executor=self._executor,
             )
 
             # Track reranker usage (fire-and-forget)

@@ -34,7 +34,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import structlog
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client
 from ..services.neo4j_retry import retry_session
 
 logger = structlog.get_logger(__name__)
@@ -1479,12 +1479,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         ).strip()
 
         if triple_instruction:
-            import voyageai
             from src.core.config import settings
 
             instructed_text = f"{triple_instruction}{query}"
             try:
-                vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+                vc = make_voyage_client()
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(
                     None,
@@ -1556,9 +1555,6 @@ class HippoRAG2Handler(BaseRouteHandler):
         Prepends an instruction to the query to steer the cross-encoder
         toward abstract category membership (e.g., "time windows" → "3 business days").
         """
-        import voyageai
-        from src.core.config import settings
-
         rerank_model = os.getenv("ROUTE7_RERANK_MODEL", "rerank-2.5")
         documents = [triple.triple_text for triple, _ in candidates]
 
@@ -1571,16 +1567,10 @@ class HippoRAG2Handler(BaseRouteHandler):
         )
 
         try:
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                None,
-                lambda: vc.rerank(
-                    query=instructed_query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            vc = make_voyage_client()
+            rr_result = await rerank_with_retry(
+                vc, instructed_query, documents, rerank_model,
+                top_k=min(top_k, len(documents)),
             )
 
             # Map results back to (Triple, rerank_score) tuples
@@ -2260,20 +2250,11 @@ class HippoRAG2Handler(BaseRouteHandler):
         request_k = min(top_k, len(documents))
 
         # Call Voyage reranker
-        import voyageai
-        from src.core.config import settings
+        vc = make_voyage_client()
 
-        vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-
-        loop = asyncio.get_running_loop()
-        rr_result = await loop.run_in_executor(
-            None,
-            lambda: vc.rerank(
-                query=query,
-                documents=documents,
-                model=rerank_model,
-                top_k=request_k,
-            ),
+        rr_result = await rerank_with_retry(
+            vc, query, documents, rerank_model,
+            top_k=request_k,
         )
 
         # Apply dynamic relevance cutoff or fixed top-K
@@ -2440,38 +2421,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Always request the same top_k — dynamic cutoff only filters results
         request_k = min(top_k, len(documents))
 
-        import voyageai
-        from src.core.config import settings
+        vc = make_voyage_client()
 
-        vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
-
-        loop = asyncio.get_running_loop()
-
-        max_retries = 2
-        for attempt in range(max_retries + 1):
-            try:
-                rr_result = await loop.run_in_executor(
-                    None,
-                    lambda: vc.rerank(
-                        query=query,
-                        documents=documents,
-                        model=rerank_model,
-                        top_k=request_k,
-                    ),
-                )
-                break
-            except Exception as e:
-                err_msg = str(e).lower()
-                if "rate limit" in err_msg and attempt < max_retries:
-                    wait_secs = 30 * (attempt + 1)
-                    logger.warning(
-                        "route7_rerank_rate_limited_retrying",
-                        attempt=attempt + 1,
-                        wait_secs=wait_secs,
-                    )
-                    await asyncio.sleep(wait_secs)
-                    continue
-                raise
+        rr_result = await rerank_with_retry(
+            vc, query, documents, rerank_model,
+            top_k=request_k,
+        )
 
         # Apply dynamic relevance cutoff or return all
         if relevance_threshold > 0:

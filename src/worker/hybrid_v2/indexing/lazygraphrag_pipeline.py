@@ -295,6 +295,8 @@ class LazyGraphRAGIndexingPipeline:
         # communities).  Used for multi-doc folder indexing: run extraction for
         # each doc, then run graph algorithms once at the end on the full graph.
         extraction_only: bool = False,
+        # User identifier for per-user usage tracking (Cosmos DB partition key)
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -1138,6 +1140,7 @@ class LazyGraphRAGIndexingPipeline:
                     try:
                         _result_url, docs, error = await di_service._analyze_single_document(
                             client, url, group_id, default_model="prebuilt-layout",
+                            user_id=user_id,
                         )
                         if error:
                             if attempt < max_di_retries - 1:
@@ -4066,12 +4069,13 @@ Output:
                 tracker = get_usage_tracker()
                 gds_credits = compute_gds_credits(memory_gb=2, duration_seconds=session_duration)
                 await tracker.log_gds_usage(
-                    partition_id=group_id,
+                    partition_id=user_id if user_id else group_id,
                     memory_gb=2,
                     duration_seconds=session_duration,
                     nodes_processed=stats.get("pagerank_nodes", 0),
                     algorithms_run=algorithms_run,
                     cost_estimate_usd=gds_credits * 0.001,
+                    user_id=user_id,
                 )
             except Exception as track_err:
                 logger.warning(f"⚠️  GDS usage tracking failed: {track_err}")

@@ -85,6 +85,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 3 v3: Sentence-enriched Map-Reduce global search.
 
@@ -915,11 +916,12 @@ class GlobalSearchHandler(BaseRouteHandler):
                 from src.core.services.usage_tracker import get_usage_tracker
                 _tracker = get_usage_tracker()
                 asyncio.ensure_future(_tracker.log_rerank_usage(
-                    partition_id=self.group_id,
+                    partition_id=user_id if user_id else self.group_id,
                     model=rerank_model,
                     total_tokens=_rerank_tokens,
                     documents_reranked=len(documents),
                     route="route_3",
+                    user_id=user_id,
                 ))
             except Exception:
                 pass

@@ -286,6 +286,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         query_mode: Optional[str] = None,
         folder_id: Optional[str] = None,
         config_overrides: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 7: True HippoRAG 2 retrieval pipeline."""
         enable_timings = os.getenv(
@@ -616,6 +617,11 @@ class HippoRAG2Handler(BaseRouteHandler):
                 for eid in (triple.subject_id, triple.object_id):
                     entity_seeds[eid] = entity_seeds.get(eid, 0) + fact_score
 
+        # Track triple-derived entity IDs — these represent direct query
+        # relevance from triple embedding search and should survive the
+        # community entity filter (Option A: preserve direct evidence).
+        triple_entity_ids: set = set(entity_seeds.keys())
+
         # Phase 2+3: Add structural seeds (Tier 2) and community seeds (Tier 3) in parallel
         structural_sections: List[str] = []
         community_data: List[Dict[str, Any]] = []
@@ -650,18 +656,29 @@ class HippoRAG2Handler(BaseRouteHandler):
         # restrict entity seeds to those belonging to the matched community.
         # This scopes PPR's walk to the community subgraph, preventing
         # dense clusters from dominating over minority documents.
+        #
+        # Option A: Triple-derived entity seeds are PRESERVED through the
+        # filter — they represent direct query-to-content relevance from
+        # triple embedding search and should not be overridden by the
+        # indirect community membership signal.  Only community/structural
+        # seeds that lack triple backing get filtered.
         if community_passage_seeds_enabled and community_entity_ids:
             community_entity_set = set(community_entity_ids)
             pre_filter = len(entity_seeds)
             entity_seeds = {
                 eid: score for eid, score in entity_seeds.items()
-                if eid in community_entity_set
+                if eid in community_entity_set or eid in triple_entity_ids
             }
+            triple_preserved = len([
+                eid for eid in entity_seeds
+                if eid in triple_entity_ids and eid not in community_entity_set
+            ])
             logger.info(
                 "step_3_community_entity_filter",
                 before=pre_filter,
                 after=len(entity_seeds),
                 community_entities=len(community_entity_set),
+                triple_preserved=triple_preserved,
             )
 
         # P2: Keep only top-5 entity seeds (upstream alignment)
@@ -1140,10 +1157,12 @@ class HippoRAG2Handler(BaseRouteHandler):
         # Phase 2 metadata
         if structural_seeds_enabled:
             metadata["structural_sections"] = structural_sections
-        if community_seeds_enabled and community_data:
+        if community_data:
             metadata["matched_communities"] = [
                 c.get("title", "?") for c in community_data[:5]
             ]
+        metadata["community_passage_seeds_added"] = community_seeds_added
+        metadata["triple_entity_ids_count"] = len(triple_entity_ids)
 
         # Entity-doc map metadata
         if graph_structural_header:
@@ -2279,11 +2298,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             from src.core.services.usage_tracker import get_usage_tracker
             _tracker = get_usage_tracker()
             asyncio.ensure_future(_tracker.log_rerank_usage(
-                partition_id=self.group_id,
+                partition_id=user_id if user_id else self.group_id,
                 model=rerank_model,
                 total_tokens=_rerank_tokens,
                 documents_reranked=len(documents),
                 route="route_7",
+                user_id=user_id,
             ))
         except Exception:
             pass
@@ -2475,11 +2495,12 @@ class HippoRAG2Handler(BaseRouteHandler):
             from src.core.services.usage_tracker import get_usage_tracker
             _tracker = get_usage_tracker()
             asyncio.ensure_future(_tracker.log_rerank_usage(
-                partition_id=self.group_id,
+                partition_id=user_id if user_id else self.group_id,
                 model=rerank_model,
                 total_tokens=_rerank_tokens,
                 documents_reranked=len(documents),
                 route="route_7",
+                user_id=user_id,
             ))
         except Exception:
             pass

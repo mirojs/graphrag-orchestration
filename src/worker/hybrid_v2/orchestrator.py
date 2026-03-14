@@ -458,6 +458,7 @@ class HybridPipeline:
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
         config_overrides: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute a query through the appropriate route.
@@ -520,7 +521,7 @@ class HybridPipeline:
             handler._token_accumulator = accumulator
             # Pass weight profile to Route 5 (other routes ignore keyword args
             # they don't accept via **kwargs, but Route 5 uses it for seed weighting)
-            extra_kwargs: Dict[str, Any] = {}
+            extra_kwargs: Dict[str, Any] = {"user_id": user_id}
             if route == QueryRoute.UNIFIED_SEARCH:
                 extra_kwargs["weight_profile"] = weight_profile
             if route == QueryRoute.HIPPORAG2_SEARCH:
@@ -2387,6 +2388,7 @@ Sub-questions:"""
         query_mode: Optional[str] = None,
         folder_id: Optional[str] = None,
         config_overrides: Optional[Dict[str, str]] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Force a specific route regardless of classification.
@@ -2418,7 +2420,7 @@ Sub-questions:"""
         # Use modular handlers if available and requested
         if use_modular_handlers and route in self._route_handlers:
             handler = self._route_handlers[route]
-            extra_kwargs: Dict[str, Any] = {}
+            extra_kwargs: Dict[str, Any] = {"user_id": user_id}
             if route == QueryRoute.UNIFIED_SEARCH:
                 # Use explicit profile if provided, otherwise derive from route
                 extra_kwargs["weight_profile"] = (

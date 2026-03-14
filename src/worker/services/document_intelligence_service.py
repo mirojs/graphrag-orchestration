@@ -2335,6 +2335,7 @@ class DocumentIntelligenceService:
         *,
         default_model: str = "prebuilt-layout",
         explicit_model: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Tuple[str, List[Document], Optional[str]]:
         """
         Analyze a single document and return extracted Documents.
@@ -2616,9 +2617,10 @@ class DocumentIntelligenceService:
                     from src.core.services.usage_tracker import get_usage_tracker
                     _tracker = get_usage_tracker()
                     asyncio.ensure_future(_tracker.log_doc_intel_usage(
-                        partition_id=group_id,
+                        partition_id=user_id if user_id else group_id,
                         pages_analyzed=len(result.pages),
                         document_id=url.rsplit("/", 1)[-1] if url else "unknown",
+                        user_id=user_id,
                     ))
                 except Exception:
                     pass

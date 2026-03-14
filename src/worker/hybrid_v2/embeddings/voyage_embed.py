@@ -380,7 +380,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "indexing",
+                    partition_id=user_id or group_id or "indexing",
                     model=self.model_name,
                     total_tokens=total_tokens_used,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,
@@ -468,7 +468,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
                     total_tokens=result.usage.total_tokens,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,
@@ -511,7 +511,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
                     total_tokens=result.usage.total_tokens,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,
@@ -582,7 +582,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
                     total_tokens=total_tokens_used,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,

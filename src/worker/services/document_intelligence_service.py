@@ -1138,7 +1138,7 @@ class DocumentIntelligenceService:
 
         # 1a. Collect start-offsets of every handwritten span as primary anchors.
         anchor_offsets: List[int] = []
-        used_fallback = False
+        typed_anchor_offsets: Set[int] = set()
         styles = getattr(result, "styles", None) or []
         for style in styles:
             if not getattr(style, "is_handwritten", False):
@@ -1151,17 +1151,19 @@ class DocumentIntelligenceService:
                 if length >= 3:
                     anchor_offsets.append(offset)
 
-        # 1b. Fallback: scan paragraph text for typed-signature patterns.
-        if not anchor_offsets:
-            used_fallback = True
-            for para in paragraphs:
-                spans = getattr(para, "spans", None) or []
-                if not spans:
-                    continue
-                text = (getattr(para, "content", "") or "").strip()
-                if self._is_typed_sig_anchor(text):
-                    offset = getattr(spans[0], "offset", 0) or 0
+        # 1b. Always also scan for typed-signature patterns so that
+        #     mixed documents (handwritten + typed sig blocks on different
+        #     pages) don't miss any signature area.
+        for para in paragraphs:
+            spans = getattr(para, "spans", None) or []
+            if not spans:
+                continue
+            text = (getattr(para, "content", "") or "").strip()
+            if self._is_typed_sig_anchor(text):
+                offset = getattr(spans[0], "offset", 0) or 0
+                if offset not in anchor_offsets:
                     anchor_offsets.append(offset)
+                typed_anchor_offsets.add(offset)
 
         if not anchor_offsets:
             return set()
@@ -1188,10 +1190,11 @@ class DocumentIntelligenceService:
 
             # Upward bound: for handwritten spans expand to nearest section heading
             # (capped at _MAX_SIG_UPWALK paragraphs to avoid sweeping in body text
-            # when there are no headings); for typed (fallback) anchors start the
-            # window AT the anchor paragraph.
+            # when there are no headings); for typed anchors start the window AT
+            # the anchor paragraph to avoid false captures.
             _MAX_SIG_UPWALK = 5  # max paragraphs to walk above the anchor
-            if used_fallback:
+            is_typed_anchor = anchor_offset in typed_anchor_offsets
+            if is_typed_anchor:
                 upper_pos = pos  # include only anchor + paragraphs below it
             else:
                 upper_limit = max(0, pos - _MAX_SIG_UPWALK)

@@ -500,23 +500,45 @@ def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
 
 
 def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
-    """Return a single joined sentence from a structured signature block.
+    """Return a meaningful sentence from a structured signature block.
 
-    Instead of constructing a template sentence from parsed party/role data
-    (which is brittle and depends on regex extraction), we join the **raw
-    paragraph lines** into one sentence — filtering only underscore filler
-    and bare field labels.
+    Uses the structured ``parties`` list (role + name pairs) when available
+    to construct a natural sentence like:
+      "Signed by John Smith as Authorized Representative of Fabrikam Inc."
+    avoiding garbled concatenations like "Representative John Smith Company
+    Fabrikam Inc." that mislead downstream LLMs into hallucinating entity
+    names.
 
-    Joining keeps all fragments (party names, roles, dates) in one embedding
-    vector so semantic search can match any combination (e.g. "who is the
-    authorized representative" matches the sentence containing both the name
-    and the role).  The sentence is stored with ``source="signature_party"``
-    which bypasses the noise-denoiser and gets a ``[Signature Block]``
-    embedding context prefix.
+    Falls back to raw_lines joining (with label disambiguation) only when
+    no structured parties exist.
+
+    The sentence is stored with ``source="signature_party"`` which bypasses
+    the noise-denoiser and gets a ``[Signature Block]`` embedding context
+    prefix.
     """
+    parties = sig_block.get("parties") or []
+    signed_date = sig_block.get("signed_date", "")
+
+    # Primary path: build a natural sentence from structured party data.
+    if parties:
+        clauses: List[str] = []
+        for p in parties:
+            role = (p.get("role") or "").strip().rstrip(":")
+            name = (p.get("name") or "").strip()
+            if role and name:
+                clauses.append(f"{name} as {role}")
+            elif name:
+                clauses.append(name)
+        if clauses:
+            sentence = "Signed by " + ", and ".join(clauses)
+            if signed_date:
+                sentence += f" on {signed_date}"
+            return [sentence]
+
+    # Fallback: join raw_lines (filter structural noise).
     raw_lines = sig_block.get("raw_lines") or []
 
-    parts: List[str] = []
+    filtered: List[str] = []
     for line in raw_lines:
         line = line.strip()
         if not line:
@@ -525,12 +547,11 @@ def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
             continue
         if _SIG_FIELD_LABEL_RE.match(line):
             continue
-        parts.append(line)
+        filtered.append(line)
 
-    if not parts:
+    if not filtered:
         return []
-    # Strip trailing periods before joining to avoid "Ltd.." doubles
-    joined = ". ".join(p.rstrip(".") for p in parts)
+    joined = ". ".join(p.rstrip(".") for p in filtered)
     return [joined]
 
 

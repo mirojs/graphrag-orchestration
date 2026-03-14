@@ -54,7 +54,6 @@ export interface UsageStats {
     documents_count: number;
     documents_limit: number;
     personal_documents_count?: number;
-    global_documents_count?: number;
     storage_used_gb: number;
     storage_limit_gb: number;
     credits_used_month: number;

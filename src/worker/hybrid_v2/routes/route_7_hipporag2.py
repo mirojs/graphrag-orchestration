@@ -203,7 +203,7 @@ class HippoRAG2Handler(BaseRouteHandler):
             "max_tokens": None,
         },
         "community_search": {          # Community-dominant (abstract themes, exhaustive)
-            "ppr_passage_top_k": 50,   # match default — don't bottleneck before reranker
+            "ppr_passage_top_k": 100,  # wider net — dynamic reranker handles filtering
             "prompt_variant": None,
             "max_tokens": None,
             "community_passage_seeds": True,   # inject Community→Entity→Sentence into passage seeds
@@ -310,7 +310,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         ppr_damping = float(_ov("damping", "ROUTE7_DAMPING", "0.5"))
         passage_node_weight = float(_ov("passage_node_weight", "ROUTE7_PASSAGE_NODE_WEIGHT", "0.05"))
         ppr_passage_top_k = preset.get("ppr_passage_top_k") or int(
-            _ov("ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K", "50")
+            _ov("ppr_passage_top_k", "ROUTE7_PPR_PASSAGE_TOP_K", "100")
         )
         # Reranker: enabled by default — cross-encoder on PPR output improves Q-D10 accuracy
         rerank_enabled = _ov("rerank", "ROUTE7_RERANK", "1").strip().lower() in {"1", "true", "yes"}
@@ -371,7 +371,7 @@ class HippoRAG2Handler(BaseRouteHandler):
         # of fixed top-K.  Keeps all passages above threshold, drops noise.
         rerank_dynamic_cutoff = _ov(
             "rerank_dynamic_cutoff", "ROUTE7_RERANK_DYNAMIC_CUTOFF",
-            "1" if preset.get("rerank_dynamic_cutoff", False) else "0"
+            "1" if preset.get("rerank_dynamic_cutoff", True) else "0"
         ).strip().lower() in {"1", "true", "yes"}
         rerank_relevance_threshold = float(
             _ov("rerank_relevance_threshold", "ROUTE7_RERANK_RELEVANCE_THRESHOLD", "0.15")

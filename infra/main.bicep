@@ -588,7 +588,7 @@ var sharedEnvVars = concat([
   }
   {
     name: 'ROUTE7_PPR_PASSAGE_TOP_K'
-    value: '50'
+    value: '100'
   }
   {
     name: 'ROUTE7_SYNONYM_THRESHOLD'

@@ -127,41 +127,64 @@ echo ""
 
 # ── Capture Current Revisions (for rollback) ─────────────────────────────
 
-echo "📸 Capturing current revisions for rollback..."
+echo "📸 Capturing current revisions for rollback (parallel)..."
 
-PREV_API_REVISION=$(az containerapp revision list \
-    --name "$API_APP_NAME" \
-    --resource-group "$AZURE_RESOURCE_GROUP" \
-    --query "[?properties.active && properties.trafficWeight > \`0\`].name | [0]" \
-    -o tsv 2>/dev/null || echo "")
+REV_TMPDIR=$(mktemp -d /tmp/graphrag-rev-XXXXXX)
 
-PREV_API_IMAGE=""
-if [ -n "$PREV_API_REVISION" ]; then
-    PREV_API_IMAGE=$(az containerapp revision show \
+# Capture API and Worker revisions in parallel — each pair (list→show) runs
+# in its own subshell, but both subshells run simultaneously.
+(
+    rev=$(az containerapp revision list \
         --name "$API_APP_NAME" \
         --resource-group "$AZURE_RESOURCE_GROUP" \
-        --revision "$PREV_API_REVISION" \
-        --query "properties.template.containers[0].image" \
+        --query "[?properties.active && properties.trafficWeight > \`0\`].name | [0]" \
         -o tsv 2>/dev/null || echo "")
+    img=""
+    if [ -n "$rev" ]; then
+        img=$(az containerapp revision show \
+            --name "$API_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$rev" \
+            --query "properties.template.containers[0].image" \
+            -o tsv 2>/dev/null || echo "")
+    fi
+    echo "${rev}|${img}" > "$REV_TMPDIR/api"
+) &
+API_REV_PID=$!
+
+(
+    rev=$(az containerapp revision list \
+        --name "$WORKER_APP_NAME" \
+        --resource-group "$AZURE_RESOURCE_GROUP" \
+        --query "[?properties.active && properties.trafficWeight > \`0\`].name | [0]" \
+        -o tsv 2>/dev/null || echo "")
+    img=""
+    if [ -n "$rev" ]; then
+        img=$(az containerapp revision show \
+            --name "$WORKER_APP_NAME" \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --revision "$rev" \
+            --query "properties.template.containers[0].image" \
+            -o tsv 2>/dev/null || echo "")
+    fi
+    echo "${rev}|${img}" > "$REV_TMPDIR/worker"
+) &
+WORKER_REV_PID=$!
+
+wait $API_REV_PID $WORKER_REV_PID
+
+PREV_API_REVISION=$(cut -d'|' -f1 < "$REV_TMPDIR/api")
+PREV_API_IMAGE=$(cut -d'|' -f2 < "$REV_TMPDIR/api")
+PREV_WORKER_REVISION=$(cut -d'|' -f1 < "$REV_TMPDIR/worker")
+PREV_WORKER_IMAGE=$(cut -d'|' -f2 < "$REV_TMPDIR/worker")
+rm -rf "$REV_TMPDIR"
+
+if [ -n "$PREV_API_REVISION" ]; then
     echo "  API:    $PREV_API_REVISION → $PREV_API_IMAGE"
 else
     echo "  API:    (no active revision found — rollback unavailable)"
 fi
-
-PREV_WORKER_REVISION=$(az containerapp revision list \
-    --name "$WORKER_APP_NAME" \
-    --resource-group "$AZURE_RESOURCE_GROUP" \
-    --query "[?properties.active && properties.trafficWeight > \`0\`].name | [0]" \
-    -o tsv 2>/dev/null || echo "")
-
-PREV_WORKER_IMAGE=""
 if [ -n "$PREV_WORKER_REVISION" ]; then
-    PREV_WORKER_IMAGE=$(az containerapp revision show \
-        --name "$WORKER_APP_NAME" \
-        --resource-group "$AZURE_RESOURCE_GROUP" \
-        --revision "$PREV_WORKER_REVISION" \
-        --query "properties.template.containers[0].image" \
-        -o tsv 2>/dev/null || echo "")
     echo "  Worker: $PREV_WORKER_REVISION → $PREV_WORKER_IMAGE"
 else
     echo "  Worker: (no active revision found — rollback unavailable)"
@@ -336,14 +359,27 @@ echo ""
 # ── Health Check ─────────────────────────────────────────────────────────
 
 echo "🏥 Running health check..."
-echo "   Waiting 60s for containers to start..."
-sleep 60
+echo "   Waiting 60s for containers to start (fetching FQDN + token in parallel)..."
 
-API_FQDN=$(az containerapp show \
+# Fetch FQDN and auth token in parallel DURING the startup wait
+HC_TMPDIR=$(mktemp -d /tmp/graphrag-hc-XXXXXX)
+
+(az containerapp show \
     --name "$API_APP_NAME" \
     --resource-group "$AZURE_RESOURCE_GROUP" \
     --query "properties.configuration.ingress.fqdn" \
-    -o tsv 2>/dev/null || echo "")
+    -o tsv 2>/dev/null || echo "") > "$HC_TMPDIR/fqdn" &
+
+(az account get-access-token \
+    --scope "$HEALTH_CHECK_SCOPE" \
+    --query accessToken -o tsv 2>/dev/null || echo "") > "$HC_TMPDIR/token" &
+
+sleep 60  # container startup wait runs concurrently with FQDN + token fetches
+wait      # ensure FQDN + token fetches are done (they finish well within 60s)
+
+API_FQDN=$(cat "$HC_TMPDIR/fqdn")
+TOKEN=$(cat "$HC_TMPDIR/token")
+rm -rf "$HC_TMPDIR"
 
 if [ -z "$API_FQDN" ]; then
     echo "⚠️  Could not determine API URL — skipping health check"
@@ -351,10 +387,6 @@ if [ -z "$API_FQDN" ]; then
 else
     HEALTH_URL="https://${API_FQDN}/health"
     echo "   Endpoint: $HEALTH_URL"
-
-    TOKEN=$(az account get-access-token \
-        --scope "$HEALTH_CHECK_SCOPE" \
-        --query accessToken -o tsv 2>/dev/null || echo "")
 
     AUTH_HEADER=""
     if [ -n "$TOKEN" ]; then
@@ -391,7 +423,9 @@ if [ "$HEALTH_OK" = false ]; then
     echo ""
 
     if [ -n "$PREV_API_IMAGE" ] || [ -n "$PREV_WORKER_IMAGE" ]; then
-        echo "🔄 Rolling back to previous revisions..."
+        echo "🔄 Rolling back to previous revisions (parallel)..."
+        ROLLBACK_SUFFIX="rollback-$(date -u +%s | tail -c 6)"
+        ROLLBACK_FAILED=0
 
         if [ -n "$PREV_API_IMAGE" ]; then
             echo "   Reverting API → $PREV_API_IMAGE"
@@ -399,8 +433,9 @@ if [ "$HEALTH_OK" = false ]; then
                 --name "$API_APP_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --image "$PREV_API_IMAGE" \
-                --revision-suffix "rollback-$(date -u +%s | tail -c 6)" \
-                --output none || echo "   ⚠️  API rollback failed"
+                --revision-suffix "$ROLLBACK_SUFFIX" \
+                --output none &
+            ROLLBACK_API_PID=$!
         fi
 
         if [ -n "$PREV_WORKER_IMAGE" ]; then
@@ -409,8 +444,9 @@ if [ "$HEALTH_OK" = false ]; then
                 --name "$WORKER_APP_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --image "$PREV_WORKER_IMAGE" \
-                --revision-suffix "rollback-$(date -u +%s | tail -c 6)" \
-                --output none || echo "   ⚠️  Worker rollback failed"
+                --revision-suffix "$ROLLBACK_SUFFIX" \
+                --output none &
+            ROLLBACK_WORKER_PID=$!
         fi
 
         if [ -n "$PREV_API_IMAGE" ]; then
@@ -419,12 +455,21 @@ if [ "$HEALTH_OK" = false ]; then
                 --name "$B2C_APP_NAME" \
                 --resource-group "$AZURE_RESOURCE_GROUP" \
                 --image "$PREV_API_IMAGE" \
-                --revision-suffix "rollback-$(date -u +%s | tail -c 6)" \
-                --output none || echo "   ⚠️  B2C rollback failed"
+                --revision-suffix "$ROLLBACK_SUFFIX" \
+                --output none &
+            ROLLBACK_B2C_PID=$!
         fi
 
-        echo ""
-        echo "🔄 Rollback complete. Previous images restored."
+        [ -n "${ROLLBACK_API_PID:-}" ]    && { wait $ROLLBACK_API_PID    || ROLLBACK_FAILED=1; }
+        [ -n "${ROLLBACK_WORKER_PID:-}" ] && { wait $ROLLBACK_WORKER_PID || ROLLBACK_FAILED=1; }
+        [ -n "${ROLLBACK_B2C_PID:-}" ]    && { wait $ROLLBACK_B2C_PID    || ROLLBACK_FAILED=1; }
+
+        if [ $ROLLBACK_FAILED -ne 0 ]; then
+            echo "   ⚠️  One or more rollbacks failed — check container status manually"
+        else
+            echo ""
+            echo "🔄 Rollback complete. Previous images restored."
+        fi
     else
         echo "⚠️  No previous revision captured — cannot rollback automatically."
         echo "   Manually check container status and logs."

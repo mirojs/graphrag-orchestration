@@ -45,11 +45,17 @@ def sanitize_folder_name(folder: str | None) -> str | None:
 
 
 def _is_directory_blob(blob) -> bool:
-    """Check if a blob entry is an ADLS Gen2 directory (not a real file)."""
+    """Check if a blob entry is a directory marker (not a real file).
+
+    Catches ADLS Gen2 directories (hdi_isfolder) AND plain 0-byte
+    folder-placeholder blobs created by non-HNS storage accounts.
+    """
     if getattr(blob, "is_directory", False):
         return True
     metadata = getattr(blob, "metadata", None)
     if metadata and metadata.get("hdi_isfolder") == "true":
+        return True
+    if (getattr(blob, "size", None) or 0) == 0:
         return True
     return False
 
@@ -151,7 +157,7 @@ class UserBlobManager:
             if _is_directory_blob(blob):
                 continue
             name = blob.name[len(prefix):]
-            if not name:
+            if not name or name.endswith(".result.json"):
                 continue
             total_bytes += blob.size or 0
             count += 1

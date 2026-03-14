@@ -12,8 +12,10 @@ to the main HybridPipeline and access its services through that reference.
 from __future__ import annotations
 
 import json
+import os
 import re
 import asyncio
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
@@ -41,6 +43,72 @@ _LLM_RETRYABLE_KEYWORDS = (
     "timeout", "connection", "server error", "throttl",
 )
 
+# ---------------------------------------------------------------------------
+# Global concurrency gates — cap concurrent external API calls across all
+# in-flight requests to prevent rate-limit avalanches.
+# ---------------------------------------------------------------------------
+
+_RERANK_CONCURRENCY = int(os.getenv("VOYAGE_RERANK_CONCURRENCY", "4"))
+_LLM_CONCURRENCY = int(os.getenv("QUERY_LLM_CONCURRENCY", "8"))
+
+# Semaphores are lazily initialised on first use (they must be created inside
+# a running event loop).  A threading lock protects the one-time init.
+_semaphore_lock = threading.Lock()
+_rerank_semaphore: Optional[asyncio.Semaphore] = None
+_llm_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_rerank_semaphore() -> asyncio.Semaphore:
+    global _rerank_semaphore
+    if _rerank_semaphore is None:
+        with _semaphore_lock:
+            if _rerank_semaphore is None:
+                _rerank_semaphore = asyncio.Semaphore(_RERANK_CONCURRENCY)
+    return _rerank_semaphore
+
+
+def _get_llm_semaphore() -> asyncio.Semaphore:
+    global _llm_semaphore
+    if _llm_semaphore is None:
+        with _semaphore_lock:
+            if _llm_semaphore is None:
+                _llm_semaphore = asyncio.Semaphore(_LLM_CONCURRENCY)
+    return _llm_semaphore
+
+
+# ---------------------------------------------------------------------------
+# Shared Voyage client — avoid creating a new HTTP client per call.
+# ---------------------------------------------------------------------------
+_voyage_client_lock = threading.Lock()
+_voyage_client_instance = None
+_voyage_client_key: Optional[str] = None  # track API key for invalidation
+
+
+def make_voyage_client(api_key: Optional[str] = None, max_retries: int = 3):
+    """Return a shared voyageai.Client with SDK-level retry enabled.
+
+    The voyageai SDK defaults to max_retries=0 (no retry). This helper
+    ensures all Voyage clients are created with proper retry for
+    RateLimitError, ServiceUnavailableError and Timeout.
+
+    A module-level singleton is reused across calls so HTTP connections
+    are pooled.  Pass a non-default *api_key* to force a fresh client.
+    """
+    global _voyage_client_instance, _voyage_client_key
+    key = api_key or settings.VOYAGE_API_KEY
+    if _voyage_client_instance is not None and _voyage_client_key == key:
+        return _voyage_client_instance
+    with _voyage_client_lock:
+        if _voyage_client_instance is not None and _voyage_client_key == key:
+            return _voyage_client_instance
+        import voyageai
+        _voyage_client_instance = voyageai.Client(
+            api_key=key,
+            max_retries=max_retries,
+        )
+        _voyage_client_key = key
+        return _voyage_client_instance
+
 
 async def rerank_with_retry(
     vc,
@@ -54,6 +122,9 @@ async def rerank_with_retry(
 ) -> Any:
     """Call Voyage rerank with retry on rate-limit / transient errors.
 
+    Acquires a global concurrency semaphore (VOYAGE_RERANK_CONCURRENCY, default 4)
+    to prevent many in-flight requests from overwhelming the Voyage API.
+
     Args:
         vc: voyageai.Client instance (should be created with max_retries>=3).
         query: The rerank query.
@@ -66,19 +137,21 @@ async def rerank_with_retry(
     Returns:
         The RerankingObject from voyageai.
     """
+    sem = _get_rerank_semaphore()
     loop = asyncio.get_running_loop()
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
-            return await loop.run_in_executor(
-                executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=model,
-                    top_k=top_k,
-                ),
-            )
+            async with sem:
+                return await loop.run_in_executor(
+                    executor,
+                    lambda: vc.rerank(
+                        query=query,
+                        documents=documents,
+                        model=model,
+                        top_k=top_k,
+                    ),
+                )
         except Exception as e:
             last_exc = e
             err_msg = str(e).lower()
@@ -100,20 +173,6 @@ async def rerank_with_retry(
     raise last_exc  # pragma: no cover
 
 
-def make_voyage_client(api_key: Optional[str] = None, max_retries: int = 3):
-    """Create a voyageai.Client with SDK-level retry enabled.
-
-    The voyageai SDK defaults to max_retries=0 (no retry). This helper
-    ensures all Voyage clients are created with proper retry for
-    RateLimitError, ServiceUnavailableError and Timeout.
-    """
-    import voyageai
-    return voyageai.Client(
-        api_key=api_key or settings.VOYAGE_API_KEY,
-        max_retries=max_retries,
-    )
-
-
 async def acomplete_with_retry(
     llm,
     prompt: str,
@@ -123,14 +182,19 @@ async def acomplete_with_retry(
 ) -> Any:
     """Call llm.acomplete() with application-level retry on transient errors.
 
+    Acquires a global concurrency semaphore (QUERY_LLM_CONCURRENCY, default 8)
+    to prevent many in-flight requests from overwhelming the OpenAI API.
+
     The OpenAI SDK already retries 3 times internally, but under sustained
     load the SDK retries may exhaust. This wrapper adds a second retry layer
     with longer back-off for rate-limit errors.
     """
+    sem = _get_llm_semaphore()
     last_exc: Optional[Exception] = None
     for attempt in range(max_retries + 1):
         try:
-            return await llm.acomplete(prompt, **kwargs)
+            async with sem:
+                return await llm.acomplete(prompt, **kwargs)
         except Exception as e:
             last_exc = e
             err_msg = str(e).lower()

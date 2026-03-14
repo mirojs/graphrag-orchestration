@@ -236,7 +236,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 2. **Q-D2:** In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Owner shall honor all confirmed reservations.
+   - **Expected:** Owner shall honor all confirmed reservations. Additionally, termination does not invalidate any existing rental agreements made by Agent on Owner's behalf, and Owner remains responsible for all obligations and expenses incurred by the Agent.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 3. **Q-D3:** Compare "time windows" across the set: list all explicit day-based timeframes.
@@ -251,8 +251,8 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 5. **Q-D5:** In the warranty, explain how the "coverage start" is defined and what must happen before coverage ends.
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Coverage begins on date of final settlement or first occupancy whichever comes first; claims must be made in writing within the 1-year or 60-day period before coverage ends.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0)
+   - **Expected:** Coverage begins on date of final settlement or first occupancy whichever comes first; claims must be made in writing by `certified mail return receipt requested` within the 1-year or 60-day period before coverage ends. Warranty is non-transferable and automatically terminates if the first purchaser sells the home or moves out.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0/3)
 
 6. **Q-D6:** Do the purchase contract total price and the invoice total match? If so, what is that amount?
    - **Expected Route:** Route 4 (DRIFT)
@@ -266,18 +266,18 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same number of documents (4 each - they are tied). Fabrikam appears in: warranty (as Builder), holding tank (as Pumper), property management (referenced), and purchase contract (as Customer). Contoso appears in: warranty (as Buyer/Owner), holding tank (as Owner), property management (as Owner), and purchase contract (as Contractor). Note: The invoice lists "Contoso Lifts LLC" which is a different entity.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same number of documents (4 each - they are tied). Fabrikam appears in: warranty (as Builder), holding tank (as Pumper), property management (as Principal Broker), and purchase contract (as Customer). Contoso appears in: warranty (as Buyer/Owner), holding tank (as Owner), property management (as Owner), and purchase contract (as Authorized Representative/signer). Note: The invoice lists "Contoso Lifts LLC" (Contractor) and "Fabrikam Construction" (bill-to) which are different entities.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); contoso_lifts_invoice.pdf (chunk 0)
 
 9. **Q-D9:** Compare the "fees" concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Property management agreement percentage-based commissions 25% 10% gross revenues short term long term; purchase contract fixed installment payments $20,000 $7,000 $2,900 totaling $29,900.
+   - **Expected:** Property management agreement has a mixed fee structure: percentage-based commissions (25%/10% gross revenues for short-term/long-term rentals, 10% on repairs/renovations, 4.712% Hawaii excise tax on all fees) plus fixed charges ($75/month advertising, $50/month admin, $35/hour scheduling, $250 non-refundable start-up fee) and credit card fee deductions. Purchase contract has fixed installment payments: $20,000 signing + $7,000 delivery + $2,900 completion = $29,900 total.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)
 
 10. **Q-D10:** List the three different "risk allocation" statements across the set (risk of loss, liability limitations, non-transferability).
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Purchase contract shifts risk of loss after delivery; property management agreement limits agent liability except gross negligence willful misconduct; warranty is not transferable terminates if first purchaser sells or moves out.
-   - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
+   - **Expected:** Purchase contract shifts risk of loss after delivery; property management agreement limits agent liability except gross negligence/willful misconduct (owner holds harmless and indemnifies agent); warranty is not transferable, terminates if first purchaser sells or moves out; warranty excludes consequential/incidental damages and disclaims all implied warranties; purchase contract prohibits assignment without other party's written consent.
+   - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 1/3)
 
 ---
 

@@ -122,7 +122,7 @@ class Worker:
                 if self.usage_tracker and result.get('usage'):
                     usage = result['usage']
                     await self.usage_tracker.log_llm_usage(
-                        partition_id=group_id,
+                        partition_id=user_id if user_id else group_id,
                         model=usage.get('model', 'unknown'),
                         prompt_tokens=usage.get('prompt_tokens', 0),
                         completion_tokens=usage.get('completion_tokens', 0),

@@ -1137,7 +1137,7 @@ class HybridPipeline:
         # Extract significant words from query (4+ chars, not stopwords)
         stopwords = {"what", "when", "where", "which", "about", "does", "there", "their", "have", "this", "that", "with", "from", "they", "been", "were", "will", "would", "could", "should", "across", "list", "summarize", "identify"}
         query_terms = [
-            w.lower() for w in re.findall(r"[A-Za-z]{4,}", query)
+            w.lower() for w in re.findall(r"[\w]{2,}", query)
             if w.lower() not in stopwords
         ]
         

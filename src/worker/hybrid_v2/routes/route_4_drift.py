@@ -934,7 +934,7 @@ Sub-questions:"""
                         query_unit = unit_match.group(1) if unit_match else None
                         
                         # Extract other important keywords (nouns, key terms)
-                        query_keywords = set(re.findall(r'\b[a-z]{3,}\b', query_lower))
+                        query_keywords = set(re.findall(r'[\w]{2,}', query_lower))
                         # Remove stop words
                         stop_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 
                                      'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been',

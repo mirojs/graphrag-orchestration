@@ -27,14 +27,15 @@ RTL_PREFIXES = ("ar", "he", "fa", "ur", "yi")
 # Non-Latin script locale prefixes (need character preservation in canonicalization)
 # This includes CJK, RTL, Indic, Thai, and other scripts that would be destroyed by ASCII-only regex
 NON_LATIN_PREFIXES = (
-    "zh", "ja", "ko",           # CJK
-    "ar", "he", "fa", "ur",    # RTL/Arabic
-    "hi", "bn", "ta", "te", "mr", "gu", "kn", "ml", "pa",  # Indic
-    "th",                        # Thai
-    "el",                        # Greek
-    "ru", "uk", "bg", "sr",    # Cyrillic
-    "ka", "hy",                  # Georgian, Armenian
-    "am", "ti",                  # Ethiopic
+    "zh", "ja", "ko",                                                    # CJK
+    "ar", "he", "fa", "ur", "yi",                                       # RTL/Arabic
+    "hi", "bn", "ta", "te", "ml", "mr", "gu", "kn", "pa", "or", "as", "ne", "si",  # Indic
+    "th", "lo", "my", "km",                                             # Southeast Asian
+    "ru", "uk", "bg", "sr", "mk", "be", "kk", "ky", "tg", "mn",       # Cyrillic
+    "el",                                                                # Greek
+    "ka",                                                                # Georgian
+    "hy",                                                                # Armenian
+    "am", "ti",                                                          # Ethiopic
 )
 
 # Sentence delimiters by language category

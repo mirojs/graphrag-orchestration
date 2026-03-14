@@ -74,6 +74,7 @@ _speech_token_lock = asyncio.Lock()
 _SPEECH_TRANSLATION_LANGUAGES = [
     "en-US", "ja-JP", "fr-FR", "es-ES", "da-DK",
     "nl-NL", "pt-BR", "tr-TR", "it-IT", "de-DE",
+    "ko-KR", "pl-PL", "zh-CN", "zh-TW", "th-TH",
 ]
 
 

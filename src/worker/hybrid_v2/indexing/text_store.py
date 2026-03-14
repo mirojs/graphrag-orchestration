@@ -174,7 +174,7 @@ class Neo4jTextUnitStore:
             "any", "our", "your", "their", "on", "for", "with", "by", "as", "at", "from",
         }
 
-        tokens = [t.lower() for t in re.findall(r"[A-Za-z0-9]+", q) if len(t) >= 3]
+        tokens = [t.lower() for t in re.findall(r"[\w]+", q) if len(t) >= 2]
         keywords = [t for t in tokens if t not in stopwords]
         if not keywords:
             return []

@@ -285,6 +285,10 @@ class BaseRouteHandler:
 
         Neo4j fulltext indexes use Lucene syntax. Certain characters are operators
         and can cause parse errors or unintended semantics.
+
+        Preserves Unicode combining marks (Mn/Mc/Me categories) which are
+        essential for Thai vowels/tones, Devanagari vowel signs, and other
+        Brahmic scripts.
         
         Args:
             query: Raw query string
@@ -294,11 +298,14 @@ class BaseRouteHandler:
         """
         if not query:
             return ""
-        # Keep alphanumerics and whitespace; replace other characters with spaces.
+        import unicodedata
+        # Keep alphanumerics, whitespace, and combining marks; replace others with spaces.
         out = []
         for ch in query:
             if ch.isalnum() or ch.isspace():
                 out.append(ch)
+            elif unicodedata.category(ch) in ("Mn", "Mc", "Me"):
+                out.append(ch)  # Preserve combining marks (Thai/Indic vowels, tones)
             else:
                 out.append(" ")
         # Collapse repeated whitespace
@@ -749,7 +756,7 @@ class BaseRouteHandler:
             'is', 'it', 'an', 'a', 'of', 'in', 'to', 'on', 'at', 'by', 'as', 'or',
         }
         
-        words = re.findall(r'\b[a-zA-Z]{3,}\b', query.lower())
+        words = re.findall(r'[\w]{2,}', query.lower())
         search_terms = [w for w in words if w not in STOPWORDS]
         
         if not search_terms:

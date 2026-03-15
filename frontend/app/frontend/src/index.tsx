@@ -18,6 +18,7 @@ const router = createHashRouter([
     {
         path: "/",
         element: <LayoutWrapper />,
+        hydrateFallbackElement: <></>,
         children: [
             {
                 index: true,

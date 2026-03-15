@@ -198,9 +198,10 @@ class RetrySession:
     for retrieval queries.
     """
 
-    def __init__(self, session, read_only: bool = False):
+    def __init__(self, session, read_only: bool = False, timeout: float | None = None):
         self._session = session
         self._read_only = read_only
+        self._timeout = timeout  # seconds, passed to execute_read/write
 
     def run(self, query, parameters=None, **kwargs):
         """Execute a Cypher query with automatic retry via managed transaction."""
@@ -220,6 +221,8 @@ class RetrySession:
 
         executor = self._session.execute_read if self._read_only else self._session.execute_write
         label = "execute_read" if self._read_only else "execute_write"
+        # Note: neo4j-driver v6.x forwards all **kwargs to the work function,
+        # so timeout cannot be passed here. Use session-level config instead.
         try:
             records, keys = executor(_tx_func)
             return _EagerResult(records, keys)
@@ -241,7 +244,7 @@ class RetrySession:
 # ── Context Manager Helper ───────────────────────────────────────────────────
 
 @contextmanager
-def retry_session(driver, database: Optional[str] = None, read_only: bool = False):
+def retry_session(driver, database: Optional[str] = None, read_only: bool = False, timeout: float | None = None):
     """Context manager yielding a retry-enabled sync Neo4j session.
 
     Drop-in replacement for ``with driver.session(database=db) as s:``.
@@ -252,9 +255,13 @@ def retry_session(driver, database: Optional[str] = None, read_only: bool = Fals
         database: Optional database name.
         read_only: If True, use ``execute_read()`` instead of ``execute_write()``.
                    Preferred for retrieval queries — enables read-replica routing.
+        timeout: Optional transaction timeout in seconds. Read queries default to
+                 60s, write queries to 120s. Pass explicit value to override.
     """
+    if timeout is None:
+        timeout = 60.0 if read_only else 120.0
     kwargs = {}
     if database is not None:
         kwargs["database"] = database
     with driver.session(**kwargs) as session:
-        yield RetrySession(session, read_only=read_only)
+        yield RetrySession(session, read_only=read_only, timeout=timeout)

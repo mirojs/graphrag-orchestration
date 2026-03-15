@@ -33,7 +33,7 @@ import time
 from src.worker.hybrid_v2.orchestrator import HybridPipeline, HighQualityError
 from src.worker.hybrid_v2.router.main import DeploymentProfile, QueryRoute
 from src.worker.hybrid_v2.indexing import DualIndexService, get_hipporag_service
-from src.api_gateway.middleware.auth import get_group_id
+from src.api_gateway.middleware.auth import get_group_id, get_user_id
 from src.core.config import settings
 from src.core.services.quota_enforcer import enforce_plan_limits
 from src.core.services.redis_service import (
@@ -287,6 +287,10 @@ class HybridQueryRequest(BaseModel):
         default=None,
         description="Optional folder ID to scope the query to a specific folder within the group. If None, all folders are searched."
     )
+    config_overrides: Optional[Dict[str, str]] = Field(
+        default=None,
+        description="Per-request overrides for route configuration. Keys are env-var names without the route prefix (e.g. 'rerank_top_k' overrides ROUTE7_RERANK_TOP_K). Only applies to the active route handler."
+    )
 
 
 class HybridQueryResponse(BaseModel):
@@ -536,6 +540,8 @@ async def hybrid_query(
     """
     import time
     start_time = time.time()
+    user = getattr(request.state, "user", None)
+    user_id = user.get("oid", "") if user else ""
     
     logger.info("hybrid_query_received",
                group_id=group_id,
@@ -571,13 +577,14 @@ async def hybrid_query(
                 language=body.language,
                 query_mode=body.query_mode,
                 folder_id=body.folder_id,
+                config_overrides=body.config_overrides,
+                user_id=user_id,
             )
         else:
-            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language, folder_id=body.folder_id)
+            result = await pipeline.query(body.query, body.response_type, knn_config=body.knn_config, prompt_variant=body.prompt_variant, synthesis_model=body.synthesis_model, include_context=body.include_context, language=body.language, folder_id=body.folder_id, config_overrides=body.config_overrides, user_id=user_id)
         
         # Fire-and-forget instrumentation tracking
         latency_ms = (time.time() - start_time) * 1000
-        user = getattr(request.state, "user", None)
         track_query(
             query=body.query,
             route=result.get("route_used", "unknown"),
@@ -585,7 +592,7 @@ async def hybrid_query(
             tokens_used=result.get("usage", {}).get("total_tokens", 0),
             success=True,
             group_id=group_id,
-            user_id=user.get("oid", "") if user else "",
+            user_id=user_id,
             skip_record_query=getattr(request.state, "query_recorded", False),
             metadata={
                 "response_type": body.response_type,
@@ -759,10 +766,13 @@ async def hybrid_query_drift(request: Request, body: HybridQueryRequest, group_i
             relevance_budget=0.9  # Thoroughness for complex queries
         )
         
+        user = getattr(request.state, "user", None)
+        user_id = user.get("oid", "") if user else ""
         result = await pipeline.force_route(
             query=body.query,
             route=QueryRoute.DRIFT_MULTI_HOP,
-            response_type=body.response_type
+            response_type=body.response_type,
+            user_id=user_id,
         )
         return HybridQueryResponse(**result)
 
@@ -1147,6 +1157,7 @@ async def _run_indexing_job(
     knn_top_k: int = 5,
     knn_similarity_cutoff: float = 0.60,
     knn_config: Optional[str] = None,
+    user_id: Optional[str] = None,
 ):
     """Background task to run indexing with distributed lock."""
     await _indexing_jobs.update(job_id, status="running", progress="Acquiring indexing lock...")
@@ -1181,6 +1192,7 @@ async def _run_indexing_job(
                 knn_top_k=knn_top_k,
                 knn_similarity_cutoff=knn_similarity_cutoff,
                 knn_config=knn_config,
+                user_id=user_id,
             )
 
             def _run_pipeline_in_thread():
@@ -1239,6 +1251,8 @@ async def hybrid_index_documents(
     """
 
     group_id = request.state.group_id
+    user = getattr(request.state, "user", None)
+    user_id = user.get("oid", "") if user else ""
 
     # Resolve folder_id → root_folder_id for Neo4j partition
     from src.api_gateway.services.folder_resolver import resolve_neo4j_group_id
@@ -1304,6 +1318,7 @@ async def hybrid_index_documents(
         body.knn_top_k,
         body.knn_similarity_cutoff,
         body.knn_config,
+        user_id,
     )
     
     logger.info(

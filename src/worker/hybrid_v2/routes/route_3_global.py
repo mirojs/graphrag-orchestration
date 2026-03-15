@@ -28,7 +28,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import structlog
 
-from .base import BaseRouteHandler, Citation, RouteResult
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client, acomplete_with_retry
 from .route_3_prompts import MAP_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT, REDUCE_WITH_EVIDENCE_PROMPT_CONCISE
 from src.core.config import settings
 from ..services.neo4j_retry import retry_session
@@ -85,6 +85,7 @@ class GlobalSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 3 v3: Sentence-enriched Map-Reduce global search.
 
@@ -649,10 +650,8 @@ class GlobalSearchHandler(BaseRouteHandler):
         )
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             text = response.text.strip()
-
-            # Check for explicit "no relevant claims"
             if "NO RELEVANT CLAIMS" in text.upper():
                 logger.info("map_no_relevant_claims", community=title)
                 return (title, [])
@@ -741,7 +740,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             prompt += f"\n\nIMPORTANT: Respond entirely in {language}."
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             return response.text.strip()
         except Exception as e:
             logger.error(
@@ -889,21 +888,16 @@ class GlobalSearchHandler(BaseRouteHandler):
         rerank_model = os.getenv("ROUTE3_RERANK_MODEL", "rerank-2.5")
 
         try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            vc = make_voyage_client()
             documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
 
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                self._executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            rr_result = await rerank_with_retry(
+                vc,
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+                executor=self._executor,
             )
 
             # Track reranker usage (fire-and-forget)
@@ -915,11 +909,12 @@ class GlobalSearchHandler(BaseRouteHandler):
                 from src.core.services.usage_tracker import get_usage_tracker
                 _tracker = get_usage_tracker()
                 asyncio.ensure_future(_tracker.log_rerank_usage(
-                    partition_id=self.group_id,
+                    partition_id=user_id if user_id else self.group_id,
                     model=rerank_model,
                     total_tokens=_rerank_tokens,
                     documents_reranked=len(documents),
                     route="route_3",
+                    user_id=user_id,
                 ))
             except Exception:
                 pass

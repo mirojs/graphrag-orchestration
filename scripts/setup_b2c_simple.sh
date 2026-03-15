@@ -48,7 +48,7 @@ else
     CALLBACK_URL="https://graphrag-api-b2c.${AZURE_REGION}.azurecontainerapps.io/.auth/login/aad/callback"
     
     APP_RESULT=$(az ad app create \
-        --display-name "GraphRAG Frontend B2C" \
+        --display-name "Evidoc" \
         --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
         --web-redirect-uris "$CALLBACK_URL" \
         --query "{appId: appId, id: id}" -o json)

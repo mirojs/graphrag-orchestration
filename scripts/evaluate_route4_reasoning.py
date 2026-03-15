@@ -239,8 +239,8 @@ def main():
     deployment_name = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-5.1") # Match production deployment
     logger.info(f"Using Judge Model: {deployment_name}")
     
-    # 3. Evaluate
-    scores = []
+    # 3. Evaluate ALL runs (not just the first)
+    question_scores = []  # Each entry: {qid, expected, run_scores: [{run, score, reasoning, actual}]}
     
     print(f"\n{'='*60}")
     print(f"Starting Evaluation for {args.results_json.name}")
@@ -258,39 +258,51 @@ def main():
         if not runs:
             continue
             
-        # Use the first run specifically
-        actual_answer = runs[0].get("text", "")
         expected = ground_truth.get(qid, "UNKNOWN")
         
         if expected == "UNKNOWN":
             logger.warning(f"No ground truth for {qid}, skipping")
             continue
+        
+        run_scores = []
+        for run_idx, run in enumerate(runs):
+            actual_answer = run.get("text", "")
+            run_num = run_idx + 1
+            print(f"Evaluating {qid} run {run_num}/{len(runs)}...", end="", flush=True)
             
-        print(f"Evaluating {qid}...", end="", flush=True)
+            result = evaluate_single_run(client, deployment_name, query, expected, actual_answer)
+            score = result.get("score", 0)
+            reasoning = result.get("reasoning", "")
+            
+            print(f" Score: {score}/3")
+            
+            run_scores.append({
+                "run": run_num,
+                "score": score,
+                "reasoning": reasoning,
+                "actual": actual_answer,
+            })
         
-        result = evaluate_single_run(client, deployment_name, query, expected, actual_answer)
-        score = result.get("score", 0)
-        reasoning = result.get("reasoning", "")
-        
-        print(f" Score: {score}/3")
-        
-        scores.append({
+        question_scores.append({
             "qid": qid,
-            "score": score,
-            "reasoning": reasoning,
-            "actual": actual_answer,
-            "expected": expected
+            "expected": expected,
+            "run_scores": run_scores,
         })
         count += 1
-        
-    # 4. Summary Report
-    total_score = sum(s['score'] for s in scores)
-    max_score = len(scores) * 3
+    
+    # 4. Summary Report — scores summed across ALL runs
+    num_questions = len(question_scores)
+    all_run_scores = [rs for qs in question_scores for rs in qs["run_scores"]]
+    total_evaluations = len(all_run_scores)
+    num_runs = max((len(qs["run_scores"]) for qs in question_scores), default=1)
+    
+    total_score = sum(rs["score"] for rs in all_run_scores)
+    max_score = total_evaluations * 3
     accuracy = (total_score / max_score) * 100 if max_score > 0 else 0
     
-    # Calculate Pass Rate (Score >= 2)
-    pass_count = sum(1 for s in scores if s['score'] >= 2)
-    pass_rate = (pass_count / len(scores)) * 100 if scores else 0
+    # Pass Rate: fraction of individual evaluations scoring >= 2
+    pass_count = sum(1 for rs in all_run_scores if rs["score"] >= 2)
+    pass_rate = (pass_count / total_evaluations) * 100 if total_evaluations else 0
     
     report_path = args.results_json.with_suffix('.eval.md')
     
@@ -303,16 +315,29 @@ def main():
         f.write("## Summary Metrics\n\n")
         f.write(f"- **Total Score:** {total_score}/{max_score} ({accuracy:.1f}%)\n")
         f.write(f"- **Pass Rate (Score >= 2):** {pass_rate:.1f}%\n")
-        f.write(f"- **Evaluated Questions:** {len(scores)}\n\n")
+        f.write(f"- **Questions:** {num_questions}\n")
+        f.write(f"- **Runs per question:** {num_runs}\n")
+        f.write(f"- **Total evaluations:** {total_evaluations}\n\n")
         
         f.write("## Detailed Results\n\n")
         
-        for item in scores:
-            icon = "✅" if item['score'] >= 2 else "❌"
-            f.write(f"### {item['qid']} {icon} (Score: {item['score']}/3)\n\n")
-            f.write(f"**Judge Reasoning:** {item['reasoning']}\n\n")
-            f.write(f"**Expected:** {item['expected']}\n\n")
-            # f.write(f"**Actual:**\n{item['actual'][:300]}...\n\n") # Optional truncate
+        for qs in question_scores:
+            qid = qs["qid"]
+            run_scores = qs["run_scores"]
+            q_total = sum(rs["score"] for rs in run_scores)
+            q_max = len(run_scores) * 3
+            all_pass = all(rs["score"] >= 2 for rs in run_scores)
+            any_fail = any(rs["score"] < 2 for rs in run_scores)
+            icon = "✅" if all_pass else "❌"
+            
+            run_summary = ", ".join(f"Run {rs['run']}: {rs['score']}/3" for rs in run_scores)
+            f.write(f"### {qid} {icon} (Score: {q_total}/{q_max} — {run_summary})\n\n")
+            
+            for rs in run_scores:
+                f.write(f"**Run {rs['run']} — Score: {rs['score']}/3:**\n")
+                f.write(f"{rs['reasoning']}\n\n")
+            
+            f.write(f"**Expected:** {qs['expected']}\n\n")
             f.write("---\n")
             
     print(f"\nEvaluation Complete. Report written to:\n{report_path}")

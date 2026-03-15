@@ -52,7 +52,8 @@ describe("FileList", () => {
 
     it("calls onToggleSelect when row is clicked", () => {
         setup();
-        fireEvent.click(screen.getByText("report.pdf"));
+        // Click on the type column (not filename, which now opens preview)
+        fireEvent.click(screen.getByText("PDF"));
         expect(onToggle).toHaveBeenCalledWith("report.pdf");
     });
 

@@ -62,7 +62,7 @@ else
     
     # Create app registration
     APP_RESULT=$(az ad app create \
-        --display-name "GraphRAG Frontend B2C" \
+        --display-name "Evidoc" \
         --sign-in-audience "AzureADandPersonalMicrosoftAccount" \
         --enable-id-token-issuance true \
         --web-home-page-url "https://graphrag-api-b2c.salmonhill-df6033f3.swedencentral.azurecontainerapps.io" \

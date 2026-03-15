@@ -1,0 +1,28 @@
+.container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.label {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: #424242;
+    white-space: nowrap;
+}
+
+.dropdown {
+    min-width: 200px;
+    max-width: 300px;
+}
+
+.emptyText {
+    font-size: 0.75rem;
+    color: #999;
+    font-style: italic;
+}
+
+.errorText {
+    font-size: 0.75rem;
+    color: #d13438;
+}

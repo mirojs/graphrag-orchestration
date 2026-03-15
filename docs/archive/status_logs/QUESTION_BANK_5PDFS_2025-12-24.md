@@ -135,66 +135,76 @@ Use for `mode=global` (or queries intended to route to GraphRAG global/community
 1. **Q-G1:** Across the agreements, list the **termination/cancellation** rules you can find.
    - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
-     - Property management: either party may terminate with `60 days written notice`.
+     - Property management: either party may terminate with `60 days written notice`; termination does not invalidate existing rental agreements; owner continues responsible for all obligations/expenses; owner shall honor all confirmed reservations.
      - Purchase contract: customer may cancel within `3 business days` for full refund; afterward deposit is forfeited.
      - Holding tank contract: remains until owner or pumper terminates.
-     - Warranty: not transferable; terminates if first purchaser sells/moves out.
-   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0/1); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
+     - Warranty: not transferable; terminates if first purchaser sells/moves out; warranty terms terminate `1 year` or `60 days` after commencement; arbitration provisions survive termination.
+   - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0/1); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1); BUILDERS LIMITED WARRANTY.pdf (chunk 3/5/6)
 
 2. **Q-G2:** Identify which documents reference **jurisdictions / governing law**.
    - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
-     - Warranty/arbitration: disputes governed by `State of Idaho` substantive law.
+     - Warranty/arbitration: disputes governed by `State of Idaho` substantive law; small claims court of State of Idaho; arbitrations conducted in Pocatello, Idaho.
      - Purchase contract: governed by laws of `State of Florida`.
      - Property management agreement: governed by laws of `State of Hawaii`.
-   - **Note:** "Pocatello" is the builder's mailing address (1820 Summit Ridge Dr., Pocatello, ID 83201), not a jurisdiction reference.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2)
+     - Holding tank contract: required under `WI Code SPS 383.21(2)5`; filed with `County of Washburn` (Wisconsin).
+   - **Note:** "Pocatello" is referenced as arbitration venue and builder's mailing address.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0)
 
 3. **Q-G3:** Summarize "who pays what" across the set (fees/charges/taxes).
    - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
      - Invoice: `TOTAL/AMOUNT DUE 29900.00`.
-     - Purchase contract: $29,900 in 3 installments.
-     - Property management: 25%/10% commissions + $75/month advertising + $50/month admin + 10% repair fee + $35/hour scheduling + Hawaii excise tax on fees.
-     - Holding tank: owner pays pumper charges; owner files contract changes within 10 business days.
-   - **Source:** contoso_lifts_invoice.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0/1)
+     - Purchase contract: $29,900 in 3 installments ($20K signing, $7K delivery, $2,900 completion); customer bears additional compliance costs; legal fees recoverable by contractor upon failure to pay.
+     - Property management: 25%/10% commissions + $75/month advertising + $50/month admin + 10% repair fee + $35/hour scheduling + Hawaii excise tax (`4.712%`) on fees + `$250.00` non-refundable start-up fee; agent deducts credit card/bankcard fees from owner's proceeds.
+     - Holding tank: owner pays pumper charges as mutually agreed.
+     - Warranty: builder repairs/replaces defective items at no charge; each party pays one-half of arbitration costs and own attorneys' fees; party refusing arbitration bears all costs.
+   - **Source:** contoso_lifts_invoice.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); BUILDERS LIMITED WARRANTY.pdf (chunk 2/5/6)
 
 4. **Q-G4:** What obligations are explicitly described as **reporting / record-keeping**?
    - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
-     - Holding tank: pumper submits reports to County including service dates, volumes pumped, and condition.
-     - Property management: agent provides owner a monthly statement of income and expenses.
-   - **Source:** HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/1)
+     - Holding tank: pumper submits reports to County including servicer name/address, tank owner name, property location, sanitary permit number, dates of service, volumes pumped, disposal sites, and condition of tank/components; owner must file original contract with County of Washburn; owner must file changes with municipality/County within `10 business days`.
+     - Property management: agent provides owner a monthly statement of income and expenses; agent conducts initial property inspection and condition report; agent prepares complete inventory of furniture/furnishings with condition report; agent provides media invoices on monthly statements.
+   - **Source:** HOLDING TANK SERVICING CONTRACT.pdf (chunk 0/1); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/1)
 
 5. **Q-G5:** What remedies / dispute-resolution mechanisms are described?
    - **Expected Route:** Route 3 (Global Search)
    - **Expected:**
-     - Warranty: binding arbitration (with small claims carveout) and confidentiality language.
-     - Purchase contract: legal fees recoverable by contractor upon customer default.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 3/4/5/6); purchase_contract.pdf (chunk 0)
+     - Warranty: binding arbitration (with small claims carveout ≤ $3,000 in Idaho); administered by AAA; each party pays ½ arbitration costs + own attorneys' fees; party refusing arbitration bears all costs; preserved remedies include lien claims/foreclosure, self-help (repossession, set-off), and provisional remedies (injunctive relief, sequestration, attachment, garnishment, replevin); arbitrator may consolidate multi-party claims and impose sanctions; 180-day target completion; all proceedings kept strictly confidential; builder repairs/replaces defective items at no charge within 60 days.
+     - Purchase contract: legal fees recoverable by contractor upon customer default; 3-day cancellation for full refund as a buyer remedy.
+     - Property management: owner holds harmless and indemnifies agent except for gross negligence or willful misconduct.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 2/3/4/5/6); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2)
 
 6. **Q-G6:** List all **named parties/organizations** across the documents and which document(s) they appear in.
     - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
-       - `Fabrikam Inc.`: builder (warranty), pumper (holding tank), customer (purchase contract)
-       - `Contoso Ltd.`: owner (property management), holding tank owner (holding tank)
-       - `Contoso Lifts LLC`: contractor (purchase contract)
+       - `Fabrikam Inc.`: builder (warranty), pumper (holding tank), customer (purchase contract), principal broker (property management)
+       - `Contoso Ltd.`: buyer/owner (warranty), owner (property management), owner (holding tank), signer (purchase contract)
+       - `Contoso Lifts LLC`: contractor (purchase contract), issuer (invoice)
        - `Walt Flood Realty`: agent (property management)
-    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); purchase_contract.pdf (chunk 0)
+       - `Fabrikam Construction`: bill-to customer (invoice) — distinct name from Fabrikam Inc.
+       - `American Arbitration Association (AAA)`: arbitration administrator (warranty)
+       - `Bayfront Animal Clinic`: job name/site (purchase contract)
+       - `Building Contractors Association of South East Idaho`: referenced (warranty)
+    - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0/6); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/2); purchase_contract.pdf (chunk 0/1); contoso_lifts_invoice.pdf (chunk 0)
 
 7. **Q-G7:** Summarize all explicit **notice / delivery** mechanisms (written notice, certified mail, phone, filings) mentioned.
     - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
-       - PMA: `60 days written notice` to terminate
-       - Warranty: defect notice must be `in writing` and sent by `certified mail return receipt requested`; emergencies by phone
-       - Holding tank: file contract changes with municipality/County within `10 business days`
-    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); BUILDERS LIMITED WARRANTY.pdf (chunk 2/3); HOLDING TANK SERVICING CONTRACT.pdf (chunk 1)
+       - PMA: `60 days written notice` to terminate; `5 business days written notification` if property listed for sale; prior `written approval` for expenditures over `$300`.
+       - Warranty: defect notice must be `in writing` and sent by `certified mail return receipt requested`; emergencies by phone; buyer/owner must tell builder `in writing` about availability.
+       - Holding tank: file original contract with County of Washburn; file contract changes with municipality/County within `10 business days`; pumper submits servicing reports to County.
+       - Purchase contract: changes must be agreed to `in writing`; assignment requires other party's `written consent`.
+    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0/1); BUILDERS LIMITED WARRANTY.pdf (chunk 2/3); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0/1); purchase_contract.pdf (chunk 0)
 
 8. **Q-G8:** Summarize all explicit **insurance / indemnity / hold harmless** clauses.
     - **Expected Route:** Route 3 (Global Search)
     - **Expected:**
-       - PMA: requires liability insurance with minimum limits `$300,000` BI and `$25,000` PD; hold harmless/indemnify agent (except gross negligence/willful misconduct)
-    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2)
+       - PMA: requires liability insurance with minimum limits `$300,000` BI and `$25,000` PD; agent named as additional insured with copy of policy and certificate furnished; hold harmless/indemnify agent (except gross negligence/willful misconduct).
+       - Purchase contract: contractor bears risk of loss until delivery; customer bears risk thereafter.
+       - Warranty: excludes consequential/incidental damages; disclaims all implied warranties (merchantability, fitness, habitability); failure to notify emergency relieves builder of all liability.
+    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0); BUILDERS LIMITED WARRANTY.pdf (chunk 1/2/3)
 
 9. **Q-G9:** Identify all explicit **non-refundable / forfeiture** terms across the documents.
     - **Expected Route:** Route 3 (Global Search)
@@ -226,7 +236,7 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 2. **Q-D2:** In the property management agreement, what happens to confirmed reservations if the agreement is terminated or the property is sold?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Owner shall honor all confirmed reservations.
+   - **Expected:** Owner shall honor all confirmed reservations. Additionally, termination does not invalidate any existing rental agreements made by Agent on Owner's behalf, and Owner remains responsible for all obligations and expenses incurred by the Agent.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
 
 3. **Q-D3:** Compare "time windows" across the set: list all explicit day-based timeframes.
@@ -241,8 +251,8 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 5. **Q-D5:** In the warranty, explain how the "coverage start" is defined and what must happen before coverage ends.
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Coverage begins on date of final settlement or first occupancy whichever comes first; claims must be made in writing within the 1-year or 60-day period before coverage ends.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0)
+   - **Expected:** Coverage begins on date of final settlement or first occupancy whichever comes first; claims must be made in writing by `certified mail return receipt requested` within the 1-year or 60-day period before coverage ends. Warranty is non-transferable and automatically terminates if the first purchaser sells the home or moves out.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0/3)
 
 6. **Q-D6:** Do the purchase contract total price and the invoice total match? If so, what is that amount?
    - **Expected Route:** Route 4 (DRIFT)
@@ -256,18 +266,18 @@ Use for `mode=drift` (or queries intended to route to multi-hop reasoning).
 
 8. **Q-D8:** Across the set, which entity appears in the most different documents: `Fabrikam Inc.` or `Contoso Ltd.`?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same number of documents (4 each - they are tied). Fabrikam appears in: warranty (as Builder), holding tank (as Pumper), property management (referenced), and purchase contract (as Customer). Contoso appears in: warranty (as Buyer/Owner), holding tank (as Owner), property management (as Owner), and purchase contract (as Contractor). Note: The invoice lists "Contoso Lifts LLC" which is a different entity.
-   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0)
+   - **Expected:** Both `Fabrikam Inc.` and `Contoso Ltd.` appear in the same number of documents (4 each - they are tied). Fabrikam appears in: warranty (as Builder), holding tank (as Pumper), property management (as Principal Broker), and purchase contract (as Customer). Contoso appears in: warranty (as Buyer/Owner), holding tank (as Owner), property management (as Owner), and purchase contract (as Authorized Representative/signer). Note: The invoice lists "Contoso Lifts LLC" (Contractor) and "Fabrikam Construction" (bill-to) which are different entities.
+   - **Source:** BUILDERS LIMITED WARRANTY.pdf (chunk 0); HOLDING TANK SERVICING CONTRACT.pdf (chunk 0); purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 0); contoso_lifts_invoice.pdf (chunk 0)
 
 9. **Q-D9:** Compare the "fees" concepts: which doc has a percentage-based fee structure and which has fixed installment payments?
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Property management agreement percentage-based commissions 25% 10% gross revenues short term long term; purchase contract fixed installment payments $20,000 $7,000 $2,900 totaling $29,900.
+   - **Expected:** Property management agreement has a mixed fee structure: percentage-based commissions (25%/10% gross revenues for short-term/long-term rentals, 10% on repairs/renovations, 4.712% Hawaii excise tax on all fees) plus fixed charges ($75/month advertising, $50/month admin, $35/hour scheduling, $250 non-refundable start-up fee) and credit card fee deductions. Purchase contract has fixed installment payments: $20,000 signing + $7,000 delivery + $2,900 completion = $29,900 total.
    - **Source:** PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 1/2); purchase_contract.pdf (chunk 0)
 
 10. **Q-D10:** List the three different "risk allocation" statements across the set (risk of loss, liability limitations, non-transferability).
    - **Expected Route:** Route 4 (DRIFT)
-   - **Expected:** Purchase contract shifts risk of loss after delivery; property management agreement limits agent liability except gross negligence willful misconduct; warranty is not transferable terminates if first purchaser sells or moves out.
-   - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 3)
+   - **Expected:** Purchase contract shifts risk of loss after delivery; property management agreement limits agent liability except gross negligence/willful misconduct (owner holds harmless and indemnifies agent); warranty is not transferable, terminates if first purchaser sells or moves out; warranty excludes consequential/incidental damages and disclaims all implied warranties; purchase contract prohibits assignment without other party's written consent.
+   - **Source:** purchase_contract.pdf (chunk 0); PROPERTY MANAGEMENT AGREEMENT.pdf (chunk 2); BUILDERS LIMITED WARRANTY.pdf (chunk 1/3)
 
 ---
 

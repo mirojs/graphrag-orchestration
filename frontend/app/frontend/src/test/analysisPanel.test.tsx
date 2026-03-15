@@ -40,34 +40,19 @@ describe("AnalysisPanel", () => {
         );
     });
 
-    it("renders both tab roles", () => {
+    it("renders citation tab", () => {
         renderWithProviders(
             <AnalysisPanel
                 className=""
-                activeTab={AnalysisPanelTabs.SupportingContentTab}
+                activeTab={AnalysisPanelTabs.CitationTab}
                 onActiveTabChanged={onTabChanged}
-                activeCitation={undefined}
+                activeCitation="/content/report.pdf"
                 citationHeight="600px"
                 answer={makeResponse()}
             />
         );
         const tabs = screen.getAllByRole("tab");
-        expect(tabs).toHaveLength(2);
-    });
-
-    it("renders supporting content when tab is active", () => {
-        renderWithProviders(
-            <AnalysisPanel
-                className=""
-                activeTab={AnalysisPanelTabs.SupportingContentTab}
-                onActiveTabChanged={onTabChanged}
-                activeCitation={undefined}
-                citationHeight="600px"
-                answer={makeResponse()}
-            />
-        );
-        // SupportingContent component renders data points
-        expect(screen.getByText(/point1/)).toBeInTheDocument();
+        expect(tabs).toHaveLength(1);
     });
 
     it("enables citation tab when activeCitation is set", () => {
@@ -90,7 +75,7 @@ describe("AnalysisPanel", () => {
         renderWithProviders(
             <AnalysisPanel
                 className=""
-                activeTab={AnalysisPanelTabs.SupportingContentTab}
+                activeTab={AnalysisPanelTabs.CitationTab}
                 onActiveTabChanged={onTabChanged}
                 activeCitation="/content/report.pdf"
                 citationHeight="600px"

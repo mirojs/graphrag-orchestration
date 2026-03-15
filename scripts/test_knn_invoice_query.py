@@ -55,7 +55,12 @@ async def test_group(group_id: str, group_name: str, edges: int):
     
     try:
         # Initialize
-        neo4j_store = Neo4jStoreV3()
+        neo4j_store = Neo4jStoreV3(
+            uri=settings.NEO4J_URI,
+            username=settings.NEO4J_USERNAME,
+            password=settings.NEO4J_PASSWORD,
+            database=getattr(settings, "NEO4J_DATABASE", "neo4j"),
+        )
         route = DRIFTMultiHopRoute(neo4j_store=neo4j_store)
         
         # Run query

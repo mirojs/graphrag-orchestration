@@ -55,15 +55,15 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Indtal spørgsmål",
         "stopRecording": "Stop optagelse af spørgsmål",
-        "showSupportingContent": "Vis understøttende indhold",
         "speakAnswer": "Afspil svar",
         "info": "Info",
         "save": "Gem",
         "copy": "Kopier",
-        "copied": "Kopieret!"
+        "copied": "Kopieret!",
+        "showOriginal": "Vis originalt svar",
+        "showTranslated": "Vis oversat svar"
     },
     "headerTexts": {
-        "supportingContent": "Understøttende indhold",
         "citation": "Kilde"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Dette vil permanent fjerne alle analysedata (graf, entiteter, embeddings) for denne mappe. Originale filer beholdes. Fortsæt?",
         "analysisDeleted": "Analysedata slettet",
         "deleteAnalysisFailed": "Sletning af analyse mislykkedes: {{message}}",
-        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger."
+        "storageReminder": "💡 Analysedata bruger lagerplads. Slet analysen når den ikke længere er nødvendig for at spare omkostninger.",
+        "zoneAnalysisResults": "Analyseresultater",
+        "zoneAnalyzed": "Analyseret",
+        "zoneFolders": "Mapper",
+        "expandZone": "Udvid",
+        "collapseZone": "Fold sammen"
     },
     "viewer": {
         "loadingFile": "Indlæser fil",
@@ -335,5 +340,11 @@
         "plan": "Plan",
         "lastActive": "Sidst aktiv",
         "noUserActivity": "Ingen brugeraktivitetsdata endnu. Data vises, når analyser er tilsluttet."
+    },
+    "folderSelector": {
+        "label": "Vidensbase:",
+        "placeholder": "Vælg en vidensbase…",
+        "noFolders": "Ingen analyserede mapper endnu",
+        "loadError": "Kunne ikke indlæse mapper"
     }
 }

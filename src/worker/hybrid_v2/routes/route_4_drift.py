@@ -35,7 +35,7 @@ import structlog
 
 from src.core.config import settings
 from ..services.neo4j_retry import retry_session
-from .base import BaseRouteHandler, RouteResult, Citation
+from .base import BaseRouteHandler, RouteResult, Citation, rerank_with_retry, make_voyage_client, acomplete_with_retry
 
 logger = structlog.get_logger(__name__)
 
@@ -111,6 +111,7 @@ class DRIFTHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 4: DRIFT for complex multi-hop queries.
@@ -609,10 +610,8 @@ Format your response as a numbered list:
 Sub-questions:"""
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             text = response.text.strip()
-            
-            # --- Robust multi-line parser ---
             # LLM may wrap long sub-questions across multiple lines.
             # First, join continuation lines back onto their numbered item.
             # A "continuation line" is any line that does NOT start with a digit
@@ -934,7 +933,7 @@ Sub-questions:"""
                         query_unit = unit_match.group(1) if unit_match else None
                         
                         # Extract other important keywords (nouns, key terms)
-                        query_keywords = set(re.findall(r'\b[a-z]{3,}\b', query_lower))
+                        query_keywords = set(re.findall(r'[\w]{2,}', query_lower))
                         # Remove stop words
                         stop_words = {'the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 
                                      'had', 'her', 'was', 'one', 'our', 'out', 'has', 'have', 'been',
@@ -1385,21 +1384,16 @@ Sub-questions:"""
         rerank_model = os.getenv("ROUTE4_RERANK_MODEL", "rerank-2.5")
 
         try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            vc = make_voyage_client()
             documents = [ev.get("sentence_text") or ev.get("text", "") for ev in evidence]
 
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                self._executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            rr_result = await rerank_with_retry(
+                vc,
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+                executor=self._executor,
             )
 
             # Track reranker usage (fire-and-forget)
@@ -1411,11 +1405,12 @@ Sub-questions:"""
                 from src.core.services.usage_tracker import get_usage_tracker
                 _tracker = get_usage_tracker()
                 asyncio.ensure_future(_tracker.log_rerank_usage(
-                    partition_id=self.group_id,
+                    partition_id=user_id if user_id else self.group_id,
                     model=rerank_model,
                     total_tokens=_rerank_tokens,
                     documents_reranked=len(documents),
                     route="route_4",
+                    user_id=user_id,
                 ))
             except Exception:
                 pass

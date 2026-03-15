@@ -206,6 +206,37 @@ def _normalize_for_comparison(name: str) -> str:
     return s
 
 
+_WORD_TO_NUM = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+    "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+    "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20, "thirty": 30,
+    "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+    "ninety": 90, "hundred": 100, "thousand": 1000,
+}
+
+
+def _extract_numbers(text: str) -> Set[int]:
+    """Extract all numeric values from text, including word-form numbers."""
+    nums: Set[int] = set()
+    for tok in re.findall(r'\d+', text):
+        nums.add(int(tok))
+    for word in text.lower().split():
+        clean = re.sub(r'[^\w]', '', word)
+        if clean in _WORD_TO_NUM:
+            nums.add(_WORD_TO_NUM[clean])
+    return nums
+
+
+def _has_conflicting_numbers(name1: str, name2: str) -> bool:
+    """Return True if both names contain numbers and those numbers differ."""
+    nums1 = _extract_numbers(name1)
+    nums2 = _extract_numbers(name2)
+    if not nums1 or not nums2:
+        return False
+    return nums1 != nums2
+
+
 class EntityDeduplicationService:
     """Service for NLP-based entity deduplication using embeddings and rules."""
 
@@ -354,6 +385,15 @@ class EntityDeduplicationService:
                         reason = {"type": "abbreviation_match"}
                         result.rule_merges += 1
                 
+                if should_merge:
+                    # Guard: never merge entities with conflicting numbers
+                    if _has_conflicting_numbers(name_i, name_j):
+                        should_merge = False
+                        if reason.get("type") == "embedding_similarity":
+                            result.embedding_merges -= 1
+                        elif reason.get("type") in ("acronym_match", "abbreviation_match"):
+                            result.rule_merges -= 1
+
                 if should_merge:
                     union(name_i, name_j)
                     # Store reason for the pair

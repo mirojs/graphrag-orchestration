@@ -55,15 +55,15 @@
         "stopStreaming": "Zatrzymaj przesyłanie strumieniowe",
         "askWithVoice": "Zadaj pytanie głosem",
         "stopRecording": "Zatrzymaj nagrywanie pytania",
-        "showSupportingContent": "Pokaż treść pomocniczą",
         "speakAnswer": "Odczytaj odpowiedź",
         "info": "Informacje",
         "save": "Zapisz",
         "copy": "Kopiuj",
-        "copied": "Skopiowano!"
+        "copied": "Skopiowano!",
+        "showOriginal": "Pokaż oryginalną odpowiedź",
+        "showTranslated": "Pokaż przetłumaczoną odpowiedź"
     },
     "headerTexts": {
-        "supportingContent": "Treść pomocnicza",
         "citation": "Cytat"
     },
     "labels": {
@@ -234,7 +234,12 @@
         "deleteAnalysisConfirm": "Spowoduje to trwałe usunięcie wszystkich danych analizy (graf, encje, embeddingi) dla tego folderu. Oryginalne pliki zostaną zachowane. Kontynuować?",
         "analysisDeleted": "Dane analizy zostały pomyślnie usunięte",
         "deleteAnalysisFailed": "Nie udało się usunąć analizy: {{message}}",
-        "storageReminder": "💡 Dane analizy zajmują miejsce. Usuń analizę, gdy nie jest już potrzebna, aby zaoszczędzić na kosztach."
+        "storageReminder": "💡 Dane analizy zajmują miejsce. Usuń analizę, gdy nie jest już potrzebna, aby zaoszczędzić na kosztach.",
+        "zoneAnalysisResults": "Wyniki analizy",
+        "zoneAnalyzed": "Przeanalizowane",
+        "zoneFolders": "Foldery",
+        "expandZone": "Rozwiń",
+        "collapseZone": "Zwiń"
     },
     "viewer": {
         "loadingFile": "Ładowanie pliku",
@@ -338,5 +343,11 @@
         "plan": "Plan",
         "lastActive": "Ostatnia aktywność",
         "noUserActivity": "Brak danych o aktywności użytkowników. Dane pojawią się po podłączeniu analityki."
+    },
+    "folderSelector": {
+        "label": "Baza wiedzy:",
+        "placeholder": "Wybierz bazę wiedzy…",
+        "noFolders": "Brak przeanalizowanych folderów",
+        "loadError": "Nie można załadować folderów"
     }
 }

@@ -78,6 +78,19 @@
     font-weight: 600;
 }
 
+/* Analysis status left-border accents — disabled, zones handle this now */
+/*
+.folderRowAnalyzing {
+    border-left: 3px solid #4cc9f0;
+}
+.folderRowAnalyzed {
+    border-left: 3px solid #2ecc71;
+}
+.folderRowStale {
+    border-left: 3px solid #f0ad4e;
+}
+*/
+
 .folderIcon {
     font-size: 16px;
     flex-shrink: 0;
@@ -288,4 +301,75 @@
 @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
+}
+
+/* Zone grouping */
+.zone {
+    margin-top: 10px;
+}
+.zone:first-of-type {
+    margin-top: 8px;
+}
+
+.zoneHeader {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 7px 12px;
+    cursor: pointer;
+    user-select: none;
+    background: #f0f2f5;
+    border-top: 1px solid #e4e7eb;
+    border-bottom: 1px solid #e4e7eb;
+    transition: background 0.1s;
+}
+.zoneHeader:hover {
+    background: #e8ebf0;
+}
+
+.zoneChevron {
+    font-size: 10px;
+    color: #777;
+    width: 12px;
+    flex-shrink: 0;
+}
+
+.zoneIcon {
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.zoneLabel {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #666;
+    flex: 1;
+}
+
+.zoneCount {
+    font-size: 10px;
+    font-weight: 600;
+    color: #888;
+    background: #e0e3e8;
+    border-radius: 8px;
+    padding: 1px 7px;
+    flex-shrink: 0;
+}
+
+/* Indent folder rows inside zones + colored left accent */
+.zoneFolders {
+    padding-left: 10px;
+    margin-left: 4px;
+    border-left: 3px solid transparent;
+}
+.zoneFoldersResults {
+    border-left-color: #7c3aed;
+}
+.zoneFoldersAnalyzed {
+    border-left-color: #2ecc71;
+}
+.zoneFoldersNotAnalyzed {
+    border-left-color: #d0d0d0;
 }

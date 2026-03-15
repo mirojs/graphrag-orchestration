@@ -568,7 +568,7 @@ class GlobalSearchHandler(BaseRouteHandler):
             "will", "would", "could", "should", "across", "list", "summarize"
         }
         query_terms = [
-            w.lower() for w in re.findall(r"[A-Za-z]{4,}", query)
+            w.lower() for w in re.findall(r"[\w]{2,}", query)
             if w.lower() not in stopwords
         ]
         

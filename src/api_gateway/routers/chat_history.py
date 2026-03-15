@@ -1,14 +1,19 @@
 """
-Chat History Router (Cosmos DB)
+Chat History Router (Azure Blob Storage)
 
-Provides CRUD endpoints for chat session history stored in Azure Cosmos DB.
-Replaces the Quart chat_history_cosmosdb_bp blueprint.
+Stores chat sessions as JSON blobs in Azure Blob Storage.
+Layout:  chat-history/{user_id}/index.json       — session list
+         chat-history/{user_id}/{session_id}.json — full conversation
+
+Cheaper and simpler than Cosmos DB for this append-heavy, read-occasional pattern.
 """
 
+import json
 import logging
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
+from azure.storage.blob import ContentSettings
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
@@ -19,26 +24,68 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat_history", tags=["chat-history"])
 
+_CONTAINER_NAME = "chat-history"
+
 
 # ==================== Request Models ====================
 
 class ChatHistoryItem(BaseModel):
     id: str
-    answers: List[List[str]]  # List of [question, response] pairs
+    answers: List[Any]  # List of [question, ChatAppResponse] pairs
 
 
-# ==================== Service Access ====================
+# ==================== Blob Helpers ====================
 
-def _get_history_container(request: Request):
-    """Get the Cosmos DB container from app state."""
-    container = getattr(request.app.state, "cosmos_history_container", None)
-    if not container:
+def _get_blob_service(request: Request):
+    """Get the BlobServiceClient from app state."""
+    svc = getattr(request.app.state, "chat_history_blob_service", None)
+    if not svc:
         raise HTTPException(status_code=400, detail="Chat history not enabled")
-    return container
+    return svc
 
 
-def _get_history_version(request: Request) -> str:
-    return getattr(request.app.state, "cosmos_history_version", "1")
+def _container_client(request: Request):
+    return _get_blob_service(request).get_container_client(_CONTAINER_NAME)
+
+
+async def _read_json(container, blob_path: str, default=None):
+    """Read and parse a JSON blob. Returns default if not found."""
+    try:
+        blob = container.get_blob_client(blob_path)
+        data = await blob.download_blob()
+        content = await data.readall()
+        return json.loads(content)
+    except Exception:
+        return default
+
+
+async def _write_json(container, blob_path: str, data):
+    """Write a JSON blob (overwrite)."""
+    blob = container.get_blob_client(blob_path)
+    await blob.upload_blob(
+        json.dumps(data, ensure_ascii=False),
+        overwrite=True,
+        content_settings=ContentSettings(content_type="application/json"),
+    )
+
+
+async def _delete_blob(container, blob_path: str):
+    """Delete a blob if it exists."""
+    try:
+        blob = container.get_blob_client(blob_path)
+        await blob.delete_blob()
+    except Exception:
+        pass
+
+
+async def _get_index(container, user_id: str) -> list:
+    """Get the session index for a user."""
+    return await _read_json(container, f"{user_id}/index.json", default=[])
+
+
+async def _put_index(container, user_id: str, sessions: list):
+    """Write the session index for a user."""
+    await _write_json(container, f"{user_id}/index.json", sessions)
 
 
 # ==================== Endpoints ====================
@@ -49,44 +96,35 @@ async def post_chat_history(
     body: ChatHistoryItem,
     user_id: str = Depends(get_user_id),
 ):
-    """Save or update a chat session with message pairs."""
-    container = _get_history_container(request)
-    version = _get_history_version(request)
+    """Save or update a chat session."""
+    container = _container_client(request)
 
     try:
-        first_question = body.answers[0][0]
+        first_question = body.answers[0][0] if body.answers else ""
         title = (first_question[:50] + "...") if len(first_question) > 50 else first_question
         timestamp = int(time.time() * 1000)
 
-        session_item = {
+        # Write session blob
+        session_data = {
             "id": body.id,
-            "version": version,
-            "session_id": body.id,
             "entra_oid": user_id,
-            "type": "session",
             "title": title,
             "timestamp": timestamp,
+            "answers": body.answers,
         }
+        await _write_json(container, f"{user_id}/{body.id}.json", session_data)
 
-        message_pair_items = []
-        for ind, pair in enumerate(body.answers):
-            message_pair_items.append({
-                "id": f"{body.id}-{ind}",
-                "version": version,
-                "session_id": body.id,
-                "entra_oid": user_id,
-                "type": "message_pair",
-                "question": pair[0],
-                "response": pair[1],
-            })
+        # Update index (insert or update entry, keep sorted by timestamp desc)
+        index = await _get_index(container, user_id)
+        index = [s for s in index if s["id"] != body.id]
+        index.insert(0, {
+            "id": body.id,
+            "entra_oid": user_id,
+            "title": title,
+            "timestamp": timestamp,
+        })
+        await _put_index(container, user_id, index)
 
-        batch_operations = [("upsert", (session_item,))] + [
-            ("upsert", (item,)) for item in message_pair_items
-        ]
-        await container.execute_item_batch(
-            batch_operations=batch_operations,
-            partition_key=[user_id, body.id],
-        )
         return JSONResponse({}, status_code=201)
     except Exception as e:
         logger.exception("Error saving chat history")
@@ -101,40 +139,18 @@ async def get_chat_history_sessions(
     user_id: str = Depends(get_user_id),
 ):
     """List chat sessions for the current user, paginated."""
-    container = _get_history_container(request)
+    container = _container_client(request)
 
     try:
-        res = container.query_items(
-            query=(
-                "SELECT c.id, c.entra_oid, c.title, c.timestamp "
-                "FROM c WHERE c.entra_oid = @entra_oid AND c.type = @type "
-                "ORDER BY c.timestamp DESC"
-            ),
-            parameters=[
-                {"name": "@entra_oid", "value": user_id},
-                {"name": "@type", "value": "session"},
-            ],
-            partition_key=[user_id],
-            max_item_count=count,
-        )
+        index = await _get_index(container, user_id)
 
-        pager = res.by_page(continuation_token)
-        sessions = []
-        next_token = None
-        try:
-            page = await pager.__anext__()
-            next_token = pager.continuation_token
-            async for item in page:
-                sessions.append({
-                    "id": item.get("id"),
-                    "entra_oid": item.get("entra_oid"),
-                    "title": item.get("title", "untitled"),
-                    "timestamp": item.get("timestamp"),
-                })
-        except StopAsyncIteration:
-            next_token = None
+        # Simple offset-based pagination via continuation token
+        offset = int(continuation_token) if continuation_token else 0
+        page = index[offset : offset + count]
+        next_offset = offset + count
+        next_token = str(next_offset) if next_offset < len(index) else None
 
-        return {"sessions": sessions, "continuation_token": next_token}
+        return {"sessions": page, "continuation_token": next_token}
     except Exception as e:
         logger.exception("Error listing chat sessions")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -147,28 +163,20 @@ async def get_chat_history_session(
     user_id: str = Depends(get_user_id),
 ):
     """Get a specific chat session with all message pairs."""
-    container = _get_history_container(request)
+    container = _container_client(request)
 
     try:
-        res = container.query_items(
-            query="SELECT * FROM c WHERE c.session_id = @session_id AND c.type = @type",
-            parameters=[
-                {"name": "@session_id", "value": session_id},
-                {"name": "@type", "value": "message_pair"},
-            ],
-            partition_key=[user_id, session_id],
-        )
-
-        message_pairs = []
-        async for page in res.by_page():
-            async for item in page:
-                message_pairs.append([item["question"], item["response"]])
+        data = await _read_json(container, f"{user_id}/{session_id}.json")
+        if not data or data.get("entra_oid") != user_id:
+            raise HTTPException(status_code=404, detail="Session not found")
 
         return {
             "id": session_id,
             "entra_oid": user_id,
-            "answers": message_pairs,
+            "answers": data.get("answers", []),
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Error getting chat session %s", session_id)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -180,26 +188,18 @@ async def delete_chat_history_session(
     session_id: str,
     user_id: str = Depends(get_user_id),
 ):
-    """Delete a chat session and all its message pairs."""
-    container = _get_history_container(request)
+    """Delete a chat session."""
+    container = _container_client(request)
 
     try:
-        res = container.query_items(
-            query="SELECT c.id FROM c WHERE c.session_id = @session_id",
-            parameters=[{"name": "@session_id", "value": session_id}],
-            partition_key=[user_id, session_id],
-        )
+        # Remove session blob
+        await _delete_blob(container, f"{user_id}/{session_id}.json")
 
-        ids_to_delete = []
-        async for page in res.by_page():
-            async for item in page:
-                ids_to_delete.append(item["id"])
+        # Update index
+        index = await _get_index(container, user_id)
+        index = [s for s in index if s["id"] != session_id]
+        await _put_index(container, user_id, index)
 
-        batch_operations = [("delete", (id_,)) for id_ in ids_to_delete]
-        await container.execute_item_batch(
-            batch_operations=batch_operations,
-            partition_key=[user_id, session_id],
-        )
         return Response(status_code=204)
     except Exception as e:
         logger.exception("Error deleting chat session %s", session_id)

@@ -73,8 +73,8 @@ class PlanLimits(BaseModel):
 # Plan definitions — these will eventually move to a database/config service
 PLAN_DEFINITIONS: Dict[PlanTier, PlanLimits] = {
     PlanTier.FREE: PlanLimits(
-        queries_per_day=20,
-        queries_per_month=200,
+        queries_per_day=100,
+        queries_per_month=2000,
         max_tokens_per_query=2048,
         monthly_credits=500,          # ~$0.50/month — ~5-25 queries
         max_documents=10,

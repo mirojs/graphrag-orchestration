@@ -603,7 +603,7 @@ Instructions:
             stopwords = {'this', 'that', 'with', 'from', 'have', 'been', 'were', 'what', 'when',
                         'where', 'which', 'there', 'their', 'about', 'would', 'could', 'should',
                         'found', 'document', 'provided', 'documents'}
-            words = re.findall(r'[a-z]{4,}', answer_lower)
+            words = re.findall(r'[\w]{2,}', answer_lower)
             grounding_tokens = {w for w in words if w not in stopwords}
         
         if not grounding_tokens:

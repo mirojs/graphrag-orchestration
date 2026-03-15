@@ -88,6 +88,7 @@ class LocalSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """
         Execute Route 2: LazyGraphRAG for entity-focused queries.

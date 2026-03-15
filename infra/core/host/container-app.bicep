@@ -109,6 +109,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
               timeoutSeconds: 5
             }
             {
+              type: 'Readiness'
+              httpGet: {
+                path: '/health'
+                port: targetPort
+                scheme: 'HTTP'
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              failureThreshold: 3
+              timeoutSeconds: 3
+            }
+            {
               type: 'Startup'
               httpGet: {
                 path: '/health'

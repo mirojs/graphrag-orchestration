@@ -35,7 +35,7 @@ import structlog
 import tiktoken
 
 from src.core.config import settings
-from .base import BaseRouteHandler, Citation, RouteResult
+from .base import BaseRouteHandler, Citation, RouteResult, rerank_with_retry, make_voyage_client, acomplete_with_retry
 from .route_6_prompts import CONCEPT_SYNTHESIS_PROMPT, COMMUNITY_EXTRACT_PROMPT
 from ..services.neo4j_retry import retry_session
 
@@ -91,6 +91,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         include_context: bool = False,
         language: Optional[str] = None,
         folder_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> RouteResult:
         """Execute Route 6: Community-aware concept synthesis.
 
@@ -116,7 +117,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         timings_ms: Dict[str, int] = {}
         t_route_start = time.perf_counter()
 
-        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "5"))
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
         section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
@@ -167,7 +168,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Feature 1: Dynamic Community Selection — LLM-rate matched communities
         dynamic_community = os.getenv(
-            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+            "ROUTE6_DYNAMIC_COMMUNITY", "1"
         ).strip().lower() in {"1", "true", "yes"}
         if dynamic_community and community_data:
             t_dc = time.perf_counter()
@@ -311,19 +312,20 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             # R6-6: Diversity BEFORE reranking but AFTER denoising (correct order).
             #
-            #   Previously diversity ran inside _retrieve_sentence_evidence on the raw
-            #   fetch, then reranking nullified it by cutting the diverse set to top_k.
-            #
-            #   Correct pipeline:
+            #   Pipeline:
             #     1. Denoise  (removes junk sentences)
             #     2. Diversity → pool of 2×rerank_top_k (guarantees document coverage)
             #     3. Rerank   → final rerank_top_k from the diverse pool
             #
             #   The reranker picks the BEST sentences from a pool that already covers
             #   all qualifying documents, so both relevance and coverage are preserved.
+            #
+            #   Diversity activates whenever we have more evidence than rerank_top_k
+            #   (previously required > 2×rerank_top_k, which was never met when
+            #   the shared vector index limited raw results).
             if diversity_enabled and sentence_evidence:
                 diversity_pool_k = rerank_top_k * 2
-                if len(sentence_evidence) > diversity_pool_k:
+                if len(sentence_evidence) > rerank_top_k:
                     sentence_evidence = self._diversify_by_document(
                         sentence_evidence,
                         top_k=diversity_pool_k,
@@ -525,7 +527,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             return response.text.strip()
         except Exception as e:
             logger.error(
@@ -589,7 +591,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         Gated by ROUTE6_STREAM_SYNTHESIS env var — caller should check before invoking.
         """
-        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "10"))
+        community_top_k = int(os.getenv("ROUTE6_COMMUNITY_TOP_K", "5"))
         sentence_top_k = int(os.getenv("ROUTE6_SENTENCE_TOP_K", "30"))
         section_top_k = int(os.getenv("ROUTE6_SECTION_TOP_K", "10"))
 
@@ -612,7 +614,7 @@ class ConceptSearchHandler(BaseRouteHandler):
 
         # Feature 1: Dynamic Community Selection (if enabled)
         dynamic_community = os.getenv(
-            "ROUTE6_DYNAMIC_COMMUNITY", "0"
+            "ROUTE6_DYNAMIC_COMMUNITY", "1"
         ).strip().lower() in {"1", "true", "yes"}
         if dynamic_community and community_data:
             try:
@@ -778,7 +780,7 @@ class ConceptSearchHandler(BaseRouteHandler):
             async with semaphore:
                 resp = None
                 try:
-                    resp = await self.llm.acomplete(prompt)
+                    resp = await acomplete_with_retry(self.llm, prompt)
                     text = resp.text.strip()
                     if text.startswith("```"):
                         text = re.sub(r'^```(?:json)?\s*\n?', '', text)
@@ -984,7 +986,7 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         try:
-            resp = await self.llm.acomplete(prompt)
+            resp = await acomplete_with_retry(self.llm, prompt)
             text = resp.text.strip()
             # Strip markdown code fences (LLMs often wrap JSON in ```json...```)
             if text.startswith("```"):
@@ -999,7 +1001,8 @@ class ConceptSearchHandler(BaseRouteHandler):
 
             # Sort by score descending, filter low-importance
             points = sorted(points, key=lambda p: p.get("score", 0), reverse=True)
-            points = [p for p in points if p.get("score", 0) >= 20]
+            min_score = int(os.getenv("ROUTE6_EXTRACT_MIN_SCORE", "40"))
+            points = [p for p in points if p.get("score", 0) >= min_score]
             if not points:
                 return self._format_raw_summaries(communities)
 
@@ -1303,19 +1306,14 @@ class ConceptSearchHandler(BaseRouteHandler):
         )
 
         # 2. Vector search on Sentence nodes + collect parent context
-        # UNION ALL of two branches for multi-group (user + __global__)
+        # sentence_embedding index does NOT have group_id as additional
+        # filterable property, so filter group_id OUTSIDE the SEARCH clause.
         cypher = f"""CYPHER 25
         CALL () {{
             MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $group_id LIMIT $top_k)
+            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding LIMIT $top_k)
             SCORE AS score
-            WHERE score >= $threshold
-            RETURN sent, score
-            UNION ALL
-            MATCH (sent:Sentence)
-            SEARCH sent IN (VECTOR INDEX sentence_embedding FOR $embedding WHERE sent.group_id = $global_group_id LIMIT $top_k)
-            SCORE AS score
-            WHERE score >= $threshold
+            WHERE score >= $threshold AND sent.group_id IN $group_ids
             RETURN sent, score
         }}
 
@@ -1764,7 +1762,32 @@ class ConceptSearchHandler(BaseRouteHandler):
                     return [dict(r) for r in records]
 
             results = await loop.run_in_executor(self._executor, _run)
-            entity_map = {r["entity_name"]: r["doc_titles"] for r in results}
+
+            # Filter noise: remove entities that are numbers, single generic
+            # words, or too short to be meaningful names.
+            def _is_meaningful(name: str) -> bool:
+                n = name.strip()
+                if len(n) < 3:
+                    return False
+                # Pure numbers / dates / zip codes
+                if re.match(r'^[\d\s,.\-/]+$', n):
+                    return False
+                # Single generic word (lowercase, no spaces)
+                generic = {
+                    "contract", "agreement", "document", "owner", "agent",
+                    "builder", "customer", "party", "property", "state",
+                    "county", "section", "change", "notice", "date",
+                    "service", "term", "condition", "fee", "payment",
+                }
+                if n.lower() in generic:
+                    return False
+                return True
+
+            entity_map = {
+                r["entity_name"]: r["doc_titles"]
+                for r in results
+                if _is_meaningful(r["entity_name"])
+            }
 
             logger.info(
                 "route6_entity_doc_map_complete",
@@ -1914,21 +1937,16 @@ class ConceptSearchHandler(BaseRouteHandler):
         rerank_model = os.getenv("ROUTE6_RERANK_MODEL", "rerank-2.5")
 
         try:
-            import voyageai
-            from src.core.config import settings
-
-            vc = voyageai.Client(api_key=settings.VOYAGE_API_KEY)
+            vc = make_voyage_client()
             documents = [ev.get("sentence_text") or ev.get("text") or "" for ev in evidence]
 
-            loop = asyncio.get_running_loop()
-            rr_result = await loop.run_in_executor(
-                self._executor,
-                lambda: vc.rerank(
-                    query=query,
-                    documents=documents,
-                    model=rerank_model,
-                    top_k=min(top_k, len(documents)),
-                ),
+            rr_result = await rerank_with_retry(
+                vc,
+                query=query,
+                documents=documents,
+                model=rerank_model,
+                top_k=min(top_k, len(documents)),
+                executor=self._executor,
             )
 
             # Track reranker usage (fire-and-forget)
@@ -1940,11 +1958,12 @@ class ConceptSearchHandler(BaseRouteHandler):
                 from src.core.services.usage_tracker import get_usage_tracker
                 _tracker = get_usage_tracker()
                 asyncio.ensure_future(_tracker.log_rerank_usage(
-                    partition_id=self.group_id,
+                    partition_id=user_id if user_id else self.group_id,
                     model=rerank_model,
                     total_tokens=_rerank_tokens,
                     documents_reranked=len(documents),
                     route="route_6",
+                    user_id=user_id,
                 ))
             except Exception:
                 pass

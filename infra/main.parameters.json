@@ -99,7 +99,7 @@
       "value": "${DOCUMENT_INTELLIGENCE_NAME=doc-intel-graphrag}"
     },
     "neo4jUri": {
-      "value": "${NEO4J_URI=neo4j+s://a86dcf63.databases.neo4j.io}"
+      "value": "${NEO4J_URI=neo4j+s://501bc8d1.databases.neo4j.io}"
     },
     "neo4jUsername": {
       "value": "${NEO4J_USERNAME=neo4j}"

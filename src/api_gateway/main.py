@@ -1,6 +1,16 @@
+import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
 import os
+import faulthandler
+faulthandler.enable()  # print traceback on SIGSEGV/SIGFPE/SIGABRT
+
+# Suppress "None of PyTorch, TensorFlow..." warning from transformers (used by wtpsplit)
+os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
+
+# Suppress Neo4j advisory notifications (property/label/rel-type doesn't exist yet)
+import logging
+logging.getLogger("neo4j.notifications").setLevel(logging.ERROR)
 
 from dotenv import load_dotenv
 load_dotenv()  # pick up .env for local development; no-op in containerized deployments
@@ -50,6 +60,126 @@ logger = structlog.get_logger()
 STATIC_DIR = Path(os.getenv("FRONTEND_STATIC_DIR", "/app/static"))
 
 
+async def _auto_resume_zombie_analyses(app: FastAPI):
+    """Detect folders stuck in 'analyzing' and auto-resume their pipelines.
+
+    Runs once after startup.  Uses the same code path as the /analyze endpoint
+    but skips already-processed files (file-level resume) and already-completed
+    pipeline steps (step checkpoint on GroupMeta).
+    """
+    await asyncio.sleep(10)  # let all services finish initializing
+
+    try:
+        from src.worker.services.graph_service import GraphService
+
+        driver = GraphService().driver
+        if driver is None:
+            return
+
+        # Find zombie folders: status = "analyzing" means a previous container
+        # was killed mid-pipeline.
+        with driver.session() as session:
+            records = list(session.run("""
+                MATCH (f:Folder {analysis_status: "analyzing"})
+                RETURN f.id AS folder_id, f.name AS folder_name,
+                       f.group_id AS partition_id, f.analysis_group_id AS neo4j_gid,
+                       f.analysis_files_processed AS processed,
+                       f.analysis_files_total AS total
+            """))
+
+        if not records:
+            logger.info("auto_resume: no zombie analyses found")
+            return
+
+        doc_sync = getattr(app.state, "document_sync_service", None)
+        blob_manager = getattr(app.state, "user_blob_manager", None)
+        if not doc_sync or not blob_manager:
+            logger.warning("auto_resume: doc_sync or blob_manager not available, skipping")
+            return
+
+        for rec in records:
+            folder_id = rec["folder_id"]
+            folder_name = rec["folder_name"]
+            partition_id = rec["partition_id"]
+            neo4j_gid = rec["neo4j_gid"]
+
+            if not neo4j_gid or not partition_id:
+                logger.warning(f"auto_resume: skipping folder {folder_id} — missing neo4j_gid or partition_id")
+                continue
+
+            logger.info(
+                "auto_resume: resuming analysis",
+                folder_id=folder_id,
+                folder_name=folder_name,
+                processed=rec["processed"],
+                total=rec["total"],
+            )
+
+            try:
+                # Resolve blob list (same logic as analyze_folder endpoint)
+                from src.api_gateway.routers.files import _resolve_folder_path
+                folder_path = await _resolve_folder_path(partition_id, folder_id)
+                blobs = await blob_manager.list_blobs_recursive(partition_id, folder_path or folder_name)
+
+                if not blobs:
+                    logger.warning(f"auto_resume: no blobs found for folder {folder_id}, marking stale")
+                    with driver.session() as session:
+                        session.run("""
+                            MATCH (f:Folder {id: $fid, group_id: $pid})
+                            SET f.analysis_status = 'stale',
+                                f.analysis_error = 'Auto-resume found no files'
+                        """, fid=folder_id, pid=partition_id)
+                    continue
+
+                # Try Redis worker first, fall back to in-process
+                dispatched = False
+                try:
+                    from src.core.services.redis_service import get_redis_service, Job
+                    import uuid as _uuid
+                    from datetime import datetime as _dt
+
+                    redis_svc = await get_redis_service()
+                    job = Job(
+                        id=str(_uuid.uuid4()),
+                        tenant_id=partition_id,
+                        job_type="index_folder",
+                        payload={
+                            "folder_id": folder_id,
+                            "folder_name": folder_name,
+                            "neo4j_gid": neo4j_gid,
+                            "partition_id": partition_id,
+                            "blobs": blobs,
+                        },
+                        created_at=_dt.utcnow().isoformat(),
+                        idempotency_key=f"index_folder:{folder_id}:{neo4j_gid}",
+                    )
+                    dispatched = await redis_svc.queue.enqueue(job)
+                    if dispatched:
+                        logger.info(f"auto_resume: dispatched to worker for folder {folder_id}")
+                except Exception as redis_err:
+                    logger.warning(f"auto_resume: Redis dispatch failed: {redis_err}")
+
+                if not dispatched:
+                    from src.api_gateway.routers.folders import _run_folder_analysis
+                    asyncio.create_task(
+                        _run_folder_analysis(
+                            doc_sync=doc_sync,
+                            blobs=blobs,
+                            neo4j_gid=neo4j_gid,
+                            folder_id=folder_id,
+                            folder_name=folder_name,
+                            partition_id=partition_id,
+                        )
+                    )
+                    logger.info(f"auto_resume: kicked off in-process for folder {folder_id}")
+
+            except Exception as e:
+                logger.error(f"auto_resume: failed for folder {folder_id}: {e}")
+
+    except Exception as e:
+        logger.error(f"auto_resume: top-level error: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -75,7 +205,6 @@ async def lifespan(app: FastAPI):
         graph_service = GraphService()
         if graph_service.driver:
             # Verify Neo4j connectivity (async-safe: run in thread to avoid blocking event loop)
-            import asyncio
             loop = asyncio.get_running_loop()
             def _ping():
                 with graph_service.driver.session() as session:
@@ -160,23 +289,32 @@ async def lifespan(app: FastAPI):
 
         app.state.azure_credential = azure_credential
 
-        # Chat history (Cosmos DB)
-        if os.getenv("USE_CHAT_HISTORY_COSMOS", "").lower() == "true":
-            cosmosdb_account = os.getenv("AZURE_COSMOSDB_ACCOUNT")
-            history_db = os.getenv("AZURE_CHAT_HISTORY_DATABASE")
-            history_container_name = os.getenv("AZURE_CHAT_HISTORY_CONTAINER")
-
-            if cosmosdb_account and history_db and history_container_name:
-                from azure.cosmos.aio import CosmosClient
-                cosmos_client = CosmosClient(
-                    url=f"https://{cosmosdb_account}.documents.azure.com:443/",
+        # Chat history (Azure Blob Storage)
+        _chat_history_enabled = (
+            os.getenv("ENABLE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+            or os.getenv("USE_CHAT_HISTORY_COSMOS", "").lower() == "true"
+            or os.getenv("ENABLE_CHAT_HISTORY", "").lower() == "true"
+        )
+        if _chat_history_enabled:
+            storage_account = (
+                os.getenv("AZURE_USERSTORAGE_ACCOUNT")
+                or os.getenv("AZURE_STORAGE_ACCOUNT")
+            )
+            if storage_account:
+                from azure.storage.blob.aio import BlobServiceClient
+                blob_svc = BlobServiceClient(
+                    account_url=f"https://{storage_account}.blob.core.windows.net",
                     credential=azure_credential,
                 )
-                db = cosmos_client.get_database_client(history_db)
-                app.state.cosmos_history_container = db.get_container_client(history_container_name)
-                app.state.cosmos_history_version = os.getenv("AZURE_CHAT_HISTORY_VERSION", "1")
-                app.state._cosmos_history_client = cosmos_client
-                logger.info("cosmos_chat_history_initialized")
+                # Ensure the chat-history container exists
+                try:
+                    await blob_svc.create_container("chat-history")
+                except Exception:
+                    pass  # Already exists
+                app.state.chat_history_blob_service = blob_svc
+                logger.info("chat_history_blob_initialized", account=storage_account)
+            else:
+                logger.warning("chat_history_skipped_no_storage_account")
 
         # File metadata (Cosmos DB)
         if os.getenv("USE_FILE_METADATA", "").lower() == "true":
@@ -250,6 +388,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("frontend_services_init_failed", error=str(e))
 
+    # ── Auto-resume zombie analyses on container restart ───────────────
+    # If the previous container was killed mid-indexing, the folder stays
+    # as "analyzing" with a partial pipeline_checkpoint.  We detect this
+    # and auto-resume in the background so the user doesn't have to
+    # manually re-trigger.
+    asyncio.create_task(_auto_resume_zombie_analyses(app))
+
     yield  # Application runs here
 
     # Shutdown
@@ -262,7 +407,7 @@ async def lifespan(app: FastAPI):
         logger.error("neo4j_close_failed", error=str(e))
 
     # Close Cosmos DB clients
-    for attr in ["_cosmos_history_client", "_cosmos_metadata_client"]:
+    for attr in ["_cosmos_metadata_client"]:
         client = getattr(app.state, attr, None)
         if client:
             try:
@@ -270,12 +415,13 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error("%s_close_failed", attr, error=str(e))
 
-    # Close blob managers
-    for attr in ["user_blob_manager", "global_blob_manager"]:
+    # Close blob managers / services
+    for attr in ["user_blob_manager", "global_blob_manager", "chat_history_blob_service"]:
         manager = getattr(app.state, attr, None)
         if manager:
             try:
-                await manager.close()
+                if hasattr(manager, "close"):
+                    await manager.close()
             except Exception as e:
                 logger.error("%s_close_failed", attr, error=str(e))
 

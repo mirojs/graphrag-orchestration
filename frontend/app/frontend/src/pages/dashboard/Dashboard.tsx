@@ -203,9 +203,7 @@ const Dashboard = () => {
                     <span className={styles.statLabel}>{t("dashboard.documents")}</span>
                     <span className={styles.statValue}>{usage.documents_count}</span>
                     <span className={styles.statSubtext}>
-                        {usage.personal_documents_count != null && usage.global_documents_count != null
-                            ? t("dashboard.personalShared", { personal: usage.personal_documents_count, shared: usage.global_documents_count, limit: usage.documents_limit })
-                            : t("dashboard.ofLimit", { limit: usage.documents_limit })}
+                        {t("dashboard.ofLimit", { limit: usage.documents_limit })}
                     </span>
                     <div className={styles.statBar}>
                         <div className={`${styles.statBarFill} ${docs.color}`} style={{ width: `${docs.pct}%` }} />

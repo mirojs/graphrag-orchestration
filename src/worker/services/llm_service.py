@@ -274,7 +274,7 @@ class LLMService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(UsageTracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     user_id=user_id,
                     model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                     total_tokens=estimated_tokens,
@@ -302,7 +302,7 @@ class LLMService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(UsageTracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     user_id=user_id,
                     model=settings.AZURE_OPENAI_EMBEDDING_DEPLOYMENT,
                     total_tokens=estimated_tokens,

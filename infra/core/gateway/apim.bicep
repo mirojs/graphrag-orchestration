@@ -46,7 +46,7 @@ resource apim 'Microsoft.ApiManagement/service@2023-05-01-preview' = {
   }
 }
 
-// Backend pointing to Container App
+// Backend pointing to Container App with retry and circuit-breaker
 resource backend 'Microsoft.ApiManagement/service/backends@2023-05-01-preview' = {
   parent: apim
   name: 'graphrag-backend'
@@ -56,6 +56,21 @@ resource backend 'Microsoft.ApiManagement/service/backends@2023-05-01-preview' =
     tls: {
       validateCertificateChain: true
       validateCertificateName: true
+    }
+    circuitBreaker: {
+      rules: [
+        {
+          name: 'backend-breaker'
+          failureCondition: {
+            count: 5
+            interval: 'PT1M'
+            statusCodeRanges: [
+              { min: 500, max: 599 }
+            ]
+          }
+          tripDuration: 'PT30S'
+        }
+      ]
     }
   }
 }
@@ -185,6 +200,10 @@ resource apiPolicy 'Microsoft.ApiManagement/service/apis/policies@2023-05-01-pre
     </inbound>
     <backend>
         <base />
+        <!-- Retry on transient backend failures (cold-start, 502/503/504) -->
+        <retry condition="@(context.Response.StatusCode >= 500)" count="3" interval="1" delta="2" max-interval="10" first-fast-retry="true">
+            <forward-request buffer-request-body="true" timeout="120" />
+        </retry>
     </backend>
     <outbound>
         <base />

@@ -34,11 +34,12 @@ class TestQueryModePresets:
     """Tests for QUERY_MODE_PRESETS class attribute."""
 
     def test_presets_defined(self):
-        """QUERY_MODE_PRESETS contains the 3 expected modes."""
+        """QUERY_MODE_PRESETS contains the 4 expected modes."""
         Handler = _get_handler_class()
         assert "local_search" in Handler.QUERY_MODE_PRESETS
         assert "global_search" in Handler.QUERY_MODE_PRESETS
         assert "drift_multi_hop" in Handler.QUERY_MODE_PRESETS
+        assert "community_search" in Handler.QUERY_MODE_PRESETS
 
     def test_local_search_preset_values(self):
         """local_search preset has concise parameters."""
@@ -60,6 +61,14 @@ class TestQueryModePresets:
         Handler = _get_handler_class()
         preset = Handler.QUERY_MODE_PRESETS["drift_multi_hop"]
         assert preset["ppr_passage_top_k"] == 20
+        assert preset["prompt_variant"] is None
+
+    def test_community_search_preset_values(self):
+        """community_search preset enables community passage seeding."""
+        Handler = _get_handler_class()
+        preset = Handler.QUERY_MODE_PRESETS["community_search"]
+        assert preset["ppr_passage_top_k"] == 50
+        assert preset["community_passage_seeds"] is True
         assert preset["prompt_variant"] is None
 
     def test_unknown_mode_returns_empty_preset(self):
@@ -164,6 +173,7 @@ class TestBackwardCompatibility:
         sig = inspect.signature(Handler.execute)
         expected = ["self", "query", "response_type", "knn_config",
                     "prompt_variant", "synthesis_model", "include_context",
-                    "weight_profile", "language", "query_mode", "folder_id"]
+                    "weight_profile", "language", "query_mode", "folder_id",
+                    "config_overrides"]
         actual = list(sig.parameters.keys())
         assert actual == expected

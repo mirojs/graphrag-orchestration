@@ -2,9 +2,12 @@ param name string
 param location string = resourceGroup().location
 param tags object = {}
 
+@description('Name of the existing Log Analytics workspace for container app logs')
+param logAnalyticsWorkspaceName string
+
 // Reference existing Log Analytics workspace instead of creating new one
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2022-10-01' existing = {
-  name: 'workspace-rggraphragfeatureeZiR'
+  name: logAnalyticsWorkspaceName
 }
 
 resource containerAppsEnvironment 'Microsoft.App/managedEnvironments@2023-05-01' = {

@@ -56,6 +56,7 @@ env:
   ACR_NAME: ${{ vars.ACR_NAME || 'graphragacr12153' }}
   API_APP_NAME: graphrag-api
   WORKER_APP_NAME: graphrag-worker
+  B2C_APP_NAME: graphrag-api-b2c
 
 jobs:
   # ============================================================================
@@ -185,34 +186,50 @@ jobs:
           echo "revision=$CURRENT" >> $GITHUB_OUTPUT
           echo "Current revision: ${CURRENT:-none}"
       
-      - name: Deploy API
-        id: deploy_api
+      - name: Deploy API + Worker + B2C in parallel
+        id: deploy_all
         run: |
-          IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ needs.build.outputs.image_tag }}"
-          echo "Deploying API: $IMAGE"
+          API_IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-api:${{ needs.build.outputs.image_tag }}"
+          WORKER_IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-worker:${{ needs.build.outputs.image_tag }}"
+          ALGO="${{ github.event.inputs.algorithm_version || 'v2' }}"
+          SUFFIX="r${{ github.run_id }}"
 
-          REVISION_SUFFIX="r${{ github.run_id }}"
+          echo "Deploying all containers in parallel..."
+
           az containerapp update \
             --name ${{ env.API_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image "$IMAGE" \
-            --revision-suffix "$REVISION_SUFFIX" \
-            --set-env-vars "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key"
-
-          echo "API deployed (single-revision mode auto-routes traffic)"
-      
-      - name: Deploy Worker
-        run: |
-          IMAGE="${{ env.ACR_NAME }}.azurecr.io/graphrag-worker:${{ needs.build.outputs.image_tag }}"
-          ALGO="${{ github.event.inputs.algorithm_version || 'v2' }}"
-          echo "Deploying Worker: $IMAGE (DEFAULT_ALGORITHM_VERSION=$ALGO)"
+            --image "$API_IMAGE" \
+            --revision-suffix "$SUFFIX" \
+            --set-env-vars "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key" &
+          API_PID=$!
 
           az containerapp update \
             --name ${{ env.WORKER_APP_NAME }} \
             --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
-            --image "$IMAGE" \
-            --revision-suffix "r${{ github.run_id }}" \
-            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO" "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key"
+            --image "$WORKER_IMAGE" \
+            --revision-suffix "$SUFFIX" \
+            --set-env-vars "DEFAULT_ALGORITHM_VERSION=$ALGO" "VOYAGE_API_KEY=secretref:voyage-api-key" "NEO4J_PASSWORD=secretref:neo4j-password" "MISTRAL_API_KEY=secretref:mistral-api-key" "LLMWHISPERER_API_KEY=secretref:llmwhisperer-api-key" &
+          WORKER_PID=$!
+
+          az containerapp update \
+            --name ${{ env.B2C_APP_NAME }} \
+            --resource-group ${{ env.AZURE_RESOURCE_GROUP }} \
+            --image "$API_IMAGE" \
+            --revision-suffix "$SUFFIX" &
+          B2C_PID=$!
+
+          FAILED=0
+          wait $API_PID || FAILED=1
+          wait $WORKER_PID || FAILED=1
+          wait $B2C_PID || FAILED=1
+
+          if [ $FAILED -ne 0 ]; then
+            echo "❌ One or more container deploys failed"
+            exit 1
+          fi
+
+          echo "✅ All containers deployed"
       
       - name: Wait for startup
         run: sleep 60

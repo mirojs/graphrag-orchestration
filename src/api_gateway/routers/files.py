@@ -27,23 +27,28 @@ router = APIRouter(tags=["files"])
 class DeleteFileRequest(BaseModel):
     filename: str
     folder: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class BulkDeleteRequest(BaseModel):
     filenames: List[str]
     folder: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class RenameFileRequest(BaseModel):
     old_filename: str
     new_filename: str
     folder: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class MoveFileRequest(BaseModel):
     filename: str
     source_folder: Optional[str] = None
     dest_folder: Optional[str] = None
+    source_folder_id: Optional[str] = None
+    dest_folder_id: Optional[str] = None
 
 
 class CopyFileRequest(BaseModel):
@@ -216,6 +221,7 @@ async def _resolve_folder_name(group_id: str, folder_id: str) -> str | None:
     """Resolve a folder UUID to its display name via Neo4j.
 
     Returns the folder name, or None if the folder doesn't exist.
+    Deprecated — prefer _resolve_folder_path for hierarchical blob storage.
     """
     try:
         from src.worker.services import GraphService
@@ -233,6 +239,48 @@ async def _resolve_folder_name(group_id: str, folder_id: str) -> str | None:
     except Exception as e:
         logger.warning("Failed to resolve folder name for %s: %s", folder_id, e)
         return None
+
+
+async def _resolve_folder_path(group_id: str, folder_id: str) -> str | None:
+    """Resolve a folder UUID to its full hierarchical path via Neo4j.
+
+    Walks the SUBFOLDER_OF chain to build a path like
+    "insurance_claims_review/input_docs" for ADLS Gen2 blob storage.
+    """
+    try:
+        from src.worker.services import GraphService
+        graph_service = GraphService()
+        if not graph_service.driver:
+            logger.warning("Neo4j unavailable — cannot resolve folder path for %s", folder_id)
+            return None
+        with graph_service.driver.session() as session:
+            result = session.run(
+                """
+                MATCH (f:Folder {id: $fid, group_id: $gid})
+                OPTIONAL MATCH path = (f)-[:SUBFOLDER_OF*0..]->(root:Folder)
+                WHERE NOT (root)-[:SUBFOLDER_OF]->()
+                WITH f, path
+                ORDER BY length(path) DESC
+                LIMIT 1
+                WITH [n IN nodes(path) | n.name] AS names
+                RETURN reduce(p = '', i IN reverse(names) |
+                    CASE WHEN p = '' THEN i ELSE p + '/' + i END
+                ) AS folder_path
+                """,
+                fid=folder_id, gid=group_id,
+            )
+            record = result.single()
+            return record["folder_path"] if record else None
+    except Exception as e:
+        logger.warning("Failed to resolve folder path for %s: %s", folder_id, e)
+        return None
+
+
+async def _resolve_folder(group_id: str, folder: str | None, folder_id: str | None) -> str | None:
+    """Resolve the blob storage folder path from folder_id (preferred) or folder name."""
+    if folder_id:
+        return await _resolve_folder_path(group_id, folder_id)
+    return folder
 
 
 async def _folder_is_analyzed(group_id: str, folder_id: str | None) -> bool:
@@ -310,10 +358,10 @@ async def upload_files(
     doc_sync = _get_doc_sync(request)
     neo4j_gid = await resolve_neo4j_group_id(group_id, folder_id)
 
-    # Resolve folder name for blob storage path
+    # Resolve folder path for blob storage (hierarchical, e.g. "parent/child")
     folder_name: str | None = None
     if folder_id:
-        folder_name = await _resolve_folder_name(group_id, folder_id)
+        folder_name = await _resolve_folder_path(group_id, folder_id)
         if not folder_name:
             logger.warning("Could not resolve folder_id=%s — uploading to root", folder_id)
 
@@ -386,7 +434,8 @@ async def delete_uploaded(
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
 
-    await blob_manager.remove_blob(body.filename, group_id, folder=body.folder)
+    folder = await _resolve_folder(group_id, body.folder, body.folder_id)
+    await blob_manager.remove_blob(body.filename, group_id, folder=folder)
     if ingester:
         await ingester.remove_file(body.filename, group_id)
 
@@ -413,11 +462,12 @@ async def delete_uploaded_bulk(
     blob_manager = _get_blob_manager(request)
     ingester = _get_ingester(request)
 
+    folder = await _resolve_folder(group_id, body.folder, body.folder_id)
     results = []
     successful_filenames = []
     for filename in body.filenames:
         try:
-            await blob_manager.remove_blob(filename, group_id, folder=body.folder)
+            await blob_manager.remove_blob(filename, group_id, folder=folder)
             if ingester:
                 await ingester.remove_file(filename, group_id)
             results.append({"filename": filename, "status": "success"})
@@ -452,18 +502,27 @@ async def delete_uploaded_bulk(
 async def list_uploaded(
     request: Request,
     folder: Optional[str] = None,
+    folder_id: Optional[str] = None,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
     """List uploaded documents, optionally scoped to a folder.
     
     Args:
-        folder: Folder name to scope listing. If omitted, lists root-level files.
+        folder: Folder name/path to scope listing. If omitted, lists root-level files.
+        folder_id: Folder UUID — resolved server-side to the full hierarchical path.
+                   Takes precedence over ``folder`` when both are provided.
     """
     blob_manager = _get_blob_manager(request)
+    resolved_folder = folder
+    if folder_id:
+        resolved_folder = await _resolve_folder_path(group_id, folder_id)
+        if not resolved_folder:
+            logger.warning("Could not resolve folder_id=%s for listing — falling back to folder param", folder_id)
+            resolved_folder = folder
     try:
         async with asyncio.timeout(30):
-            files = await blob_manager.list_blobs(group_id, folder=folder)
+            files = await blob_manager.list_blobs(group_id, folder=resolved_folder)
     except TimeoutError:
         logger.error("list_uploaded_timeout for group_id=%s", group_id)
         raise HTTPException(status_code=504, detail="File listing timed out")
@@ -519,7 +578,8 @@ async def rename_uploaded(
 
     try:
         # Step 1: Rename in ADLS
-        new_url = await blob_manager.rename_blob(body.old_filename, body.new_filename, group_id, folder=body.folder)
+        folder = await _resolve_folder(group_id, body.folder, body.folder_id)
+        new_url = await blob_manager.rename_blob(body.old_filename, body.new_filename, group_id, folder=folder)
 
         # Step 2: Update search index (if available)
         if ingester:
@@ -556,7 +616,9 @@ async def move_uploaded(
     blob_manager = _get_blob_manager(request)
 
     try:
-        new_url = await blob_manager.move_blob(body.filename, body.source_folder, body.dest_folder, group_id)
+        src_folder = await _resolve_folder(group_id, body.source_folder, body.source_folder_id)
+        dst_folder = await _resolve_folder(group_id, body.dest_folder, body.dest_folder_id)
+        new_url = await blob_manager.move_blob(body.filename, src_folder, dst_folder, group_id)
 
         # Update Document.source in Neo4j in background
         doc_sync = _get_doc_sync(request)
@@ -616,6 +678,8 @@ async def content_file(
     request: Request,
     path: str,
     source: Optional[str] = None,
+    folder: Optional[str] = None,
+    folder_id: Optional[str] = None,
     group_id: str = Depends(get_group_id),
     user_id: str = Depends(get_user_id),
 ):
@@ -627,36 +691,55 @@ async def content_file(
     """
     filename = path.split("/")[-1]
 
-    # --- Primary path: proxy from the original source blob URL ---
+    global_blob_manager = getattr(request.app.state, "global_blob_manager", None)
+    user_blob_manager = getattr(request.app.state, "user_blob_manager", None)
+
+    # --- Primary path: download from source blob URL via authenticated SDK ---
     if source:
         try:
-            from urllib.parse import urlparse
+            from urllib.parse import urlparse, unquote
             parsed = urlparse(source)
             if parsed.hostname and parsed.hostname.endswith(".blob.core.windows.net"):
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(source, follow_redirects=True, timeout=30.0)
-                    if resp.status_code == 200:
-                        content_type = resp.headers.get("content-type") or mimetypes.guess_type(path)[0] or "application/octet-stream"
-                        return StreamingResponse(
-                            iter([resp.content]),
-                            media_type=content_type,
-                            headers={"Content-Disposition": f'inline; filename="{filename}"'},
-                        )
-                    logger.debug("Source URL returned %s for %s", resp.status_code, source)
+                # Extract container and blob path from the URL
+                # URL format: https://<account>.blob.core.windows.net/<container>/<blob_path>
+                path_parts = parsed.path.lstrip("/").split("/", 1)
+                if len(path_parts) == 2:
+                    container_name, blob_name = path_parts[0], unquote(path_parts[1])
+                    # Try user blob manager first (same storage account)
+                    if user_blob_manager is not None:
+                        try:
+                            container_client = user_blob_manager.blob_service_client.get_container_client(container_name)
+                            blob_client = container_client.get_blob_client(blob_name)
+                            download = await blob_client.download_blob()
+                            content_bytes = await download.readall()
+                            ct = "application/octet-stream"
+                            if (
+                                hasattr(download.properties, "content_settings")
+                                and download.properties.content_settings
+                                and hasattr(download.properties.content_settings, "content_type")
+                                and download.properties.content_settings.content_type
+                            ):
+                                ct = download.properties.content_settings.content_type
+                            content_type = ct or mimetypes.guess_type(path)[0] or "application/octet-stream"
+                            return StreamingResponse(
+                                iter([content_bytes]),
+                                media_type=content_type,
+                                headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                            )
+                        except Exception as e:
+                            logger.debug("SDK download from source URL failed: %s", e)
             else:
                 logger.warning("Rejected non-Azure source URL: %s", parsed.hostname)
         except Exception as e:
             logger.debug("Source URL proxy failed for %s: %s", source, e)
 
     # --- Fallback: blob manager lookups (user-uploaded files) ---
-    global_blob_manager = getattr(request.app.state, "global_blob_manager", None)
-    user_blob_manager = getattr(request.app.state, "user_blob_manager", None)
 
     # Try user storage first (files stored as {group_id}/{filename})
     if user_blob_manager is not None:
         try:
-            blob_data = await user_blob_manager.download_blob(path, group_id)
+            resolved_folder = await _resolve_folder(group_id, folder, folder_id)
+            blob_data = await user_blob_manager.download_blob(path, group_id, folder=resolved_folder)
             if blob_data:
                 content_bytes, props = blob_data
                 content_type = props.get("content_settings", {}).get("content_type") or mimetypes.guess_type(path)[0] or "application/octet-stream"

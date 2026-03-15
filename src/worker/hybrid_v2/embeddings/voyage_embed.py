@@ -66,8 +66,9 @@ except ImportError:
 # Voyage-context-3 has a 32K token context window for contextualized_embed()
 # Leave headroom for safety (30K instead of 32K)
 MAX_CONTEXT_TOKENS = 30000
-# Approximate tokens per character (conservative estimate for English)
-TOKENS_PER_CHAR_ESTIMATE = 0.25
+# Approximate tokens per character.  0.30 is conservative for mixed
+# English/table/numeric content where token density is higher.
+TOKENS_PER_CHAR_ESTIMATE = 0.30
 
 # ============================================================================
 # API Batch Limits (per contextualized_embed() call)
@@ -119,7 +120,11 @@ class VoyageEmbedService:
             )
         
         # Initialize native Voyage client for contextual embeddings
-        self._client = voyageai.Client(api_key=self.api_key)  # type: ignore[union-attr]
+        self._client = voyageai.Client(api_key=self.api_key, max_retries=3)  # type: ignore[union-attr]
+        
+        # Retry configuration for transient API failures
+        self._max_retries = 3
+        self._base_delay = 1.0  # seconds, exponential backoff base
         
         # LlamaIndex wrapper kept for legacy pipeline compatibility only
         self._embed_model = None
@@ -131,6 +136,35 @@ class VoyageEmbedService:
             )
         
         logger.info(f"VoyageEmbedService initialized with model: {self.model_name}")
+
+    def _call_with_retry(self, **kwargs):
+        """Call Voyage contextualized_embed with retry + exponential backoff.
+
+        Retries on transient errors (rate limits, server errors, timeouts).
+        Non-retryable errors (e.g., invalid API key) are raised immediately.
+        """
+        import time as _time
+
+        last_exc = None
+        for attempt in range(self._max_retries):
+            try:
+                return self._client.contextualized_embed(**kwargs)
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e).lower()
+                is_retryable = any(k in err_msg for k in (
+                    "rate limit", "429", "500", "502", "503", "504",
+                    "timeout", "connection", "reset by peer", "server error",
+                ))
+                if not is_retryable or attempt >= self._max_retries - 1:
+                    raise
+                delay = self._base_delay * (2 ** attempt)
+                logger.warning(
+                    "Voyage API transient error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1, self._max_retries, delay, e,
+                )
+                _time.sleep(delay)
+        raise last_exc  # pragma: no cover
     
     @property
     def embed_dim(self) -> int:
@@ -192,18 +226,20 @@ class VoyageEmbedService:
         for chunk in chunks:
             chunk_tokens = self._estimate_tokens(chunk)
             
-            # If this chunk alone exceeds the limit, it's a single-chunk bin
+            # If this chunk alone exceeds the limit, truncate it to fit
             if chunk_tokens > max_context_tokens:
                 # Save current bin if non-empty
                 if current_bin:
                     bins.append(current_bin)
-                # Large chunk gets its own bin (will be truncated by API if needed)
-                bins.append([chunk])
+                # Truncate chunk to fit within context window
+                max_chars = int(max_context_tokens / TOKENS_PER_CHAR_ESTIMATE)
+                truncated = chunk[:max_chars]
+                bins.append([truncated])
                 current_bin = []
                 current_tokens = 0
                 logger.warning(
-                    f"Chunk exceeds context window ({chunk_tokens} > {max_context_tokens} tokens). "
-                    "Placed in separate bin - may lose some context."
+                    f"Chunk truncated to fit context window ({chunk_tokens} > {max_context_tokens} tokens, "
+                    f"kept {max_chars} chars)."
                 )
             elif current_tokens + chunk_tokens > max_context_tokens:
                 # Start a new bin
@@ -312,7 +348,7 @@ class VoyageEmbedService:
 
         for batch_idx, batch in enumerate(batches):
             inputs = [effective_inputs[i][1] for i in batch]
-            result = self._client.contextualized_embed(
+            result = self._call_with_retry(
                 inputs=inputs,
                 model=self.model_name,
                 input_type="document",
@@ -344,7 +380,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "indexing",
+                    partition_id=user_id or group_id or "indexing",
                     model=self.model_name,
                     total_tokens=total_tokens_used,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,
@@ -392,9 +428,18 @@ class VoyageEmbedService:
             result = self.embed_documents_contextualized([texts])
             return result[0]  # Return the embeddings for the single document
         else:
-            # Standard embedding - still use contextualized_embed for consistency
-            result = self.embed_documents_contextualized([texts])
-            return result[0]
+            # Independent texts — batch into groups that fit within context window
+            # to avoid exceeding voyage-context-3's 32K token limit
+            bins = self._bin_pack_chunks(texts)
+            if len(bins) == 1:
+                result = self.embed_documents_contextualized([bins[0]])
+                return result[0]
+            else:
+                all_embeddings: List[List[float]] = []
+                result = self.embed_documents_contextualized(bins)
+                for bin_embeddings in result:
+                    all_embeddings.extend(bin_embeddings)
+                return all_embeddings
     
     def embed_query(self, query: str, group_id: Optional[str] = None, user_id: Optional[str] = None) -> List[float]:
         """
@@ -411,7 +456,7 @@ class VoyageEmbedService:
         Returns:
             Embedding vector (2048 dimensions)
         """
-        result = self._client.contextualized_embed(
+        result = self._call_with_retry(
             inputs=[[query]],  # Single document with single chunk
             model=self.model_name,
             input_type="query",
@@ -423,7 +468,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
                     total_tokens=result.usage.total_tokens,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,
@@ -454,7 +499,7 @@ class VoyageEmbedService:
         """
         # Each query as a separate single-chunk document
         inputs = [[q] for q in queries]
-        result = self._client.contextualized_embed(
+        result = self._call_with_retry(
             inputs=inputs,
             model=self.model_name,
             input_type="query",
@@ -466,7 +511,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
                     total_tokens=result.usage.total_tokens,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,
@@ -519,7 +564,7 @@ class VoyageEmbedService:
             
             # Each text as its own single-chunk document (no contextual bleed)
             inputs = [[t] for t in batch_texts]
-            result = self._client.contextualized_embed(
+            result = self._call_with_retry(
                 inputs=inputs,
                 model=self.model_name,
                 input_type="document",
@@ -537,7 +582,7 @@ class VoyageEmbedService:
             try:
                 loop = asyncio.get_event_loop()
                 task = loop.create_task(get_usage_tracker().log_embedding_usage(
-                    partition_id=group_id or "unknown",
+                    partition_id=user_id or group_id or "unknown",
                     model=self.model_name,
                     total_tokens=total_tokens_used,
                     dimensions=settings.VOYAGE_EMBEDDING_DIM,

@@ -55,15 +55,15 @@
         "stopStreaming": "Akışı durdur",
         "askWithVoice": "Sesle soru sor",
         "stopRecording": "Kaydı durdur",
-        "showSupportingContent": "Destekleyici içeriği göster",
         "speakAnswer": "Cevabı seslendir",
         "info": "Bilgi",
         "save": "Kaydet",
         "copy": "Kopyala",
-        "copied": "Kopyalandı!"
+        "copied": "Kopyalandı!",
+        "showOriginal": "Orijinal yanıtı göster",
+        "showTranslated": "Çevrilmiş yanıtı göster"
     },
     "headerTexts": {
-        "supportingContent": "Destekleyici İçerik",
         "citation": "Alıntı"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Bu, klasörün tüm analiz verilerini (grafik, varlıklar, gömülmeler) kalıcı olarak silecektir. Orijinal dosyalar korunacaktır. Devam edilsin mi?",
         "analysisDeleted": "Analiz verileri başarıyla silindi",
         "deleteAnalysisFailed": "Analiz silme başarısız: {{message}}",
-        "storageReminder": "💡 Analiz verileri depolama alanı kullanır. Maliyetlerden tasarruf etmek için artık gerekli olmayan analizleri silin."
+        "storageReminder": "💡 Analiz verileri depolama alanı kullanır. Maliyetlerden tasarruf etmek için artık gerekli olmayan analizleri silin.",
+        "zoneAnalysisResults": "Analiz Sonuçları",
+        "zoneAnalyzed": "Analiz Edildi",
+        "zoneFolders": "Klasörler",
+        "expandZone": "Genişlet",
+        "collapseZone": "Daralt"
     },
     "viewer": {
         "loadingFile": "Dosya yükleniyor",
@@ -335,5 +340,11 @@
         "plan": "Plan",
         "lastActive": "Son etkinlik",
         "noUserActivity": "Henüz kullanıcı etkinlik verisi yok. Analitik bağlandığında veriler görünecektir."
+    },
+    "folderSelector": {
+        "label": "Bilgi tabanı:",
+        "placeholder": "Bir bilgi tabanı seçin…",
+        "noFolders": "Henüz analiz edilmiş klasör yok",
+        "loadError": "Klasörler yüklenemedi"
     }
 }

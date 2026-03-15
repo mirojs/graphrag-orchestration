@@ -212,6 +212,11 @@ class LazyGraphRAGIndexingPipeline:
         self.voyage_service = voyage_service  # VoyageEmbedService for entity + passage embedding
         self.config = config or LazyGraphRAGIndexingConfig()
 
+        # Limit concurrent Neo4j write operations to prevent Aura write storms.
+        # Parallel steps (section enrichment, foundation edges) each acquire
+        # this semaphore before writing, keeping max concurrent writes bounded.
+        self._neo4j_write_sem = asyncio.Semaphore(settings.NEO4J_WRITE_CONCURRENCY)
+
         self._splitter = SentenceSplitter(
             chunk_size=self.config.chunk_size,
             chunk_overlap=self.config.chunk_overlap,
@@ -229,6 +234,42 @@ class LazyGraphRAGIndexingPipeline:
         self._openie_two_step = os.getenv("OPENIE_TWO_STEP", "true").strip().lower() in {"1", "true", "yes"}
         # NER scope: "broad" (includes abstract concepts) or "narrow" (proper nouns only, HippoRAG 2 style)
         self._ner_scope = os.getenv("OPENIE_NER_SCOPE", "broad").strip().lower()
+
+    async def _achat_with_retry(self, messages, *, timeout: Optional[int] = None) -> Any:
+        """Call self.llm.achat() with retry + timeout.
+
+        Retries on transient LLM errors (rate limits, server errors).
+        Wraps with asyncio.wait_for to prevent indefinite hangs.
+        """
+        if timeout is None:
+            timeout = settings.LLM_TIMEOUT_SECONDS
+        max_retries = settings.LLM_MAX_RETRIES
+        last_exc = None
+        for attempt in range(max_retries):
+            try:
+                return await asyncio.wait_for(
+                    self.llm.achat(messages), timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                last_exc = TimeoutError(f"LLM achat timed out after {timeout}s")
+                if attempt >= max_retries - 1:
+                    raise last_exc
+                delay = 2 ** attempt
+                logger.warning("LLM timeout (attempt %d/%d), retrying in %ds", attempt + 1, max_retries, delay)
+                await asyncio.sleep(delay)
+            except Exception as e:
+                last_exc = e
+                err_msg = str(e).lower()
+                is_retryable = any(k in err_msg for k in (
+                    "rate limit", "429", "500", "502", "503", "504",
+                    "timeout", "connection", "server error", "throttl",
+                ))
+                if not is_retryable or attempt >= max_retries - 1:
+                    raise
+                delay = 2 ** attempt
+                logger.warning("LLM transient error (attempt %d/%d), retrying in %ds: %s", attempt + 1, max_retries, delay, e)
+                await asyncio.sleep(delay)
+        raise last_exc  # pragma: no cover
 
     async def index_documents(
         self,
@@ -250,6 +291,12 @@ class LazyGraphRAGIndexingPipeline:
         knn_config: Optional[str] = None,  # Tag for KNN edges (e.g., "knn-1", "knn-2") for A/B testing
         # Entity synonymy parameters (cross-doc bridging via embedding similarity)
         entity_synonymy_threshold: float = 0.65,
+        # When True, skip steps 7.5-9 (triple embeddings, synonymy edges, GDS,
+        # communities).  Used for multi-doc folder indexing: run extraction for
+        # each doc, then run graph algorithms once at the end on the full graph.
+        extraction_only: bool = False,
+        # User identifier for per-user usage tracking (Cosmos DB partition key)
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
         
@@ -275,6 +322,7 @@ class LazyGraphRAGIndexingPipeline:
 
         if reindex:
             self.neo4j_store.delete_group_data(group_id)
+            self.neo4j_store.clear_pipeline_checkpoint(group_id)
 
         # ── Re-extract entities only (skip parse/chunk/embed) ──────
         # When reextract_entities=True, we keep existing Sentences,
@@ -308,7 +356,10 @@ class LazyGraphRAGIndexingPipeline:
 
             # Steps 6-7: dedup + validate + commit
             if entities:
-                entities, relationships, dedup_stats = self._deduplicate_entities(
+                # Offload CPU-heavy dedup (O(n²) pairwise cosine) to thread
+                # pool so the main event loop stays responsive for health probes.
+                entities, relationships, dedup_stats = await asyncio.to_thread(
+                    self._deduplicate_entities,
                     group_id=group_id,
                     entities=entities,
                     relationships=relationships,
@@ -346,290 +397,634 @@ class LazyGraphRAGIndexingPipeline:
         # This creates or updates the GroupMeta node to track GDS staleness, etc.
         self.neo4j_store.initialize_group_meta(group_id)
 
-        # Pre-load wtpsplit model BEFORE DI extraction so its ~1.4GB allocation
-        # happens while memory is still plentiful (DI results add ~1GB for 5 PDFs).
+        # ── Resume support: read last checkpoint ───────────────────────────
+        # In extraction_only mode (parallel doc processing), skip checkpointing
+        # since the checkpoint is group-level and would conflict between docs.
+        # File-level resume (analysis_files_processed) handles crash recovery.
+        if extraction_only:
+            checkpoint = None
+        else:
+            checkpoint = self.neo4j_store.get_pipeline_checkpoint(group_id)
+            if checkpoint:
+                logger.info(
+                    "pipeline_resuming_from_checkpoint",
+                    extra={"group_id": group_id, "checkpoint": checkpoint},
+                )
+
+        # Pre-load wtpsplit model synchronously BEFORE DI extraction so its
+        # ~816 MB allocation happens while memory is still plentiful.
+        # Must NOT run concurrently with DI — on a 1 Gi container the combined
+        # peak would OOM and crash the process.
         from src.worker.services.sentence_extraction_service import _get_sat
         _get_sat()
 
-        # 1) Normalize + (optional) extract with Document Intelligence.
-        expanded_docs = await self._prepare_documents(group_id, documents, ingestion)
+        # ── Steps 1-3: DI extraction → sentences ──────────────────────────
+        if not self.neo4j_store._step_done(checkpoint, "sentences"):
+            # 1) Normalize + (optional) extract with Document Intelligence.
+            t_step = time.perf_counter()
+            expanded_docs = await self._prepare_documents(group_id, documents, ingestion, user_id=user_id)
+            logger.info("⏱️ Step 1 (_prepare_documents): %.2fs", time.perf_counter() - t_step)
 
-        # 2) Upsert Document nodes + clean stale children.
-        chunk_to_doc_id: Dict[str, str] = {}  # kept for _process_di_metadata_to_graph compat
-        for doc in expanded_docs:
-            doc_id = doc["id"]
-            doc_title = doc.get("title", "Untitled")
-            logger.info(f"Upserting document: id={doc_id}, title='{doc_title}', has_di={bool(doc.get('di_extracted_docs'))}")
+            # 2) Upsert Document nodes (batched) + clean stale children.
+            t_step = time.perf_counter()
+            chunk_to_doc_id: Dict[str, str] = {}  # kept for _process_di_metadata_to_graph compat
 
-            doc_content_for_date = ""
-            di_docs = doc.get("di_extracted_docs") or []
-            if di_docs:
-                doc_content_for_date = " ".join(str(d.text) for d in di_docs if hasattr(d, 'text'))
-            else:
-                doc_content_for_date = doc.get("content") or doc.get("text") or ""
+            # Build Document objects and extract dates in one pass
+            doc_objects = []
+            for doc in expanded_docs:
+                doc_id = doc["id"]
+                doc_title = doc.get("title", "Untitled")
+                logger.info(f"Preparing document: id={doc_id}, title='{doc_title}', has_di={bool(doc.get('di_extracted_docs'))}")
 
-            document_date = extract_document_date(doc_content_for_date) if doc_content_for_date else None
-            if document_date:
-                logger.info(f"Extracted document date: doc_id={doc_id}, date={document_date}")
+                doc_content_for_date = ""
+                di_docs = doc.get("di_extracted_docs") or []
+                if di_docs:
+                    doc_content_for_date = " ".join(str(d.text) for d in di_docs if hasattr(d, 'text'))
+                else:
+                    doc_content_for_date = doc.get("content") or doc.get("text") or ""
 
-            self.neo4j_store.upsert_document(
-                group_id,
-                Document(
+                document_date = extract_document_date(doc_content_for_date) if doc_content_for_date else None
+                if document_date:
+                    logger.info(f"Extracted document date: doc_id={doc_id}, date={document_date}")
+
+                doc_objects.append(Document(
                     id=doc_id,
                     title=doc_title,
                     source=doc.get("source", ""),
                     metadata=doc.get("metadata", {}) or {},
                     document_date=document_date,
-                ),
-            )
-
-            # Clean stale children before creating new ones.
-            if not reindex:
-                self.neo4j_store.delete_document_chunks(group_id, doc_id)
-
-        # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
-        #    Bypasses the old TextChunk pipeline.
-        sentence_stats = await self._index_sentences_direct(
-            group_id=group_id,
-            expanded_docs=expanded_docs,
-        )
-        stats["sentences"] = sentence_stats.get("sentences_created", 0)
-        stats["sentences_embedded"] = sentence_stats.get("sentences_embedded", 0)
-
-        if stats["sentences"] == 0:
-            stats["skipped"].append("no_sentences")
-            stats["elapsed_s"] = round(time.time() - start_time, 2)
-            return stats
-
-        # 4.2) Sparse sentence-to-sentence RELATED_TO edges.
-        if stats["sentences"] > 1:
-            try:
-                knn_stats = await self._build_sentence_knn_edges(group_id)
-                stats["skeleton_related_to_edges"] = knn_stats.get("edges_created", 0)
-                logger.info(
-                    "step_4.2_sentence_knn_complete",
-                    extra={"edges": stats["skeleton_related_to_edges"]},
-                )
-            except Exception as e:
-                logger.warning(f"step_4.2_sentence_knn_failed: {e}")
-                stats["skeleton_related_to_edges"] = 0
-
-        # 4.5) Build Section graph from DI unit metadata.
-        section_stats = await self._build_section_graph_from_docs(group_id, expanded_docs)
-        stats["sections"] = section_stats.get("sections_created", 0)
-        stats["section_edges"] = section_stats.get("in_section_edges", 0)
-
-        # 4.5.1) Assign hierarchical IDs to sentences (needs both sentences + sections).
-        h_id_stats = await self._assign_sentence_hierarchical_ids(group_id)
-        stats["hierarchical_ids_assigned"] = h_id_stats.get("assigned", 0)
-
-        # 4.5.2) Backfill Section.total_sentences from IN_SECTION edge count.
-        total_stats = await self._backfill_section_total_sentences(group_id)
-        stats["section_totals_backfilled"] = total_stats.get("updated", 0)
-        
-        # 4.6–4.8) Section enrichment + KVP embedding.
-        # Wave 1: Independent stages run in parallel.
-        #   - 4.6  embed section content (for similarity edges)
-        #   - 4.6.1 LLM section summaries (for structural embed)
-        #   - 4.8  embed KVP keys (fully independent)
-        section_embed_stats, section_summary_stats, kvp_embed_stats = await asyncio.gather(
-            self._embed_section_nodes(group_id),
-            self._generate_section_summaries(group_id),
-            self._embed_keyvalue_keys(group_id),
-        )
-        stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
-        stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
-        stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
-        stats["key_values_embedded"] = kvp_embed_stats.get("keys_embedded", 0)
-
-        # Wave 2: Stages that depend on wave 1 results.
-        #   - 4.6.2 structural embed (needs summaries from 4.6.1)
-        #   - 4.7   similarity edges (needs embeddings from 4.6)
-        structural_embed_stats, similarity_stats = await asyncio.gather(
-            self._embed_section_structural(group_id),
-            self._build_section_similarity_edges(group_id),
-        )
-        stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
-        stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
-
-        # 4.9) Process DI metadata: extract barcodes, figures, languages → graph entities/edges.
-        # This leverages Azure DI FREE add-ons that are already extracted but not yet in the graph.
-        # Note: DI metadata is stored in di_extracted_docs (LlamaIndex Documents), not in TextChunks.
-        di_metadata_stats = await self._process_di_metadata_to_graph(
-            group_id=group_id,
-            expanded_docs=expanded_docs,
-            chunk_to_doc_id=chunk_to_doc_id,
-        )
-        stats["di_barcodes"] = di_metadata_stats.get("barcodes_created", 0)
-        stats["di_languages"] = di_metadata_stats.get("languages_updated", 0)
-
-        # 5) Entity/relationship extraction — sentence-based (Phase B denoising).
-        #    Entities are extracted from Sentence nodes (no overlap, pre-filtered)
-        #    instead of legacy TextChunk nodes (64-token overlap, noisy).
-        entities: List[Entity] = []
-        relationships: List[Relationship] = []
-        if self.llm is None:
-            stats["skipped"].append("no_llm_entity_extraction")
-        else:
-            entities, relationships = await self._extract_entities_and_relationships(
-                group_id=group_id,
-            )
-            logger.info(f"entity_extraction_complete: {len(entities)} entities, {len(relationships)} relationships")
-            # Diagnostic: log relationship count to help debug validation failures
-            if len(relationships) < self.config.min_mentions:
-                logger.warning(
-                    f"low_relationship_count: {len(relationships)} relationships "
-                    f"(min_mentions={self.config.min_mentions}), entities={len(entities)}"
-                )
-
-        # NOTE: Step 5b (supplemental OpenIE) removed — OpenIE is now the
-        # primary extraction path in step 5 via _extract_entities_and_relationships().
-
-        # 6) Entity deduplication (optional; only if we have enough entities).
-        if entities:
-            entities, relationships, dedup_stats = self._deduplicate_entities(
-                group_id=group_id,
-                entities=entities,
-                relationships=relationships,
-            )
-            stats["deduplication"] = dedup_stats
-
-        # 7) Validate and (conditionally) persist entities + relationships.
-        commit_result = await self._validate_and_commit_entities(
-            group_id=group_id,
-            entities=entities,
-            relationships=relationships,
-            dry_run=dry_run,
-        )
-        stats["validation_passed"] = commit_result.get("passed", False)
-        stats["validation_details"] = commit_result.get("details", {})
-        if not commit_result.get("passed", False) and not dry_run:
-            stats["skipped"].append("entity_validation_failed")
-            stats["elapsed_s"] = round(time.time() - start_time, 2)
-            return stats
-
-        stats["entities"] = len(entities)
-        stats["relationships"] = len(relationships)
-        stats["foundation_edges"] = commit_result.get("details", {}).get("foundation_edges", {})
-
-        # 7.5) Pre-compute triple embeddings for HippoRAG 2 Route 7.
-        # Embeds all RELATED_TO triples via Voyage and stores on edges as
-        # triple_embedding, eliminating cold-start latency at query time.
-        try:
-            triple_embed_stats = await self._precompute_triple_embeddings(group_id)
-            stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
-            logger.info(
-                f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings"
-            )
-        except Exception as e:
-            logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
-            stats["triple_embeddings_stored"] = 0
-
-        # 7.6) Compute entity-entity synonymy edges.
-        # After entity dedup merges near-identical entities (≥0.8), remaining
-        # entity pairs in the 0.70–0.79 range are semantically related but
-        # distinct. Connecting them with SEMANTICALLY_SIMILAR edges creates
-        # cross-document bridges for PPR traversal (see §47).
-        try:
-            synonymy_stats = await self._compute_entity_synonymy_edges(
-                group_id=group_id,
-                threshold=entity_synonymy_threshold,
-            )
-            stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
-            stats["entity_synonymy_cross_community"] = synonymy_stats.get("cross_community", 0)
-            logger.info(
-                "✅ Step 7.6: %d entity synonymy edges (%d cross-community) at threshold %.2f",
-                stats["entity_synonymy_edges"],
-                stats["entity_synonymy_cross_community"],
-                entity_synonymy_threshold,
-            )
-        except Exception as e:
-            logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
-            stats["entity_synonymy_edges"] = 0
-
-        # 8) Run GDS graph algorithms (KNN, Louvain, PageRank) - AFTER entities are in Neo4j
-        # This ensures GDS can project all nodes with embeddings (Entities, Figures, KVPs, Chunks)
-        # Retry up to 3 times with exponential backoff for transient Neo4j/GDS errors.
-        gds_max_retries = 3
-        gds_base_delay = 15  # seconds
-        gds_stats: Dict[str, int] = {}
-        for gds_attempt in range(gds_max_retries):
-            try:
-                if knn_enabled:
-                    logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, Louvain, PageRank)...")
-                    gds_stats = await self._run_gds_graph_algorithms(
-                        group_id=group_id,
-                        knn_top_k=knn_top_k,
-                        knn_similarity_cutoff=knn_similarity_cutoff,
-                        knn_config=knn_config,
-                    )
-                else:
-                    logger.info("🔬 KNN disabled - running Louvain and PageRank only...")
-                    gds_stats = await self._run_gds_graph_algorithms(
-                        group_id=group_id,
-                        knn_top_k=0,  # Signal to skip KNN
-                        knn_similarity_cutoff=1.0,  # No edges will pass this threshold
-                        knn_config=None,
-                    )
-                # Success — break out of retry loop
-                break
-            except Exception as e:
-                err_msg = str(e).lower()
-                is_transient = any(k in err_msg for k in (
-                    "no data", "connection closed", "defunct connection",
-                    "service unavailable", "timed out", "reset by peer",
-                    "incomplete handshake",
                 ))
-                if is_transient and gds_attempt < gds_max_retries - 1:
-                    delay = gds_base_delay * (2 ** gds_attempt)
-                    logger.warning(
-                        f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
-                        f"retrying in {delay}s: {e}"
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
-                logger.warning("⚠️  Continuing indexing without GDS algorithms")
-                gds_stats = {}
-                break
 
-        stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
-        stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
-        stats["gds_communities"] = gds_stats.get("communities", 0)
-        stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
-        stats["knn_config"] = {
-            "enabled": knn_enabled,
-            "top_k": knn_top_k if knn_enabled else 0,
-            "similarity_cutoff": knn_similarity_cutoff if knn_enabled else None,
-            "config_tag": knn_config,
-        }
-        if gds_stats:
-            logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities, {stats['gds_pagerank_nodes']} nodes scored")
+            # Single UNWIND batch upsert (1 round-trip instead of N)
+            self.neo4j_store.upsert_documents_batch(group_id, doc_objects)
 
-        # ── Step 9: Materialize Louvain communities with LLM summaries ──
-        if stats.get("gds_communities", 0) > 0:
+            # Clean stale children before creating new ones (per-doc, only on fresh index).
+            if not reindex:
+                for doc in expanded_docs:
+                    self.neo4j_store.delete_document_chunks(group_id, doc["id"])
+
+            logger.info("⏱️ Step 2 (doc upsert): %.2fs", time.perf_counter() - t_step)
+
+            # 3) Direct sentence indexing: DI units → spaCy → Sentence nodes.
+            #    Bypasses the old TextChunk pipeline.
+            t_step = time.perf_counter()
+            import sys as _sys
+            logger.info("Step 3 starting — entering _index_sentences_direct")
+            _sys.stderr.flush(); _sys.stdout.flush()
             try:
-                logger.info("📦 Step 9: Materializing Louvain communities with LLM summaries...")
-                community_stats = await self._materialize_louvain_communities(
+                sentence_stats = await self._index_sentences_direct(
                     group_id=group_id,
-                    min_community_size=2,
+                    expanded_docs=expanded_docs,
                 )
-                stats["communities_created"] = community_stats.get("communities_created", 0)
-                stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
-                stats["embeddings_stored"] = community_stats.get("embeddings_stored", 0)
-                logger.info(
-                    "✅ Step 9 complete: %d communities, %d summaries, %d embeddings",
-                    stats["communities_created"],
-                    stats["summaries_generated"],
-                    stats["embeddings_stored"],
+            except BaseException as _exc:
+                logger.error("Step 3 CRASHED: %s: %s", type(_exc).__name__, _exc, exc_info=True)
+                _sys.stderr.flush(); _sys.stdout.flush()
+                raise
+            logger.info("⏱️ Step 3 (_index_sentences_direct): %.2fs", time.perf_counter() - t_step)
+            stats["sentences"] = sentence_stats.get("sentences_created", 0)
+            stats["sentences_embedded"] = sentence_stats.get("sentences_embedded", 0)
+
+            if stats["sentences"] == 0:
+                stats["skipped"].append("no_sentences")
+                stats["elapsed_s"] = round(time.time() - start_time, 2)
+                return stats
+
+            if not extraction_only:
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "sentences")
+        else:
+            logger.info("pipeline_skip_sentences (checkpoint >= sentences)")
+            # We still need expanded_docs for later steps — re-prepare them
+            expanded_docs = await self._prepare_documents(group_id, documents, ingestion, user_id=user_id)
+            chunk_to_doc_id = {}
+            # Recover sentence count from Neo4j
+            existing = self.neo4j_store.get_sentences_by_group(group_id)
+            stats["sentences"] = len(existing)
+            stats["sentences_embedded"] = len(existing)
+
+        # ── Steps 4.2-4.9 ‖ Steps 5-7: Section graph + Entity extraction ──
+        # These two blocks have NO data dependencies (section steps write to
+        # Section/IN_SECTION/KVP nodes; entity steps write to Entity/RELATED_TO).
+        # Both read Sentence nodes (committed in Steps 1-3) but don't modify them.
+        # Running them in parallel saves ~30-60s on a typical pipeline run.
+        section_needed = not self.neo4j_store._step_done(checkpoint, "section_graph")
+        entities_needed = not self.neo4j_store._step_done(checkpoint, "entities_committed")
+
+        if section_needed or entities_needed:
+            parallel_tasks = []
+
+            # ── Section block helper ──────────────────────────────────────
+            async def _run_section_block() -> None:
+                t_section_start = time.perf_counter()
+
+                # 4.2 and 4.5 have no data dependencies — run them in parallel.
+                async def _step_4_2():
+                    if stats["sentences"] > 1:
+                        try:
+                            knn_stats = await self._build_sentence_knn_edges(group_id)
+                            return knn_stats.get("edges_created", 0)
+                        except Exception as e:
+                            logger.warning(f"step_4.2_sentence_knn_failed: {e}")
+                            return 0
+                    return 0
+
+                async def _step_4_5():
+                    return await self._build_section_graph_from_docs(group_id, expanded_docs)
+
+                knn_edge_count, section_stats = await asyncio.gather(
+                    _step_4_2(), _step_4_5(),
                 )
-            except Exception as e:
-                logger.warning(f"⚠️  Community materialization failed: {e}")
-                stats["communities_created"] = 0
-                stats["summaries_generated"] = 0
-                stats["embeddings_stored"] = 0
+                stats["skeleton_related_to_edges"] = knn_edge_count
+                if knn_edge_count:
+                    logger.info("step_4.2_sentence_knn_complete", extra={"edges": knn_edge_count})
+                stats["sections"] = section_stats.get("sections_created", 0)
+                stats["section_edges"] = section_stats.get("in_section_edges", 0)
+
+                # 4.5.1 and 4.5.2 both depend on 4.5 but are independent of each other.
+                h_id_stats, total_stats = await asyncio.gather(
+                    self._assign_sentence_hierarchical_ids(group_id),
+                    self._backfill_section_total_sentences(group_id),
+                )
+                stats["hierarchical_ids_assigned"] = h_id_stats.get("assigned", 0)
+                stats["section_totals_backfilled"] = total_stats.get("updated", 0)
+
+                # 4.6–4.8) Section enrichment + KVP embedding.
+                # Wave 1: Run 4.6, 4.7, 4.8 concurrently — no data deps between them.
+                async def _gated_embed_sections():
+                    async with self._neo4j_write_sem:
+                        return await self._embed_section_nodes(group_id)
+
+                async def _gated_section_summaries():
+                    async with self._neo4j_write_sem:
+                        return await self._generate_section_summaries(group_id)
+
+                async def _gated_embed_kvp():
+                    async with self._neo4j_write_sem:
+                        return await self._embed_keyvalue_keys(group_id)
+
+                section_embed_stats, section_summary_stats, kvp_embed_stats = await asyncio.gather(
+                    _gated_embed_sections(),
+                    _gated_section_summaries(),
+                    _gated_embed_kvp(),
+                )
+                stats["sections_embedded"] = section_embed_stats.get("sections_embedded", 0)
+                stats["sections_summarised"] = section_summary_stats.get("sections_summarised", 0)
+                stats["key_values"] = kvp_embed_stats.get("kvps_total", 0)
+                stats["key_values_embedded"] = kvp_embed_stats.get("keys_embedded", 0)
+
+                # Wave 2: structural embedding depends on wave 1 summaries, but
+                # similarity edges read section_embedding (wave 1) — independent.
+                structural_embed_stats, similarity_stats = await asyncio.gather(
+                    self._embed_section_structural(group_id),
+                    self._build_section_similarity_edges(group_id),
+                )
+                stats["sections_structural_embedded"] = structural_embed_stats.get("sections_embedded", 0)
+                stats["semantic_similarity_edges"] = similarity_stats.get("edges_created", 0)
+
+                # 4.9) Process DI metadata: barcodes, figures, languages → graph.
+                di_metadata_stats = await self._process_di_metadata_to_graph(
+                    group_id=group_id,
+                    expanded_docs=expanded_docs,
+                    chunk_to_doc_id=chunk_to_doc_id,
+                )
+                stats["di_barcodes"] = di_metadata_stats.get("barcodes_created", 0)
+                stats["di_languages"] = di_metadata_stats.get("languages_updated", 0)
+
+                # Checkpoint: section block complete. Safe to set here because
+                # "section_graph" < "entities_committed" in the checkpoint order.
+                if not extraction_only:
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "section_graph")
+                logger.info("⏱️ Steps 4.2-4.9 (section graph): %.2fs", time.perf_counter() - t_section_start)
+
+            # ── Entity block helper ───────────────────────────────────────
+            async def _run_entity_block() -> bool:
+                """Returns True if entities passed validation, False otherwise."""
+                t_entity_start = time.perf_counter()
+                entities: List[Entity] = []
+                relationships: List[Relationship] = []
+                if self.llm is None:
+                    stats["skipped"].append("no_llm_entity_extraction")
+                else:
+                    entities, relationships = await self._extract_entities_and_relationships(
+                        group_id=group_id,
+                    )
+                    logger.info(f"entity_extraction_complete: {len(entities)} entities, {len(relationships)} relationships")
+                    if len(relationships) < self.config.min_mentions:
+                        logger.warning(
+                            f"low_relationship_count: {len(relationships)} relationships "
+                            f"(min_mentions={self.config.min_mentions}), entities={len(entities)}"
+                        )
+
+                # 6) Entity deduplication
+                if entities:
+                    entities, relationships, dedup_stats = await asyncio.to_thread(
+                        self._deduplicate_entities,
+                        group_id=group_id,
+                        entities=entities,
+                        relationships=relationships,
+                    )
+                    stats["deduplication"] = dedup_stats
+
+                # 7) Validate and persist entities + relationships.
+                commit_result = await self._validate_and_commit_entities(
+                    group_id=group_id,
+                    entities=entities,
+                    relationships=relationships,
+                    dry_run=dry_run,
+                )
+                stats["validation_passed"] = commit_result.get("passed", False)
+                stats["validation_details"] = commit_result.get("details", {})
+                stats["entities"] = len(entities)
+                stats["relationships"] = len(relationships)
+                stats["foundation_edges"] = commit_result.get("details", {}).get("foundation_edges", {})
+
+                logger.info("⏱️ Steps 5-7 (entity extraction+commit): %.2fs", time.perf_counter() - t_entity_start)
+                return commit_result.get("passed", False) or dry_run
+
+            # Dispatch: run both in parallel if both needed, or just the one needed.
+            if section_needed and entities_needed:
+                logger.info("🚀 Running Steps 4.x ‖ Steps 5-7 in parallel (no data dependencies)")
+                section_result, entity_passed = await asyncio.gather(
+                    _run_section_block(),
+                    _run_entity_block(),
+                )
+                # Set "entities_committed" only after BOTH complete.
+                # "section_graph" was already set inside _run_section_block().
+                if not entity_passed and not dry_run:
+                    stats["skipped"].append("entity_validation_failed")
+                    stats["elapsed_s"] = round(time.time() - start_time, 2)
+                    return stats
+                if not extraction_only:
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "entities_committed")
+            elif section_needed:
+                await _run_section_block()
+            elif entities_needed:
+                entity_passed = await _run_entity_block()
+                if not entity_passed and not dry_run:
+                    stats["skipped"].append("entity_validation_failed")
+                    stats["elapsed_s"] = round(time.time() - start_time, 2)
+                    return stats
+                if not extraction_only:
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "entities_committed")
+        else:
+            logger.info("pipeline_skip_section_and_entities (checkpoint >= entities_committed)")
+
+        # ── extraction_only: skip graph-wide steps (7.5-9) ─────────────────
+        if extraction_only:
+            logger.info("extraction_only=True — skipping steps 7.5-9 (will run once after all docs)")
+            stats["elapsed_s"] = round(time.time() - start_time, 2)
+            return stats
+
+        # ── Steps 7.5 ‖ 7.6: Triple embeddings + Entity synonymy (parallel)
+        # These are independent: 7.5 reads RELATED_TO triples → writes triple_embedding;
+        # 7.6 reads entity_embedding → writes SEMANTICALLY_SIMILAR edges.
+        t_post_entity_start = time.perf_counter()
+        triple_needed = not self.neo4j_store._step_done(checkpoint, "triple_embeddings")
+        synonymy_needed = not self.neo4j_store._step_done(checkpoint, "synonymy_edges")
+
+        if triple_needed or synonymy_needed:
+            async def _run_triple_embeddings() -> None:
+                try:
+                    triple_embed_stats = await self._precompute_triple_embeddings(group_id)
+                    stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
+                    logger.info(
+                        f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings"
+                    )
+                    # Safe to set checkpoint here: "triple_embeddings" < "synonymy_edges"
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "triple_embeddings")
+                except Exception as e:
+                    logger.warning(f"⚠️  Triple embedding pre-computation failed: {e}")
+                    stats["triple_embeddings_stored"] = 0
+
+            async def _run_entity_synonymy() -> None:
+                try:
+                    synonymy_stats = await self._compute_entity_synonymy_edges(
+                        group_id=group_id,
+                        threshold=entity_synonymy_threshold,
+                    )
+                    stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
+                    stats["entity_synonymy_cross_community"] = synonymy_stats.get("cross_community", 0)
+                    logger.info(
+                        "✅ Step 7.6: %d entity synonymy edges (%d cross-community) at threshold %.2f",
+                        stats["entity_synonymy_edges"],
+                        stats["entity_synonymy_cross_community"],
+                        entity_synonymy_threshold,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
+                    stats["entity_synonymy_edges"] = 0
+
+            parallel_75_76 = []
+            if triple_needed:
+                parallel_75_76.append(_run_triple_embeddings())
+            else:
+                logger.info("pipeline_skip_triple_embeddings (checkpoint >= triple_embeddings)")
+            if synonymy_needed:
+                parallel_75_76.append(_run_entity_synonymy())
+            else:
+                logger.info("pipeline_skip_synonymy_edges (checkpoint >= synonymy_edges)")
+
+            if len(parallel_75_76) == 2:
+                logger.info("🚀 Running Steps 7.5 ‖ 7.6 in parallel")
+            await asyncio.gather(*parallel_75_76)
+
+            # Set "synonymy_edges" only after both complete successfully.
+            # "triple_embeddings" was already set inside _run_triple_embeddings().
+            if synonymy_needed and stats.get("entity_synonymy_edges", 0) > 0:
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "synonymy_edges")
+        else:
+            logger.info("pipeline_skip_triple_and_synonymy (checkpoint >= synonymy_edges)")
+
+        # ── Step 8: GDS algorithms ─────────────────────────────────────────
+        if not self.neo4j_store._step_done(checkpoint, "gds_complete"):
+            gds_max_retries = 3
+            gds_base_delay = 15  # seconds
+            gds_stats: Dict[str, int] = {}
+            for gds_attempt in range(gds_max_retries):
+                try:
+                    if knn_enabled:
+                        logger.info(f"🔬 Running GDS algorithms (KNN k={knn_top_k}, cutoff={knn_similarity_cutoff}, config={knn_config}, community detection, PageRank)...")
+                        gds_stats = await self._run_gds_graph_algorithms(
+                            group_id=group_id,
+                            knn_top_k=knn_top_k,
+                            knn_similarity_cutoff=knn_similarity_cutoff,
+                            knn_config=knn_config,
+                        )
+                    else:
+                        logger.info("🔬 KNN disabled - running community detection and PageRank only...")
+                        gds_stats = await self._run_gds_graph_algorithms(
+                            group_id=group_id,
+                            knn_top_k=0,
+                            knn_similarity_cutoff=1.0,
+                            knn_config=None,
+                        )
+                    break
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    is_transient = any(k in err_msg for k in (
+                        "no data", "connection closed", "defunct connection",
+                        "service unavailable", "timed out", "reset by peer",
+                        "incomplete handshake",
+                    ))
+                    if is_transient and gds_attempt < gds_max_retries - 1:
+                        delay = gds_base_delay * (2 ** gds_attempt)
+                        logger.warning(
+                            f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
+                            f"retrying in {delay}s: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
+                    logger.warning("⚠️  Continuing indexing without GDS algorithms")
+                    gds_stats = {}
+                    break
+
+            stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
+            stats["gds_entity_edges"] = gds_stats.get("entity_edges", 0)
+            stats["gds_communities"] = gds_stats.get("communities", 0)
+            stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
+            stats["knn_config"] = {
+                "enabled": knn_enabled,
+                "top_k": knn_top_k if knn_enabled else 0,
+                "similarity_cutoff": knn_similarity_cutoff if knn_enabled else None,
+                "config_tag": knn_config,
+            }
+            if gds_stats:
+                logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities, {stats['gds_pagerank_nodes']} nodes scored")
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "gds_complete")
+            else:
+                # GDS failed or produced no results — do NOT set checkpoint so it
+                # can be retried on the next run.
+                logger.warning("⚠️  GDS produced no results — checkpoint NOT set (will retry on resume)")
+        else:
+            logger.info("pipeline_skip_gds (checkpoint >= gds_complete)")
+
+        # ── Step 9: Materialize communities ────────────────────────
+        if not self.neo4j_store._step_done(checkpoint, "communities"):
+            if stats.get("gds_communities", 0) > 0:
+                try:
+                    logger.info("📦 Step 9: Materializing communities with LLM summaries...")
+                    community_stats = await self._materialize_communities(
+                        group_id=group_id,
+                        min_community_size=2,
+                    )
+                    stats["communities_created"] = community_stats.get("communities_created", 0)
+                    stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
+                    stats["embeddings_stored"] = community_stats.get("embeddings_stored", 0)
+                    logger.info(
+                        "✅ Step 9 complete: %d communities, %d summaries, %d embeddings",
+                        stats["communities_created"],
+                        stats["summaries_generated"],
+                        stats["embeddings_stored"],
+                    )
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
+                except Exception as e:
+                    logger.warning(f"⚠️  Community materialization failed: {e}")
+                    stats["communities_created"] = 0
+                    stats["summaries_generated"] = 0
+                    stats["embeddings_stored"] = 0
+                    # Do NOT set checkpoint on failure — allows retry on next run
+            else:
+                # No communities to materialize (GDS produced 0) — mark done
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
+        else:
+            logger.info("pipeline_skip_communities (checkpoint >= communities)")
+        logger.info("⏱️ Steps 7.5-9 (triples+synonymy+GDS+communities): %.2fs", time.perf_counter() - t_post_entity_start)
+
+        # Clear checkpoint — pipeline complete
+        self.neo4j_store.clear_pipeline_checkpoint(group_id)
         
         stats["elapsed_s"] = round(time.time() - start_time, 2)
+        return stats
+
+    async def run_graph_algorithms_only(
+        self,
+        *,
+        group_id: str,
+        knn_enabled: bool = True,
+        knn_top_k: int = 5,
+        knn_similarity_cutoff: float = 0.60,
+        knn_config: Optional[str] = None,
+        entity_synonymy_threshold: float = 0.65,
+    ) -> Dict[str, Any]:
+        """Run only the graph-wide steps (7.5-9) after all docs have been extracted.
+
+        This is the second phase of a two-phase folder indexing:
+        Phase 1: index_documents(extraction_only=True) per doc
+        Phase 2: run_graph_algorithms_only() once on the full graph
+
+        Returns a dict with step stats plus:
+          - ``errors``: list of ``{"step": ..., "error": ...}`` for failed steps
+          - ``success``: True only if no critical step failed
+        Critical steps: triple_embeddings, gds (KNN/Leiden/PageRank).
+        Non-critical: synonymy_edges, communities (degrade quality but not fatal).
+        """
+        import time
+        start_time = time.time()
+        stats: Dict[str, Any] = {}
+        errors: list[Dict[str, str]] = []
+
+        logger.info(f"🔬 Running graph algorithms on full graph for group {group_id}")
+
+        # ── Resume from checkpoint (skip already-completed steps) ──
+        checkpoint = self.neo4j_store.get_pipeline_checkpoint(group_id)
+        if checkpoint:
+            logger.info(f"📌 Resuming graph algorithms from checkpoint: {checkpoint}")
+
+        # Step 7.5: Triple embeddings (CRITICAL) — with retry
+        _te_max_retries = 3
+        _te_base_delay = 15
+        if not self.neo4j_store._step_done(checkpoint, "triple_embeddings"):
+            for _te_attempt in range(_te_max_retries):
+                try:
+                    triple_embed_stats = await self._precompute_triple_embeddings(group_id)
+                    stats["triple_embeddings_stored"] = triple_embed_stats.get("stored", 0)
+                    logger.info(f"✅ Step 7.5: Pre-computed {stats['triple_embeddings_stored']} triple embeddings")
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "triple_embeddings")
+                    break
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    is_transient = any(k in err_msg for k in (
+                        "connection", "timeout", "timed out", "rate limit",
+                        "service unavailable", "reset by peer", "429",
+                    ))
+                    if is_transient and _te_attempt < _te_max_retries - 1:
+                        delay = _te_base_delay * (2 ** _te_attempt)
+                        logger.warning(
+                            f"⏳ Triple embedding transient failure (attempt {_te_attempt + 1}/{_te_max_retries}), "
+                            f"retrying in {delay}s: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.warning(f"⚠️  Triple embedding failed after {_te_attempt + 1} attempt(s): {e}")
+                    stats["triple_embeddings_stored"] = 0
+                    errors.append({"step": "triple_embeddings", "error": str(e)[:500]})
+                    break
+        else:
+            logger.info("⏭️  Step 7.5: Triple embeddings already checkpointed, skipping")
+
+        # Step 7.6: Entity synonymy edges (non-critical)
+        if not self.neo4j_store._step_done(checkpoint, "synonymy_edges"):
+            try:
+                synonymy_stats = await self._compute_entity_synonymy_edges(
+                    group_id=group_id,
+                    threshold=entity_synonymy_threshold,
+                )
+                stats["entity_synonymy_edges"] = synonymy_stats.get("edges_created", 0)
+                logger.info(
+                    "✅ Step 7.6: %d entity synonymy edges at threshold %.2f",
+                    stats["entity_synonymy_edges"], entity_synonymy_threshold,
+                )
+                self.neo4j_store.set_pipeline_checkpoint(group_id, "synonymy_edges")
+            except Exception as e:
+                logger.warning(f"⚠️  Entity synonymy computation failed: {e}")
+                stats["entity_synonymy_edges"] = 0
+                errors.append({"step": "synonymy_edges", "error": str(e)[:500]})
+        else:
+            logger.info("⏭️  Step 7.6: Synonymy edges already checkpointed, skipping")
+
+        # Step 8: GDS algorithms with retry (CRITICAL)
+        if not self.neo4j_store._step_done(checkpoint, "gds_complete"):
+            gds_max_retries = 3
+            gds_base_delay = 15
+            gds_stats: Dict[str, int] = {}
+            for gds_attempt in range(gds_max_retries):
+                try:
+                    if knn_enabled:
+                        logger.info(
+                            f"🔬 Running GDS algorithms (KNN k={knn_top_k}, "
+                            f"cutoff={knn_similarity_cutoff}, community detection, PageRank)..."
+                        )
+                        gds_stats = await self._run_gds_graph_algorithms(
+                            group_id=group_id,
+                            knn_top_k=knn_top_k,
+                            knn_similarity_cutoff=knn_similarity_cutoff,
+                            knn_config=knn_config,
+                        )
+                    else:
+                        gds_stats = await self._run_gds_graph_algorithms(
+                            group_id=group_id, knn_top_k=0,
+                            knn_similarity_cutoff=1.0, knn_config=None,
+                        )
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "gds_complete")
+                    break
+                except Exception as e:
+                    err_msg = str(e).lower()
+                    is_transient = any(k in err_msg for k in (
+                        "no data", "connection closed", "defunct connection",
+                        "service unavailable", "timed out", "reset by peer",
+                        "incomplete handshake",
+                    ))
+                    if is_transient and gds_attempt < gds_max_retries - 1:
+                        delay = gds_base_delay * (2 ** gds_attempt)
+                        logger.warning(
+                            f"⏳ GDS transient failure (attempt {gds_attempt + 1}/{gds_max_retries}), "
+                            f"retrying in {delay}s: {e}"
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    logger.warning(f"⚠️  GDS algorithms failed after {gds_attempt + 1} attempt(s): {e}")
+                    errors.append({"step": "gds", "error": str(e)[:500]})
+                    gds_stats = {}
+                    break
+        else:
+            logger.info("⏭️  Step 8: GDS algorithms already checkpointed, skipping")
+            gds_stats = {}
+
+        stats["gds_knn_edges"] = gds_stats.get("knn_edges", 0)
+        stats["gds_communities"] = gds_stats.get("communities", 0)
+        stats["gds_pagerank_nodes"] = gds_stats.get("pagerank_nodes", 0)
+        if gds_stats:
+            logger.info(f"✅ GDS complete: {stats['gds_knn_edges']} KNN edges, {stats['gds_communities']} communities")
+
+        # Step 9: Materialize communities (non-critical)
+        if not self.neo4j_store._step_done(checkpoint, "communities"):
+            if stats.get("gds_communities", 0) > 0:
+                try:
+                    logger.info("📦 Step 9: Materializing communities with LLM summaries...")
+                    community_stats = await self._materialize_communities(
+                        group_id=group_id,
+                        min_community_size=2,
+                    )
+                    stats["communities_created"] = community_stats.get("communities_created", 0)
+                    stats["summaries_generated"] = community_stats.get("summaries_generated", 0)
+                    logger.info(
+                        "✅ Step 9 complete: %d communities, %d summaries",
+                        stats["communities_created"], stats["summaries_generated"],
+                    )
+                    self.neo4j_store.set_pipeline_checkpoint(group_id, "communities")
+                except Exception as e:
+                    logger.warning(f"⚠️  Community materialization failed: {e}")
+                    errors.append({"step": "communities", "error": str(e)[:500]})
+        else:
+            logger.info("⏭️  Step 9: Communities already checkpointed, skipping")
+
+        # ── Integrity validation ──
+        try:
+            validation = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: self._validate_graph_integrity(group_id)
+            )
+            stats["validation"] = validation
+            if validation.get("warnings"):
+                for w in validation["warnings"]:
+                    logger.warning(f"⚠️  Integrity: {w}")
+                    errors.append({"step": "validation", "error": w})
+        except Exception as e:
+            logger.warning(f"⚠️  Integrity validation failed: {e}")
+
+        # Determine overall success: critical steps must not have failed
+        critical_failures = [e for e in errors if e["step"] in ("triple_embeddings", "gds")]
+        stats["errors"] = errors
+        stats["success"] = len(critical_failures) == 0
+        stats["elapsed_s"] = round(time.time() - start_time, 2)
+
+        if critical_failures:
+            failed_steps = ", ".join(e["step"] for e in critical_failures)
+            logger.error(
+                f"❌ Graph algorithms finished with critical failures: {failed_steps} "
+                f"({stats['elapsed_s']}s)"
+            )
+        else:
+            logger.info(f"✅ Graph algorithms complete in {stats['elapsed_s']}s")
         return stats
 
     async def _prepare_documents(
@@ -637,6 +1032,7 @@ class LazyGraphRAGIndexingPipeline:
         group_id: str,
         documents: List[Dict[str, Any]],
         ingestion: str,
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         # Assign stable IDs and normalize fields.
         normalized: List[Dict[str, Any]] = []
@@ -732,26 +1128,42 @@ class LazyGraphRAGIndexingPipeline:
 
         di_service = DocumentIntelligenceService()
 
-        # Process URLs sequentially to keep memory bounded (each DI result is
-        # stored before the next URL is processed).  Previous parallel version
-        # held all results in memory simultaneously which caused OOM on
-        # constrained environments (codespace, small container).
+        # F1: Share a single DI client across all URLs instead of creating
+        # one client per URL via extract_documents(). Saves ~0.5-1s per doc
+        # in HTTP client setup and Managed Identity token acquisition.
         by_source: Dict[str, List[LlamaDocument]] = {}
 
-        for url in effective_urls:
-            try:
-                extracted = await di_service.extract_documents(
-                    group_id=group_id,
-                    input_items=cast(List[str | Dict[str, Any]], [url]),
-                    fail_fast=True,
-                    model_strategy="auto",
-                )
-                logger.info(f"DI extracted {len(extracted)} units for {url.split('/')[-1]}")
-                # If this result.json was a sidecar, map results back to the PDF's URL
-                target_url = source_remap.get(url, url)
-                by_source[target_url] = extracted
-            except Exception as exc:
-                logger.warning(f"DI extraction failed for a URL: {exc}")
+        t_di_start = time.perf_counter()
+        async with di_service._create_client() as client:
+            async def _analyze_one(url: str) -> None:
+                max_di_retries = 2
+                for attempt in range(max_di_retries):
+                    try:
+                        _result_url, docs, error = await di_service._analyze_single_document(
+                            client, url, group_id, default_model="prebuilt-layout",
+                            user_id=user_id,
+                        )
+                        if error:
+                            if attempt < max_di_retries - 1:
+                                logger.warning("DI extraction error for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, error)
+                                await asyncio.sleep(2 ** attempt)
+                                continue
+                            logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, error)
+                        else:
+                            target_url = source_remap.get(url, url)
+                            by_source[target_url] = docs
+                            logger.info("DI extracted %d units for %s", len(docs), url.split("/")[-1])
+                        return
+                    except Exception as exc:
+                        if attempt < max_di_retries - 1:
+                            logger.warning("DI extraction exception for %s (attempt %d), retrying: %s", url.split("/")[-1], attempt + 1, exc)
+                            await asyncio.sleep(2 ** attempt)
+                        else:
+                            logger.warning("DI extraction failed for %s after %d attempts: %s", url.split("/")[-1], max_di_retries, exc)
+
+            await asyncio.gather(*[_analyze_one(url) for url in effective_urls])
+        await di_service.close()
+        logger.info("⏱️ DI extraction: %.2fs for %d documents", time.perf_counter() - t_di_start, len(effective_urls))
 
         out: List[Dict[str, Any]] = []
         for doc in normalized:
@@ -794,12 +1206,19 @@ class LazyGraphRAGIndexingPipeline:
 
         Returns stats dict with sentences_created, sentences_embedded, etc.
         """
+        import sys as _sys
+        logger.info("_index_sentences_direct: ENTERED (docs=%d)", len(expanded_docs))
+        _sys.stderr.flush(); _sys.stdout.flush()
+
         from src.worker.services.sentence_extraction_service import (
             extract_sentences_from_di_units,
             extract_sentences_from_raw_text,
             _is_noise_sentence,
         )
         from src.worker.hybrid_v2.services.neo4j_store import Sentence
+
+        logger.info("_index_sentences_direct: imports OK")
+        _sys.stderr.flush(); _sys.stdout.flush()
 
         stats: Dict[str, Any] = {
             "sentences_created": 0,
@@ -818,6 +1237,8 @@ class LazyGraphRAGIndexingPipeline:
 
             di_units = doc.get("di_extracted_docs") or []
             if di_units:
+                logger.info("_index_sentences_direct: extracting sentences doc=%s units=%d", doc_title, len(di_units))
+                _sys.stderr.flush(); _sys.stdout.flush()
                 raw = extract_sentences_from_di_units(
                     di_units, doc_id=doc_id,
                     doc_title=doc_title, doc_source=doc_source,
@@ -1182,13 +1603,28 @@ class LazyGraphRAGIndexingPipeline:
 
         sections_created = await self.neo4j_store.arun_in_session(_write)
 
-        # IN_SECTION edges for Sentences are already created by
-        # upsert_sentences_batch (direct section_path matching).
+        # Backfill IN_SECTION edges: upsert_sentences_batch (Step 3) runs
+        # before Section nodes exist (Step 4), so it can't create them.
+        # Create them now that both Sentence and Section nodes are committed.
+        in_section_result = await self.neo4j_store.arun_query(
+            """
+            MATCH (sent:Sentence {group_id: $group_id})
+            WHERE sent.section_path IS NOT NULL AND sent.section_path <> ''
+            AND NOT (sent)-[:IN_SECTION]->(:Section)
+            MATCH (sec:Section {group_id: $group_id})
+            WHERE sec.doc_id = sent.document_id AND sec.section_path = sent.section_path
+            MERGE (sent)-[:IN_SECTION]->(sec)
+            RETURN count(*) AS created
+            """,
+            group_id=group_id,
+        )
+        in_section_edges = in_section_result[0]["created"] if in_section_result else 0
+
         logger.info(
             "section_graph_from_docs_built",
-            extra={"group_id": group_id, "sections_created": sections_created},
+            extra={"group_id": group_id, "sections_created": sections_created, "in_section_edges": in_section_edges},
         )
-        return {"sections_created": sections_created, "in_section_edges": 0}
+        return {"sections_created": sections_created, "in_section_edges": in_section_edges}
 
     async def _assign_sentence_hierarchical_ids(self, group_id: str) -> Dict[str, Any]:
         """Post-processing: assign hierarchical_id to Sentence nodes.
@@ -1498,13 +1934,19 @@ class LazyGraphRAGIndexingPipeline:
         # pairwise similarity (e.g., cos drops from 0.93→0.54 with 252 entities).
         if entities and self.voyage_service:
             texts = [e.name for e in entities]
-            try:
-                embs = await self.voyage_service.aembed_independent_texts(texts)
-                for ent, emb in zip(entities, embs):
-                    ent.entity_embedding = emb
-                logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
-            except Exception as e:
-                logger.warning("openie_entity_embedding_failed", extra={"error": str(e)})
+            for attempt in range(3):
+                try:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                    for ent, emb in zip(entities, embs):
+                        ent.entity_embedding = emb
+                    logger.info(f"openie_entity_embeddings: {len(embs)} entities embedded (independent)")
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("openie_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("openie_entity_embedding_failed after 3 attempts — entities committed without embeddings: %s", e)
 
         # Build a lookup of entities by canonical key for co-occurrence step
         entities_by_key: Dict[str, Entity] = {}
@@ -1946,7 +2388,7 @@ Return ONLY valid JSON (no markdown fences):
             },
         )
 
-        sem = asyncio.Semaphore(4)  # max 4 concurrent LLM calls
+        sem = asyncio.Semaphore(settings.OPENIE_LLM_CONCURRENCY)
 
         def _strip_json_fences(text: str) -> str:
             """Remove markdown code fences from LLM JSON response."""
@@ -1967,18 +2409,18 @@ Return ONLY valid JSON (no markdown fences):
             prompt = self._OPENIE_PROMPT.format(sentences=sentence_block)
             async with sem:
                 try:
-                    response = await self.llm.achat(
+                    response = await self._achat_with_retry(
                         [ChatMessage(role="user", content=prompt)]
                     )
                     text = _strip_json_fences(response.message.content)
                     parsed = json_mod.loads(text)
                     return parsed.get("triples", [])
                 except Exception as e:
-                    logger.debug(f"OpenIE batch failed: {e}")
+                    logger.warning("OpenIE batch failed (triples lost): %s", e)
                     return []
 
         async def _extract_batch_two_step(batch: List[Dict[str, Any]], context: str) -> List[Dict[str, str]]:
-            """Two-step NER→Triple extraction (upstream HippoRAG 2 alignment).
+            """Two-step NER→Triple extraction.
 
             Step 1: NER — extract named entities from the sentence batch.
             Step 2: Triple extraction — conditioned on the NER entity list.
@@ -1987,41 +2429,45 @@ Return ONLY valid JSON (no markdown fences):
                 f"[{s['id']}]: {s['text']}" for s in batch
             )
 
-            # Step 1: NER (scope-dependent prompt)
-            ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
-            ner_prompt = ner_template.format(sentences=sentence_block)
             async with sem:
+                # ── Step 1: NER ──────────────────────────────────────
+                ner_template = self._NER_PROMPT_NARROW if self._ner_scope == "narrow" else self._NER_PROMPT_BROAD
+                ner_prompt = ner_template.format(sentences=sentence_block)
                 try:
-                    ner_response = await self.llm.achat(
+                    ner_response = await self._achat_with_retry(
                         [ChatMessage(role="user", content=ner_prompt)]
                     )
                     ner_text = _strip_json_fences(ner_response.message.content)
                     ner_parsed = json_mod.loads(ner_text)
                     named_entities = ner_parsed.get("named_entities", [])
                 except Exception as e:
-                    logger.debug(f"NER step failed: {e}, falling back to single-step")
+                    logger.warning("NER step failed (falling back to single-step): %s", e)
                     named_entities = []
 
-            if not named_entities:
-                # Fallback to single-step if NER produces nothing
-                return await _extract_batch(batch, context)
-
-            # Step 2: NER-conditioned triple extraction
-            entities_str = json_mod.dumps(named_entities)
-            triple_prompt = self._TRIPLE_PROMPT.format(
-                named_entities=entities_str, sentences=sentence_block
-            )
-            async with sem:
-                try:
-                    triple_response = await self.llm.achat(
-                        [ChatMessage(role="user", content=triple_prompt)]
+                if not named_entities:
+                    pass  # will fall back to single-step below
+                else:
+                    # ── Step 2: Triple extraction ────────────────
+                    entities_str = json_mod.dumps(named_entities)
+                    triple_prompt = self._TRIPLE_PROMPT.format(
+                        named_entities=entities_str, sentences=sentence_block
                     )
-                    triple_text = _strip_json_fences(triple_response.message.content)
-                    parsed = json_mod.loads(triple_text)
-                    return parsed.get("triples", [])
-                except Exception as e:
-                    logger.debug(f"Triple extraction step failed: {e}")
-                    return []
+                    try:
+                        triple_response = await self._achat_with_retry(
+                            [ChatMessage(role="user", content=triple_prompt)]
+                        )
+                        triple_text = _strip_json_fences(triple_response.message.content)
+                        parsed = json_mod.loads(triple_text)
+                        triples = parsed.get("triples", [])
+                    except Exception as e:
+                        logger.warning("Triple extraction step failed (triples lost): %s", e)
+                        return []
+
+                    return triples
+
+            # NER produced nothing — fall back to single-step (outside the sem block)
+            if not named_entities:
+                return await _extract_batch(batch, context)
 
         # Choose extraction function based on two-step flag
         extract_fn = _extract_batch_two_step if self._openie_two_step else _extract_batch
@@ -2447,12 +2893,18 @@ Return ONLY valid JSON (no markdown fences):
         # Embeddings for entities — name-only, independently embedded (HippoRAG 2)
         if entities and self.voyage_service:
             texts = [e.name for e in entities]
-            try:
-                embs = await self.voyage_service.aembed_independent_texts(texts)
-                for ent, emb in zip(entities, embs):
-                    ent.entity_embedding = emb
-            except Exception as e:
-                logger.warning("sentence_entity_embedding_failed", extra={"error": str(e)})
+            for attempt in range(3):
+                try:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                    for ent, emb in zip(entities, embs):
+                        ent.entity_embedding = emb
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("sentence_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("sentence_entity_embedding_failed after 3 attempts: %s", e)
 
         logger.info(f"Sentence-based native extraction: {len(entities)} entities, {len(relationships)} relationships, {mentions_total} mention links")
         return entities, relationships
@@ -2560,12 +3012,18 @@ Return ONLY valid JSON (no markdown fences):
         entities = list(entities_by_key.values())
         if entities and self.voyage_service:
             texts = [e.name for e in entities]  # name-only, independently embedded
-            try:
-                embs = await self.voyage_service.aembed_independent_texts(texts)
-                for ent, emb in zip(entities, embs):
-                    ent.entity_embedding = emb
-            except Exception as e:
-                logger.warning("llamaindex_sentence_embedding_failed", extra={"error": str(e)})
+            for attempt in range(3):
+                try:
+                    embs = await self.voyage_service.aembed_independent_texts(texts)
+                    for ent, emb in zip(entities, embs):
+                        ent.entity_embedding = emb
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.warning("llamaindex_entity_embedding attempt %d failed, retrying: %s", attempt + 1, e)
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error("llamaindex_sentence_embedding_failed after 3 attempts: %s", e)
 
         return entities, relationships
 
@@ -2658,22 +3116,25 @@ Output:
             await self.neo4j_store.aupsert_entities_batch(group_id, entities)
             details["entities_committed"] = len(entities)
         if relationships:
-            self.neo4j_store.upsert_relationships_batch(group_id, relationships)
+            # Offload sync Neo4j writes to thread pool to keep event loop responsive
+            await asyncio.to_thread(
+                self.neo4j_store.upsert_relationships_batch, group_id, relationships
+            )
             details["relationships_committed"] = len(relationships)
 
-        # Best-effort: compute ranking fields so query-time Cypher can use them
-        # without property-key warnings (importance_score/degree/chunk_count).
-        self.neo4j_store.compute_entity_importance(group_id)
-        
-        # Create foundation edges for graph schema enhancement (Phase 1 Week 1-2)
-        # These edges enable O(1) retrieval and provide LazyGraphRAG→HippoRAG bridge
-        foundation_stats = await self._create_foundation_edges(group_id)
+        # Foundation and connectivity edges are independent — run in parallel.
+        # compute_entity_importance must run AFTER these because it counts
+        # all Entity relationships (including the APPEARS_IN_* edges created here).
+        foundation_stats, connectivity_stats = await asyncio.gather(
+            self._create_foundation_edges(group_id),
+            self._create_connectivity_edges(group_id),
+        )
         details["foundation_edges"] = foundation_stats
-        
-        # Create connectivity edges (Phase 2 Week 3-4)
-        # SHARES_ENTITY edges connect sections that discuss the same entities across documents
-        connectivity_stats = await self._create_connectivity_edges(group_id)
         details["connectivity_edges"] = connectivity_stats
+
+        # Best-effort: compute ranking fields (degree, chunk_count, importance_score)
+        # after all edges exist so counts are accurate.
+        await asyncio.to_thread(self.neo4j_store.compute_entity_importance, group_id)
         
         # NOTE: Semantic edges (SIMILAR_TO) are now created by GDS KNN in Step 8 (index_documents)
         # as SEMANTICALLY_SIMILAR edges. The legacy _create_semantic_edges() method is kept
@@ -2898,6 +3359,7 @@ Output:
                                 k.section_id = kvp.section_id,
                                 k.section_path = kvp.section_path,
                                 k.searchable_text = kvp.searchable_text,
+                                k.key_embedding = coalesce(k.key_embedding, null),
                                 k.updated_at = datetime()
                             WITH k, kvp
                             MATCH (d:Document {id: kvp.doc_id, group_id: kvp.group_id})
@@ -2933,6 +3395,253 @@ Output:
         composite_key = f"kvp:{group_id}:{doc_id}:{key}:{value}"
         return f"kvp_{hashlib.md5(composite_key.encode()).hexdigest()[:16]}"
 
+    # ==================== Step 8 (local): In-Process Graph Algorithms ====================
+
+    async def _run_local_graph_algorithms(
+        self,
+        *,
+        group_id: str,
+        knn_top_k: int = 5,
+        knn_similarity_cutoff: float = 0.60,
+        knn_config: Optional[str] = None,
+    ) -> Dict[str, int]:
+        """Run KNN/Leiden/PageRank in-process using numpy + networkx.
+
+        This replaces the remote Aura GDS session for small graphs (< GDS_LOCAL_THRESHOLD
+        entities), eliminating the 60-120s provisioning overhead. For 50-500 entities the
+        computation takes < 1s; the bottleneck is only Neo4j read/write I/O (~2-5s total).
+
+        The algorithms are mathematically equivalent to the GDS versions:
+        - KNN: cosine similarity via numpy, same top-k + cutoff semantics
+        - Leiden: leidenalg community detection (resolution=1.0 matches GDS default)
+        - PageRank: networkx pagerank (damping=0.85, tol=1e-6 matches GDS defaults)
+
+        Returns same stats dict as _run_gds_graph_algorithms for drop-in compatibility.
+        """
+        import numpy as np
+        import networkx as nx
+        import igraph as ig
+        import leidenalg
+
+        stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
+        algo_start = time.time()
+
+        # ── 1. Fetch entity embeddings from Neo4j ──────────────────────────
+        logger.info("📊 [local] Fetching entity embeddings from Neo4j...")
+
+        def _fetch_entities(session):
+            result = session.run("""
+                MATCH (n:Entity)
+                WHERE n.group_id IN $group_ids
+                  AND NOT coalesce(n.deprecated, false)
+                  AND n.entity_embedding IS NOT NULL
+                RETURN elementId(n) AS eid, n.entity_embedding AS emb
+            """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+            return [(r["eid"], r["emb"]) for r in result]
+
+        entity_rows = await self.neo4j_store.arun_in_session(_fetch_entities, read_only=True)
+
+        if not entity_rows:
+            logger.warning("⚠️  [local] No entities with embeddings — skipping graph algorithms")
+            return stats
+
+        entity_ids = [r[0] for r in entity_rows]
+        n_entities = len(entity_ids)
+        logger.info(f"📊 [local] Loaded {n_entities} entity embeddings")
+
+        # Build normalized embedding matrix (n × d) for cosine similarity
+        embeddings = np.array([r[1] for r in entity_rows], dtype=np.float32)
+        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+        norms = np.where(norms == 0, 1.0, norms)  # avoid division by zero
+        embeddings_normed = embeddings / norms
+
+        # ── 2. KNN via cosine similarity matrix ────────────────────────────
+        knn_edge_batch: List[Dict[str, Any]] = []
+        if knn_top_k > 0:
+            logger.info(f"🔗 [local] Computing KNN (k={knn_top_k}, cutoff={knn_similarity_cutoff})...")
+            # Cosine similarity = dot product of L2-normed vectors
+            sim_matrix = await asyncio.to_thread(
+                lambda: embeddings_normed @ embeddings_normed.T
+            )
+            # Zero out self-similarity
+            np.fill_diagonal(sim_matrix, 0.0)
+
+            # For each entity, pick top-k neighbors above cutoff
+            seen_pairs: set = set()
+            for i in range(n_entities):
+                row = sim_matrix[i]
+                # Get indices sorted by descending similarity
+                candidates = np.argsort(row)[::-1][:knn_top_k]
+                for j_idx in candidates:
+                    j = int(j_idx)
+                    sim_val = float(row[j])
+                    if sim_val < knn_similarity_cutoff:
+                        break  # sorted desc, so rest will be lower
+                    pair = (min(i, j), max(i, j))
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        knn_edge_batch.append({
+                            "eid1": entity_ids[pair[0]],
+                            "eid2": entity_ids[pair[1]],
+                            "similarity": sim_val,
+                        })
+
+            logger.info(f"🔗 [local] KNN found {len(knn_edge_batch)} edges")
+
+        # ── 3. Write KNN edges to Neo4j ────────────────────────────────────
+        if knn_edge_batch:
+            def _write_knn_edges(session):
+                BATCH = 500
+                edges_created = 0
+                for start in range(0, len(knn_edge_batch), BATCH):
+                    chunk = knn_edge_batch[start:start + BATCH]
+                    if knn_config:
+                        result = session.run("""
+                            UNWIND $edges AS e
+                            MATCH (n1) WHERE elementId(n1) = e.eid1
+                            MATCH (n2) WHERE elementId(n2) = e.eid2
+                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
+                            SET r.score = e.similarity, r.similarity = e.similarity,
+                                r.method = 'local_knn', r.group_id = $group_id,
+                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff,
+                                r.created_at = datetime()
+                            RETURN count(r) AS cnt
+                        """, edges=chunk, knn_config=knn_config, group_id=group_id,
+                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                    else:
+                        result = session.run("""
+                            UNWIND $edges AS e
+                            MATCH (n1) WHERE elementId(n1) = e.eid1
+                            MATCH (n2) WHERE elementId(n2) = e.eid2
+                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                            SET r.score = e.similarity, r.similarity = e.similarity,
+                                r.method = 'local_knn', r.group_id = $group_id,
+                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff,
+                                r.created_at = datetime()
+                            RETURN count(r) AS cnt
+                        """, edges=chunk, group_id=group_id,
+                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                    edges_created += result.single()["cnt"]
+                return edges_created
+
+            stats["knn_edges"] = await self.neo4j_store.arun_in_session(_write_knn_edges)
+            logger.info(f"🔗 [local] KNN: {stats['knn_edges']} SEMANTICALLY_SIMILAR edges written")
+
+        # ── 4. Build networkx graph for Leiden + PageRank ─────────────────
+        # Include KNN edges + existing relationships between entities
+        logger.info("🏘️ [local] Building graph for Leiden + PageRank...")
+
+        def _fetch_relationships(session):
+            result = session.run("""
+                MATCH (n:Entity)-[r]->(m:Entity)
+                WHERE n.group_id IN $group_ids
+                  AND m.group_id IN $group_ids
+                  AND NOT coalesce(n.deprecated, false) AND NOT coalesce(m.deprecated, false)
+                  AND n.entity_embedding IS NOT NULL
+                  AND m.entity_embedding IS NOT NULL
+                RETURN DISTINCT elementId(n) AS src, elementId(m) AS tgt
+            """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+            return [(r["src"], r["tgt"]) for r in result]
+
+        rel_rows = await self.neo4j_store.arun_in_session(_fetch_relationships, read_only=True)
+
+        G = nx.Graph()
+        G.add_nodes_from(entity_ids)
+        # Add existing relationships
+        for src, tgt in rel_rows:
+            if src in G and tgt in G:
+                G.add_edge(src, tgt, weight=1.0)
+        # Add KNN edges (with similarity as weight)
+        for e in knn_edge_batch:
+            G.add_edge(e["eid1"], e["eid2"], weight=e["similarity"])
+
+        # ── 5. Leiden community detection ──────────────────────────────────
+        logger.info("🏘️ [local] Running Leiden community detection...")
+
+        def _run_leiden():
+            # Convert networkx graph to igraph for leidenalg
+            node_list = list(G.nodes())
+            node_idx = {n: i for i, n in enumerate(node_list)}
+            ig_edges = [(node_idx[u], node_idx[v]) for u, v in G.edges()]
+            weights = [G[u][v].get("weight", 1.0) for u, v in G.edges()]
+            ig_graph = ig.Graph(n=len(node_list), edges=ig_edges, directed=False)
+            ig_graph.es["weight"] = weights
+            partition = leidenalg.find_partition(
+                ig_graph, leidenalg.RBConfigurationVertexPartition,
+                weights=weights, resolution_parameter=1.0, seed=42,
+            )
+            # Convert back: list of sets (same format as louvain_communities output)
+            return [
+                {node_list[idx] for idx in comm}
+                for comm in partition
+            ]
+
+        communities_list = await asyncio.to_thread(_run_leiden)
+
+        # Assign community IDs (match GDS convention: integer IDs)
+        leiden_updates: List[Dict[str, Any]] = []
+        community_ids_set: set = set()
+        for comm_idx, comm_members in enumerate(communities_list):
+            community_ids_set.add(comm_idx)
+            for eid in comm_members:
+                leiden_updates.append({"eid": eid, "communityId": comm_idx})
+
+        if leiden_updates:
+            def _write_leiden(session):
+                BATCH = 500
+                for start in range(0, len(leiden_updates), BATCH):
+                    chunk = leiden_updates[start:start + BATCH]
+                    session.run("""
+                        UNWIND $updates AS u
+                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
+                        SET n.community_id = u.communityId
+                    """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+
+            await self.neo4j_store.arun_in_session(_write_leiden)
+
+        stats["communities"] = len(community_ids_set)
+        logger.info(f"🏘️ [local] Leiden: {stats['communities']} communities detected")
+
+        # ── 6. PageRank ────────────────────────────────────────────────────
+        logger.info("📈 [local] Running PageRank...")
+        pr_scores = await asyncio.to_thread(
+            lambda: nx.pagerank(G, alpha=0.85, max_iter=100, tol=1e-6)
+        )
+
+        pr_updates = [
+            {"eid": eid, "score": float(score)}
+            for eid, score in pr_scores.items()
+        ]
+
+        if pr_updates:
+            def _write_pagerank(session):
+                BATCH = 500
+                for start in range(0, len(pr_updates), BATCH):
+                    chunk = pr_updates[start:start + BATCH]
+                    session.run("""
+                        UNWIND $updates AS u
+                        MATCH (n) WHERE elementId(n) = u.eid AND n.group_id IN $group_ids
+                        SET n.pagerank = u.score
+                    """, updates=chunk, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+
+            await self.neo4j_store.arun_in_session(_write_pagerank)
+
+        stats["pagerank_nodes"] = len(pr_updates)
+        logger.info(f"📈 [local] PageRank: scored {stats['pagerank_nodes']} nodes")
+
+        # Mark GDS as freshly computed
+        self.neo4j_store.clear_gds_stale(group_id)
+
+        elapsed = round(time.time() - algo_start, 2)
+        logger.info(
+            f"✅ [local] Graph algorithms complete in {elapsed}s: "
+            f"{stats['knn_edges']} KNN edges, {stats['communities']} communities, "
+            f"{stats['pagerank_nodes']} nodes scored"
+        )
+        return stats
+
+    # ==================== Step 8 (GDS): Remote Aura GDS Session ====================
+
     async def _run_gds_graph_algorithms(
         self,
         *,
@@ -2943,14 +3652,15 @@ Output:
     ) -> Dict[str, int]:
         """Run GDS algorithms to enhance the graph with computed properties.
         
-        Uses Aura Serverless Graph Analytics via GdsSessions API.
-        Requires AURA_DS_CLIENT_ID and AURA_DS_CLIENT_SECRET configured.
+        Routes to in-process computation (numpy + networkx) for small graphs
+        when entity count < GDS_LOCAL_THRESHOLD, or falls back to Aura Serverless
+        GDS sessions for large graphs.
         
         Algorithms run:
         1. **KNN** - Creates similarity edges:
            - Figure/KVP → Entity (SIMILAR_TO)
            - Entity ↔ Entity (SEMANTICALLY_SIMILAR)
-        2. **Louvain** - Detects communities and assigns community_id to nodes
+        2. **Leiden** - Detects communities and assigns community_id to nodes
         3. **PageRank** - Computes importance scores for all nodes
         
         Args:
@@ -2963,7 +3673,40 @@ Output:
             Statistics dictionary with algorithm results
         """
         stats = {"knn_edges": 0, "entity_edges": 0, "communities": 0, "pagerank_nodes": 0}
-        
+
+        # ── Dispatch: local vs GDS ─────────────────────────────────────────
+        threshold = settings.GDS_LOCAL_THRESHOLD
+        if threshold > 0:
+            def _count_entities(session):
+                result = session.run("""
+                    MATCH (n:Entity)
+                    WHERE n.group_id IN $group_ids
+                      AND NOT coalesce(n.deprecated, false)
+                      AND n.entity_embedding IS NOT NULL
+                    RETURN count(n) AS cnt
+                """, group_ids=[group_id, settings.GLOBAL_GROUP_ID])
+                return result.single()["cnt"]
+
+            entity_count = await self.neo4j_store.arun_in_session(
+                _count_entities, read_only=True,
+            )
+            if entity_count < threshold:
+                logger.info(
+                    f"📊 Entity count ({entity_count}) < GDS_LOCAL_THRESHOLD ({threshold}) "
+                    f"→ using in-process graph algorithms (numpy + networkx)"
+                )
+                return await self._run_local_graph_algorithms(
+                    group_id=group_id,
+                    knn_top_k=knn_top_k,
+                    knn_similarity_cutoff=knn_similarity_cutoff,
+                    knn_config=knn_config,
+                )
+            else:
+                logger.info(
+                    f"📊 Entity count ({entity_count}) >= GDS_LOCAL_THRESHOLD ({threshold}) "
+                    f"→ using Aura GDS session"
+                )
+
         if not GDS_SESSIONS_AVAILABLE:
             logger.warning("⚠️  GDS sessions not available - skipping graph algorithms. Install: pip install graphdatascience")
             return stats
@@ -3008,9 +3751,9 @@ Output:
                             sessions.delete(session_name=stale.name)
                             logger.info(f"🧹 Cleaned up idle GDS session: {stale.name} ({stale.status})")
                         except Exception as idle_err:
-                            logger.debug(f"Could not delete idle session {stale.name}: {idle_err}")
+                            logger.warning("Could not delete idle GDS session %s: %s", stale.name, idle_err)
             except Exception as cleanup_err:
-                logger.debug(f"Pre-cleanup check: {cleanup_err}")
+                logger.warning("GDS pre-cleanup check failed: %s", cleanup_err)
             
             # Extract Aura instance ID from URI (e.g., neo4j+s://abc123.databases.neo4j.io -> abc123)
             import re
@@ -3075,7 +3818,7 @@ Output:
                             except Exception as force_err:
                                 logger.warning(f"Could not force-drop projection: {force_err}")
             except Exception as e:
-                logger.debug(f"Graph list/drop check: {e}")
+                logger.warning("GDS graph list/drop check failed: %s", e)
             
             # Escape group_id for Cypher (handle both backslash and double quotes)
             escaped_group_id = group_id.replace('\\', '\\\\').replace('"', '\\"').replace("'", "\\'")
@@ -3093,11 +3836,11 @@ Output:
                     // Project Entity nodes only - KVP/Figure/Chunk add noise to KNN & communities
                     MATCH (n:Entity)
                     WHERE n.group_id = "{escaped_group_id}"
-                      AND NOT n:Deprecated
+                      AND NOT coalesce(n.deprecated, false)
                       AND n.entity_embedding IS NOT NULL
                     OPTIONAL MATCH (n)-[r]->(m:Entity)
                     WHERE m.group_id = "{escaped_group_id}"
-                      AND NOT m:Deprecated
+                      AND NOT coalesce(m.deprecated, false)
                       AND m.entity_embedding IS NOT NULL
                     RETURN 
                       n AS source, r AS rel, m AS target,
@@ -3203,36 +3946,39 @@ Output:
                     edge_batch.append({"node1": n1, "node2": n2, "similarity": float(row["similarity"])})
             
             def _write_knn_edges(session):
+                import time
+                BATCH = 100
+                edges_created = 0
                 if edge_batch:
-                    if knn_config:
-                        result = session.run("""
-                            UNWIND $edges AS e
-                            MATCH (n1), (n2)
-                            WHERE id(n1) = e.node1 AND id(n2) = e.node2
-                              AND n1.group_id = $group_id AND n2.group_id = $group_id
-                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
-                            SET r.score = e.similarity, r.similarity = e.similarity,
-                                r.method = 'gds_knn', r.group_id = $group_id,
-                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
-                            RETURN count(r) AS cnt
-                        """, edges=edge_batch, knn_config=knn_config, group_id=group_id,
-                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
-                    else:
-                        result = session.run("""
-                            UNWIND $edges AS e
-                            MATCH (n1), (n2)
-                            WHERE id(n1) = e.node1 AND id(n2) = e.node2
-                              AND n1.group_id = $group_id AND n2.group_id = $group_id
-                            MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
-                            SET r.score = e.similarity, r.similarity = e.similarity,
-                                r.method = 'gds_knn', r.group_id = $group_id,
-                                r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
-                            RETURN count(r) AS cnt
-                        """, edges=edge_batch, group_id=group_id,
-                            knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
-                    edges_created = result.single()["cnt"]
-                else:
-                    edges_created = 0
+                    for start in range(0, len(edge_batch), BATCH):
+                        chunk = edge_batch[start : start + BATCH]
+                        if knn_config:
+                            result = session.run("""
+                                UNWIND $edges AS e
+                                MATCH (n1), (n2)
+                                WHERE id(n1) = e.node1 AND id(n2) = e.node2
+                                  AND n1.group_id = $group_id AND n2.group_id = $group_id
+                                MERGE (n1)-[r:SEMANTICALLY_SIMILAR {knn_config: $knn_config}]->(n2)
+                                SET r.score = e.similarity, r.similarity = e.similarity,
+                                    r.method = 'gds_knn', r.group_id = $group_id,
+                                    r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
+                                RETURN count(r) AS cnt
+                            """, edges=chunk, knn_config=knn_config, group_id=group_id,
+                                knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                        else:
+                            result = session.run("""
+                                UNWIND $edges AS e
+                                MATCH (n1), (n2)
+                                WHERE id(n1) = e.node1 AND id(n2) = e.node2
+                                  AND n1.group_id = $group_id AND n2.group_id = $group_id
+                                MERGE (n1)-[r:SEMANTICALLY_SIMILAR]->(n2)
+                                SET r.score = e.similarity, r.similarity = e.similarity,
+                                    r.method = 'gds_knn', r.group_id = $group_id,
+                                    r.knn_k = $knn_k, r.knn_cutoff = $knn_cutoff, r.created_at = datetime()
+                                RETURN count(r) AS cnt
+                            """, edges=chunk, group_id=group_id,
+                                knn_k=knn_top_k, knn_cutoff=knn_similarity_cutoff)
+                        edges_created += result.single()["cnt"]
 
                 stats["knn_edges"] = edges_created
                 config_msg = f" (config={knn_config})" if knn_config else ""
@@ -3240,33 +3986,36 @@ Output:
 
             await self.neo4j_store.arun_in_session(_write_knn_edges)
             
-            # 4. Run Louvain community detection
-            logger.info(f"🏘️ Running GDS Louvain community detection...")
-            louvain_df = await _run_gds_algo(
-                "Louvain", gds.louvain.stream,
+            # 4. Run Leiden community detection
+            logger.info(f"🏘️ Running GDS Leiden community detection...")
+            leiden_df = await _run_gds_algo(
+                "Leiden", gds.leiden.stream,
                 G, includeIntermediateCommunities=False, concurrency=4
             )
             
             updates = []
             community_ids = set()
-            for _, row in louvain_df.iterrows():
+            for _, row in leiden_df.iterrows():
                 node_id = int(row["nodeId"])
                 community_id = int(row["communityId"])
                 updates.append({"nodeId": node_id, "communityId": community_id})
                 community_ids.add(community_id)
             
-            def _write_louvain(session):
+            def _write_leiden(session):
+                BATCH = 100
                 if updates:
-                    session.run("""
-                        UNWIND $updates AS u
-                        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
-                        SET n.community_id = u.communityId
-                    """, updates=updates, group_id=group_id)
+                    for start in range(0, len(updates), BATCH):
+                        chunk = updates[start : start + BATCH]
+                        session.run("""
+                            UNWIND $updates AS u
+                            MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                            SET n.community_id = u.communityId
+                        """, updates=chunk, group_id=group_id)
 
                 stats["communities"] = len(community_ids)
-                logger.info(f"🏘️ GDS Louvain: {stats['communities']} communities")
+                logger.info(f"🏘️ GDS Leiden: {stats['communities']} communities")
 
-            await self.neo4j_store.arun_in_session(_write_louvain)
+            await self.neo4j_store.arun_in_session(_write_leiden)
             
             # 5. Run PageRank
             logger.info(f"📈 Running GDS PageRank...")
@@ -3281,12 +4030,15 @@ Output:
             ]
             
             def _write_pagerank(session):
+                BATCH = 100
                 if pr_updates:
-                    session.run("""
-                        UNWIND $updates AS u
-                        MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
-                        SET n.pagerank = u.score
-                    """, updates=pr_updates, group_id=group_id)
+                    for start in range(0, len(pr_updates), BATCH):
+                        chunk = pr_updates[start : start + BATCH]
+                        session.run("""
+                            UNWIND $updates AS u
+                            MATCH (n) WHERE id(n) = u.nodeId AND n.group_id = $group_id
+                            SET n.pagerank = u.score
+                        """, updates=chunk, group_id=group_id)
 
                 stats["pagerank_nodes"] = len(pr_updates)
                 logger.info(f"📈 GDS PageRank: scored {stats['pagerank_nodes']} nodes")
@@ -3307,7 +4059,7 @@ Output:
             # Track GDS usage (billed by memory-hours)
             session_duration = int(time.time() - session_start)
             algorithms_run = [a for a, v in [
-                ("knn", stats["knn_edges"]), ("louvain", stats["communities"]),
+                ("knn", stats["knn_edges"]), ("leiden", stats["communities"]),
                 ("pagerank", stats["pagerank_nodes"]),
             ] if v > 0]
             try:
@@ -3316,12 +4068,13 @@ Output:
                 tracker = get_usage_tracker()
                 gds_credits = compute_gds_credits(memory_gb=2, duration_seconds=session_duration)
                 await tracker.log_gds_usage(
-                    partition_id=group_id,
+                    partition_id=user_id if user_id else group_id,
                     memory_gb=2,
                     duration_seconds=session_duration,
                     nodes_processed=stats.get("pagerank_nodes", 0),
                     algorithms_run=algorithms_run,
                     cost_estimate_usd=gds_credits * 0.001,
+                    user_id=user_id,
                 )
             except Exception as track_err:
                 logger.warning(f"⚠️  GDS usage tracking failed: {track_err}")
@@ -3343,17 +4096,17 @@ Output:
         
         return stats
 
-    # ==================== Step 9: Louvain Community Materialization ====================
+    # ==================== Step 9: Community Materialization ====================
 
-    async def _materialize_louvain_communities(
+    async def _materialize_communities(
         self,
         *,
         group_id: str,
         min_community_size: int = 2,
     ) -> Dict[str, int]:
-        """Materialize GDS Louvain clusters into Community nodes with LLM summaries.
+        """Materialize Leiden clusters into Community nodes with LLM summaries.
 
-        Bridges GDS Louvain (structural clustering) with LazyGraphRAG (semantic
+        Bridges Leiden (structural clustering) with LazyGraphRAG (semantic
         summarization):
         1. Read community_id assignments from Step 8 (already on Entity nodes)
         2. Create :Community nodes and :BELONGS_TO edges via neo4j_store
@@ -3380,7 +4133,7 @@ Output:
             return stats
 
         # 9a) Group entities by community_id
-        logger.info("📋 Step 9a: Grouping entities by Louvain community_id...")
+        logger.info("📋 Step 9a: Grouping entities by Leiden community_id...")
         community_query = """
         MATCH (e:Entity {group_id: $group_id})
         WHERE e.community_id IS NOT NULL
@@ -3400,10 +4153,10 @@ Output:
         community_groups = [(record["cid"], record["members"]) for record in result]
 
         if not community_groups:
-            logger.info("⏭️  No Louvain communities with >= %d members found", min_community_size)
+            logger.info("⏭️  No Leiden communities with >= %d members found", min_community_size)
             return stats
 
-        logger.info("📋 Found %d Louvain communities (>= %d members)", len(community_groups), min_community_size)
+        logger.info("📋 Found %d Leiden communities (>= %d members)", len(community_groups), min_community_size)
 
         # 9b) Delete stale communities from prior runs, then create fresh ones
         logger.info("🧹 Step 9b: Cleaning stale Community nodes...")
@@ -3416,7 +4169,7 @@ Output:
         link_params = []
         for cid, members in community_groups:
             avg_pagerank = sum(m["pagerank"] for m in members) / len(members)
-            c_id = f"louvain_{group_id}_{cid}"
+            c_id = f"leiden_{group_id}_{cid}"
             community_params.append({
                 "id": c_id, "level": 0, "title": "", "summary": "",
                 "full_content": "", "rank": avg_pagerank,
@@ -3447,13 +4200,41 @@ Output:
             )
         stats["communities_created"] = len(community_params)
 
-        # 9c) Generate LLM summaries (bounded parallelism)
+        # 9c) Pre-fetch ALL intra-community relationships in a single batch query
+        # (replaces N+1 individual queries — one per community).
+        logger.info("📝 Step 9c: Fetching intra-community relationships (batch)...")
+        all_community_ids = [cid for cid, _ in community_groups]
+        batch_rel_query = """
+        MATCH (e1:Entity {group_id: $group_id})-[r]->(e2:Entity {group_id: $group_id})
+        WHERE e1.community_id IN $community_ids
+          AND e1.community_id = e2.community_id
+          AND NOT type(r) IN ['MENTIONS', 'SEMANTICALLY_SIMILAR', 'BELONGS_TO', 'APPEARS_IN_SECTION', 'APPEARS_IN_DOCUMENT']
+        RETURN e1.community_id AS cid, e1.name AS source, type(r) AS rel_type,
+               e2.name AS target, coalesce(r.description, '') AS description
+        """
+        batch_rel_result = await self.neo4j_store.arun_query(
+            batch_rel_query, read_only=True, group_id=group_id, community_ids=all_community_ids,
+        )
+        # Group relationships by community_id
+        community_rels: Dict[int, List[Dict]] = {cid: [] for cid in all_community_ids}
+        for record in batch_rel_result:
+            cid = record["cid"]
+            if cid in community_rels and len(community_rels[cid]) < 50:
+                community_rels[cid].append({
+                    "source": record["source"],
+                    "rel_type": record["rel_type"],
+                    "target": record["target"],
+                    "description": record["description"],
+                })
+
+        # Generate LLM summaries (bounded parallelism)
         logger.info("📝 Step 9c: Generating LLM summaries for %d communities...", len(community_groups))
-        sem = asyncio.Semaphore(5)  # Bound parallel LLM calls to avoid 429s
+        sem = asyncio.Semaphore(settings.COMMUNITY_LLM_CONCURRENCY)
 
         async def _summarize_one(cid: int, members: List[Dict]) -> Optional[Tuple[str, str]]:
             async with sem:
-                return await self._summarize_community(group_id, cid, members)
+                rels = community_rels.get(cid, [])
+                return await self._summarize_community(group_id, cid, members, relationships=rels)
 
         tasks = [_summarize_one(cid, members) for cid, members in community_groups]
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -3466,10 +4247,24 @@ Output:
             if result is None:
                 continue
             title, summary = result
-            community_id = f"louvain_{group_id}_{cid}"
-            self.neo4j_store.update_community_summary(group_id, community_id, title, summary)
+            community_id = f"leiden_{group_id}_{cid}"
             summaries_cache[community_id] = (title, summary)
             stats["summaries_generated"] += 1
+
+        # Batch write all community summaries in a single UNWIND query
+        if summaries_cache:
+            summary_updates = [
+                {"id": cid, "title": title, "summary": summary}
+                for cid, (title, summary) in summaries_cache.items()
+            ]
+            await self.neo4j_store.arun_query(
+                """
+                UNWIND $updates AS u
+                MATCH (c:Community {id: u.id, group_id: $group_id})
+                SET c.title = u.title, c.summary = u.summary, c.full_content = u.summary
+                """,
+                updates=summary_updates, group_id=group_id,
+            )
 
         # 9d-9e) Embed summaries and store on Community nodes (batched)
         if summaries_cache and self.section_embed_model:
@@ -3507,25 +4302,33 @@ Output:
         group_id: str,
         community_id: int,
         members: List[Dict],
+        relationships: Optional[List[Dict]] = None,
     ) -> Optional[Tuple[str, str]]:
-        """Generate title + summary for one Louvain community via LLM.
+        """Generate title + summary for one Leiden community via LLM.
+
+        Args:
+            group_id: Tenant group identifier
+            community_id: Leiden community integer ID
+            members: List of entity dicts with name, description, pagerank, etc.
+            relationships: Pre-fetched intra-community relationships (avoids N+1 query).
+                If None, falls back to per-community Neo4j query.
 
         Returns:
             (title, summary) tuple or None on failure.
         """
-        # Fetch intra-community relationships
-        rel_query = """
-        MATCH (e1:Entity {group_id: $group_id})-[r]->(e2:Entity {group_id: $group_id})
-        WHERE e1.community_id = $community_id
-          AND e2.community_id = $community_id
-          AND NOT type(r) IN ['MENTIONS', 'SEMANTICALLY_SIMILAR', 'BELONGS_TO', 'APPEARS_IN_SECTION', 'APPEARS_IN_DOCUMENT']
-        RETURN e1.name AS source, type(r) AS rel_type, e2.name AS target,
-               coalesce(r.description, '') AS description
-        LIMIT 50
-        """
-        relationships = []
-        result = await self.neo4j_store.arun_query(rel_query, read_only=True, group_id=group_id, community_id=community_id)
-        relationships = [dict(record) for record in result]
+        # Use pre-fetched relationships if provided, otherwise query (fallback)
+        if relationships is None:
+            rel_query = """
+            MATCH (e1:Entity {group_id: $group_id})-[r]->(e2:Entity {group_id: $group_id})
+            WHERE e1.community_id = $community_id
+              AND e2.community_id = $community_id
+              AND NOT type(r) IN ['MENTIONS', 'SEMANTICALLY_SIMILAR', 'BELONGS_TO', 'APPEARS_IN_SECTION', 'APPEARS_IN_DOCUMENT']
+            RETURN e1.name AS source, type(r) AS rel_type, e2.name AS target,
+                   coalesce(r.description, '') AS description
+            LIMIT 50
+            """
+            result = await self.neo4j_store.arun_query(rel_query, read_only=True, group_id=group_id, community_id=community_id)
+            relationships = [dict(record) for record in result]
 
         # Build entity list (sorted by pagerank descending)
         entity_lines = []
@@ -3557,7 +4360,7 @@ SUMMARY: <summary>"""
 
         try:
             from llama_index.core.llms import ChatMessage
-            response = await self.llm.achat([ChatMessage(role="user", content=prompt)])
+            response = await self._achat_with_retry([ChatMessage(role="user", content=prompt)])
             text = response.message.content.strip()
             return self._parse_community_summary(text)
         except Exception as e:
@@ -3976,22 +4779,26 @@ SUMMARY: <summary>"""
             logger.warning("section_embedding_failed", extra={"error": str(e)})
             return {"sections_embedded": 0, "error": str(e)}
         
-        # Update Section nodes with embeddings
+        # Update Section nodes with embeddings — batched to avoid overwhelming Neo4j
+        # with a single transaction containing many 2048-dim vectors
         updates = [
             {"id": sec["id"], "section_embedding": emb}
             for sec, emb in zip(sections_to_embed, embeddings)
             if emb is not None
         ]
         
-        await self.neo4j_store.arun_query(
-            """
-            UNWIND $updates AS u
-            MATCH (s:Section {id: u.id, group_id: $group_id})
-            SET s.section_embedding = u.section_embedding
-            """,
-            updates=updates,
-            group_id=group_id,
-        )
+        BATCH = 20  # ~20 × 2048 floats ≈ 320 KB per batch
+        for start in range(0, len(updates), BATCH):
+            chunk = updates[start : start + BATCH]
+            await self.neo4j_store.arun_query(
+                """
+                UNWIND $updates AS u
+                MATCH (s:Section {id: u.id, group_id: $group_id})
+                SET s.section_embedding = u.section_embedding
+                """,
+                updates=chunk,
+                group_id=group_id,
+            )
         
         logger.info(
             "section_nodes_embedded",
@@ -4058,7 +4865,7 @@ SUMMARY: <summary>"""
 
         from llama_index.core.llms import ChatMessage
 
-        _summary_sem = asyncio.Semaphore(5)
+        _summary_sem = asyncio.Semaphore(settings.SECTION_LLM_CONCURRENCY)
 
         async def _summarize_section(sec: dict) -> Optional[dict]:
             content_sample = "\n---\n".join(
@@ -4077,7 +4884,7 @@ SUMMARY: <summary>"""
             )
             try:
                 async with _summary_sem:
-                    response = await self.llm.achat(
+                    response = await self._achat_with_retry(
                         [ChatMessage(role="user", content=prompt)]
                     )
                 summary = response.message.content.strip()
@@ -4277,50 +5084,46 @@ SUMMARY: <summary>"""
         if len(sections) < 2:
             return {"edges_created": 0, "reason": "insufficient_sections"}
         
-        # Compute pairwise similarities for cross-document sections
-        import numpy as np
-        
-        edges_to_create = []
-        edge_count_per_section: Dict[str, int] = {}
-        
-        for i, s1 in enumerate(sections):
-            if s1["embedding"] is None:
-                continue
-            emb1 = np.array(s1["embedding"])
-            norm1 = np.linalg.norm(emb1)
-            if norm1 == 0:
-                continue
-            
-            for j, s2 in enumerate(sections):
-                if j <= i:  # Avoid duplicates and self-comparison
+        # Offload O(n²) pairwise cosine computation to thread pool
+        # so the main event loop stays responsive for health probes.
+        def _compute_edges():
+            import numpy as np
+            edges = []
+            edge_count_per_section: Dict[str, int] = {}
+            for i, s1 in enumerate(sections):
+                if s1["embedding"] is None:
                     continue
-                if s1["doc_id"] == s2["doc_id"]:  # Only cross-document
+                emb1 = np.array(s1["embedding"])
+                norm1 = np.linalg.norm(emb1)
+                if norm1 == 0:
                     continue
-                if s2["embedding"] is None:
-                    continue
-                
-                # Check edge count limits
-                if edge_count_per_section.get(s1["id"], 0) >= max_edges_per_section:
-                    continue
-                if edge_count_per_section.get(s2["id"], 0) >= max_edges_per_section:
-                    continue
-                
-                emb2 = np.array(s2["embedding"])
-                norm2 = np.linalg.norm(emb2)
-                if norm2 == 0:
-                    continue
-                
-                # Cosine similarity
-                similarity = float(np.dot(emb1, emb2) / (norm1 * norm2))
-                
-                if similarity >= similarity_threshold:
-                    edges_to_create.append({
-                        "source_id": s1["id"],
-                        "target_id": s2["id"],
-                        "similarity": round(similarity, 4),
-                    })
-                    edge_count_per_section[s1["id"]] = edge_count_per_section.get(s1["id"], 0) + 1
-                    edge_count_per_section[s2["id"]] = edge_count_per_section.get(s2["id"], 0) + 1
+                for j, s2 in enumerate(sections):
+                    if j <= i:
+                        continue
+                    if s1["doc_id"] == s2["doc_id"]:
+                        continue
+                    if s2["embedding"] is None:
+                        continue
+                    if edge_count_per_section.get(s1["id"], 0) >= max_edges_per_section:
+                        continue
+                    if edge_count_per_section.get(s2["id"], 0) >= max_edges_per_section:
+                        continue
+                    emb2 = np.array(s2["embedding"])
+                    norm2 = np.linalg.norm(emb2)
+                    if norm2 == 0:
+                        continue
+                    similarity = float(np.dot(emb1, emb2) / (norm1 * norm2))
+                    if similarity >= similarity_threshold:
+                        edges.append({
+                            "source_id": s1["id"],
+                            "target_id": s2["id"],
+                            "similarity": round(similarity, 4),
+                        })
+                        edge_count_per_section[s1["id"]] = edge_count_per_section.get(s1["id"], 0) + 1
+                        edge_count_per_section[s2["id"]] = edge_count_per_section.get(s2["id"], 0) + 1
+            return edges
+
+        edges_to_create = await asyncio.to_thread(_compute_edges)
         
         if not edges_to_create:
             return {"edges_created": 0}
@@ -4352,7 +5155,7 @@ SUMMARY: <summary>"""
         return {"edges_created": edges_created}
 
     async def _embed_keyvalue_keys(self, group_id: str) -> Dict[str, Any]:
-        """Embed KeyValue keys for semantic matching at query time.
+        """Embed KeyValuePair keys for semantic matching at query time.
         
         Creates embeddings for unique KVP keys to enable semantic key matching.
         Uses batch deduplication to avoid re-embedding identical keys.
@@ -4370,10 +5173,10 @@ SUMMARY: <summary>"""
             logger.warning("keyvalue_embedding_skipped_no_embedder")
             return {"kvps_total": 0, "unique_keys": 0, "keys_embedded": 0, "skipped": "no_embedder"}
         
-        # Fetch all KeyValue nodes without embeddings
+        # Fetch all KeyValuePair nodes without embeddings
         result = await self.neo4j_store.arun_query(
             """
-            MATCH (kv:KeyValue {group_id: $group_id})
+            MATCH (kv:KeyValuePair {group_id: $group_id})
             WHERE kv.key_embedding IS NULL
             RETURN kv.id AS id, kv.key AS key
             """,
@@ -4385,7 +5188,7 @@ SUMMARY: <summary>"""
         if not kvps_to_embed:
             # Count total KVPs for stats
             result = await self.neo4j_store.arun_query(
-                "MATCH (kv:KeyValue {group_id: $group_id}) RETURN count(kv) AS count",
+                "MATCH (kv:KeyValuePair {group_id: $group_id}) RETURN count(kv) AS count",
                 read_only=True,
                 group_id=group_id,
             )
@@ -4421,11 +5224,11 @@ SUMMARY: <summary>"""
         if not updates:
             return {"kvps_total": len(kvps_to_embed), "unique_keys": len(unique_keys), "keys_embedded": 0}
         
-        # Update KeyValue nodes with embeddings
+        # Update KeyValuePair nodes with embeddings
         await self.neo4j_store.arun_query(
             """
             UNWIND $updates AS u
-            MATCH (kv:KeyValue {id: u.id, group_id: $group_id})
+            MATCH (kv:KeyValuePair {id: u.id, group_id: $group_id})
             SET kv.key_embedding = u.key_embedding
             """,
             updates=updates,
@@ -4447,6 +5250,57 @@ SUMMARY: <summary>"""
             "unique_keys": len(unique_keys),
             "keys_embedded": len(updates),
         }
+
+    def _validate_graph_integrity(self, group_id: str) -> Dict[str, Any]:
+        """Post-pipeline integrity check: verify critical data was written.
+
+        Returns dict with counts and a ``warnings`` list for gaps.
+        This runs synchronously (called via run_in_executor).
+        """
+        warnings: list[str] = []
+        counts: Dict[str, int] = {}
+
+        with self.neo4j_store._resilient_session(read_only=True) as session:
+            row = session.run("""
+                MATCH (e:Entity) WHERE e.group_id = $gid
+                WITH count(e) AS total_entities,
+                     sum(CASE WHEN e.entity_embedding IS NOT NULL THEN 1 ELSE 0 END) AS entities_with_emb
+                OPTIONAL MATCH ()-[r:RELATED_TO]->()
+                    WHERE r.group_id = $gid AND r.description IS NOT NULL AND r.description <> ''
+                WITH total_entities, entities_with_emb,
+                     count(r) AS triples_with_desc,
+                     sum(CASE WHEN r.triple_embedding IS NOT NULL THEN 1 ELSE 0 END) AS triples_with_emb
+                OPTIONAL MATCH (c:Community {group_id: $gid})
+                RETURN total_entities, entities_with_emb,
+                       triples_with_desc, triples_with_emb,
+                       count(c) AS community_count
+            """, gid=group_id).single()
+
+            if row:
+                counts = dict(row)
+                ent_total = row["total_entities"]
+                ent_emb = row["entities_with_emb"]
+                tri_desc = row["triples_with_desc"]
+                tri_emb = row["triples_with_emb"]
+                comm = row["community_count"]
+
+                if ent_total > 0 and ent_emb < ent_total * 0.8:
+                    warnings.append(
+                        f"Only {ent_emb}/{ent_total} entities have embeddings "
+                        f"({ent_emb * 100 // max(ent_total, 1)}%)"
+                    )
+                if tri_desc > 0 and tri_emb < tri_desc * 0.8:
+                    warnings.append(
+                        f"Only {tri_emb}/{tri_desc} triples have embeddings "
+                        f"({tri_emb * 100 // max(tri_desc, 1)}%)"
+                    )
+                if ent_total >= 10 and comm == 0:
+                    warnings.append(
+                        f"{ent_total} entities but 0 communities — "
+                        f"GDS/Leiden may have failed"
+                    )
+
+        return {"counts": counts, "warnings": warnings}
 
     async def _precompute_triple_embeddings(self, group_id: str) -> Dict[str, Any]:
         """Pre-compute Voyage embeddings for all RELATED_TO triples (Step 7.5).
@@ -4497,10 +5351,9 @@ SUMMARY: <summary>"""
                 index_map.append(indices)
 
             logger.info(
-                "triple_embedding_contextualized",
-                total=len(triples),
-                documents=len(document_chunks),
-                triples_with_doc=sum(1 for t in triples if t.get("document_title")),
+                f"triple_embedding_contextualized total={len(triples)} "
+                f"documents={len(document_chunks)} "
+                f"triples_with_doc={sum(1 for t in triples if t.get('document_title'))}"
             )
 
             nested_embeddings = await asyncio.get_event_loop().run_in_executor(
@@ -4633,19 +5486,10 @@ SUMMARY: <summary>"""
     async def _create_foundation_edges(self, group_id: str) -> Dict[str, int]:
         """Create foundation edges for graph schema enhancement.
         
-        Creates three types of pre-computed edges:
+        Creates three types of pre-computed edges in parallel:
         1. APPEARS_IN_SECTION: Entity → Section (replaces 2-hop Entity-Chunk-Section)
         2. APPEARS_IN_DOCUMENT: Entity → Document (replaces 3-hop Entity-Chunk-Section-Doc)
         3. HAS_HUB_ENTITY: Section → Entity (top-3 most connected entities per section)
-        
-        These edges enable O(1) retrieval for Route 2 (Local Search) and provide
-        the LazyGraphRAG→HippoRAG bridge for Route 4 (DRIFT).
-        
-        Args:
-            group_id: Group identifier for multi-tenancy
-            
-        Returns:
-            Dictionary with edge counts: {"appears_in_section": N, "appears_in_document": M, "has_hub_entity": K}
         """
         logger.info("creating_foundation_edges", extra={"group_id": group_id})
         
@@ -4655,68 +5499,83 @@ SUMMARY: <summary>"""
             "has_hub_entity": 0,
         }
         
-        def _write_foundation(session):
-            # 1. Create APPEARS_IN_SECTION edges (Entity → Section)
-            # Phase B: Sentences reach Section via IN_SECTION
-            result = session.run(
-                """
-                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id
-                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
-                WITH e, s
-                WHERE s IS NOT NULL
-                MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
-                SET r.group_id = $group_id
-                RETURN count(DISTINCT r) AS count
-                """,
-                group_id=group_id,
-            )
-            s = {"appears_in_section": result.single()["count"]}
+        async def _create_appears_in_section():
+            try:
+                result = await self.neo4j_store.arun_query(
+                    """
+                    MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
+                    WHERE e.group_id = $group_id AND src.group_id = $group_id
+                    MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                    WITH e, s
+                    WHERE s IS NOT NULL
+                    MERGE (e)-[r:APPEARS_IN_SECTION]->(s)
+                    SET r.group_id = $group_id
+                    RETURN count(DISTINCT r) AS count
+                    """,
+                    group_id=group_id,
+                )
+                stats["appears_in_section"] = result.single()["count"]
+            except Exception as e:
+                logger.warning(f"APPEARS_IN_SECTION failed (continuing): {e}")
 
-            # 2. Create APPEARS_IN_DOCUMENT edges (Entity → Document)
-            result = session.run(
-                """
-                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id
-                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
-                With e, s
-                WHERE s IS NOT NULL
-                WITH e, s.doc_id AS doc_id
-                MATCH (d:Document {id: doc_id})
-                WHERE d.group_id = $group_id
-                WITH e, d
-                MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
-                SET r.group_id = $group_id
-                RETURN count(DISTINCT r) AS count
-                """,
-                group_id=group_id,
-            )
-            s["appears_in_document"] = result.single()["count"]
+        async def _create_appears_in_document():
+            try:
+                result = await self.neo4j_store.arun_query(
+                    """
+                    MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
+                    WHERE e.group_id = $group_id AND src.group_id = $group_id
+                    MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                    With e, s
+                    WHERE s IS NOT NULL
+                    WITH e, s.doc_id AS doc_id
+                    MATCH (d:Document {id: doc_id})
+                    WHERE d.group_id = $group_id
+                    WITH e, d
+                    MERGE (e)-[r:APPEARS_IN_DOCUMENT]->(d)
+                    SET r.group_id = $group_id
+                    RETURN count(DISTINCT r) AS count
+                    """,
+                    group_id=group_id,
+                )
+                stats["appears_in_document"] = result.single()["count"]
+            except Exception as e:
+                logger.warning(f"APPEARS_IN_DOCUMENT failed (continuing): {e}")
 
-            # 3. Create HAS_HUB_ENTITY edges (Section → top-3 entities)
-            result = session.run(
-                """
-                // Collect entity mentions per section, resolving Sentence→IN_SECTION
-                MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
-                WHERE e.group_id = $group_id AND src.group_id = $group_id
-                MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
-                WITH e, s, src
-                WHERE s IS NOT NULL
-                WITH s, e, count(DISTINCT src) AS mention_count
-                ORDER BY s.id, mention_count DESC
-                WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
-                UNWIND top_entities AS te
-                WITH s, te.entity AS e, te.count AS mention_count
-                MERGE (s)-[r:HAS_HUB_ENTITY]->(e)
-                SET r.group_id = $group_id, r.mention_count = mention_count
-                RETURN count(r) AS count
-                """,
-                group_id=group_id,
-            )
-            s["has_hub_entity"] = result.single()["count"]
-            return s
+        async def _create_has_hub_entity():
+            try:
+                result = await self.neo4j_store.arun_query(
+                    """
+                    MATCH (src:Sentence)-[:MENTIONS]->(e:Entity)
+                    WHERE e.group_id = $group_id AND src.group_id = $group_id
+                    MATCH (src)-[:IN_SECTION]->(s:Section {group_id: $group_id})
+                    WITH e, s, src
+                    WHERE s IS NOT NULL
+                    WITH s, e, count(DISTINCT src) AS mention_count
+                    ORDER BY s.id, mention_count DESC
+                    WITH s, collect({entity: e, count: mention_count})[..3] AS top_entities
+                    UNWIND top_entities AS te
+                    WITH s, te.entity AS e, te.count AS mention_count
+                    MERGE (s)-[r:HAS_HUB_ENTITY]->(e)
+                    SET r.group_id = $group_id, r.mention_count = mention_count
+                    RETURN count(r) AS count
+                    """,
+                    group_id=group_id,
+                )
+                stats["has_hub_entity"] = result.single()["count"]
+            except Exception as e:
+                logger.warning(f"HAS_HUB_ENTITY failed (continuing): {e}")
 
-        stats = await self.neo4j_store.arun_in_session(_write_foundation)
+        # Run all 3 edge types concurrently — gated by _neo4j_write_sem
+        # to prevent write storms on Aura Professional tier.
+        async def _gated(fn):
+            async with self._neo4j_write_sem:
+                return await fn()
+
+        await asyncio.gather(
+            _gated(_create_appears_in_section),
+            _gated(_create_appears_in_document),
+            _gated(_create_has_hub_entity),
+        )
         
         logger.info(
             "foundation_edges_created",

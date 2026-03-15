@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@fluentui/react-components";
-import { Copy24Regular, Checkmark24Regular } from "@fluentui/react-icons";
+import { Copy24Regular, Checkmark24Regular, Translate24Regular } from "@fluentui/react-icons";
 import { useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import ReactMarkdown from "react-markdown";
@@ -14,6 +14,8 @@ import { AnswerIcon } from "./AnswerIcon";
 import { SpeechOutputBrowser } from "./SpeechOutputBrowser";
 import { SpeechOutputAzure } from "./SpeechOutputAzure";
 
+const SHOW_ORIGINAL_KEY = "showOriginalLanguage";
+
 interface Props {
     answer: ChatAppResponse;
     index: number;
@@ -21,7 +23,6 @@ interface Props {
     isSelected?: boolean;
     isStreaming: boolean;
     onCitationClicked: (filePath: string) => void;
-    onSupportingContentClicked: () => void;
     onFollowupQuestionClicked?: (question: string) => void;
     showFollowupQuestions?: boolean;
     showSpeechOutputBrowser?: boolean;
@@ -35,16 +36,57 @@ export const Answer = ({
     isSelected,
     isStreaming,
     onCitationClicked,
-    onSupportingContentClicked,
     onFollowupQuestionClicked,
     showFollowupQuestions,
     showSpeechOutputAzure,
     showSpeechOutputBrowser
 }: Props) => {
     const followupQuestions = answer.context?.followup_questions;
+    const originalAnswer = answer.context?.original_answer;
+    const hasOriginal = Boolean(originalAnswer);
+
+    const [showOriginal, setShowOriginal] = useState<boolean>(() => {
+        return hasOriginal && localStorage.getItem(SHOW_ORIGINAL_KEY) === "true";
+    });
+
+    // Sync with localStorage when toggled
+    const toggleOriginal = useCallback(() => {
+        setShowOriginal(prev => {
+            const next = !prev;
+            localStorage.setItem(SHOW_ORIGINAL_KEY, String(next));
+            return next;
+        });
+    }, []);
+
+    // When a new answer arrives that has no original, reset to translated view
+    useEffect(() => {
+        if (!hasOriginal) setShowOriginal(false);
+    }, [hasOriginal]);
+
     const parsedAnswer = useMemo(() => parseAnswerToHtml(answer, isStreaming, onCitationClicked), [answer, isStreaming, onCitationClicked]);
     const { t } = useTranslation();
+    // DOMPurify sanitized copy — used only for clipboard copy and speech output.
+    // NOT used for ReactMarkdown because DOMPurify's HTML parser collapses \n
+    // to spaces between inline elements, breaking markdown list rendering.
     const sanitizedAnswerHtml = DOMPurify.sanitize(parsedAnswer.answerHtml);
+    // For ReactMarkdown: use raw answerHtml (newlines preserved).
+    // Only HTML present is our own citation <span>s from renderToStaticMarkup().
+    const markdownReady = parsedAnswer.answerHtml
+        .replace(/^• /gm, "- ")
+        .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
+        .replace(/([^\n])\n([-*] |\d+[.)]\s)/g, "$1\n\n$2");
+
+    // Original-language markdown (no citation spans — plain text)
+    const originalMarkdownReady = useMemo(() => {
+        if (!originalAnswer) return "";
+        return originalAnswer
+            .replace(/^• /gm, "- ")
+            .replace(/([^\n])\n(#{1,6} )/g, "$1\n\n$2")
+            .replace(/([^\n])\n([-*] |\d+[.)]\s)/g, "$1\n\n$2");
+    }, [originalAnswer]);
+
+    const displayMarkdown = showOriginal && originalMarkdownReady ? originalMarkdownReady : markdownReady;
+
     const [copied, setCopied] = useState(false);
 
     const handleCopy = () => {
@@ -72,6 +114,16 @@ export const Answer = ({
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                     <AnswerIcon />
                     <div>
+                        {hasOriginal && (
+                            <Button
+                                appearance="transparent"
+                                style={{ color: showOriginal ? "#0078d4" : "black" }}
+                                icon={<Translate24Regular />}
+                                title={showOriginal ? t("tooltips.showTranslated") : t("tooltips.showOriginal")}
+                                aria-label={showOriginal ? t("tooltips.showTranslated") : t("tooltips.showOriginal")}
+                                onClick={toggleOriginal}
+                            />
+                        )}
                         <Button
                             appearance="transparent"
                             style={{ color: "black" }}
@@ -80,7 +132,6 @@ export const Answer = ({
                             aria-label={copied ? t("tooltips.copied") : t("tooltips.copy")}
                             onClick={handleCopy}
                         />
-{/* Supporting content button hidden — not useful for end users */}
                         {showSpeechOutputAzure && (
                             <SpeechOutputAzure answer={sanitizedAnswerHtml} index={index} speechConfig={speechConfig} isStreaming={isStreaming} />
                         )}
@@ -102,7 +153,7 @@ export const Answer = ({
                         }
                     }}
                 >
-                    <ReactMarkdown children={sanitizedAnswerHtml} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]} />
+                    <ReactMarkdown children={displayMarkdown} rehypePlugins={[rehypeRaw]} remarkPlugins={[remarkGfm]} />
                 </div>
             </div>
 
@@ -123,8 +174,8 @@ export const Answer = ({
 
                 return (
                     <div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
-                            <span className={styles.citationLearnMore}>{t("citationWithColon")}</span>
+                        <div className={styles.citationLearnMore}>{t("citationWithColon")}</div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                             {uniqueCitations.map((sc, idx) => {
                                 const rawName = sc.document_title || sc.source || "Unknown";
                                 const docName = (() => { try { return decodeURIComponent(rawName); } catch { return rawName; } })();

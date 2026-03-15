@@ -44,11 +44,30 @@ export const FolderSidebar = ({
     const [renamingId, setRenamingId] = useState<string | null>(null);
     const [renameValue, setRenameValue] = useState("");
     const [contextMenu, setContextMenu] = useState<{ folderId: string; x: number; y: number } | null>(null);
+    const [collapsedZones, setCollapsedZones] = useState<Record<string, boolean>>({});
     const createInputRef = useRef<HTMLInputElement>(null);
     const renameInputRef = useRef<HTMLInputElement>(null);
 
     const rootFolders = folders.filter(f => !f.parent_folder_id);
     const childrenOf = (parentId: string) => folders.filter(f => f.parent_folder_id === parentId);
+
+    // Group root folders into 3 zones
+    const analysisResultFolders = rootFolders.filter(f => f.folder_type === "analysis_result");
+    const analyzedFolders = rootFolders.filter(f =>
+        f.folder_type !== "analysis_result" &&
+        (f.analysis_status === "analyzed" || f.analysis_status === "stale" || f.analysis_status === "analyzing")
+    );
+    const notAnalyzedFolders = rootFolders.filter(f =>
+        f.folder_type !== "analysis_result" &&
+        (!f.analysis_status || f.analysis_status === "not_analyzed")
+    );
+
+    const sumFileCount = (flds: typeof rootFolders) =>
+        flds.reduce((sum, f) => sum + (f.file_count ?? 0), 0);
+
+    const toggleZone = (zone: string) => {
+        setCollapsedZones(prev => ({ ...prev, [zone]: !prev[zone] }));
+    };
 
     useEffect(() => {
         if (creating) createInputRef.current?.focus();
@@ -133,10 +152,10 @@ export const FolderSidebar = ({
     );
 
     const renderAnalysisBadge = (status: AnalysisStatus | null | undefined) => {
-        if (!status || status === "not_analyzed") return null;
+        // Zone grouping communicates analyzed status; only show sub-status badges
+        if (!status || status === "not_analyzed" || status === "analyzed") return null;
         const badgeMap: Record<string, { emoji: string; cls: string; label: string }> = {
             analyzing: { emoji: "⏳", cls: styles.badgeAnalyzing ?? "", label: "Analyzing…" },
-            analyzed: { emoji: "✅", cls: styles.badgeAnalyzed ?? "", label: "Analyzed" },
             stale: { emoji: "⚠️", cls: styles.badgeStale ?? "", label: "Stale" },
         };
         const badge = badgeMap[status];
@@ -240,6 +259,22 @@ export const FolderSidebar = ({
         );
     };
 
+    const renderZoneHeader = (zone: string, icon: string, label: string, fileCount: number) => {
+        const isCollapsed = collapsedZones[zone];
+        return (
+            <div
+                className={styles.zoneHeader}
+                onClick={() => toggleZone(zone)}
+                title={isCollapsed ? t("files.expandZone", "Expand") : t("files.collapseZone", "Collapse")}
+            >
+                <span className={styles.zoneChevron}>{isCollapsed ? "▸" : "▾"}</span>
+                <span className={styles.zoneIcon}>{icon}</span>
+                <span className={styles.zoneLabel}>{label}</span>
+                <span className={styles.zoneCount}>{fileCount}</span>
+            </div>
+        );
+    };
+
     return (
         <div className={styles.sidebar}>
             <div className={styles.sidebarHeader}>
@@ -262,7 +297,30 @@ export const FolderSidebar = ({
                 <span className={styles.folderName} title={t("files.allFiles")}>{t("files.allFiles")}</span>
             </div>
 
-            {rootFolders.map(f => renderFolder(f, 0))}
+            {/* Zone 1: Analysis Results */}
+            {analysisResultFolders.length > 0 && (
+                <div className={styles.zone}>
+                    {renderZoneHeader("results", "📊", t("files.zoneAnalysisResults", "Analysis Results"), sumFileCount(analysisResultFolders))}
+                    {!collapsedZones["results"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersResults}`}>{analysisResultFolders.map(f => renderFolder(f, 0))}</div>}
+                </div>
+            )}
+
+            {/* Zone 2: Analyzed */}
+            {analyzedFolders.length > 0 && (
+                <div className={styles.zone}>
+                    {renderZoneHeader("analyzed", "✅", t("files.zoneAnalyzed", "Analyzed"), sumFileCount(analyzedFolders))}
+                    {!collapsedZones["analyzed"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersAnalyzed}`}>{analyzedFolders.map(f => renderFolder(f, 0))}</div>}
+                </div>
+            )}
+
+            {/* Zone 3: Folders (Not Analyzed) */}
+            {notAnalyzedFolders.length > 0 && (
+                <div className={styles.zone}>
+                    {renderZoneHeader("folders", "📁", t("files.zoneFolders", "Folders"), sumFileCount(notAnalyzedFolders))}
+                    {!collapsedZones["folders"] && <div className={`${styles.zoneFolders} ${styles.zoneFoldersNotAnalyzed}`}>{notAnalyzedFolders.map(f => renderFolder(f, 0))}</div>}
+                </div>
+            )}
+
             {creating && creating.parentId === null && renderCreateInput()}
 
             {/* Context menu */}

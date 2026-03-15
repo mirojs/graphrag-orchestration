@@ -38,11 +38,9 @@ function makeResponse(overrides: Partial<ChatAppResponse> = {}): ChatAppResponse
 
 describe("Answer component", () => {
     let onCitation: (filePath: string) => void;
-    let onSupporting: () => void;
 
     beforeEach(() => {
         onCitation = vi.fn();
-        onSupporting = vi.fn();
     });
 
     it("renders answer text via markdown", () => {
@@ -53,24 +51,9 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
             />
         );
         expect(screen.getByText("Test answer")).toBeInTheDocument();
-    });
-
-    it("does not render supporting content button (hidden for end users)", () => {
-        renderWithProviders(
-            <Answer
-                answer={makeResponse()}
-                index={0}
-                speechConfig={makeSpeechConfig()}
-                isStreaming={false}
-                onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
-            />
-        );
-        expect(screen.queryByTitle("Show supporting content")).not.toBeInTheDocument();
     });
 
     it("copies answer text to clipboard on copy button click", async () => {
@@ -84,7 +67,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
             />
         );
         fireEvent.click(screen.getByTitle("Copy"));
@@ -107,7 +89,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 onFollowupQuestionClicked={onFollowup}
                 showFollowupQuestions={true}
             />
@@ -132,7 +113,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 onFollowupQuestionClicked={onFollowup}
                 showFollowupQuestions={true}
             />
@@ -149,7 +129,6 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 showSpeechOutputAzure={true}
             />
         );
@@ -164,10 +143,42 @@ describe("Answer component", () => {
                 speechConfig={makeSpeechConfig()}
                 isStreaming={false}
                 onCitationClicked={onCitation}
-                onSupportingContentClicked={onSupporting}
                 showSpeechOutputBrowser={true}
             />
         );
         expect(screen.getByTestId("speech-browser")).toBeInTheDocument();
+    });
+
+    it("renders bullet points with citations as separate list items", () => {
+        const resp = makeResponse({
+            message: {
+                content: "- First point [1]\n- Second point [2]\n- Third point [1]",
+                role: "assistant",
+            },
+            context: {
+                data_points: {
+                    text: [],
+                    images: [],
+                    citations: [],
+                    structured_citations: [
+                        { citation: "[1]", document_title: "doc1.pdf", document_url: "https://store/doc1.pdf" },
+                        { citation: "[2]", document_title: "doc2.pdf", document_url: "https://store/doc2.pdf" },
+                    ],
+                },
+                followup_questions: null,
+                thoughts: [],
+            },
+        });
+        const { container } = renderWithProviders(
+            <Answer
+                answer={resp}
+                index={0}
+                speechConfig={makeSpeechConfig()}
+                isStreaming={false}
+                onCitationClicked={onCitation}
+            />
+        );
+        const listItems = container.querySelectorAll("ul > li");
+        expect(listItems.length).toBe(3);
     });
 });

@@ -40,7 +40,6 @@ vi.mock("../api/files", () => ({
     bulkDeleteFilesApi: (...args: any[]) => mockBulkDelete(...args),
     renameFileApi: (...args: any[]) => mockRenameFile(...args),
     moveFileApi: (...args: any[]) => mockMoveFile(...args),
-    listGlobalFilesApi: vi.fn().mockResolvedValue([]),
     getFileIcon: (name: string) => "📄",
     ACCEPTED_FILE_TYPES: ".pdf,.docx,.xlsx",
 }));

@@ -55,15 +55,15 @@
         "stopStreaming": "Detener transmisión",
         "askWithVoice": "Realizar pregunta con voz",
         "stopRecording": "Detener la grabación de la pregunta",
-        "showSupportingContent": "Mostrar contenido de soporte",
         "speakAnswer": "Hablar respuesta",
         "info": "Información",
         "save": "Guardar",
         "copy": "Copiar",
-        "copied": "¡Copiado!"
+        "copied": "¡Copiado!",
+        "showOriginal": "Mostrar respuesta original",
+        "showTranslated": "Mostrar respuesta traducida"
     },
     "headerTexts": {
-        "supportingContent": "Contenido de apoyo",
         "citation": "Cita"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Esto eliminará permanentemente todos los datos de análisis (grafo, entidades, embeddings) de esta carpeta. Los archivos originales se conservarán. ¿Continuar?",
         "analysisDeleted": "Datos de análisis eliminados correctamente",
         "deleteAnalysisFailed": "Error al eliminar el análisis: {{message}}",
-        "storageReminder": "💡 Los datos de análisis utilizan almacenamiento. Elimine el análisis cuando ya no lo necesite para ahorrar costos."
+        "storageReminder": "💡 Los datos de análisis utilizan almacenamiento. Elimine el análisis cuando ya no lo necesite para ahorrar costos.",
+        "zoneAnalysisResults": "Resultados del análisis",
+        "zoneAnalyzed": "Analizados",
+        "zoneFolders": "Carpetas",
+        "expandZone": "Expandir",
+        "collapseZone": "Contraer"
     },
     "viewer": {
         "loadingFile": "Cargando archivo",
@@ -335,5 +340,11 @@
         "plan": "Plan",
         "lastActive": "Última actividad",
         "noUserActivity": "Aún no hay datos de actividad de usuarios. Los datos aparecerán cuando se conecten las analíticas."
+    },
+    "folderSelector": {
+        "label": "Base de conocimiento:",
+        "placeholder": "Seleccionar una base de conocimiento…",
+        "noFolders": "Aún no hay carpetas analizadas",
+        "loadError": "No se pudieron cargar las carpetas"
     }
 }

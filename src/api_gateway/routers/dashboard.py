@@ -93,9 +93,7 @@ class UsageStatsResponse(BaseModel):
     documents_limit: int = 0
     storage_used_gb: float = 0.0
     storage_limit_gb: float = 0.0
-    # Two-tier document breakdown
     personal_documents_count: int = 0
-    global_documents_count: int = 0
     # Credit system
     credits_used_month: int = 0
     credits_limit_month: Optional[int] = None
@@ -281,8 +279,8 @@ async def _fetch_user_usage(
     blob_degraded = False
     cosmos_degraded = False
 
-    async def _blob_stats() -> tuple[int, float, int]:
-        """Returns (personal_count, storage_gb, global_count)."""
+    async def _blob_stats() -> tuple[int, float]:
+        """Returns (personal_count, storage_gb)."""
         nonlocal blob_degraded
         blob_mgr = getattr(request.app.state, "user_blob_manager", None)
         personal_count, storage_gb = 0, 0.0
@@ -298,21 +296,7 @@ async def _fetch_user_usage(
         else:
             logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
 
-        global_count = 0
-        global_mgr = getattr(request.app.state, "global_blob_manager", None)
-        if global_mgr:
-            try:
-                async with asyncio.timeout(5):
-                    container_client = global_mgr.blob_service_client.get_container_client(
-                        global_mgr.container
-                    )
-                    async for blob in container_client.list_blobs():
-                        if "/" not in blob.name:
-                            global_count += 1
-            except (TimeoutError, Exception) as e:
-                logger.warning("usage_global_blob_count_failed", error=str(e))
-
-        return personal_count, storage_gb, global_count
+        return personal_count, storage_gb
 
     async def _recent_queries() -> tuple[list, int, float]:
         """Fetch recent queries and (fallback) doc count from Cosmos."""
@@ -367,7 +351,7 @@ async def _fetch_user_usage(
             logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
             return {}
 
-    (documents_count, storage_used_gb, global_documents_count), \
+    (documents_count, storage_used_gb), \
         (recent_queries, cosmos_doc_count, cosmos_doc_storage), \
         credit_info = await asyncio.gather(
             _blob_stats(), _recent_queries(), _credits()
@@ -395,7 +379,6 @@ async def _fetch_user_usage(
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
         personal_documents_count=personal_documents_count,
-        global_documents_count=global_documents_count,
         credits_used_month=credit_info.get("credits_used", 0),
         credits_limit_month=credit_info.get("credits_limit"),
         credits_remaining=credit_info.get("credits_remaining"),
@@ -549,46 +532,20 @@ async def _fetch_dashboard_all(
     blob_degraded = False
     cosmos_degraded = False
 
-    async def _blob_stats() -> tuple[int, float, int]:
+    async def _blob_stats() -> tuple[int, float]:
         nonlocal blob_degraded
-
-        async def _personal() -> tuple[int, float]:
-            nonlocal blob_degraded
-            blob_mgr = getattr(request.app.state, "user_blob_manager", None)
-            if not blob_mgr:
-                logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
-                return 0, 0.0
-            try:
-                async with asyncio.timeout(5):
-                    count, size_bytes = await blob_mgr.get_blob_stats(group_id)
-                    return count, round(size_bytes / (1024 ** 3), 4)
-            except (TimeoutError, Exception) as e:
-                logger.warning("usage_blob_count_failed", group_id=group_id, error=str(e))
-                blob_degraded = True
-                return 0, 0.0
-
-        async def _global() -> int:
-            global_mgr = getattr(request.app.state, "global_blob_manager", None)
-            if not global_mgr:
-                return 0
-            try:
-                async with asyncio.timeout(5):
-                    container_client = global_mgr.blob_service_client.get_container_client(
-                        global_mgr.container
-                    )
-                    count = 0
-                    async for blob in container_client.list_blobs():
-                        if "/" not in blob.name:
-                            count += 1
-                    return count
-            except (TimeoutError, Exception) as e:
-                logger.warning("usage_global_blob_count_failed", error=str(e))
-                return 0
-
-        (personal_count, storage_gb), global_count = await asyncio.gather(
-            _personal(), _global()
-        )
-        return personal_count, storage_gb, global_count
+        blob_mgr = getattr(request.app.state, "user_blob_manager", None)
+        if not blob_mgr:
+            logger.debug("usage_blob_manager_not_initialized", group_id=group_id)
+            return 0, 0.0
+        try:
+            async with asyncio.timeout(5):
+                count, size_bytes = await blob_mgr.get_blob_stats(group_id)
+                return count, round(size_bytes / (1024 ** 3), 4)
+        except (TimeoutError, Exception) as e:
+            logger.warning("usage_blob_count_failed", group_id=group_id, error=str(e))
+            blob_degraded = True
+            return 0, 0.0
 
     async def _recent_queries() -> tuple[list, int, float]:
         nonlocal cosmos_degraded
@@ -637,7 +594,7 @@ async def _fetch_dashboard_all(
             logger.warning("dashboard_credit_fetch_failed", user_id=user_id)
             return {}
 
-    (documents_count, storage_used_gb, global_documents_count), \
+    (documents_count, storage_used_gb), \
         (recent_queries, cosmos_doc_count, cosmos_doc_storage), \
         credit_info = await asyncio.gather(
             _blob_stats(), _recent_queries(), _credits()
@@ -663,7 +620,6 @@ async def _fetch_dashboard_all(
         storage_used_gb=storage_used_gb,
         storage_limit_gb=limits.max_storage_gb,
         personal_documents_count=personal_documents_count,
-        global_documents_count=global_documents_count,
         credits_used_month=credit_info.get("credits_used", 0),
         credits_limit_month=credit_info.get("credits_limit"),
         credits_remaining=credit_info.get("credits_remaining"),

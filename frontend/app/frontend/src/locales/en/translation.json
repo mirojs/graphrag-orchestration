@@ -31,6 +31,12 @@
         "errorDeleting": "Error deleting.",
         "fileDeleted": "File deleted"
     },
+    "folderSelector": {
+        "label": "Knowledge base:",
+        "placeholder": "Select a knowledge base…",
+        "noFolders": "No analyzed folders yet",
+        "loadError": "Could not load folders"
+    },
     "developerSettings": "Developer settings",
     "chatEmptyStateTitle": "Ask your documents. Trust every answer.",
     "chatEmptyStateSubtitle": "Every answer is traced to the exact sentence — click to verify on the original PDF. Try with our sample documents or upload your own.",
@@ -55,15 +61,15 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Ask question with voice",
         "stopRecording": "Stop recording question",
-        "showSupportingContent": "Show supporting content",
         "speakAnswer": "Speak answer",
         "info": "Info",
         "save": "Save",
         "copy": "Copy",
-        "copied": "Copied!"
+        "copied": "Copied!",
+        "showOriginal": "Show original",
+        "showTranslated": "Show translated"
     },
     "headerTexts": {
-        "supportingContent": "Supporting Content",
         "citation": "Citation"
     },
     "labels": {
@@ -232,7 +238,13 @@
         "deleteAnalysisConfirm": "This will permanently remove all analysis data (graph, entities, embeddings) for this folder. Original files will be kept. Continue?",
         "analysisDeleted": "Analysis data deleted successfully",
         "deleteAnalysisFailed": "Failed to delete analysis: {{message}}",
-        "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs."
+        "storageReminder": "💡 Analysis data uses storage. Delete analysis when no longer needed to save costs.",
+        "preview": "Preview",
+        "zoneAnalysisResults": "Analysis Results",
+        "zoneAnalyzed": "Analyzed",
+        "zoneFolders": "Folders",
+        "expandZone": "Expand",
+        "collapseZone": "Collapse"
     },
     "nav": {
         "chat": "Chat",
@@ -248,6 +260,19 @@
         "pageInfo": "Page {{current}} / {{total}}",
         "highlightCount": "{{count}} highlight(s) on this page",
         "failedLoadPdf": "Failed to load PDF document"
+    },
+    "preview": {
+        "prev": "Previous file",
+        "next": "Next file",
+        "download": "Download",
+        "close": "Close",
+        "fitWidth": "Fit",
+        "loading": "Loading preview…",
+        "rendering": "Rendering…",
+        "error": "Preview failed",
+        "noPreview": "Preview not available",
+        "noPreviewHint": "This file format cannot be previewed in the browser.",
+        "downloadFile": "Download file"
     },
     "analysis": {
         "citedSentences": "Cited Sentences",

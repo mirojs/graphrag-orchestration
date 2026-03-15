@@ -285,7 +285,7 @@ class InstrumentationHooks:
         """
         try:
             self._create_background_task(self._usage_tracker.log_llm_usage(
-                partition_id=group_id,
+                partition_id=user_id if user_id else group_id,
                 model=model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -315,7 +315,7 @@ class InstrumentationHooks:
         """
         try:
             self._create_background_task(self._usage_tracker.log_embedding_usage(
-                partition_id=group_id,
+                partition_id=user_id if user_id else group_id,
                 model=model,
                 total_tokens=total_tokens,
                 dimensions=dimensions,
@@ -342,7 +342,7 @@ class InstrumentationHooks:
         """
         try:
             self._create_background_task(self._usage_tracker.log_doc_intel_usage(
-                partition_id=group_id,
+                partition_id=user_id if user_id else group_id,
                 pages_analyzed=pages_analyzed,
                 document_id=document_id,
                 user_id=user_id,

@@ -7,7 +7,7 @@
  * - File list with selection, sorting, context actions
  * - Bulk operations toolbar
  * - Rename dialog
- * - Shared Library tab (graceful when unconfigured)
+ * - Analysis CTA + toolbar analyze button
  * - Responsive design
  */
 
@@ -19,7 +19,6 @@ import { useLogin, requireLogin, getToken } from "../../authConfig";
 import { LoginContext } from "../../loginContext";
 import {
     listFilesApi,
-    listGlobalFilesApi,
     uploadFilesApi,
     deleteFileApi,
     bulkDeleteFilesApi,
@@ -35,7 +34,10 @@ import {
     deleteFolderApi,
     analyzeFolderApi,
     deleteFolderAnalysisApi,
+    cancelFolderAnalysisApi,
+    getFolderFileCountApi,
     Folder,
+    SubfolderCount,
 } from "../../api/folders";
 import { UploadZone } from "../../components/FileManager/UploadZone";
 import { FileList } from "../../components/FileManager/FileList";
@@ -43,6 +45,7 @@ import { FileToolbar } from "../../components/FileManager/FileToolbar";
 import { RenameDialog } from "../../components/FileManager/RenameDialog";
 import { FolderSidebar } from "../../components/FileManager/FolderSidebar";
 import { MoveToFolderDialog } from "../../components/FileManager/MoveToFolderDialog";
+import { FilePreviewPanel } from "../../components/FileManager/FilePreviewPanel";
 import { Toast } from "../../components/FileManager/Toast";
 import styles from "./Files.module.css";
 
@@ -58,10 +61,7 @@ const Files = () => {
     const { loggedIn } = useContext(LoginContext);
     const { t } = useTranslation();
     const navigate = useNavigate();
-    const [activeTab, setActiveTab] = useState<"my" | "shared">("my");
     const [files, setFiles] = useState<string[]>([]);
-    const [globalFiles, setGlobalFiles] = useState<string[]>([]);
-    const [sharedAvailable, setSharedAvailable] = useState(true);
     const [folders, setFolders] = useState<Folder[]>([]);
     const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
@@ -71,15 +71,21 @@ const Files = () => {
     const [searchQuery, setSearchQuery] = useState("");
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
+    const [analyzingFolderIds, setAnalyzingFolderIds] = useState<Set<string>>(new Set());
+    const analyzingGuardRef = useRef<Set<string>>(new Set());
     const [uploadedCount, setUploadedCount] = useState(0);
     const [uploadTotal, setUploadTotal] = useState(0);
     const [renameFile, setRenameFile] = useState<string | null>(null);
     const [moveFile, setMoveFile] = useState<string | null>(null);
+    const [previewFile, setPreviewFile] = useState<string | null>(null);
     const [toasts, setToasts] = useState<ToastMessage[]>([]);
+    const [recursiveFileCount, setRecursiveFileCount] = useState<number | null>(null);
+    const [subfolderCounts, setSubfolderCounts] = useState<SubfolderCount[]>([]);
     const toastIdRef = useRef(0);
 
-    // Track active folder name via ref (avoids callback dependency on `folders` state)
+    // Track active folder name/id via ref (avoids callback dependency on `folders` state)
     const activeFolderNameRef = useRef<string | undefined>(undefined);
+    const activeFolderIdRef = useRef<string | null>(null);
 
     // Toast helper
     const addToast = useCallback((type: ToastMessage["type"], text: string) => {
@@ -101,7 +107,7 @@ const Files = () => {
                 setFiles([]);
                 return;
             }
-            const result = await listFilesApi(token as string, activeFolderNameRef.current);
+            const result = await listFilesApi(token as string, undefined, activeFolderIdRef.current ?? undefined);
             setFiles(result);
         } catch (err: any) {
             addToast("error", `Failed to load files: ${err.message}`);
@@ -109,20 +115,6 @@ const Files = () => {
             setLoading(false);
         }
     }, [client, addToast]);
-
-    const loadGlobalFiles = useCallback(async () => {
-        try {
-            setLoading(true);
-            const result = await listGlobalFilesApi();
-            setGlobalFiles(result);
-            setSharedAvailable(true);
-        } catch (err: any) {
-            setGlobalFiles([]);
-            setSharedAvailable(false);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
 
     // Load folders
     const loadFolders = useCallback(async () => {
@@ -135,8 +127,8 @@ const Files = () => {
             const result = await listFoldersApi(token as string);
             setFolders(result);
         } catch (err: any) {
-            // Folders API may not be available — degrade silently
-            setFolders([]);
+            // Keep existing folders on poll failure — don't wipe UI state
+            console.warn("[folders] poll failed, keeping stale data", err?.message);
         }
     }, [client]);
 
@@ -150,15 +142,27 @@ const Files = () => {
         activeFolderNameRef.current = activeFolderId
             ? folders.find(f => f.id === activeFolderId)?.name
             : undefined;
+        activeFolderIdRef.current = activeFolderId;
         loadFiles();
         setSelected(new Set());
-    }, [activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    useEffect(() => {
-        if (activeTab === "shared") {
-            loadGlobalFiles();
+        // Fetch recursive file count + subfolder breakdown
+        setRecursiveFileCount(null);
+        setSubfolderCounts([]);
+        if (activeFolderId) {
+            (async () => {
+                try {
+                    const token = client ? await getToken(client) : undefined;
+                    if (!useLogin || token) {
+                        const result = await getFolderFileCountApi(activeFolderId, token as string);
+                        setRecursiveFileCount(result.count);
+                        setSubfolderCounts(result.subfolders || []);
+                    }
+                } catch (err) {
+                    console.warn("[file-count] failed to fetch recursive count", err);
+                }
+            })();
         }
-    }, [activeTab, loadGlobalFiles]);
+    }, [activeFolderId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Poll folders while any folder is "analyzing" (every 5s)
     useEffect(() => {
@@ -337,14 +341,43 @@ const Files = () => {
     // Analyze a folder (trigger Neo4j indexing)
     const handleAnalyzeFolder = useCallback(
         async (folderId: string) => {
+            // Use ref for double-click guard (immune to stale closures)
+            if (analyzingGuardRef.current.has(folderId)) return;
+            analyzingGuardRef.current.add(folderId);
+            // Optimistic UI: immediately show "analyzing" state
+            setAnalyzingFolderIds(prev => new Set(prev).add(folderId));
+            setFolders(prev => prev.map(f =>
+                f.id === folderId
+                    ? { ...f, analysis_status: "analyzing" as const, analysis_error: null }
+                    : f
+            ));
             try {
                 const token = client ? await getToken(client) : undefined;
                 if (useLogin && !token) throw new Error("Not authenticated");
-                const result = await analyzeFolderApi(folderId, token as string);
-                addToast("info", result.message || "Analysis started");
+                await analyzeFolderApi(folderId, token as string);
                 await loadFolders();
             } catch (err: any) {
-                addToast("error", err.message || "Analysis failed");
+                const msg = err.message || "";
+                const isAlreadyRunning = msg.includes("already in progress");
+                if (isAlreadyRunning) {
+                    // 409: analysis IS running — keep showing "analyzing", just reload
+                    await loadFolders();
+                } else {
+                    // Real failure — revert optimistic update
+                    setFolders(prev => prev.map(f =>
+                        f.id === folderId
+                            ? { ...f, analysis_status: "not_analyzed" as const }
+                            : f
+                    ));
+                    addToast("error", msg || "Analysis failed");
+                }
+            } finally {
+                analyzingGuardRef.current.delete(folderId);
+                setAnalyzingFolderIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(folderId);
+                    return next;
+                });
             }
         },
         [client, addToast, loadFolders]
@@ -375,6 +408,22 @@ const Files = () => {
             }
         },
         [client, addToast, loadFolders, t]
+    );
+
+    const handleCancelAnalysis = useCallback(
+        async (folderId: string) => {
+            if (!window.confirm("Cancel the in-progress analysis? You can re-analyze later.")) return;
+            try {
+                const token = client ? await getToken(client) : undefined;
+                if (useLogin && !token) throw new Error("Not authenticated");
+                await cancelFolderAnalysisApi(folderId, token as string);
+                addToast("info", "Analysis cancelled");
+                await loadFolders();
+            } catch (err: any) {
+                addToast("error", err.message || "Failed to cancel analysis");
+            }
+        },
+        [client, addToast, loadFolders]
     );
 
     // Move file to folder
@@ -414,8 +463,7 @@ const Files = () => {
     const selectNone = useCallback(() => setSelected(new Set()), []);
 
     // Filter & sort
-    const activeFiles = activeTab === "my" ? files : globalFiles;
-    const filteredFiles = activeFiles
+    const filteredFiles = files
         .filter(f => !searchQuery || f.toLowerCase().includes(searchQuery.toLowerCase()))
         .sort((a, b) => {
             let cmp = 0;
@@ -446,31 +494,10 @@ const Files = () => {
         );
     }
 
-    const isShared = activeTab === "shared";
-
     return (
         <div className={styles.container}>
-            {/* Tab bar */}
-            <div className={styles.tabBar}>
-                <button
-                    className={`${styles.tab} ${activeTab === "my" ? styles.tabActive : ""}`}
-                    onClick={() => setActiveTab("my")}
-                >
-                    {t("files.myFiles")}
-                </button>
-                {sharedAvailable && (
-                    <button
-                        className={`${styles.tab} ${activeTab === "shared" ? styles.tabActive : ""}`}
-                        onClick={() => setActiveTab("shared")}
-                    >
-                        {t("files.sharedLibrary")}
-                    </button>
-                )}
-            </div>
-
-            {/* Upload zone (drag & drop) — only for My Files */}
-            {!isShared && (
-                <UploadZone
+            {/* Upload zone (drag & drop) */}
+            <UploadZone
                     onUpload={handleUpload}
                     uploading={uploading}
                     progress={uploadProgress}
@@ -478,27 +505,23 @@ const Files = () => {
                     uploadedCount={uploadedCount}
                     uploadTotal={uploadTotal}
                 />
-            )}
 
             <div className={styles.mainArea}>
-                {/* Folder sidebar — only for My Files */}
-                {!isShared && (
-                    <FolderSidebar
-                        folders={folders}
-                        activeFolderId={activeFolderId}
-                        onSelectFolder={setActiveFolderId}
-                        onCreateFolder={handleCreateFolder}
-                        onRenameFolder={handleRenameFolder}
-                        onDeleteFolder={handleDeleteFolder}
-                        onAnalyzeFolder={handleAnalyzeFolder}
-                        onChatWithAnalysis={handleChatWithAnalysis}
-                        onDeleteAnalysis={handleDeleteAnalysis}
-                    />
-                )}
+                <FolderSidebar
+                    folders={folders}
+                    activeFolderId={activeFolderId}
+                    onSelectFolder={setActiveFolderId}
+                    onCreateFolder={handleCreateFolder}
+                    onRenameFolder={handleRenameFolder}
+                    onDeleteFolder={handleDeleteFolder}
+                    onAnalyzeFolder={handleAnalyzeFolder}
+                    onChatWithAnalysis={handleChatWithAnalysis}
+                    onDeleteAnalysis={handleDeleteAnalysis}
+                />
 
                 <div className={styles.contentArea}>
                     {/* Breadcrumb */}
-                    {!isShared && activeFolderId && (
+                    {activeFolderId && (
                         <div className={styles.breadcrumb}>
                             <button className={styles.breadcrumbLink} onClick={() => setActiveFolderId(null)}>
                                 {t("files.allFiles")}
@@ -519,30 +542,39 @@ const Files = () => {
                         </div>
                     )}
 
-                    {/* Hero CTA — shown when folder is selected, has files, and is not yet analyzed */}
-                    {!isShared && activeFolder
+                    {/* Hero CTA — shown when folder is selected, has files (including in subfolders), and is not yet analyzed */}
+                    {activeFolder
                         && (!activeFolder.analysis_status || activeFolder.analysis_status === "not_analyzed")
                         && (!activeFolder.folder_type || activeFolder.folder_type === "user")
-                        && filteredFiles.length > 0 && (
+                        && (recursiveFileCount != null ? recursiveFileCount > 0 : filteredFiles.length > 0) && (
                         <div className={styles.analysisCta}>
+                            {activeFolder.analysis_error && (
+                                <div className={styles.analysisErrorBanner}>
+                                    <span className={styles.analysisErrorIcon}>❌</span>
+                                    <span className={styles.analysisErrorText}>Previous analysis failed: {activeFolder.analysis_error}</span>
+                                </div>
+                            )}
                             <div className={styles.analysisCtaContent}>
                                 <span className={styles.analysisCtaIcon}>📊</span>
                                 <div className={styles.analysisCtaText}>
-                                    <strong>{t("files.readyToAnalyze", { count: filteredFiles.length, defaultValue: `Ready to analyze ${filteredFiles.length} document(s)` })}</strong>
+                                    <strong>{t("files.readyToAnalyze", { count: recursiveFileCount ?? filteredFiles.length, defaultValue: `Ready to analyze all documents in this folder` })}</strong>
                                     <span>{t("files.analysisExplainer", "Build a knowledge graph from your files to enable AI-powered question answering.")}</span>
                                 </div>
                             </div>
                             <button
                                 className={styles.analysisCtaBtn}
                                 onClick={() => handleAnalyzeFolder(activeFolder.id)}
+                                disabled={analyzingFolderIds.has(activeFolder.id)}
                             >
-                                🔍 {t("files.analyzeNow", "Analyze Now")}
+                                {analyzingFolderIds.has(activeFolder.id)
+                                    ? "⏳ Starting…"
+                                    : `🔍 ${t("files.analyzeNow", "Analyze Now")}`}
                             </button>
                         </div>
                     )}
 
                     {/* Analysis result summary — shown for analyzed/result folders */}
-                    {!isShared && activeFolder && (activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.analysis_status === "analyzing" || activeFolder.folder_type === "analysis_result") && (
+                    {activeFolder && (activeFolder.analysis_status === "analyzed" || activeFolder.analysis_status === "stale" || activeFolder.analysis_status === "analyzing" || activeFolder.folder_type === "analysis_result") && (
                         <div className={styles.analysisSummary}>
                             <div className={styles.analysisSummaryHeader}>
                                 <span className={styles.analysisSummaryIcon}>
@@ -556,6 +588,13 @@ const Files = () => {
                                             : t("files.analysisComplete", "Analysis Complete")}
                                 </span>
                             </div>
+                            {/* Analysis error banner */}
+                            {activeFolder.analysis_error && (
+                                <div className={styles.analysisErrorBanner}>
+                                    <span className={styles.analysisErrorIcon}>❌</span>
+                                    <span className={styles.analysisErrorText}>{activeFolder.analysis_error}</span>
+                                </div>
+                            )}
                             <div className={styles.analysisSummaryStats}>
                                 {activeFolder.file_count != null && (
                                     <span className={styles.analysisStat}>📄 {activeFolder.file_count} files</span>
@@ -563,8 +602,17 @@ const Files = () => {
                                 {activeFolder.entity_count != null && (
                                     <span className={styles.analysisStat}>🔗 {activeFolder.entity_count} entities</span>
                                 )}
+                                {activeFolder.relationship_count != null && (
+                                    <span className={styles.analysisStat}>↔️ {activeFolder.relationship_count} relationships</span>
+                                )}
                                 {activeFolder.community_count != null && (
                                     <span className={styles.analysisStat}>🏘️ {activeFolder.community_count} communities</span>
+                                )}
+                                {activeFolder.section_count != null && (
+                                    <span className={styles.analysisStat}>📑 {activeFolder.section_count} sections</span>
+                                )}
+                                {activeFolder.sentence_count != null && (
+                                    <span className={styles.analysisStat}>💬 {activeFolder.sentence_count} sentences</span>
                                 )}
                                 {activeFolder.analyzed_at && (
                                     <span className={styles.analysisStat}>🕐 {new Date(activeFolder.analyzed_at).toLocaleString()}</span>
@@ -592,9 +640,44 @@ const Files = () => {
                                 </p>
                             )}
                             {activeFolder.analysis_status === "analyzing" && (
-                                <div className={styles.analysisProgressBar}>
-                                    <div className={styles.analysisProgressFill} />
-                                </div>
+                                <>
+                                    {activeFolder.analysis_files_total != null && activeFolder.analysis_files_total > 0 ? (
+                                        <>
+                                            <div className={styles.analysisProgressText}>
+                                                {(activeFolder.analysis_files_processed ?? 0) === 0
+                                                    ? `Analyzing ${activeFolder.analysis_files_total} files in parallel…`
+                                                    : (activeFolder.analysis_files_processed ?? 0) >= activeFolder.analysis_files_total
+                                                        ? "Building knowledge graph…"
+                                                        : `Analyzed ${activeFolder.analysis_files_processed} of ${activeFolder.analysis_files_total} files…`}
+                                            </div>
+                                            <div className={styles.analysisProgressBar}>
+                                                <div
+                                                    className={(activeFolder.analysis_files_processed ?? 0) === 0
+                                                        ? styles.analysisProgressFill
+                                                        : styles.analysisProgressFillDeterminate}
+                                                    style={(activeFolder.analysis_files_processed ?? 0) > 0
+                                                        ? { width: `${Math.min(95, Math.round(((activeFolder.analysis_files_processed ?? 0) / activeFolder.analysis_files_total) * 100))}%` }
+                                                        : undefined}
+                                                />
+                                            </div>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <div className={styles.analysisProgressText}>Analyzing…</div>
+                                            <div className={styles.analysisProgressBar}>
+                                                <div className={styles.analysisProgressFill} />
+                                            </div>
+                                        </>
+                                    )}
+                                    <div className={styles.analysisActions}>
+                                        <button
+                                            className={styles.cancelAnalysisBtn}
+                                            onClick={() => handleCancelAnalysis(activeFolder.id)}
+                                        >
+                                            ✖ {t("files.cancelAnalysis", "Cancel Analysis")}
+                                        </button>
+                                    </div>
+                                </>
                             )}
                         </div>
                     )}
@@ -602,7 +685,7 @@ const Files = () => {
                     {/* Toolbar: search, sort, bulk actions, analyze */}
                     <FileToolbar
                         fileCount={filteredFiles.length}
-                        selectedCount={isShared ? 0 : selected.size}
+                        selectedCount={selected.size}
                         searchQuery={searchQuery}
                         onSearchChange={setSearchQuery}
                         sortBy={sortBy}
@@ -611,11 +694,11 @@ const Files = () => {
                             if (by === sortBy) setSortAsc(!sortAsc);
                             else { setSortBy(by); setSortAsc(true); }
                         }}
-                        onSelectAll={isShared ? () => {} : selectAll}
-                        onSelectNone={isShared ? () => {} : selectNone}
-                        onDeleteSelected={isShared ? () => {} : () => handleDelete(Array.from(selected))}
-                        onRefresh={isShared ? loadGlobalFiles : () => { loadFiles(); loadFolders(); }}
-                        activeFolderId={isShared ? null : activeFolderId}
+                        onSelectAll={selectAll}
+                        onSelectNone={selectNone}
+                        onDeleteSelected={() => handleDelete(Array.from(selected))}
+                        onRefresh={() => { loadFiles(); loadFolders(); }}
+                        activeFolderId={activeFolderId}
                         analysisStatus={activeFolder?.analysis_status}
                         isUserFolder={!activeFolder?.folder_type || activeFolder.folder_type === "user"}
                         onAnalyzeFolder={activeFolderId ? () => handleAnalyzeFolder(activeFolderId) : undefined}
@@ -624,18 +707,31 @@ const Files = () => {
                     {/* File list */}
                     <FileList
                         files={filteredFiles}
-                        selected={isShared ? new Set<string>() : selected}
+                        selected={selected}
                         loading={loading}
-                        onToggleSelect={isShared ? () => {} : toggleSelect}
-                        onDelete={isShared ? () => {} : (f) => handleDelete([f])}
-                        onRename={isShared ? () => {} : (f) => setRenameFile(f)}
-                        onMove={isShared ? undefined : (f) => setMoveFile(f)}
+                        onToggleSelect={toggleSelect}
+                        onDelete={(f) => handleDelete([f])}
+                        onRename={(f) => setRenameFile(f)}
+                        onMove={(f) => setMoveFile(f)}
+                        onPreview={(f) => setPreviewFile(f)}
+                        subfolderCounts={subfolderCounts}
                     />
                 </div>
+
+                {/* File preview side panel */}
+                {previewFile && (
+                    <FilePreviewPanel
+                        filename={previewFile}
+                        allFiles={filteredFiles}
+                        folder={activeFolder?.name}
+                        onDismiss={() => setPreviewFile(null)}
+                        onNavigate={(f) => setPreviewFile(f)}
+                    />
+                )}
             </div>
 
-            {/* Rename dialog — only for My Files */}
-            {!isShared && renameFile && (
+            {/* Rename dialog */}
+            {renameFile && (
                 <RenameDialog
                     currentName={renameFile}
                     onRename={(newName) => handleRename(renameFile, newName)}
@@ -643,8 +739,8 @@ const Files = () => {
                 />
             )}
 
-            {/* Move to folder dialog — only for My Files */}
-            {!isShared && moveFile && (
+            {/* Move to folder dialog */}
+            {moveFile && (
                 <MoveToFolderDialog
                     filename={moveFile}
                     folders={folders}

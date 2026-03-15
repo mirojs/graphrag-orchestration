@@ -18,29 +18,44 @@ _blob_list_cache: dict[str, Tuple[float, list[str]]] = {}
 _BLOB_CACHE_TTL = 60  # seconds
 
 # Pattern for safe folder names: alphanumeric, spaces, hyphens, underscores, dots
-_SAFE_FOLDER_RE = re.compile(r'^[\w\s.\-]+$')
+_SAFE_FOLDER_RE = re.compile(r'^[\w\s.\-\u2014:]+$')  # includes em-dash and colon for analysis result timestamps
 
 
 def sanitize_folder_name(folder: str | None) -> str | None:
-    """Validate and sanitize a folder name to prevent path traversal."""
+    """Validate and sanitize a folder name or path to prevent path traversal.
+
+    Accepts both single names ("input_docs") and hierarchical paths
+    ("insurance_claims_review/input_docs") for ADLS Gen2 compatibility.
+    """
     if not folder:
         return None
     folder = folder.strip().strip("/")
     if not folder:
         return None
-    if ".." in folder or "/" in folder or "\\" in folder:
+    if ".." in folder or "\\" in folder:
         raise ValueError(f"Invalid folder name: {folder}")
-    if not _SAFE_FOLDER_RE.match(folder):
-        raise ValueError(f"Folder name contains invalid characters: {folder}")
+    # Validate each segment individually
+    for segment in folder.split("/"):
+        segment = segment.strip()
+        if not segment:
+            raise ValueError(f"Folder path contains empty segment: {folder}")
+        if not _SAFE_FOLDER_RE.match(segment):
+            raise ValueError(f"Folder name contains invalid characters: {folder}")
     return folder
 
 
 def _is_directory_blob(blob) -> bool:
-    """Check if a blob entry is an ADLS Gen2 directory (not a real file)."""
+    """Check if a blob entry is a directory marker (not a real file).
+
+    Catches ADLS Gen2 directories (hdi_isfolder) AND plain 0-byte
+    folder-placeholder blobs created by non-HNS storage accounts.
+    """
     if getattr(blob, "is_directory", False):
         return True
     metadata = getattr(blob, "metadata", None)
     if metadata and metadata.get("hdi_isfolder") == "true":
+        return True
+    if (getattr(blob, "size", None) or 0) == 0:
         return True
     return False
 
@@ -142,7 +157,7 @@ class UserBlobManager:
             if _is_directory_blob(blob):
                 continue
             name = blob.name[len(prefix):]
-            if not name:
+            if not name or name.endswith(".result.json"):
                 continue
             total_bytes += blob.size or 0
             count += 1

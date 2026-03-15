@@ -182,6 +182,20 @@ class Settings(BaseSettings):
     AURA_DS_CLIENT_ID: Optional[str] = None
     AURA_DS_CLIENT_SECRET: Optional[str] = None
     
+    # Local graph algorithms threshold: when entity count is below this value,
+    # run KNN/Louvain/PageRank in-process (numpy + networkx) instead of
+    # provisioning an Aura GDS session. Eliminates 60-120s GDS overhead for
+    # small graphs. Set to 0 to always use GDS sessions.
+    GDS_LOCAL_THRESHOLD: int = 2000
+
+    # Pipeline concurrency limits (tune per deployment tier)
+    NEO4J_WRITE_CONCURRENCY: int = 3       # Max concurrent Neo4j write sessions
+    OPENIE_LLM_CONCURRENCY: int = 8        # Max concurrent OpenIE LLM calls (gpt-4.1 50K TPM)
+    COMMUNITY_LLM_CONCURRENCY: int = 5     # Max concurrent community summary LLM calls
+    SECTION_LLM_CONCURRENCY: int = 5       # Max concurrent section summary LLM calls
+    LLM_TIMEOUT_SECONDS: int = 90          # Timeout for individual LLM achat() calls
+    LLM_MAX_RETRIES: int = 3               # Max retries for LLM achat() calls
+    
     # Cosmos DB (Schema Vault)
     COSMOS_ENDPOINT: Optional[str] = None
     COSMOS_KEY: Optional[str] = None
@@ -215,6 +229,7 @@ class Settings(BaseSettings):
     # Azure Translator (query translation for multilingual chat)
     AZURE_TRANSLATOR_ENDPOINT: Optional[str] = None
     AZURE_TRANSLATOR_REGION: str = "swedencentral"
+    AZURE_TRANSLATOR_RESOURCE_ID: Optional[str] = None
 
     # Azure Key Vault (optional — secrets auto-loaded at module import when set)
     AZURE_KEY_VAULT_URL: Optional[str] = None

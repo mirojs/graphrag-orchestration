@@ -34,11 +34,11 @@ param env array = []
 @description('Secrets for the container')
 param secrets array = []
 
-@description('CPU allocation (default 0.5 for worker)')
-param cpuCores string = '0.5'
+@description('CPU allocation for worker container')
+param cpuCores string = '2.0'
 
-@description('Memory allocation (default 1Gi for worker)')
-param memory string = '1Gi'
+@description('Memory allocation for worker container')
+param memory string = '4Gi'
 
 @description('Minimum replicas (default 1)')
 param minReplicas int = 1
@@ -84,6 +84,28 @@ resource containerApp 'Microsoft.App/containerApps@2024-10-02-preview' = {
             cpu: json(cpuCores)
             memory: memory
           }
+          probes: [
+            {
+              type: 'Liveness'
+              tcpSocket: {
+                port: 8000
+              }
+              initialDelaySeconds: 30
+              periodSeconds: 60
+              failureThreshold: 3
+              timeoutSeconds: 5
+            }
+            {
+              type: 'Startup'
+              tcpSocket: {
+                port: 8000
+              }
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              failureThreshold: 12
+              timeoutSeconds: 5
+            }
+          ]
         }
       ]
       scale: {

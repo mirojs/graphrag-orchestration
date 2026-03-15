@@ -59,7 +59,7 @@ resource chatHistoryContainer 'Microsoft.DocumentDB/databaseAccounts/sqlDatabase
       id: 'chat_history'
       partitionKey: {
         paths: [
-          '/user_id'
+          '/entra_oid'
         ]
         kind: 'Hash'
       }

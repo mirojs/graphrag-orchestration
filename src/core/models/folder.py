@@ -70,6 +70,18 @@ class Folder(BaseModel):
     entity_count: Optional[int] = Field(None, description="Number of entities extracted")
     community_count: Optional[int] = Field(None, description="Number of communities detected")
 
+    # Progress tracking (populated during analysis)
+    analysis_files_total: Optional[int] = Field(None, description="Total files to process in current analysis")
+    analysis_files_processed: Optional[int] = Field(None, description="Files processed so far in current analysis")
+
+    # Richer stats (populated on analysis completion)
+    section_count: Optional[int] = Field(None, description="Number of sections extracted")
+    sentence_count: Optional[int] = Field(None, description="Number of sentences extracted")
+    relationship_count: Optional[int] = Field(None, description="Number of relationships extracted")
+
+    # Error tracking
+    analysis_error: Optional[str] = Field(None, description="Error message if analysis failed")
+
     @field_validator("created_at", "updated_at", "analyzed_at", mode="before")
     @classmethod
     def coerce_neo4j_datetime(cls, v):

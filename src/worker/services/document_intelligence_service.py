@@ -362,6 +362,16 @@ class DocumentIntelligenceService:
         logger.info(f"Document Intelligence Service Init - Using API key: {bool(self.api_key)}")
         logger.info(f"Document Intelligence Service Init - Max concurrency: {self.max_concurrency}")
 
+        # Cache credential for reuse — avoids per-file IMDS token acquisition
+        # latency (1-5s) when using Managed Identity.
+        self._cached_credential = None
+
+    async def close(self) -> None:
+        """Close cached credential to release aiohttp resources."""
+        if self._cached_credential is not None:
+            await self._cached_credential.close()
+            self._cached_credential = None
+
     @asynccontextmanager
     async def _create_client(self) -> AsyncIterator[DocumentIntelligenceClient]:
         """Create an async Document Intelligence client and ensure resources are closed.
@@ -380,13 +390,15 @@ class DocumentIntelligenceService:
                 yield client
         else:
             logger.info("Document Intelligence: Using managed identity authentication")
-            async with DefaultAzureCredential() as credential:
-                async with DocumentIntelligenceClient(
-                    endpoint=self.endpoint,
-                    credential=credential,
-                    api_version=self.api_version,
-                ) as client:
-                    yield client
+            # Reuse cached credential to avoid per-call IMDS token acquisition
+            if self._cached_credential is None:
+                self._cached_credential = DefaultAzureCredential()
+            async with DocumentIntelligenceClient(
+                endpoint=self.endpoint,
+                credential=self._cached_credential,
+                api_version=self.api_version,
+            ) as client:
+                yield client
 
     def _build_section_hierarchy(self, paragraphs: List[DocumentParagraph]) -> List[str]:
         """Extract section hierarchy from paragraph roles."""
@@ -1107,6 +1119,70 @@ class DocumentIntelligenceService:
                 return set()
         return set(candidates)
 
+    # Patterns for contact/address block detection
+    _CONTACT_STREET_RE = re.compile(
+        r'Street|St\.|Avenue|Ave\.|Boulevard|Blvd|Drive|Dr\.|Road|Rd\.|Lane|Ln\.',
+        re.IGNORECASE,
+    )
+    _CONTACT_CITY_STATE_ZIP_RE = re.compile(
+        r'City,?\s*State,?\s*Zip|,\s*[A-Z]{2}\s+\d{5}',
+        re.IGNORECASE,
+    )
+    _CONTACT_PHONE_RE = re.compile(
+        r'(?:Phone|Tel|Fax|Emergency)\s*(?:Number|#|:|\()|'
+        r'\(\s*\d{3}\s*\)\s*\d{3}[\-\s]\d{4}',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_contact_block_paragraph(cls, text: str) -> bool:
+        """Return True if text looks like a concatenated contact/address block.
+
+        Azure DI sometimes merges separate address lines (name, street, city,
+        phone) into one paragraph.  Each line is a label-value pair that makes
+        sense alone, but the concatenation is garbled.
+
+        Requires a strong address signal (``Street_``, ``City, State, Zip_``)
+        plus at least one other address indicator.  This avoids false positives
+        on normal prose that merely mentions an address.
+        """
+        # Strong signals: form-field labels with underscores (Street_, City, State, Zip_)
+        has_field_label = bool(re.search(r'Street_|City,?\s*State,?\s*Zip_', text, re.IGNORECASE))
+        if not has_field_label:
+            return False
+        score = 1  # already matched a field label
+        if cls._CONTACT_PHONE_RE.search(text):
+            score += 1
+        if re.search(r'\b\d{5}(?:-\d{4})?\b', text):  # ZIP code
+            score += 1
+        return score >= 2
+
+    def _detect_contact_block_paragraph_indices(
+        self,
+        paragraphs,  # List[DocumentParagraph]
+        exclude: Set[int] = frozenset(),
+    ) -> Set[int]:
+        """Identify contact/address block paragraph indices.
+
+        Scans all paragraphs for concatenated address blocks (street + city/zip
+        + phone patterns).  Skips paragraphs already claimed by letterhead or
+        signature detection.
+        """
+        indices: Set[int] = set()
+        for i, para in enumerate(paragraphs):
+            if i in exclude:
+                continue
+            role = getattr(para, "role", None) or ""
+            if role in ("pageHeader", "pageFooter", "pageNumber",
+                        "title", "sectionHeading"):
+                continue
+            content = (getattr(para, "content", "") or "").strip()
+            if not content:
+                continue
+            if self._is_contact_block_paragraph(content):
+                indices.add(i)
+        return indices
+
     def _detect_signature_block_paragraphs(self, result: AnalyzeResult) -> Set[int]:
         """Detect paragraph indices within signature block windows.
 
@@ -1126,7 +1202,7 @@ class DocumentIntelligenceService:
 
         # 1a. Collect start-offsets of every handwritten span as primary anchors.
         anchor_offsets: List[int] = []
-        used_fallback = False
+        typed_anchor_offsets: Set[int] = set()
         styles = getattr(result, "styles", None) or []
         for style in styles:
             if not getattr(style, "is_handwritten", False):
@@ -1139,17 +1215,19 @@ class DocumentIntelligenceService:
                 if length >= 3:
                     anchor_offsets.append(offset)
 
-        # 1b. Fallback: scan paragraph text for typed-signature patterns.
-        if not anchor_offsets:
-            used_fallback = True
-            for para in paragraphs:
-                spans = getattr(para, "spans", None) or []
-                if not spans:
-                    continue
-                text = (getattr(para, "content", "") or "").strip()
-                if self._is_typed_sig_anchor(text):
-                    offset = getattr(spans[0], "offset", 0) or 0
+        # 1b. Always also scan for typed-signature patterns so that
+        #     mixed documents (handwritten + typed sig blocks on different
+        #     pages) don't miss any signature area.
+        for para in paragraphs:
+            spans = getattr(para, "spans", None) or []
+            if not spans:
+                continue
+            text = (getattr(para, "content", "") or "").strip()
+            if self._is_typed_sig_anchor(text):
+                offset = getattr(spans[0], "offset", 0) or 0
+                if offset not in anchor_offsets:
                     anchor_offsets.append(offset)
+                typed_anchor_offsets.add(offset)
 
         if not anchor_offsets:
             return set()
@@ -1176,10 +1254,11 @@ class DocumentIntelligenceService:
 
             # Upward bound: for handwritten spans expand to nearest section heading
             # (capped at _MAX_SIG_UPWALK paragraphs to avoid sweeping in body text
-            # when there are no headings); for typed (fallback) anchors start the
-            # window AT the anchor paragraph.
+            # when there are no headings); for typed anchors start the window AT
+            # the anchor paragraph to avoid false captures.
             _MAX_SIG_UPWALK = 5  # max paragraphs to walk above the anchor
-            if used_fallback:
+            is_typed_anchor = anchor_offset in typed_anchor_offsets
+            if is_typed_anchor:
                 upper_pos = pos  # include only anchor + paragraphs below it
             else:
                 upper_limit = max(0, pos - _MAX_SIG_UPWALK)
@@ -1597,6 +1676,9 @@ class DocumentIntelligenceService:
         if result.paragraphs:
             sig_block_indices = self._detect_signature_block_paragraphs(result)
             letterhead_indices = self._detect_letterhead_paragraph_indices(result.paragraphs)
+            contact_block_indices = self._detect_contact_block_paragraph_indices(
+                result.paragraphs, exclude=letterhead_indices | sig_block_indices,
+            )
             in_sig_block = False
 
             for i, para in enumerate(result.paragraphs):
@@ -1613,6 +1695,10 @@ class DocumentIntelligenceService:
 
                 # Skip letterhead — handled as dedicated sentence node
                 if i in letterhead_indices:
+                    continue
+
+                # Skip contact blocks — handled as dedicated DI unit
+                if i in contact_block_indices:
                     continue
 
                 is_sig = i in sig_block_indices
@@ -1877,6 +1963,9 @@ class DocumentIntelligenceService:
         # paragraph→role map so we can propagate roles to emitted DI units.
         letterhead_para_indices = self._detect_letterhead_paragraph_indices(paragraphs)
         sig_block_para_indices = self._detect_signature_block_paragraphs(result)
+        contact_block_para_indices = self._detect_contact_block_paragraph_indices(
+            paragraphs, exclude=letterhead_para_indices | sig_block_para_indices,
+        )
         para_role_map: Dict[int, str] = {}
         for i, para in enumerate(paragraphs):
             role = getattr(para, "role", None) or ""
@@ -1943,7 +2032,7 @@ class DocumentIntelligenceService:
                 elif kind == "paragraphs":
                     # Exclude letterhead and signature block paragraphs —
                     # they get their own dedicated DI units.
-                    if idx not in letterhead_para_indices and idx not in sig_block_para_indices:
+                    if idx not in letterhead_para_indices and idx not in sig_block_para_indices and idx not in contact_block_para_indices:
                         para_indices.append(idx)
                 elif kind == "tables":
                     table_indices.append(idx)
@@ -1976,6 +2065,20 @@ class DocumentIntelligenceService:
                     text = self._build_markdown_from_paragraphs_and_tables(paras, tbls)
                 if not text:
                     return
+
+                # Strip contact-block paragraph content that leaked via
+                # span-union merging (the union is min..max, so excluded
+                # paragraphs sitting between included ones are captured).
+                for ci in contact_block_para_indices:
+                    cb_para = _safe_get_paragraph(ci)
+                    if cb_para and getattr(cb_para, "content", ""):
+                        # Use span-sliced text (preserves newlines from markdown)
+                        cb_spans = getattr(cb_para, "spans", None) or []
+                        if cb_spans and content:
+                            cb_merged = self._collect_span_union([cb_spans])
+                            cb_slice = self._slice_content_by_spans(content, cb_merged).strip()
+                            if cb_slice and cb_slice in text:
+                                text = text.replace(cb_slice, "").strip()
 
                 tables_metadata = [
                     self._extract_table_metadata(
@@ -2139,7 +2242,12 @@ class DocumentIntelligenceService:
                      for parsed in [self._parse_di_element_ref(el)]
                      if parsed and parsed[0] == "paragraphs" and parsed[1] in sig_block_para_indices}
                 )
-                use_para_spans = has_children or lh_in_elements or sig_in_elements
+                cb_in_elements = bool(contact_block_para_indices) and bool(
+                    {idx for el in elements
+                     for parsed in [self._parse_di_element_ref(el)]
+                     if parsed and parsed[0] == "paragraphs" and parsed[1] in contact_block_para_indices}
+                )
+                use_para_spans = has_children or lh_in_elements or sig_in_elements or cb_in_elements
                 direct_spans = None if use_para_spans else section_spans
                 emit_chunk(part="direct", spans=direct_spans, paras=direct_paras, tbls=direct_tables, para_idx=para_indices)
 
@@ -2163,9 +2271,10 @@ class DocumentIntelligenceService:
                 parsed = self._parse_di_element_ref(el)
                 if parsed and parsed[0] == "paragraphs":
                     visited_para_indices.add(parsed[1])
-        # Also exclude letterhead and signature block paragraphs (they get their own DI units below)
+        # Also exclude letterhead, signature block, and contact block paragraphs (they get their own DI units below)
         visited_para_indices.update(letterhead_para_indices)
         visited_para_indices.update(sig_block_para_indices)
+        visited_para_indices.update(contact_block_para_indices)
         for i, para in enumerate(paragraphs):
             if i in visited_para_indices:
                 continue
@@ -2280,6 +2389,65 @@ class DocumentIntelligenceService:
                     },
                 ))
 
+        # Emit DI units for contact/address block paragraphs.
+        # Each contact block gets its own unit with role="contact_block" so
+        # the sentence extraction pipeline can route it through the LLM
+        # fragment connector instead of wtpsplit.
+        if contact_block_para_indices:
+            for ci in sorted(contact_block_para_indices):
+                para = paragraphs[ci] if ci < len(paragraphs) else None
+                if not para:
+                    continue
+                para_content = (getattr(para, "content", "") or "").strip()
+                if not para_content:
+                    continue
+                cb_page = None
+                regions = getattr(para, "bounding_regions", None) or []
+                if regions:
+                    cb_page = getattr(regions[0], "page_number", None)
+                # Get the lines from the page that overlap this paragraph's
+                # bounding region so we can pass them as raw_lines for the
+                # LLM connector (each line is a meaningful label-value pair).
+                raw_lines: List[str] = []
+                if regions and result.pages:
+                    poly = getattr(regions[0], "polygon", None) or []
+                    pg_num = getattr(regions[0], "page_number", None)
+                    if poly and pg_num:
+                        p_ys = [poly[j] for j in range(1, len(poly), 2)]
+                        p_ymin, p_ymax = min(p_ys), max(p_ys)
+                        for pg in result.pages:
+                            if pg.page_number != pg_num:
+                                continue
+                            for line in (pg.lines or []):
+                                lp = getattr(line, "polygon", None) or []
+                                if lp:
+                                    l_ys = [lp[j] for j in range(1, len(lp), 2)]
+                                    l_ymid = sum(l_ys) / len(l_ys)
+                                    if p_ymin - 0.1 <= l_ymid <= p_ymax + 0.1:
+                                        raw_lines.append(line.content or "")
+                if not raw_lines:
+                    raw_lines = [para_content]
+                docs.append(Document(
+                    text=para_content,
+                    metadata={
+                        "group_id": group_id,
+                        "source": "document-intelligence",
+                        "url": url,
+                        "chunk_type": "role",
+                        "section_path": [],
+                        "di_section_path": [],
+                        "di_section_part": "role",
+                        "role": "contact_block",
+                        "tables": [],
+                        "table_count": 0,
+                        "paragraph_count": 1,
+                        "key_value_pairs": [],
+                        "kvp_count": 0,
+                        **({"page_number": cb_page} if cb_page is not None else {}),
+                        "contact_block": {"raw_lines": raw_lines},
+                    },
+                ))
+
         # De-dup exact duplicates (can happen when roots include nested sections).
         # Include role in key so orphan/role-tagged units don't collide.
         seen: set[tuple[str, str, str]] = set()
@@ -2323,6 +2491,7 @@ class DocumentIntelligenceService:
         *,
         default_model: str = "prebuilt-layout",
         explicit_model: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Tuple[str, List[Document], Optional[str]]:
         """
         Analyze a single document and return extracted Documents.
@@ -2350,6 +2519,7 @@ class DocumentIntelligenceService:
                         async with BlobClient.from_blob_url(url, credential=credential) as blob:
                             download = await blob.download_blob()
                             raw = await download.readall()
+                        await credential.close()
                         result_dict = json.loads(raw)
                         result = AnalyzeResult(result_dict)
                         logger.info(f"✅ Deserialized pre-analyzed result ({len(result.pages or [])} pages) from {url[:80]}")
@@ -2603,9 +2773,10 @@ class DocumentIntelligenceService:
                     from src.core.services.usage_tracker import get_usage_tracker
                     _tracker = get_usage_tracker()
                     asyncio.ensure_future(_tracker.log_doc_intel_usage(
-                        partition_id=group_id,
+                        partition_id=user_id if user_id else group_id,
                         pages_analyzed=len(result.pages),
                         document_id=url.rsplit("/", 1)[-1] if url else "unknown",
+                        user_id=user_id,
                     ))
                 except Exception:
                     pass

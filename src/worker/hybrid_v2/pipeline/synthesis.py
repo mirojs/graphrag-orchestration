@@ -19,6 +19,7 @@ import structlog
 from src.worker.hybrid_v2.services.extraction_service import ExtractionService
 from src.worker.hybrid_v2.pipeline.enhanced_graph_retriever import EnhancedGraphContext
 from src.worker.hybrid_v2.pipeline.chunk_filters import apply_noise_filters
+from src.worker.hybrid_v2.routes.base import acomplete_with_retry
 
 logger = structlog.get_logger(__name__)
 
@@ -999,7 +1000,7 @@ Use this output format:
 Response:"""
 
         try:
-            response = await self.llm.acomplete(prompt)
+            response = await acomplete_with_retry(self.llm, prompt)
             return response.text.strip()
         except Exception as e:
             logger.error("graph_response_generation_failed", error=str(e))
@@ -2287,7 +2288,7 @@ Response:"""
             acomplete_kwargs: Dict[str, Any] = {}
             if max_tokens is not None:
                 acomplete_kwargs["max_tokens"] = max_tokens
-            response = await llm.acomplete(prompt, **acomplete_kwargs)
+            response = await acomplete_with_retry(llm, prompt, **acomplete_kwargs)
             return response.text.strip()
         except Exception as e:
             logger.error("response_generation_failed", error=str(e))
@@ -2550,6 +2551,88 @@ QUESTION: {query}
 | Fact | Source Document | Citation |
 |------|-----------------|----------|"""
         
+        # ---- V10: Comprehensive — exhaustive extraction, relaxed merging ----
+        if variant == "v10_comprehensive":
+            return f"""You are an expert analyst. Answer with bullet points only.
+
+Question: {query}
+
+Evidence Context:
+{context}
+
+Instructions:
+1. Answer the question using ONLY information from the Evidence Context.
+2. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for "bank routing number" but evidence has no routing number → Refuse
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
+   - Question asks for "California law" but evidence shows a different state → Refuse
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → Refuse. Do NOT infer that an unnamed concept falls under a broader or related category.
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+   - Include ONLY items matching that qualifier
+   - EXCLUDE items that don't match, even if they seem related
+   - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
+5. Include citations [N] for factual claims.
+6. **Be EXHAUSTIVE within scope.** Include every distinct fact, clause, obligation, amount, or condition from the evidence that is relevant to the question. Do not summarize multiple distinct items into one bullet — give each its own bullet.
+7. If the evidence contains explicit numeric values (e.g., dollar amounts, time periods/deadlines, percentages, counts), include them verbatim.
+8. **Completeness over brevity.** If the question characterizes a topic one way (e.g. "percentage-based fees") but the evidence shows additional dimensions (e.g. fixed charges alongside percentages), include ALL dimensions — do not limit to the question's framing.
+9. **Expand categories, not count.** When the question lists categories in parentheses (e.g. "risk of loss, liability limitations, non-transferability"), treat each as a CATEGORY that may contain multiple items. List ALL items found in each category — do not cap at the number of categories mentioned.
+10. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
+11. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+12. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
+{document_guidance}
+
+Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
+
+- [Fact with citation [N]]
+- [Fact with citation [N]]
+
+Response:"""
+
+        # ---- V9: Hybrid — scope-control + consolidation for precise answers ----
+        if variant == "v9_hybrid":
+            return f"""You are an expert analyst. Answer with bullet points only.
+
+Question: {query}
+
+Evidence Context:
+{context}
+
+Instructions:
+1. Answer the question using ONLY information from the Evidence Context.
+2. REFUSE only for specific lookups where the exact data point is absent:
+   - Question asks for "bank routing number" but evidence has no routing number → Refuse
+   - Question asks for "SWIFT code" but evidence has no SWIFT/IBAN → Refuse
+   - Question asks for "California law" but evidence shows a different state → Refuse
+   - Question asks about a specific term, clause, or concept by name (e.g. "mold damage", "force majeure") but that exact term does NOT appear anywhere in the evidence → Refuse. Do NOT infer that an unnamed concept falls under a broader or related category.
+   When refusing, respond ONLY with: "The requested information was not found in the available documents."
+3. For general questions (warranty terms, agreement details, fees, obligations, etc.),
+   synthesize all relevant information from the evidence even if the text is
+   fragmentary or OCR-imperfect. Do NOT refuse when partial evidence is available.
+4. **RESPECT ALL QUALIFIERS** in the question. If the question asks for a specific type, category, or unit:
+   - Include ONLY items matching that qualifier
+   - EXCLUDE items that don't match, even if they seem related
+   - If the question specifies a unit (e.g. "day-based"), do NOT include items in other units (weeks, months) even if convertible
+5. Include citations [N] for factual claims.
+6. If the question asks about items **explicitly described as X**, include ONLY items the document actually LABELS or CATEGORIZES as X — not items that merely relate to X in practice.
+7. **ONE bullet = one distinct top-level answer.** If multiple passages describe the same item, MERGE them into a single bullet. Do NOT create separate bullets for supporting details of the same item.
+8. Answer ONLY what was asked — no extra items, no tangential information.
+   If the question asks for N items (e.g. "list the three"), return exactly N bullets.
+9. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
+10. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
+{document_guidance}
+
+Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
+
+- [Fact with citation [N]]
+- [Fact with citation [N]]
+
+Response:"""
+
         # ---- V3: Key-points only — drops Summary to eliminate duplication ----
         if variant == "v3_keypoints":
             return f"""You are an expert analyst. Answer with bullet points only.
@@ -2581,6 +2664,7 @@ Instructions:
    If the question asks for N items (e.g. "list the three"), return exactly N bullets.
 9. When the specific information requested is absent from the evidence, **lead with** an explicit statement that it was not found before mentioning any related information.
 10. Entities with different legal names are DIFFERENT entities (e.g. "Contoso Lifts LLC" ≠ "Contoso Ltd."). Do NOT conflate them.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
 {document_guidance}
 
 Respond using ONLY bullet points — no summary paragraph, no headers, no preamble:
@@ -2619,6 +2703,7 @@ Instructions:
 8. If the question is asking for obligations, reporting/record-keeping, remedies, default/breach, or dispute-resolution: enumerate each distinct obligation/mechanism that is explicitly present in the Evidence Context; do not omit items just because another item is more prominent.
 9. Answer precisely what was asked. Do not volunteer additional conditions, exceptions, or tangential information that was not requested.
 10. When the specific information requested is absent from the evidence, always **lead with** an explicit statement that it was not found (e.g. "The documents do not provide X") before mentioning any related information.
+11. **Prefer exact lexical matches over semantic paraphrases.** If the question asks about "non-transferability" and the evidence contains a clause saying something "is not transferable", cite THAT clause rather than a loosely related clause (e.g. "may not assign"). Match the question's specific terminology to the evidence's wording.
 {document_guidance}
 
 Respond using this format:
@@ -3041,7 +3126,7 @@ BEGIN ANALYSIS:"""
                     narrative += f"- Fields extracted: {len([k for k in ext.keys() if not k.startswith('_')])}\n\n"
         else:
             try:
-                comparison_result = await self.llm.acomplete(comparison_prompt)
+                comparison_result = await acomplete_with_retry(self.llm, comparison_prompt)
                 narrative = comparison_result.text.strip()
             except Exception as e:
                 logger.error("llm_comparison_failed", error=str(e))
@@ -3355,7 +3440,7 @@ BEGIN ANALYSIS:"""
             narrative = "## Analysis Failed: LLM not available\n\nRaw evidence was retrieved but cannot be analyzed."
         else:
             try:
-                comparison_result = await self.llm.acomplete(comparison_prompt)
+                comparison_result = await acomplete_with_retry(self.llm, comparison_prompt)
                 narrative = comparison_result.text.strip()
             except Exception as e:
                 logger.error("llm_sentence_analysis_failed", error=str(e))

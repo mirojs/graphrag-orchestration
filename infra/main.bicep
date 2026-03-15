@@ -155,7 +155,7 @@ param azureOpenAiResourceName string = 'graphrag-openai-8476'
 param documentIntelligenceName string = 'doc-intel-graphrag'
 
 @description('Neo4j connection URI')
-param neo4jUri string = 'neo4j+s://a86dcf63.databases.neo4j.io'
+param neo4jUri string = 'neo4j+s://501bc8d1.databases.neo4j.io'
 
 @description('Neo4j username')
 param neo4jUsername string = 'neo4j'
@@ -168,6 +168,9 @@ param groupIdOverride string = ''
 
 @description('Deployment timestamp for cache busting — auto-generated on each deploy')
 param deployTimestamp string = utcNow()
+
+@description('Name of the existing Log Analytics workspace for container app logs')
+param logAnalyticsWorkspaceName string = 'workspace-rggraphragfeatureeZiR'
 
 // Tags for all resources
 var tags = {
@@ -188,6 +191,7 @@ module containerAppsEnvironment './core/host/container-apps-environment.bicep' =
     name: containerAppsEnvironmentName
     location: location
     tags: tags
+    logAnalyticsWorkspaceName: logAnalyticsWorkspaceName
   }
 }
 
@@ -576,6 +580,63 @@ var sharedEnvVars = concat([
   {
     name: 'VOYAGE_EMBEDDING_DIM'
     value: '2048'
+  }
+  // ── Route 7 (HippoRAG 2) tuning — mirrors local .env overrides ──
+  {
+    name: 'ROUTE7_RERANK'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_PPR_PASSAGE_TOP_K'
+    value: '100'
+  }
+  {
+    name: 'ROUTE7_SYNONYM_THRESHOLD'
+    value: '0.70'
+  }
+  {
+    name: 'ROUTE7_DPR_TOP_K'
+    value: '50'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_CANDIDATES_K'
+    value: '500'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_RERANK'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_PASSAGE_SEEDS'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_SEED_TOP_K'
+    value: '20'
+  }
+  {
+    name: 'ROUTE7_SEMANTIC_SEED_WEIGHT'
+    value: '0.05'
+  }
+  {
+    name: 'ROUTE7_TRIPLE_TOP_K'
+    value: '15'
+  }
+  {
+    name: 'ROUTE7_RERANK_ALL'
+    value: '0'
+  }
+  {
+    name: 'ROUTE7_ENTITY_SEED_TOP_K'
+    value: '15'
+  }
+  {
+    name: 'ROUTE7_SENTENCE_WINDOW'
+    value: '1'
+  }
+  {
+    name: 'ROUTE7_MAX_MERGE_RUN'
+    value: '1'
   }
 ], useUserUpload ? userUploadEnvVars : [])
 

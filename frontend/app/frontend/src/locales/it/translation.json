@@ -55,15 +55,15 @@
         "stopStreaming": "Interrompi lo streaming",
         "askWithVoice": "Fai una domanda usando la voce",
         "stopRecording": "Interrompi la registrazione della domanda",
-        "showSupportingContent": "Mostra contenuto di supporto",
         "speakAnswer": "Parla risposta",
         "info": "Info",
         "save": "Salva",
         "copy": "Copia",
-        "copied": "Copiato!"
+        "copied": "Copiato!",
+        "showOriginal": "Mostra risposta originale",
+        "showTranslated": "Mostra risposta tradotta"
     },
     "headerTexts": {
-        "supportingContent": "Contenuto di Supporto",
         "citation": "Citazione"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Verranno eliminati permanentemente tutti i dati di analisi (grafo, entità, embedding) di questa cartella. I file originali verranno conservati. Continuare?",
         "analysisDeleted": "Dati di analisi eliminati con successo",
         "deleteAnalysisFailed": "Eliminazione analisi fallita: {{message}}",
-        "storageReminder": "💡 I dati di analisi utilizzano spazio. Elimina l'analisi quando non serve più per risparmiare sui costi."
+        "storageReminder": "💡 I dati di analisi utilizzano spazio. Elimina l'analisi quando non serve più per risparmiare sui costi.",
+        "zoneAnalysisResults": "Risultati dell'analisi",
+        "zoneAnalyzed": "Analizzati",
+        "zoneFolders": "Cartelle",
+        "expandZone": "Espandi",
+        "collapseZone": "Comprimi"
     },
     "viewer": {
         "loadingFile": "Caricamento file",
@@ -335,5 +340,11 @@
         "plan": "Piano",
         "lastActive": "Ultima attività",
         "noUserActivity": "Nessun dato di attività utente ancora disponibile. I dati appariranno una volta connessa l'analisi."
+    },
+    "folderSelector": {
+        "label": "Base di conoscenza:",
+        "placeholder": "Seleziona una base di conoscenza…",
+        "noFolders": "Nessuna cartella analizzata ancora",
+        "loadError": "Impossibile caricare le cartelle"
     }
 }

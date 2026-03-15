@@ -25,6 +25,12 @@ export interface Folder {
     file_count: number | null;
     entity_count: number | null;
     community_count: number | null;
+    analysis_files_total: number | null;
+    analysis_files_processed: number | null;
+    section_count: number | null;
+    sentence_count: number | null;
+    relationship_count: number | null;
+    analysis_error: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -213,6 +219,31 @@ export async function deleteFolderAnalysisApi(
     return response.json();
 }
 
+export async function cancelFolderAnalysisApi(
+    folderId: string,
+    idToken: string
+): Promise<{ status: string; folder_id: string; message: string }> {
+    const headers = await getHeaders(idToken);
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}/cancel-analysis`,
+        {
+            method: "POST",
+            headers,
+        }
+    );
+    if (!response.ok) {
+        let detail = response.statusText;
+        try {
+            const body = await response.json();
+            detail = body.detail || detail;
+        } catch {
+            /* ignore */
+        }
+        throw new Error(detail);
+    }
+    return response.json();
+}
+
 export async function getFolderAnalysisStatusApi(
     folderId: string,
     idToken: string
@@ -234,4 +265,32 @@ export async function getFolderAnalysisStatusApi(
         entity_count: folder.entity_count,
         community_count: folder.community_count,
     };
+}
+
+export interface SubfolderCount {
+    name: string;
+    count: number;
+}
+
+export interface FolderFileCountResult {
+    folder_id: string;
+    count: number;
+    subfolders: SubfolderCount[];
+}
+
+export async function getFolderFileCountApi(
+    folderId: string,
+    idToken: string
+): Promise<FolderFileCountResult> {
+    const response = await fetchWithAuthRetry(
+        `/folders/${encodeURIComponent(folderId)}/file-count`,
+        {
+            method: "GET",
+            headers: await getHeaders(idToken),
+        }
+    );
+    if (!response.ok) {
+        throw new Error(`Get folder file count failed: ${response.statusText}`);
+    }
+    return response.json();
 }

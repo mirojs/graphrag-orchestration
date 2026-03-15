@@ -132,9 +132,12 @@ export async function bulkDeleteFilesApi(filenames: string[], idToken: string, f
 
 // ======================== List ========================
 
-export async function listFilesApi(idToken: string, folder?: string): Promise<string[]> {
-    const params = folder ? `?folder=${encodeURIComponent(folder)}` : "";
-    const response = await fetchWithAuthRetry(`/list_uploaded${params}`, {
+export async function listFilesApi(idToken: string, folder?: string, folderId?: string): Promise<string[]> {
+    const searchParams = new URLSearchParams();
+    if (folderId) searchParams.set("folder_id", folderId);
+    else if (folder) searchParams.set("folder", folder);
+    const qs = searchParams.toString();
+    const response = await fetchWithAuthRetry(`/list_uploaded${qs ? `?${qs}` : ""}`, {
         method: "GET",
         headers: await getHeaders(idToken),
     });
@@ -147,23 +150,6 @@ export async function listFilesApi(idToken: string, folder?: string): Promise<st
             detail = response.statusText || `HTTP ${response.status}`;
         }
         throw new Error(`List failed (${response.status}): ${detail}`);
-    }
-    return response.json();
-}
-
-export async function listGlobalFilesApi(): Promise<string[]> {
-    const response = await fetch("/list_global", {
-        method: "GET",
-    });
-    if (!response.ok) {
-        let detail = "";
-        try {
-            const body = await response.json();
-            detail = body.detail || body.message || JSON.stringify(body);
-        } catch {
-            detail = response.statusText || `HTTP ${response.status}`;
-        }
-        throw new Error(`List global files failed (${response.status}): ${detail}`);
     }
     return response.json();
 }
@@ -301,8 +287,9 @@ export async function unlockFileApi(filename: string, idToken: string): Promise<
 
 // ======================== Content / Preview ========================
 
-export function getFileContentUrl(path: string): string {
-    return `/content/${encodeURIComponent(path)}`;
+export function getFileContentUrl(path: string, folder?: string): string {
+    const base = `/content/${encodeURIComponent(path)}`;
+    return folder ? `${base}?folder=${encodeURIComponent(folder)}` : base;
 }
 
 // ======================== Helpers ========================

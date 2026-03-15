@@ -55,15 +55,15 @@
         "stopStreaming": "Stop streaming",
         "askWithVoice": "Vraag stellen met stem",
         "stopRecording": "Opname stoppen",
-        "showSupportingContent": "Ondersteunende inhoud tonen",
         "speakAnswer": "Antwoord uitspreken",
         "info": "Info",
         "save": "Opslaan",
         "copy": "Kopieer",
-        "copied": "Gekopieerd!"
+        "copied": "Gekopieerd!",
+        "showOriginal": "Origineel antwoord tonen",
+        "showTranslated": "Vertaald antwoord tonen"
     },
     "headerTexts": {
-        "supportingContent": "Ondersteunende Inhoud",
         "citation": "Citaat"
     },
     "labels": {
@@ -231,7 +231,12 @@
         "deleteAnalysisConfirm": "Dit verwijdert permanent alle analysegegevens (grafiek, entiteiten, embeddings) voor deze map. Originele bestanden blijven behouden. Doorgaan?",
         "analysisDeleted": "Analysegegevens succesvol verwijderd",
         "deleteAnalysisFailed": "Verwijderen van analyse mislukt: {{message}}",
-        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen."
+        "storageReminder": "💡 Analysegegevens gebruiken opslagruimte. Verwijder de analyse wanneer deze niet meer nodig is om kosten te besparen.",
+        "zoneAnalysisResults": "Analyseresultaten",
+        "zoneAnalyzed": "Geanalyseerd",
+        "zoneFolders": "Mappen",
+        "expandZone": "Uitvouwen",
+        "collapseZone": "Invouwen"
     },
     "viewer": {
         "loadingFile": "Bestand laden",
@@ -335,5 +340,11 @@
         "plan": "Abonnement",
         "lastActive": "Laatst actief",
         "noUserActivity": "Nog geen gebruikersactiviteit. Gegevens verschijnen zodra analyses zijn verbonden."
+    },
+    "folderSelector": {
+        "label": "Kennisbank:",
+        "placeholder": "Selecteer een kennisbank…",
+        "noFolders": "Nog geen geanalyseerde mappen",
+        "loadError": "Kan mappen niet laden"
     }
 }

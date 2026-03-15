@@ -274,6 +274,53 @@ def _call_llm_json(prompt: str) -> Optional[Any]:
         return None
 
 
+def _call_llm_text(prompt: str) -> Optional[str]:
+    """Synchronous LLM call that returns plain text or None."""
+    try:
+        from llama_index.llms.azure_openai import AzureOpenAI
+    except ImportError:
+        return None
+
+    from src.core.config import settings
+
+    model = os.getenv("SENTENCE_REVIEW_MODEL", "gpt-4.1")
+    deployment = os.getenv("SENTENCE_REVIEW_DEPLOYMENT", model)
+    api_version = settings.AZURE_OPENAI_API_VERSION or "2025-03-01-preview"
+
+    llm_kwargs: dict = {
+        "engine": deployment,
+        "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+        "api_version": api_version,
+        "temperature": 0.0,
+    }
+    if settings.AZURE_OPENAI_API_KEY:
+        llm_kwargs["api_key"] = settings.AZURE_OPENAI_API_KEY
+    else:
+        env_token = os.getenv("AZURE_OPENAI_BEARER_TOKEN")
+        if env_token:
+            llm_kwargs["use_azure_ad"] = True
+            llm_kwargs["azure_ad_token_provider"] = lambda: env_token
+        else:
+            try:
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                credential = DefaultAzureCredential()
+                token_provider = get_bearer_token_provider(
+                    credential, "https://cognitiveservices.azure.com/.default"
+                )
+                llm_kwargs["use_azure_ad"] = True
+                llm_kwargs["azure_ad_token_provider"] = token_provider
+            except Exception:
+                return None
+
+    try:
+        llm = AzureOpenAI(**llm_kwargs)
+        response = llm.complete(prompt)
+        return (response.text or "").strip()
+    except Exception as exc:
+        logger.debug("llm_connect_fragments_failed", error=str(exc))
+        return None
+
+
 def _call_llm_for_review(prompt: str) -> Optional[List[str]]:
     """LLM call expecting a JSON array of strings. Returns list or None."""
     parsed = _call_llm_json(prompt)
@@ -500,23 +547,17 @@ def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
 
 
 def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
-    """Return a single joined sentence from a structured signature block.
+    """Connect signature block fragments into one meaningful sentence via LLM.
 
-    Instead of constructing a template sentence from parsed party/role data
-    (which is brittle and depends on regex extraction), we join the **raw
-    paragraph lines** into one sentence — filtering only underscore filler
-    and bare field labels.
+    The raw lines from a signature block are distinct fragments (names, roles,
+    dates, labels) that individually lack context.  An LLM connects them into
+    a single coherent sentence without changing sequence or adding information.
 
-    Joining keeps all fragments (party names, roles, dates) in one embedding
-    vector so semantic search can match any combination (e.g. "who is the
-    authorized representative" matches the sentence containing both the name
-    and the role).  The sentence is stored with ``source="signature_party"``
-    which bypasses the noise-denoiser and gets a ``[Signature Block]``
-    embedding context prefix.
+    Falls back to comma-joined text when the LLM is unavailable.
     """
     raw_lines = sig_block.get("raw_lines") or []
 
-    parts: List[str] = []
+    filtered: List[str] = []
     for line in raw_lines:
         line = line.strip()
         if not line:
@@ -525,13 +566,25 @@ def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
             continue
         if _SIG_FIELD_LABEL_RE.match(line):
             continue
-        parts.append(line)
+        filtered.append(line)
 
-    if not parts:
+    if not filtered:
         return []
-    # Strip trailing periods before joining to avoid "Ltd.." doubles
-    joined = ". ".join(p.rstrip(".") for p in parts)
-    return [joined]
+
+    prompt = (
+        "Connect the following text fragments into a single meaningful sentence.\n"
+        "Rules:\n"
+        "- Do NOT add any information not present in the fragments\n"
+        "- Just add minimal connective words to make it read as one coherent sentence\n"
+        "- Return ONLY the resulting sentence, nothing else\n\n"
+        "Fragments:\n"
+        + "\n".join(f"- {f}" for f in filtered)
+    )
+    result = _call_llm_text(prompt)
+    if result:
+        return [result]
+
+    return [", ".join(filtered)]
 
 
 def _is_noise_sentence(
@@ -1051,30 +1104,69 @@ def extract_sentences_from_di_units(
             continue
 
         # ─── Source G: Signature block (tagged by section-aware path) ──
+        # Use LLM fragment connector to produce coherent sentences from
+        # disconnected signature fragments (names, roles, dates).
         if role == "signature":
-            sig_text = unit_text.strip()
-            if sig_text:
-                text_key = sig_text.strip().lower()
-                if text_key not in seen_texts:
-                    sent_id = f"{doc_id}_sent_{global_idx}"
-                    seen_texts[text_key] = sent_id
-                    section_key = "[Signature Block]"
-                    idx_in_section = section_counters.get(section_key, 0)
-                    section_counters[section_key] = idx_in_section + 1
-                    all_sentences.append({
-                        "id": sent_id,
-                        "text": sig_text,
-                        "document_id": doc_id,
-                        "source": "signature_block",
-                        "index_in_doc": global_idx,
-                        "section_path": "[Signature Block]",
-                        "page": page,
-                        "confidence": 1.0,
-                        "tokens": len(sig_text.split()),
-                        "parent_text": "",
-                        "index_in_section": idx_in_section,
-                    })
-                    global_idx += 1
+            sig_block = meta.get("signature_block") or {}
+            raw_lines = sig_block.get("raw_lines") or []
+            if not raw_lines:
+                raw_lines = [l.strip() for l in unit_text.strip().split("\n") if l.strip()]
+            if raw_lines:
+                for sig_text in _synthesize_signature_sentences({"raw_lines": raw_lines}):
+                    text_key = sig_text.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = "[Signature Block]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": sig_text,
+                            "document_id": doc_id,
+                            "source": "signature_block",
+                            "index_in_doc": global_idx,
+                            "section_path": "[Signature Block]",
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(sig_text.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
+            continue
+
+        # ─── Source H: Contact/address block ──────────────────────
+        # Use LLM fragment connector to produce coherent sentences from
+        # concatenated address fields (name, street, city, phone).
+        if role == "contact_block":
+            cb_data = meta.get("contact_block") or {}
+            raw_lines = cb_data.get("raw_lines") or []
+            if not raw_lines:
+                raw_lines = [l.strip() for l in unit_text.strip().split("\n") if l.strip()]
+            if raw_lines:
+                for cb_text in _synthesize_signature_sentences({"raw_lines": raw_lines}):
+                    text_key = cb_text.strip().lower()
+                    if text_key not in seen_texts:
+                        sent_id = f"{doc_id}_sent_{global_idx}"
+                        seen_texts[text_key] = sent_id
+                        section_key = section_path or "[Contact Block]"
+                        idx_in_section = section_counters.get(section_key, 0)
+                        section_counters[section_key] = idx_in_section + 1
+                        all_sentences.append({
+                            "id": sent_id,
+                            "text": cb_text,
+                            "document_id": doc_id,
+                            "source": "contact_block",
+                            "index_in_doc": global_idx,
+                            "section_path": section_path or "[Contact Block]",
+                            "page": page,
+                            "confidence": 1.0,
+                            "tokens": len(cb_text.split()),
+                            "parent_text": "",
+                            "index_in_section": idx_in_section,
+                        })
+                        global_idx += 1
             continue
 
         # Skip non-content DI roles (remaining headers/footers, page numbers, etc.)

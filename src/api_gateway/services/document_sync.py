@@ -146,12 +146,16 @@ class DocumentSyncService:
             )
 
     async def on_file_uploaded(
-        self, group_id: str, filename: str, blob_url: str, user_id: str = ""
+        self, group_id: str, filename: str, blob_url: str, user_id: str = "",
+        extraction_only: bool = False,
     ) -> None:
         """Trigger indexing for a newly uploaded file.
 
         If a document with the same source URL already exists (overwrite),
         hard-deletes it first to prevent orphan entities.
+
+        When extraction_only=True, only runs steps 1-7 (DI, sentences,
+        entities) without graph-wide algorithms (KNN, communities).
         """
         try:
             # Clean previous version if this is an overwrite
@@ -169,6 +173,7 @@ class DocumentSyncService:
                 group_id=group_id,
                 documents=docs,
                 ingestion="document-intelligence",
+                extraction_only=extraction_only,
             )
             logger.info(
                 "doc_sync_upload_indexed",

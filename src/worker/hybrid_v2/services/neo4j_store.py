@@ -167,8 +167,9 @@ class Neo4jStoreV3:
                     self.uri,
                     auth=(self.username, self.password),
                     max_connection_lifetime=300,
-                    max_transaction_retry_time=120,
+                    max_transaction_retry_time=300,
                     connection_acquisition_timeout=120,
+                    max_connection_pool_size=25,
                 )
                 # Verify connectivity
                 self._driver.verify_connectivity()
@@ -191,7 +192,7 @@ class Neo4jStoreV3:
         Use ``read_only=True`` for pure-read queries to enable read-replica routing.
         """
         def _sync():
-            with self.get_retry_session(read_only=read_only) as session:
+            with self._resilient_session(read_only=read_only) as session:
                 return session.run(query, **params)
         return await asyncio.to_thread(_sync)
 
@@ -202,7 +203,7 @@ class Neo4jStoreV3:
         ``func`` receives a ``RetrySession`` and should return any result.
         """
         def _sync():
-            with self.get_retry_session(read_only=read_only) as session:
+            with self._resilient_session(read_only=read_only) as session:
                 return func(session)
         return await asyncio.to_thread(_sync)
 
@@ -211,6 +212,95 @@ class Neo4jStoreV3:
         if self._driver:
             self._driver.close()
             self._driver = None
+
+    def _resilient_session(self, read_only: bool = False, max_retries: int = 5):
+        """Get a retry-enabled session, retrying session creation on pool failures.
+
+        The Neo4j driver's ``execute_write()`` handles transient *transaction*
+        errors (deadlocks, leader switches) automatically.  But if the entire
+        connection pool is stale (e.g. after a 60-second network outage) even
+        *creating* a session can fail with ServiceUnavailable.
+
+        This helper retries session creation with exponential backoff
+        (5→10→20→40→80 s, ~2.5 min total) so transient network outages
+        don't crash the pipeline.
+
+        Key improvement: we do NOT destroy the driver pool on the first failure.
+        Attempts 1-2 retry with the existing pool (connections may self-heal).
+        Only attempt 3+ forces a driver recreation to avoid thundering-herd
+        reconnection storms across high-latency links.
+        """
+        import time as _time
+        from neo4j.exceptions import ServiceUnavailable, SessionExpired
+
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                return self.get_retry_session(read_only=read_only)
+            except (ServiceUnavailable, SessionExpired, OSError) as exc:
+                last_err = exc
+                delay = 5 * (2 ** attempt)  # 5, 10, 20, 40, 80
+                logger.warning(
+                    "neo4j_session_creation_retry",
+                    extra={
+                        "attempt": attempt + 1,
+                        "max_retries": max_retries,
+                        "delay_s": delay,
+                        "error": str(exc)[:120],
+                    },
+                )
+                _time.sleep(delay)
+                # Only recreate driver after 2 failed attempts with existing pool
+                if attempt >= 2:
+                    with self._driver_lock:
+                        if self._driver is not None:
+                            try:
+                                self._driver.close()
+                            except Exception:
+                                pass
+                            self._driver = None
+                            logger.info("neo4j_driver_pool_recreated_after_repeated_failures")
+        raise last_err  # type: ignore[misc]
+
+    def _batched_write(
+        self,
+        query: str,
+        items: list,
+        *,
+        param_name: str = "batch",
+        batch_size: int = 50,
+        pause: float = 0.5,
+        **extra_params,
+    ) -> int:
+        """Run an UNWIND write in batches with a pause between each.
+
+        Prevents Neo4j Aura from being overwhelmed by large single-transaction
+        writes.  Uses ``_resilient_session()`` so that transient network outages
+        don't crash mid-batch — each batch is retried independently (all writes
+        use MERGE, so replaying a batch is idempotent).
+
+        Returns the sum of ``count`` from each batch (expects the query
+        to ``RETURN count(...) AS count``).
+        """
+        import time
+        if not items:
+            return 0
+        total = 0
+        for start in range(0, len(items), batch_size):
+            chunk = items[start : start + batch_size]
+            with self._resilient_session() as session:
+                result = session.run(query, **{param_name: chunk}, **extra_params)
+                rec = result.single()
+                if rec:
+                    total += rec.get("count", 0)
+            if start + batch_size < len(items):
+                time.sleep(pause)
+        return total
+
+    # ── Pipeline checkpoint helpers ──────────────────────────────────────
+    # NOTE: The full checkpoint system (set/get/clear/step_done + PIPELINE_STEPS)
+    # is defined further below (line ~1724).  See those methods for the canonical
+    # implementation used by the indexing pipeline.
     
     # ==================== Schema Management ====================
     
@@ -271,7 +361,8 @@ class Neo4jStoreV3:
         # V2 indexes include WITH [group_id] for in-index pre-filtering.
         vector_indexes = [
             # Entity embeddings with Voyage (2048-dim)
-            """
+            # CYPHER 25 prefix required for WITH [group_id] filterable property syntax
+            """CYPHER 25
             CREATE VECTOR INDEX entity_embedding IF NOT EXISTS
             FOR (e:Entity) ON (e.entity_embedding)
             WITH [e.group_id]
@@ -281,7 +372,7 @@ class Neo4jStoreV3:
             }}
             """,
             # Sentence-level embeddings with Voyage (2048-dim)
-            """
+            """CYPHER 25
             CREATE VECTOR INDEX sentence_embedding IF NOT EXISTS
             FOR (s:Sentence) ON (s.sentence_embedding)
             WITH [s.group_id]
@@ -323,6 +414,7 @@ class Neo4jStoreV3:
             e.type = $type,
             e.description = $description,
             e.group_id = $group_id,
+            e.deprecated = coalesce(e.deprecated, false),
             e.updated_at = datetime()
         With e
         FOREACH (_ IN CASE WHEN $entity_embedding IS NOT NULL THEN [1] ELSE [] END |
@@ -359,6 +451,7 @@ class Neo4jStoreV3:
             entity.description = e.description,
             entity.aliases = coalesce(e.aliases, []),
             entity.group_id = $group_id,
+            entity.deprecated = coalesce(entity.deprecated, false),
             entity.updated_at = datetime()
         
         WITH entity, e
@@ -409,27 +502,47 @@ class Neo4jStoreV3:
         - `chunk_count`: number of Sentences that mention the entity
         - `importance_score`: weighted score used for ranking
 
-        Note: This is best-effort and should not fail indexing.
+        Uses batched execution to avoid overwhelming Neo4j Aura with a single
+        graph-wide transaction.
         """
-
-        query = """
-        MATCH (e)
-        WHERE e.group_id = $group_id AND (e:Entity)
-        WITH e, COUNT { (e)-[]-() } AS degree
-        SET e.degree = degree
-        WITH e
-        // Count MENTIONS from Sentence nodes
-        WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id } AS chunk_count
-        SET e.chunk_count = chunk_count
-        SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
-        RETURN count(e) AS updated
-        """
-
+        # Step 1: Get all entity IDs for this group
         try:
-            with self.get_retry_session() as session:
-                session.run(query, group_id=group_id).consume()
+            with self.get_retry_session(read_only=True) as session:
+                result = session.run(
+                    "MATCH (e:Entity) WHERE e.group_id = $group_id RETURN e.id AS eid",
+                    group_id=group_id,
+                )
+                entity_ids = [r["eid"] for r in result]
         except Exception as e:
-            logger.warning(f"Failed to compute entity importance (continuing): {e}")
+            logger.warning(f"Failed to fetch entity IDs for importance (continuing): {e}")
+            return
+
+        if not entity_ids:
+            return
+
+        # Step 2: Update importance in batches
+        import time
+        BATCH = 50
+        for start in range(0, len(entity_ids), BATCH):
+            batch = entity_ids[start : start + BATCH]
+            query = """
+            UNWIND $eids AS eid
+            MATCH (e:Entity {id: eid, group_id: $group_id})
+            WITH e, COUNT { (e)-[]-() } AS degree
+            SET e.degree = degree
+            WITH e
+            WITH e, COUNT { (src)-[:MENTIONS]->(e) WHERE src.group_id = $group_id } AS chunk_count
+            SET e.chunk_count = chunk_count
+            SET e.importance_score = coalesce(e.degree, 0) * 0.3 + chunk_count * 0.7
+            RETURN count(e) AS updated
+            """
+            try:
+                with self.get_retry_session() as session:
+                    session.run(query, eids=batch, group_id=group_id).consume()
+            except Exception as e:
+                logger.warning(f"Failed to compute entity importance batch (continuing): {e}")
+            if start + BATCH < len(entity_ids):
+                time.sleep(0.3)
     
     async def aupsert_entities_batch(self, group_id: str, entities: List[Entity]) -> int:
         """Async batch insert/update entities with native vector support."""
@@ -445,6 +558,7 @@ class Neo4jStoreV3:
             entity.type = e.type,
             entity.description = e.description,
             entity.aliases = coalesce(e.aliases, []),
+            entity.deprecated = coalesce(entity.deprecated, false),
             entity.updated_at = datetime()
         
         WITH entity, e
@@ -480,14 +594,15 @@ class Neo4jStoreV3:
         if entity_data:
             sample = entity_data[0]
             has_v2 = sample['entity_embedding'] is not None and len(sample['entity_embedding']) > 0 if sample['entity_embedding'] else False
-            logger.warning(f"   Sample entity_data: has entity_embedding={has_v2}")
+            logger.info(f"   Sample entity_data: has entity_embedding={has_v2}")
             if sample['entity_embedding']:
-                logger.warning(f"   entity_embedding dim: {len(sample['entity_embedding'])}")
+                logger.info(f"   entity_embedding dim: {len(sample['entity_embedding'])}")
         
         def _sync_upsert():
             # Warm up connection — dedup can idle for 8+ minutes, staling pooled connections
             self.driver.verify_connectivity()
             # Batch UNWIND — smaller batches for Aura stability with 2048-dim embeddings
+            import time
             BATCH_SIZE = 25
             total_count = 0
             for i in range(0, len(entity_data), BATCH_SIZE):
@@ -496,6 +611,8 @@ class Neo4jStoreV3:
                     result = session.run(query, entities=batch, group_id=group_id)
                     record = result.single()
                     total_count += cast(int, record["count"]) if record else 0
+                if i + BATCH_SIZE < len(entity_data):
+                    time.sleep(0.5)
 
             mentions_count = sum(len(e.text_unit_ids) if hasattr(e, 'text_unit_ids') else 0 for e in entities)
             logger.info(f"Created {total_count} entities with {mentions_count} Sentence MENTIONS (async)")
@@ -815,6 +932,7 @@ class Neo4jStoreV3:
         
         # Batch UNWIND to avoid Neo4j "Index N out of bounds" internal error
         # on large MERGE operations (observed with Aura at ~640+ relationships).
+        import time
         BATCH_SIZE = 100
         total = 0
         for i in range(0, len(rel_data), BATCH_SIZE):
@@ -823,6 +941,8 @@ class Neo4jStoreV3:
                 result = session.run(query, relationships=batch, group_id=group_id)
                 record = result.single()
                 total += cast(int, record["count"]) if record else 0
+            if i + BATCH_SIZE < len(rel_data):
+                time.sleep(0.5)
         return total
 
     def backfill_rel_type(self, group_id: str) -> int:
@@ -855,19 +975,24 @@ class Neo4jStoreV3:
         """
         if group_ids is None:
             group_ids = build_group_ids(group_id)
+        # Use MENTIONS→IN_SECTION→BELONGS_TO path (always exists after Step 4+7)
+        # instead of APPEARS_IN_DOCUMENT shortcut (created later in foundation edges).
         cypher = """
         MATCH (e1:Entity)-[r:RELATED_TO]->(e2:Entity)
         WHERE e1.group_id IN $group_ids AND e2.group_id IN $group_ids
           AND r.description IS NOT NULL AND r.description <> ''
-        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d:Document)<-[:APPEARS_IN_DOCUMENT]-(e2)
-        WITH e1, r, e2, head(collect(d.title)) AS shared_title
-        OPTIONAL MATCH (e1)-[:APPEARS_IN_DOCUMENT]->(d2:Document)
-        WHERE shared_title IS NULL
-        WITH e1, r, e2, shared_title, head(collect(d2.title)) AS fallback_title
+        OPTIONAL MATCH (e1)<-[:MENTIONS]-(:Sentence)-[:IN_SECTION]->(:Section)
+                        -[:BELONGS_TO]->(d:Document)
+        WHERE d.group_id IN $group_ids
+        WITH e1, r, e2, collect(DISTINCT d.title) AS e1_docs
+        OPTIONAL MATCH (e2)<-[:MENTIONS]-(:Sentence)-[:IN_SECTION]->(:Section)
+                        -[:BELONGS_TO]->(d2:Document)
+        WHERE d2.group_id IN $group_ids AND d2.title IN e1_docs
+        WITH e1, r, e2, e1_docs, head(collect(DISTINCT d2.title)) AS shared_title
         RETURN e1.id AS source_id, e1.name AS source_name,
                r.description AS description,
                e2.id AS target_id, e2.name AS target_name,
-               COALESCE(shared_title, fallback_title) AS document_title
+               COALESCE(shared_title, head(e1_docs)) AS document_title
         """
         triples: List[Dict[str, Any]] = []
         with self.get_retry_session() as session:
@@ -910,6 +1035,7 @@ class Neo4jStoreV3:
             for t, emb in zip(triples, embeddings)
         ]
         # Batch in groups of 100 to avoid transaction size limits
+        import time
         total = 0
         batch_size = 100
         for i in range(0, len(items), batch_size):
@@ -918,6 +1044,8 @@ class Neo4jStoreV3:
                 result = session.run(cypher, items=batch, group_ids=group_ids)
                 record = result.single()
                 total += cast(int, record["count"]) if record else 0
+            if i + batch_size < len(items):
+                time.sleep(0.5)
         return total
 
     # ==================== Community Operations ====================
@@ -1251,9 +1379,14 @@ class Neo4jStoreV3:
             })
         
         with self.get_retry_session() as session:
-            result = session.run(query, sentences=sentence_data, group_id=group_id)
-            record = result.single()
-            count = cast(int, record["count"]) if record else 0
+            # Batch sentences to avoid overwhelming Neo4j Aura with one giant UNWIND
+            BATCH = 50
+            count = 0
+            for start in range(0, len(sentence_data), BATCH):
+                chunk = sentence_data[start : start + BATCH]
+                result = session.run(query, sentences=chunk, group_id=group_id)
+                record = result.single()
+                count += cast(int, record["count"]) if record else 0
             
             # Build NEXT edges between sequential sentences within each chunk
             self._create_sentence_next_edges(group_id, sentences)
@@ -1298,7 +1431,10 @@ class Neo4jStoreV3:
         """
         
         with self.get_retry_session() as session:
-            session.run(query, pairs=next_pairs, group_id=group_id)
+            BATCH = 100
+            for start in range(0, len(next_pairs), BATCH):
+                chunk = next_pairs[start : start + BATCH]
+                session.run(query, pairs=chunk, group_id=group_id)
 
         if next_in_section_pairs:
             query_section = """
@@ -1308,7 +1444,9 @@ class Neo4jStoreV3:
             MERGE (a)-[:NEXT_IN_SECTION]->(b)
             """
             with self.get_retry_session() as session:
-                session.run(query_section, pairs=next_in_section_pairs, group_id=group_id)
+                for start in range(0, len(next_in_section_pairs), BATCH):
+                    chunk = next_in_section_pairs[start : start + BATCH]
+                    session.run(query_section, pairs=chunk, group_id=group_id)
     
     def create_sentence_related_to_edges(
         self,
@@ -1342,9 +1480,11 @@ class Neo4jStoreV3:
         RETURN count(r) AS count
         """
         
-        with self.get_retry_session() as session:
-            result = session.run(query, edges=edges, group_id=group_id)
-            count = result.single()["count"]
+        count = self._batched_write(
+            query, edges,
+            param_name="edges", batch_size=100, pause=0.3,
+            group_id=group_id,
+        )
         
         logger.info(f"Created {count} sentence RELATED_TO edges for group {group_id}")
         return count
@@ -1375,9 +1515,11 @@ class Neo4jStoreV3:
         RETURN count(r) AS count
         """
 
-        with self.get_retry_session() as session:
-            result = session.run(query, edges=edges, group_id=group_id)
-            count = result.single()["count"]
+        count = self._batched_write(
+            query, edges,
+            param_name="edges", batch_size=100, pause=0.3,
+            group_id=group_id,
+        )
 
         logger.info(f"Created {count} sentence SEMANTICALLY_SIMILAR edges for group {group_id}")
         return count
@@ -1489,6 +1631,35 @@ class Neo4jStoreV3:
             )
             record = result.single()
             return cast(str, record["id"]) if record else document.id
+
+    def upsert_documents_batch(self, group_id: str, documents: list[Document]) -> int:
+        """Batch upsert documents in a single UNWIND query (1 round-trip instead of N)."""
+        if not documents:
+            return 0
+        query = """
+        UNWIND $docs AS d
+        MERGE (doc:Document {id: d.id, group_id: $group_id})
+        SET doc.title = d.title,
+            doc.source = d.source,
+            doc.group_id = $group_id,
+            doc.metadata = d.metadata,
+            doc.date = d.document_date,
+            doc.updated_at = datetime(),
+            doc.created_at = coalesce(doc.created_at, datetime())
+        """
+        doc_params = []
+        for doc in documents:
+            metadata_json = json.dumps(doc.metadata) if doc.metadata else "{}"
+            doc_params.append({
+                "id": doc.id,
+                "title": doc.title,
+                "source": doc.source,
+                "metadata": metadata_json,
+                "document_date": doc.document_date,
+            })
+        with self.get_retry_session() as session:
+            session.run(query, docs=doc_params, group_id=group_id)
+        return len(documents)
     
     def initialize_group_meta(self, group_id: str) -> None:
         """Initialize or update GroupMeta node for lifecycle tracking.
@@ -1536,6 +1707,63 @@ class Neo4jStoreV3:
         
         with self.get_retry_session() as session:
             session.run(query, group_id=group_id)
+
+    # ── Pipeline checkpoint for resume-after-crash ──────────────────────────
+
+    # Ordered list of checkpoint names. A checkpoint means "everything up to
+    # and including this step has been persisted to Neo4j".
+    PIPELINE_STEPS = [
+        "sentences",            # Steps 1-3: DI extraction + sentence upsert
+        "section_graph",        # Steps 4.2-4.9: sections, embeddings, KVP
+        "entities_committed",   # Steps 5-7: OpenIE + dedup + entity/rel commit
+        "triple_embeddings",    # Step 7.5
+        "synonymy_edges",       # Step 7.6
+        "gds_complete",         # Step 8
+        "communities",          # Step 9
+        "done",                 # Pipeline complete
+    ]
+
+    def set_pipeline_checkpoint(self, group_id: str, step: str, doc_id: str | None = None) -> None:
+        """Record the last completed pipeline step on GroupMeta."""
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        SET g.pipeline_checkpoint = $step,
+            g.pipeline_checkpoint_doc_id = $doc_id,
+            g.pipeline_checkpoint_at = datetime()
+        """
+        with self._resilient_session() as session:
+            session.run(query, group_id=group_id, step=step, doc_id=doc_id)
+        logger.info("pipeline_checkpoint_set", extra={"group_id": group_id, "step": step})
+
+    def get_pipeline_checkpoint(self, group_id: str) -> str | None:
+        """Read the last completed pipeline step (or None if fresh run)."""
+        query = """
+        MATCH (g:GroupMeta {group_id: $group_id})
+        RETURN g.pipeline_checkpoint AS step
+        """
+        with self._resilient_session(read_only=True) as session:
+            rec = session.run(query, group_id=group_id).single()
+            return rec["step"] if rec else None
+
+    def clear_pipeline_checkpoint(self, group_id: str) -> None:
+        """Clear the checkpoint (e.g. after full reindex or pipeline completion)."""
+        query = """
+        MERGE (g:GroupMeta {group_id: $group_id})
+        SET g.pipeline_checkpoint = null,
+            g.pipeline_checkpoint_doc_id = null,
+            g.pipeline_checkpoint_at = null
+        """
+        with self._resilient_session() as session:
+            session.run(query, group_id=group_id)
+
+    def _step_done(self, checkpoint: str | None, step: str) -> bool:
+        """Return True if *step* was already completed according to *checkpoint*."""
+        if checkpoint is None:
+            return False
+        try:
+            return self.PIPELINE_STEPS.index(checkpoint) >= self.PIPELINE_STEPS.index(step)
+        except ValueError:
+            return False
     
     # ==================== Cleanup Operations ====================
 

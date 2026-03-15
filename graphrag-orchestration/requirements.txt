@@ -29,12 +29,12 @@ voyageai>=0.3.0  # Native Voyage client for contextual embeddings with tuples
 # llama-index-graph-stores-neo4j removed - replaced by app/services/neo4j_standalone_store.py
 # This enables neo4j driver v6.0+ compatibility for native Vector type support
 scikit-learn>=1.4.0
+numpy>=1.26.0  # Explicit dep — used by _run_local_graph_algorithms() for KNN cosine similarity
 
-# Community Detection (GraphRAG Global Search)
-# Optional - moved to `requirements.community.txt` to avoid heavy deps in base image.
-# Install community detection deps with: pip install -r requirements.community.txt
-# graspologic==3.4.1  # moved to optional requirements
+# Community Detection
 networkx==3.4.2
+python-igraph>=0.11.0  # Graph conversion for Leiden algorithm
+leidenalg>=0.10.0  # Leiden community detection (matches GDS gds.leiden)
 
 llama-parse>=0.6.0  # Layout-aware PDF parsing
 

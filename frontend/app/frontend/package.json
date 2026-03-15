@@ -28,6 +28,7 @@
     "i18next-browser-languagedetector": "^8.0.2",
     "i18next-http-backend": "^3.0.1",
     "idb": "^8.0.0",
+    "mammoth": "^1.11.0",
     "microsoft-cognitiveservices-speech-sdk": "^1.48.0",
     "ndjson-readablestream": "^1.4.0",
     "pdfjs-dist": "^4.10.38",
@@ -40,7 +41,8 @@
     "react-syntax-highlighter": "^16.1.0",
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.0",
-    "scheduler": "^0.27.0"
+    "scheduler": "^0.27.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

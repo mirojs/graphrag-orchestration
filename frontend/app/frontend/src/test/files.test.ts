@@ -88,4 +88,12 @@ describe("getFileContentUrl", () => {
     it("encodes special characters", () => {
         expect(getFileContentUrl("report (1).pdf")).toBe("/content/report%20(1).pdf");
     });
+
+    it("appends folder as query param when provided", () => {
+        expect(getFileContentUrl("report.pdf", "invoices")).toBe("/content/report.pdf?folder=invoices");
+    });
+
+    it("encodes folder name with spaces", () => {
+        expect(getFileContentUrl("report.pdf", "my folder")).toBe("/content/report.pdf?folder=my%20folder");
+    });
 });

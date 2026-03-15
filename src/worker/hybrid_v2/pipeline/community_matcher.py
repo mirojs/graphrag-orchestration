@@ -188,13 +188,20 @@ class CommunityMatcher:
     async def match_communities(
         self,
         query: str,
-        top_k: int = 3
+        top_k: int = 3,
+        *,
+        relative_threshold: float | None = None,
+        max_k: int | None = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Find communities most relevant to the query via embedding similarity.
 
         Args:
             query: The user's thematic query.
-            top_k: Number of communities to return.
+            top_k: Hard cap on communities when *relative_threshold* is not set.
+            relative_threshold: When set (0-1), include all communities whose
+                similarity is >= *relative_threshold* × best_score, up to
+                *max_k*.  Overrides *top_k*.
+            max_k: Safety cap when using *relative_threshold* (default 10).
 
         Returns:
             List of (community_data, similarity_score) tuples, ordered by
@@ -222,7 +229,9 @@ class CommunityMatcher:
                 "_ensure_embeddings must have failed — check VOYAGE_API_KEY."
             )
 
-        results = await self._semantic_match(query, top_k)
+        results = await self._semantic_match(
+            query, top_k, relative_threshold=relative_threshold, max_k=max_k,
+        )
 
         # Post-filter: prune communities whose entities have no content
         # in the target folder.  Only runs when folder_id is set AND we
@@ -241,9 +250,17 @@ class CommunityMatcher:
     async def _semantic_match(
         self,
         query: str,
-        top_k: int
+        top_k: int,
+        *,
+        relative_threshold: float | None = None,
+        max_k: int | None = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
-        """Match using embedding similarity."""
+        """Match using embedding similarity.
+
+        When *relative_threshold* is set, all communities whose similarity
+        >= best_score × relative_threshold are returned (up to *max_k*).
+        Otherwise the classic hard *top_k* slice is used.
+        """
         query_embedding = await self._get_embedding(query)
         if not query_embedding:
             raise RuntimeError(
@@ -287,12 +304,25 @@ class CommunityMatcher:
                 "Community embeddings are likely from a different model than the query embedder."
             )
 
+        # Adaptive selection: keep all communities within relative_threshold
+        # of the top score, capped by max_k.  Falls back to hard top_k.
+        if relative_threshold is not None and meaningful:
+            best_score = meaningful[0][1]
+            cutoff = best_score * relative_threshold
+            _max = max_k or 10
+            selected = [(c, s) for c, s in meaningful if s >= cutoff][:_max]
+        else:
+            selected = meaningful[:top_k]
+
         logger.info("semantic_community_match",
                    query=query[:50],
-                   top_scores=[round(s, 4) for _, s in meaningful[:5]],
-                   top_matches=[c.get("title", c.get("id", "?"))[:30] for c, _ in meaningful[:top_k]])
+                   mode="adaptive" if relative_threshold else "top_k",
+                   cutoff=round(meaningful[0][1] * relative_threshold, 4) if relative_threshold and meaningful else None,
+                   selected_count=len(selected),
+                   top_scores=[round(s, 4) for _, s in meaningful[:6]],
+                   top_matches=[c.get("title", c.get("id", "?"))[:40] for c, _ in selected])
 
-        return meaningful[:top_k]
+        return selected
 
     async def _filter_communities_by_folder(
         self,

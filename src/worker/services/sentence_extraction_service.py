@@ -274,6 +274,53 @@ def _call_llm_json(prompt: str) -> Optional[Any]:
         return None
 
 
+def _call_llm_text(prompt: str) -> Optional[str]:
+    """Synchronous LLM call that returns plain text or None."""
+    try:
+        from llama_index.llms.azure_openai import AzureOpenAI
+    except ImportError:
+        return None
+
+    from src.core.config import settings
+
+    model = os.getenv("SENTENCE_REVIEW_MODEL", "gpt-4.1")
+    deployment = os.getenv("SENTENCE_REVIEW_DEPLOYMENT", model)
+    api_version = settings.AZURE_OPENAI_API_VERSION or "2025-03-01-preview"
+
+    llm_kwargs: dict = {
+        "engine": deployment,
+        "azure_endpoint": settings.AZURE_OPENAI_ENDPOINT,
+        "api_version": api_version,
+        "temperature": 0.0,
+    }
+    if settings.AZURE_OPENAI_API_KEY:
+        llm_kwargs["api_key"] = settings.AZURE_OPENAI_API_KEY
+    else:
+        env_token = os.getenv("AZURE_OPENAI_BEARER_TOKEN")
+        if env_token:
+            llm_kwargs["use_azure_ad"] = True
+            llm_kwargs["azure_ad_token_provider"] = lambda: env_token
+        else:
+            try:
+                from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+                credential = DefaultAzureCredential()
+                token_provider = get_bearer_token_provider(
+                    credential, "https://cognitiveservices.azure.com/.default"
+                )
+                llm_kwargs["use_azure_ad"] = True
+                llm_kwargs["azure_ad_token_provider"] = token_provider
+            except Exception:
+                return None
+
+    try:
+        llm = AzureOpenAI(**llm_kwargs)
+        response = llm.complete(prompt)
+        return (response.text or "").strip()
+    except Exception as exc:
+        logger.debug("llm_connect_fragments_failed", error=str(exc))
+        return None
+
+
 def _call_llm_for_review(prompt: str) -> Optional[List[str]]:
     """LLM call expecting a JSON array of strings. Returns list or None."""
     parsed = _call_llm_json(prompt)
@@ -500,42 +547,14 @@ def _detect_letterhead_indices(di_units: List[Any]) -> List[int]:
 
 
 def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
-    """Return a meaningful sentence from a structured signature block.
+    """Connect signature block fragments into one meaningful sentence via LLM.
 
-    Uses the structured ``parties`` list (role + name pairs) when available
-    to construct a natural sentence like:
-      "Signed by John Smith as Authorized Representative of Fabrikam Inc."
-    avoiding garbled concatenations like "Representative John Smith Company
-    Fabrikam Inc." that mislead downstream LLMs into hallucinating entity
-    names.
+    The raw lines from a signature block are distinct fragments (names, roles,
+    dates, labels) that individually lack context.  An LLM connects them into
+    a single coherent sentence without changing sequence or adding information.
 
-    Falls back to raw_lines joining (with label disambiguation) only when
-    no structured parties exist.
-
-    The sentence is stored with ``source="signature_party"`` which bypasses
-    the noise-denoiser and gets a ``[Signature Block]`` embedding context
-    prefix.
+    Falls back to comma-joined text when the LLM is unavailable.
     """
-    parties = sig_block.get("parties") or []
-    signed_date = sig_block.get("signed_date", "")
-
-    # Primary path: build a natural sentence from structured party data.
-    if parties:
-        clauses: List[str] = []
-        for p in parties:
-            role = (p.get("role") or "").strip().rstrip(":")
-            name = (p.get("name") or "").strip()
-            if role and name:
-                clauses.append(f"{name} as {role}")
-            elif name:
-                clauses.append(name)
-        if clauses:
-            sentence = "Signed by " + ", and ".join(clauses)
-            if signed_date:
-                sentence += f" on {signed_date}"
-            return [sentence]
-
-    # Fallback: join raw_lines (filter structural noise).
     raw_lines = sig_block.get("raw_lines") or []
 
     filtered: List[str] = []
@@ -551,8 +570,21 @@ def _synthesize_signature_sentences(sig_block: dict) -> List[str]:
 
     if not filtered:
         return []
-    joined = ". ".join(p.rstrip(".") for p in filtered)
-    return [joined]
+
+    prompt = (
+        "Connect the following text fragments into a single meaningful sentence.\n"
+        "Rules:\n"
+        "- Do NOT add any information not present in the fragments\n"
+        "- Just add minimal connective words to make it read as one coherent sentence\n"
+        "- Return ONLY the resulting sentence, nothing else\n\n"
+        "Fragments:\n"
+        + "\n".join(f"- {f}" for f in filtered)
+    )
+    result = _call_llm_text(prompt)
+    if result:
+        return [result]
+
+    return [", ".join(filtered)]
 
 
 def _is_noise_sentence(

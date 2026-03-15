@@ -2066,6 +2066,20 @@ class DocumentIntelligenceService:
                 if not text:
                     return
 
+                # Strip contact-block paragraph content that leaked via
+                # span-union merging (the union is min..max, so excluded
+                # paragraphs sitting between included ones are captured).
+                for ci in contact_block_para_indices:
+                    cb_para = _safe_get_paragraph(ci)
+                    if cb_para and getattr(cb_para, "content", ""):
+                        # Use span-sliced text (preserves newlines from markdown)
+                        cb_spans = getattr(cb_para, "spans", None) or []
+                        if cb_spans and content:
+                            cb_merged = self._collect_span_union([cb_spans])
+                            cb_slice = self._slice_content_by_spans(content, cb_merged).strip()
+                            if cb_slice and cb_slice in text:
+                                text = text.replace(cb_slice, "").strip()
+
                 tables_metadata = [
                     self._extract_table_metadata(
                         t,
@@ -2228,7 +2242,12 @@ class DocumentIntelligenceService:
                      for parsed in [self._parse_di_element_ref(el)]
                      if parsed and parsed[0] == "paragraphs" and parsed[1] in sig_block_para_indices}
                 )
-                use_para_spans = has_children or lh_in_elements or sig_in_elements
+                cb_in_elements = bool(contact_block_para_indices) and bool(
+                    {idx for el in elements
+                     for parsed in [self._parse_di_element_ref(el)]
+                     if parsed and parsed[0] == "paragraphs" and parsed[1] in contact_block_para_indices}
+                )
+                use_para_spans = has_children or lh_in_elements or sig_in_elements or cb_in_elements
                 direct_spans = None if use_para_spans else section_spans
                 emit_chunk(part="direct", spans=direct_spans, paras=direct_paras, tbls=direct_tables, para_idx=para_indices)
 
